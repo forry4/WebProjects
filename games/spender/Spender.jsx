@@ -1938,11 +1938,26 @@ export default function SpenderApp() {
 	const PUZ_SEEN_KEY = "spender_puzzle_seen";
 	const getSeen = () => { try { return new Set(JSON.parse(localStorage.getItem(PUZ_SEEN_KEY) || "[]")); } catch { return new Set(); } };
 	const markSeen = (id) => { try { const s = getSeen(); s.add(id); localStorage.setItem(PUZ_SEEN_KEY, JSON.stringify([...s].slice(-2000))); } catch {} };
+	// Target answer-type mix for the one-at-a-time draw (buys are common, takes rare/prized).
+	const PUZ_TYPE_WEIGHTS = [["buy", 0.60], ["take", 0.15], ["reserve", 0.25]];
+	const pickPuzzleType = () => {
+		let r = Math.random();
+		for (const [t, w] of PUZ_TYPE_WEIGHTS) { if (r < w) return t; r -= w; }
+		return "buy";
+	};
 	const pickPuzzleId = (list) => {
 		const bank = (list || []).filter(p => p.kind === "advantage");   // one-at-a-time mode = single 'only-move' puzzles
 		if (!bank.length) return null;
-		let pool = bank.filter(p => !getSeen().has(p.id));
+		const seen = getSeen();
+		let pool = bank.filter(p => !seen.has(p.id));
 		if (!pool.length) { try { localStorage.removeItem(PUZ_SEEN_KEY); } catch {} pool = bank; }   // exhausted -> reshuffle
+		// draw an answer-type by the target mix, then a random unseen puzzle of that type; fall
+		// through the other types (by weight) if that bucket is empty so small pools still serve.
+		const at = (p) => p.answer_type || "buy";   // undefined (pre-deploy backend) -> treat as buy
+		for (const t of [pickPuzzleType(), "buy", "take", "reserve"]) {
+			const tp = pool.filter(p => at(p) === t);
+			if (tp.length) return tp[Math.floor(Math.random() * tp.length)].id;
+		}
 		return pool[Math.floor(Math.random() * pool.length)].id;
 	};
 	const enterPuzzles = async () => {

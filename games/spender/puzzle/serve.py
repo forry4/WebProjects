@@ -38,6 +38,13 @@ def _difficulty(k: int) -> str:
     return "Easy" if k <= 2 else "Tricky" if k == 3 else "Hard"
 
 
+def _answer_type(puz: dict) -> str:
+    """The hero's first move type coarsened to buy | reserve | take — lets the frontend
+    weight the one-at-a-time draw toward a target answer-type mix without fetching each file."""
+    t = ((puz.get("steps") or [{}])[0].get("move") or {}).get("type", "")
+    return "take" if "take" in t else ("reserve" if t == "reserve" else "buy")
+
+
 def _meta(puz: dict) -> dict:
     """The lightweight listing entry (no embedded snapshots)."""
     m = puz.get("meta", {})
@@ -45,6 +52,7 @@ def _meta(puz: dict) -> dict:
         "id": puz["id"],
         "title": m.get("title"),   # null -> the frontend names it "Puzzle N"
         "kind": puz.get("kind", "win"),   # "win" | "advantage" (single best move)
+        "answer_type": _answer_type(puz),   # "buy" | "reserve" | "take" (advantage puzzles)
         "win_points": puz["win_points"],
         "K": puz["K"],
         "n_hero_moves": sum(1 for st in puz["steps"] if st.get("is_hero")),

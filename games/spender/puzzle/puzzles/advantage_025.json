@@ -8,34 +8,14 @@
  "position": {
   "bank": {
    "white": 0,
-   "blue": 1,
-   "green": 2,
+   "blue": 0,
+   "green": 4,
    "red": 0,
-   "black": 0,
+   "black": 2,
    "gold": 4
   },
   "decks": {
    "L1": [
-    {
-     "id": "L1-4",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 3
-     }
-    },
-    {
-     "id": "L1-25",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 1,
-      "red": 1,
-      "black": 3
-     }
-    },
     {
      "id": "L1-11",
      "level": 1,
@@ -48,122 +28,12 @@
      }
     },
     {
-     "id": "L1-16",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "white": 2,
-      "blue": 1
-     }
-    },
-    {
-     "id": "L1-26",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "blue": 2,
-      "green": 1
-     }
-    },
-    {
-     "id": "L1-30",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "red": 2
-     }
-    },
-    {
-     "id": "L1-24",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 3
-     }
-    },
-    {
-     "id": "L1-1",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 2,
-      "red": 1
-     }
-    },
-    {
-     "id": "L1-23",
+     "id": "L1-39",
      "level": 1,
      "points": 1,
-     "bonus": "green",
-     "cost": {
-      "black": 4
-     }
-    },
-    {
-     "id": "L1-14",
-     "level": 1,
-     "points": 0,
-     "bonus": "blue",
-     "cost": {
-      "green": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-33",
-     "level": 1,
-     "points": 0,
      "bonus": "white",
      "cost": {
-      "red": 2,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-38",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "white": 3,
-      "blue": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-35",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 3
-     }
-    },
-    {
-     "id": "L1-36",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-6",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "white": 2,
-      "blue": 2,
-      "red": 1
+      "green": 4
      }
     },
     {
@@ -179,13 +49,180 @@
      }
     },
     {
-     "id": "L1-21",
+     "id": "L1-12",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "black": 3
+     }
+    },
+    {
+     "id": "L1-23",
+     "level": 1,
+     "points": 1,
+     "bonus": "green",
+     "cost": {
+      "black": 4
+     }
+    },
+    {
+     "id": "L1-34",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 1,
+      "green": 1,
+      "red": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-19",
      "level": 1,
      "points": 0,
      "bonus": "green",
      "cost": {
+      "white": 1,
       "blue": 1,
+      "red": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-29",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "blue": 1,
+      "green": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-18",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 1,
+      "blue": 3,
+      "green": 1
+     }
+    },
+    {
+     "id": "L1-25",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "red": 1,
+      "black": 3
+     }
+    },
+    {
+     "id": "L1-9",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "white": 1,
+      "green": 1,
       "red": 2,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-24",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 3
+     }
+    },
+    {
+     "id": "L1-4",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "green": 3
+     }
+    },
+    {
+     "id": "L1-30",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-1",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "green": 2,
+      "red": 1
+     }
+    },
+    {
+     "id": "L1-26",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "blue": 2,
+      "green": 1
+     }
+    },
+    {
+     "id": "L1-31",
+     "level": 1,
+     "points": 1,
+     "bonus": "red",
+     "cost": {
+      "white": 4
+     }
+    },
+    {
+     "id": "L1-20",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 1,
+      "blue": 1,
+      "red": 1,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-32",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 2,
+      "green": 2,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-14",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "green": 2,
       "black": 2
      }
     },
@@ -212,27 +249,14 @@
      }
     },
     {
-     "id": "L1-28",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "blue": 1,
-      "green": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-0",
+     "id": "L1-3",
      "level": 1,
      "points": 0,
      "bonus": "black",
      "cost": {
-      "white": 1,
-      "blue": 1,
       "green": 1,
-      "red": 1
+      "red": 3,
+      "black": 1
      }
     },
     {
@@ -248,57 +272,6 @@
      }
     },
     {
-     "id": "L1-17",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "blue": 2,
-      "red": 2
-     }
-    },
-    {
-     "id": "L1-32",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 2,
-      "green": 2,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-34",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 1,
-      "green": 1,
-      "red": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-22",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "red": 3
-     }
-    },
-    {
-     "id": "L1-39",
-     "level": 1,
-     "points": 1,
-     "bonus": "white",
-     "cost": {
-      "green": 4
-     }
-    },
-    {
      "id": "L1-8",
      "level": 1,
      "points": 0,
@@ -309,37 +282,206 @@
      }
     },
     {
-     "id": "L1-13",
+     "id": "L1-35",
      "level": 1,
      "points": 0,
-     "bonus": "blue",
+     "bonus": "white",
      "cost": {
-      "white": 1,
-      "green": 2,
-      "red": 2
+      "blue": 3
      }
     },
     {
-     "id": "L1-9",
+     "id": "L1-36",
      "level": 1,
      "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-21",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "blue": 1,
+      "red": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-6",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "white": 2,
+      "blue": 2,
+      "red": 1
+     }
+    },
+    {
+     "id": "L1-27",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 2,
+      "green": 1,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-15",
+     "level": 1,
+     "points": 1,
      "bonus": "blue",
      "cost": {
+      "red": 4
+     }
+    },
+    {
+     "id": "L1-16",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 2,
+      "blue": 1
+     }
+    },
+    {
+     "id": "L1-0",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
       "white": 1,
+      "blue": 1,
       "green": 1,
-      "red": 2,
-      "black": 1
+      "red": 1
      }
     }
    ],
    "L2": [
     {
-     "id": "L2-23",
+     "id": "L2-5",
      "level": 2,
      "points": 3,
+     "bonus": "black",
+     "cost": {
+      "black": 6
+     }
+    },
+    {
+     "id": "L2-21",
+     "level": 2,
+     "points": 2,
      "bonus": "red",
      "cost": {
-      "red": 6
+      "white": 3,
+      "black": 5
+     }
+    },
+    {
+     "id": "L2-9",
+     "level": 2,
+     "points": 2,
+     "bonus": "blue",
+     "cost": {
+      "blue": 5
+     }
+    },
+    {
+     "id": "L2-3",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "white": 5
+     }
+    },
+    {
+     "id": "L2-20",
+     "level": 2,
+     "points": 2,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "blue": 4,
+      "green": 2
+     }
+    },
+    {
+     "id": "L2-27",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "red": 5
+     }
+    },
+    {
+     "id": "L2-13",
+     "level": 2,
+     "points": 1,
+     "bonus": "green",
+     "cost": {
+      "white": 2,
+      "blue": 3,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-0",
+     "level": 2,
+     "points": 1,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "blue": 2,
+      "green": 2
+     }
+    },
+    {
+     "id": "L2-1",
+     "level": 2,
+     "points": 1,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "green": 3,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-22",
+     "level": 2,
+     "points": 2,
+     "bonus": "red",
+     "cost": {
+      "black": 5
+     }
+    },
+    {
+     "id": "L2-4",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "green": 5,
+      "red": 3
+     }
+    },
+    {
+     "id": "L2-11",
+     "level": 2,
+     "points": 3,
+     "bonus": "blue",
+     "cost": {
+      "blue": 6
      }
     },
     {
@@ -354,13 +496,14 @@
      }
     },
     {
-     "id": "L2-4",
+     "id": "L2-18",
      "level": 2,
-     "points": 2,
-     "bonus": "black",
+     "points": 1,
+     "bonus": "red",
      "cost": {
-      "green": 5,
-      "red": 3
+      "blue": 3,
+      "red": 2,
+      "black": 3
      }
     },
     {
@@ -370,15 +513,6 @@
      "bonus": "green",
      "cost": {
       "green": 6
-     }
-    },
-    {
-     "id": "L2-11",
-     "level": 2,
-     "points": 3,
-     "bonus": "blue",
-     "cost": {
-      "blue": 6
      }
     },
     {
@@ -392,12 +526,14 @@
      }
     },
     {
-     "id": "L2-29",
+     "id": "L2-19",
      "level": 2,
-     "points": 3,
-     "bonus": "white",
+     "points": 1,
+     "bonus": "red",
      "cost": {
-      "white": 6
+      "white": 2,
+      "red": 2,
+      "black": 3
      }
     },
     {
@@ -421,127 +557,13 @@
      }
     },
     {
-     "id": "L2-13",
+     "id": "L2-16",
      "level": 2,
-     "points": 1,
+     "points": 2,
      "bonus": "green",
      "cost": {
-      "white": 2,
-      "blue": 3,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-1",
-     "level": 2,
-     "points": 1,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "green": 3,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-28",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "red": 5,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-24",
-     "level": 2,
-     "points": 1,
-     "bonus": "white",
-     "cost": {
-      "green": 3,
-      "red": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-20",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "white": 1,
-      "blue": 4,
-      "green": 2
-     }
-    },
-    {
-     "id": "L2-26",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "green": 1,
-      "red": 4,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-3",
-     "level": 2,
-     "points": 2,
-     "bonus": "black",
-     "cost": {
-      "white": 5
-     }
-    },
-    {
-     "id": "L2-7",
-     "level": 2,
-     "points": 1,
-     "bonus": "blue",
-     "cost": {
-      "blue": 2,
-      "green": 3,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-0",
-     "level": 2,
-     "points": 1,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "blue": 2,
-      "green": 2
-     }
-    },
-    {
-     "id": "L2-21",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "white": 3,
-      "black": 5
-     }
-    },
-    {
-     "id": "L2-5",
-     "level": 2,
-     "points": 3,
-     "bonus": "black",
-     "cost": {
-      "black": 6
-     }
-    },
-    {
-     "id": "L2-27",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "red": 5
+      "blue": 5,
+      "green": 3
      }
     },
     {
@@ -556,6 +578,38 @@
      }
     },
     {
+     "id": "L2-2",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "blue": 1,
+      "green": 4,
+      "red": 2
+     }
+    },
+    {
+     "id": "L2-28",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "red": 5,
+      "black": 3
+     }
+    },
+    {
+     "id": "L2-7",
+     "level": 2,
+     "points": 1,
+     "bonus": "blue",
+     "cost": {
+      "blue": 2,
+      "green": 3,
+      "black": 3
+     }
+    },
+    {
      "id": "L2-6",
      "level": 2,
      "points": 1,
@@ -565,164 +619,18 @@
       "green": 2,
       "red": 3
      }
-    },
-    {
-     "id": "L2-22",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "black": 5
-     }
     }
    ],
    "L3": [
     {
-     "id": "L3-6",
-     "level": 3,
-     "points": 4,
-     "bonus": "blue",
-     "cost": {
-      "white": 6,
-      "blue": 3,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-9",
-     "level": 3,
-     "points": 4,
-     "bonus": "green",
-     "cost": {
-      "white": 3,
-      "blue": 6,
-      "green": 3
-     }
-    },
-    {
-     "id": "L3-1",
-     "level": 3,
-     "points": 4,
-     "bonus": "black",
-     "cost": {
-      "red": 7
-     }
-    },
-    {
-     "id": "L3-17",
+     "id": "L3-18",
      "level": 3,
      "points": 4,
      "bonus": "white",
      "cost": {
-      "black": 7
-     }
-    },
-    {
-     "id": "L3-5",
-     "level": 3,
-     "points": 4,
-     "bonus": "blue",
-     "cost": {
-      "white": 7
-     }
-    },
-    {
-     "id": "L3-7",
-     "level": 3,
-     "points": 5,
-     "bonus": "blue",
-     "cost": {
-      "white": 7,
-      "blue": 3
-     }
-    },
-    {
-     "id": "L3-4",
-     "level": 3,
-     "points": 3,
-     "bonus": "blue",
-     "cost": {
       "white": 3,
-      "green": 3,
       "red": 3,
-      "black": 5
-     }
-    },
-    {
-     "id": "L3-10",
-     "level": 3,
-     "points": 4,
-     "bonus": "green",
-     "cost": {
-      "blue": 7
-     }
-    },
-    {
-     "id": "L3-2",
-     "level": 3,
-     "points": 4,
-     "bonus": "black",
-     "cost": {
-      "green": 3,
-      "red": 6,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-11",
-     "level": 3,
-     "points": 5,
-     "bonus": "green",
-     "cost": {
-      "blue": 7,
-      "green": 3
-     }
-    },
-    {
-     "id": "L3-0",
-     "level": 3,
-     "points": 3,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "blue": 3,
-      "green": 5,
-      "red": 3
-     }
-    },
-    {
-     "id": "L3-16",
-     "level": 3,
-     "points": 3,
-     "bonus": "white",
-     "cost": {
-      "blue": 3,
-      "green": 3,
-      "red": 5,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-14",
-     "level": 3,
-     "points": 4,
-     "bonus": "red",
-     "cost": {
-      "blue": 3,
-      "green": 6,
-      "red": 3
-     }
-    },
-    {
-     "id": "L3-8",
-     "level": 3,
-     "points": 3,
-     "bonus": "green",
-     "cost": {
-      "white": 5,
-      "blue": 3,
-      "red": 3,
-      "black": 3
+      "black": 6
      }
     },
     {
@@ -743,101 +651,72 @@
      "cost": {
       "green": 7
      }
-    }
-   ]
-  },
-  "board": {
-   "L1": [
+    },
     {
-     "id": "L1-19",
-     "level": 1,
-     "points": 0,
+     "id": "L3-11",
+     "level": 3,
+     "points": 5,
      "bonus": "green",
      "cost": {
-      "white": 1,
-      "blue": 1,
-      "red": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-27",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "green": 1,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-31",
-     "level": 1,
-     "points": 1,
-     "bonus": "red",
-     "cost": {
-      "white": 4
-     }
-    },
-    {
-     "id": "L1-3",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 1,
-      "red": 3,
-      "black": 1
-     }
-    }
-   ],
-   "L2": [
-    {
-     "id": "L2-19",
-     "level": 2,
-     "points": 1,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "red": 2,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-2",
-     "level": 2,
-     "points": 2,
-     "bonus": "black",
-     "cost": {
-      "blue": 1,
-      "green": 4,
-      "red": 2
-     }
-    },
-    {
-     "id": "L2-16",
-     "level": 2,
-     "points": 2,
-     "bonus": "green",
-     "cost": {
-      "blue": 5,
+      "blue": 7,
       "green": 3
      }
     },
     {
-     "id": "L2-18",
-     "level": 2,
-     "points": 1,
+     "id": "L3-14",
+     "level": 3,
+     "points": 4,
      "bonus": "red",
      "cost": {
       "blue": 3,
-      "red": 2,
+      "green": 6,
+      "red": 3
+     }
+    },
+    {
+     "id": "L3-2",
+     "level": 3,
+     "points": 4,
+     "bonus": "black",
+     "cost": {
+      "green": 3,
+      "red": 6,
       "black": 3
      }
-    }
-   ],
-   "L3": [
+    },
+    {
+     "id": "L3-4",
+     "level": 3,
+     "points": 3,
+     "bonus": "blue",
+     "cost": {
+      "white": 3,
+      "green": 3,
+      "red": 3,
+      "black": 5
+     }
+    },
+    {
+     "id": "L3-8",
+     "level": 3,
+     "points": 3,
+     "bonus": "green",
+     "cost": {
+      "white": 5,
+      "blue": 3,
+      "red": 3,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-10",
+     "level": 3,
+     "points": 4,
+     "bonus": "green",
+     "cost": {
+      "blue": 7
+     }
+    },
     {
      "id": "L3-15",
      "level": 3,
@@ -846,17 +725,6 @@
      "cost": {
       "green": 7,
       "red": 3
-     }
-    },
-    {
-     "id": "L3-18",
-     "level": 3,
-     "points": 4,
-     "bonus": "white",
-     "cost": {
-      "white": 3,
-      "red": 3,
-      "black": 6
      }
     },
     {
@@ -869,6 +737,178 @@
       "blue": 5,
       "green": 3,
       "black": 3
+     }
+    },
+    {
+     "id": "L3-0",
+     "level": 3,
+     "points": 3,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "blue": 3,
+      "green": 5,
+      "red": 3
+     }
+    },
+    {
+     "id": "L3-5",
+     "level": 3,
+     "points": 4,
+     "bonus": "blue",
+     "cost": {
+      "white": 7
+     }
+    },
+    {
+     "id": "L3-16",
+     "level": 3,
+     "points": 3,
+     "bonus": "white",
+     "cost": {
+      "blue": 3,
+      "green": 3,
+      "red": 5,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-9",
+     "level": 3,
+     "points": 4,
+     "bonus": "green",
+     "cost": {
+      "white": 3,
+      "blue": 6,
+      "green": 3
+     }
+    },
+    {
+     "id": "L3-7",
+     "level": 3,
+     "points": 5,
+     "bonus": "blue",
+     "cost": {
+      "white": 7,
+      "blue": 3
+     }
+    }
+   ]
+  },
+  "board": {
+   "L1": [
+    {
+     "id": "L1-7",
+     "level": 1,
+     "points": 1,
+     "bonus": "black",
+     "cost": {
+      "blue": 4
+     }
+    },
+    {
+     "id": "L1-17",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "blue": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-13",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "white": 1,
+      "green": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-38",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "white": 3,
+      "blue": 1,
+      "black": 1
+     }
+    }
+   ],
+   "L2": [
+    {
+     "id": "L2-24",
+     "level": 2,
+     "points": 1,
+     "bonus": "white",
+     "cost": {
+      "green": 3,
+      "red": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-29",
+     "level": 2,
+     "points": 3,
+     "bonus": "white",
+     "cost": {
+      "white": 6
+     }
+    },
+    {
+     "id": "L2-23",
+     "level": 2,
+     "points": 3,
+     "bonus": "red",
+     "cost": {
+      "red": 6
+     }
+    },
+    {
+     "id": "L2-26",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "green": 1,
+      "red": 4,
+      "black": 2
+     }
+    }
+   ],
+   "L3": [
+    {
+     "id": "L3-6",
+     "level": 3,
+     "points": 4,
+     "bonus": "blue",
+     "cost": {
+      "white": 6,
+      "blue": 3,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-17",
+     "level": 3,
+     "points": 4,
+     "bonus": "white",
+     "cost": {
+      "black": 7
+     }
+    },
+    {
+     "id": "L3-1",
+     "level": 3,
+     "points": 4,
+     "bonus": "black",
+     "cost": {
+      "red": 7
      }
     },
     {
@@ -885,15 +925,6 @@
   },
   "nobles": [
    {
-    "id": "n9",
-    "points": 3,
-    "req": {
-     "green": 3,
-     "blue": 3,
-     "red": 3
-    }
-   },
-   {
     "id": "n10",
     "points": 3,
     "req": {
@@ -903,96 +934,51 @@
     }
    },
    {
-    "id": "n7",
+    "id": "n6",
     "points": 3,
     "req": {
      "black": 3,
      "red": 3,
-     "white": 3
+     "green": 3
+    }
+   },
+   {
+    "id": "n3",
+    "points": 3,
+    "req": {
+     "blue": 4,
+     "white": 4
     }
    }
   ],
   "players": {
    "p0": {
     "tokens": {
-     "white": 3,
-     "blue": 2,
-     "green": 2,
-     "red": 2,
-     "black": 1,
-     "gold": 0
-    },
-    "purchased": [
-     {
-      "id": "L1-12",
-      "level": 1,
-      "points": 0,
-      "bonus": "blue",
-      "cost": {
-       "black": 3
-      }
-     },
-     {
-      "id": "L2-9",
-      "level": 2,
-      "points": 2,
-      "bonus": "blue",
-      "cost": {
-       "blue": 5
-      }
-     }
-    ],
-    "reserved": [
-     {
-      "id": "L1-15",
-      "level": 1,
-      "points": 1,
-      "bonus": "blue",
-      "cost": {
-       "red": 4
-      }
-     },
-     {
-      "id": "L1-20",
-      "level": 1,
-      "points": 0,
-      "bonus": "green",
-      "cost": {
-       "white": 1,
-       "blue": 1,
-       "red": 1,
-       "black": 2
-      }
-     }
-    ],
-    "nobles": []
-   },
-   "p1": {
-    "tokens": {
-     "white": 1,
+     "white": 2,
      "blue": 1,
      "green": 0,
      "red": 2,
-     "black": 3,
+     "black": 0,
      "gold": 1
     },
     "purchased": [
      {
-      "id": "L1-7",
+      "id": "L1-33",
       "level": 1,
-      "points": 1,
-      "bonus": "black",
+      "points": 0,
+      "bonus": "white",
       "cost": {
-       "blue": 4
+       "red": 2,
+       "black": 1
       }
      },
      {
-      "id": "L1-29",
+      "id": "L1-28",
       "level": 1,
       "points": 0,
       "bonus": "red",
       "cost": {
-       "white": 1,
+       "white": 2,
        "blue": 1,
        "green": 1,
        "black": 1
@@ -1000,6 +986,28 @@
      }
     ],
     "reserved": [
+     {
+      "id": "L1-22",
+      "level": 1,
+      "points": 0,
+      "bonus": "green",
+      "cost": {
+       "red": 3
+      }
+     }
+    ],
+    "nobles": []
+   },
+   "p1": {
+    "tokens": {
+     "white": 2,
+     "blue": 3,
+     "green": 0,
+     "red": 2,
+     "black": 2,
+     "gold": 0
+    },
+    "purchased": [
      {
       "id": "L2-10",
       "level": 2,
@@ -1010,19 +1018,9 @@
        "red": 1,
        "black": 4
       }
-     },
-     {
-      "id": "L1-18",
-      "level": 1,
-      "points": 0,
-      "bonus": "green",
-      "cost": {
-       "white": 1,
-       "blue": 3,
-       "green": 1
-      }
      }
     ],
+    "reserved": [],
     "nobles": []
    }
   },
@@ -1041,43 +1039,23 @@
    "seat": 0,
    "is_hero": true,
    "phase": 0,
-   "action": 46,
-   "action_name": "buy:L1#0",
+   "action": 31,
+   "action_name": "reserve:L1#0",
    "move": {
-    "type": "buy",
-    "card_id": "L1-19"
+    "type": "reserve",
+    "card_id": "L1-7"
    },
    "snapshot": {
     "bank": {
      "white": 0,
-     "blue": 1,
-     "green": 2,
+     "blue": 0,
+     "green": 4,
      "red": 0,
-     "black": 0,
+     "black": 2,
      "gold": 4
     },
     "decks": {
      "L1": [
-      {
-       "id": "L1-4",
-       "level": 1,
-       "points": 0,
-       "bonus": "black",
-       "cost": {
-        "green": 3
-       }
-      },
-      {
-       "id": "L1-25",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "white": 1,
-        "red": 1,
-        "black": 3
-       }
-      },
       {
        "id": "L1-11",
        "level": 1,
@@ -1090,122 +1068,12 @@
        }
       },
       {
-       "id": "L1-16",
-       "level": 1,
-       "points": 0,
-       "bonus": "green",
-       "cost": {
-        "white": 2,
-        "blue": 1
-       }
-      },
-      {
-       "id": "L1-26",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "blue": 2,
-        "green": 1
-       }
-      },
-      {
-       "id": "L1-30",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "white": 2,
-        "red": 2
-       }
-      },
-      {
-       "id": "L1-24",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "white": 3
-       }
-      },
-      {
-       "id": "L1-1",
-       "level": 1,
-       "points": 0,
-       "bonus": "black",
-       "cost": {
-        "green": 2,
-        "red": 1
-       }
-      },
-      {
-       "id": "L1-23",
+       "id": "L1-39",
        "level": 1,
        "points": 1,
-       "bonus": "green",
-       "cost": {
-        "black": 4
-       }
-      },
-      {
-       "id": "L1-14",
-       "level": 1,
-       "points": 0,
-       "bonus": "blue",
-       "cost": {
-        "green": 2,
-        "black": 2
-       }
-      },
-      {
-       "id": "L1-33",
-       "level": 1,
-       "points": 0,
        "bonus": "white",
        "cost": {
-        "red": 2,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-38",
-       "level": 1,
-       "points": 0,
-       "bonus": "white",
-       "cost": {
-        "white": 3,
-        "blue": 1,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-35",
-       "level": 1,
-       "points": 0,
-       "bonus": "white",
-       "cost": {
-        "blue": 3
-       }
-      },
-      {
-       "id": "L1-36",
-       "level": 1,
-       "points": 0,
-       "bonus": "white",
-       "cost": {
-        "blue": 2,
-        "black": 2
-       }
-      },
-      {
-       "id": "L1-6",
-       "level": 1,
-       "points": 0,
-       "bonus": "black",
-       "cost": {
-        "white": 2,
-        "blue": 2,
-        "red": 1
+        "green": 4
        }
       },
       {
@@ -1221,13 +1089,180 @@
        }
       },
       {
-       "id": "L1-21",
+       "id": "L1-12",
+       "level": 1,
+       "points": 0,
+       "bonus": "blue",
+       "cost": {
+        "black": 3
+       }
+      },
+      {
+       "id": "L1-23",
+       "level": 1,
+       "points": 1,
+       "bonus": "green",
+       "cost": {
+        "black": 4
+       }
+      },
+      {
+       "id": "L1-34",
+       "level": 1,
+       "points": 0,
+       "bonus": "white",
+       "cost": {
+        "blue": 1,
+        "green": 1,
+        "red": 1,
+        "black": 1
+       }
+      },
+      {
+       "id": "L1-19",
        "level": 1,
        "points": 0,
        "bonus": "green",
        "cost": {
+        "white": 1,
         "blue": 1,
+        "red": 1,
+        "black": 1
+       }
+      },
+      {
+       "id": "L1-29",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "white": 1,
+        "blue": 1,
+        "green": 1,
+        "black": 1
+       }
+      },
+      {
+       "id": "L1-18",
+       "level": 1,
+       "points": 0,
+       "bonus": "green",
+       "cost": {
+        "white": 1,
+        "blue": 3,
+        "green": 1
+       }
+      },
+      {
+       "id": "L1-25",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "white": 1,
+        "red": 1,
+        "black": 3
+       }
+      },
+      {
+       "id": "L1-9",
+       "level": 1,
+       "points": 0,
+       "bonus": "blue",
+       "cost": {
+        "white": 1,
+        "green": 1,
         "red": 2,
+        "black": 1
+       }
+      },
+      {
+       "id": "L1-24",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "white": 3
+       }
+      },
+      {
+       "id": "L1-4",
+       "level": 1,
+       "points": 0,
+       "bonus": "black",
+       "cost": {
+        "green": 3
+       }
+      },
+      {
+       "id": "L1-30",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "white": 2,
+        "red": 2
+       }
+      },
+      {
+       "id": "L1-1",
+       "level": 1,
+       "points": 0,
+       "bonus": "black",
+       "cost": {
+        "green": 2,
+        "red": 1
+       }
+      },
+      {
+       "id": "L1-26",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "blue": 2,
+        "green": 1
+       }
+      },
+      {
+       "id": "L1-31",
+       "level": 1,
+       "points": 1,
+       "bonus": "red",
+       "cost": {
+        "white": 4
+       }
+      },
+      {
+       "id": "L1-20",
+       "level": 1,
+       "points": 0,
+       "bonus": "green",
+       "cost": {
+        "white": 1,
+        "blue": 1,
+        "red": 1,
+        "black": 2
+       }
+      },
+      {
+       "id": "L1-32",
+       "level": 1,
+       "points": 0,
+       "bonus": "white",
+       "cost": {
+        "blue": 2,
+        "green": 2,
+        "black": 1
+       }
+      },
+      {
+       "id": "L1-14",
+       "level": 1,
+       "points": 0,
+       "bonus": "blue",
+       "cost": {
+        "green": 2,
         "black": 2
        }
       },
@@ -1254,27 +1289,14 @@
        }
       },
       {
-       "id": "L1-28",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "white": 2,
-        "blue": 1,
-        "green": 1,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-0",
+       "id": "L1-3",
        "level": 1,
        "points": 0,
        "bonus": "black",
        "cost": {
-        "white": 1,
-        "blue": 1,
         "green": 1,
-        "red": 1
+        "red": 3,
+        "black": 1
        }
       },
       {
@@ -1290,57 +1312,6 @@
        }
       },
       {
-       "id": "L1-17",
-       "level": 1,
-       "points": 0,
-       "bonus": "green",
-       "cost": {
-        "blue": 2,
-        "red": 2
-       }
-      },
-      {
-       "id": "L1-32",
-       "level": 1,
-       "points": 0,
-       "bonus": "white",
-       "cost": {
-        "blue": 2,
-        "green": 2,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-34",
-       "level": 1,
-       "points": 0,
-       "bonus": "white",
-       "cost": {
-        "blue": 1,
-        "green": 1,
-        "red": 1,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-22",
-       "level": 1,
-       "points": 0,
-       "bonus": "green",
-       "cost": {
-        "red": 3
-       }
-      },
-      {
-       "id": "L1-39",
-       "level": 1,
-       "points": 1,
-       "bonus": "white",
-       "cost": {
-        "green": 4
-       }
-      },
-      {
        "id": "L1-8",
        "level": 1,
        "points": 0,
@@ -1351,37 +1322,206 @@
        }
       },
       {
-       "id": "L1-13",
+       "id": "L1-35",
        "level": 1,
        "points": 0,
-       "bonus": "blue",
+       "bonus": "white",
        "cost": {
-        "white": 1,
-        "green": 2,
-        "red": 2
+        "blue": 3
        }
       },
       {
-       "id": "L1-9",
+       "id": "L1-36",
        "level": 1,
        "points": 0,
+       "bonus": "white",
+       "cost": {
+        "blue": 2,
+        "black": 2
+       }
+      },
+      {
+       "id": "L1-21",
+       "level": 1,
+       "points": 0,
+       "bonus": "green",
+       "cost": {
+        "blue": 1,
+        "red": 2,
+        "black": 2
+       }
+      },
+      {
+       "id": "L1-6",
+       "level": 1,
+       "points": 0,
+       "bonus": "black",
+       "cost": {
+        "white": 2,
+        "blue": 2,
+        "red": 1
+       }
+      },
+      {
+       "id": "L1-27",
+       "level": 1,
+       "points": 0,
+       "bonus": "red",
+       "cost": {
+        "white": 2,
+        "green": 1,
+        "black": 2
+       }
+      },
+      {
+       "id": "L1-15",
+       "level": 1,
+       "points": 1,
        "bonus": "blue",
        "cost": {
+        "red": 4
+       }
+      },
+      {
+       "id": "L1-16",
+       "level": 1,
+       "points": 0,
+       "bonus": "green",
+       "cost": {
+        "white": 2,
+        "blue": 1
+       }
+      },
+      {
+       "id": "L1-0",
+       "level": 1,
+       "points": 0,
+       "bonus": "black",
+       "cost": {
         "white": 1,
+        "blue": 1,
         "green": 1,
-        "red": 2,
-        "black": 1
+        "red": 1
        }
       }
      ],
      "L2": [
       {
-       "id": "L2-23",
+       "id": "L2-5",
        "level": 2,
        "points": 3,
+       "bonus": "black",
+       "cost": {
+        "black": 6
+       }
+      },
+      {
+       "id": "L2-21",
+       "level": 2,
+       "points": 2,
        "bonus": "red",
        "cost": {
-        "red": 6
+        "white": 3,
+        "black": 5
+       }
+      },
+      {
+       "id": "L2-9",
+       "level": 2,
+       "points": 2,
+       "bonus": "blue",
+       "cost": {
+        "blue": 5
+       }
+      },
+      {
+       "id": "L2-3",
+       "level": 2,
+       "points": 2,
+       "bonus": "black",
+       "cost": {
+        "white": 5
+       }
+      },
+      {
+       "id": "L2-20",
+       "level": 2,
+       "points": 2,
+       "bonus": "red",
+       "cost": {
+        "white": 1,
+        "blue": 4,
+        "green": 2
+       }
+      },
+      {
+       "id": "L2-27",
+       "level": 2,
+       "points": 2,
+       "bonus": "white",
+       "cost": {
+        "red": 5
+       }
+      },
+      {
+       "id": "L2-13",
+       "level": 2,
+       "points": 1,
+       "bonus": "green",
+       "cost": {
+        "white": 2,
+        "blue": 3,
+        "black": 2
+       }
+      },
+      {
+       "id": "L2-0",
+       "level": 2,
+       "points": 1,
+       "bonus": "black",
+       "cost": {
+        "white": 3,
+        "blue": 2,
+        "green": 2
+       }
+      },
+      {
+       "id": "L2-1",
+       "level": 2,
+       "points": 1,
+       "bonus": "black",
+       "cost": {
+        "white": 3,
+        "green": 3,
+        "black": 2
+       }
+      },
+      {
+       "id": "L2-22",
+       "level": 2,
+       "points": 2,
+       "bonus": "red",
+       "cost": {
+        "black": 5
+       }
+      },
+      {
+       "id": "L2-4",
+       "level": 2,
+       "points": 2,
+       "bonus": "black",
+       "cost": {
+        "green": 5,
+        "red": 3
+       }
+      },
+      {
+       "id": "L2-11",
+       "level": 2,
+       "points": 3,
+       "bonus": "blue",
+       "cost": {
+        "blue": 6
        }
       },
       {
@@ -1396,13 +1536,14 @@
        }
       },
       {
-       "id": "L2-4",
+       "id": "L2-18",
        "level": 2,
-       "points": 2,
-       "bonus": "black",
+       "points": 1,
+       "bonus": "red",
        "cost": {
-        "green": 5,
-        "red": 3
+        "blue": 3,
+        "red": 2,
+        "black": 3
        }
       },
       {
@@ -1412,15 +1553,6 @@
        "bonus": "green",
        "cost": {
         "green": 6
-       }
-      },
-      {
-       "id": "L2-11",
-       "level": 2,
-       "points": 3,
-       "bonus": "blue",
-       "cost": {
-        "blue": 6
        }
       },
       {
@@ -1434,12 +1566,14 @@
        }
       },
       {
-       "id": "L2-29",
+       "id": "L2-19",
        "level": 2,
-       "points": 3,
-       "bonus": "white",
+       "points": 1,
+       "bonus": "red",
        "cost": {
-        "white": 6
+        "white": 2,
+        "red": 2,
+        "black": 3
        }
       },
       {
@@ -1463,127 +1597,13 @@
        }
       },
       {
-       "id": "L2-13",
+       "id": "L2-16",
        "level": 2,
-       "points": 1,
+       "points": 2,
        "bonus": "green",
        "cost": {
-        "white": 2,
-        "blue": 3,
-        "black": 2
-       }
-      },
-      {
-       "id": "L2-1",
-       "level": 2,
-       "points": 1,
-       "bonus": "black",
-       "cost": {
-        "white": 3,
-        "green": 3,
-        "black": 2
-       }
-      },
-      {
-       "id": "L2-28",
-       "level": 2,
-       "points": 2,
-       "bonus": "white",
-       "cost": {
-        "red": 5,
-        "black": 3
-       }
-      },
-      {
-       "id": "L2-24",
-       "level": 2,
-       "points": 1,
-       "bonus": "white",
-       "cost": {
-        "green": 3,
-        "red": 2,
-        "black": 2
-       }
-      },
-      {
-       "id": "L2-20",
-       "level": 2,
-       "points": 2,
-       "bonus": "red",
-       "cost": {
-        "white": 1,
-        "blue": 4,
-        "green": 2
-       }
-      },
-      {
-       "id": "L2-26",
-       "level": 2,
-       "points": 2,
-       "bonus": "white",
-       "cost": {
-        "green": 1,
-        "red": 4,
-        "black": 2
-       }
-      },
-      {
-       "id": "L2-3",
-       "level": 2,
-       "points": 2,
-       "bonus": "black",
-       "cost": {
-        "white": 5
-       }
-      },
-      {
-       "id": "L2-7",
-       "level": 2,
-       "points": 1,
-       "bonus": "blue",
-       "cost": {
-        "blue": 2,
-        "green": 3,
-        "black": 3
-       }
-      },
-      {
-       "id": "L2-0",
-       "level": 2,
-       "points": 1,
-       "bonus": "black",
-       "cost": {
-        "white": 3,
-        "blue": 2,
-        "green": 2
-       }
-      },
-      {
-       "id": "L2-21",
-       "level": 2,
-       "points": 2,
-       "bonus": "red",
-       "cost": {
-        "white": 3,
-        "black": 5
-       }
-      },
-      {
-       "id": "L2-5",
-       "level": 2,
-       "points": 3,
-       "bonus": "black",
-       "cost": {
-        "black": 6
-       }
-      },
-      {
-       "id": "L2-27",
-       "level": 2,
-       "points": 2,
-       "bonus": "white",
-       "cost": {
-        "red": 5
+        "blue": 5,
+        "green": 3
        }
       },
       {
@@ -1598,6 +1618,38 @@
        }
       },
       {
+       "id": "L2-2",
+       "level": 2,
+       "points": 2,
+       "bonus": "black",
+       "cost": {
+        "blue": 1,
+        "green": 4,
+        "red": 2
+       }
+      },
+      {
+       "id": "L2-28",
+       "level": 2,
+       "points": 2,
+       "bonus": "white",
+       "cost": {
+        "red": 5,
+        "black": 3
+       }
+      },
+      {
+       "id": "L2-7",
+       "level": 2,
+       "points": 1,
+       "bonus": "blue",
+       "cost": {
+        "blue": 2,
+        "green": 3,
+        "black": 3
+       }
+      },
+      {
        "id": "L2-6",
        "level": 2,
        "points": 1,
@@ -1607,164 +1659,18 @@
         "green": 2,
         "red": 3
        }
-      },
-      {
-       "id": "L2-22",
-       "level": 2,
-       "points": 2,
-       "bonus": "red",
-       "cost": {
-        "black": 5
-       }
       }
      ],
      "L3": [
       {
-       "id": "L3-6",
-       "level": 3,
-       "points": 4,
-       "bonus": "blue",
-       "cost": {
-        "white": 6,
-        "blue": 3,
-        "black": 3
-       }
-      },
-      {
-       "id": "L3-9",
-       "level": 3,
-       "points": 4,
-       "bonus": "green",
-       "cost": {
-        "white": 3,
-        "blue": 6,
-        "green": 3
-       }
-      },
-      {
-       "id": "L3-1",
-       "level": 3,
-       "points": 4,
-       "bonus": "black",
-       "cost": {
-        "red": 7
-       }
-      },
-      {
-       "id": "L3-17",
+       "id": "L3-18",
        "level": 3,
        "points": 4,
        "bonus": "white",
        "cost": {
-        "black": 7
-       }
-      },
-      {
-       "id": "L3-5",
-       "level": 3,
-       "points": 4,
-       "bonus": "blue",
-       "cost": {
-        "white": 7
-       }
-      },
-      {
-       "id": "L3-7",
-       "level": 3,
-       "points": 5,
-       "bonus": "blue",
-       "cost": {
-        "white": 7,
-        "blue": 3
-       }
-      },
-      {
-       "id": "L3-4",
-       "level": 3,
-       "points": 3,
-       "bonus": "blue",
-       "cost": {
         "white": 3,
-        "green": 3,
         "red": 3,
-        "black": 5
-       }
-      },
-      {
-       "id": "L3-10",
-       "level": 3,
-       "points": 4,
-       "bonus": "green",
-       "cost": {
-        "blue": 7
-       }
-      },
-      {
-       "id": "L3-2",
-       "level": 3,
-       "points": 4,
-       "bonus": "black",
-       "cost": {
-        "green": 3,
-        "red": 6,
-        "black": 3
-       }
-      },
-      {
-       "id": "L3-11",
-       "level": 3,
-       "points": 5,
-       "bonus": "green",
-       "cost": {
-        "blue": 7,
-        "green": 3
-       }
-      },
-      {
-       "id": "L3-0",
-       "level": 3,
-       "points": 3,
-       "bonus": "black",
-       "cost": {
-        "white": 3,
-        "blue": 3,
-        "green": 5,
-        "red": 3
-       }
-      },
-      {
-       "id": "L3-16",
-       "level": 3,
-       "points": 3,
-       "bonus": "white",
-       "cost": {
-        "blue": 3,
-        "green": 3,
-        "red": 5,
-        "black": 3
-       }
-      },
-      {
-       "id": "L3-14",
-       "level": 3,
-       "points": 4,
-       "bonus": "red",
-       "cost": {
-        "blue": 3,
-        "green": 6,
-        "red": 3
-       }
-      },
-      {
-       "id": "L3-8",
-       "level": 3,
-       "points": 3,
-       "bonus": "green",
-       "cost": {
-        "white": 5,
-        "blue": 3,
-        "red": 3,
-        "black": 3
+        "black": 6
        }
       },
       {
@@ -1785,101 +1691,72 @@
        "cost": {
         "green": 7
        }
-      }
-     ]
-    },
-    "board": {
-     "L1": [
+      },
       {
-       "id": "L1-19",
-       "level": 1,
-       "points": 0,
+       "id": "L3-11",
+       "level": 3,
+       "points": 5,
        "bonus": "green",
        "cost": {
-        "white": 1,
-        "blue": 1,
-        "red": 1,
-        "black": 1
-       }
-      },
-      {
-       "id": "L1-27",
-       "level": 1,
-       "points": 0,
-       "bonus": "red",
-       "cost": {
-        "white": 2,
-        "green": 1,
-        "black": 2
-       }
-      },
-      {
-       "id": "L1-31",
-       "level": 1,
-       "points": 1,
-       "bonus": "red",
-       "cost": {
-        "white": 4
-       }
-      },
-      {
-       "id": "L1-3",
-       "level": 1,
-       "points": 0,
-       "bonus": "black",
-       "cost": {
-        "green": 1,
-        "red": 3,
-        "black": 1
-       }
-      }
-     ],
-     "L2": [
-      {
-       "id": "L2-19",
-       "level": 2,
-       "points": 1,
-       "bonus": "red",
-       "cost": {
-        "white": 2,
-        "red": 2,
-        "black": 3
-       }
-      },
-      {
-       "id": "L2-2",
-       "level": 2,
-       "points": 2,
-       "bonus": "black",
-       "cost": {
-        "blue": 1,
-        "green": 4,
-        "red": 2
-       }
-      },
-      {
-       "id": "L2-16",
-       "level": 2,
-       "points": 2,
-       "bonus": "green",
-       "cost": {
-        "blue": 5,
+        "blue": 7,
         "green": 3
        }
       },
       {
-       "id": "L2-18",
-       "level": 2,
-       "points": 1,
+       "id": "L3-14",
+       "level": 3,
+       "points": 4,
        "bonus": "red",
        "cost": {
         "blue": 3,
-        "red": 2,
+        "green": 6,
+        "red": 3
+       }
+      },
+      {
+       "id": "L3-2",
+       "level": 3,
+       "points": 4,
+       "bonus": "black",
+       "cost": {
+        "green": 3,
+        "red": 6,
         "black": 3
        }
-      }
-     ],
-     "L3": [
+      },
+      {
+       "id": "L3-4",
+       "level": 3,
+       "points": 3,
+       "bonus": "blue",
+       "cost": {
+        "white": 3,
+        "green": 3,
+        "red": 3,
+        "black": 5
+       }
+      },
+      {
+       "id": "L3-8",
+       "level": 3,
+       "points": 3,
+       "bonus": "green",
+       "cost": {
+        "white": 5,
+        "blue": 3,
+        "red": 3,
+        "black": 3
+       }
+      },
+      {
+       "id": "L3-10",
+       "level": 3,
+       "points": 4,
+       "bonus": "green",
+       "cost": {
+        "blue": 7
+       }
+      },
       {
        "id": "L3-15",
        "level": 3,
@@ -1888,17 +1765,6 @@
        "cost": {
         "green": 7,
         "red": 3
-       }
-      },
-      {
-       "id": "L3-18",
-       "level": 3,
-       "points": 4,
-       "bonus": "white",
-       "cost": {
-        "white": 3,
-        "red": 3,
-        "black": 6
        }
       },
       {
@@ -1911,6 +1777,178 @@
         "blue": 5,
         "green": 3,
         "black": 3
+       }
+      },
+      {
+       "id": "L3-0",
+       "level": 3,
+       "points": 3,
+       "bonus": "black",
+       "cost": {
+        "white": 3,
+        "blue": 3,
+        "green": 5,
+        "red": 3
+       }
+      },
+      {
+       "id": "L3-5",
+       "level": 3,
+       "points": 4,
+       "bonus": "blue",
+       "cost": {
+        "white": 7
+       }
+      },
+      {
+       "id": "L3-16",
+       "level": 3,
+       "points": 3,
+       "bonus": "white",
+       "cost": {
+        "blue": 3,
+        "green": 3,
+        "red": 5,
+        "black": 3
+       }
+      },
+      {
+       "id": "L3-9",
+       "level": 3,
+       "points": 4,
+       "bonus": "green",
+       "cost": {
+        "white": 3,
+        "blue": 6,
+        "green": 3
+       }
+      },
+      {
+       "id": "L3-7",
+       "level": 3,
+       "points": 5,
+       "bonus": "blue",
+       "cost": {
+        "white": 7,
+        "blue": 3
+       }
+      }
+     ]
+    },
+    "board": {
+     "L1": [
+      {
+       "id": "L1-7",
+       "level": 1,
+       "points": 1,
+       "bonus": "black",
+       "cost": {
+        "blue": 4
+       }
+      },
+      {
+       "id": "L1-17",
+       "level": 1,
+       "points": 0,
+       "bonus": "green",
+       "cost": {
+        "blue": 2,
+        "red": 2
+       }
+      },
+      {
+       "id": "L1-13",
+       "level": 1,
+       "points": 0,
+       "bonus": "blue",
+       "cost": {
+        "white": 1,
+        "green": 2,
+        "red": 2
+       }
+      },
+      {
+       "id": "L1-38",
+       "level": 1,
+       "points": 0,
+       "bonus": "white",
+       "cost": {
+        "white": 3,
+        "blue": 1,
+        "black": 1
+       }
+      }
+     ],
+     "L2": [
+      {
+       "id": "L2-24",
+       "level": 2,
+       "points": 1,
+       "bonus": "white",
+       "cost": {
+        "green": 3,
+        "red": 2,
+        "black": 2
+       }
+      },
+      {
+       "id": "L2-29",
+       "level": 2,
+       "points": 3,
+       "bonus": "white",
+       "cost": {
+        "white": 6
+       }
+      },
+      {
+       "id": "L2-23",
+       "level": 2,
+       "points": 3,
+       "bonus": "red",
+       "cost": {
+        "red": 6
+       }
+      },
+      {
+       "id": "L2-26",
+       "level": 2,
+       "points": 2,
+       "bonus": "white",
+       "cost": {
+        "green": 1,
+        "red": 4,
+        "black": 2
+       }
+      }
+     ],
+     "L3": [
+      {
+       "id": "L3-6",
+       "level": 3,
+       "points": 4,
+       "bonus": "blue",
+       "cost": {
+        "white": 6,
+        "blue": 3,
+        "black": 3
+       }
+      },
+      {
+       "id": "L3-17",
+       "level": 3,
+       "points": 4,
+       "bonus": "white",
+       "cost": {
+        "black": 7
+       }
+      },
+      {
+       "id": "L3-1",
+       "level": 3,
+       "points": 4,
+       "bonus": "black",
+       "cost": {
+        "red": 7
        }
       },
       {
@@ -1927,15 +1965,6 @@
     },
     "nobles": [
      {
-      "id": "n9",
-      "points": 3,
-      "req": {
-       "green": 3,
-       "blue": 3,
-       "red": 3
-      }
-     },
-     {
       "id": "n10",
       "points": 3,
       "req": {
@@ -1945,96 +1974,51 @@
       }
      },
      {
-      "id": "n7",
+      "id": "n6",
       "points": 3,
       "req": {
        "black": 3,
        "red": 3,
-       "white": 3
+       "green": 3
+      }
+     },
+     {
+      "id": "n3",
+      "points": 3,
+      "req": {
+       "blue": 4,
+       "white": 4
       }
      }
     ],
     "players": {
      "p0": {
       "tokens": {
-       "white": 3,
-       "blue": 2,
-       "green": 2,
-       "red": 2,
-       "black": 1,
-       "gold": 0
-      },
-      "purchased": [
-       {
-        "id": "L1-12",
-        "level": 1,
-        "points": 0,
-        "bonus": "blue",
-        "cost": {
-         "black": 3
-        }
-       },
-       {
-        "id": "L2-9",
-        "level": 2,
-        "points": 2,
-        "bonus": "blue",
-        "cost": {
-         "blue": 5
-        }
-       }
-      ],
-      "reserved": [
-       {
-        "id": "L1-15",
-        "level": 1,
-        "points": 1,
-        "bonus": "blue",
-        "cost": {
-         "red": 4
-        }
-       },
-       {
-        "id": "L1-20",
-        "level": 1,
-        "points": 0,
-        "bonus": "green",
-        "cost": {
-         "white": 1,
-         "blue": 1,
-         "red": 1,
-         "black": 2
-        }
-       }
-      ],
-      "nobles": []
-     },
-     "p1": {
-      "tokens": {
-       "white": 1,
+       "white": 2,
        "blue": 1,
        "green": 0,
        "red": 2,
-       "black": 3,
+       "black": 0,
        "gold": 1
       },
       "purchased": [
        {
-        "id": "L1-7",
+        "id": "L1-33",
         "level": 1,
-        "points": 1,
-        "bonus": "black",
+        "points": 0,
+        "bonus": "white",
         "cost": {
-         "blue": 4
+         "red": 2,
+         "black": 1
         }
        },
        {
-        "id": "L1-29",
+        "id": "L1-28",
         "level": 1,
         "points": 0,
         "bonus": "red",
         "cost": {
-         "white": 1,
+         "white": 2,
          "blue": 1,
          "green": 1,
          "black": 1
@@ -2042,6 +2026,28 @@
        }
       ],
       "reserved": [
+       {
+        "id": "L1-22",
+        "level": 1,
+        "points": 0,
+        "bonus": "green",
+        "cost": {
+         "red": 3
+        }
+       }
+      ],
+      "nobles": []
+     },
+     "p1": {
+      "tokens": {
+       "white": 2,
+       "blue": 3,
+       "green": 0,
+       "red": 2,
+       "black": 2,
+       "gold": 0
+      },
+      "purchased": [
        {
         "id": "L2-10",
         "level": 2,
@@ -2052,19 +2058,9 @@
          "red": 1,
          "black": 4
         }
-       },
-       {
-        "id": "L1-18",
-        "level": 1,
-        "points": 0,
-        "bonus": "green",
-        "cost": {
-         "white": 1,
-         "blue": 3,
-         "green": 1
-        }
        }
       ],
+      "reserved": [],
       "nobles": []
      }
     },
@@ -2082,35 +2078,15 @@
  ],
  "final": {
   "bank": {
-   "white": 1,
-   "blue": 1,
-   "green": 2,
-   "red": 1,
-   "black": 1,
-   "gold": 4
+   "white": 0,
+   "blue": 0,
+   "green": 4,
+   "red": 0,
+   "black": 2,
+   "gold": 3
   },
   "decks": {
    "L1": [
-    {
-     "id": "L1-4",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 3
-     }
-    },
-    {
-     "id": "L1-25",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 1,
-      "red": 1,
-      "black": 3
-     }
-    },
     {
      "id": "L1-11",
      "level": 1,
@@ -2123,122 +2099,12 @@
      }
     },
     {
-     "id": "L1-16",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "white": 2,
-      "blue": 1
-     }
-    },
-    {
-     "id": "L1-26",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "blue": 2,
-      "green": 1
-     }
-    },
-    {
-     "id": "L1-30",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "red": 2
-     }
-    },
-    {
-     "id": "L1-24",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 3
-     }
-    },
-    {
-     "id": "L1-1",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 2,
-      "red": 1
-     }
-    },
-    {
-     "id": "L1-23",
+     "id": "L1-39",
      "level": 1,
      "points": 1,
-     "bonus": "green",
-     "cost": {
-      "black": 4
-     }
-    },
-    {
-     "id": "L1-14",
-     "level": 1,
-     "points": 0,
-     "bonus": "blue",
-     "cost": {
-      "green": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-33",
-     "level": 1,
-     "points": 0,
      "bonus": "white",
      "cost": {
-      "red": 2,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-38",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "white": 3,
-      "blue": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-35",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 3
-     }
-    },
-    {
-     "id": "L1-36",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-6",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "white": 2,
-      "blue": 2,
-      "red": 1
+      "green": 4
      }
     },
     {
@@ -2254,13 +2120,180 @@
      }
     },
     {
-     "id": "L1-21",
+     "id": "L1-12",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "black": 3
+     }
+    },
+    {
+     "id": "L1-23",
+     "level": 1,
+     "points": 1,
+     "bonus": "green",
+     "cost": {
+      "black": 4
+     }
+    },
+    {
+     "id": "L1-34",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 1,
+      "green": 1,
+      "red": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-19",
      "level": 1,
      "points": 0,
      "bonus": "green",
      "cost": {
+      "white": 1,
       "blue": 1,
+      "red": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-29",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "blue": 1,
+      "green": 1,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-18",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 1,
+      "blue": 3,
+      "green": 1
+     }
+    },
+    {
+     "id": "L1-25",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "red": 1,
+      "black": 3
+     }
+    },
+    {
+     "id": "L1-9",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "white": 1,
+      "green": 1,
       "red": 2,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-24",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 3
+     }
+    },
+    {
+     "id": "L1-4",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "green": 3
+     }
+    },
+    {
+     "id": "L1-30",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-1",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "green": 2,
+      "red": 1
+     }
+    },
+    {
+     "id": "L1-26",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "blue": 2,
+      "green": 1
+     }
+    },
+    {
+     "id": "L1-31",
+     "level": 1,
+     "points": 1,
+     "bonus": "red",
+     "cost": {
+      "white": 4
+     }
+    },
+    {
+     "id": "L1-20",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 1,
+      "blue": 1,
+      "red": 1,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-32",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 2,
+      "green": 2,
+      "black": 1
+     }
+    },
+    {
+     "id": "L1-14",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "green": 2,
       "black": 2
      }
     },
@@ -2287,27 +2320,14 @@
      }
     },
     {
-     "id": "L1-28",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "blue": 1,
-      "green": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-0",
+     "id": "L1-3",
      "level": 1,
      "points": 0,
      "bonus": "black",
      "cost": {
-      "white": 1,
-      "blue": 1,
       "green": 1,
-      "red": 1
+      "red": 3,
+      "black": 1
      }
     },
     {
@@ -2323,57 +2343,6 @@
      }
     },
     {
-     "id": "L1-17",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "blue": 2,
-      "red": 2
-     }
-    },
-    {
-     "id": "L1-32",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 2,
-      "green": 2,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-34",
-     "level": 1,
-     "points": 0,
-     "bonus": "white",
-     "cost": {
-      "blue": 1,
-      "green": 1,
-      "red": 1,
-      "black": 1
-     }
-    },
-    {
-     "id": "L1-22",
-     "level": 1,
-     "points": 0,
-     "bonus": "green",
-     "cost": {
-      "red": 3
-     }
-    },
-    {
-     "id": "L1-39",
-     "level": 1,
-     "points": 1,
-     "bonus": "white",
-     "cost": {
-      "green": 4
-     }
-    },
-    {
      "id": "L1-8",
      "level": 1,
      "points": 0,
@@ -2384,25 +2353,194 @@
      }
     },
     {
-     "id": "L1-13",
+     "id": "L1-35",
      "level": 1,
      "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 3
+     }
+    },
+    {
+     "id": "L1-36",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "blue": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-21",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "blue": 1,
+      "red": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-6",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "white": 2,
+      "blue": 2,
+      "red": 1
+     }
+    },
+    {
+     "id": "L1-27",
+     "level": 1,
+     "points": 0,
+     "bonus": "red",
+     "cost": {
+      "white": 2,
+      "green": 1,
+      "black": 2
+     }
+    },
+    {
+     "id": "L1-15",
+     "level": 1,
+     "points": 1,
      "bonus": "blue",
      "cost": {
-      "white": 1,
-      "green": 2,
-      "red": 2
+      "red": 4
+     }
+    },
+    {
+     "id": "L1-16",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "white": 2,
+      "blue": 1
      }
     }
    ],
    "L2": [
     {
-     "id": "L2-23",
+     "id": "L2-5",
      "level": 2,
      "points": 3,
+     "bonus": "black",
+     "cost": {
+      "black": 6
+     }
+    },
+    {
+     "id": "L2-21",
+     "level": 2,
+     "points": 2,
      "bonus": "red",
      "cost": {
-      "red": 6
+      "white": 3,
+      "black": 5
+     }
+    },
+    {
+     "id": "L2-9",
+     "level": 2,
+     "points": 2,
+     "bonus": "blue",
+     "cost": {
+      "blue": 5
+     }
+    },
+    {
+     "id": "L2-3",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "white": 5
+     }
+    },
+    {
+     "id": "L2-20",
+     "level": 2,
+     "points": 2,
+     "bonus": "red",
+     "cost": {
+      "white": 1,
+      "blue": 4,
+      "green": 2
+     }
+    },
+    {
+     "id": "L2-27",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "red": 5
+     }
+    },
+    {
+     "id": "L2-13",
+     "level": 2,
+     "points": 1,
+     "bonus": "green",
+     "cost": {
+      "white": 2,
+      "blue": 3,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-0",
+     "level": 2,
+     "points": 1,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "blue": 2,
+      "green": 2
+     }
+    },
+    {
+     "id": "L2-1",
+     "level": 2,
+     "points": 1,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "green": 3,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-22",
+     "level": 2,
+     "points": 2,
+     "bonus": "red",
+     "cost": {
+      "black": 5
+     }
+    },
+    {
+     "id": "L2-4",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "green": 5,
+      "red": 3
+     }
+    },
+    {
+     "id": "L2-11",
+     "level": 2,
+     "points": 3,
+     "bonus": "blue",
+     "cost": {
+      "blue": 6
      }
     },
     {
@@ -2417,13 +2555,14 @@
      }
     },
     {
-     "id": "L2-4",
+     "id": "L2-18",
      "level": 2,
-     "points": 2,
-     "bonus": "black",
+     "points": 1,
+     "bonus": "red",
      "cost": {
-      "green": 5,
-      "red": 3
+      "blue": 3,
+      "red": 2,
+      "black": 3
      }
     },
     {
@@ -2433,15 +2572,6 @@
      "bonus": "green",
      "cost": {
       "green": 6
-     }
-    },
-    {
-     "id": "L2-11",
-     "level": 2,
-     "points": 3,
-     "bonus": "blue",
-     "cost": {
-      "blue": 6
      }
     },
     {
@@ -2455,12 +2585,14 @@
      }
     },
     {
-     "id": "L2-29",
+     "id": "L2-19",
      "level": 2,
-     "points": 3,
-     "bonus": "white",
+     "points": 1,
+     "bonus": "red",
      "cost": {
-      "white": 6
+      "white": 2,
+      "red": 2,
+      "black": 3
      }
     },
     {
@@ -2484,127 +2616,13 @@
      }
     },
     {
-     "id": "L2-13",
+     "id": "L2-16",
      "level": 2,
-     "points": 1,
+     "points": 2,
      "bonus": "green",
      "cost": {
-      "white": 2,
-      "blue": 3,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-1",
-     "level": 2,
-     "points": 1,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "green": 3,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-28",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "red": 5,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-24",
-     "level": 2,
-     "points": 1,
-     "bonus": "white",
-     "cost": {
-      "green": 3,
-      "red": 2,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-20",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "white": 1,
-      "blue": 4,
-      "green": 2
-     }
-    },
-    {
-     "id": "L2-26",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "green": 1,
-      "red": 4,
-      "black": 2
-     }
-    },
-    {
-     "id": "L2-3",
-     "level": 2,
-     "points": 2,
-     "bonus": "black",
-     "cost": {
-      "white": 5
-     }
-    },
-    {
-     "id": "L2-7",
-     "level": 2,
-     "points": 1,
-     "bonus": "blue",
-     "cost": {
-      "blue": 2,
-      "green": 3,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-0",
-     "level": 2,
-     "points": 1,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "blue": 2,
-      "green": 2
-     }
-    },
-    {
-     "id": "L2-21",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "white": 3,
-      "black": 5
-     }
-    },
-    {
-     "id": "L2-5",
-     "level": 2,
-     "points": 3,
-     "bonus": "black",
-     "cost": {
-      "black": 6
-     }
-    },
-    {
-     "id": "L2-27",
-     "level": 2,
-     "points": 2,
-     "bonus": "white",
-     "cost": {
-      "red": 5
+      "blue": 5,
+      "green": 3
      }
     },
     {
@@ -2619,6 +2637,38 @@
      }
     },
     {
+     "id": "L2-2",
+     "level": 2,
+     "points": 2,
+     "bonus": "black",
+     "cost": {
+      "blue": 1,
+      "green": 4,
+      "red": 2
+     }
+    },
+    {
+     "id": "L2-28",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "red": 5,
+      "black": 3
+     }
+    },
+    {
+     "id": "L2-7",
+     "level": 2,
+     "points": 1,
+     "bonus": "blue",
+     "cost": {
+      "blue": 2,
+      "green": 3,
+      "black": 3
+     }
+    },
+    {
      "id": "L2-6",
      "level": 2,
      "points": 1,
@@ -2628,164 +2678,18 @@
       "green": 2,
       "red": 3
      }
-    },
-    {
-     "id": "L2-22",
-     "level": 2,
-     "points": 2,
-     "bonus": "red",
-     "cost": {
-      "black": 5
-     }
     }
    ],
    "L3": [
     {
-     "id": "L3-6",
-     "level": 3,
-     "points": 4,
-     "bonus": "blue",
-     "cost": {
-      "white": 6,
-      "blue": 3,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-9",
-     "level": 3,
-     "points": 4,
-     "bonus": "green",
-     "cost": {
-      "white": 3,
-      "blue": 6,
-      "green": 3
-     }
-    },
-    {
-     "id": "L3-1",
-     "level": 3,
-     "points": 4,
-     "bonus": "black",
-     "cost": {
-      "red": 7
-     }
-    },
-    {
-     "id": "L3-17",
+     "id": "L3-18",
      "level": 3,
      "points": 4,
      "bonus": "white",
      "cost": {
-      "black": 7
-     }
-    },
-    {
-     "id": "L3-5",
-     "level": 3,
-     "points": 4,
-     "bonus": "blue",
-     "cost": {
-      "white": 7
-     }
-    },
-    {
-     "id": "L3-7",
-     "level": 3,
-     "points": 5,
-     "bonus": "blue",
-     "cost": {
-      "white": 7,
-      "blue": 3
-     }
-    },
-    {
-     "id": "L3-4",
-     "level": 3,
-     "points": 3,
-     "bonus": "blue",
-     "cost": {
       "white": 3,
-      "green": 3,
       "red": 3,
-      "black": 5
-     }
-    },
-    {
-     "id": "L3-10",
-     "level": 3,
-     "points": 4,
-     "bonus": "green",
-     "cost": {
-      "blue": 7
-     }
-    },
-    {
-     "id": "L3-2",
-     "level": 3,
-     "points": 4,
-     "bonus": "black",
-     "cost": {
-      "green": 3,
-      "red": 6,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-11",
-     "level": 3,
-     "points": 5,
-     "bonus": "green",
-     "cost": {
-      "blue": 7,
-      "green": 3
-     }
-    },
-    {
-     "id": "L3-0",
-     "level": 3,
-     "points": 3,
-     "bonus": "black",
-     "cost": {
-      "white": 3,
-      "blue": 3,
-      "green": 5,
-      "red": 3
-     }
-    },
-    {
-     "id": "L3-16",
-     "level": 3,
-     "points": 3,
-     "bonus": "white",
-     "cost": {
-      "blue": 3,
-      "green": 3,
-      "red": 5,
-      "black": 3
-     }
-    },
-    {
-     "id": "L3-14",
-     "level": 3,
-     "points": 4,
-     "bonus": "red",
-     "cost": {
-      "blue": 3,
-      "green": 6,
-      "red": 3
-     }
-    },
-    {
-     "id": "L3-8",
-     "level": 3,
-     "points": 3,
-     "bonus": "green",
-     "cost": {
-      "white": 5,
-      "blue": 3,
-      "red": 3,
-      "black": 3
+      "black": 6
      }
     },
     {
@@ -2806,101 +2710,72 @@
      "cost": {
       "green": 7
      }
-    }
-   ]
-  },
-  "board": {
-   "L1": [
-    {
-     "id": "L1-9",
-     "level": 1,
-     "points": 0,
-     "bonus": "blue",
-     "cost": {
-      "white": 1,
-      "green": 1,
-      "red": 2,
-      "black": 1
-     }
     },
     {
-     "id": "L1-27",
-     "level": 1,
-     "points": 0,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "green": 1,
-      "black": 2
-     }
-    },
-    {
-     "id": "L1-31",
-     "level": 1,
-     "points": 1,
-     "bonus": "red",
-     "cost": {
-      "white": 4
-     }
-    },
-    {
-     "id": "L1-3",
-     "level": 1,
-     "points": 0,
-     "bonus": "black",
-     "cost": {
-      "green": 1,
-      "red": 3,
-      "black": 1
-     }
-    }
-   ],
-   "L2": [
-    {
-     "id": "L2-19",
-     "level": 2,
-     "points": 1,
-     "bonus": "red",
-     "cost": {
-      "white": 2,
-      "red": 2,
-      "black": 3
-     }
-    },
-    {
-     "id": "L2-2",
-     "level": 2,
-     "points": 2,
-     "bonus": "black",
-     "cost": {
-      "blue": 1,
-      "green": 4,
-      "red": 2
-     }
-    },
-    {
-     "id": "L2-16",
-     "level": 2,
-     "points": 2,
+     "id": "L3-11",
+     "level": 3,
+     "points": 5,
      "bonus": "green",
      "cost": {
-      "blue": 5,
+      "blue": 7,
       "green": 3
      }
     },
     {
-     "id": "L2-18",
-     "level": 2,
-     "points": 1,
+     "id": "L3-14",
+     "level": 3,
+     "points": 4,
      "bonus": "red",
      "cost": {
       "blue": 3,
-      "red": 2,
+      "green": 6,
+      "red": 3
+     }
+    },
+    {
+     "id": "L3-2",
+     "level": 3,
+     "points": 4,
+     "bonus": "black",
+     "cost": {
+      "green": 3,
+      "red": 6,
       "black": 3
      }
-    }
-   ],
-   "L3": [
+    },
+    {
+     "id": "L3-4",
+     "level": 3,
+     "points": 3,
+     "bonus": "blue",
+     "cost": {
+      "white": 3,
+      "green": 3,
+      "red": 3,
+      "black": 5
+     }
+    },
+    {
+     "id": "L3-8",
+     "level": 3,
+     "points": 3,
+     "bonus": "green",
+     "cost": {
+      "white": 5,
+      "blue": 3,
+      "red": 3,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-10",
+     "level": 3,
+     "points": 4,
+     "bonus": "green",
+     "cost": {
+      "blue": 7
+     }
+    },
     {
      "id": "L3-15",
      "level": 3,
@@ -2909,17 +2784,6 @@
      "cost": {
       "green": 7,
       "red": 3
-     }
-    },
-    {
-     "id": "L3-18",
-     "level": 3,
-     "points": 4,
-     "bonus": "white",
-     "cost": {
-      "white": 3,
-      "red": 3,
-      "black": 6
      }
     },
     {
@@ -2932,6 +2796,181 @@
       "blue": 5,
       "green": 3,
       "black": 3
+     }
+    },
+    {
+     "id": "L3-0",
+     "level": 3,
+     "points": 3,
+     "bonus": "black",
+     "cost": {
+      "white": 3,
+      "blue": 3,
+      "green": 5,
+      "red": 3
+     }
+    },
+    {
+     "id": "L3-5",
+     "level": 3,
+     "points": 4,
+     "bonus": "blue",
+     "cost": {
+      "white": 7
+     }
+    },
+    {
+     "id": "L3-16",
+     "level": 3,
+     "points": 3,
+     "bonus": "white",
+     "cost": {
+      "blue": 3,
+      "green": 3,
+      "red": 5,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-9",
+     "level": 3,
+     "points": 4,
+     "bonus": "green",
+     "cost": {
+      "white": 3,
+      "blue": 6,
+      "green": 3
+     }
+    },
+    {
+     "id": "L3-7",
+     "level": 3,
+     "points": 5,
+     "bonus": "blue",
+     "cost": {
+      "white": 7,
+      "blue": 3
+     }
+    }
+   ]
+  },
+  "board": {
+   "L1": [
+    {
+     "id": "L1-0",
+     "level": 1,
+     "points": 0,
+     "bonus": "black",
+     "cost": {
+      "white": 1,
+      "blue": 1,
+      "green": 1,
+      "red": 1
+     }
+    },
+    {
+     "id": "L1-17",
+     "level": 1,
+     "points": 0,
+     "bonus": "green",
+     "cost": {
+      "blue": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-13",
+     "level": 1,
+     "points": 0,
+     "bonus": "blue",
+     "cost": {
+      "white": 1,
+      "green": 2,
+      "red": 2
+     }
+    },
+    {
+     "id": "L1-38",
+     "level": 1,
+     "points": 0,
+     "bonus": "white",
+     "cost": {
+      "white": 3,
+      "blue": 1,
+      "black": 1
+     }
+    }
+   ],
+   "L2": [
+    {
+     "id": "L2-24",
+     "level": 2,
+     "points": 1,
+     "bonus": "white",
+     "cost": {
+      "green": 3,
+      "red": 2,
+      "black": 2
+     }
+    },
+    {
+     "id": "L2-29",
+     "level": 2,
+     "points": 3,
+     "bonus": "white",
+     "cost": {
+      "white": 6
+     }
+    },
+    {
+     "id": "L2-23",
+     "level": 2,
+     "points": 3,
+     "bonus": "red",
+     "cost": {
+      "red": 6
+     }
+    },
+    {
+     "id": "L2-26",
+     "level": 2,
+     "points": 2,
+     "bonus": "white",
+     "cost": {
+      "green": 1,
+      "red": 4,
+      "black": 2
+     }
+    }
+   ],
+   "L3": [
+    {
+     "id": "L3-6",
+     "level": 3,
+     "points": 4,
+     "bonus": "blue",
+     "cost": {
+      "white": 6,
+      "blue": 3,
+      "black": 3
+     }
+    },
+    {
+     "id": "L3-17",
+     "level": 3,
+     "points": 4,
+     "bonus": "white",
+     "cost": {
+      "black": 7
+     }
+    },
+    {
+     "id": "L3-1",
+     "level": 3,
+     "points": 4,
+     "bonus": "black",
+     "cost": {
+      "red": 7
      }
     },
     {
@@ -2948,15 +2987,6 @@
   },
   "nobles": [
    {
-    "id": "n9",
-    "points": 3,
-    "req": {
-     "green": 3,
-     "blue": 3,
-     "red": 3
-    }
-   },
-   {
     "id": "n10",
     "points": 3,
     "req": {
@@ -2966,12 +2996,20 @@
     }
    },
    {
-    "id": "n7",
+    "id": "n6",
     "points": 3,
     "req": {
      "black": 3,
      "red": 3,
-     "white": 3
+     "green": 3
+    }
+   },
+   {
+    "id": "n3",
+    "points": 3,
+    "req": {
+     "blue": 4,
+     "white": 4
     }
    }
   ],
@@ -2979,79 +3017,46 @@
    "p0": {
     "tokens": {
      "white": 2,
-     "blue": 2,
-     "green": 2,
-     "red": 1,
+     "blue": 1,
+     "green": 0,
+     "red": 2,
      "black": 0,
-     "gold": 0
+     "gold": 2
     },
     "purchased": [
      {
-      "id": "L1-12",
+      "id": "L1-33",
       "level": 1,
       "points": 0,
-      "bonus": "blue",
+      "bonus": "white",
       "cost": {
-       "black": 3
+       "red": 2,
+       "black": 1
       }
      },
      {
-      "id": "L2-9",
-      "level": 2,
-      "points": 2,
-      "bonus": "blue",
-      "cost": {
-       "blue": 5
-      }
-     },
-     {
-      "id": "L1-19",
+      "id": "L1-28",
       "level": 1,
       "points": 0,
-      "bonus": "green",
+      "bonus": "red",
       "cost": {
-       "white": 1,
+       "white": 2,
        "blue": 1,
-       "red": 1,
+       "green": 1,
        "black": 1
       }
      }
     ],
     "reserved": [
      {
-      "id": "L1-15",
-      "level": 1,
-      "points": 1,
-      "bonus": "blue",
-      "cost": {
-       "red": 4
-      }
-     },
-     {
-      "id": "L1-20",
+      "id": "L1-22",
       "level": 1,
       "points": 0,
       "bonus": "green",
       "cost": {
-       "white": 1,
-       "blue": 1,
-       "red": 1,
-       "black": 2
+       "red": 3
       }
-     }
-    ],
-    "nobles": []
-   },
-   "p1": {
-    "tokens": {
-     "white": 1,
-     "blue": 1,
-     "green": 0,
-     "red": 2,
-     "black": 3,
-     "gold": 1
-    },
-    "purchased": [
+     },
      {
       "id": "L1-7",
       "level": 1,
@@ -3060,21 +3065,20 @@
       "cost": {
        "blue": 4
       }
-     },
-     {
-      "id": "L1-29",
-      "level": 1,
-      "points": 0,
-      "bonus": "red",
-      "cost": {
-       "white": 1,
-       "blue": 1,
-       "green": 1,
-       "black": 1
-      }
      }
     ],
-    "reserved": [
+    "nobles": []
+   },
+   "p1": {
+    "tokens": {
+     "white": 2,
+     "blue": 3,
+     "green": 0,
+     "red": 2,
+     "black": 2,
+     "gold": 0
+    },
+    "purchased": [
      {
       "id": "L2-10",
       "level": 2,
@@ -3085,19 +3089,9 @@
        "red": 1,
        "black": 4
       }
-     },
-     {
-      "id": "L1-18",
-      "level": 1,
-      "points": 0,
-      "bonus": "green",
-      "cost": {
-       "white": 1,
-       "blue": 3,
-       "green": 1
-      }
      }
     ],
+    "reserved": [],
     "nobles": []
    }
   },
@@ -3115,60 +3109,207 @@
  "meta": {
   "title": null,
   "kind": "advantage",
-  "difficulty": "Easy",
+  "difficulty": "Hard",
   "hand_crafted": false,
   "source": "n_selfplay_single",
   "floor": 0.1,
   "gap": 0.25,
-  "best_eval": 0.4175,
-  "second_eval": 0.0,
+  "best_eval": 0.231,
+  "second_eval": -0.0471,
   "alts": [
    [
-    "buy:L1#0",
-    0.424
+    "reserve:L1#0",
+    0.233
    ],
    [
-    "take2:bg",
-    0.0
+    "reserve:L2#2",
+    -0.028
    ],
    [
-    "take1:b",
-    0.0
+    "reserve:L2#1",
+    -0.061
    ],
    [
-    "take1:g",
-    0.0
+    "reserve:L2#3",
+    -0.072
    ]
   ],
   "move_evals": [
    {
     "move": {
-     "type": "buy",
-     "card_id": "L1-19"
+     "type": "reserve",
+     "card_id": "L1-7"
     },
-    "name": "buy:L1#0",
-    "eval": 0.4175
+    "name": "reserve:L1#0",
+    "eval": 0.231
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-23"
+    },
+    "name": "reserve:L2#2",
+    "eval": -0.0471
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-26"
+    },
+    "name": "reserve:L2#3",
+    "eval": -0.0592
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-29"
+    },
+    "name": "reserve:L2#1",
+    "eval": -0.0804
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-17"
+    },
+    "name": "buy:L1#1",
+    "eval": -0.0853
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-22"
+    },
+    "name": "buy_reserved:#0",
+    "eval": -0.1136
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-19"
+    },
+    "name": "reserve:L3#3",
+    "eval": -0.124
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L1-17"
+    },
+    "name": "reserve:L1#1",
+    "eval": -0.1259
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L2-24"
+    },
+    "name": "reserve:L2#0",
+    "eval": -0.1277
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "deck_level": 1
+    },
+    "name": "reserve_deck:L1",
+    "eval": -0.13
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-17"
+    },
+    "name": "reserve:L3#1",
+    "eval": -0.135
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L1-38"
+    },
+    "name": "reserve:L1#3",
+    "eval": -0.1425
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-6"
+    },
+    "name": "reserve:L3#0",
+    "eval": -0.1453
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "deck_level": 2
+    },
+    "name": "reserve_deck:L2",
+    "eval": -0.1515
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L3-1"
+    },
+    "name": "reserve:L3#2",
+    "eval": -0.1536
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "deck_level": 3
+    },
+    "name": "reserve_deck:L3",
+    "eval": -0.168
    },
    {
     "move": {
      "type": "take_gems",
      "colors": [
-      "blue",
+      "green",
+      "black"
+     ]
+    },
+    "name": "take2:gk",
+    "eval": -0.1931
+   },
+   {
+    "move": {
+     "type": "reserve",
+     "card_id": "L1-13"
+    },
+    "name": "reserve:L1#2",
+    "eval": -0.205
+   },
+   {
+    "move": {
+     "type": "take_gems",
+     "colors": [
+      "green",
       "green"
      ]
     },
-    "name": "take2:bg",
-    "eval": 0.0
+    "name": "take2same:g",
+    "eval": -0.2136
+   },
+   {
+    "move": {
+     "type": "buy",
+     "card_id": "L1-38"
+    },
+    "name": "buy:L1#3",
+    "eval": -0.222
    },
    {
     "move": {
      "type": "take_gems",
      "colors": [
-      "blue"
+      "black"
      ]
     },
-    "name": "take1:b",
-    "eval": 0.0
+    "name": "take1:k",
+    "eval": -0.2451
    },
    {
     "move": {
@@ -3178,132 +3319,12 @@
      ]
     },
     "name": "take1:g",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L1-19"
-    },
-    "name": "reserve:L1#0",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L1-27"
-    },
-    "name": "reserve:L1#1",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L1-31"
-    },
-    "name": "reserve:L1#2",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L1-3"
-    },
-    "name": "reserve:L1#3",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-19"
-    },
-    "name": "reserve:L2#0",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-2"
-    },
-    "name": "reserve:L2#1",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-16"
-    },
-    "name": "reserve:L2#2",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L2-18"
-    },
-    "name": "reserve:L2#3",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-15"
-    },
-    "name": "reserve:L3#0",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-18"
-    },
-    "name": "reserve:L3#1",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-12"
-    },
-    "name": "reserve:L3#2",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "card_id": "L3-19"
-    },
-    "name": "reserve:L3#3",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "deck_level": 1
-    },
-    "name": "reserve_deck:L1",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "deck_level": 2
-    },
-    "name": "reserve_deck:L2",
-    "eval": 0.0
-   },
-   {
-    "move": {
-     "type": "reserve",
-     "deck_level": 3
-    },
-    "name": "reserve_deck:L3",
-    "eval": 0.0
+    "eval": -0.259
    }
   ],
   "eval_seeds": 8,
   "gap_hi": 0.5
  },
  "kind": "advantage",
- "id": "advantage_004"
+ "id": "advantage_025"
 }
