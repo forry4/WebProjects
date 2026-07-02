@@ -1197,14 +1197,22 @@ export default function SpenderApp() {
 	screenRef.current = screen;
 	const reviewingRef = useRef(reviewing);
 	reviewingRef.current = reviewing;
+	// A puzzle drives the "game" screen with roomId set to the puzzle id but NO socket
+	// (it's a local scripted line). Without this ref the visibility reconnect below would
+	// fire during a puzzle and open a bogus WS to a room named after the puzzle, whose
+	// server reply replaces roomData and wipes the puzzle board.
+	const puzzlingRef = useRef(puzzling);
+	puzzlingRef.current = puzzling;
 	useEffect(() => {
 		const handleVisibility = () => {
 			// Only auto-reconnect when actively on the game screen — otherwise tabbing
 			// back would dump a lobby/waiting user into a stale waiting room. Never while
-			// reviewing a finished game (no live socket — a reconnect would be spurious).
+			// reviewing a finished game or playing a puzzle (neither has a live socket —
+			// a reconnect would be spurious and, in a puzzle, clobbers the board).
 			if (document.visibilityState === "visible"
 				&& screenRef.current === "game"
 				&& !reviewingRef.current
+				&& !puzzlingRef.current
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
