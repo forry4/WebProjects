@@ -2878,3 +2878,99 @@ being whack-a-mole):
 - Known longer-term option (not done): the CSS-in-JS `<style>{baseCss+css}</style>` injects
   styles at render; a static `<link>` stylesheet would make them render-blocking/earlier, but
   it conflicts with the self-contained single-`.jsx` game pattern, so it was deferred.
+
+---
+
+## Spender Puzzle mode (`games/spender/puzzle/`) — LIVE on prod (July 2026)
+
+A **"Spender Puzzles"** feature: the player is dropped straight into a single position and must find
+**the one move** N most favours. Reached from the home-menu **🧩 Spender Puzzles** button. Backend is
+static (no AI at serve time); all the hard work is offline.
+
+```
+games/spender/puzzle/
+  serve.py    # two read-only routes wired in the composition-root app.py (setup_puzzles):
+              #   GET /puzzles (listing: id/title/kind/win_points/K/n_hero_moves/difficulty)
+              #   GET /puzzles/{id} (the full puzzle: embedded per-step snapshots + moves)
+  schema.py   # build_puzzle(start, sol, opponent, meta) -> a fully-scripted walkthrough with a
+              #   game-dict SNAPSHOT embedded per step, so serving needs ZERO engine/AI compute
+  author.py   # hand-crafted-puzzle authoring (build_state / verify / emit) — the chain/reserve set
+  solver.py   # forced-win + uniqueness search (s_opponent/h3_opponent oracles; every_deviation_loses)
+  generate.py # harvest H3/S self-play -> screen for unique forced wins (the puzzle_00N set)
+  puzzles/    # the committed static bank (advantage_*.json = the shipped single-move puzzles)
+```
+
+### Two puzzle KINDS (top-level `kind` field; serve.py `_meta` exposes it)
+- **`kind:"win"`** — scripted forced-win puzzles (the original `chain_*`/`reserve_*`/`strict_*`/
+  `puzzle_00N`). Multi-move; solver-verified UNIQUE (any deviation provably loses). These EXIST
+  because the "reach `win_points`" terminal pins the line down. **NOT surfaced in the live mode**
+  (the frontend filters to `kind:"advantage"`); kept in the repo but orphaned.
+- **`kind:"advantage"`** — the shipped SINGLE-MOVE "only-move" puzzles. One hero step; "solved" =
+  play that move. `meta.move_evals` = every legal move's N eval (dict-move + name + eval) so the UI
+  can show the eval of ANY move; `best_eval`/`second_eval`/`eval_seeds` too.
+
+### Single-move "advantage" pipeline (offline; the current content)
+- **`spender-core/src/bin/n_eval_server.rs`** (build `--features bridge`): the N (net_attn_3
+  attention net) EVAL bridge. One JSON req/line `{state,seat,sims,seed}` -> `{best,value,visits,
+  wins}`. Same determinized PUCT as `n_move_server` but returns the rich root readout (per-move Q).
+  Serving/tooling only; NOT shipped to prod.
+- **`scratchpad` tooling (not committed): `advantage.py`** (NEval bridge wrapper w/ seed-offset for
+  independent samples + hang/crash-resilience; `hero_move_evals_avg`; `critical_single_avg`),
+  **`gen_single.py`** (the generator), + audit/finalize scripts.
+- **A puzzle = a position where ONE move's N eval beats every other legal move by >= 0.25** (the
+  `--gap`), hero doing well (`--floor` 0.10). The eval of a move = APPLY it + re-search the child
+  (negamax), **averaged over K=8 independent determinization seeds** (`--K`). `gen_single` does a
+  cheap root-Q prefilter (recall) then the averaged verify (the gate). `--answer-types
+  buy,reserve,take` filters the KEPT answer type (with a cheap N-top-visit-move pre-skip so the
+  expensive verify only runs on wanted candidates).
+- Positions come from N-vs-N self-play, so they already look like real games (nobles, mixed board,
+  loose tokens) — **no decoration needed**.
+
+### HARD-WON FINDINGS — DO NOT RELITIGATE
+- **Multi-move "hold the advantage" chains DON'T EXIST in Splendor.** 0 chains of length >=2 across
+  20 seat-games at every threshold. Positions branch too much; after the one sharp move + N's best
+  reply, the next position almost always has several near-equal moves. Unlike chess, there is no
+  *unique* eval-based continuation to force. (The forced-WIN puzzles chain only because the 15-pt
+  terminal pins the line.) So single-move puzzles are the only viable eval-based kind.
+- **You CANNOT select puzzles from the sample game's per-move numbers.** Trusting the self-play
+  search's root-Q was **11% precise**. PUCT is greedy — it pours ~all its sims into the best move and
+  barely grades the alternatives (1-5 visits each -> their Q is noise). "Few visits = bad" is FALSE
+  (a 2-visit move measured 0.99 true value). So to prove "every OTHER move is >=0.25 worse" you MUST
+  re-search each alternative — the roads the game-playing search deliberately prunes. This is why
+  generation is inherently slow (per candidate: ~#moves x K searches).
+- **A single search's VALUE is noise-dominated for open positions.** Same position, same 1000 sims,
+  different RNG seed -> root value spread **0.42** (e.g. a take-gems move ranged -0.08..+0.34). The
+  1000 sims are CORRELATED (shared tree + PUCT concentration), so the average isn't converged. The
+  gap can be pure luck (one puzzle's "0.41 gap" was really ~0). **Take-gems answers are the noisy
+  ones (leave the outcome to future draws); buy/reserve are stable (spread <=0.066).**
+- **The fix = average K independent searches (fresh seed each).** The MEAN is the true expected value
+  over reveals, so even take-gems answers get a well-defined eval. Baked into `gen_single`
+  (`critical_single` averages) + the displayed `move_evals` are means. An audit of the shipped bank
+  confirmed all solid under averaging; store the averaged means, not one sample.
+- **N's REAL PLAY is fine — this was a puzzle-tooling artifact.** Determinization (ISMCTS) IS the
+  correct averaging over hidden info; N runs **~20k sims** in the browser (far better converged than
+  the 1k puzzle-gen sims) and **picks by VISIT COUNT, not the noisy value**, so its move choice is
+  robust. Only the puzzle's displayed eval needed the extra care.
+
+### Frontend (`Spender.jsx`) — one-at-a-time, no menu
+- Home button -> `enterPuzzles()` loads the list and immediately `startPuzzle(random)`. There is NO
+  picker screen (it's a brief loading state). `pickPuzzleId` filters to `kind:"advantage"`, excludes
+  a localStorage `spender_puzzle_seen` set (reshuffles when exhausted), random pick.
+- Always-available **Next ▸** (skip/advance), **Try Again** (restart on a wrong move via the fail
+  overlay), **Return** (dismiss the result overlay to re-examine the board), **Exit** -> home.
+- Shows N's eval: on solve "The only move: X · N eval +0.29"; on a WRONG move ONLY the move you
+  played ("You played X · N eval -0.09 — not the move..."), **never revealing the answer** (the
+  Answer button is the explicit reveal). `fmtEval`/`puzMoveEval(move)` read `meta.move_evals` (mean).
+- Progressive **Hint** (level 1 = move category, level 2 = exact move); un-clipped/gold so it's
+  visible.
+- Backend `kind` + `move_evals` come from serve; the single-move flow reuses the existing
+  submitPuzzleMove/showPuzzleAt path (1 hero step -> solved).
+
+### Deploy — LIVE on prod (July 2026)
+- Backend bank + serve are on `main` (Render watches `games/spender/puzzle/**/*.py` +
+  `puzzles/*.json`; `setup_puzzles` wired in `app.py`). Frontend on `main` too (Pages CI smoke-gates
+  + publishes). Staging mirrors it. **Ship pattern:** puzzle JSONs/`serve.py` -> main; `Spender.jsx`
+  -> main (Pages) and force-resync `staging`. Grow the bank by re-running the (now averaged)
+  `gen_single` and appending renumbered `advantage_NNN.json`.
+- Current bank skews **buy** (18 buy / 5 reserve / 1 take of 24); `--answer-types reserve,take` is
+  used to mine the rarer types to balance it.
