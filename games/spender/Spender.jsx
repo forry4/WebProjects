@@ -954,6 +954,10 @@ export default function SpenderApp() {
 	const [screen, setScreen] = useState("loading");
 	const [loadingProgress, setLoadingProgress] = useState(0);
 	const [showLoading, setShowLoading] = useState(false);
+	// Bumped when the tab is foregrounded while still stuck on the loading screen, to
+	// re-kick the loading effect with a fresh fetch (a fetch started during a
+	// background/freeze transition can hang with its abort timer throttled).
+	const [loadingKick, setLoadingKick] = useState(0);
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
@@ -1204,6 +1208,12 @@ export default function SpenderApp() {
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
+			}
+			// If the tab was reloaded/frozen and we're still stuck on the loading
+			// screen, re-fire the load now that we're actually foreground — the
+			// backgrounded fetch may be hung with its abort timer throttled.
+			if (document.visibilityState === "visible" && screenRef.current === "loading") {
+				setLoadingKick(k => k + 1);
 			}
 		};
 		document.addEventListener("visibilitychange", handleVisibility);
@@ -1495,7 +1505,7 @@ export default function SpenderApp() {
 			if (!cancelled) { setShowLoading(true); startPolling(); }
 		})();
 		return () => { cancelled = true; if (interval) clearInterval(interval); };
-	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+	}, [screen, loadingKick]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Gem flash when bank count drops ───────────────────────────────────────
 	const prevBankRef = useRef(null);
