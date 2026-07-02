@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.24
+// @version      0.9.26
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -44,6 +44,7 @@
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
+    MINIMIZED:  false,  // collapse the overlay to just its title bar (toggle from the panel; persisted)
     REGULAR_JOB: 'SPENDEE_REGULAR',
   };
 
@@ -681,11 +682,14 @@
     return out;
   }
 
-  // Ask H3 (the engine eval) which gems to discard — strictly better than chooseDiscards (it weighs the
-  // whole position: reserved AND board cards, engine value, noble progress). The PV search returns H3's
-  // pick at any non-PLAY phase, so we build the post-take DISCARD state (Spender-space, phase=1) and read
-  // the top action: A_DISCARD(61)+colour. Loops per gem. Returns colour NAMES, or null on any failure
-  // (caller falls back to chooseDiscards). `addTokens` = engine colour indices added by the take (or [5]=gold).
+  // Ask N which gems to discard by SEARCHING the discard node (net value-head lookahead over the <=6
+  // options — the SAME brain that chose the take decides its discard, so it keeps the gems it's building
+  // toward instead of H3's static-heuristic pick disagreeing with the take). Requires the wasm built with
+  // DISCARD roots searched (vsearch.rs: `s.phase != PLAY && s.phase != DISCARD` short-circuit); older wasm
+  // one-hots H3 here regardless of sims. We build the post-take DISCARD state (Spender-space, phase=1) and
+  // read the top searched action: A_DISCARD(61)+colour. Loops per gem (re-searches after each drop, so a
+  // multi-gem discard is decided sequentially with fresh lookahead). Returns colour NAMES, or null on any
+  // failure (caller falls back to chooseDiscards). `addTokens` = engine colour indices added by the take (or [5]=gold).
   const A_DISCARD = 61;
   async function decideDiscards(dump, seat, addTokens, n) {
     try {
@@ -695,7 +699,7 @@
       s.phase = 1; s.turn = seat;                   // DISCARD
       const out = [];
       for (let k = 0; k < n; k++) {
-        const raw = wb.search_pv_full_timed(JSON.stringify(s), seat >>> 0, 200, 1, BigInt(0));
+        const raw = wb.search_pv_full_timed(JSON.stringify(s), seat >>> 0, 500, 2000, BigInt(0));
         const d = JSON.parse(raw);
         if (d.error) throw new Error(d.error);
         let a = 0; for (let i = 1; i < d.visits.length; i++) if (d.visits[i] > d.visits[a]) a = i;
@@ -1141,7 +1145,24 @@
     box.style.cssText = 'position:fixed;top:12px;right:12px;z-index:2147483647;width:280px;background:#241a10;color:#f0e6d8;' +
       'border:1px solid #b5852f;border-radius:10px;padding:10px 12px;font:13px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.5)';
     const mk = (t) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'background:#b5852f;color:#1b140d;border:0;border-radius:7px;padding:6px 10px;font-weight:700;cursor:pointer;margin:4px 4px 0 0'; return b; };
-    box.innerHTML = '<b style="color:#e8c170">WWSD · PV (browser)</b>';
+    // Header row: title + a minimize button that collapses everything below to just this bar.
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px';
+    header.innerHTML = '<b style="color:#e8c170">WWSD · PV (browser)</b>';
+    const mini = document.createElement('button');
+    mini.style.cssText = 'background:transparent;color:#e8c170;border:1px solid #b5852f;border-radius:6px;width:24px;height:22px;line-height:1;font-weight:700;cursor:pointer;padding:0;flex:0 0 auto';
+    const body = document.createElement('div');   // everything the minimize hides
+    const setMini = () => {
+      const c = CONFIG.MINIMIZED;
+      body.style.display = c ? 'none' : '';
+      mini.textContent = c ? '+' : '–';       // en-dash so it reads as a minus, ASCII-safe elsewhere
+      mini.title = c ? 'Expand' : 'Minimize';
+      box.style.width = c ? 'auto' : '280px';
+      box.style.padding = c ? '6px 10px' : '10px 12px';
+    };
+    mini.onclick = () => { CONFIG.MINIMIZED = !CONFIG.MINIMIZED; setMini(); saveCfg(); };
+    header.appendChild(mini);
+    box.appendChild(header);
     const toggle = mk(CONFIG.ENABLED ? 'Disable' : 'Enable');
     const setTog = () => { toggle.textContent = CONFIG.ENABLED ? 'Disable' : 'Enable'; toggle.style.background = CONFIG.ENABLED ? '#4a8f4a' : '#b5852f'; };
     toggle.onclick = () => { CONFIG.ENABLED = !CONFIG.ENABLED; lastKey = null; setTog(); setStatus(CONFIG.ENABLED ? 'enabled' : 'disabled'); };
@@ -1164,7 +1185,9 @@
     statusEl = document.createElement('div'); statusEl.style.cssText = 'margin-top:8px;color:#cdbfa8;font-size:12px;min-height:16px';
     statusEl.textContent = 'loading PV…';
     resultEl = document.createElement('div'); resultEl.style.cssText = 'margin-top:6px';
-    for (const el of [toggle, once, auto, loop, methods, record, domrec, logbtn, logclr, statusEl, resultEl]) box.appendChild(el);
+    for (const el of [toggle, once, auto, loop, methods, record, domrec, logbtn, logclr, statusEl, resultEl]) body.appendChild(el);
+    box.appendChild(body);
+    setMini();
     document.body.appendChild(box);
     logCount().then(updateLogBtn);
   }
@@ -1172,8 +1195,8 @@
   // Persist the loop toggles across page reloads — navigating between lobby/board reloads the page and
   // re-inits the script, which would otherwise reset AUTO_PLAY/AUTO_LOBBY to off and stop the loop.
   const _LS_CFG = 'wwsd_cfg';
-  function saveCfg() { try { localStorage.setItem(_LS_CFG, JSON.stringify({ AUTO_PLAY: CONFIG.AUTO_PLAY, AUTO_LOBBY: CONFIG.AUTO_LOBBY })); } catch (e) {} }
-  function loadCfg() { try { const o = JSON.parse(localStorage.getItem(_LS_CFG) || '{}'); if (typeof o.AUTO_PLAY === 'boolean') CONFIG.AUTO_PLAY = o.AUTO_PLAY; if (typeof o.AUTO_LOBBY === 'boolean') CONFIG.AUTO_LOBBY = o.AUTO_LOBBY; } catch (e) {} }
+  function saveCfg() { try { localStorage.setItem(_LS_CFG, JSON.stringify({ AUTO_PLAY: CONFIG.AUTO_PLAY, AUTO_LOBBY: CONFIG.AUTO_LOBBY, MINIMIZED: CONFIG.MINIMIZED })); } catch (e) {} }
+  function loadCfg() { try { const o = JSON.parse(localStorage.getItem(_LS_CFG) || '{}'); if (typeof o.AUTO_PLAY === 'boolean') CONFIG.AUTO_PLAY = o.AUTO_PLAY; if (typeof o.AUTO_LOBBY === 'boolean') CONFIG.AUTO_LOBBY = o.AUTO_LOBBY; if (typeof o.MINIMIZED === 'boolean') CONFIG.MINIMIZED = o.MINIMIZED; } catch (e) {} }
 
   function boot() {
     if (!meteorReady()) { setTimeout(boot, 1000); return; }

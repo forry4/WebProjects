@@ -2,7 +2,7 @@
 //! with an H3-derived policy prior (softmax over take_value + the H3-greedy-pick anchor).
 
 use crate::engine::{self, State, A_BUY_BOARD, A_BUY_RESV, A_PASS, A_RES_BOARD, A_RES_DECK, A_TAKE3,
-                    N_ACTIONS, PLAY};
+                    DISCARD, N_ACTIONS, PLAY};
 use crate::heuristic::{self, W_GEM, W_GOLD, W_TEMPO};
 use crate::mcts::Search;
 use crate::rng::Rng;
@@ -249,7 +249,10 @@ pub fn root_visits_until_pv<F: FnMut(usize) -> bool>(
         out[A_PASS] = 1;
         return out;
     }
-    if s.phase != PLAY || legal.len() == 1 {
+    // DISCARD roots ARE searched (net value-head lookahead over the <=6 discard options, so the discard
+    // is decided by the SAME brain that chose the take, not H3's static heuristic); NOBLE/OVER/single-legal
+    // still one-hot the H3 pick.
+    if legal.len() == 1 || (s.phase != PLAY && s.phase != DISCARD) {
         out[heuristic::choose_action(s, seat)] = 1;
         return out;
     }
@@ -340,7 +343,8 @@ pub fn root_nw_until_pv<F: FnMut(usize) -> bool>(
         n[A_PASS] = 1;
         return (n, vec![0.0; N_ACTIONS]);
     }
-    if s.phase != PLAY || legal.len() == 1 {
+    // DISCARD roots ARE searched (see `root_visits_until_pv`); NOBLE/OVER/single-legal one-hot H3.
+    if legal.len() == 1 || (s.phase != PLAY && s.phase != DISCARD) {
         let mut n = vec![0i32; N_ACTIONS];
         n[heuristic::choose_action(s, seat)] = 1;
         return (n, vec![0.0; N_ACTIONS]);
@@ -400,4 +404,30 @@ pub fn choose_action_until<F: FnMut(usize) -> bool>(
         }
     }
     best
+}
+
+#[cfg(test)]
+mod discard_search_tests {
+    use super::*;
+    use crate::engine::{self, A_DISCARD, DISCARD};
+    use crate::rng::Rng;
+
+    // A DISCARD-phase root must be SEARCHED (net value-head lookahead over the discard options),
+    // not one-hot the H3 pick. Regression guard for the "take gems -> discard the wanted ones" loop.
+    #[test]
+    fn discard_root_is_searched() {
+        let mut s = engine::new_game(12345, 15);
+        s.turn = 0;
+        s.tokens[0] = [3, 3, 3, 2, 0, 0]; // 11 tokens -> must discard 1
+        s.phase = DISCARD;
+        let legal = engine::legal_actions(&s);
+        assert!(legal.len() > 1, "need multiple discard options; got {:?}", legal);
+        let pv = |_st: &State, _sd: usize| -> (f64, Vec<f64>) { (0.0, vec![0.0; N_ACTIONS]) };
+        let mut rng = Rng::new(1);
+        let (visits, _w) = root_nw_until_pv(&s, 0, &mut rng, |n| n < 300, &pv);
+        let tot: i32 = visits.iter().sum();
+        assert!(tot > 1, "DISCARD root was one-hot (tot={}), expected a real search", tot);
+        let a = (0..visits.len()).max_by_key(|&x| visits[x]).unwrap();
+        assert!((A_DISCARD..A_DISCARD + 6).contains(&a), "argmax {} is not a discard action", a);
+    }
 }
