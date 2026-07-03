@@ -779,7 +779,7 @@ const css = baseCss + `
   .puzzle-fail-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:#e0696b;margin-bottom:8px}
   .puzzle-fail-sub{opacity:.85;margin-bottom:20px;line-height:1.45}
   .puzzle-nav-aids{display:flex;gap:6px;align-items:center}
-  .action-hint.puzzle-hint{color:var(--gold);font-weight:600;white-space:normal;overflow:visible;text-overflow:clip}
+  .puzzle-hint-word{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;color:var(--gold);font-weight:700;margin:10px 0 16px}
   .puzzle-answer-list{margin:6px 0 10px;padding-left:22px;line-height:1.7}
   .puzzle-answer-note{font-size:.8rem;opacity:.7;margin:0 0 14px}
   .puzzle-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
@@ -975,7 +975,7 @@ export default function SpenderApp() {
 	const [puzWrong, setPuzWrong] = useState(false);     // last move was wrong (just restarted)
 	const [puzSolved, setPuzSolved] = useState(false);   // reached the winning final position
 	const [puzList, setPuzList] = useState(null);        // the /puzzles listing for the picker (null = not loaded)
-	const [puzHintLevel, setPuzHintLevel] = useState(0); // 0 none, 1 category, 2 exact (per current step)
+	const [puzHintOpen, setPuzHintOpen] = useState(false); // hint popup: the answer's CATEGORY only (buy/reserve/take)
 	const [puzAnswerOpen, setPuzAnswerOpen] = useState(false); // the "show the full solution" modal
 	const [puzFailed, setPuzFailed] = useState(false);   // a wrong move was made -> explicit FAIL overlay
 	const [puzHideOverlay, setPuzHideOverlay] = useState(false); // Return -> view the board, hide the result overlay
@@ -1892,17 +1892,6 @@ export default function SpenderApp() {
 		return m.type;
 	};
 
-	// A vaguer one-line hint (the move CATEGORY, not the exact card).
-	const moveCategory = (m) => {
-		if (!m) return "";
-		if (m.type === "take_gems") return m.colors?.length ? "take gems" : "pass";
-		if (m.type === "buy") return "buy a card";
-		if (m.type === "reserve") return "reserve a card";
-		if (m.type === "discard") return "discard a gem";
-		if (m.type === "pick_noble") return "claim a noble";
-		return m.type;
-	};
-
 	const PUZ_OPP_DELAY = 850;   // beat before/between the opponent's scripted replies
 
 	// Newest-first move log for the moves played THROUGH step `idx` (so the game log
@@ -1977,7 +1966,7 @@ export default function SpenderApp() {
 			setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
 			setPuzzle(puz); setPuzHeroPid(heroPid); markSeen(id);
 			setPuzStep(0); setPuzAttempts(1); setPuzFeedback(""); setPuzWrong(false); setPuzSolved(false);
-			setPuzHintLevel(0); setPuzAnswerOpen(false); setPuzFailed(false); setPuzHideOverlay(false); setPuzFailMove(null);
+			setPuzHintOpen(false); setPuzAnswerOpen(false); setPuzFailed(false); setPuzHideOverlay(false); setPuzFailMove(null);
 			// reset the animation baselines so the opening board doesn't spuriously animate
 			prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
 			setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
@@ -2000,7 +1989,7 @@ export default function SpenderApp() {
 		if (!puz || puzFailed || puzSolved) return;
 		const cur = puz.steps[puzStep];
 		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
-		setPuzHintLevel(0);   // each step gets a fresh hint
+		setPuzHintOpen(false);   // each step gets a fresh hint
 		if (!cur || !cur.is_hero) return;
 		if (!movesEqual(move, cur.move)) {
 			// WRONG — an explicit FAIL. The board stays put; the fail overlay makes it
@@ -2039,7 +2028,7 @@ export default function SpenderApp() {
 		if (!puzzle) return;
 		if (puzFailed) setPuzAttempts(a => a + 1);   // retry after a fail counts as a new attempt
 		setPuzStep(0); setPuzWrong(false); setPuzSolved(false); setPuzFailed(false); setPuzFeedback(""); setPuzHideOverlay(false); setPuzFailMove(null);
-		setPuzHintLevel(0);
+		setPuzHintOpen(false);
 		prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
 		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
 		showPuzzleAt(puzzle, puzHeroPid, 0);
@@ -2048,7 +2037,7 @@ export default function SpenderApp() {
 	const exitPuzzle = () => {
 		setPuzzling(false); setPuzzle(null); setPuzSolved(false); setPuzWrong(false); setPuzFailed(false);
 		setPuzFeedback(""); setRoomData(null); setRoomId("");
-		setPuzHintLevel(0); setPuzAnswerOpen(false);
+		setPuzHintOpen(false); setPuzAnswerOpen(false);
 		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
 		setScreen("home");
 	};
@@ -2153,13 +2142,11 @@ export default function SpenderApp() {
 		const total = steps.filter(s => s.is_hero).length;
 		const done = steps.slice(0, puzStep).filter(s => s.is_hero).length;
 		const cur = steps[puzStep];
-		const hintText = (!puzSolved && cur && puzHintLevel >= 2) ? `Hint: ${moveLabel(cur.move)}`
-			: (!puzSolved && cur && puzHintLevel === 1) ? `Hint: ${moveCategory(cur.move)}` : "";
 		return (<>
 			<span className="turn-badge mine">{puzSolved ? "Solved!" : "Your Move"}</span>
 			<span className="target-label" style={{ marginRight: 6 }}>Target: {game.win_points || 15}</span>
-			<span className={`action-hint${puzWrong ? " puzzle-wrong" : ""}${hintText ? " puzzle-hint" : ""}`}>
-				{puzSolved ? (puzzle?.kind === "advantage" ? "You found the only move!" : "You found the win!") : (hintText || puzFeedback || `Move ${Math.min(done + 1, total)} of ${total}`)}
+			<span className={`action-hint${puzWrong ? " puzzle-wrong" : ""}`}>
+				{puzSolved ? (puzzle?.kind === "advantage" ? "You found the only move!" : "You found the win!") : (puzFeedback || `Move ${Math.min(done + 1, total)} of ${total}`)}
 			</span>
 			<div className="action-bar-btns">
 				{renderActionButtons() || <button className="btn btn-ghost action-bar-spacer" aria-hidden="true" tabIndex={-1}>{"✕"}</button>}
@@ -2874,7 +2861,7 @@ export default function SpenderApp() {
 					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
 					{puzzling
 						? <div className="puzzle-nav-aids">
-								<button className="btn btn-ghost btn-sm" onClick={() => setPuzHintLevel(l => Math.min(2, l + 1))} disabled={puzSolved || puzHintLevel >= 2}>💡 Hint</button>
+								<button className="btn btn-ghost btn-sm" onClick={() => setPuzHintOpen(true)} disabled={puzSolved}>💡 Hint</button>
 								<button className="btn btn-ghost btn-sm" onClick={() => setPuzAnswerOpen(true)} disabled={puzSolved}>Answer</button>
 								<button className="btn btn-ghost btn-sm" onClick={restartPuzzle} title="Restart puzzle">↻</button>
 									<button className="btn btn-ghost btn-sm" onClick={nextPuzzle} title="Skip to next puzzle">Next ▸</button>
@@ -3095,6 +3082,19 @@ export default function SpenderApp() {
 						</div>
 					</div>
 				</div>
+
+				{puzzling && puzHintOpen && (
+					<div className="modal-backdrop" onClick={() => setPuzHintOpen(false)}>
+						<div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 320, textAlign: "center" }}>
+							<h3 style={{ marginTop: 0 }}>💡 Hint</h3>
+							<p className="puzzle-hint-word">{(() => {
+								const t = puzzle?.steps?.[puzStep]?.move?.type;
+								return t === "take_gems" ? "Take gems" : t === "reserve" ? "Reserve" : "Buy";
+							})()}</p>
+							<button className="btn btn-ghost btn-sm" style={{ width: "100%" }} onClick={() => setPuzHintOpen(false)}>Close</button>
+						</div>
+					</div>
+				)}
 
 				{puzzling && puzAnswerOpen && (
 					<div className="modal-backdrop" onClick={() => setPuzAnswerOpen(false)}>
