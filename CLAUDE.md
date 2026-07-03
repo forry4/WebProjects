@@ -3007,6 +3007,11 @@ games/spender/puzzle/
   -> main (Pages) and force-resync `staging`. Grow the bank via `gen_single`/`harvest_wwsd` +
   `rebuild_bank` (renumbers contiguously; the frontend shows no per-puzzle number, so renumbering is
   UX-safe).
-- Take answers are the scarce type (genuine only-move takes are rare — several takes are usually
-  near-equal); real-game harvests yield more reserve/take than self-play. The 60/15/25 weighted draw
-  delivers the target mix regardless of bank skew.
+- Take answers are the scarce type (genuine only-move takes are rare — adjacent gem combos are
+  near-interchangeable, so a take is rarely THE only move). Measured: **0 takes** survived the strict
+  0.25 bar across 553 real-game candidates (117+161 WWSD files). So take answers use a **softer lower
+  bound, `GAP_LO_TAKE = 0.20`** (in `rebuild_bank`; user-approved) — a 0.20-gap take is still clearly
+  best. Even then only ~1 per ~78 take-candidates. The 60/15/25 weighted draw delivers the target mix
+  regardless of the bank's actual skew; the take pool just repeats sooner (2 takes as of this bank).
+- Current bank: **43** advantage puzzles (21 buy / 20 reserve / 2 take), gaps 0.213–0.462, sourced
+  from N self-play + WWSD real-game harvests (117 + 161 game files).
