@@ -1882,11 +1882,27 @@ export default function SpenderApp() {
 
 	const fmtEval = (v) => (v == null ? "?" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2));
 	const puzMoveEval = (m) => { const list = puzzle?.meta?.move_evals || []; const hit = list.find(e => e.move && movesEqual(m, e.move)); return hit ? hit.eval : null; };
+	// Players don't know card ids — describe a card by its POSITION in its row ("L3 #1" = the
+	// first card of the L3 row), resolved against the puzzle's STARTING position (every label we
+	// show — answer, failed move, Answer modal — describes a move from that position). A card in
+	// the hero's hand is "your reserved card".
+	const puzCardRef = (cardId) => {
+		const pos = puzzle?.position;
+		if (!cardId || !pos) return cardId;
+		for (const lvl of ["L3", "L2", "L1"]) {
+			const i = (pos.board?.[lvl] || []).findIndex(c => c && c.id === cardId);
+			if (i >= 0) return `${lvl} #${i + 1}`;
+		}
+		const res = pos.players?.[puzHeroPid]?.reserved || [];
+		const j = res.findIndex(c => c && c.id === cardId);
+		if (j >= 0) return res.length > 1 ? `your reserved card #${j + 1}` : "your reserved card";
+		return cardId;
+	};
 	const moveLabel = (m) => {
 		if (!m) return "";
 		if (m.type === "take_gems") return m.colors?.length ? "take " + m.colors.map(c => GEM_LABELS[c] || c).join(", ") : "pass";
-		if (m.type === "buy") return "buy " + m.card_id;
-		if (m.type === "reserve") return "reserve " + (m.card_id || ("deck L" + m.deck_level));
+		if (m.type === "buy") return "buy " + puzCardRef(m.card_id);
+		if (m.type === "reserve") return "reserve " + (m.card_id ? puzCardRef(m.card_id) : "from the L" + m.deck_level + " deck");
 		if (m.type === "discard") return "discard " + (GEM_LABELS[m.color] || m.color);
 		if (m.type === "pick_noble") return "claim a noble";
 		return m.type;
