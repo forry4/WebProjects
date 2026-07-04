@@ -778,7 +778,7 @@ const css = baseCss + `
   .puzzle-fail-card{background:var(--surface);border:1px solid #e0696b;border-radius:var(--radius-lg);padding:30px 36px;text-align:center;max-width:360px}
   .puzzle-fail-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:#e0696b;margin-bottom:8px}
   .puzzle-fail-sub{opacity:.85;margin-bottom:20px;line-height:1.45}
-  .puzzle-nav-aids{display:flex;gap:6px;align-items:center}
+  .puzzle-nav-aids{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
   .puzzle-hint-word{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;color:var(--gold);font-weight:700;margin:10px 0 16px}
   .puzzle-answer-list{margin:6px 0 10px;padding-left:22px;line-height:1.7}
   .puzzle-answer-note{font-size:.8rem;opacity:.7;margin:0 0 14px}
@@ -976,6 +976,7 @@ export default function SpenderApp() {
 	const [puzSolved, setPuzSolved] = useState(false);   // reached the winning final position
 	const [puzList, setPuzList] = useState(null);        // the /puzzles listing for the picker (null = not loaded)
 	const [puzHintOpen, setPuzHintOpen] = useState(false); // hint popup: the answer's CATEGORY only (buy/reserve/take)
+	const [puzHistory, setPuzHistory] = useState([]);    // back-stack of visited puzzle ids (so an accidental Next isn't a dead end)
 	const [puzAnswerOpen, setPuzAnswerOpen] = useState(false); // the "show the full solution" modal
 	const [puzFailed, setPuzFailed] = useState(false);   // a wrong move was made -> explicit FAIL overlay
 	const [puzHideOverlay, setPuzHideOverlay] = useState(false); // Return -> view the board, hide the result overlay
@@ -1966,7 +1967,7 @@ export default function SpenderApp() {
 		return pool[Math.floor(Math.random() * pool.length)].id;
 	};
 	const enterPuzzles = async () => {
-		setScreen("puzzles"); setPuzList(null);          // brief loading screen
+		setScreen("puzzles"); setPuzList(null); setPuzHistory([]);   // fresh session -> empty back-stack
 		const list = await loadPuzzles();
 		const id = pickPuzzleId(list);
 		if (id) startPuzzle(id);
@@ -2059,10 +2060,18 @@ export default function SpenderApp() {
 	};
 
 	const nextPuzzle = () => {
-		if (puzzle?.id) markSeen(puzzle.id);
+		if (puzzle?.id) { markSeen(puzzle.id); setPuzHistory(h => [...h, puzzle.id]); }  // remember where we were
 		const id = pickPuzzleId(puzList || []);
 		if (id) startPuzzle(id);
 		else exitPuzzle();
+	};
+
+	// Go back to the previously-shown puzzle (fixes an accidental Next; you can re-solve or review it).
+	const prevPuzzle = () => {
+		if (!puzHistory.length) return;
+		const id = puzHistory[puzHistory.length - 1];
+		setPuzHistory(h => h.slice(0, -1));
+		startPuzzle(id);
 	};
 
 	const goToMenu = () => {
@@ -2880,6 +2889,7 @@ export default function SpenderApp() {
 								<button className="btn btn-ghost btn-sm" onClick={() => setPuzHintOpen(true)} disabled={puzSolved}>💡 Hint</button>
 								<button className="btn btn-ghost btn-sm" onClick={() => setPuzAnswerOpen(true)} disabled={puzSolved}>Answer</button>
 								<button className="btn btn-ghost btn-sm" onClick={restartPuzzle} title="Restart puzzle">↻</button>
+									<button className="btn btn-ghost btn-sm" onClick={prevPuzzle} disabled={!puzHistory.length} title="Back to the previous puzzle">◀ Prev</button>
 									<button className="btn btn-ghost btn-sm" onClick={nextPuzzle} title="Skip to next puzzle">Next ▸</button>
 							</div>
 						: reviewChrome
@@ -3140,6 +3150,7 @@ export default function SpenderApp() {
 							<div className="puzzle-won-btns">
 								<button className="btn btn-gold" onClick={nextPuzzle}>Next ▸</button>
 								<button className="btn btn-outline" onClick={() => setPuzHideOverlay(true)}>Return</button>
+								{!!puzHistory.length && <button className="btn btn-outline" onClick={prevPuzzle}>◀ Prev</button>}
 								<button className="btn btn-outline" onClick={exitPuzzle}>Exit</button>
 							</div>
 						</div>
@@ -3158,6 +3169,7 @@ export default function SpenderApp() {
 							<div className="puzzle-won-btns">
 								<button className="btn btn-gold" onClick={restartPuzzle}>↻ Try again</button>
 								<button className="btn btn-outline" onClick={() => setPuzHideOverlay(true)}>Return</button>
+								{!!puzHistory.length && <button className="btn btn-outline" onClick={prevPuzzle}>◀ Prev</button>}
 								<button className="btn btn-outline" onClick={exitPuzzle}>Exit</button>
 							</div>
 						</div>
