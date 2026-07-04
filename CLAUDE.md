@@ -3007,22 +3007,24 @@ games/spender/puzzle/
   -> main (Pages) and force-resync `staging`. Grow the bank via `gen_single`/`harvest_wwsd` +
   `rebuild_bank` (renumbers contiguously; the frontend shows no per-puzzle number, so renumbering is
   UX-safe).
-- **Takes use the same 0.25 lower bound but NO UPPER BOUND** (buys/reserves stay `[0.25, 0.50]`).
-  Rationale (data-driven, user-approved): a big-gap BUY is an obvious forced win, but a big-gap TAKE
-  is NOT obvious — the wrong gem-combos look identical to the right one, so it's still a find-the-gems
-  puzzle. Measured over ~1000 ledger take-candidates: **7 of the 11** takes with gap ≥0.25 have another
-  *take* as the runner-up (you must pick the exact gems); the high end is dominated by `take2same`
-  (take 2 of one colour — counterintuitive since players default to take-3-different). The old
-  `GAP_LO_TAKE=0.20` softer-lower-bound experiment is REMOVED — takes just needed the upper bound
-  dropped, not a lower one. Genuine only-move takes stay rare (~11 at ≥0.25 across all sources), which
-  is why the upper-bound relaxation matters.
+- **Takes use `[0.25, 0.60]` — same 0.25 lower bound, a HIGHER upper bound than buys/reserves (0.50).**
+  Rationale (data-driven, user-approved): a big-gap BUY is an obvious forced win, but a big-gap TAKE is
+  subtler — the wrong gem-combos look identical to the right one, so it's still a find-the-gems puzzle
+  (measured: most takes with gap ≥0.25 have another *take* as the runner-up; the high end is dominated
+  by `take2same` — counterintuitive since players default to take-3-different). So takes get more
+  headroom than 0.50 — but the VERY-extreme ones (>0.60, e.g. gap 1.7 near-win endgames) read as forced,
+  so they're still capped (`GAP_HI_TAKE=0.60` in `rebuild_bank`; the tuning history went no-cap → 0.60).
+  The old `GAP_LO_TAKE=0.20` softer-lower-bound experiment is REMOVED — takes needed the upper bound
+  raised, not the lower one dropped. Genuine only-move takes stay rare (7 in [0.25,0.60] across all
+  sources), which is why the headroom over 0.50 matters.
 - **Candidate LEDGER (`games/spender/puzzle/candidates/`) — persist the expensive verification.** Every
   position the miners VERIFY (pass or fail) is appended to `candidate_ledger.jsonl.gz` (1 line =
   compact engine state + every legal move's K=8-averaged N eval). That table costs ~#moves×8 searches
   to produce, so persisting it makes a future threshold change a **pure re-filter with ZERO recompute**:
   `python -m games.spender.puzzle.candidates.rebuild_from_ledger --stats` (report gap bands) or
-  `--out DIR --types take --gap-take 0.15` (re-emit). Miners take `--ledger PATH`; merge new runs'
-  ledgers in (dedupe by `(dump, hero)`). Committed (gzipped, ~550 KB); not served, not in the build.
-- Current bank: **58** advantage puzzles (23 buy / 23 reserve / 12 take), gaps 0.25–1.708, sourced from
-  N self-play + WWSD real-game harvests (117 + 161 files) + the ledger's ≥0.25 finds. The 60/15/25
-  weighted draw (`PUZ_TYPE_WEIGHTS`) delivers the target mix regardless of the bank's actual skew.
+  `--out DIR --types take --gap-take 0.15 --gap-take-hi 0.6` (re-emit at any bar). Miners take
+  `--ledger PATH`; merge new runs' ledgers in (dedupe by `(dump, hero)`). Committed (gzipped, ~550 KB);
+  not served, not in the build.
+- Current bank: **53** advantage puzzles (23 buy / 23 reserve / 7 take), gaps 0.25–0.49, sourced from
+  N self-play + WWSD real-game harvests (117 + 161 files) + the ledger's `[0.25,0.60]` take finds. The
+  60/15/25 weighted draw (`PUZ_TYPE_WEIGHTS`) delivers the target mix regardless of the bank's skew.

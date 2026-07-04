@@ -22,9 +22,10 @@ the root CLAUDE.md "Spender Puzzle mode" section) and ship.
 ## Accept rule (matches the shipped bank)
 - **buy / reserve**: gap (best − 2nd best N eval) in `[0.25, 0.50]` — the upper bound rejects blowouts
   (a huge-gap buy is an obvious forced win, not a puzzle).
-- **take**: gap `>= 0.25`, **no upper bound** — a big-gap take is NOT obvious the way a big-gap buy is,
-  because the wrong gem-combos look identical to the right one (measured: most ≥0.25 takes have another
-  *take* as the runner-up). Genuine only-move takes are structurally rare, so this keeps every good one.
+- **take**: gap in `[0.25, 0.60]` — a HIGHER upper bound than buy/reserve (0.50), not none. A big-gap
+  take is subtler than a big-gap buy (the wrong gem-combos look identical to the right one), so it gets
+  more headroom; but the very-extreme ones (>0.60) read as forced/obvious and are capped. Genuine
+  only-move takes are structurally rare, so the extra headroom over 0.50 still matters (`--gap-take-hi`).
 - Answers that would force a discard/noble sub-step are always excluded (bad puzzle UX).
 
 ## Growing the ledger

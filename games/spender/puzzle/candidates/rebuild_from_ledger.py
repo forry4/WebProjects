@@ -69,11 +69,11 @@ def load(paths):
     return list(by_key.values())
 
 
-def qualifies(e, gap_lo, gap_hi, gap_take, types):
+def qualifies(e, gap_lo, gap_hi, gap_take, gap_take_hi, types):
     if e.get("forces_sub") or (types and e["answer_type"] not in types):
         return False
     if e["answer_type"] == "take":
-        return e["gap"] >= gap_take
+        return gap_take <= e["gap"] <= gap_take_hi
     return gap_lo <= e["gap"] <= gap_hi
 
 
@@ -101,6 +101,7 @@ def main():
     ap.add_argument("--gap", type=float, default=0.25)
     ap.add_argument("--gap-hi", type=float, default=0.50)
     ap.add_argument("--gap-take", type=float, default=0.25)
+    ap.add_argument("--gap-take-hi", type=float, default=0.60, help="take upper bound")
     ap.add_argument("--types", default="buy,reserve,take")
     args = ap.parse_args()
 
@@ -109,14 +110,14 @@ def main():
     if args.stats or not args.out:
         for at in ("take", "reserve", "buy"):
             gs = sorted((e["gap"] for e in entries if e["answer_type"] == at and not e.get("forces_sub")), reverse=True)
-            b = lambda lo, hi=99: sum(1 for g in gs if lo <= g <= hi)
-            print(f"  {at:8s}: {len(gs)} playable | >=0.30:{b(0.30) if at=='take' else b(0.30,0.50)} "
-                  f">=0.25:{b(0.25) if at=='take' else b(0.25,0.50)} >=0.20:{b(0.20) if at=='take' else b(0.20,0.50)} "
-                  f">=0.15:{b(0.15) if at=='take' else b(0.15,0.50)} | top {[round(g,3) for g in gs[:6]]}")
+            hi = 0.60 if at == "take" else 0.50   # take cap 0.60, buy/reserve 0.50 (the accept rule)
+            b = lambda lo: sum(1 for g in gs if lo <= g <= hi)
+            print(f"  {at:8s}: {len(gs)} playable | in [0.30,{hi}]:{b(0.30)} [0.25,{hi}]:{b(0.25)} "
+                  f"[0.20,{hi}]:{b(0.20)} [0.15,{hi}]:{b(0.15)} | all top gaps {[round(g,3) for g in gs[:6]]}")
         if not args.out:
             return
     types = set(args.types.split(","))
-    keep = [e for e in entries if qualifies(e, args.gap, args.gap_hi, args.gap_take, types)]
+    keep = [e for e in entries if qualifies(e, args.gap, args.gap_hi, args.gap_take, args.gap_take_hi, types)]
     os.makedirs(args.out, exist_ok=True)
     for i, e in enumerate(keep):
         schema.save(build(e), os.path.join(args.out, f"advantage_{args.start + i:04d}.json"))
