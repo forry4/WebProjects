@@ -156,6 +156,7 @@ function moveText(m, board) {
     case "end_turn": return "ended their turn";
     case "undo_turn": return "undid their turn";
     case "skip_pending": return "skipped";
+    case "roll": return `rolled a ${m.d0} and a ${m.d1}`;
     case "mine_income": return `gained ${m.silver} silver from ${m.mines} mine${m.mines === 1 ? "" : "s"}`;
     case "monastery_income": return `gained ${m.workers} worker${m.workers === 1 ? "" : "s"} from Monastery ${m.effect}`;
     case "phase_end": return `— Phase ${m.phase} ended —`;
@@ -838,6 +839,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const me = game?.players?.[myId];
   const opp = oppId ? game?.players?.[oppId] : null;
   const over = game?.phase === "over";
+  const fscore = roomData?.final_scores;   // final VP incl. end-of-game bonuses (shown when over)
   const pendingMine = game && game.pending_pid === myId;
   const myTurnRaw = game && !over && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
   const aiThinking = game && roomData?.vs_ai && !over &&
@@ -1670,9 +1672,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : `${players[game.turn] || "Opponent"}'s turn`}
             </span>
           </div>
-          <div className="coc-vp coc-vp-click" onClick={() => over ? setReviewing(false) : setShowScores(true)} title="Click for the full VP breakdown">
-            <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
-            {opp && <span className="v">{players[oppId]} <b>{opp.vp}</b></span>}
+          <div className="coc-vp coc-vp-click" onClick={() => over ? setReviewing(false) : setShowScores(true)}
+            title={over ? "Final score (with end-of-game bonuses). Click for the full breakdown" : "Click for the full VP breakdown"}>
+            {/* At game end show the FINAL score (leftover resources + monastery bonuses
+                folded in); during play show the live placed-tile VP. */}
+            <span className="v">{me ? "You" : ""} <b>{over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)}</b></span>
+            {opp && <span className="v">{players[oppId]} <b>{over && fscore?.[oppId] != null ? fscore[oppId] : opp.vp}</b></span>}
             <span className="coc-vp-info">ⓘ</span>
           </div>
           <div className="coc-status-right">
