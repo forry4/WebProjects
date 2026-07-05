@@ -568,6 +568,8 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-status-right{justify-content:center}
   /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
   .coc-create{gap:8px}
+  /* workers + silver drop to their OWN full row below the dice (not just silver) */
+  .coc-resbar{flex-basis:100%;margin-left:0;margin-top:2px}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
@@ -634,7 +636,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-token-flyer.gain{animation:coc-tok-in .6s ease-out forwards}
 @keyframes coc-tok-out{from{transform:translate(0,0) scale(1);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(.55);opacity:0}}
 @keyframes coc-tok-in{from{transform:translate(0,0) scale(.55);opacity:0}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
-/* Resource token chips (workers / silver) in the dice bar + opponent modal. */
+/* Resource token chips (workers / silver) in the dice bar + opponent modal. The
+   .coc-resbar keeps workers+silver together as ONE wrap unit (so they never split);
+   on mobile it takes its own full row below the dice. */
+.coc-resbar{display:inline-flex;align-items:center;gap:14px;margin-left:8px}
 .coc-token-chip{display:inline-flex;align-items:center;gap:7px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;color:var(--text)}
 .coc-token-chip b{color:var(--text);font-size:1.35rem}
 .coc-token{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15)}
@@ -1734,7 +1739,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <span key={c} className={`coc-bonuschip${size ? "" : " gone"}`}
                 title={`${colorLabel(c)}: ${size ? `${size} bonus available (+${rem[0]} VP)` : "both bonuses taken"}`}>
                 <span className="coc-bonus-sw" style={{ background: TILE_HEX[c] }} />
-                {size ? <><b>+{rem[0]}</b><i>{size === "large" ? "lg" : "sm"}</i></> : <i>—</i>}
+                {size ? <b>+{rem[0]}</b> : <i>—</i>}
               </span>
             );
           })}
@@ -1887,12 +1892,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     )}
                   </div>
                 ))}
-                <span className="coc-token-chip" data-workers="1" style={{ marginLeft: 8 }} title="Workers — spent to adjust dice">
-                  <span className="coc-token worker">⚒</span><b>{me?.workers ?? 0}</b>
-                </span>
-                <span className="coc-token-chip" data-silver="1" title="Silver — spent to buy black-depot tiles">
-                  <span className="coc-token silver">⛃</span><b>{me?.silver ?? 0}</b>
-                </span>
+                <div className="coc-resbar">
+                  <span className="coc-token-chip" data-workers="1" title="Workers — spent to adjust dice">
+                    <span className="coc-token worker">⚒</span><b>{me?.workers ?? 0}</b>
+                  </span>
+                  <span className="coc-token-chip" data-silver="1" title="Silver — spent to buy black-depot tiles">
+                    <span className="coc-token silver">⛃</span><b>{me?.silver ?? 0}</b>
+                  </span>
+                </div>
               </div>
 
               {/* storage + goods */}
