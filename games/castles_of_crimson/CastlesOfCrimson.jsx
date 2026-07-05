@@ -2181,7 +2181,10 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
         {extraValue != null && (
           <div className="coc-modal-row" style={{ marginTop: 10 }}>
             <button className="coc-btn ghost sm" onClick={() => mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } })}>Take 2 Workers</button>
-            <button className="coc-btn ghost sm" disabled={!(me.goods[goodsForDie] > 0)} onClick={() => mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } })}>Sell {goodsForDie}</button>
+            <button className="coc-btn ghost sm" disabled={!(me.goods[goodsForDie] > 0)} onClick={() => mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } })}>
+              Sell{goodsForDie
+                ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{sellNum(goodsForDie)}</span>{me.goods[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
+                : " goods"}</button>
           </div>
         )}
         <div className="coc-modal-row" style={{ marginTop: 10 }}><button className="coc-btn ghost sm" onClick={skip}>Skip bonus</button></div>
