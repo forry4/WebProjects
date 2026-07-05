@@ -17,8 +17,12 @@ const GOODS_HEX = {
   amber: "#e0a526", rose: "#d6678b", jade: "#3fae8e",
   cobalt: "#3b6fd0", plum: "#8a5cc0", rust: "#c0552f",
 };
-// The 6 territory colours, in the backend's board.COLORS order (drives the bonus strip).
+// The 6 territory colors, in the backend's board.COLORS order (drives the bonus strip).
 const BOARD_COLORS = ["burgundy", "blue", "gray", "green", "beige", "yellow"];
+// Per-phase region-completion bonus (mirrors tiles.PHASE_BONUS): completing a region
+// THIS phase earns this many bonus VP on top of the region's size score. It shrinks
+// each phase, so finishing regions early is worth more.
+const PHASE_BONUS = { A: 10, B: 8, C: 6, D: 4, E: 2 };
 const TYPE_LABEL = {
   castle: "Castle", ship: "Ship", mine: "Mine",
   livestock: "Livestock", building: "Building", monastery: "Monastery",
@@ -125,7 +129,7 @@ function tileName(t) {
   }
 }
 // Descriptive move-log line built from the data already in each record (tile, depot, …).
-// `board` supplies the goods number (goods are named "#N goods", never by colour).
+// `board` supplies the goods number (goods are named "#N goods", never by color).
 function moveText(m, board) {
   const t = m.tile;
   const gnum = (c) => (board ? board.goods_colors.indexOf(c) + 1 : "?");
@@ -674,9 +678,12 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
-/* Colour-completion bonus strip (large = 1st to finish a colour, small = 2nd). */
+/* Color-completion bonus strip (large = 1st to finish a color, small = 2nd). */
 .coc-bonusbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
 .coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+.coc-regbonus-lbl{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim)}
+.coc-regbonus{font-size:.98rem;color:var(--gold-l);letter-spacing:.02em}
+.coc-bonus-div{width:1px;align-self:stretch;background:var(--border);margin:-2px 2px}
 .coc-bonuschip{display:inline-flex;align-items:center;gap:4px;font-size:.82rem;color:var(--text)}
 .coc-bonuschip.gone{opacity:.38}
 .coc-bonus-sw{width:15px;height:15px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
@@ -715,7 +722,7 @@ function hexPoints(cx, cy, s) {
 
 // A die value (1-6) as SVG pips centered in a duchy hex — replaces the numeral on
 // empty spaces so the "die you need" reads as a die face (matches the dice + depot
-// mini-dice). White dots with a thin dark rim so they show on any hex colour.
+// mini-dice). White dots with a thin dark rim so they show on any hex color.
 function svgPips(cx, cy, n, key) {
   const on = PIP_MAP[n];
   if (!on) return null;
@@ -1198,8 +1205,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const buildingDepotCands = (d) => (game.depots[String(d)].hexes || []).filter((t) => buildingCands.includes(t.id)).map((t) => t.id);
   const buildingPick = (id) => mv({ type: "building_take_choice", tile_id: id });
 
-  // Goods pick: the chosen depot had more new goods colours than free slots, so you
-  // choose which type(s) to take. Click a goods token of an offered colour in the
+  // Goods pick: the chosen depot had more new goods colors than free slots, so you
+  // choose which type(s) to take. Click a goods token of an offered color in the
   // depot (that depot's tokens pulse), or a button in the floating modal.
   const goodsPickMine = pendingMine && game?.pending_kind === "goods_pick";
   const goodsPickColors = goodsPickMine ? (game.pending?.ctx?.colors || []) : [];
@@ -1669,10 +1676,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
-        {/* Colour-completion bonuses: which colours still award their large (1st to
-            fully complete the colour) vs small (2nd) VP bonus. */}
-        <div className="coc-bonusbar" title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a colour">
-          <span className="coc-bonusbar-lbl">Colour bonuses</span>
+        {/* Region-completion bonus (this phase) + color-completion bonuses (which
+            colors still award their large=1st / small=2nd VP bonus). */}
+        <div className="coc-bonusbar" title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a color">
+          <span className="coc-bonusbar-lbl coc-regbonus-lbl"
+            title="Complete any region THIS phase for this many bonus VP, on top of its size score. It shrinks each phase: A +10 → B +8 → C +6 → D +4 → E +2.">
+            Region bonus <b className="coc-regbonus">+{PHASE_BONUS[game.phase_letter] ?? 0}</b>
+          </span>
+          <span className="coc-bonus-div" />
+          <span className="coc-bonusbar-lbl">Color bonuses</span>
           {BOARD_COLORS.map((c) => {
             const rem = game.bonus_tiles?.[c] || [];
             const size = rem.length >= 2 ? "large" : rem.length === 1 ? "small" : null;
