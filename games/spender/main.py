@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import copy
 import json
 import math
@@ -237,8 +238,55 @@ def init_db():
 
 # ─── Game persistence helpers ─────────────────────────────────────────────────
 
+# Persist off the event loop on a dedicated single-thread executor with a REUSED
+# (persistent) connection. A fresh per-move Turso connection (TLS+auth handshake)
+# run synchronously on the loop was blocking the broadcast / deferring the WS frame
+# flush — measured at ~300-1600ms/move in CoC, which shares this exact pattern. A
+# single worker keeps writes in submission order (no last-writer-loses race); a
+# failed write drops the connection so the next reconnects. save_game snapshots +
+# serializes on the CALLING thread (fast, race-free vs ROOMS) then fires the write off.
+_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="spender-db-write")
+_save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
+
+
+def _persist_row(room_id, status, ids, names, host, state_json, now, created_at) -> None:
+    """Upsert one games row on the dedicated write thread using a reused connection.
+    ids/names are 4-element seat lists (None-padded for 2-3 player games)."""
+    global _save_conn
+    try:
+        if _save_conn is None:
+            _save_conn = get_db_conn()
+        cur = _save_conn.cursor()
+        cur.execute("SELECT id FROM games WHERE id=?", (room_id,))
+        if cur.fetchone() is not None:
+            cur.execute("""UPDATE games SET status=?, player2_id=?, player2_name=?,
+                                  player3_id=?, player3_name=?, player4_id=?, player4_name=?,
+                                  state_json=?, updated_at=? WHERE id=?""",
+                        (status, ids[1], names[1], ids[2], names[2], ids[3], names[3],
+                         state_json, now, room_id))
+        else:
+            cur.execute("""INSERT INTO games
+                           (id,status,player1_id,player1_name,player2_id,player2_name,
+                            player3_id,player3_name,player4_id,player4_name,
+                            host_id,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, ids[0], names[0], ids[1], names[1],
+                         ids[2], names[2], ids[3], names[3], host, state_json, created_at, now))
+        _save_conn.commit()
+    except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn so the next reconnects
+        LOG.warning("spender save_game write failed for %s; dropping connection to reconnect next time", room_id,
+                    exc_info=True)
+        try:
+            if _save_conn is not None:
+                _save_conn.close()
+        except Exception:
+            pass
+        _save_conn = None
+
+
 def save_game(room_id: str) -> None:
-    """Upsert the current in-memory room state to the games table."""
+    """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
+    event loop via the single-thread write executor (fire-and-forget)."""
     room = ROOMS.get(room_id)
     if not room:
         return
@@ -255,30 +303,10 @@ def save_game(room_id: str) -> None:
     }
     now = int(time.time())
     seat = lambda lst, i: lst[i] if len(lst) > i else None   # seat value or None (2-4 players)
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM games WHERE id=?", (room_id,))
-    exists = cur.fetchone() is not None
-    if exists:
-        cur.execute("""UPDATE games SET status=?, player2_id=?, player2_name=?,
-                              player3_id=?, player3_name=?, player4_id=?, player4_name=?,
-                              state_json=?, updated_at=? WHERE id=?""",
-                    (room.get("status"),
-                     seat(pids, 1), seat(names, 1), seat(pids, 2), seat(names, 2),
-                     seat(pids, 3), seat(names, 3),
-                     json.dumps(state), now, room_id))
-    else:
-        cur.execute("""INSERT INTO games
-                       (id,status,player1_id,player1_name,player2_id,player2_name,
-                        player3_id,player3_name,player4_id,player4_name,
-                        host_id,state_json,created_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (room_id, room.get("status", "open"),
-                     seat(pids, 0), seat(names, 0), seat(pids, 1), seat(names, 1),
-                     seat(pids, 2), seat(names, 2), seat(pids, 3), seat(names, 3),
-                     room.get("host"), json.dumps(state), now, now))
-    conn.commit()
-    conn.close()
+    ids = [seat(pids, i) for i in range(4)]
+    nms = [seat(names, i) for i in range(4)]
+    _DB_WRITE_EXEC.submit(_persist_row, room_id, room.get("status", "open"),
+                          ids, nms, room.get("host"), json.dumps(state), now, now)
 
 
 def load_game_to_memory(room_id: str) -> bool:
