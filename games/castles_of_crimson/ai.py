@@ -152,6 +152,11 @@ def _determinize(state, rng):
 # ── Legal-move helper: don't waste a die by ending early (matches the UI rule) ────
 def _legal(state, pid):
     moves = engine.legal_moves(state, pid)
+    # The bot NEVER discards a stored tile — discarding helps in only exceedingly rare
+    # cases, and otherwise the search wastes tiles it took. Safe: discard is always
+    # optional (never forced), and an unused die always still has take_workers, so
+    # pruning it can't deadlock.
+    moves = [m for m in moves if m.get("type") != "discard_storage"]
     d = state["dice"].get(pid)
     if d is not None:
         # For a die the bot has already adjusted this turn, drop two wasteful moves:

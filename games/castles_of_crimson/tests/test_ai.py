@@ -144,6 +144,18 @@ def test_ai_never_readjusts_within_a_planned_turn():
     assert all(n <= 1 for n in per_die.values()), per_die
 
 
+def test_ai_never_discards_a_stored_tile():
+    g = _playing_game(seed=9)
+    pid = ai._actor(g)
+    g["turn"] = pid
+    p = g["players"][pid]
+    p["storage"] = [{"id": f"t{i}", "kind": "hex", "type": "mine", "color": "gray"} for i in range(3)]
+    raw = [m["type"] for m in engine.legal_moves(g, pid)]
+    assert "discard_storage" in raw            # the engine offers it (storage is full)
+    pruned = [m["type"] for m in ai._legal(g, pid)]
+    assert "discard_storage" not in pruned     # but the bot never considers discarding
+
+
 def test_setup_move_picks_a_burgundy_space():
     g = engine.new_game(["p1", "p2"], seed=1)
     mv = ai._setup_move(g, "p1")
