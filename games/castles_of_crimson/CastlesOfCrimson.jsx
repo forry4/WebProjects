@@ -584,11 +584,16 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-stt{width:70px;height:81px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#15100a;transition:transform .1s}
 .coc-stt:hover{transform:scale(1.08)}
 .coc-stt.empty{cursor:default}
-/* Selected storage tile (ready to place): lift it, raise it above neighbors, and give
-   it a pulsing gold glow that follows the hex outline (a border would be clipped away). */
-.coc-stt.sel{transform:scale(1.12);z-index:3;animation:coc-stt-sel 1s ease-in-out infinite}
+/* Selected storage tile (ready to place): scale the hex and wrap it in a NON-clipped
+   layer that carries the pulsing gold glow. The glow MUST live on the wrapper — a
+   drop-shadow (or border/box-shadow) on the hex itself is clipped away by the hex's
+   own clip-path. The wrapper has no clip-path, so its drop-shadow follows the child
+   hex's outline and radiates outward, unclipped. */
+.coc-stt-wrap{width:70px;height:81px;position:relative;display:flex}
+.coc-stt.sel{transform:scale(1.12);z-index:3}
 .coc-stt.sel:hover{transform:scale(1.15)}
-@keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 4px var(--gold)) drop-shadow(0 0 2px var(--gold))}50%{filter:drop-shadow(0 0 12px var(--gold-l)) drop-shadow(0 0 7px var(--gold-l))}}
+.coc-stt-wrap.sel{z-index:3;animation:coc-stt-sel 1.2s ease-in-out infinite}
+@keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 5px var(--gold)) drop-shadow(0 0 3px var(--gold))}50%{filter:drop-shadow(0 0 17px var(--gold-l)) drop-shadow(0 0 9px var(--gold-l))}}
 /* Tile-move animation overlay (depot->storage, storage->duchy) */
 .coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
 .coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .5s cubic-bezier(.4,.05,.25,1) forwards}
@@ -1564,20 +1569,23 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     {[0, 1, 2].map((i) => {
                       const t = me?.storage?.[i];
                       if (!t) return <div key={i} data-storage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                      const isSel = selStorage === t.id;
                       return (
-                        <div key={t.id} data-storage-slot={i} className={`coc-stt${selStorage === t.id ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
-                          title={tileDesc(t, board)}
-                          onClick={() => {
-                            // Only SELECT a storage tile when there's a way to place it
-                            // (a die chosen, or an extra-action value, or a town-hall extra
-                            // placement). Otherwise a tap just shows the description.
-                            const canPlace = pendingMine
-                              ? (game.pending_kind === "townhall_place" || (inExtra && extraValue != null))
-                              : (selDie != null);
-                            if (canPlace) setSelStorage(selStorage === t.id ? null : t.id);
-                            else setToast(tileDesc(t, board));
-                          }}>
-                          <TileArt tile={t} px={70} />
+                        <div key={t.id} className={`coc-stt-wrap${isSel ? " sel" : ""}`}>
+                          <div data-storage-slot={i} className={`coc-stt${isSel ? " sel" : ""}`} style={{ background: TILE_HEX[t.color] }}
+                            title={tileDesc(t, board)}
+                            onClick={() => {
+                              // Only SELECT a storage tile when there's a way to place it
+                              // (a die chosen, or an extra-action value, or a town-hall extra
+                              // placement). Otherwise a tap just shows the description.
+                              const canPlace = pendingMine
+                                ? (game.pending_kind === "townhall_place" || (inExtra && extraValue != null))
+                                : (selDie != null);
+                              if (canPlace) setSelStorage(isSel ? null : t.id);
+                              else setToast(tileDesc(t, board));
+                            }}>
+                            <TileArt tile={t} px={70} />
+                          </div>
                         </div>
                       );
                     })}
