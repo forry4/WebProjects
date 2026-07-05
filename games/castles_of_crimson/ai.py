@@ -101,7 +101,8 @@ def _clone_game(g):
         "track": [list(s) for s in g["track"]], "round_order": list(g["round_order"]),
         "ship_advance_pending": g.get("ship_advance_pending", 0),
         "start_player": g["start_player"], "white_die": g["white_die"],
-        "dice": {pid: {"values": list(dv["values"]), "used": list(dv["used"])}
+        "dice": {pid: {"values": list(dv["values"]), "used": list(dv["used"]),
+                       "adjusted": list(dv.get("adjusted", (False, False)))}
                  for pid, dv in g["dice"].items()},
         "turn": g["turn"],
         "black_depot_used_this_turn": g["black_depot_used_this_turn"],
@@ -151,10 +152,18 @@ def _determinize(state, rng):
 def _legal(state, pid):
     moves = engine.legal_moves(state, pid)
     d = state["dice"].get(pid)
-    if d is not None and not (d["used"][0] and d["used"][1]):
-        non_end = [m for m in moves if m.get("type") != "end_turn"]
-        if non_end:
-            return non_end
+    if d is not None:
+        # Never re-adjust a die the bot has already set this turn — one direct jump
+        # reaches any value, so a 2nd adjust only wastes workers (the "bot flails on
+        # the dice" bug). Humans keep the incremental ±1 UI; this caps only the AI.
+        adjusted = d.get("adjusted")
+        if adjusted and any(adjusted):
+            moves = [m for m in moves
+                     if not (m.get("type") == "adjust_die" and adjusted[m.get("die_index", 0)])]
+        if not (d["used"][0] and d["used"][1]):
+            non_end = [m for m in moves if m.get("type") != "end_turn"]
+            if non_end:
+                return non_end
     return moves
 
 

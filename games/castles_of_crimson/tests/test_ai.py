@@ -110,6 +110,35 @@ def test_value_rewards_scoring_and_filling():
     assert ai._value(g2, pid) > base
 
 
+# ── The bot must not re-adjust a die it has already set (the "flails on dice" bug) ──
+def test_ai_legal_drops_readjust_of_adjusted_die():
+    g = _playing_game(seed=6)
+    pid = ai._actor(g)
+    d = g["dice"][pid]
+    d["used"] = [False, False]
+    d["values"] = [3, 3]
+    d["adjusted"] = [True, False]           # die 0 already adjusted this turn
+    g["players"][pid]["workers"] = 6        # plenty to afford more adjusts
+    moves = ai._legal(g, pid)
+    adj = [m for m in moves if m.get("type") == "adjust_die"]
+    assert all(m["die_index"] == 1 for m in adj), adj   # never die 0 again
+    assert any(m["die_index"] == 1 for m in adj)        # die 1 (unadjusted) still open
+
+
+def test_ai_never_readjusts_within_a_planned_turn():
+    # Drive the planner and confirm no die is adjusted more than once in the turn.
+    g = _playing_game(seed=11)
+    pid = ai._actor(g)
+    g["turn"] = pid
+    g["players"][pid]["workers"] = 12       # enough to flail if it wanted to
+    seq = ai.play_turn_plan(g, pid, difficulty="hard", rng=random.Random(0))
+    per_die = {}
+    for mv in seq:
+        if mv.get("type") == "adjust_die":
+            per_die[mv["die_index"]] = per_die.get(mv["die_index"], 0) + 1
+    assert all(n <= 1 for n in per_die.values()), per_die
+
+
 def test_setup_move_picks_a_burgundy_space():
     g = engine.new_game(["p1", "p2"], seed=1)
     mv = ai._setup_move(g, "p1")

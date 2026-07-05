@@ -127,7 +127,8 @@ def _begin_round(game: dict) -> None:
 
     rng = _make_rng(game)
     for pid in game["order"]:
-        game["dice"][pid] = {"values": [rng.randint(1, 6), rng.randint(1, 6)], "used": [False, False]}
+        game["dice"][pid] = {"values": [rng.randint(1, 6), rng.randint(1, 6)],
+                             "used": [False, False], "adjusted": [False, False]}
     game["white_die"] = rng.randint(1, 6)
     _save_rng(game, rng)
 
@@ -862,6 +863,11 @@ def _h_adjust_die(game, pid, move):
         return False, "not enough workers"
     p["workers"] -= cost
     game["dice"][pid]["values"][i] = to
+    # Bookkeeping: mark this die as adjusted this turn. Humans may keep nudging a die
+    # (the ±1 UI walks it a step at a time), but the AI reads this flag to avoid
+    # wastefully re-adjusting a die it has already set (a 2nd adjust is never cheaper
+    # than one direct jump, so re-adjusting only burns workers).
+    game["dice"][pid].setdefault("adjusted", [False, False])[i] = True
     _log(game, pid, "adjust_die", die_index=i, to=to, workers=cost)
     return True, None
 
