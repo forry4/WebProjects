@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.30
+// @version      0.9.31
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -46,7 +46,7 @@
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
     MINIMIZED:  false,  // collapse the overlay to just its title bar (toggle from the panel; persisted)
     LOG_CHAT:   true,   // capture in-game chat messages into each game log (for bot-suggestion mining)
-    CHAT_COLL:  '',     // spendee chat collection name; blank = auto-detect (see chatProbe/listCollections)
+    CHAT_COLL:  '',     // blank = spendee's rooms[].conversation[] (verified); set to a FLAT message collection name to override
     REGULAR_JOB: 'SPENDEE_REGULAR',
   };
 
@@ -1002,64 +1002,59 @@
     }, info || {}));
   }
   // ── Chat capture (bot-suggestion mining) ──────────────────────────────────
-  // spendee is a Meteor app, so chat is a client-synced Minimongo collection (like `games`). We don't
-  // hard-code its name/schema (unknown): auto-detect a message-like collection, extract text/author/ts
-  // heuristically, associate rows to the CURRENT game (a field == game id, else the in-game time window
-  // — the bot is only ever in one game at a time), and fold new messages (deduped by _id) into the log's
-  // `chat` array. Override the collection with CONFIG.CHAT_COLL; discover the schema via chatProbe().
+  // VERIFIED against spendee (listCollections dump): chat is NOT its own collection — it's the
+  // `conversation[]` array embedded in the `rooms` collection doc, linked to the game by
+  // `room.gameId === game._id`. Each entry: { isSystem, userId, name, content, createdAt }. Entries
+  // have NO _id, so we dedup by a composite (createdAt|userId|content) key. System lines (isSystem)
+  // are skipped. New messages fold into the log's `chat` array. CONFIG.CHAT_COLL overrides to a FLAT
+  // message collection (generic escape hatch) if spendee's schema ever changes; chatProbe() previews.
   function _allCollections() {
     try { return window.Meteor.connection._mongo_livedata_collections || {}; } catch (e) { return {}; }
   }
-  const _CHAT_TEXT = ['message', 'text', 'body', 'content', 'msg', 'chat'];
+  function _ms(at) { return (at && typeof at === 'object' && typeof at.getTime === 'function') ? at.getTime() : (at || null); }
+  // The room doc for the current game (rooms.gameId === game._id).
+  function _roomForGame(g) {
+    try {
+      const rooms = _allCollections()['rooms']; if (!rooms || !g) return null;
+      return (rooms.find().fetch() || []).find(r => r && r.gameId === g._id) || null;
+    } catch (e) { return null; }
+  }
+  // Normalize a spendee conversation entry → the log's chat record.
+  function _normConv(m) {
+    if (!m || typeof m.content !== 'string' || !m.content) return null;
+    return { at: _ms(m.createdAt), from: m.name || m.userId || null, uid: m.userId || null, text: m.content, system: !!m.isSystem };
+  }
+  const _convKey = m => (_ms(m.createdAt) || '') + '|' + (m.userId || '') + '|' + m.content;
+  // Generic flat-collection fallback (only used if CONFIG.CHAT_COLL is set to a real message collection).
+  const _CHAT_TEXT = ['content', 'message', 'text', 'body', 'msg', 'chat'];
   const _CHAT_FROM = ['name', 'username', 'user', 'author', 'from', 'sender', 'playerName', 'userId'];
   const _CHAT_TS = ['createdAt', 'ts', 'time', 'at', 'timestamp', 'sentAt'];
-  const _CHAT_GAME = ['gameId', 'game', 'roomId', 'room', 'table', 'tableId'];
   function _pick(doc, keys) { for (const k of keys) if (doc[k] != null && doc[k] !== '') return doc[k]; return null; }
-  function _looksLikeChat(coll) {
-    try {
-      const docs = (coll.find().fetch() || []).slice(0, 5);
-      return docs.length > 0 && docs.some(d => _CHAT_TEXT.some(k => typeof d[k] === 'string' && d[k].length > 0));
-    } catch (e) { return false; }
-  }
-  let _chatCollNames = null;
-  function _detectChatCollections() {
-    if (CONFIG.CHAT_COLL) return [CONFIG.CHAT_COLL];
-    if (_chatCollNames && _chatCollNames.length) return _chatCollNames;   // re-detect while empty (chat coll may appear late)
-    const colls = _allCollections(), out = [];
-    for (const name of Object.keys(colls)) {
-      if (name === 'games' || name === 'rooms' || name === 'users') continue;
-      if (/chat|message|msg/i.test(name) || _looksLikeChat(colls[name])) out.push(name);
-    }
-    if (out.length) _chatCollNames = out;
-    return out;
-  }
-  function _normChatDoc(d, coll) {
-    const text = _pick(d, _CHAT_TEXT);
-    if (typeof text !== 'string' || !text) return null;
-    let at = _pick(d, _CHAT_TS);
-    if (at && typeof at === 'object' && typeof at.getTime === 'function') at = at.getTime();
-    return { _id: d._id, coll, at: at || null, from: _pick(d, _CHAT_FROM), text };
-  }
   function logCaptureChat(g) {
     if (!_logGame || !CONFIG.ENABLED || !CONFIG.LOG_CHAT) return;
     try {
-      const colls = _allCollections();
       const seen = _logGame._chatSeen || (_logGame._chatSeen = {});
-      for (const name of _detectChatCollections()) {
-        const coll = colls[name]; if (!coll) continue;
-        let docs; try { docs = coll.find().fetch(); } catch (e) { continue; }
-        for (const d of docs) {
+      if (CONFIG.CHAT_COLL) {                                   // escape hatch: a flat message collection
+        const coll = _allCollections()[CONFIG.CHAT_COLL]; if (!coll) return;
+        for (const d of (coll.find().fetch() || [])) {
           if (!d || d._id == null || seen[d._id]) continue;
-          const refsGame = _CHAT_GAME.some(k => d[k] === g._id);
-          const hasRef = _CHAT_GAME.some(k => d[k] != null);
-          const norm = _normChatDoc(d, name); if (!norm) continue;
-          const inWindow = norm.at == null || norm.at >= _logGame.startedAt - 5000;
-          if (refsGame || (!hasRef && inWindow)) { seen[d._id] = 1; _logGame.chat.push(norm); }
+          const text = _pick(d, _CHAT_TEXT); if (typeof text !== 'string' || !text) continue;
+          seen[d._id] = 1;
+          _logGame.chat.push({ at: _ms(_pick(d, _CHAT_TS)), from: _pick(d, _CHAT_FROM), text });
         }
+        return;
+      }
+      const room = _roomForGame(g);                            // spendee: rooms[].conversation[]
+      if (!room || !Array.isArray(room.conversation)) return;
+      for (const m of room.conversation) {
+        if (!m || typeof m.content !== 'string' || !m.content || m.isSystem) continue;
+        const k = _convKey(m); if (seen[k]) continue;
+        seen[k] = 1;
+        const norm = _normConv(m); if (norm) _logGame.chat.push(norm);
       }
     } catch (e) {}
   }
-  // Discovery helpers (run from console on the friend's site): find the chat collection + preview its shape.
+  // Discovery helpers (run from console on the friend's site): list all collections / preview the chat.
   function listCollections() {
     const colls = _allCollections(), out = {};
     for (const name of Object.keys(colls)) {
@@ -1070,17 +1065,14 @@
     return out;
   }
   function chatProbe() {
-    const names = _detectChatCollections();
-    console.log('[WWSD] detected chat collection(s):', names, '(override via CONFIG.CHAT_COLL)');
-    const colls = _allCollections();
-    for (const name of names) {
-      try {
-        const ds = colls[name].find().fetch();
-        console.log('[WWSD]   ' + name + ': ' + ds.length + ' rows; last 3 normalized:',
-          ds.slice(-3).map(d => _normChatDoc(d, name)), '| last raw:', ds[ds.length - 1] || null);
-      } catch (e) {}
-    }
-    return names;
+    const found = findMyActiveGame();
+    if (!found) { console.log('[WWSD] chatProbe: no active game — join a game first'); return null; }
+    const room = _roomForGame(found.game);
+    if (!room) { console.log('[WWSD] chatProbe: no room found for game', found.game._id, '(rooms.gameId link failed)'); return null; }
+    const conv = Array.isArray(room.conversation) ? room.conversation : [];
+    console.log('[WWSD] room ' + room._id + ' for game ' + found.game._id + ': ' + conv.length + ' conversation entries; last 3 normalized:',
+      conv.slice(-3).map(_normConv), '| last raw:', conv[conv.length - 1] || null);
+    return conv.map(_normConv);
   }
   // Quick console peek at the CURRENT game's move failures (exported logs also carry every game's failures[]).
   function logFailures() {
