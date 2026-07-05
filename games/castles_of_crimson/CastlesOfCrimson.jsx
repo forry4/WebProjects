@@ -573,6 +573,12 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-bonusbar{gap:6px;padding:7px 9px}
   .coc-bonuschip{gap:3px}
   .coc-bonus-sw{width:13px;height:13px}
+  /* lobby header: the big centered title overlapped the ← Back button on phones, making
+     it un-tappable. Shrink the title and trim the header padding so Back stays clickable
+     and the header isn't so tall. */
+  .coc-top.coc-top-lobby{padding:9px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 9px);gap:8px}
+  .coc-top-lobby .coc-title{font-size:1.05rem}
+  .coc-top-lobby .coc-user{font-size:.64rem}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
