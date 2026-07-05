@@ -380,12 +380,18 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-btn.tool{background:var(--surface2);color:var(--gold-l);border:1px solid var(--gold)}.coc-btn.tool:hover:not(:disabled){background:#3a2a18;color:var(--gold-l)}
 .coc-btn.outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.coc-btn.outline:hover:not(:disabled){background:var(--gold);color:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
-.coc-hero{text-align:center;margin:24px 0 30px}
-.coc-hero h1{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2.4rem;color:var(--crimson-l);letter-spacing:.04em}
-.coc-hero p{color:var(--text-dim);font-style:italic;margin-top:6px}
-.coc-lobby-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:24px}
-.coc-vsbot{display:inline-flex;align-items:center;gap:6px;padding:3px 8px 3px 10px;border:1px solid var(--border);border-radius:var(--radius)}
-.coc-vsbot-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
+/* Lobby create row — a single "+ Create Game ▾" dropdown (vs Friend / vs Bot),
+   Join code, and refresh, centered (mirrors Spender's browser-create). */
+.coc-create{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
+.coc-ai-picker-wrap{position:relative;display:inline-flex}
+.coc-ai-picker-wrap>.coc-btn.active{background:var(--gold-l)}
+.coc-ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:180px;max-width:min(92vw,280px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
+.coc-ai-picker .coc-btn{white-space:nowrap}
+.coc-ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
+/* Open Games | Active Games, side by side (mirrors Spender's lobby-grid). */
+.coc-lobby-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;align-items:start}
+.coc-lobby-col{min-width:0}
+@media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
 .coc-join{display:flex;gap:8px}
 .coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
 .coc-input:focus{border-color:var(--gold)}
@@ -482,11 +488,8 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-statusbar{display:flex;flex-wrap:wrap;justify-content:center}
   .coc-status-left{width:100%;justify-content:center}
   .coc-status-right{justify-content:center}
-  /* lobby header: the big crimson title is redundant with the hero h1 below and
-     overlaps the username on narrow screens — drop it on phones, shrink the hero */
-  .coc-top-lobby .coc-title{display:none}
-  .coc-hero{margin:16px 0 22px}
-  .coc-hero h1{font-size:1.9rem}
+  /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
+  .coc-create{gap:8px}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
@@ -668,6 +671,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
+  const [showCreateMenu, setShowCreateMenu] = useState(false);  // + Create Game dropdown (vs Friend / vs Bot)
 
   // interaction state
   const [selDie, setSelDie] = useState(null);
@@ -1005,11 +1009,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <span className="coc-user">{playerName}</span>
         </div>
         <div className="coc-wrap">
-          <div className="coc-hero">
-            <h1>Castles of Crimson</h1>
-            <p>Build your duchy of crimson estates.</p>
-          </div>
-
           <div className="coc-board-pick">
             <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
             <div className="coc-board-grid">
@@ -1027,15 +1026,32 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
           </div>
 
-          <div className="coc-lobby-actions">
-            <button className="coc-btn gold" onClick={() => startCreate(false)}>+ New Game</button>
-            <span className="coc-vsbot">
-              <span className="coc-vsbot-lbl">vs Bot</span>
-              <button className="coc-btn crimson sm" title="A capable opponent that makes the occasional mistake"
-                onClick={() => startCreate(true, "normal")}>Normal</button>
-              <button className="coc-btn crimson sm" title="Full-strength search — a real challenge"
-                onClick={() => startCreate(true, "hard")}>Hard</button>
-            </span>
+          <div className="coc-create">
+            <div className="coc-ai-picker-wrap">
+              <button className={`coc-btn gold${showCreateMenu ? " active" : ""}`}
+                title="Create a game — play a friend or the bot"
+                onClick={() => setShowCreateMenu((v) => !v)}>
+                + Create Game {showCreateMenu ? "▴" : "▾"}
+              </button>
+              {showCreateMenu && (
+                <div className="coc-ai-picker">
+                  <button className="coc-btn gold sm"
+                    title="Create a game a friend can join from Open Games (or your room code)"
+                    onClick={() => { setShowCreateMenu(false); startCreate(false); }}>
+                    vs Friend
+                  </button>
+                  <span className="coc-ai-picker-label">vs Bot</span>
+                  <button className="coc-btn outline sm" title="A capable opponent that makes the occasional mistake"
+                    onClick={() => { setShowCreateMenu(false); startCreate(true, "normal"); }}>
+                    Normal
+                  </button>
+                  <button className="coc-btn outline sm" title="Full-strength search — a real challenge"
+                    onClick={() => { setShowCreateMenu(false); startCreate(true, "hard"); }}>
+                    Hard
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="coc-join">
               <input className="coc-input" placeholder="CODE" value={joinCode} maxLength={6}
                 onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
@@ -1044,46 +1060,50 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
 
-          <div className="coc-section-hd">
-            <div className="coc-section-title">Open Games</div>
-            <span className="coc-muted">waiting for a second player</span>
-          </div>
-          {loadingGames && openGames.length === 0 ? (
-            <div className="coc-empty"><span className="coc-spinner" />Loading…</div>
-          ) : openGames.length === 0 ? (
-            <div className="coc-empty">No open games. Create one!</div>
-          ) : (
-            openGames.map((g) => (
-              <div className="coc-card" key={g.id}>
-                <div className="coc-card-info">
-                  <div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
-                  <div className="coc-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
-                </div>
-                <div className="coc-card-actions">
-                  {g.host_id === myId
-                    ? <>
-                        <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
-                        <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
-                      </>
-                    : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
-                </div>
+          <div className="coc-lobby-grid">
+            <div className="coc-lobby-col">
+              <div className="coc-section-hd">
+                <div className="coc-section-title">Open Games</div>
+                <span className="coc-muted">waiting for a second player</span>
               </div>
-            ))
-          )}
+              {loadingGames && openGames.length === 0 ? (
+                <div className="coc-empty"><span className="coc-spinner" />Loading…</div>
+              ) : openGames.length === 0 ? (
+                <div className="coc-empty">No open games. Create one!</div>
+              ) : (
+                openGames.map((g) => (
+                  <div className="coc-card" key={g.id}>
+                    <div className="coc-card-info">
+                      <div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
+                      <div className="coc-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+                    </div>
+                    <div className="coc-card-actions">
+                      {g.host_id === myId
+                        ? <>
+                            <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
+                            <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                          </>
+                        : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
 
-          {activeGames.length > 0 && (() => {
-            // All in-progress games (yours + others'). Yours pinned to the top;
-            // each sub-list is already updated_at-desc from the backend.
-            const mine = activeGames.filter((g) => g.player1_id === myId || g.player2_id === myId);
-            const others = activeGames.filter((g) => g.player1_id !== myId && g.player2_id !== myId);
-            const ordered = [...mine, ...others];
-            return (
-              <>
-                <div className="coc-section-hd">
-                  <div className="coc-section-title">Active Games</div>
-                  <span className="coc-muted">{activeGames.length} in progress</span>
-                </div>
-                {ordered.map((g) => {
+            <div className="coc-lobby-col">
+              <div className="coc-section-hd">
+                <div className="coc-section-title">Active Games</div>
+                <span className="coc-muted">{activeGames.length} in progress</span>
+              </div>
+              {activeGames.length === 0 ? (
+                <div className="coc-empty">No games in progress.</div>
+              ) : (() => {
+                // All in-progress games (yours + others'). Yours pinned to the top;
+                // each sub-list is already updated_at-desc from the backend.
+                const mine = activeGames.filter((g) => g.player1_id === myId || g.player2_id === myId);
+                const others = activeGames.filter((g) => g.player1_id !== myId && g.player2_id !== myId);
+                const ordered = [...mine, ...others];
+                return ordered.map((g) => {
                   const isMine = g.player1_id === myId || g.player2_id === myId;
                   const youP1 = g.player1_id === myId;
                   const turnName = g.turn === g.player1_id ? g.player1_name
@@ -1112,10 +1132,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       </div>
                     </div>
                   );
-                })}
-              </>
-            );
-          })()}
+                });
+              })()}
+            </div>
+          </div>
         </div>
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
