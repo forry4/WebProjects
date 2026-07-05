@@ -536,7 +536,6 @@ async def _handle_start(ws, room_id, pid):
 
 
 async def _handle_move(ws, room_id, pid, msg):
-    t0 = time.perf_counter()   # TEMP perf: measure server-side processing (lock + apply + build)
     bot_turn = False
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
@@ -555,10 +554,10 @@ async def _handle_move(ws, room_id, pid, msg):
         bot_turn = _bot_should_act(room)
     # Broadcast the new state FIRST so the client sees its move immediately, THEN
     # persist. The save is a remote (Turso) write; running it off the event loop
-    # (see save_game) keeps it from blocking the broadcast/flush.
-    room_state = mk_room_state(room_id)
-    srv_ms = round((time.perf_counter() - t0) * 1000, 1)  # TEMP perf: receipt -> just before broadcast
-    await broadcast_room(room_id, {"type": "room_update", "room": room_state, "srv_ms": srv_ms})
+    # (see save_game) keeps it from blocking the broadcast/flush. This cut the
+    # per-move round-trip from ~300-1600ms to ~90ms in production (the fresh
+    # per-save connection handshake was the lag; save_game now reuses one).
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
     save_game(room_id)
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))

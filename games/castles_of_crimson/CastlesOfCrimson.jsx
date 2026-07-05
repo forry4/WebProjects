@@ -685,10 +685,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [flyers, setFlyers] = useState([]);             // tile-move animations (depot->storage, storage->duchy)
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
-  // TEMP perf instrumentation — logs per-move round-trip / render / paint to the
-  // console so we can see whether the post-action delay is network or repaint.
-  // Remove once the latency question is answered. See the [CoC-perf] logs.
-  const perfMark = useRef(null);
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
@@ -716,13 +712,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (msg.type === "error") { setToast(msg.message || "error"); return; }
     const room = msg.room;
     if (!room) return;
-    // TEMP perf: on the FIRST room_update after my move, capture the round-trip.
-    const pm = perfMark.current;
-    if (msg.type === "room_update" && pm && pm.recvAt == null) {
-      pm.recvAt = performance.now();
-      pm.rtt = pm.recvAt - pm.sentAt;
-      pm.srv = msg.srv_ms;   // server processing time (receipt -> broadcast), if present
-    }
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
     if (tok) { try { localStorage.setItem(`coc_token_${rid}_${myId}`, tok); localStorage.setItem("coc_roomId", rid); } catch {} }
@@ -861,23 +850,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const ids = new Set(add.map((f) => f.id));
     setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 560);
   }, [game, me]);
-
-  // TEMP perf instrumentation: after the render triggered by my move's echo commits,
-  // log round-trip (click -> echo) vs render (echo -> React commit) vs paint (echo ->
-  // next frame). Tells us whether the felt delay is the network or the SVG repaint.
-  useEffect(() => {
-    const pm = perfMark.current;
-    if (!pm || pm.recvAt == null || pm.logged) return;
-    pm.logged = true;
-    const render = performance.now() - pm.recvAt;
-    requestAnimationFrame(() => {
-      const paint = performance.now() - pm.recvAt;
-      const net = pm.srv != null ? ` (server ${pm.srv}ms, network ~${(pm.rtt - pm.srv).toFixed(0)}ms)` : "";
-      // eslint-disable-next-line no-console
-      console.log(`[CoC-perf] ${pm.type || "move"}: round-trip ${pm.rtt.toFixed(0)}ms${net} | render ${render.toFixed(0)}ms | paint ${paint.toFixed(0)}ms`);
-      perfMark.current = null;
-    });
-  }, [roomData]);
   // Deselect a die once it's been used (its action applied) — adjust_die leaves
   // the die unused, so it stays selected.
   useEffect(() => {
@@ -948,7 +920,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const mv = (move) => {
     // Any action other than the undo itself means there's now something to undo.
     if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
-    perfMark.current = { sentAt: performance.now(), type: move?.type };  // TEMP perf: start round-trip clock
     send({ action: "move", move });
   };
 
