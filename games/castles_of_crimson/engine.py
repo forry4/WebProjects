@@ -294,7 +294,10 @@ def _log(game: dict, pid: str, mtype: str, **kw) -> None:
     rec = {"pid": pid, "type": mtype}
     rec.update(kw)
     game["moves"].insert(0, rec)
-    del game["moves"][50:]
+    # Keep the WHOLE game's log (records are tiny — {pid, type, +a few fields}) so the
+    # UI can scroll back to the opening. A full 2-player game is a few hundred entries;
+    # the generous cap is just a runaway guard, never hit in real play.
+    del game["moves"][2000:]
 
 
 def _free_storage(p: dict) -> bool:

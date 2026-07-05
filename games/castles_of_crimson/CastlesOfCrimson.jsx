@@ -490,6 +490,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-depot-pick,.coc-depot-pick *{cursor:pointer}
 .coc-depot-pick{animation:coc-pickpulse 1.1s ease-in-out infinite}
 @keyframes coc-pickpulse{0%,100%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 8px rgba(232,201,106,.35)}50%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 18px rgba(232,201,106,.75)}}
+/* A specific candidate tile in a depot (building-take): pulse its brightness so the
+   pickable tile is obvious. A ring/glow would be clipped by the hex clip-path, but a
+   brightness filter modifies the tile's own pixels, so it shows through the clip. */
+.coc-tile-pick{cursor:pointer;animation:coc-tilepick 1.1s ease-in-out infinite}
+@keyframes coc-tilepick{0%,100%{filter:brightness(1.05)}50%{filter:brightness(1.5)}}
 /* hexagon board layout */
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
@@ -620,7 +625,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
-.coc-log{max-height:150px;overflow:auto;font-size:.78rem;color:var(--text-dim)}
+.coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
@@ -1024,6 +1029,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (game.pending_kind === "ship_adjacent_depot" && shipCands.includes(d)) mv({ type: "ship_adjacent_take", depot: d });
   };
 
+  // Building take-a-tile (carpenter/church/etc): same board-picking style as the ship —
+  // click the depot holding the tile you want. A depot with exactly ONE candidate
+  // (the carpenter's building case) takes on a depot click; a depot holding TWO
+  // candidates (church: castle+monastery / mine+monastery) needs the specific tile
+  // clicked to disambiguate (handled in clickDepotTile).
+  const buildingPickMine = pendingMine && game?.pending_kind === "building_take_choice";
+  const buildingCands = buildingPickMine ? (game.pending?.ctx?.candidates || []) : [];
+  const buildingDepotCands = (d) => (game.depots[String(d)].hexes || []).filter((t) => buildingCands.includes(t.id)).map((t) => t.id);
+  const buildingPick = (id) => mv({ type: "building_take_choice", tile_id: id });
+
   const doTakeWorkers = () => {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
     else if (selDie != null) mv({ type: "take_workers", die_index: selDie });
@@ -1034,12 +1049,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   };
   // Tapping a tile you can't act on yet shows its description (mobile has no hover,
   // so this mirrors the PC title-tooltip — see also clickBlackTile).
-  const clickDepotTile = (depot, tile) => {
+  const clickDepotTile = (depot, tile, e) => {
     if (shipPickMine) return;   // clicking anywhere in a depot picks it (handled on the depot div)
-    if (!pendingMine && !myTurnRaw) { setToast(tileDesc(tile, board)); return; }
-    if (pendingMine && game.pending_kind === "building_take_choice") {
-      mv({ type: "building_take_choice", tile_id: tile.id }); return;
+    if (buildingPickMine) {
+      // Take this exact tile if it's a candidate (disambiguates a 2-candidate depot);
+      // stop the click from also hitting the depot's own pick handler.
+      if (buildingCands.includes(tile.id)) { if (e) e.stopPropagation(); buildingPick(tile.id); }
+      else setToast(tileDesc(tile, board));
+      return;
     }
+    if (!pendingMine && !myTurnRaw) { setToast(tileDesc(tile, board)); return; }
     if (inExtra) { if (extraValue == null) { setToast(tileDesc(tile, board)); return; } mv({ type: "extra_action", value: extraValue, sub: { type: "take_hex", depot, tile_id: tile.id } }); return; }
     if (selDie == null) { setToast(tileDesc(tile, board)); return; }
     mv({ type: "take_hex", die_index: selDie, depot, tile_id: tile.id });
@@ -1479,17 +1498,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
                   : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
               }
-              const pickable = shipPickMine && shipCands.includes(d);
+              const bCands = buildingPickMine ? buildingDepotCands(d) : [];
+              const pickable = shipPickMine ? shipCands.includes(d) : (buildingPickMine && bCands.length > 0);
+              const depotPick = shipPickMine ? () => shipPick(d)
+                : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               return (
                 <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
-                  onClick={pickable ? () => shipPick(d) : undefined}
-                  title={pickable ? `Take all goods from depot ${d}` : undefined}>
+                  onClick={depotPick}
+                  title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : `Take the highlighted tile from depot ${d}`) : undefined}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
-                      <div key={slot.tile.id} className="coc-tile" style={{ background: TILE_HEX[slot.tile.color] }}
-                        title={tileDesc(slot.tile, board)} onClick={() => clickDepotTile(d, slot.tile)}>
+                      <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
+                        title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
                         <TileArt tile={slot.tile} px={HEX_W} />
                       </div>
                     ) : (
@@ -1642,7 +1664,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-panel">
           <h3>Log</h3>
           <div className="coc-log">
-            {(game.moves || []).slice(0, 15).map((m, i) => (
+            {(game.moves || []).map((m, i) => (
               <div key={i}>{players[m.pid] || m.pid} {moveText(m)}{m.vp ? ` (+${m.vp} VP)` : ""}</div>
             ))}
           </div>
@@ -1761,7 +1783,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
       return null;
     };
     return (
-      <Modal title="Take a tile" desc="Choose a tile to take into storage.">
+      <Modal title="Take a tile" desc="Click a highlighted tile in a depot on the board (or a button below) to take it into storage." interactive>
         <div className="coc-modal-row">
           {ids.map((id) => { const t = find(id); if (!t) return null; return (
             <button key={id} className="coc-btn outline sm" onClick={() => mv({ type: "building_take_choice", tile_id: id })}>
