@@ -234,6 +234,76 @@ The real bot. Pure Python, no new prod deps; reuses the engine contract.
   over a PR. `gh` is not installed and `main` is checked out in the `forrestm_projects-ai` worktree,
   so from the primary worktree: branch off `origin/main`, make the change, then
   `git push origin <branch>:main` (fast-forwards `origin/main`); CI builds + publishes to the `gh-pages` branch + redeploys.
+  **Primary worktree is now ON `main`** (not `-ai`), so these small changes are just commit-on-main +
+  `git push origin main` (fetch/`0 0` ahead-behind first). Backend (`engine.py`/`ai.py`/`main.py`)
+  redeploys to Render; frontend (`.jsx`) publishes to gh-pages (CDN ~few min). After a backend push,
+  poll `/coc/health` + `/coc/games` (DB read) across the deploy window — Render's zero-downtime swap
+  keeps it 200 throughout for a clean deploy.
+
+### Session (July 2026) — dice UX, bonus-bar split, richer log, final-score display, bot flail fix
+UI/UX polish + one bot fix, all shipped to prod. Durable, non-obvious facts:
+- **`dice[pid]` now has four fields: `values` / `orig` / `used` / `adjusted`** (was just `values`/`used`).
+  `orig` = the rolled values; `adjusted` = per-die bools. Set together in `_begin_round`; all JSON-safe;
+  every reader defaults via `.get(..., [False,False])` / `.get("orig", values)` so old saved games load
+  fine. `_snapshot_turn` deep-copies the whole game, so undo is automatic. `ai._clone_game` copies both.
+- **Die-adjust WORKER REFUND (house rule beyond the base game).** `_h_adjust_die` charges the **net
+  distance from `orig`**: `delta = _adjust_cost(orig,to) − _adjust_cost(orig,frm)`, so nudging a die
+  back toward its roll **refunds** workers (`delta<0`) and moving toward the roll is allowed even at 0
+  workers (only `delta>0` is affordability-gated). `_adjust_cost` is a metric (min-wrap distance, ÷
+  per-worker for monastery-8), so a multi-step path is never cheaper than one direct jump — refunds make
+  "away then back" free. Frontend: the incremental **±1 buttons** stay (humans chain freely in the
+  engine); `adjustDelta(i,dir)` mirrors the cost model (incl. monastery-8 halving) to disable a button
+  only when that step is unaffordable, and tooltips say "refunds a worker" when moving toward the roll.
+- **Bot dice-flail fix (`ai._legal`) — the "adjust a die to 6, then take 2 workers" waste.** The AI
+  prunes, for an already-`adjusted` die, BOTH re-adjusting it AND `take_workers` with it — both are
+  strictly dominated (`take_workers` ignores the die value, so paying workers to set it first is pure
+  waste; a 2nd adjust is never cheaper than one jump). Pruning `take_workers` makes a pointless adjust
+  **self-defeating in the search**, so the bot stops doing it. Strictly-correct (never removes an optimal
+  line); **humans unaffected** (engine-level rules unchanged — the prune is AI-only). **REJECTED (do not
+  relitigate):** valuing workers at `*0.5` instead of the floored `//2` in `ai._value` — an A/B showed it
+  made the flail WORSE (15 vs 6 wasteful adjacencies across 6 games) and increased total adjusts;
+  reverted. The eval is NOT the lever here; the legal-move prune is.
+- **Turn-start roll log:** `engine._log_roll(game, pid)` logs `{type:"roll", d0, d1}` at each turn start
+  (`_begin_round` for the start player, `_advance_turn` for the next). Frontend `moveText` → "X rolled a
+  A and a B". Logs are DISPLAY-only records (never re-applied), so new types are harmless.
+- **Phase-end income log:** `_end_of_phase` logs per player `mine_income {silver,mines}` +
+  `monastery_income {workers,effect=2}` (monastery-2's worker-per-mine), then a `phase_end {phase}`
+  DIVIDER with **`pid=None`**. `vp_breakdown` is unaffected (it skips any record without a `vp` field, and
+  `phase_end`/income carry none). Frontend renders the income lines normally and the divider as a centered
+  ".coc-log-phase" "— Phase X ended —"; the log render **guards the player-name prefix** (`m.pid ? … : ""`)
+  for the pid-less divider.
+- **Bonus bar SPLIT into three groups:** "Region phase bonus +N" (the per-phase time bonus,
+  `PHASE_BONUS` A10→B8→C6→D4→E2) · "Region size bonus" (the fixed `AREA_SCORE` scale 1/3/6/10/15/21/28/36
+  by region size) · "Color bonuses" (the existing large/small color-completion chips). `PHASE_BONUS`/
+  `AREA_SCORE` are JSX-mirrored constants of `tiles.*`. Region completion pays size + phase, so both are
+  now surfaced.
+- **Spelling:** all UI text is "color" (was "colour"), including the backend `vp_breakdown` "Color bonus"
+  label. **Goods are ALWAYS named by number** ("#N goods"), never by color — the last offender was the
+  castle bonus (`extra_action`) modal's "Sell {color}" button, now a numbered goods token.
+- **Final score at game end:** the top status-bar score shows `roomData.final_scores[pid]` (leftover
+  goods/silver/workers + monastery end-game bonuses folded in) once `over`, and live placed VP during
+  play. `mk_room_state` already ships `final_scores` + `vp_breakdown` every update (also feeds the
+  click-to-open mid-game breakdown).
+- **Rendering gotcha (recap — do not regress):** the gold rim on **legal-placement spaces AND placed
+  tiles** is drawn as a **top-most `pointer-events:none` stroke-only `<polygon>`** (over the socket/raise
+  gradient). A stroke on the BASE polygon gets its inner half painted over by the gradient → pale-top /
+  dark-bottom asymmetric rim. The base polygon still catches clicks, so placement is unaffected.
+
+### Session (June-July 2026) — earlier CoC polish now on prod (context)
+Shipped in prior sessions; recorded here since they weren't in this doc: a **`goods_pick` pending kind**
+(when a depot offers more new goods TYPES than you have free goods slots, you pick which — floating modal
++ pulsing depot tokens); an **in-game VP review** (`VpReview` component, click the score any time — mid-game
+shows end-of-game bonuses faded until `over`); a lobby **History** section with per-game **Review** (HTTP
+`GET /coc/games/{id}/review`, read-only, synthesizes `roomData`, `reviewOnly` guards localStorage); **worker/
+silver visual tokens** with spend/gain flyer animations (`data-workers`/`data-silver` anchors, `resFly`);
+goods named "#N goods"; **1s bot move pacing** (`_BOT_MOVE_DELAY`); auto-open View Opponent on the bot's turn.
+- **OUTAGE LESSON (do not regress):** a rewrite of `_schedule_bot_turn` to animate a bot's *consecutive*
+  turns (ship → retake first player) fully on the View-Opponent screen **hung the backend event loop** and
+  took prod down. Root cause: the finisher's **synchronous `bot.play_turn` loop runs UNDER `ROOM_LOCK` on
+  the event-loop thread**; looping it up to ~12× per bot turn + ~12 DB saves/turn starved the single-process
+  loop. Reverted (`git revert`). **Keep `_schedule_bot_turn` as the single-turn plan-then-apply version**
+  (MCTS in the thread pool, apply move-by-move with per-move broadcast + `_BOT_MOVE_DELAY`); never loop
+  heavy synchronous engine work under the lock. This is the same class of hazard as any lock-held blocking.
 
 ---
 
