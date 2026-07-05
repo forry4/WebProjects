@@ -797,17 +797,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     (oPlayer?.storage || []).forEach((t) => { if (t) oppTiles[t.id] = t; });
     Object.values(oPlayer?.duchy || {}).forEach((t) => { if (t) oppTiles[t.id] = t; });
     const oppTileIds = new Set(Object.keys(oppTiles));
-    const movesLen = (game.moves || []).length;
     const prev = animSnap.current;
-    animSnap.current = { loc, storageIds, duchyIds, movesLen, depotGoods, myGoods, oppTileIds };
+    animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppTileIds };
     if (!prev) return;                                  // first paint: nothing to animate
-    const adv = movesLen - prev.movesLen;
-    // TEMP [CoC-anim] diagnostic — catch the case where my own take/place is skipped
-    // by the adv guard (remove once the "no animations" report is resolved).
-    const _ns0 = (me.storage || []).filter((t) => !prev.storageIds.has(t.id)).length;
-    const _nd0 = Object.values(me.duchy || {}).filter((t) => t && !prev.duchyIds.has(t.id)).length;
-    if ((_ns0 || _nd0) && (adv < 1 || adv > 6)) console.log("[CoC-anim] SKIPPED by adv guard", { adv, newStore: _ns0, newDuchy: _nd0, movesLen, prevMoves: prev.movesLen });
-    if (adv < 1 || adv > 6) return;                     // skip initial load / reconnect catch-up
     const rectOf = (spec) => {
       if (!spec) return null;
       const sel = spec.kind === "depot" ? `[data-depot="${spec.d}"]`
@@ -873,16 +865,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         if (f) add.push(f);
       }
     }
-    // TEMP [CoC-anim] diagnostic — for each of my new tiles, whether the source (depot)
-    // and destination anchors resolved, and whether a flyer was actually added.
-    try {
-      const ns = (me.storage || []).filter((t) => !prev.storageIds.has(t.id));
-      const nd = Object.values(me.duchy || {}).filter((t) => t && !prev.duchyIds.has(t.id));
-      if (ns.length || nd.length) console.log("[CoC-anim]", { adv, newStore: ns.length, newDuchy: nd.length, added: add.length,
-        store: ns.map((t) => ({ prevLoc: prev.loc[t.id], srcOK: !!rectOf(prev.loc[t.id]), slotOK: !!rectOf({ kind: "slot", i: (me.storage || []).indexOf(t) }) })),
-        duchy: nd.map((t) => ({ prevLoc: prev.loc[t.id], srcOK: !!rectOf(prev.loc[t.id]) })) });
-    } catch (e) { console.log("[CoC-anim] err", e && e.message); }
     if (!add.length) return;
+    // Skip a flood of changes (reconnect / initial catch-up) so we animate only normal,
+    // incremental updates. NB: we can't gate on the move-log length — engine.py caps
+    // game["moves"] at 50, so its delta is 0 for every move after the 50th, which had
+    // silently disabled ALL animations mid/late game.
+    if (add.length > 8) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
     setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 560);
