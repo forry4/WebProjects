@@ -154,13 +154,19 @@ def _legal(state, pid):
     moves = engine.legal_moves(state, pid)
     d = state["dice"].get(pid)
     if d is not None:
-        # Never re-adjust a die the bot has already set this turn — one direct jump
-        # reaches any value, so a 2nd adjust only wastes workers (the "bot flails on
-        # the dice" bug). Humans keep the incremental ±1 UI; this caps only the AI.
+        # For a die the bot has already adjusted this turn, drop two wasteful moves:
+        #   • re-adjusting it (one direct jump reaches any value — a 2nd only burns
+        #     workers), and
+        #   • taking workers with it — take_workers ignores the die's VALUE, so having
+        #     spent workers to set that value first is pure waste. Pruning it makes a
+        #     pointless adjust self-defeating in the search, so the bot stops doing the
+        #     "adjust a die, then take 2 workers with it" flail from the logs.
+        # Humans keep the incremental ±1 UI; this caps only the AI.
         adjusted = d.get("adjusted")
         if adjusted and any(adjusted):
             moves = [m for m in moves
-                     if not (m.get("type") == "adjust_die" and adjusted[m.get("die_index", 0)])]
+                     if not (m.get("type") in ("adjust_die", "take_workers")
+                             and adjusted[m.get("die_index", 0)])]
         if not (d["used"][0] and d["used"][1]):
             non_end = [m for m in moves if m.get("type") != "end_turn"]
             if non_end:

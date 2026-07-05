@@ -123,6 +123,11 @@ def test_ai_legal_drops_readjust_of_adjusted_die():
     adj = [m for m in moves if m.get("type") == "adjust_die"]
     assert all(m["die_index"] == 1 for m in adj), adj   # never die 0 again
     assert any(m["die_index"] == 1 for m in adj)        # die 1 (unadjusted) still open
+    # take_workers with the already-adjusted die 0 is pruned too (adjust then take_workers
+    # is pure waste); die 1's take_workers stays.
+    tw = [m for m in moves if m.get("type") == "take_workers"]
+    assert all(m["die_index"] == 1 for m in tw), tw
+    assert any(m["die_index"] == 1 for m in tw)
 
 
 def test_ai_never_readjusts_within_a_planned_turn():

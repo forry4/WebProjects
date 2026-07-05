@@ -145,6 +145,7 @@ def _begin_round(game: dict) -> None:
     game["black_depot_used_this_turn"] = False
     game["m6_used_this_turn"] = False
     game["ship_advance_pending"] = 0
+    _log_roll(game, game["turn"])
     _snapshot_turn(game)
 
 
@@ -379,6 +380,13 @@ def _log(game: dict, pid: str, mtype: str, **kw) -> None:
     del game["moves"][2000:]
 
 
+def _log_roll(game: dict, pid: str) -> None:
+    """Log the dice a player starts their turn with (their round-start roll)."""
+    d = game["dice"].get(pid)
+    if d:
+        _log(game, pid, "roll", d0=d["values"][0], d1=d["values"][1])
+
+
 def _free_storage(p: dict) -> bool:
     return len(p["storage"]) < 3
 
@@ -465,6 +473,7 @@ def _advance_turn(game: dict) -> None:
         game["black_depot_used_this_turn"] = False
         game["m6_used_this_turn"] = False
         game["ship_advance_pending"] = 0
+        _log_roll(game, game["turn"])
         _snapshot_turn(game)
     else:
         _advance_round(game)
