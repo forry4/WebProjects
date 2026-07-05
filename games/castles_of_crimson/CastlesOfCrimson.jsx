@@ -802,6 +802,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     animSnap.current = { loc, storageIds, duchyIds, movesLen, depotGoods, myGoods, oppTileIds };
     if (!prev) return;                                  // first paint: nothing to animate
     const adv = movesLen - prev.movesLen;
+    // TEMP [CoC-anim] diagnostic — catch the case where my own take/place is skipped
+    // by the adv guard (remove once the "no animations" report is resolved).
+    const _ns0 = (me.storage || []).filter((t) => !prev.storageIds.has(t.id)).length;
+    const _nd0 = Object.values(me.duchy || {}).filter((t) => t && !prev.duchyIds.has(t.id)).length;
+    if ((_ns0 || _nd0) && (adv < 1 || adv > 6)) console.log("[CoC-anim] SKIPPED by adv guard", { adv, newStore: _ns0, newDuchy: _nd0, movesLen, prevMoves: prev.movesLen });
     if (adv < 1 || adv > 6) return;                     // skip initial load / reconnect catch-up
     const rectOf = (spec) => {
       if (!spec) return null;
@@ -868,6 +873,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         if (f) add.push(f);
       }
     }
+    // TEMP [CoC-anim] diagnostic — for each of my new tiles, whether the source (depot)
+    // and destination anchors resolved, and whether a flyer was actually added.
+    try {
+      const ns = (me.storage || []).filter((t) => !prev.storageIds.has(t.id));
+      const nd = Object.values(me.duchy || {}).filter((t) => t && !prev.duchyIds.has(t.id));
+      if (ns.length || nd.length) console.log("[CoC-anim]", { adv, newStore: ns.length, newDuchy: nd.length, added: add.length,
+        store: ns.map((t) => ({ prevLoc: prev.loc[t.id], srcOK: !!rectOf(prev.loc[t.id]), slotOK: !!rectOf({ kind: "slot", i: (me.storage || []).indexOf(t) }) })),
+        duchy: nd.map((t) => ({ prevLoc: prev.loc[t.id], srcOK: !!rectOf(prev.loc[t.id]) })) });
+    } catch (e) { console.log("[CoC-anim] err", e && e.message); }
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
