@@ -102,6 +102,7 @@ def _clone_game(g):
         "ship_advance_pending": g.get("ship_advance_pending", 0),
         "start_player": g["start_player"], "white_die": g["white_die"],
         "dice": {pid: {"values": list(dv["values"]), "used": list(dv["used"]),
+                       "orig": list(dv.get("orig", dv["values"])),
                        "adjusted": list(dv.get("adjusted", (False, False)))}
                  for pid, dv in g["dice"].items()},
         "turn": g["turn"],

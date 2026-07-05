@@ -207,6 +207,58 @@ def test_adjust_die_rejects_insufficient_workers():
     assert not ok and "workers" in err
 
 
+def test_adjust_die_refunds_when_returning_toward_roll():
+    g = fresh()
+    g["dice"]["p1"] = {"values": [4, 1], "orig": [4, 1], "used": [False, False], "adjusted": [False, False]}
+    g["players"]["p1"]["workers"] = 3
+    # roll was 4; move to 5 costs 1 worker
+    assert engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 5})[0]
+    assert g["players"]["p1"]["workers"] == 2
+    # move back toward the roll (5 -> 4) refunds the worker
+    assert engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 4})[0]
+    assert g["dice"]["p1"]["values"][0] == 4
+    assert g["players"]["p1"]["workers"] == 3          # fully refunded
+
+
+def test_adjust_die_cost_is_net_distance_from_roll():
+    g = fresh()
+    g["dice"]["p1"] = {"values": [3, 1], "orig": [3, 1], "used": [False, False], "adjusted": [False, False]}
+    g["players"]["p1"]["workers"] = 5
+    engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 5})   # 2 away -> pay 2
+    assert g["players"]["p1"]["workers"] == 3
+    engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 4})   # now 1 away -> refund 1
+    assert g["players"]["p1"]["workers"] == 4
+    engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 6})   # now 3 away -> pay 2 more
+    assert g["players"]["p1"]["workers"] == 2          # net 3 invested (dist roll->6)
+
+
+def test_adjust_die_toward_roll_allowed_at_zero_workers():
+    g = fresh()
+    g["dice"]["p1"] = {"values": [6, 1], "orig": [4, 1], "used": [False, False], "adjusted": [False, False]}
+    g["players"]["p1"]["workers"] = 0                  # spent it all getting 2 away from the roll
+    ok, err = engine.apply_move(g, "p1", {"type": "adjust_die", "die_index": 0, "to": 5})
+    assert ok, err                                     # moving back toward the roll refunds, so allowed
+    assert g["players"]["p1"]["workers"] == 1
+
+
+def test_end_of_phase_logs_income():
+    from .conftest import complete_setup
+    g = engine.new_game(["p1", "p2"], seed=1)
+    complete_setup(g)
+    g["players"]["p1"]["mines_count"] = 2
+    g["players"]["p1"]["monastery_effects"] = [2]      # worker per mine at phase end
+    g["players"]["p2"]["mines_count"] = 0
+    g["moves"] = []
+    silver0, workers0 = g["players"]["p1"]["silver"], g["players"]["p1"]["workers"]
+    engine._end_of_phase(g)
+    assert g["players"]["p1"]["silver"] == silver0 + 2
+    assert g["players"]["p1"]["workers"] == workers0 + 2
+    types = [m["type"] for m in g["moves"]]
+    assert types.count("mine_income") == 1             # only p1 has mines
+    assert "monastery_income" in types and "phase_end" in types
+    assert next(m for m in g["moves"] if m["type"] == "phase_end")["pid"] is None
+
+
 # ── turn ownership ────────────────────────────────────────────────────────────
 def test_not_your_turn():
     g = fresh()

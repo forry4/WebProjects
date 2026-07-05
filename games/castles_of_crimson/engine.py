@@ -127,7 +127,10 @@ def _begin_round(game: dict) -> None:
 
     rng = _make_rng(game)
     for pid in game["order"]:
-        game["dice"][pid] = {"values": [rng.randint(1, 6), rng.randint(1, 6)],
+        rolled = [rng.randint(1, 6), rng.randint(1, 6)]
+        # `orig` remembers the rolled value so die-adjust cost is the NET distance from
+        # the roll — nudging a die back toward its roll refunds the workers you spent.
+        game["dice"][pid] = {"values": list(rolled), "orig": list(rolled),
                              "used": [False, False], "adjusted": [False, False]}
     game["white_die"] = rng.randint(1, 6)
     _save_rng(game, rng)
@@ -322,7 +325,7 @@ def vp_breakdown(game: dict, pid: str) -> list[dict]:
         if typ == "area_complete":
             label = f"Completed a size-{m.get('size', '?')} region"
         elif typ == "bonus_tile":
-            label = f"Colour bonus ({m.get('color', '?')})"
+            label = f"Color bonus ({m.get('color', '?')})"
         elif typ == "livestock_score":
             label = f"Livestock scored ({m.get('animal', '?')})"
         elif typ == "sell_goods":
@@ -477,12 +480,19 @@ def _advance_round(game: dict) -> None:
 
 
 def _end_of_phase(game: dict) -> None:
-    """Award each player 1 silver per mine (and a worker per mine with effect 2)."""
-    for p in game["players"].values():
+    """Award each player 1 silver per mine (and a worker per mine with effect 2).
+
+    Logs each income source so the between-phase gains show up in the move log."""
+    ending = game.get("phase_letter")
+    for pid, p in game["players"].items():
         mines = p["mines_count"]
-        p["silver"] += mines
-        if 2 in p["monastery_effects"]:
-            p["workers"] += mines
+        if mines:
+            p["silver"] += mines
+            _log(game, pid, "mine_income", silver=mines, mines=mines)
+            if 2 in p["monastery_effects"]:
+                p["workers"] += mines
+                _log(game, pid, "monastery_income", workers=mines, effect=2)
+    _log(game, None, "phase_end", phase=ending)
 
 
 def _advance_phase(game: dict) -> None:
@@ -850,25 +860,29 @@ def _h_adjust_die(game, pid, move):
     i = move.get("die_index")
     if i not in (0, 1):
         return False, "bad die_index"
-    if game["dice"][pid]["used"][i]:
+    d = game["dice"][pid]
+    if d["used"][i]:
         return False, "die already used"
     to = move.get("to")
     if to not in (1, 2, 3, 4, 5, 6):
         return False, "bad target value"
-    frm = game["dice"][pid]["values"][i]
+    frm = d["values"][i]
     if to == frm:
         return False, "die already shows that value"
-    cost = _adjust_cost(game, pid, frm, to)
-    if p["workers"] < cost:
+    orig = d.get("orig", d["values"])[i]
+    # Cost is the NET distance from the die's originally-rolled value, so nudging a die
+    # back toward its roll REFUNDS workers (delta < 0) you paid moving it away.
+    delta = _adjust_cost(game, pid, orig, to) - _adjust_cost(game, pid, orig, frm)
+    if delta > 0 and p["workers"] < delta:
         return False, "not enough workers"
-    p["workers"] -= cost
-    game["dice"][pid]["values"][i] = to
+    p["workers"] -= delta
+    d["values"][i] = to
     # Bookkeeping: mark this die as adjusted this turn. Humans may keep nudging a die
     # (the ±1 UI walks it a step at a time), but the AI reads this flag to avoid
-    # wastefully re-adjusting a die it has already set (a 2nd adjust is never cheaper
-    # than one direct jump, so re-adjusting only burns workers).
-    game["dice"][pid].setdefault("adjusted", [False, False])[i] = True
-    _log(game, pid, "adjust_die", die_index=i, to=to, workers=cost)
+    # wastefully re-adjusting a die it has already set (with refunds it can reach any
+    # value in one priced jump).
+    d.setdefault("adjusted", [False, False])[i] = True
+    _log(game, pid, "adjust_die", die_index=i, to=to, workers=delta)
     return True, None
 
 
