@@ -65,7 +65,7 @@ into `games/spender/ai/` by default.
 ### Serving
 - Backend: `uvicorn games.spender.main:app --reload` (port 8000)
 - Dev frontend: `cd webapp && npm run dev` (port 5173, proxies /ws to 8000) — repo-root, neutral
-- Production: GitHub Pages serves the **`gh-pages` branch** (since 2026-06-24; was `main`/`docs`), which CI (`deploy-pages.yml`) **builds + force-pushes** on every frontend push to `main`. **Never hand-build/commit the bundle** — commit source only and let CI deploy. CI no longer commits to `main` (that was the local-main drift source); `docs/` is now vestigial. See "Build + deploy steps" below.
+- Production: GitHub Pages is served via the **official Actions pipeline** (Pages source = "GitHub Actions", since 2026-07-05; was the `gh-pages` branch, was `main`/`docs`). CI (`deploy-pages.yml`) **builds + publishes via `upload-pages-artifact`/`deploy-pages`** on every frontend push to `main` — one run we own (no more flaky gh-pages double-hop; re-run the `deploy` job if it ever hiccups). **Never hand-build/commit the bundle** — commit source only and let CI deploy. `gh-pages` branch + `docs/` are kept only as rollback nets. See "Build + deploy steps" below.
 
 ---
 
@@ -2835,33 +2835,53 @@ From a strong human player; drives the structural features (not just weights —
 
 ## Build + deploy steps (production)
 
-**The build is CI-owned and published to the `gh-pages` branch — NEVER build or commit it by hand.**
-As of **2026-06-24** the Pages source is **`gh-pages` / root** (repo Settings → Pages), NOT the
-old `main` / `/docs`. The `.github/workflows/deploy-pages.yml` Action fires on every push to `main`
-touching the frontend (`webapp/**`, `games/spender/**`, `games/castles_of_crimson/**`,
-`games/wherewolf/**`, `books/**`, `shared/**`): it builds the **top-level `webapp/`** (with
-`VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in) and **force-pushes `webapp/dist/` to the
-`gh-pages` branch** (single-commit, `.nojekyll`). It does **NOT commit anything to `main`** — the old
-"`rm -rf docs/` + commit `docs/` to main `[skip ci]`" step was removed because those deploy commits
-advanced `origin/main` on every frontend push and were a constant source of local-`main` drift (and
-the push-rejected → rebase → minified-bundle conflict loop). A push to `gh-pages` does NOT re-trigger
-the workflow (it only watches `main`), so there's no deploy loop and no `[skip ci]` needed.
+**The build is CI-owned — NEVER build or commit the bundle by hand.**
+As of **2026-07-05** the Pages source is **"GitHub Actions"** (`build_type=workflow`), NOT the old
+`gh-pages` branch and NOT `main`/`docs`. The `.github/workflows/deploy-pages.yml` Action fires on
+every push to `main` touching the frontend (`webapp/**`, `games/spender/**`,
+`games/castles_of_crimson/**`, `games/wherewolf/**`, `books/**`, `shared/**`, or the workflow
+itself): a **`build` job** builds the top-level `webapp/` (with
+`VITE_WS_URL=wss://splendid-nelz.onrender.com/ws` baked in), runs the smoke gate, and uploads
+`webapp/dist/` via `actions/upload-pages-artifact`; a **`deploy` job** publishes it via
+`actions/deploy-pages` (the `github-pages` environment). It does **NOT commit anything to `main`** and
+**NOT push to any branch**.
 
-**`docs/` is now VESTIGIAL** — kept on `main` only as a rollback safety net (flip Pages source back to
-`main` / `/docs` to revert). Once the gh-pages flow is trusted, `git rm -r docs/` it (+ gitignore).
+**Why this replaced the gh-pages double-hop (2026-07-05 — DO NOT regress to force-pushing gh-pages).**
+The old flow force-pushed `dist/` to a `gh-pages` branch, which then triggered a **SEPARATE,
+GitHub-managed "pages build and deployment" run** whose **Deploy step is outside our control and
+repeatedly FLAKED** — the build succeeded and gh-pages held the new bundle, but the native Deploy step
+failed, so the **live site silently served a STALE bundle** (the "I don't see my changes" symptom).
+`rerun-failed-jobs` on that native run was **unreliable** (it re-failed twice in a row); the only
+reliable recovery was a fresh `POST /repos/forry4/forry4.github.io/pages/builds`. The Actions-based
+flow is a **single run we own**: build + deploy are both jobs in `deploy-pages.yml`, so **if the deploy
+ever flakes, just re-run this workflow's `deploy` job** (Actions UI or
+`POST /actions/runs/<id>/rerun-failed-jobs`) — it retries the same official deploy path. `concurrency:
+group: pages, cancel-in-progress: false` queues a rapid second push instead of aborting a publish.
+
+**Rollback to the old flow** (only if the Actions flow ever breaks): flip Settings → Pages → Source
+back to **`gh-pages` / root** (`PUT /repos/.../pages -d '{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'`)
+and `git revert` this workflow to the force-push-gh-pages version. The **`gh-pages` branch is left
+intact** as that safety net (last legacy bundle). **`docs/` is also still vestigial** (older rollback net).
+
+**Deploy verification (recommended after a frontend push):** poll the `deploy-pages.yml` run to
+`completed success` (both `build` + `deploy` jobs), then confirm the live bundle hash changed:
+`curl -s https://forry4.github.io/index.html | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'`. With the
+Actions flow there is **no second native run to check** — if `deploy-pages.yml` is green, the site is
+published. (Token for the API, if needed: `printf "protocol=https\nhost=github.com\n\n" | git
+credential fill | grep '^password=' | cut -d= -f2-`.)
 
 **Frontend deploy = commit source only:**
 ```bash
-# edit games/spender/Spender.jsx (do NOT npm run build, do NOT touch docs/)
+# edit games/spender/Spender.jsx (do NOT npm run build, do NOT touch docs/ or gh-pages)
 git sync-main                      # ff the main worktree to origin/main first (global alias)
 git add games/spender/Spender.jsx
 git commit -m "feat(ui): ..."
-git push                           # CI builds + publishes to gh-pages (~2-3 min)
+git push                           # deploy-pages.yml builds + publishes via Actions (~2-3 min)
 ```
-The two deploy workflows: **deploy-pages.yml** (frontend → builds + publishes to the `gh-pages`
-branch → GitHub Pages) and **deploy-render.yml** (backend → Render). Backend (`main.py` etc.) also
-deploys on push to main. `npm run build` locally is only for *verifying a build compiles* — discard
-the `dist/`, never copy it into `docs/`.
+The two deploy workflows: **deploy-pages.yml** (frontend → builds + publishes via the official Pages
+Actions pipeline) and **deploy-render.yml** (backend → Render). Backend (`main.py` etc.) also deploys
+on push to main. `npm run build` locally is only for *verifying a build compiles* — discard the
+`dist/`, never copy it anywhere.
 
 **`git sync-main` (global alias)** ff's the primary main worktree to `origin/main` from anywhere
 (`git -C "<main-worktree>" fetch origin && merge --ff-only origin/main`). Local `main` carries no
