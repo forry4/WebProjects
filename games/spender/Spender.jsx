@@ -1995,7 +1995,9 @@ export default function SpenderApp() {
 			setRoomId(id);
 			setRoomData({
 				room_id: id,
-				players: { [myId]: (authUser?.name || "You"), [PUZ_OPP]: puz.opponent || "S" },
+				// name the opponent "AI (X)" so displayName maps it to the persona ("Nina (AI)" etc.),
+				// not the bare variant code
+				players: { [myId]: (authUser?.name || "You"), [PUZ_OPP]: `AI (${puz.opponent || "S"})` },
 				status: "playing",
 				game: { ...relabelGame(puz.steps[0].snapshot, heroPid), moves: [] },
 			});
@@ -3149,7 +3151,7 @@ export default function SpenderApp() {
 							<div className="puzzle-won-sub">
 								{puzzle?.kind === "advantage"
 									? <>The only move: <b>{moveLabel(puzzle.steps[0].move)}</b> · N eval <b>{fmtEval(puzMoveEval(puzzle.steps[0].move) ?? puzzle?.meta?.best_eval)}</b></>
-									: <>You beat S, {game.players?.[myId] ? totalPoints(game.players[myId].purchased, game.players[myId].nobles) : 0}{" – "}{game.players?.[PUZ_OPP] ? totalPoints(game.players[PUZ_OPP].purchased, game.players[PUZ_OPP].nobles) : 0}</>}
+									: <>You beat {aiPersona(puzzle?.opponent || "S")}, {game.players?.[myId] ? totalPoints(game.players[myId].purchased, game.players[myId].nobles) : 0}{" – "}{game.players?.[PUZ_OPP] ? totalPoints(game.players[PUZ_OPP].purchased, game.players[PUZ_OPP].nobles) : 0}</>}
 								{puzAttempts > 1 ? `  ·  ${puzAttempts} attempts` : ""}
 							</div>
 							<div className="puzzle-won-btns">
