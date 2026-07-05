@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.26
+// @version      0.9.29
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -40,11 +40,13 @@
     STEP_MS:    480,    // base gap between in-modal clicks (a little jitter is added) — raise if the site lags
     HOVER_MS:   160,    // pause after a priming hover (pointermove) before the click — lets the canvas engine
                         //   process the new hover target on its next frame so the click isn't dropped (1st-gem fix)
-    HOLD_MS:    1600,   // press-and-hold duration for the Reserve button — raise if a reserve doesn't register
+    HOLD_MS:    2200,   // press-and-hold duration for the Reserve button (kept ALIVE with pointermoves) — raise if a reserve doesn't register
     MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
     MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
     MINIMIZED:  false,  // collapse the overlay to just its title bar (toggle from the panel; persisted)
+    LOG_CHAT:   true,   // capture in-game chat messages into each game log (for bot-suggestion mining)
+    CHAT_COLL:  '',     // spendee chat collection name; blank = auto-detect (see chatProbe/listCollections)
     REGULAR_JOB: 'SPENDEE_REGULAR',
   };
 
@@ -1007,16 +1009,28 @@
     if (!cv) { console.warn('[WWSD] no board canvas'); return; }
     const r = cv.getBoundingClientRect();
     const x = r.left + fx * r.width, y = r.top + fy * r.height;
-    const down = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y,
-      screenX: x, screenY: y, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
-    try { cv.dispatchEvent(new PointerEvent('pointerover', down)); cv.dispatchEvent(new PointerEvent('pointerdown', down)); } catch (e) {}
-    cv.dispatchEvent(new MouseEvent('mousedown', down));
-    await sleep(ms);
-    const up = Object.assign({}, down, { buttons: 0 });
-    try { cv.dispatchEvent(new PointerEvent('pointerup', up)); } catch (e) {}
-    cv.dispatchEvent(new MouseEvent('mouseup', up));
-    cv.dispatchEvent(new MouseEvent('click', up));
-    console.log(`[WWSD] synthHold @frac(${fx},${fy}) ${ms}ms → client(${Math.round(x)},${Math.round(y)})`);
+    const ev = (ox, oy, buttons) => ({ bubbles: true, cancelable: true, composed: true, view: window,
+      clientX: x + ox, clientY: y + oy, screenX: x + ox, screenY: y + oy, button: 0, buttons,
+      pointerId: 1, pointerType: 'mouse', isPrimary: true });
+    // Prime hover + an initial move (some canvas engines only start tracking a pointer after a move),
+    // then press.
+    try { cv.dispatchEvent(new PointerEvent('pointerover', ev(0, 0, 0))); cv.dispatchEvent(new PointerEvent('pointermove', ev(0, 0, 0))); } catch (e) {}
+    try { cv.dispatchEvent(new PointerEvent('pointerdown', ev(0, 0, 1))); } catch (e) {}
+    cv.dispatchEvent(new MouseEvent('mousedown', ev(0, 0, 1)));
+    // KEEP THE PRESS ALIVE: a perfectly static long-press is often ignored/cancelled by a canvas engine
+    // that drives its hold-to-reserve ring from pointer activity. Nudge the pointer a sub-pixel every
+    // ~90ms for the whole hold so the engine keeps counting. This is the usual "reserve won't register" fix.
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      await sleep(90);
+      const jx = (Math.random() - 0.5), jy = (Math.random() - 0.5);   // ~+-0.5px jitter, stays on the button
+      try { cv.dispatchEvent(new PointerEvent('pointermove', ev(jx, jy, 1))); } catch (e) {}
+      cv.dispatchEvent(new MouseEvent('mousemove', ev(jx, jy, 1)));
+    }
+    try { cv.dispatchEvent(new PointerEvent('pointerup', ev(0, 0, 0))); } catch (e) {}
+    cv.dispatchEvent(new MouseEvent('mouseup', ev(0, 0, 0)));
+    cv.dispatchEvent(new MouseEvent('click', ev(0, 0, 0)));
+    console.log(`[WWSD] synthHold @frac(${fx},${fy}) held ${Date.now() - t0}ms → client(${Math.round(x)},${Math.round(y)})`);
   }
 
   // Buy / reserve a face-up board card by engine slot: click the card → modal → Buy (click) / Reserve (hold).
@@ -1388,7 +1402,7 @@
   const _idbClear = () => _idbDo('readwrite', st => st.clear());
   async function logCount() { try { return (await _idbAll()).length; } catch (e) { return 0; } }
 
-  let _logGame = null, _loggedKey = null, _logBtn = null;
+  let _logGame = null, _loggedKey = null, _logBtn = null, _syncToggles = null;
   function updateLogBtn(n) { if (_logBtn) _logBtn.textContent = '⤓ Logs (' + n + ')'; }
   function _myUid() { try { return window.Meteor.userId(); } catch (e) { return null; } }
   function logStartGame(g, seat) {
@@ -1396,7 +1410,7 @@
       id: g._id + '@' + Date.now(), gameId: g._id, startedAt: Date.now(),
       winPoints: parseInt((g.settings || {}).targetScore) || 15,
       mySeat: seat, myUid: _myUid(), names: (g.players || []).map(p => (p || {}).name || null),
-      plies: [], partial: false,
+      plies: [], partial: false, chat: [],
     };
     _loggedKey = null;
   }
@@ -1425,6 +1439,88 @@
       visits: (r.visits || []).slice(), q: (r.q || []).map(r3),
     };
   }
+  // ── Chat capture (bot-suggestion mining) ──────────────────────────────────
+  // spendee is a Meteor app, so chat is a client-synced Minimongo collection (like `games`). We don't
+  // hard-code its name/schema (unknown): auto-detect a message-like collection, extract text/author/ts
+  // heuristically, associate rows to the CURRENT game (a field == game id, else the in-game time window
+  // — the bot is only ever in one game at a time), and fold new messages (deduped by _id) into the log's
+  // `chat` array. Override the collection with CONFIG.CHAT_COLL; discover the schema via chatProbe().
+  function _allCollections() {
+    try { return window.Meteor.connection._mongo_livedata_collections || {}; } catch (e) { return {}; }
+  }
+  const _CHAT_TEXT = ['message', 'text', 'body', 'content', 'msg', 'chat'];
+  const _CHAT_FROM = ['name', 'username', 'user', 'author', 'from', 'sender', 'playerName', 'userId'];
+  const _CHAT_TS = ['createdAt', 'ts', 'time', 'at', 'timestamp', 'sentAt'];
+  const _CHAT_GAME = ['gameId', 'game', 'roomId', 'room', 'table', 'tableId'];
+  function _pick(doc, keys) { for (const k of keys) if (doc[k] != null && doc[k] !== '') return doc[k]; return null; }
+  function _looksLikeChat(coll) {
+    try {
+      const docs = (coll.find().fetch() || []).slice(0, 5);
+      return docs.length > 0 && docs.some(d => _CHAT_TEXT.some(k => typeof d[k] === 'string' && d[k].length > 0));
+    } catch (e) { return false; }
+  }
+  let _chatCollNames = null;
+  function _detectChatCollections() {
+    if (CONFIG.CHAT_COLL) return [CONFIG.CHAT_COLL];
+    if (_chatCollNames && _chatCollNames.length) return _chatCollNames;   // re-detect while empty (chat coll may appear late)
+    const colls = _allCollections(), out = [];
+    for (const name of Object.keys(colls)) {
+      if (name === 'games' || name === 'rooms' || name === 'users') continue;
+      if (/chat|message|msg/i.test(name) || _looksLikeChat(colls[name])) out.push(name);
+    }
+    if (out.length) _chatCollNames = out;
+    return out;
+  }
+  function _normChatDoc(d, coll) {
+    const text = _pick(d, _CHAT_TEXT);
+    if (typeof text !== 'string' || !text) return null;
+    let at = _pick(d, _CHAT_TS);
+    if (at && typeof at === 'object' && typeof at.getTime === 'function') at = at.getTime();
+    return { _id: d._id, coll, at: at || null, from: _pick(d, _CHAT_FROM), text };
+  }
+  function logCaptureChat(g) {
+    if (!_logGame || !CONFIG.ENABLED || !CONFIG.LOG_CHAT) return;
+    try {
+      const colls = _allCollections();
+      const seen = _logGame._chatSeen || (_logGame._chatSeen = {});
+      for (const name of _detectChatCollections()) {
+        const coll = colls[name]; if (!coll) continue;
+        let docs; try { docs = coll.find().fetch(); } catch (e) { continue; }
+        for (const d of docs) {
+          if (!d || d._id == null || seen[d._id]) continue;
+          const refsGame = _CHAT_GAME.some(k => d[k] === g._id);
+          const hasRef = _CHAT_GAME.some(k => d[k] != null);
+          const norm = _normChatDoc(d, name); if (!norm) continue;
+          const inWindow = norm.at == null || norm.at >= _logGame.startedAt - 5000;
+          if (refsGame || (!hasRef && inWindow)) { seen[d._id] = 1; _logGame.chat.push(norm); }
+        }
+      }
+    } catch (e) {}
+  }
+  // Discovery helpers (run from console on the friend's site): find the chat collection + preview its shape.
+  function listCollections() {
+    const colls = _allCollections(), out = {};
+    for (const name of Object.keys(colls)) {
+      try { const ds = colls[name].find().fetch(); out[name] = { count: ds.length, sample: ds[0] || null }; }
+      catch (e) { out[name] = { count: '?', sample: null }; }
+    }
+    console.log('[WWSD] Meteor collections:', out);
+    return out;
+  }
+  function chatProbe() {
+    const names = _detectChatCollections();
+    console.log('[WWSD] detected chat collection(s):', names, '(override via CONFIG.CHAT_COLL)');
+    const colls = _allCollections();
+    for (const name of names) {
+      try {
+        const ds = colls[name].find().fetch();
+        console.log('[WWSD]   ' + name + ': ' + ds.length + ' rows; last 3 normalized:',
+          ds.slice(-3).map(d => _normChatDoc(d, name)), '| last raw:', ds[ds.length - 1] || null);
+      } catch (e) {}
+    }
+    return names;
+  }
+
   function _scoreFrom(players) {
     return (players || []).map(p => {
       let pts = 0; for (const ci of (p.purchasedCards || [])) pts += PTS[ci];
@@ -1466,7 +1562,20 @@
         const top = Math.max(game.finalScores[0].points, game.finalScores[1].points);
         game.completed = top >= game.winPoints;   // false ⇒ discard from the analysis sample
       }
+      // SAFETY CIRCUIT-BREAKER: if WE ran out of time / forfeited (a loss where NOBODY reached the target),
+      // turn the hands-off loop OFF so a bug can't keep spinning up new lobbies. Runs BEFORE the tick's
+      // `if (CONFIG.AUTO_LOBBY)` autoLobbyStep (logFinalize's sync portion executes before its first await),
+      // so not even one extra lobby is created. A legit loss reaches the target (completed=true) and is
+      // left alone; an OPPONENT timeout is a win/non-loss and is also left alone.
+      if (CONFIG.AUTO_LOBBY && game.result === 'loss' && game.completed === false) {
+        CONFIG.AUTO_LOBBY = false; saveCfg();
+        if (_syncToggles) _syncToggles();
+        setStatus('auto-lobby OFF: game ended without reaching target (likely our timeout/forfeit)');
+        console.warn('[WWSD] auto-lobby DISABLED after a non-completed loss (timeout/forfeit safety) — re-enable from the panel');
+      }
       game.endedAt = Date.now();
+      delete game._chatSeen;                     // dedup scratch — not for storage
+      if (game.chat && game.chat.length) console.log('[WWSD] captured', game.chat.length, 'chat msg(s) for', game.gameId);
       await _idbPut(game);
       const n = await logCount();
       updateLogBtn(n);
@@ -1497,6 +1606,7 @@
     const st = (g.data && g.data.state) || {};
     logMaybeNewGame(g, seat);                  // open a log on a fresh game / close a stale one
     logSnapshot(g);                            // record this ply's board (runs for BOTH seats' turns)
+    logCaptureChat(g);                         // fold any new in-game chat messages into the log
     if (st.currentPlayerIndex !== seat) { setStatus('waiting for opponent…'); return; }
     const key = turnKey(g);
     if (key === lastKey) return;
@@ -1626,6 +1736,7 @@
     const setLoop = () => { loop.textContent = 'Auto-lobby: ' + (CONFIG.AUTO_LOBBY ? 'on' : 'off'); loop.style.background = CONFIG.AUTO_LOBBY ? '#4a8f4a' : '#b5852f'; };
     loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; if (CONFIG.AUTO_LOBBY) CONFIG.AUTO_PLAY = true; setAuto(); setLoop(); saveCfg(); if (CONFIG.AUTO_LOBBY) { lastKey = null; tick(); } };
     setLoop();
+    _syncToggles = () => { setAuto(); setLoop(); };   // let the safety circuit-breaker refresh these buttons
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
     const record = mk('Record'); record.onclick = () => { const on = toggleRecord(); record.style.background = on ? '#4a8f4a' : '#b5852f'; };
     const domrec = mk('Rec DOM'); domrec.onclick = () => { const on = toggleDomRecord(); domrec.style.background = on ? '#4a8f4a' : '#b5852f'; setStatus(on ? 'DOM-record ON — make moves; check console' : 'DOM-record off'); };
@@ -1655,7 +1766,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount, listCollections, chatProbe };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
