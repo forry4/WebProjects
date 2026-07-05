@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.29
+// @version      0.9.30
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -961,7 +961,7 @@
       id: g._id + '@' + Date.now(), gameId: g._id, startedAt: Date.now(),
       winPoints: parseInt((g.settings || {}).targetScore) || 15,
       mySeat: seat, myUid: _myUid(), names: (g.players || []).map(p => (p || {}).name || null),
-      plies: [], partial: false, chat: [],
+      plies: [], partial: false, chat: [], failures: [],
     };
     _loggedKey = null;
   }
@@ -989,6 +989,17 @@
       rec_pct: r.rec_pct, rec_eval: r3(r.rec_eval),
       visits: (r.visits || []).slice(), q: (r.q || []).map(r3),
     };
+  }
+  // ── Failed-move logging (diagnose autoplay-click patterns) ────────────────
+  // Every time the bot's move doesn't commit — a canvas click missed, a discard didn't drop the seat
+  // under the cap, an unknown sub-decision was bailed to manual, or a UI helper threw — record it on the
+  // game's `failures[]` (with the ply, the intended action, seat state, and retry count) so a recurring
+  // pattern (e.g. reserve always misses) is visible in the exported logs. Console: WWSD_N.logFailures().
+  function logFailure(kind, info) {
+    if (!_logGame || !CONFIG.ENABLED) return;
+    (_logGame.failures || (_logGame.failures = [])).push(Object.assign({
+      ply: _logGame.plies.length, at: Date.now(), kind,
+    }, info || {}));
   }
   // ── Chat capture (bot-suggestion mining) ──────────────────────────────────
   // spendee is a Meteor app, so chat is a client-synced Minimongo collection (like `games`). We don't
@@ -1070,6 +1081,12 @@
       } catch (e) {}
     }
     return names;
+  }
+  // Quick console peek at the CURRENT game's move failures (exported logs also carry every game's failures[]).
+  function logFailures() {
+    const f = (_logGame && _logGame.failures) || [];
+    console.log('[WWSD] current game failures (' + f.length + '):', f);
+    return f;
   }
 
   function _scoreFrom(players) {
@@ -1169,7 +1186,7 @@
         // so claim it here too — not only in the post-buy fast path below.
         if (CONFIG.AUTO_PLAY && job === 'SPENDEE_PICK_NOBLE') {
           setStatus('claiming noble…');
-          try { await claimNoble(g, seat); } catch (e) { setStatus('noble claim failed: ' + (e && e.message)); console.error('[WWSD] claimNoble', e); }
+          try { await claimNoble(g, seat); } catch (e) { logFailure('exception', { where: 'claimNoble', msg: String(e && e.message) }); setStatus('noble claim failed: ' + (e && e.message)); console.error('[WWSD] claimNoble', e); }
           lastKey = key; return;
         }
         // A standalone over-10 discard surfaced as its own job (name varies) — resolve it with H3 instead of
@@ -1179,17 +1196,19 @@
         const overCap = pid => toDump(g.data, wpJob).tokens[pid].reduce((a, b) => a + b, 0) > 10;
         if (CONFIG.AUTO_PLAY && overCap(seat)) {
           setStatus('discarding…');
-          try { await discardSubDecision(g, seat); } catch (e) { setStatus('discard failed: ' + (e && e.message)); console.error('[WWSD] discardSubDecision', e); }
+          try { await discardSubDecision(g, seat); } catch (e) { logFailure('exception', { where: 'discardSubDecision', msg: String(e && e.message) }); setStatus('discard failed: ' + (e && e.message)); console.error('[WWSD] discardSubDecision', e); }
           await sleep(1200);
           const af = findMyActiveGame();
           const stillOver = af && af.seat === seat && toDump(af.game.data, wpJob).tokens[seat].reduce((a, b) => a + b, 0) > 10;
           if (stillOver) {
             _retries[key] = (_retries[key] || 0) + 1;
+            logFailure('discard_missed', { retry: _retries[key], gave_up: _retries[key] > 2, over_cap: toDump(af.game.data, wpJob).tokens[seat].reduce((a, b) => a + b, 0) });
             if (_retries[key] <= 2) { lastKey = null; setStatus('discard missed — retrying (' + _retries[key] + ')…'); }
             else { lastKey = key; setStatus('discard stuck — finish this one manually; it resumes after'); }
           } else { lastKey = key; _retries = {}; }
           return;
         }
+        logFailure('subdecision_manual', { job });
         setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return;
       }
       setStatus('PV thinking…');
@@ -1217,12 +1236,14 @@
       else if (committed) { lastKey = key; _retries = {}; }
       else {
         _retries[key] = (_retries[key] || 0) + 1;
+        logFailure('move_missed', { retry: _retries[key], gave_up: _retries[key] > 2, action_kind: r.action.kind, rec: r.recommendation, action: r.action });
         synthClickCanvas(...UI.cardCancel); await sleep(250); synthClickCanvas(...UI.takeCancel);
         if (_retries[key] <= 2) { lastKey = null; setStatus('move missed — retrying (' + _retries[key] + ')…'); }
         else { lastKey = key; setStatus('autoplay stuck — finish this move manually; it resumes after'); }
       }
     } catch (e) {
       const wired = String(e && e.message).indexOf(ADAPTER_TODO) < 0;
+      logFailure('exception', { where: 'tick', msg: String(e && e.message) });
       setStatus((wired ? 'error: ' : 'autoplay needs SITE ADAPTER — ') + (e && e.message));
       console.error('[WWSD]', e);
     } finally { busy = false; }
@@ -1317,7 +1338,7 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
-    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount, listCollections, chatProbe };
+    window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount, listCollections, chatProbe, logFailures };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
   boot();
