@@ -17,6 +17,8 @@ const GOODS_HEX = {
   amber: "#e0a526", rose: "#d6678b", jade: "#3fae8e",
   cobalt: "#3b6fd0", plum: "#8a5cc0", rust: "#c0552f",
 };
+// The 6 territory colours, in the backend's board.COLORS order (drives the bonus strip).
+const BOARD_COLORS = ["burgundy", "blue", "gray", "green", "beige", "yellow"];
 const TYPE_LABEL = {
   castle: "Castle", ship: "Ship", mine: "Mine",
   livestock: "Livestock", building: "Building", monastery: "Monastery",
@@ -641,9 +643,35 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
+/* End-of-game VP review: itemized breakdown per player (turn-stamped + end-of-game). */
+.coc-review{max-width:820px;margin:34px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:24px}
+.coc-review h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.9rem;color:var(--gold);margin-bottom:2px}
+.coc-review-hint{color:var(--text-dim);font-size:.78rem;margin:0 0 14px}
+.coc-review-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;text-align:left}
+.coc-review-col{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px}
+.coc-review-col.win{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+.coc-review-hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1rem;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.coc-review-hd b{color:var(--gold);font-size:1.1rem}
+.coc-review-list{font-size:.82rem}
+.coc-review-sub{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);opacity:.8;margin:8px 0 3px}
+.coc-review-row{display:flex;align-items:baseline;gap:8px;padding:2px 0;color:var(--text-dim)}
+.coc-review-t{flex:0 0 34px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:700;color:var(--gold);opacity:.75}
+.coc-review-lbl{flex:1;color:var(--text)}
+.coc-review-vp{flex:0 0 auto;color:var(--text);font-weight:700}
+.coc-review-total{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);color:var(--text)}
+.coc-review-total .coc-review-lbl,.coc-review-total .coc-review-vp{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold)}
+.coc-review-empty{color:var(--text-dim);font-size:.78rem;padding:6px 0}
 .coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
+/* Colour-completion bonus strip (large = 1st to finish a colour, small = 2nd). */
+.coc-bonusbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+.coc-bonuschip{display:inline-flex;align-items:center;gap:4px;font-size:.82rem;color:var(--text)}
+.coc-bonuschip.gone{opacity:.38}
+.coc-bonus-sw{width:15px;height:15px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)}
+.coc-bonuschip b{color:var(--text);font-size:.86rem}
+.coc-bonuschip i{font-style:normal;font-size:.58rem;letter-spacing:.04em;color:var(--text-dim);text-transform:uppercase}
 .coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
 .coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
@@ -1131,6 +1159,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const buildingDepotCands = (d) => (game.depots[String(d)].hexes || []).filter((t) => buildingCands.includes(t.id)).map((t) => t.id);
   const buildingPick = (id) => mv({ type: "building_take_choice", tile_id: id });
 
+  // Goods pick: the chosen depot had more new goods colours than free slots, so you
+  // choose which type(s) to take. Click a goods token of an offered colour in the
+  // depot (that depot's tokens pulse), or a button in the floating modal.
+  const goodsPickMine = pendingMine && game?.pending_kind === "goods_pick";
+  const goodsPickColors = goodsPickMine ? (game.pending?.ctx?.colors || []) : [];
+  const goodsPickDepot = goodsPickMine ? game.pending?.ctx?.depot : null;
+  const goodsPick = (color) => { if (goodsPickColors.includes(color)) mv({ type: "goods_pick", color }); };
+
   const doTakeWorkers = () => {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
     else if (selDie != null) mv({ type: "take_workers", die_index: selDie });
@@ -1387,15 +1423,63 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // ─── Winner ──────────────────────────────────────────────────────────────
   if (over && !reviewing) {
     const w = game.winner;
-    const isMe = w === myId;
-    const name = players[w] || w;
+    const tie = Array.isArray(w);
+    const isMe = !tie && w === myId;
+    const winnerName = tie ? "Tie" : (players[w] || w);
+    const order = game.order || Object.keys(players);
+    const scores = roomData?.final_scores || {};
+    const breakdowns = roomData?.vp_breakdown || {};
     return (
       <div className="coc"><style>{css}</style>
         <div className="coc-wrap">
-          <div className="coc-winner">
-            <h2>{isMe ? "Victory!" : "Defeat"}</h2>
-            <p className="coc-card-meta" style={{ margin: "10px 0" }}>{name} wins the duchy.</p>
-            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 16 }}>
+          <div className="coc-review">
+            <h2>{isMe ? "Victory!" : tie ? "It's a tie!" : "Defeat"}</h2>
+            <p className="coc-card-meta" style={{ margin: "6px 0 4px" }}>
+              {tie ? "The duchy is shared." : `${winnerName} wins the duchy.`}
+            </p>
+            <p className="coc-review-hint">Every point, by turn (T#) or scored at the end — so you can verify the total.</p>
+            <div className="coc-review-grid">
+              {order.map((pid) => {
+                const bd = breakdowns[pid] || [];
+                const during = bd.filter((i) => i.t != null).sort((a, b) => (a.t - b.t) || 0);
+                const ends = bd.filter((i) => i.t == null);
+                const total = scores[pid] != null ? scores[pid] : bd.reduce((s, i) => s + i.vp, 0);
+                const won = tie ? true : pid === w;
+                return (
+                  <div key={pid} className={`coc-review-col${won ? " win" : ""}`}>
+                    <div className="coc-review-hd">
+                      <span>{(players[pid] || pid)}{pid === myId ? " (you)" : ""}</span>
+                      <b>{total} VP</b>
+                    </div>
+                    <div className="coc-review-list">
+                      {bd.length === 0 && <div className="coc-review-empty">No breakdown available for this game.</div>}
+                      {during.length > 0 && <div className="coc-review-sub">During the game</div>}
+                      {during.map((i, k) => (
+                        <div key={`d${k}`} className="coc-review-row">
+                          <span className="coc-review-t">T{i.t}</span>
+                          <span className="coc-review-lbl">{i.label}</span>
+                          <span className="coc-review-vp">+{i.vp}</span>
+                        </div>
+                      ))}
+                      {ends.length > 0 && <div className="coc-review-sub">End of game</div>}
+                      {ends.map((i, k) => (
+                        <div key={`e${k}`} className="coc-review-row">
+                          <span className="coc-review-t">end</span>
+                          <span className="coc-review-lbl">{i.label}</span>
+                          <span className="coc-review-vp">+{i.vp}</span>
+                        </div>
+                      ))}
+                      <div className="coc-review-row coc-review-total">
+                        <span className="coc-review-t" />
+                        <span className="coc-review-lbl">Total</span>
+                        <span className="coc-review-vp">{total}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
               <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review Board</button>
               <button className="coc-btn gold" onClick={leaveToLobby}>Back to Lobby</button>
             </div>
@@ -1547,6 +1631,23 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
+        {/* Colour-completion bonuses: which colours still award their large (1st to
+            fully complete the colour) vs small (2nd) VP bonus. */}
+        <div className="coc-bonusbar" title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a colour">
+          <span className="coc-bonusbar-lbl">Colour bonuses</span>
+          {BOARD_COLORS.map((c) => {
+            const rem = game.bonus_tiles?.[c] || [];
+            const size = rem.length >= 2 ? "large" : rem.length === 1 ? "small" : null;
+            return (
+              <span key={c} className={`coc-bonuschip${size ? "" : " gone"}`}
+                title={`${colorLabel(c)}: ${size ? `${size} bonus available (+${rem[0]} VP)` : "both bonuses taken"}`}>
+                <span className="coc-bonus-sw" style={{ background: TILE_HEX[c] }} />
+                {size ? <><b>+{rem[0]}</b><i>{size === "large" ? "lg" : "sm"}</i></> : <i>—</i>}
+              </span>
+            );
+          })}
+        </div>
+
         {/* Shared board: 6 numbered depots arranged as a hexagon, black depot centered */}
         <div className="coc-panel">
           <div className="coc-board-head">
@@ -1600,14 +1701,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
               }
               const bCands = buildingPickMine ? buildingDepotCands(d) : [];
-              const pickable = shipPickMine ? shipCands.includes(d) : (buildingPickMine && bCands.length > 0);
+              const pickable = shipPickMine ? shipCands.includes(d)
+                : buildingPickMine ? bCands.length > 0
+                : goodsPickMine ? d === goodsPickDepot     // pulse the pick depot; click its token
+                : false;
               const depotPick = shipPickMine ? () => shipPick(d)
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               return (
                 <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
-                  title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : `Take the highlighted tile from depot ${d}`) : undefined}>
+                  title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
@@ -1621,10 +1725,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                         title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
                       </div>
                     ))}
-                    {depot.goods.map((gt) => (
-                      <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={tileDesc(gt, board)}
-                        onClick={() => { if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
-                    ))}
+                    {depot.goods.map((gt) => {
+                      const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
+                      return (
+                        <div key={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
+                          title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
+                          onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -1887,6 +1995,21 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
             const n = game.depots[String(d)].goods.length;
             return <button key={d} className="coc-btn outline sm" onClick={() => mv({ type: "ship_adjacent_take", depot: d })}>◆{d} ({n})</button>;
           })}
+          <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
+        </div>
+      </Modal>
+    );
+  }
+  if (kind === "goods_pick") {
+    const colors = game.pending?.ctx?.colors || [];
+    return (
+      <Modal title="Choose goods to take" desc="This depot has more goods types than you have free slots. Click a highlighted goods token on the board (or a button below) to take that type; you may take more until your slots are full." interactive>
+        <div className="coc-modal-row">
+          {colors.map((c) => (
+            <button key={c} className="coc-btn outline sm" onClick={() => mv({ type: "goods_pick", color: c })}>
+              <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[c], marginRight: 5 }}>{sellNum(c)}</span>#{sellNum(c)} goods
+            </button>
+          ))}
           <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
         </div>
       </Modal>

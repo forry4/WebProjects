@@ -271,6 +271,78 @@ def final_scores(game: dict) -> dict[str, int]:
     return scores
 
 
+_BUILDING_LABEL = {
+    "market": "Market", "carpenter": "Carpenter's Workshop", "church": "Church",
+    "warehouse": "Warehouse", "boarding": "Boarding House", "bank": "Bank",
+    "townhall": "Town Hall", "watchtower": "Watchtower",
+}
+
+
+def _endgame_monastery_items(game: dict, pid: str):
+    """Itemized end-of-game monastery VP: (label, vp) per scoring effect owned."""
+    p = game["players"][pid]
+    eff = p["monastery_effects"]
+    out = []
+    if 15 in eff:
+        n = len(set(p["sold_goods"]))
+        if n:
+            out.append((f"Monastery #15 — 2 VP x {n} sold-goods types", 2 * n))
+    for eid, bt in tiles.MONASTERY_BUILDING_SCORING.items():
+        if eid in eff:
+            cnt = p["buildings_placed"].get(bt, 0)
+            if cnt:
+                out.append((f"Monastery #{eid} — 4 VP x {cnt} {_BUILDING_LABEL.get(bt, bt)}", 4 * cnt))
+    if 24 in eff:
+        n = len(set(p["livestock_types"]))
+        if n:
+            out.append((f"Monastery #24 — 4 VP x {n} livestock types", 4 * n))
+    if 25 in eff:
+        n = len(p["sold_goods"])
+        if n:
+            out.append((f"Monastery #25 — 1 VP x {n} goods tiles sold", n))
+    if 26 in eff:
+        n = len(p["claimed_bonus"])
+        if n:
+            out.append((f"Monastery #26 — 3 VP x {n} bonus tiles", 3 * n))
+    return out
+
+
+def vp_breakdown(game: dict, pid: str) -> list[dict]:
+    """Itemized VP for the end-game review — every turn-stamped gain during play (read
+    from the move log) plus the end-of-game extras (leftover resources + monastery
+    bonuses). Each item is {t, source, label, vp}; `t` is the turn number, or None for
+    an end-of-game item. The items SUM to final_scores()[pid] (used to verify scoring)."""
+    p = game["players"][pid]
+    items: list[dict] = []
+    for m in reversed(game.get("moves", [])):        # log is newest-first → replay chronologically
+        if m.get("pid") != pid or not m.get("vp"):
+            continue
+        t, typ, vp = m.get("t", 0), m.get("type"), m["vp"]
+        if typ == "area_complete":
+            label = f"Completed a size-{m.get('size', '?')} region"
+        elif typ == "bonus_tile":
+            label = f"Colour bonus ({m.get('color', '?')})"
+        elif typ == "livestock_score":
+            label = f"Livestock scored ({m.get('animal', '?')})"
+        elif typ == "sell_goods":
+            label = f"Sold {m.get('count', '?')} goods"
+        elif typ == "building_effect":               # only the watchtower carries vp>0
+            label = "Watchtower"
+        else:
+            label = typ
+        items.append({"t": t, "source": typ, "label": label, "vp": vp})
+    goods = sum(p["goods"].values())
+    if goods:
+        items.append({"t": None, "source": "goods", "label": f"Leftover goods x {goods}", "vp": goods})
+    if p["silver"]:
+        items.append({"t": None, "source": "silver", "label": f"Silver x {p['silver']}", "vp": p["silver"]})
+    if p["workers"] // 2:
+        items.append({"t": None, "source": "workers", "label": f"Workers ({p['workers']}) / 2", "vp": p["workers"] // 2})
+    for label, vp in _endgame_monastery_items(game, pid):
+        items.append({"t": None, "source": "monastery", "label": label, "vp": vp})
+    return items
+
+
 def winner(game: dict) -> str | list[str]:
     """Most VP wins; tiebreak: fewest empty duchy spaces, then furthest back on track."""
     scores = final_scores(game)
@@ -501,12 +573,13 @@ def _score_livestock(game: dict, pid: str, sid: str, tile: dict) -> None:
     pasture = b.REGIONS[b.region_of(sid)]["spaces"]
     same = [s for s in pasture if p["duchy"][s] is not None and p["duchy"][s].get("animal") == animal]
     total = sum(p["duchy"][s]["count"] for s in same)
-    p["vp"] += total
+    gain = total
     if 7 in p["monastery_effects"]:
-        p["vp"] += len(same)          # +1 VP per scoring livestock tile
+        gain += len(same)             # +1 VP per scoring livestock tile
+    p["vp"] += gain
     if animal not in p["livestock_types"]:
         p["livestock_types"].append(animal)
-    _log(game, pid, "livestock_score", animal=animal, vp=total)
+    _log(game, pid, "livestock_score", animal=animal, vp=gain)
 
 
 def _building_take_pending(game: dict, pid: str, bt: str, types: tuple) -> None:
@@ -524,12 +597,14 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     bt = tile["building"]
     p["buildings_placed"][bt] += 1
     p["town_buildings"].setdefault(_pboard(p).region_of(sid), []).append(bt)
+    vp_gain = 0
     if bt == "boarding":
         p["workers"] += 4
     elif bt == "bank":
         p["silver"] += 2
     elif bt == "watchtower":
         p["vp"] += 4
+        vp_gain = 4
     elif bt == "market":
         _building_take_pending(game, pid, bt, ("ship", "livestock"))
     elif bt == "carpenter":
@@ -542,19 +617,60 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     elif bt == "townhall":
         if p["storage"]:
             _set_pending(game, pid, "townhall_place", {"building": bt})
-    _log(game, pid, "building_effect", building=bt)
+    _log(game, pid, "building_effect", building=bt, vp=vp_gain)
 
 
-def _take_all_goods_from_depot(game: dict, pid: str, depot: int) -> None:
+def _take_goods_colors(game: dict, pid: str, depot: int, colors) -> None:
+    """Take every goods tile of the given colours from `depot`. Colours already held
+    always stack; a new colour is taken only while a free slot remains (<=3 distinct)."""
     p = game["players"][pid]
     d = game["depots"][str(depot)]
+    keep = []
+    for g in d["goods"]:
+        if g["color"] in colors and (g["color"] in p["goods"] or len(p["goods"]) < 3):
+            p["goods"][g["color"]] = p["goods"].get(g["color"], 0) + 1
+        else:
+            keep.append(g)
+    d["goods"] = keep
+
+
+def _take_goods_from_depot(game: dict, pid: str, depot: int):
+    """Take goods from `depot`. Colours you already hold always stack; each NEW colour
+    needs a free goods slot (max 3 distinct). When there are MORE new colours than free
+    slots, WHICH to take is the player's choice — return (True, [new colours]) so the
+    caller can prompt a `goods_pick`. Otherwise take everything storable → (False, [])."""
+    p = game["players"][pid]
+    d = game["depots"][str(depot)]
+    # 1. always take colours already held (they stack — no new slot needed)
     remaining = []
     for g in d["goods"]:
-        if g["color"] in p["goods"] or len(p["goods"]) < 3:   # store <=3 distinct types
-            p["goods"][g["color"]] = p["goods"].get(g["color"], 0) + 1
+        if g["color"] in p["goods"]:
+            p["goods"][g["color"]] += 1
         else:
             remaining.append(g)
     d["goods"] = remaining
+    # 2. distinct NEW colours still sitting in the depot, in deal order
+    new_colors = []
+    for g in remaining:
+        if g["color"] not in new_colors:
+            new_colors.append(g["color"])
+    free = 3 - len(p["goods"])
+    if free <= 0 or not new_colors:
+        return False, []                     # no room for any new colour → leave them
+    if len(new_colors) <= free:
+        _take_goods_colors(game, pid, depot, new_colors)
+        return False, []                     # unambiguous → take all storable
+    return True, new_colors                  # more new colours than slots → prompt a pick
+
+
+def _offer_m5_adjacent(game: dict, pid: str, from_depot: int) -> None:
+    """Monastery 5: after taking goods from `from_depot`, optionally take from one
+    adjacent depot too. Offered only when an adjacent depot actually holds goods."""
+    if 5 in game["players"][pid]["monastery_effects"]:
+        adj = [x for x in (from_depot - 1, from_depot + 1)
+               if 1 <= x <= 6 and game["depots"][str(x)]["goods"]]
+        if adj:
+            _set_pending(game, pid, "ship_adjacent_depot", {"candidates": adj})
 
 
 def _place_ship_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
@@ -847,15 +963,15 @@ def _r_ship_take_goods(game, pid, move):
     if d not in (1, 2, 3, 4, 5, 6):
         return False, "choose a depot 1-6"
     _clear_pending(game)
-    _take_all_goods_from_depot(game, pid, d)
+    needs_pick, colors = _take_goods_from_depot(game, pid, d)
     _log(game, pid, "ship_take_goods", depot=d)
-    # Monastery 5: you may ALSO take all goods from one adjacent depot of your
-    # choice. Offer it only when an adjacent depot actually holds goods.
-    if 5 in game["players"][pid]["monastery_effects"]:
-        adj = [x for x in (d - 1, d + 1)
-               if 1 <= x <= 6 and game["depots"][str(x)]["goods"]]
-        if adj:
-            _set_pending(game, pid, "ship_adjacent_depot", {"candidates": adj})
+    # Monastery 5 may add an adjacent depot AFTER this take resolves; if a goods pick
+    # is needed first, carry the m5 continuation on the pick's context.
+    m5_from = d if 5 in game["players"][pid]["monastery_effects"] else None
+    if needs_pick:
+        _set_pending(game, pid, "goods_pick", {"depot": d, "colors": colors, "m5_from": m5_from})
+    elif m5_from is not None:
+        _offer_m5_adjacent(game, pid, m5_from)
     # (The ship's track advance was queued at placement and applies at end of turn.)
     return True, None
 
@@ -867,8 +983,32 @@ def _r_ship_adjacent_take(game, pid, move):
     if d not in ctx.get("candidates", []):
         return False, "not an adjacent depot with goods"
     _clear_pending(game)
-    _take_all_goods_from_depot(game, pid, d)
+    needs_pick, colors = _take_goods_from_depot(game, pid, d)
     _log(game, pid, "ship_adjacent_take", depot=d)
+    if needs_pick:
+        _set_pending(game, pid, "goods_pick", {"depot": d, "colors": colors, "m5_from": None})
+    return True, None
+
+
+def _r_goods_pick(game, pid, move):
+    """Depot has more new goods colours than the player has free slots — take one of
+    the offered colours (all tiles of it). Repeats until slots are full or the player
+    skips; a monastery-5 continuation (if any) fires when the pick phase ends."""
+    ctx = game["pending"]["ctx"]
+    color = move.get("color")
+    if color not in ctx.get("colors", []):
+        return False, "not an available goods type"
+    p = game["players"][pid]
+    if len(p["goods"]) >= 3 and color not in p["goods"]:
+        return False, "no free goods slot"
+    _take_goods_colors(game, pid, ctx["depot"], [color])
+    ctx["colors"] = [c for c in ctx["colors"] if c != color]
+    _log(game, pid, "goods_pick", color=color, depot=ctx["depot"])
+    if (3 - len(p["goods"])) <= 0 or not ctx["colors"]:   # slots full / nothing left to choose
+        m5 = ctx.get("m5_from")
+        _clear_pending(game)
+        if m5 is not None:
+            _offer_m5_adjacent(game, pid, m5)
     return True, None
 
 
@@ -913,10 +1053,15 @@ def _r_townhall_place(game, pid, move):
 
 def _r_skip_pending(game, pid, move):
     kind = game["pending_kind"]
-    # (A ship's track advance was already queued at placement; skipping the depot
-    # choice just forgoes the goods.)
+    ctx = game["pending"]["ctx"] if game.get("pending") else {}
+    # Skipping a goods pick forgoes the remaining new colours, but a monastery-5
+    # adjacent-depot offer still applies. (A ship's track advance was queued at
+    # placement; skipping the depot choice just forgoes the goods.)
+    m5 = ctx.get("m5_from") if kind == "goods_pick" else None
     _clear_pending(game)
     _log(game, pid, "skip_pending", kind=kind)
+    if m5 is not None:
+        _offer_m5_adjacent(game, pid, m5)
     return True, None
 
 
@@ -924,6 +1069,7 @@ _RESOLVERS = {
     "extra_action": _r_extra_action,
     "ship_take_goods": _r_ship_take_goods,
     "ship_adjacent_take": _r_ship_adjacent_take,
+    "goods_pick": _r_goods_pick,
     "building_take_choice": _r_building_take,
     "warehouse_sell": _r_warehouse_sell,
     "townhall_place": _r_townhall_place,
@@ -934,6 +1080,7 @@ RESOLVERS_FOR = {
     "extra_action": {"extra_action", "skip_pending"},
     "ship_choose_depot": {"ship_take_goods", "skip_pending"},
     "ship_adjacent_depot": {"ship_adjacent_take", "skip_pending"},
+    "goods_pick": {"goods_pick", "skip_pending"},
     "building_take_choice": {"building_take_choice", "skip_pending"},
     "warehouse_sell": {"warehouse_sell", "skip_pending"},
     "townhall_place": {"townhall_place", "skip_pending"},
@@ -974,6 +1121,9 @@ def _pending_legal_moves(game: dict, pid: str) -> list[dict]:
     elif kind == "ship_adjacent_depot":
         for d in ctx.get("candidates", []):
             moves.append({"type": "ship_adjacent_take", "depot": d})
+    elif kind == "goods_pick":
+        for c in ctx.get("colors", []):
+            moves.append({"type": "goods_pick", "color": c})
     elif kind == "building_take_choice":
         for tid in ctx.get("candidates", []):
             moves.append({"type": "building_take_choice", "tile_id": tid})

@@ -48,7 +48,7 @@ DEFAULT_DIFFICULTY = "hard"
 # Pause between the bot's individual moves so the client animates each tile in turn
 # (a whole-turn bulk update trips the flyer's catch-up guard and animates nothing).
 # Slow enough to watch each move land on the opponent board (the flyer plays ~0.5s).
-_BOT_MOVE_DELAY = 1.25
+_BOT_MOVE_DELAY = 1.0
 
 
 def _valid_difficulty(value) -> str:
@@ -311,18 +311,25 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]) -> None:
 
 def mk_room_state(room_id: str) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
-    return {
+    g = room.get("game")
+    state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
         "status": room.get("status", "open"),
-        "game": room.get("game"),
+        "game": g,
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "boards": room.get("boards", {}),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
+    # At game end, ship the itemized VP breakdown + final scores so the review screen
+    # can show exactly where each player's points came from (and on which turn).
+    if g and engine.is_over(g):
+        state["final_scores"] = engine.final_scores(g)
+        state["vp_breakdown"] = {pid: engine.vp_breakdown(g, pid) for pid in g["players"]}
+    return state
 
 
 def _sync_status_from_game(room: dict) -> None:

@@ -91,7 +91,8 @@ def test_take_all_goods_respects_three_distinct_limit():
     p["goods"] = {"amber": 1, "rose": 1, "jade": 1}   # 3 distinct
     g["depots"]["1"]["goods"] = [{"id": "g1", "color": "amber", "kind": "goods"},
                                  {"id": "g2", "color": "cobalt", "kind": "goods"}]
-    engine._take_all_goods_from_depot(g, "p1", 1)
+    needs_pick, _ = engine._take_goods_from_depot(g, "p1", 1)
+    assert not needs_pick                              # only one new colour, no free slot -> no prompt
     assert p["goods"]["amber"] == 2                    # existing color topped up
     assert "cobalt" not in p["goods"]                  # 4th distinct color not stored
     assert [x["color"] for x in g["depots"]["1"]["goods"]] == ["cobalt"]  # remains in depot
@@ -104,9 +105,50 @@ def test_take_all_goods_adds_new_colors_up_to_three():
     g["depots"]["2"]["goods"] = [{"id": "g1", "color": "rose", "kind": "goods"},
                                  {"id": "g2", "color": "rose", "kind": "goods"},
                                  {"id": "g3", "color": "jade", "kind": "goods"}]
-    engine._take_all_goods_from_depot(g, "p1", 2)
+    needs_pick, _ = engine._take_goods_from_depot(g, "p1", 2)
+    assert not needs_pick                              # 2 new colours, 2 free slots -> unambiguous
     assert p["goods"] == {"amber": 1, "rose": 2, "jade": 1}
     assert g["depots"]["2"]["goods"] == []             # all taken (room was available)
+
+
+def test_take_goods_prompts_a_pick_when_more_new_colors_than_slots():
+    """One free slot but two NEW colours in the depot -> the player must choose which
+    to take (a goods_pick pending); the chosen colour's tiles transfer, the rest stay."""
+    g = _playing(9)
+    p = g["players"]["p1"]
+    p["goods"] = {"amber": 1, "rose": 1}               # 1 free slot
+    g["turn"] = "p1"
+    g["depots"]["3"]["goods"] = [{"id": "g1", "color": "jade", "kind": "goods"},
+                                 {"id": "g2", "color": "cobalt", "kind": "goods"}]
+    engine._set_pending(g, "p1", "ship_choose_depot", {})
+    ok, err = engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 3})
+    assert ok, err
+    assert g["pending_kind"] == "goods_pick"
+    assert set(g["pending"]["ctx"]["colors"]) == {"jade", "cobalt"}
+    # only jade + cobalt + skip are legal while the pick is open
+    assert {m["type"] for m in engine.legal_moves(g, "p1")} == {"goods_pick", "skip_pending"}
+    ok, err = engine.apply_move(g, "p1", {"type": "goods_pick", "color": "cobalt"})
+    assert ok, err
+    assert p["goods"] == {"amber": 1, "rose": 1, "cobalt": 1}   # took the chosen colour
+    assert [x["color"] for x in g["depots"]["3"]["goods"]] == ["jade"]  # the other stays
+    assert g["pending_pid"] is None                    # slots full -> pick phase ends
+
+
+def test_take_goods_pick_can_be_skipped():
+    g = _playing(10)
+    p = g["players"]["p1"]
+    p["goods"] = {"amber": 1, "rose": 1}
+    g["turn"] = "p1"
+    g["depots"]["3"]["goods"] = [{"id": "g1", "color": "jade", "kind": "goods"},
+                                 {"id": "g2", "color": "cobalt", "kind": "goods"}]
+    engine._set_pending(g, "p1", "ship_choose_depot", {})
+    engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 3})
+    assert g["pending_kind"] == "goods_pick"
+    ok, err = engine.apply_move(g, "p1", {"type": "skip_pending"})
+    assert ok, err
+    assert p["goods"] == {"amber": 1, "rose": 1}        # forwent both new colours
+    assert len(g["depots"]["3"]["goods"]) == 2          # both remain in the depot
+    assert g["pending_pid"] is None
 
 
 def test_sell_goods_clears_entire_color_and_records_each_tile():

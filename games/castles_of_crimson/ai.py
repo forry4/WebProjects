@@ -222,7 +222,7 @@ def _eval_reward(state, ai_pid):
 _ROLLOUT_PRIORITY = {
     "place_tile": 5, "townhall_place": 5, "extra_action": 4, "building_take_choice": 4,
     "ship_take_goods": 4, "ship_adjacent_take": 3, "take_hex": 3, "sell_goods": 3,
-    "warehouse_sell": 3, "buy_black": 2, "monastery6_take": 2, "adjust_die": 1,
+    "goods_pick": 3, "warehouse_sell": 3, "buy_black": 2, "monastery6_take": 2, "adjust_die": 1,
     "take_workers": 1, "discard_storage": 0, "skip_pending": 0, "end_turn": 0,
 }
 

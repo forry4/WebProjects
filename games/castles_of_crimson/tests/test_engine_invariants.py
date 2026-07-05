@@ -138,6 +138,20 @@ def test_vp_is_monotonic_non_decreasing():
         assert ok
 
 
+def test_vp_breakdown_sums_to_final_score():
+    """The itemized end-game VP review must EXACTLY reconstruct every player's final
+    score — this is the whole point of the review (spot a scoring bug). Checked over
+    many random games so it exercises every VP source (regions, bonuses, livestock,
+    sells, watchtower, leftover resources, and monastery endgame effects)."""
+    for seed in range(25):
+        g = _random_playout(seed)
+        scores = engine.final_scores(g)
+        for pid in g["players"]:
+            items = engine.vp_breakdown(g, pid)
+            assert sum(i["vp"] for i in items) == scores[pid], (
+                f"seed {seed} {pid}: breakdown {sum(i['vp'] for i in items)} != final {scores[pid]}\n{items}")
+
+
 def test_three_and_four_player_random_games_complete():
     """The engine is player-count-agnostic: 3- and 4-player random games finish
     with a single winner and the right number of end-of-turn cycles."""
