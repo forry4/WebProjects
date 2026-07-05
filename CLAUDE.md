@@ -2305,6 +2305,29 @@ state before confirming the delete.
 - **Tab-back only rejoins ACTIVE games.** The visibilitychange reconnect (iOS kills backgrounded
   WS) now also guards `screenRef.current === "game"` — without it, tabbing back while in the
   lobby/waiting re-opened a stale waiting room (the "dumped into waiting" report).
+- **Tab-back must NOT reconnect during a PUZZLE (July 2026; do not regress).** A puzzle drives the
+  **game screen** with `roomId` set to the puzzle id (`startPuzzle` does `setRoomId(id)`) but **no
+  socket** (it's a local scripted line — `disconnect()` on entry). The visibilitychange reconnect
+  guard checked only `screen==="game"` + `!reviewing` + `roomId` + `socket!==OPEN` — **all true in a
+  puzzle** — so tabbing out and back opened a bogus WS to a room named after the puzzle
+  (`/ws/advantage_003/<id>`); the server's reply hit `handleMessage`→`setRoomData(msg.room)`, which
+  **replaced the puzzle's roomData and wiped the board** (18→0 cards), leaving a blank/loading-looking
+  screen that only a refresh cleared. This was the user's "stuck on LOADING, mostly in puzzles"
+  report — puzzle-specific because it fires on EVERY tab-out/in during a puzzle (the app-level loading
+  screen only appears on a fresh mount, so it read as intermittent elsewhere). Fix: added a
+  `puzzlingRef` and guard the reconnect with `!puzzlingRef.current`. Reproduced + verified with
+  Playwright (pre-fix: tab-back opened the puzzle-id socket, board collapsed 18→0; post-fix: no
+  socket, board intact). Shipped to main (`01f8b17`). A SECOND, separate fix rode along (`b6b0fbc`):
+  **re-fire the loading poll on foreground** — a tab reloaded on wake (Firefox tab-unload / Edge
+  sleeping tabs) lands on the loading screen and its poll fetch can hang with the `AbortController`
+  timeout throttled while backgrounded; bump a `loadingKick` (added to the loading effect's deps) on
+  `visibilitychange`→visible while `screen==="loading"` so the effect re-runs with a fresh fetch.
+  **Staging gotcha this session:** the **Cloudflare staging pipeline was stuck** — it never rebuilt
+  across two `staging` pushes (kept serving the pre-fix bundle `index-BP69f09i.js` for 30+ min), so
+  validation was done on **local vite-against-prod** + the GitHub-Actions prod deploy, NOT the
+  workers.dev URL. If staging ever shows old code, check the `webprojectsstaging` Cloudflare build
+  logs (branch trigger disconnected / build failing) — don't trust it as a validation surface until
+  its bundle hash actually changes.
 - **Joining a cancelled game is rejected.** On WS connect the handler `ROOMS.setdefault`s a fresh
   empty room for ANY id (needed so the creator can then `create`). After a host cancels (room
   popped from ROOMS + deleted from DB), a second client connecting to that id fabricated a
