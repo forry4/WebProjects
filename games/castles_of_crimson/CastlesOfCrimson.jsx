@@ -533,6 +533,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
 .coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .5s cubic-bezier(.4,.05,.25,1) forwards}
 .coc-flyer::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
+.coc-flyer.goods{clip-path:none;border-radius:4px;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.coc-flyer.goods::after{display:none}
 @keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
@@ -779,9 +781,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     (me.storage || []).forEach((t) => { loc[t.id] = { kind: "storage" }; });
     const storageIds = new Set((me.storage || []).map((t) => t.id));
     const duchyIds = new Set(Object.values(me.duchy || {}).filter(Boolean).map((t) => t.id));
+    const depotGoods = [];
+    for (const d of [1, 2, 3, 4, 5, 6]) (game.depots?.[String(d)]?.goods || []).forEach((g) => depotGoods.push({ id: g.id, color: g.color, d }));
+    const myGoods = { ...(me.goods || {}) };
     const movesLen = (game.moves || []).length;
     const prev = animSnap.current;
-    animSnap.current = { loc, storageIds, duchyIds, movesLen };
+    animSnap.current = { loc, storageIds, duchyIds, movesLen, depotGoods, myGoods };
     if (!prev) return;                                  // first paint: nothing to animate
     const adv = movesLen - prev.movesLen;
     if (adv < 1 || adv > 6) return;                     // skip initial load / reconnect catch-up
@@ -791,7 +796,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "black" ? "[data-blackdepot]"
         : spec.kind === "storage" ? "[data-storage]"
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
-        : spec.kind === "hex" ? `[data-sid="${spec.sid}"]` : null;
+        : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
+        : spec.kind === "mygoods" ? "[data-mygoods]" : null;
       const el = sel && document.querySelector(sel);
       return el ? el.getBoundingClientRect() : null;
     };
@@ -816,6 +822,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       if (!t || prev.duchyIds.has(t.id)) continue;      // newly in duchy = placed
       const f = mk(t, prev.loc[t.id], { kind: "hex", sid });
       if (f) add.push(f);
+    }
+    // Goods I took from a depot (a ship action) -> fly each to my goods section.
+    const goodsDelta = {};
+    for (const c of new Set([...Object.keys(me.goods || {}), ...Object.keys(prev.myGoods || {})])) {
+      goodsDelta[c] = (me.goods?.[c] || 0) - (prev.myGoods?.[c] || 0);
+    }
+    const curGoodIds = new Set();
+    for (const d of [1, 2, 3, 4, 5, 6]) (game.depots?.[String(d)]?.goods || []).forEach((g) => curGoodIds.add(g.id));
+    const gDest = rectOf({ kind: "mygoods" });
+    for (const g of (prev.depotGoods || [])) {
+      if (!gDest || curGoodIds.has(g.id) || (goodsDelta[g.color] || 0) <= 0) continue;   // still in a depot, or it went to the opponent
+      goodsDelta[g.color] -= 1;
+      const s = rectOf({ kind: "depot", d: g.d });
+      if (!s) continue;
+      const W = 26, H = 26;
+      const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
+      const dcx = gDest.left + 18, dcy = gDest.top + gDest.height / 2;
+      add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1: 1 });
     }
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
@@ -1238,21 +1262,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
             <span className="coc-pill">Round <b>{game.round}/5</b></span>
             {(() => {
-              // Goods still to be handed out this game: the undrawn supply + this
-              // phase's queued-but-not-yet-placed goods, counted per color.
-              const rem = {};
-              [...(game.goods_supply || []), ...(game.goods_queue || [])].forEach((g) => { rem[g.color] = (rem[g.color] || 0) + 1; });
-              const cols = (board && board.goods_colors) || Object.keys(rem);
-              if (!cols.length) return null;
+              // Goods still to be handed out THIS PHASE: the queued goods not yet placed
+              // on a depot, shown in deal order (leftmost = next). One is dealt at the
+              // start of each round, so this counts down 5 -> 0 across the phase.
+              const q = game.goods_queue || [];
               return (
-                <span className="coc-pill coc-goods-left" title="Goods still to be handed out (remaining supply + this phase's queue)">
+                <span className="coc-pill coc-goods-left" title="Goods still to be handed out this phase (next first)">
                   <span className="coc-goods-left-lbl">Goods left</span>
-                  {cols.map((c) => (
-                    <span key={c} className="coc-goods-mini" title={tileDesc({ kind: "goods", color: c }, board)}>
-                      <span className="coc-tile goods" style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>
-                      {rem[c] || 0}
-                    </span>
-                  ))}
+                  {q.length === 0
+                    ? <span style={{ opacity: .6 }}>none</span>
+                    : q.map((g, i) => (
+                        <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
+                          style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
+                      ))}
                 </span>
               );
             })()}
@@ -1446,7 +1468,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
                 <div>
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
-                  <div className="coc-goods-row">
+                  <div className="coc-goods-row" data-mygoods="1">
                     {me && Object.entries(me.goods).length === 0 && <span className="coc-card-meta">none</span>}
                     {me && Object.entries(me.goods).map(([c, n]) => (
                       <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
@@ -1552,11 +1574,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       {flyers.length > 0 && (
         <div className="coc-fly-layer">
           {flyers.map((f) => (
-            <div key={f.id} className="coc-flyer"
-              style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: TILE_HEX[f.tile.color] || "#555",
-                "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
-              <TileArt tile={f.tile} px={f.w} />
-            </div>
+            f.goods ? (
+              <div key={f.id} className="coc-flyer goods"
+                style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: GOODS_HEX[f.color] || "#555",
+                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+                {goodsSellNum(f.color)}
+              </div>
+            ) : (
+              <div key={f.id} className="coc-flyer"
+                style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: TILE_HEX[f.tile.color] || "#555",
+                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+                <TileArt tile={f.tile} px={f.w} />
+              </div>
+            )
           ))}
         </div>
       )}
@@ -1574,7 +1604,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
 
   if (kind === "ship_choose_depot") {
     return (
-      <Modal title="Ship — take goods" desc="Choose a depot to take all its goods from.">
+      <Modal title="Ship — take goods" desc="Choose a depot to take all its goods from." interactive>
         <div className="coc-modal-row">
           {[1, 2, 3, 4, 5, 6].map((d) => {
             const n = game.depots[String(d)].goods.length;
@@ -1588,7 +1618,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
   if (kind === "ship_adjacent_depot") {
     const cands = game.pending?.ctx?.candidates || [];
     return (
-      <Modal title="Monastery — adjacent depot" desc="You may also take all goods from one adjacent depot.">
+      <Modal title="Monastery — adjacent depot" desc="You may also take all goods from one adjacent depot." interactive>
         <div className="coc-modal-row">
           {cands.map((d) => {
             const n = game.depots[String(d)].goods.length;
