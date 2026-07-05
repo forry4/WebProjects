@@ -1572,13 +1572,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           // Full colors for every hex (matching the depot tiles); placed tiles
           // are distinguished by a bright highlighted outline, not by dimming.
           const fill = placed ? (TILE_HEX[tile.color] || "#555") : (TILE_HEX[sp.color] || "#444");
-          // The placed-tile gold rim is drawn LAST (a stroke-only polygon over the
-          // bevel) so it stays uniform all the way around — otherwise the raise
-          // gradient paints over the inner half of the stroke (pale at the top, dark
-          // at the bottom) and the outline reads asymmetrically.
+          // Both the placed-tile gold rim AND the legal-target glow are drawn LAST
+          // (stroke-only polygons over the bevel/socket gradient) so each stays uniform
+          // all the way around — otherwise the gradient paints over the inner half of
+          // the stroke (pale at the top, dark at the bottom) and the outline reads
+          // asymmetrically.
           let stroke, strokeWidth;
-          if (legal) { stroke = "var(--gold)"; strokeWidth = 3; }
-          else if (placed) { stroke = "none"; strokeWidth = 0; }
+          if (legal || placed) { stroke = "none"; strokeWidth = 0; }
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
             <g key={sid} data-sid={interactive ? sid : undefined} data-oppsid={opp ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
@@ -1592,6 +1592,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 stroke="none" style={{ pointerEvents: "none" }} />
               {placed && <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill="none"
                 stroke="#fff2c0" strokeWidth={2.6} style={{ pointerEvents: "none" }} />}
+              {legal && <polygon points={hexPoints(c.x, c.y, HEX_S - 1.5)} fill="none"
+                stroke="var(--gold)" strokeWidth={3} style={{ pointerEvents: "none" }} />}
               {placed
                 ? <TileArtSvg tile={tile} cx={c.x} cy={c.y} box={HEX_ART} />
                 : svgPips(c.x, c.y, sp.number, sid)}
