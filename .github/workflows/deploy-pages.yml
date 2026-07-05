@@ -85,3 +85,10 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+      # GitHub's Pages backend occasionally hard-fails the deploy step transiently
+      # (build is fine; publish flakes). One automatic in-job retry self-heals it so a
+      # transient flake never needs a manual re-run. Runs ONLY if the first attempt
+      # failed; if this one also fails, re-run the `deploy` job by hand as the backstop.
+      - name: Retry deploy once if it flaked
+        if: failure() && steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
