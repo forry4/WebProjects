@@ -397,12 +397,16 @@ def _sync_status_from_game(room: dict) -> None:
 
 # ── Opponent (bot) turn scheduler ─────────────────────────────────────────────
 async def _schedule_bot_turn(room_id: str) -> None:
-    """Drive the AI opponent's whole turn.
+    """Drive the AI opponent through ALL of its consecutive turns, animated.
 
-    The MCTS is heavy, so it plans the turn on a snapshot **in a thread pool**
-    (mirrors Spender's `_schedule_ai_turn`) and the planned move sequence is applied
-    back under the lock. A trivial-bot finisher guarantees the turn always ends, so
-    the game can never deadlock even if planning fails or the state drifts."""
+    Each turn is planned on a snapshot **in a thread pool** (MCTS is heavy) and applied
+    back under the lock ONE move at a time, broadcasting + pausing between moves so the
+    client animates each tile (a single bulk update trips the flyer's catch-up guard).
+    A ship's track advance can make the bot the first player again, so it may take
+    SEVERAL turns in a row — we plan + animate EACH one (looping while it stays the
+    bot's turn), so the human watches every turn play out on the View Opponent screen
+    before control returns. `turn_number` (bumped whenever a turn begins) is the turn
+    boundary. A trivial-bot per-turn finisher guarantees each turn ends (no deadlock)."""
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room:
@@ -415,29 +419,16 @@ async def _schedule_bot_turn(room_id: str) -> None:
             return
         if room.get("_bot_running"):             # another bot-turn coroutine is already active
             return
-        room["_bot_running"] = True              # guard: only one bot turn at a time (we release
-                                                 # the lock between moves for per-move animation)
+        room["_bot_running"] = True              # guard: only one bot driver at a time (we
+                                                 # release the lock between moves for animation)
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
-        snapshot = coc_ai._clone_game(game)      # independent of the live game
 
+    loop = asyncio.get_event_loop()
     try:
-        # Plan the bot's turn off the event loop (MCTS may take a couple seconds).
-        loop = asyncio.get_event_loop()
-        try:
-            seq = await loop.run_in_executor(
-                None,
-                lambda: coc_ai.play_turn_plan(snapshot, ai_pid, difficulty=difficulty, rng=random.Random()),
-            )
-        except Exception:
-            LOG.exception("CoC AI planning failed; finishing with the trivial bot")
-            seq = None
-
-        # Apply the planned sequence ONE MOVE AT A TIME, broadcasting after each so the
-        # client animates the bot's tiles individually (a single bulk update trips the
-        # flyer's adv>6 catch-up guard and animates nothing). We release the lock and
-        # pause between moves; the _bot_running guard prevents a concurrent scheduler
-        # (e.g. from a reconnect) from double-applying while the lock is free.
-        for mv in (seq or []):
+        turn_guard = 0
+        while turn_guard < 12:                    # bound the consecutive-turn chain
+            turn_guard += 1
+            # Snapshot THIS turn so its plan runs off the event loop.
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
                 if not room:
@@ -448,37 +439,77 @@ async def _schedule_bot_turn(room_id: str) -> None:
                     break
                 if (game.get("pending_pid") or game.get("turn")) != ai_pid:
                     break
-                ok, _ = engine.apply_move(game, ai_pid, mv)
-                if not ok:
-                    break
-                _sync_status_from_game(room)
-                over = engine.is_over(game)
-                still_bot = (game.get("pending_pid") or game.get("turn")) == ai_pid
-                state = mk_room_state(room_id)
-            await broadcast_room(room_id, {"type": "room_update", "room": state})
-            if over or not still_bot:
-                break                             # turn ended — stop pacing
-            await asyncio.sleep(_BOT_MOVE_DELAY)   # let each tile animation (~0.5s) play
+                start_tn = game.get("turn_number", 0)   # this turn's id (bumped when it ends)
+                snapshot = coc_ai._clone_game(game)
 
-        # Finisher: ensure the bot's turn actually ended (empty/failed plan or drift).
-        async with ROOM_LOCK:
-            room = ROOMS.get(room_id)
-            if not room:
-                return
-            game = room.get("game")
-            ai_pid = room.get("ai_player")
-            if game and ai_pid and not engine.is_over(game):
-                rng = random.Random()
-                guard = 0
-                while (not engine.is_over(game)
-                       and (game.get("pending_pid") or game.get("turn")) == ai_pid
-                       and guard < 200):
-                    guard += 1
-                    bot.play_turn(game, ai_pid, rng)
-            _sync_status_from_game(room)
-            final_state = mk_room_state(room_id)
-        await broadcast_room(room_id, {"type": "room_update", "room": final_state})
-        save_game(room_id)
+            try:
+                seq = await loop.run_in_executor(
+                    None,
+                    lambda: coc_ai.play_turn_plan(snapshot, ai_pid, difficulty=difficulty, rng=random.Random()),
+                )
+            except Exception:
+                LOG.exception("CoC AI planning failed; finishing with the trivial bot")
+                seq = None
+
+            # Apply the plan one move at a time; stop this turn once the turn id advances.
+            for mv in (seq or []):
+                async with ROOM_LOCK:
+                    room = ROOMS.get(room_id)
+                    if not room:
+                        return
+                    game = room.get("game")
+                    ai_pid = room.get("ai_player")
+                    if not game or not ai_pid or engine.is_over(game):
+                        break
+                    if game.get("turn_number", 0) != start_tn or (game.get("pending_pid") or game.get("turn")) != ai_pid:
+                        break                          # this turn already ended
+                    ok, _ = engine.apply_move(game, ai_pid, mv)
+                    if not ok:
+                        break
+                    _sync_status_from_game(room)
+                    turn_ended = engine.is_over(game) or game.get("turn_number", 0) != start_tn
+                    state = mk_room_state(room_id)
+                await broadcast_room(room_id, {"type": "room_update", "room": state})
+                if turn_ended:
+                    break
+                await asyncio.sleep(_BOT_MOVE_DELAY)   # let each tile animation (~0.5s) play
+
+            # Per-turn finisher: guarantee THIS turn ended (empty/short/drifted plan).
+            # Scoped to the SAME turn (turn_number == start_tn) so it never fast-forwards
+            # a *following* consecutive turn — those are animated by the outer loop.
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room:
+                    return
+                game = room.get("game")
+                ai_pid = room.get("ai_player")
+                did_finish = False
+                if (game and ai_pid and not engine.is_over(game)
+                        and game.get("turn_number", 0) == start_tn
+                        and (game.get("pending_pid") or game.get("turn")) == ai_pid):
+                    rng = random.Random()
+                    guard = 0
+                    while (not engine.is_over(game)
+                           and game.get("turn_number", 0) == start_tn
+                           and (game.get("pending_pid") or game.get("turn")) == ai_pid
+                           and guard < 200):
+                        guard += 1
+                        bot.play_turn(game, ai_pid, rng)
+                    did_finish = True
+                _sync_status_from_game(room)
+                over = engine.is_over(game) if game else True
+                # The bot gets ANOTHER turn iff this turn ended but it's still its turn
+                # (a track advance made it first player again).
+                more = bool(game and ai_pid and not over
+                            and (game.get("pending_pid") or game.get("turn")) == ai_pid
+                            and game.get("turn_number", 0) != start_tn)
+                state = mk_room_state(room_id) if did_finish else None
+            if state is not None:
+                await broadcast_room(room_id, {"type": "room_update", "room": state})
+            save_game(room_id)
+            if over or not more:
+                break
+            await asyncio.sleep(_BOT_MOVE_DELAY)       # visible pause across the turn boundary
     finally:
         async with ROOM_LOCK:
             r = ROOMS.get(room_id)
