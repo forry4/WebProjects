@@ -721,6 +721,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (msg.type === "room_update" && pm && pm.recvAt == null) {
       pm.recvAt = performance.now();
       pm.rtt = pm.recvAt - pm.sentAt;
+      pm.srv = msg.srv_ms;   // server processing time (receipt -> broadcast), if present
     }
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
@@ -871,8 +872,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const render = performance.now() - pm.recvAt;
     requestAnimationFrame(() => {
       const paint = performance.now() - pm.recvAt;
+      const net = pm.srv != null ? ` (server ${pm.srv}ms, network ~${(pm.rtt - pm.srv).toFixed(0)}ms)` : "";
       // eslint-disable-next-line no-console
-      console.log(`[CoC-perf] ${pm.type || "move"}: round-trip ${pm.rtt.toFixed(0)}ms | render ${render.toFixed(0)}ms | paint ${paint.toFixed(0)}ms`);
+      console.log(`[CoC-perf] ${pm.type || "move"}: round-trip ${pm.rtt.toFixed(0)}ms${net} | render ${render.toFixed(0)}ms | paint ${paint.toFixed(0)}ms`);
       perfMark.current = null;
     });
   }, [roomData]);

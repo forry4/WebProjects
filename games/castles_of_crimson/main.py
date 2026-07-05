@@ -18,6 +18,7 @@ persistence uses a separate ``coc_games`` table in the shared site database.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import random
@@ -106,7 +107,50 @@ cleanup_stale_games("coc_games")
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
+# Persisting a room is a remote write (Turso/libSQL in prod): a fresh connection
+# per save is a TLS+auth handshake, and running it on the event loop blocked every
+# move for the round-trips. So writes go to a DEDICATED SINGLE-THREAD executor with
+# its OWN persistent connection: (1) the connection is reused (no per-move
+# handshake), (2) the event loop is never blocked, (3) a single worker keeps writes
+# strictly in submission order (no interleaving/last-writer-loses race). save_game
+# snapshots+serializes the row on the CALLING thread (fast, race-free vs ROOMS) then
+# fires the write off; a failed write drops the connection so the next one reconnects.
+_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="coc-db-write")
+_save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
+
+
+def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, now, created_at) -> None:
+    """Upsert one coc_games row on the dedicated write thread using a reused connection."""
+    global _save_conn
+    try:
+        if _save_conn is None:
+            _save_conn = _db()
+        cur = _save_conn.cursor()
+        cur.execute("SELECT id FROM coc_games WHERE id=?", (room_id,))
+        if cur.fetchone() is not None:
+            cur.execute("""UPDATE coc_games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
+                           WHERE id=?""",
+                        (status, p2id, p2name, state_json, now, room_id))
+        else:
+            cur.execute("""INSERT INTO coc_games
+                           (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
+        _save_conn.commit()
+    except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn so the next reconnects
+        LOG.warning("coc save_game write failed for %s; dropping connection to reconnect next time", room_id,
+                    exc_info=True)
+        try:
+            if _save_conn is not None:
+                _save_conn.close()
+        except Exception:
+            pass
+        _save_conn = None
+
+
 def save_game(room_id: str) -> None:
+    """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
+    event loop via the single-thread write executor (fire-and-forget)."""
     room = ROOMS.get(room_id)
     if not room:
         return
@@ -124,27 +168,12 @@ def save_game(room_id: str) -> None:
         "boards": room.get("boards", {}),
     }
     now = int(time.time())
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM coc_games WHERE id=?", (room_id,))
-    exists = cur.fetchone() is not None
-    if exists:
-        cur.execute("""UPDATE coc_games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
-                       WHERE id=?""",
-                    (room.get("status"),
-                     pids[1] if len(pids) > 1 else None,
-                     names[1] if len(names) > 1 else None,
-                     json.dumps(state), now, room_id))
-    else:
-        cur.execute("""INSERT INTO coc_games
-                       (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (room_id, room.get("status", "open"),
-                     pids[0] if pids else None, names[0] if names else None,
-                     pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
-                     room.get("host"), json.dumps(state), now, now))
-    conn.commit()
-    conn.close()
+    _DB_WRITE_EXEC.submit(
+        _persist_row, room_id, room.get("status", "open"),
+        pids[0] if pids else None, names[0] if names else None,
+        pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
+        room.get("host"), json.dumps(state), now, now,
+    )
 
 
 def load_game_to_memory(room_id: str) -> bool:
@@ -507,6 +536,7 @@ async def _handle_start(ws, room_id, pid):
 
 
 async def _handle_move(ws, room_id, pid, msg):
+    t0 = time.perf_counter()   # TEMP perf: measure server-side processing (lock + apply + build)
     bot_turn = False
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
@@ -524,9 +554,11 @@ async def _handle_move(ws, room_id, pid, msg):
         _sync_status_from_game(room)
         bot_turn = _bot_should_act(room)
     # Broadcast the new state FIRST so the client sees its move immediately, THEN
-    # persist. The save is a remote (Turso) write of several network round-trips and
-    # was the per-move lag — doing it before the broadcast made every move feel slow.
-    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    # persist. The save is a remote (Turso) write; running it off the event loop
+    # (see save_game) keeps it from blocking the broadcast/flush.
+    room_state = mk_room_state(room_id)
+    srv_ms = round((time.perf_counter() - t0) * 1000, 1)  # TEMP perf: receipt -> just before broadcast
+    await broadcast_room(room_id, {"type": "room_update", "room": room_state, "srv_ms": srv_ms})
     save_game(room_id)
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
