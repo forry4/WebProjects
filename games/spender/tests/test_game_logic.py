@@ -737,6 +737,39 @@ def test_ai_discard_respects_reserved_cards():
     assert g["players"]["p1"]["tokens"]["black"] == 4   # no card needs it -> discarded
 
 
+def test_ai_run_turn_defers_discard_for_client():
+    """defer_discard=True (a client-AI game) leaves the AI over the cap in a pending-discard state for
+    the client's NET to resolve — the turn is NOT finished and the heuristic does NOT fire. With
+    defer_discard=False (the server fallback) the discard finishes heuristically and the turn advances."""
+    def over_cap_take():
+        g = make_game_state("p1", "p2")
+        g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 4, "red": 4}  # 8 held
+        g["bank"] = {c: 4 for c in main.GEM_COLORS}
+        g["bank"]["gold"] = 5
+        return g
+
+    # deferred: over the cap → pending set, turn stays p1, no discard yet (11 tokens)
+    g = over_cap_take()
+    main._run_ai_turn(g, "p1", {"type": "take_gems", "colors": ["blue", "green", "black"]}, defer_discard=True)
+    assert g.get("pending_discard_pid") == "p1"
+    assert g["turn"] == "p1"
+    assert sum(g["players"]["p1"]["tokens"].values()) == 11
+
+    # the client's net-chosen discard is applied one at a time (validated held-color)
+    assert main._apply_ai_discard(g, "p1", "purple_not_held" if False else "blue") == "blue"
+    assert g["players"]["p1"]["tokens"]["blue"] == 0
+    assert main._apply_ai_discard(g, "p1", "green") == "green"
+    assert sum(g["players"]["p1"]["tokens"].values()) == 9   # would be finished by the handler at <=10
+    assert main._apply_ai_discard(g, "p1", "green") is None  # no longer held → rejected
+
+    # not deferred (server fallback): discards down to 10 heuristically and finishes the turn
+    g2 = over_cap_take()
+    main._run_ai_turn(g2, "p1", {"type": "take_gems", "colors": ["blue", "green", "black"]}, defer_discard=False)
+    assert "pending_discard_pid" not in g2
+    assert sum(g2["players"]["p1"]["tokens"].values()) == 10
+    assert g2["turn"] == "p2"
+
+
 # ─── _sim_rollout ─────────────────────────────────────────────────────────────
 
 def test_sim_rollout_terminates():

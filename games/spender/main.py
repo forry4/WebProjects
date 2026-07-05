@@ -2265,7 +2265,27 @@ def _mcts_choose_move_impl(game: dict, ai_pid: str, time_limit: float,
     return max(root.children, key=lambda c: c.visits).move
 
 
-def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
+def _defer_or_finish_discards(game: dict, ai_pid: str, defer: bool) -> bool:
+    """Resolve over-cap tokens after an AI take/reserve. If `defer` (a client-AI game), leave the AI in
+    a server-enforced pending-discard state so the client's NET decides the discard (the same brain that
+    chose the take) and return True — the caller must NOT finish the turn. Otherwise finish the discard
+    with the heuristic (`_ai_discard_one`) and return False. Returns False when already at/under the cap."""
+    ps = game["players"][ai_pid]
+    if sum(ps["tokens"].values()) <= 10:
+        return False
+    if defer:
+        game["pending_discard_pid"] = ai_pid
+        return True
+    while sum(ps["tokens"].values()) > 10:
+        dc = _ai_discard_one(game, ai_pid)
+        if dc:
+            _log_move(game, ai_pid, "discard", color=dc)
+        else:
+            break
+    return False
+
+
+def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None, defer_discard: bool = False) -> None:
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
     if mv is None:
@@ -2311,10 +2331,8 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 game["bank"][c] -= 1
                 ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
         _log_move(game, ai_pid, "take_gems", colors=mv["colors"])
-        while sum(ps["tokens"].values()) > 10:
-            dc = _ai_discard_one(game, ai_pid)
-            if dc:
-                _log_move(game, ai_pid, "discard", color=dc)
+        if _defer_or_finish_discards(game, ai_pid, defer_discard):
+            return  # deferred: the client's net will submit the discard; turn NOT finished
 
     elif mv["type"] == "reserve":
         card_id = mv.get("card_id")
@@ -2334,12 +2352,54 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None) -> None:
                 game["bank"]["gold"] -= 1
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
             _log_move(game, ai_pid, "reserve", card_id=card["id"])
-            while sum(ps["tokens"].values()) > 10:
-                dc = _ai_discard_one(game, ai_pid)
-                if dc:
-                    _log_move(game, ai_pid, "discard", color=dc)
+            if _defer_or_finish_discards(game, ai_pid, defer_discard):
+                return  # deferred: the client's net will submit the discard; turn NOT finished
 
     _finish_turn(game, ai_pid)
+
+
+def _apply_ai_discard(game: dict, ai_pid: str, color: str | None) -> str | None:
+    """Apply ONE client-net-chosen discard for the AI's over-cap turn (validated by the caller). Moves a
+    token back to the bank + logs it. Returns the color discarded, or None if the AI doesn't hold it."""
+    ps = game["players"][ai_pid]
+    if color and ps["tokens"].get(color, 0) > 0:
+        ps["tokens"][color] -= 1
+        game["bank"][color] = game["bank"].get(color, 0) + 1
+        _log_move(game, ai_pid, "discard", color=color)
+        return color
+    return None
+
+
+async def _schedule_ai_discard_fallback(room_id: str, ai_pid: str, at_ply: int) -> None:
+    """Safety net for the deferred client-AI discard: if the client doesn't submit its net-chosen discard
+    within CLIENT_AI_TIMEOUT, finish the AI's over-cap discard with the heuristic so a turn can never hang
+    mid-discard. Ply-guarded — if the client made progress (logged a discard), a newer fallback covers the
+    next one and this bails; the whole path degrades to today's server-side heuristic on any client failure."""
+    await asyncio.sleep(CLIENT_AI_TIMEOUT)
+    changed = False
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        g = r.get("game") if r else None
+        if not g or g.get("pending_discard_pid") != ai_pid:
+            return  # already resolved (client submitted, or the game moved on)
+        if len(g.get("moves", [])) != at_ply:
+            return  # the client progressed; a newer fallback (or completion) handles it
+        ps = g["players"][ai_pid]
+        while sum(ps["tokens"].values()) > 10:
+            dc = _ai_discard_one(g, ai_pid)
+            if dc:
+                _log_move(g, ai_pid, "discard", color=dc)
+            else:
+                break
+        g.pop("pending_discard_pid", None)
+        _finish_turn(g, ai_pid)
+        if g.get("phase") == "over":
+            r["status"] = "over"
+        changed = True
+    if changed:
+        save_game(room_id)
+        await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+        asyncio.create_task(_schedule_s_searched_eval(room_id))
 
 
 def _post_turn(game: dict, r: dict) -> None:
@@ -2920,6 +2980,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 mv = msg.get("move") or {}
                 _err = None
                 _did_change = False
+                _deferred = False       # the AI is mid-turn awaiting the client's net-chosen discard
+                _defer_ai_pid = None
+                _defer_ply = None
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
                     if not r or r.get("status") != "playing":
@@ -2929,13 +2992,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     else:
                         g = r["game"]
                         ai_pid = g.get("ai_player")
+                        # A pending discard keeps phase=="playing"/turn==ai_pid, so the guard below still
+                        # holds and the client's DISCARD-phase ai_move (a `discard` move) lands here too.
                         if not ai_pid or g.get("phase") != "playing" or g.get("turn") != ai_pid:
                             _err = "not the AI's turn"
                         elif pid not in g.get("order", ()) or pid == ai_pid:
                             _err = "not a player in this game"
                         else:
                             # Validate the move is LEGAL for the AI (never trust the client to mutate
-                            # state directly): map to an engine action and check the legal set.
+                            # state directly): map to an engine action and check the legal set. During a
+                            # pending discard from_game_dict yields a DISCARD phase, so only a held-color
+                            # `discard` validates; on a normal turn only the PLAY moves do.
                             legal = False
                             try:
                                 from games.spender.ai.az import actions as _aza
@@ -2949,12 +3016,32 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                                 _err = "illegal AI move"
                             else:
                                 try:
-                                    _run_ai_turn(g, ai_pid, mv)  # applies primary + discard/noble finish
+                                    if mv.get("type") == "discard" and g.get("pending_discard_pid") == ai_pid:
+                                        # client's net-chosen discard for the AI's over-cap turn
+                                        _apply_ai_discard(g, ai_pid, mv.get("color"))
+                                        if sum(g["players"][ai_pid]["tokens"].values()) > 10:
+                                            _deferred = True   # more discards needed → stay pending
+                                        else:
+                                            g.pop("pending_discard_pid", None)
+                                            _finish_turn(g, ai_pid)
+                                    else:
+                                        # a normal PLAY move — apply it, but DEFER any resulting discard to
+                                        # the client's net (the same brain that chose the take) instead of
+                                        # finishing it with the heuristic.
+                                        _run_ai_turn(g, ai_pid, mv, defer_discard=True)
+                                        _deferred = g.get("pending_discard_pid") == ai_pid
                                     if g.get("phase") == "over":
                                         r["status"] = "over"
+                                    if _deferred:
+                                        _defer_ai_pid = ai_pid
+                                        _defer_ply = len(g.get("moves", []))
                                     _did_change = True
                                 except Exception:
                                     LOG.exception("Applying client AI move failed (room=%s); ending the AI turn", room_id)
+                                    while sum(g["players"][ai_pid]["tokens"].values()) > 10:
+                                        if not _ai_discard_one(g, ai_pid):
+                                            break
+                                    g.pop("pending_discard_pid", None)
                                     _finish_turn(g, ai_pid)
                                     if g.get("phase") == "over":
                                         r["status"] = "over"
@@ -2969,8 +3056,14 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 elif _did_change:
                     save_game(room_id)
                     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
-                    # It's the human's turn now — kick a fresh searched-eval search for the admin overlay.
-                    asyncio.create_task(_schedule_s_searched_eval(room_id))
+                    if _deferred:
+                        # AI is over the cap and awaiting the client's net-chosen discard (the broadcast
+                        # above carried a fresh DISCARD-phase ai_search). Arm the heuristic fallback so the
+                        # turn can't hang if the client never answers.
+                        asyncio.create_task(_schedule_ai_discard_fallback(room_id, _defer_ai_pid, _defer_ply))
+                    else:
+                        # It's the human's turn now — kick a fresh searched-eval search for the admin overlay.
+                        asyncio.create_task(_schedule_s_searched_eval(room_id))
 
             # ── abandon ─────────────────────────────────────────────────────
             elif action == "abandon":
