@@ -519,12 +519,15 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
-/* turn-order track — boxed, sat at the board's upper-left (left of depot 1) */
-.coc-track-block{position:absolute;left:-15%;top:4%;z-index:3;max-width:360px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+/* The board panel is the positioning context for the turn-order track (pinned to its
+   left gutter, beside the centered hexagon). */
+.coc-board-panel{position:relative}
+/* turn-order track — boxed, pinned flush to the panel's upper-left gutter */
+.coc-track-block{position:absolute;left:14px;top:66px;z-index:3;max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
 .coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
-.coc-track-space{position:relative;width:42px;min-height:58px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:19px 3px 5px}
+.coc-track-space{position:relative;width:38px;min-height:56px;border:1px solid var(--border);border-radius:5px;background:var(--surface);display:flex;flex-direction:column;justify-content:flex-end;gap:2px;padding:18px 3px 5px}
 .coc-track-snum{position:absolute;top:3px;left:0;right:0;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.64rem;color:var(--text-dim)}
 .coc-track-stack{display:flex;flex-direction:column;gap:6px}
 .coc-track-token{border-radius:3px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.56rem;font-weight:700;text-align:center;padding:2px 1px;line-height:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -547,7 +550,8 @@ html,body{margin:0;padding:0;background:#120c0d}
    the black depot centered below. !important beats the inline left/top/transform. */
 @media (max-width:600px){
   .coc-board-hex{display:grid;grid-template-columns:1fr 1fr;gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
-  .coc-board-hex .coc-track-block{position:static;left:auto;top:auto;max-width:none;grid-column:1/-1;justify-self:stretch;margin:0;padding:6px 7px}
+  /* track now lives OUTSIDE the board-hex (a panel child); reflow it to a plain block above the board */
+  .coc-track-block{position:static;left:auto;top:auto;max-width:none;margin:0 0 8px;padding:6px 7px}
   /* shrink the 7 turn-order spaces so 0-6 fit on one row */
   .coc-track-spaces{flex-wrap:wrap;gap:2px}
   .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
@@ -1727,7 +1731,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         </div>
 
         {/* Shared board: 6 numbered depots arranged as a hexagon, black depot centered */}
-        <div className="coc-panel">
+        <div className="coc-panel coc-board-panel">
           <div className="coc-board-head">
             <h3>The Board</h3>
             <div className="coc-whitedie">
@@ -1736,30 +1740,33 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
           </div>
 
-          <div className="coc-board-hex">
-            {/* Turn-order track: label on top, positioned at the upper-left (left of depot 1) */}
-            <div className="coc-track-block">
-              <div className="coc-track">
-                <span className="coc-track-lbl">Turn order</span>
-                <div className="coc-track-spaces">
-                  {(game.track || []).map((stack, s) => (
-                    <div className="coc-track-space" key={s}>
-                      <span className="coc-track-snum">{s}</span>
-                      <div className="coc-track-stack">
-                        {[...stack].reverse().map((pid) => (
-                          <div key={pid} className={`coc-track-token${pid === game.start_player ? " start" : ""}`}
-                            style={{ background: pid === myId ? "var(--gold)" : "#5a86c4", color: pid === myId ? "#15100a" : "#fff" }}
-                            title={`${pid === myId ? "You" : (players[pid] || "Opp")}${pid === game.start_player ? " — goes first" : ""}`}>
-                            {pid === myId ? "You" : (players[pid] || "Opp")}
-                          </div>
-                        ))}
-                      </div>
+          {/* Turn-order track: pinned flush to the panel's upper-LEFT (it sits in the
+              gutter beside the centered board — it used to overlap depot 1 after the
+              board was narrowed). On mobile it reflows to a block above the board. */}
+          <div className="coc-track-block">
+            <div className="coc-track">
+              <span className="coc-track-lbl">Turn order</span>
+              <div className="coc-track-spaces">
+                {(game.track || []).map((stack, s) => (
+                  <div className="coc-track-space" key={s}>
+                    <span className="coc-track-snum">{s}</span>
+                    <div className="coc-track-stack">
+                      {[...stack].reverse().map((pid) => (
+                        <div key={pid} className={`coc-track-token${pid === game.start_player ? " start" : ""}`}
+                          style={{ background: pid === myId ? "var(--gold)" : "#5a86c4", color: pid === myId ? "#15100a" : "#fff" }}
+                          title={`${pid === myId ? "You" : (players[pid] || "Opp")}${pid === game.start_player ? " — goes first" : ""}`}>
+                          {pid === myId ? "You" : (players[pid] || "Opp")}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
-              <div className="coc-track-cap">furthest right and furthest up goes first · each ship moves you 1 space right</div>
             </div>
+            <div className="coc-track-cap">furthest right and furthest up goes first · each ship moves you 1 space right</div>
+          </div>
+
+          <div className="coc-board-hex">
             {[1, 2, 3, 4, 5, 6].map((d, idx) => {
               const depot = game.depots[String(d)];
               const match = dice && !pendingMine && [0, 1].some((i) => !dice.used[i] && dice.values[i] === d);
