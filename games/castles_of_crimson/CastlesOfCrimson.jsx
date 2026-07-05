@@ -788,9 +788,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const depotGoods = [];
     for (const d of [1, 2, 3, 4, 5, 6]) (game.depots?.[String(d)]?.goods || []).forEach((g) => depotGoods.push({ id: g.id, color: g.color, d }));
     const myGoods = { ...(me.goods || {}) };
+    // opponent's currently-held tiles (storage + duchy), keyed by id — to detect what
+    // the bot/opponent just acquired (their board isn't rendered, so it flies toward
+    // the View Opponent button instead of a hidden slot).
+    const oId = game.players ? Object.keys(game.players).find((p) => p !== myId) : null;
+    const oPlayer = oId ? game.players[oId] : null;
+    const oppTiles = {};
+    (oPlayer?.storage || []).forEach((t) => { if (t) oppTiles[t.id] = t; });
+    Object.values(oPlayer?.duchy || {}).forEach((t) => { if (t) oppTiles[t.id] = t; });
+    const oppTileIds = new Set(Object.keys(oppTiles));
     const movesLen = (game.moves || []).length;
     const prev = animSnap.current;
-    animSnap.current = { loc, storageIds, duchyIds, movesLen, depotGoods, myGoods };
+    animSnap.current = { loc, storageIds, duchyIds, movesLen, depotGoods, myGoods, oppTileIds };
     if (!prev) return;                                  // first paint: nothing to animate
     const adv = movesLen - prev.movesLen;
     if (adv < 1 || adv > 6) return;                     // skip initial load / reconnect catch-up
@@ -801,7 +810,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "storage" ? "[data-storage]"
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
-        : spec.kind === "mygoods" ? "[data-mygoods]" : null;
+        : spec.kind === "mygoods" ? "[data-mygoods]"
+        : spec.kind === "viewopp" ? "[data-viewopp]" : null;
       const el = sel && document.querySelector(sel);
       return el ? el.getBoundingClientRect() : null;
     };
@@ -811,7 +821,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const W = 58, H = 67;
       const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
       const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
-      const s1 = dest.kind === "hex" ? Math.max(0.5, Math.min(1, d.width / W)) : 1;
+      const s1 = dest.kind === "hex" ? Math.max(0.5, Math.min(1, d.width / W))
+        : dest.kind === "viewopp" ? 0.4 : 1;
       return { id: `f${flyerSeq.current++}`, tile, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1 };
     };
     const add = [];
@@ -844,6 +855,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
       const dcx = gDest.left + 18, dcy = gDest.top + gDest.height / 2;
       add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1: 1 });
+    }
+    // Tiles the OPPONENT acquired from a depot (take / buy-black) -> fly toward the
+    // View Opponent button, since their duchy/storage isn't shown on your screen.
+    const oppDest = rectOf({ kind: "viewopp" });
+    if (oppDest) {
+      for (const [tid, t] of Object.entries(oppTiles)) {
+        if (prev.oppTileIds.has(tid)) continue;          // opponent already had it
+        const src = prev.loc[tid];                       // was it in a visible depot / black?
+        if (!src) continue;                              // internal (hidden) opp move -> skip
+        const f = mk(t, src, { kind: "viewopp" });
+        if (f) add.push(f);
+      }
     }
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
@@ -1318,7 +1341,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(false)}>No</button>
                 </>
               : <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>)}
-            <button className="coc-btn outline sm" onClick={() => setViewOpp(true)}>View Opponent</button>
+            <button className="coc-btn outline sm" data-viewopp="1" onClick={() => setViewOpp(true)}>View Opponent</button>
             {oppDice && (
               <span className="coc-oppdice" title={`${players[oppId] || "Opponent"}'s dice`}>
                 {[0, 1].map((i) => (
