@@ -569,6 +569,10 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-create{gap:8px}
   /* workers + silver drop to their OWN full row below the dice (not just silver) */
   .coc-resbar{flex-basis:100%;margin-left:0;margin-top:2px}
+  /* tighten the bonus bar so the 6 color-bonus chips fit on a single row */
+  .coc-bonusbar{gap:6px;padding:7px 9px}
+  .coc-bonuschip{gap:3px}
+  .coc-bonus-sw{width:13px;height:13px}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
