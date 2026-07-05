@@ -1650,25 +1650,33 @@ def _lose_prevention_move(game: dict, ai_pid: str) -> dict | None:
 
 
 def _ai_discard_one(game: dict, ai_pid: str) -> str | None:
-    """Discard the AI's least-needed token (gold kept for last). Returns the colour discarded
+    """Discard the AI's least-useful token (gold kept for last). Returns the colour discarded
     (or None if it held nothing) so the real-move applier can log it; the MCTS-simulation
-    applier ignores the return."""
+    applier ignores the return.
+
+    Demand is summed over the AI's ACTUAL targets — face-up board cards AND its own RESERVED cards —
+    using the raw effective cost (after permanent bonuses). Two prior bugs made this heuristic discard
+    exactly what the AI was stockpiling, so variant N (whose takes come from the net, a *different*
+    brain than this heuristic) churned take->discard->re-take forever:
+      1. reserved cards were ignored, so gems saved to buy a reserved card looked surplus; and
+      2. subtracting held tokens (`effective - tokens`) made the very pile you were building up look
+         "least-needed" the more of it you held.
+    Counting reserved cards + using raw (holdings-independent) demand makes the dropped colour a
+    genuinely low-demand one, so it isn't immediately re-taken."""
     ps = game["players"][ai_pid]
     bonuses = bonuses_from(ps["purchased"])
-    need: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
-    for lk in ["L1", "L2", "L3"]:
-        for card in (game["board"].get(lk) or []):
-            if not card:
-                continue
-            for color, cost in card["cost"].items():
-                if color in need:
-                    effective = max(0, cost - bonuses.get(color, 0))
-                    need[color] += max(0, effective - ps["tokens"].get(color, 0))
+    demand: dict[str, float] = {c: 0.0 for c in GEM_COLORS}
+    cards = [c for lk in ("L1", "L2", "L3") for c in (game["board"].get(lk) or []) if c]
+    cards += [c for c in (ps.get("reserved") or []) if c]
+    for card in cards:
+        for color, cost in (card.get("cost") or {}).items():
+            if color in demand:
+                demand[color] += max(0, cost - bonuses.get(color, 0))
     held = [(c, ps["tokens"].get(c, 0)) for c in GEM_COLORS + ["gold"] if ps["tokens"].get(c, 0) > 0]
     if not held:
         return None
-    # Non-gold least-needed first; keep gold for last
-    worst = min(held, key=lambda x: (1 if x[0] == "gold" else 0, need.get(x[0], 0.0)))
+    # gold last; otherwise the lowest-demand colour, dropping from the biggest pile on ties
+    worst = min(held, key=lambda x: (1 if x[0] == "gold" else 0, demand.get(x[0], 0.0), -x[1]))
     ps["tokens"][worst[0]] -= 1
     game["bank"][worst[0]] = game["bank"].get(worst[0], 0) + 1
     return worst[0]

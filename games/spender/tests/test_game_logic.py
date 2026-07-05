@@ -719,6 +719,24 @@ def test_ai_discard_one_reduces_total_by_one():
     assert sum(g["players"]["p1"]["tokens"].values()) == total_before - 1
 
 
+def test_ai_discard_respects_reserved_cards():
+    """The gem pile saved for a RESERVED card must not be discarded — that was the take->discard->
+    re-take loop that hit variant N on the site (its net-chosen takes disagreed with this heuristic,
+    which ignored reserved cards). Board needs white; a reserved card needs red; black is genuinely
+    surplus -> black goes, red is kept. (Old logic dropped the red it was saving.)"""
+    g = make_game_state("p1", "p2")
+    g["board"] = {
+        "L1": [{"bonus": "white", "cost": {"white": 5}, "points": 1, "id": "wh1"}, None, None, None],
+        "L2": [None, None, None, None],
+        "L3": [None, None, None, None],
+    }
+    g["players"]["p1"]["reserved"] = [{"bonus": "red", "cost": {"red": 4}, "points": 3, "id": "rr1"}]
+    g["players"]["p1"]["tokens"] = {**main.empty_gems(), "white": 2, "red": 4, "black": 5}
+    main._ai_discard_one(g, "p1")
+    assert g["players"]["p1"]["tokens"]["red"] == 4     # saved for the reserved card -> kept
+    assert g["players"]["p1"]["tokens"]["black"] == 4   # no card needs it -> discarded
+
+
 # ─── _sim_rollout ─────────────────────────────────────────────────────────────
 
 def test_sim_rollout_terminates():
