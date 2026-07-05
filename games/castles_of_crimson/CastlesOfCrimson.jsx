@@ -441,10 +441,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:180px;max-width:min(92vw,280px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
 .coc-ai-picker .coc-btn{white-space:nowrap}
 .coc-ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
-/* Open Games | Active Games, side by side (mirrors Spender's lobby-grid). */
-.coc-lobby-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;align-items:start}
+/* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
+.coc-lobby-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px 24px;align-items:start}
 .coc-lobby-col{min-width:0}
+@media (max-width:1040px){.coc-lobby-grid{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
+.coc-won{color:#7ec87e;font-weight:700}
+.coc-lost{color:#d98a8a;font-weight:700}
 .coc-join{display:flex;gap:8px}
 .coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
 .coc-input:focus{border-color:var(--gold)}
@@ -611,7 +614,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-flyer.goods::after{display:none}
 @keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
 /* Worker / silver token flyers: pop OUT of the counter when spent, IN when gained. */
-.coc-token-flyer{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:.72rem;line-height:1;z-index:141;pointer-events:none;will-change:transform,opacity}
+.coc-token-flyer{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:1rem;line-height:1;z-index:141;pointer-events:none;will-change:transform,opacity}
 .coc-token-flyer.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.18)}
 .coc-token-flyer.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.35)}
 .coc-token-flyer.spent{animation:coc-tok-out .6s ease-in forwards}
@@ -619,12 +622,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 @keyframes coc-tok-out{from{transform:translate(0,0) scale(1);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(.55);opacity:0}}
 @keyframes coc-tok-in{from{transform:translate(0,0) scale(.55);opacity:0}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
 /* Resource token chips (workers / silver) in the dice bar + opponent modal. */
-.coc-token-chip{display:inline-flex;align-items:center;gap:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;color:var(--text)}
-.coc-token-chip b{color:var(--text);font-size:1rem}
-.coc-token{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:.72rem;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.15)}
+.coc-token-chip{display:inline-flex;align-items:center;gap:7px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;color:var(--text)}
+.coc-token-chip b{color:var(--text);font-size:1.35rem}
+.coc-token{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15)}
 .coc-token.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8}
 .coc-token.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a}
-.coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+/* Goods are shown in their own bordered box (empty box when you hold none — no "none" text). */
+.coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:44px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
@@ -661,6 +665,12 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-review-total{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);color:var(--text)}
 .coc-review-total .coc-review-lbl,.coc-review-total .coc-review-vp{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold)}
 .coc-review-empty{color:var(--text-dim);font-size:.78rem;padding:6px 0}
+.coc-review-row.proj,.coc-review-sub.proj,.coc-review-total.proj{opacity:.4}
+.coc-review-modal{max-width:760px;width:100%;max-height:88vh;overflow-y:auto}
+/* Clickable score in the status bar -> opens the mid-game VP breakdown. */
+.coc-vp-click{cursor:pointer;border-radius:var(--radius);transition:background .12s}
+.coc-vp-click:hover{background:var(--surface2)}
+.coc-vp-info{font-size:.7rem;color:var(--gold);opacity:.8;align-self:flex-start}
 .coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
@@ -779,6 +789,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [roomData, setRoomData] = useState(null);
   const [openGames, setOpenGames] = useState([]);
   const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
+  const [history, setHistory] = useState([]);           // your finished games (lobby History column)
+  const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   const [loadingGames, setLoadingGames] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
@@ -791,6 +803,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
   const [viewOpp, setViewOpp] = useState(false);
+  const [showScores, setShowScores] = useState(false);   // mid-game VP breakdown popup
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
   const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
@@ -863,7 +876,30 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     // Active Games is PUBLIC: all in-progress games (yours + others', vs-bot or not).
     // The frontend pins yours to the top via myId. No auth needed.
     fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => setActiveGames(d.games || [])).catch(() => {});
-  }, []);
+    // History = your finished games (session-gated). Guests have none.
+    if (authUser?.session_token) {
+      fetch(`${COC_HTTP}/games/history`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
+        .then((r) => r.json()).then((d) => setHistory(d.games || [])).catch(() => {});
+    } else {
+      setHistory([]);
+    }
+  }, [authUser]);
+
+  // Load + show a finished game's board + results, read-only over HTTP (no WebSocket).
+  const enterCocReview = (id) => {
+    fetch(`${COC_HTTP}/games/${id}/review`).then((r) => r.json()).then((d) => {
+      if (!d.ok) { setToast(d.message || "Could not load review"); return; }
+      setRoomData({
+        game: d.game, players: d.players || {}, host: null, status: "over",
+        vs_ai: false, ai_player: null,
+        final_scores: d.final_scores || {}, vp_breakdown: d.vp_breakdown || {},
+      });
+      setReviewOnly(true);
+      setReviewing(false);   // land on the results page first (Review Board is one click away)
+      setRoomId(id);
+      setScreen("game");
+    }).catch(() => setToast("Could not load review"));
+  };
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
@@ -1046,7 +1082,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         const ox = Math.cos(ang) * dist, oy = Math.sin(ang) * dist;
         add.push({
           id: `f${flyerSeq.current++}`, token: kind, spent,
-          left: (spent ? cx : cx + ox) - 11, top: (spent ? cy : cy + oy) - 11, w: 22, h: 22,
+          left: (spent ? cx : cx + ox) - 16, top: (spent ? cy : cy + oy) - 16, w: 32, h: 32,
           dx: spent ? ox : -ox, dy: spent ? oy : -oy,
         });
       }
@@ -1106,7 +1142,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   };
   const leaveToLobby = () => {
     disconnect();
-    try { localStorage.removeItem("coc_roomId"); } catch {}
+    // A read-only HTTP review has no WS and must NOT clear the resume pointer of a
+    // real in-progress game the player also has.
+    if (!reviewOnly) { try { localStorage.removeItem("coc_roomId"); } catch {} }
+    setReviewOnly(false);
     setRoomData(null); setRoomId(""); setReviewing(false); setScreen("lobby"); fetchGames();
   };
   // Cancel an open game you created (host_id === myId). Mirrors Spender: authorize
@@ -1389,6 +1428,35 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 });
               })()}
             </div>
+
+            <div className="coc-lobby-col">
+              <div className="coc-section-hd">
+                <div className="coc-section-title">History</div>
+                <span className="coc-muted">{history.length ? `${history.length} finished` : ""}</span>
+              </div>
+              {!authUser ? (
+                <div className="coc-empty">Log in to see your finished games.</div>
+              ) : history.length === 0 ? (
+                <div className="coc-empty">No finished games yet.</div>
+              ) : (
+                history.map((g) => (
+                  <div className="coc-card" key={g.id}>
+                    <div className="coc-card-info">
+                      <div className="coc-card-title">
+                        <span className={g.tie ? "" : (g.you_won ? "coc-won" : "coc-lost")}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
+                        {" vs "}{g.opp_name}
+                      </div>
+                      <div className="coc-card-meta">
+                        {g.your_score != null && g.opp_score != null ? `${g.your_score}–${g.opp_score} · ` : ""}{timeAgo(g.updated_at)}
+                      </div>
+                    </div>
+                    <div className="coc-card-actions">
+                      <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
         {toast && <div className="coc-toast">{toast}</div>}
@@ -1438,47 +1506,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               {tie ? "The duchy is shared." : `${winnerName} wins the duchy.`}
             </p>
             <p className="coc-review-hint">Every point, by turn (T#) or scored at the end — so you can verify the total.</p>
-            <div className="coc-review-grid">
-              {order.map((pid) => {
-                const bd = breakdowns[pid] || [];
-                const during = bd.filter((i) => i.t != null).sort((a, b) => (a.t - b.t) || 0);
-                const ends = bd.filter((i) => i.t == null);
-                const total = scores[pid] != null ? scores[pid] : bd.reduce((s, i) => s + i.vp, 0);
-                const won = tie ? true : pid === w;
-                return (
-                  <div key={pid} className={`coc-review-col${won ? " win" : ""}`}>
-                    <div className="coc-review-hd">
-                      <span>{(players[pid] || pid)}{pid === myId ? " (you)" : ""}</span>
-                      <b>{total} VP</b>
-                    </div>
-                    <div className="coc-review-list">
-                      {bd.length === 0 && <div className="coc-review-empty">No breakdown available for this game.</div>}
-                      {during.length > 0 && <div className="coc-review-sub">During the game</div>}
-                      {during.map((i, k) => (
-                        <div key={`d${k}`} className="coc-review-row">
-                          <span className="coc-review-t">T{i.t}</span>
-                          <span className="coc-review-lbl">{i.label}</span>
-                          <span className="coc-review-vp">+{i.vp}</span>
-                        </div>
-                      ))}
-                      {ends.length > 0 && <div className="coc-review-sub">End of game</div>}
-                      {ends.map((i, k) => (
-                        <div key={`e${k}`} className="coc-review-row">
-                          <span className="coc-review-t">end</span>
-                          <span className="coc-review-lbl">{i.label}</span>
-                          <span className="coc-review-vp">+{i.vp}</span>
-                        </div>
-                      ))}
-                      <div className="coc-review-row coc-review-total">
-                        <span className="coc-review-t" />
-                        <span className="coc-review-lbl">Total</span>
-                        <span className="coc-review-vp">{total}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <VpReview order={order} players={players} myId={myId} scores={scores}
+              breakdowns={breakdowns} winnerPid={w} projected={false} />
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
               <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review Board</button>
               <button className="coc-btn gold" onClick={leaveToLobby}>Back to Lobby</button>
@@ -1608,9 +1637,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : `${players[game.turn] || "Opponent"}'s turn`}
             </span>
           </div>
-          <div className="coc-vp">
+          <div className="coc-vp coc-vp-click" onClick={() => over ? setReviewing(false) : setShowScores(true)} title="Click for the full VP breakdown">
             <span className="v">{me ? "You" : ""} <b>{me?.vp ?? 0}</b></span>
             {opp && <span className="v">{players[oppId]} <b>{opp.vp}</b></span>}
+            <span className="coc-vp-info">ⓘ</span>
           </div>
           <div className="coc-status-right">
             {!over && (confirmAbandon
@@ -1829,7 +1859,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div>
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                   <div className="coc-goods-row" data-mygoods="1">
-                    {me && Object.entries(me.goods).length === 0 && <span className="coc-card-meta">none</span>}
                     {me && Object.entries(me.goods).map(([c, n]) => (
                       <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
                         onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}>
@@ -1922,7 +1951,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <div>
                 <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                 <div className="coc-goods-row" data-oppgoods="1">
-                  {Object.entries(opp.goods).length === 0 && <span className="coc-card-meta">none</span>}
                   {Object.entries(opp.goods).map(([c, n]) => (
                     <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
                   ))}
@@ -1932,6 +1960,23 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             {renderDuchy(opp, false, true)}
             <div className="coc-modal-row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button className="coc-btn gold sm" onClick={() => setViewOpp(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mid-game VP breakdown (click the score). End-of-game bonuses are faded — a
+          projection that only counts once the game ends. */}
+      {showScores && !over && (
+        <div className="coc-modal-bg" onClick={() => setShowScores(false)}>
+          <div className="coc-modal coc-review-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Score breakdown</h3>
+            <p className="coc-review-hint">Every point so far, by turn (T#). End-of-game bonuses are faded — they're projected and only count once the game ends.</p>
+            <VpReview order={game.order || Object.keys(players)} players={players} myId={myId}
+              scores={roomData?.final_scores || {}} breakdowns={roomData?.vp_breakdown || {}}
+              winnerPid={null} projected />
+            <div className="coc-modal-row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+              <button className="coc-btn gold sm" onClick={() => setShowScores(false)}>Close</button>
             </div>
           </div>
         </div>
@@ -1963,6 +2008,57 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       )}
 
       {toast && <div className="coc-toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ─── VP breakdown (shared by the end-game results + the mid-game score popup) ──
+// `projected` = the game is still on, so the end-of-game items are a projection —
+// fade them and show the header as the currently-realized VP (not the projected total).
+function VpReview({ order, players, myId, scores, breakdowns, winnerPid, projected }) {
+  const winners = Array.isArray(winnerPid) ? winnerPid : (winnerPid != null ? [winnerPid] : []);
+  return (
+    <div className="coc-review-grid">
+      {order.map((pid) => {
+        const bd = breakdowns[pid] || [];
+        const during = bd.filter((i) => i.t != null).sort((a, b) => (a.t - b.t) || 0);
+        const ends = bd.filter((i) => i.t == null);
+        const total = scores[pid] != null ? scores[pid] : bd.reduce((s, i) => s + i.vp, 0);
+        const realized = during.reduce((s, i) => s + i.vp, 0);   // officially-scored so far
+        const won = winners.includes(pid);
+        return (
+          <div key={pid} className={`coc-review-col${won ? " win" : ""}`}>
+            <div className="coc-review-hd">
+              <span>{(players[pid] || pid)}{pid === myId ? " (you)" : ""}</span>
+              <b>{projected ? realized : total} VP</b>
+            </div>
+            <div className="coc-review-list">
+              {bd.length === 0 && <div className="coc-review-empty">No breakdown available for this game.</div>}
+              {during.length > 0 && <div className="coc-review-sub">During the game</div>}
+              {during.map((i, k) => (
+                <div key={`d${k}`} className="coc-review-row">
+                  <span className="coc-review-t">T{i.t}</span>
+                  <span className="coc-review-lbl">{i.label}</span>
+                  <span className="coc-review-vp">+{i.vp}</span>
+                </div>
+              ))}
+              {ends.length > 0 && <div className={`coc-review-sub${projected ? " proj" : ""}`}>End of game{projected ? " — projected" : ""}</div>}
+              {ends.map((i, k) => (
+                <div key={`e${k}`} className={`coc-review-row${projected ? " proj" : ""}`}>
+                  <span className="coc-review-t">end</span>
+                  <span className="coc-review-lbl">{i.label}</span>
+                  <span className="coc-review-vp">+{i.vp}</span>
+                </div>
+              ))}
+              <div className={`coc-review-row coc-review-total${projected ? " proj" : ""}`}>
+                <span className="coc-review-t" />
+                <span className="coc-review-lbl">{projected ? "Projected total" : "Total"}</span>
+                <span className="coc-review-vp">{total}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -180,6 +180,22 @@ def save_game(room_id: str) -> None:
     )
 
 
+def load_game_state(room_id: str) -> dict | None:
+    """Raw persisted room state (players/game/…) from the DB, without touching ROOMS.
+    Used by the read-only finished-game review endpoint."""
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("SELECT state_json FROM coc_games WHERE id=?", (room_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["state_json"]:
+        return None
+    try:
+        return json.loads(row["state_json"])
+    except Exception:
+        return None
+
+
 def load_game_to_memory(room_id: str) -> bool:
     conn = _db()
     cur = conn.cursor()
@@ -276,6 +292,44 @@ def list_active_games() -> list[dict]:
     return out
 
 
+def list_user_history(user_id: str) -> list[dict]:
+    """The user's FINISHED games (newest first) for the lobby History column: opponent,
+    final scores, and whether they won — each reviewable via /games/{id}/review."""
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
+                          state_json, updated_at
+                   FROM coc_games
+                   WHERE (player1_id=? OR player2_id=?) AND status='over'
+                   ORDER BY updated_at DESC LIMIT 30""", (user_id, user_id))
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            g = (json.loads(r["state_json"] or "{}").get("game") or {})
+        except Exception:
+            g = {}
+        if not isinstance(g, dict) or not g.get("players"):
+            continue
+        try:
+            scores = engine.final_scores(g)
+        except Exception:
+            scores = {}
+        win = g.get("winner")
+        is_p1 = r["player1_id"] == user_id
+        opp_id = r["player2_id"] if is_p1 else r["player1_id"]
+        opp_name = (r["player2_name"] if is_p1 else r["player1_name"]) or "Opponent"
+        you_won = (win == user_id) or (isinstance(win, list) and user_id in win)
+        out.append({
+            "id": r["id"], "opp_name": opp_name,
+            "your_score": scores.get(user_id), "opp_score": scores.get(opp_id),
+            "you_won": you_won, "tie": isinstance(win, list),
+            "updated_at": r["updated_at"],
+        })
+    return out
+
+
 def delete_open_game(game_id: str, user_id: str) -> bool:
     """Delete an OPEN game the user hosts (lobby 'cancel'). Returns True if a row
     was removed. Uses an existence check rather than cursor.rowcount: the
@@ -324,9 +378,12 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "boards": room.get("boards", {}),
         "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
     }
-    # At game end, ship the itemized VP breakdown + final scores so the review screen
-    # can show exactly where each player's points came from (and on which turn).
-    if g and engine.is_over(g):
+    # Ship the itemized VP breakdown + (projected) final scores so the review can show
+    # exactly where each player's points came from and on which turn. Computed every
+    # update (cheap — a move-log scan) so it's viewable mid-game too; during play the
+    # end-of-game items are a projection the frontend fades until the game is actually
+    # over. Only present once a game is under way (has players).
+    if g and isinstance(g, dict) and g.get("players"):
         state["final_scores"] = engine.final_scores(g)
         state["vp_breakdown"] = {pid: engine.vp_breakdown(g, pid) for pid in g["players"]}
     return state
@@ -720,6 +777,37 @@ async def games_mine(token: str | None = Depends(_bearer_token)):
 async def games_active():
     # Public: all in-progress games (yours + others'). Frontend pins yours on top.
     return {"ok": True, "games": list_active_games()}
+
+
+@coc_app.get("/games/history")
+async def games_history(token: str | None = Depends(_bearer_token)):
+    user = get_user_by_session(token) if token else None
+    if not user:
+        return {"ok": False, "games": [], "message": "unauthenticated"}
+    return {"ok": True, "games": list_user_history(user["id"])}
+
+
+@coc_app.get("/games/{game_id}/review")
+async def games_review(game_id: str):
+    """Read-only review of a FINISHED game: final board + itemized VP breakdown +
+    scores, for the lobby History 'Review' button. Restricted to over games so an
+    in-progress game's full state isn't exposed here (resume it over WS instead)."""
+    game_id = normalize_room(game_id)
+    room = ROOMS.get(game_id)
+    if room and room.get("game"):
+        g, players = room["game"], room.get("players", {})
+    else:
+        state = load_game_state(game_id)
+        if not state:
+            return {"ok": False, "message": "not found"}
+        g, players = state.get("game"), state.get("players", {})
+    if not isinstance(g, dict) or not g.get("players") or g.get("phase") != "over":
+        return {"ok": False, "message": "game not finished"}
+    return {
+        "ok": True, "game": g, "players": players, "winner": g.get("winner"),
+        "final_scores": engine.final_scores(g),
+        "vp_breakdown": {pid: engine.vp_breakdown(g, pid) for pid in g["players"]},
+    }
 
 
 @coc_app.post("/games/{game_id}/cancel")
