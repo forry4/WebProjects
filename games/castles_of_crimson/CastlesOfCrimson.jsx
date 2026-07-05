@@ -19,10 +19,11 @@ const GOODS_HEX = {
 };
 // The 6 territory colors, in the backend's board.COLORS order (drives the bonus strip).
 const BOARD_COLORS = ["burgundy", "blue", "gray", "green", "beige", "yellow"];
-// Per-phase region-completion bonus (mirrors tiles.PHASE_BONUS): completing a region
-// THIS phase earns this many bonus VP on top of the region's size score. It shrinks
-// each phase, so finishing regions early is worth more.
+// Region-completion VP has two parts (mirrors tiles.PHASE_BONUS / AREA_SCORE):
+//  • phase bonus — a time bonus that shrinks each phase (finish regions early!)
+//  • size bonus  — fixed VP by the region's number of spaces (1–8)
 const PHASE_BONUS = { A: 10, B: 8, C: 6, D: 4, E: 2 };
+const AREA_SCORE = [1, 3, 6, 10, 15, 21, 28, 36];   // completing a size-n region (n=1..8)
 const TYPE_LABEL = {
   castle: "Castle", ship: "Ship", mine: "Mine",
   livestock: "Livestock", building: "Building", monastery: "Monastery",
@@ -155,6 +156,9 @@ function moveText(m, board) {
     case "end_turn": return "ended their turn";
     case "undo_turn": return "undid their turn";
     case "skip_pending": return "skipped";
+    case "mine_income": return `gained ${m.silver} silver from ${m.mines} mine${m.mines === 1 ? "" : "s"}`;
+    case "monastery_income": return `gained ${m.workers} worker${m.workers === 1 ? "" : "s"} from Monastery ${m.effect}`;
+    case "phase_end": return `— Phase ${m.phase} ended —`;
     default: return m.type;
   }
 }
@@ -678,11 +682,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
+.coc-log-phase{text-align:center;color:var(--gold);opacity:.85;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;padding:4px 0!important}
 /* Color-completion bonus strip (large = 1st to finish a color, small = 2nd). */
 .coc-bonusbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
 .coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
 .coc-regbonus-lbl{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim)}
 .coc-regbonus{font-size:.98rem;color:var(--gold-l);letter-spacing:.02em}
+.coc-regsize{font-size:.74rem;color:var(--text-dim);letter-spacing:.01em}
 .coc-bonus-div{width:1px;align-self:stretch;background:var(--border);margin:-2px 2px}
 .coc-bonuschip{display:inline-flex;align-items:center;gap:4px;font-size:.82rem;color:var(--text)}
 .coc-bonuschip.gone{opacity:.38}
@@ -1255,6 +1261,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const to = ((v - 1 + dir + 6) % 6) + 1;
     mv({ type: "adjust_die", die_index: i, to });
   };
+  // Net worker cost of nudging die `i` by `dir` (±1). Cost is distance-from-roll, so
+  // moving back toward the rolled value REFUNDS (delta < 0). Mirrors engine _adjust_cost.
+  const adjustDelta = (i, dir) => {
+    const d = game?.dice?.[myId];
+    if (!d) return 0;
+    const cur = d.values[i];
+    const to = ((cur - 1 + dir + 6) % 6) + 1;
+    const orig = (d.orig || d.values)[i];
+    const per = (me?.monastery_effects || []).includes(8) ? 2 : 1;
+    const dist = (a, b) => { const s = Math.min(((b - a) % 6 + 6) % 6, ((a - b) % 6 + 6) % 6); return Math.ceil(s / per); };
+    return dist(orig, to) - dist(orig, cur);
+  };
 
   // ── placement legality (client-side highlight; server is authoritative) ──
   const placeValue = inExtra ? extraValue : (selDie != null ? game?.dice?.[myId]?.values?.[selDie] : null);
@@ -1676,12 +1694,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
-        {/* Region-completion bonus (this phase) + color-completion bonuses (which
-            colors still award their large=1st / small=2nd VP bonus). */}
+        {/* Region-completion VP (phase bonus + size bonus) + color-completion bonuses
+            (which colors still award their large=1st / small=2nd VP bonus). */}
         <div className="coc-bonusbar" title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a color">
           <span className="coc-bonusbar-lbl coc-regbonus-lbl"
-            title="Complete any region THIS phase for this many bonus VP, on top of its size score. It shrinks each phase: A +10 → B +8 → C +6 → D +4 → E +2.">
-            Region bonus <b className="coc-regbonus">+{PHASE_BONUS[game.phase_letter] ?? 0}</b>
+            title="Complete any region THIS phase for this many bonus VP, on top of its size bonus. It shrinks each phase: A +10 → B +8 → C +6 → D +4 → E +2.">
+            Region phase bonus <b className="coc-regbonus">+{PHASE_BONUS[game.phase_letter] ?? 0}</b>
+          </span>
+          <span className="coc-bonus-div" />
+          <span className="coc-bonusbar-lbl coc-regbonus-lbl"
+            title="Fixed VP for completing a region, by its number of spaces (1–8). Added to the region phase bonus.">
+            Region size bonus <b className="coc-regbonus coc-regsize">{AREA_SCORE.join("/")}</b>
           </span>
           <span className="coc-bonus-div" />
           <span className="coc-bonusbar-lbl">Color bonuses</span>
@@ -1832,8 +1855,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       onClick={() => { if (!dice.used[i] && !pendingMine) setSelDie(selDie === i ? null : i); }}><Pips n={dice.values[i]} /></div>
                     {!pendingMine && (
                       <div className="coc-die-adj">
-                        <button disabled={dice.used[i] || !me || me.workers < 1} onClick={() => adjustDie(i, +1)}>▲</button>
-                        <button disabled={dice.used[i] || !me || me.workers < 1} onClick={() => adjustDie(i, -1)}>▼</button>
+                        <button disabled={dice.used[i] || !me || adjustDelta(i, +1) > (me.workers || 0)}
+                          title={adjustDelta(i, +1) < 0 ? "Refunds a worker (back toward the roll)" : "Spend a worker to raise this die"}
+                          onClick={() => adjustDie(i, +1)}>▲</button>
+                        <button disabled={dice.used[i] || !me || adjustDelta(i, -1) > (me.workers || 0)}
+                          title={adjustDelta(i, -1) < 0 ? "Refunds a worker (back toward the roll)" : "Spend a worker to lower this die"}
+                          onClick={() => adjustDie(i, -1)}>▼</button>
                       </div>
                     )}
                   </div>
@@ -1927,10 +1954,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <h3>Log</h3>
           <div className="coc-log">
             {(game.moves || []).map((m, i) => (
-              <div key={i}>
-                <span className="coc-log-t">{m.t ? `T${m.t}` : "·"}</span>
-                {players[m.pid] || m.pid} {moveText(m, board)}{m.vp ? ` (+${m.vp} VP)` : ""}
-              </div>
+              m.type === "phase_end"
+                ? <div key={i} className="coc-log-phase">{moveText(m, board)}</div>
+                : <div key={i}>
+                    <span className="coc-log-t">{m.t ? `T${m.t}` : "·"}</span>
+                    {m.pid ? `${players[m.pid] || m.pid} ` : ""}{moveText(m, board)}{m.vp ? ` (+${m.vp} VP)` : ""}
+                  </div>
             ))}
           </div>
         </div>
