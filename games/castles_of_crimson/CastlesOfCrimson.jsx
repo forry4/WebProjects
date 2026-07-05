@@ -514,7 +514,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* hexagon board layout */
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
-.coc-board-hex{position:relative;width:100%;max-width:760px;margin:6px auto 0;aspect-ratio:1/0.98}
+.coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
 .coc-board-hex .coc-depot{position:absolute;width:31%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
