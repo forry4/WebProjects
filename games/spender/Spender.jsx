@@ -1002,6 +1002,9 @@ export default function SpenderApp() {
 	const myTurn = !reviewing && game?.turn === myId && game?.phase === "playing";
 	const myBonuses = me ? bonusesFrom(me.purchased) : emptyGems();
 	const aiThinking = !reviewing && game?.ai_player && game?.turn === game?.ai_player && game?.phase === "playing";
+	// A genuine human-vs-human game — the ONLY context where another player can be waiting on you.
+	// Excludes vs-AI games (game.ai_player set), puzzles (puzzle set, no opponent), and review.
+	const humanGame = !reviewing && !!game && !game.ai_player && !puzzle;
 	// Derived from game state (not a transient message) so a later room_update
 	// can't clear an unmet requirement — the server keeps these set until resolved.
 	const needsDiscard = !reviewing && game?.pending_discard_pid === myId;
@@ -1343,9 +1346,10 @@ export default function SpenderApp() {
 	}, [roomData, wasmReady, send]);
 
 	// ── "Someone's waiting for you" tab indicator (permission-free) ─────────
-	// When the tab is HIDDEN and it's your turn OR a ping arrived, flash the page
-	// title and swap in the alert favicon so an unfocused tab shows someone's waiting.
-	// Cleared the moment you return (visibilitychange → visible). No Notifications API.
+	// In a human-vs-human game only, when the tab is HIDDEN and it's your turn OR a
+	// ping arrived, flash the page title and swap in the alert favicon so an unfocused
+	// tab shows someone's waiting. Never fires for vs-AI or puzzle games (no human is
+	// waiting there). Cleared the moment you return (visibilitychange → visible). No Notifications API.
 	useEffect(() => {
 		const BASE_TITLE = "Forrest Games";
 		const icon = document.querySelector('link[rel~="icon"][type="image/svg+xml"]');
@@ -1368,12 +1372,13 @@ export default function SpenderApp() {
 		};
 		const evaluate = () => {
 			if (!document.hidden) { stop(); if (pinged) setPinged(false); return; }
-			if (myTurn || pinged) flash(); else stop();
+			// Only alert when a real human opponent is waiting — never for vs-AI or puzzle games.
+			if (humanGame && (myTurn || pinged)) flash(); else stop();
 		};
 		evaluate();
 		document.addEventListener("visibilitychange", evaluate);
 		return () => { document.removeEventListener("visibilitychange", evaluate); stop(); };
-	}, [myTurn, pinged]);
+	}, [humanGame, myTurn, pinged]);
 
 	useEffect(() => {
 		if (screen === "browser" && authUser) fetchGames(authUser);
