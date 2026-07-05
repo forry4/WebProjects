@@ -144,7 +144,7 @@ function moveText(m, board) {
     case "place_starting_castle": return "placed their starting castle";
     case "sell_goods": return `sold ${m.count} #${gnum(m.color)} goods`;
     case "take_workers": return "took 2 workers";
-    case "adjust_die": return `adjusted a die to ${m.to}`;
+    case "adjust_die": return `adjusted die ${m.die_index != null ? m.die_index + 1 : "?"} to ${m.to}`;
     case "ship_take_goods": return `took goods from depot ${m.depot} (ship)`;
     case "ship_adjacent_take": return `took goods from depot ${m.depot} (monastery)`;
     case "building_effect": return `used ${BUILDING_NAME[m.building] || "a building"}`;
@@ -1008,6 +1008,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : dest.kind === "viewopp" ? 0.4 : 1;
       return { id: `f${flyerSeq.current++}`, tile, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1 };
     };
+    // A placement with no source (a starting castle isn't drawn from a depot/storage) —
+    // "pop" it IN at the destination hex (scale up in place) so it still animates.
+    const popIn = (tile, dest) => {
+      const d = rectOf(dest);
+      if (!d) return null;
+      const W = 58, H = 67;
+      const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
+      const s1 = (dest.kind === "hex" || dest.kind === "oppsid") ? Math.max(0.5, Math.min(1, d.width / W)) : 1;
+      return { id: `f${flyerSeq.current++}`, tile, left: dcx - W / 2, top: dcy - H / 2, w: W, h: H, dx: 0, dy: 0, s0: 0.2, s1 };
+    };
     const add = [];
     const storage = me.storage || [];
     for (let i = 0; i < storage.length; i++) {
@@ -1018,7 +1028,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     }
     for (const [sid, t] of Object.entries(me.duchy || {})) {
       if (!t || prev.duchyIds.has(t.id)) continue;      // newly in duchy = placed
-      const f = mk(t, prev.loc[t.id], { kind: "hex", sid });
+      const f = mk(t, prev.loc[t.id], { kind: "hex", sid }) || popIn(t, { kind: "hex", sid });
       if (f) add.push(f);
     }
     // Goods I took from a depot (a ship action) -> fly each to my goods section.
@@ -1051,7 +1061,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       });
       for (const [sid, t] of Object.entries(oPlayer?.duchy || {})) {
         if (!t || prev.oppDuchyIds.has(t.id)) continue;          // newly in their duchy = placed
-        const f = mk(t, prev.oppLoc[t.id] || prev.loc[t.id], { kind: "oppsid", sid });
+        const f = mk(t, prev.oppLoc[t.id] || prev.loc[t.id], { kind: "oppsid", sid }) || popIn(t, { kind: "oppsid", sid });
         if (f) add.push(f);
       }
       const oGoodsDest = rectOf({ kind: "oppgoods" });
@@ -2060,7 +2070,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             ) : (
               <div key={f.id} className="coc-flyer"
                 style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: TILE_HEX[f.tile.color] || "#555",
-                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0 ?? 1, "--s1": f.s1 }}>
                 <TileArt tile={f.tile} px={f.w} />
               </div>
             )
