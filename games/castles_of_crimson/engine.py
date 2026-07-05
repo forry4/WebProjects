@@ -572,7 +572,9 @@ def _place_monastery_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     p = game["players"][pid]
     if eid not in p["monastery_effects"]:
         p["monastery_effects"].append(eid)
-    _log(game, pid, "monastery_placed", effect_id=eid)
+    # NB: the placement itself is already logged by `_do_place_tile` ("place_tile"),
+    # which renders "placed Monastery #N" — so we do NOT log a second line here (it
+    # would duplicate the placement, bracketing any area-complete line between them).
     _monastery_on_place(game, pid, sid, tile)   # immediate effects (M7)
 
 

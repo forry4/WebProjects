@@ -598,7 +598,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-stt.sel{transform:scale(1.12);z-index:3}
 .coc-stt.sel:hover{transform:scale(1.15)}
 .coc-stt-wrap.sel{z-index:3;animation:coc-stt-sel 1.2s ease-in-out infinite}
-@keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 5px var(--gold)) drop-shadow(0 0 3px var(--gold))}50%{filter:drop-shadow(0 0 17px var(--gold-l)) drop-shadow(0 0 9px var(--gold-l))}}
+@keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 2px var(--gold))}50%{filter:drop-shadow(0 0 8px var(--gold-l)) drop-shadow(0 0 4px var(--gold-l))}}
 /* Tile-move animation overlay (depot->storage, storage->duchy) */
 .coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
 .coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .5s cubic-bezier(.4,.05,.25,1) forwards}
@@ -752,6 +752,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [flyers, setFlyers] = useState([]);             // tile-move animations (depot->storage, storage->duchy)
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
+  const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
@@ -840,6 +841,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
+  // Vs the bot: auto-open the opponent view when the bot's turn begins (so you can
+  // watch it build), and auto-close when your turn returns (the view is a blocking
+  // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
+  useEffect(() => {
+    if (aiThinking && !prevAiThinking.current) setViewOpp(true);
+    else if (!aiThinking && prevAiThinking.current) setViewOpp(false);
+    prevAiThinking.current = aiThinking;
+  }, [aiThinking]);
 
   // Tile-move animations: diff MY storage/duchy each update and fly the moved tile
   // from where it was (depot / black depot / storage) to its new home. Mirrors
@@ -1100,8 +1109,17 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (!tile || tile.color !== sp.color) return false;
     if (!ignoreNumber) {
       if (placeValue == null) return false;
-      const allowed = new Set([placeValue, (placeValue % 6) + 1, ((placeValue - 2 + 6) % 6) + 1]);
-      // (we always allow neighbors here; server enforces whether a free-shift applies)
+      // Match the engine's _free_shift_for_tile: the die's 1<->6-wrapping neighbors
+      // are only legal when the player owns the free-shift monastery for THIS tile
+      // type (9=building, 10=ship/livestock, 11=castle/mine/monastery). Otherwise
+      // only the exact die value places (highlighting the ±1 spaces was misleading).
+      const eff = me.monastery_effects || [];
+      const freeShift = (tile.type === "building" && eff.includes(9))
+        || ((tile.type === "ship" || tile.type === "livestock") && eff.includes(10))
+        || ((tile.type === "castle" || tile.type === "mine" || tile.type === "monastery") && eff.includes(11));
+      const allowed = freeShift
+        ? new Set([placeValue, (placeValue % 6) + 1, ((placeValue - 2 + 6) % 6) + 1])
+        : new Set([placeValue]);
       if (!allowed.has(sp.number)) return false;
     }
     // adjacency: any filled neighbor
