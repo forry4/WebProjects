@@ -137,6 +137,7 @@ def _begin_round(game: dict) -> None:
         game["depots"][str(game["white_die"])]["goods"].append(goods)
 
     game["turn"] = game["start_player"]
+    game["turn_number"] = game.get("turn_number", 0) + 1   # a new round's first player-turn
     game["black_depot_used_this_turn"] = False
     game["m6_used_this_turn"] = False
     game["ship_advance_pending"] = 0
@@ -183,6 +184,8 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
         "phase_letter": "A",
         "round": 1,
         "round_in_game": 1,
+        "turn_number": 0,   # increments as each player's turn begins (0 = setup); stamped on log records
+
         "phase": "setup",                    # "setup" | "playing" | "over"
         "winner": None,
         "order": list(player_ids),
@@ -291,7 +294,7 @@ def winner(game: dict) -> str | list[str]:
 
 # ── Small helpers ───────────────────────────────────────────────────────────
 def _log(game: dict, pid: str, mtype: str, **kw) -> None:
-    rec = {"pid": pid, "type": mtype}
+    rec = {"pid": pid, "type": mtype, "t": game.get("turn_number", 0)}
     rec.update(kw)
     game["moves"].insert(0, rec)
     # Keep the WHOLE game's log (records are tiny — {pid, type, +a few fields}) so the
@@ -382,6 +385,7 @@ def _advance_turn(game: dict) -> None:
     idx = order.index(game["turn"])
     if idx + 1 < len(order):
         game["turn"] = order[idx + 1]
+        game["turn_number"] = game.get("turn_number", 0) + 1   # next player-turn this round
         game["black_depot_used_this_turn"] = False
         game["m6_used_this_turn"] = False
         game["ship_advance_pending"] = 0

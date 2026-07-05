@@ -86,7 +86,7 @@ function tileDesc(t, board) {
   if (!t) return "";
   if (t.kind === "goods") {
     const n = board ? board.goods_colors.indexOf(t.color) + 1 : "?";
-    return `Goods — sell with die ${n} to gain 1 silver and 2 VP per good (2-player).`;
+    return `#${n} goods — sell with die ${n} to gain 1 silver and 2 VP per good (2-player).`;
   }
   switch (t.type) {
     case "castle": return "Castle — when placed, take an immediate bonus action (a die of your choice).";
@@ -123,8 +123,10 @@ function tileName(t) {
   }
 }
 // Descriptive move-log line built from the data already in each record (tile, depot, …).
-function moveText(m) {
+// `board` supplies the goods number (goods are named "#N goods", never by colour).
+function moveText(m, board) {
   const t = m.tile;
+  const gnum = (c) => (board ? board.goods_colors.indexOf(c) + 1 : "?");
   switch (m.type) {
     case "take_hex": return `took ${tileName(t)} from depot ${m.depot}`;
     case "place_tile": return `placed ${tileName(t)}`;
@@ -133,7 +135,7 @@ function moveText(m) {
     case "building_take": return `took ${tileName(t)} (building action)`;
     case "discard_storage": return `discarded ${tileName(t)}`;
     case "place_starting_castle": return "placed their starting castle";
-    case "sell_goods": return `sold ${m.count} ${colorLabel(m.color)} goods`;
+    case "sell_goods": return `sold ${m.count} #${gnum(m.color)} goods`;
     case "take_workers": return "took 2 workers";
     case "adjust_die": return `adjusted a die to ${m.to}`;
     case "ship_take_goods": return `took goods from depot ${m.depot} (ship)`;
@@ -606,6 +608,20 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-flyer.goods{clip-path:none;border-radius:4px;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 .coc-flyer.goods::after{display:none}
 @keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
+/* Worker / silver token flyers: pop OUT of the counter when spent, IN when gained. */
+.coc-token-flyer{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:.72rem;line-height:1;z-index:141;pointer-events:none;will-change:transform,opacity}
+.coc-token-flyer.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.18)}
+.coc-token-flyer.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.35)}
+.coc-token-flyer.spent{animation:coc-tok-out .6s ease-in forwards}
+.coc-token-flyer.gain{animation:coc-tok-in .6s ease-out forwards}
+@keyframes coc-tok-out{from{transform:translate(0,0) scale(1);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(.55);opacity:0}}
+@keyframes coc-tok-in{from{transform:translate(0,0) scale(.55);opacity:0}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
+/* Resource token chips (workers / silver) in the dice bar + opponent modal. */
+.coc-token-chip{display:inline-flex;align-items:center;gap:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;color:var(--text)}
+.coc-token-chip b{color:var(--text);font-size:1rem}
+.coc-token{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:.72rem;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.15)}
+.coc-token.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8}
+.coc-token.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a}
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -627,6 +643,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
 .coc-log{max-height:220px;overflow-y:auto;scrollbar-gutter:stable;font-size:.78rem;color:var(--text-dim)}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
+.coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
 .coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
 .coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
@@ -753,6 +770,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
   const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
+  const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
 
   const playerName = authUser?.name || "Player";
   const pendingAction = useRef(null);
@@ -849,6 +867,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     else if (!aiThinking && prevAiThinking.current) setViewOpp(false);
     prevAiThinking.current = aiThinking;
   }, [aiThinking]);
+  useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
 
   // Tile-move animations: diff MY storage/duchy each update and fly the moved tile
   // from where it was (depot / black depot / storage) to its new home. Mirrors
@@ -870,11 +889,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const oId = game.players ? Object.keys(game.players).find((p) => p !== myId) : null;
     const oPlayer = oId ? game.players[oId] : null;
     const oppTiles = {};
-    (oPlayer?.storage || []).forEach((t) => { if (t) oppTiles[t.id] = t; });
-    Object.values(oPlayer?.duchy || {}).forEach((t) => { if (t) oppTiles[t.id] = t; });
+    const oppLoc = {};   // opponent tile id -> where it sits on THEIR board (for in-modal anim)
+    (oPlayer?.storage || []).forEach((t, i) => { if (t) { oppTiles[t.id] = t; oppLoc[t.id] = { kind: "oppslot", i }; } });
+    Object.entries(oPlayer?.duchy || {}).forEach(([sid, t]) => { if (t) { oppTiles[t.id] = t; oppLoc[t.id] = { kind: "oppsid", sid }; } });
     const oppTileIds = new Set(Object.keys(oppTiles));
+    const oppStorageIds = new Set((oPlayer?.storage || []).filter(Boolean).map((t) => t.id));
+    const oppDuchyIds = new Set(Object.values(oPlayer?.duchy || {}).filter(Boolean).map((t) => t.id));
+    const oppGoods = { ...(oPlayer?.goods || {}) };
     const prev = animSnap.current;
-    animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppTileIds };
+    animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppTileIds, oppLoc, oppStorageIds, oppDuchyIds, oppGoods,
+      workers: me.workers, silver: me.silver, oppWorkers: oPlayer?.workers, oppSilver: oPlayer?.silver };
     if (!prev) return;                                  // first paint: nothing to animate
     const rectOf = (spec) => {
       if (!spec) return null;
@@ -884,7 +908,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
         : spec.kind === "mygoods" ? "[data-mygoods]"
-        : spec.kind === "viewopp" ? "[data-viewopp]" : null;
+        : spec.kind === "viewopp" ? "[data-viewopp]"
+        : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
+        : spec.kind === "oppsid" ? `[data-oppsid="${spec.sid}"]`
+        : spec.kind === "oppgoods" ? "[data-oppgoods]" : null;
       const el = sel && document.querySelector(sel);
       return el ? el.getBoundingClientRect() : null;
     };
@@ -894,7 +921,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const W = 58, H = 67;
       const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
       const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
-      const s1 = dest.kind === "hex" ? Math.max(0.5, Math.min(1, d.width / W))
+      const s1 = (dest.kind === "hex" || dest.kind === "oppsid") ? Math.max(0.5, Math.min(1, d.width / W))
         : dest.kind === "viewopp" ? 0.4 : 1;
       return { id: `f${flyerSeq.current++}`, tile, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1 };
     };
@@ -929,27 +956,83 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const dcx = gDest.left + 18, dcy = gDest.top + gDest.height / 2;
       add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1: 1 });
     }
-    // Tiles the OPPONENT acquired from a depot (take / buy-black) -> fly toward the
-    // View Opponent button, since their duchy/storage isn't shown on your screen.
-    const oppDest = rectOf({ kind: "viewopp" });
-    if (oppDest) {
-      for (const [tid, t] of Object.entries(oppTiles)) {
-        if (prev.oppTileIds.has(tid)) continue;          // opponent already had it
-        const src = prev.loc[tid];                       // was it in a visible depot / black?
-        if (!src) continue;                              // internal (hidden) opp move -> skip
-        const f = mk(t, src, { kind: "viewopp" });
+    // Opponent's moves. While you're VIEWING their board (auto-opens on the bot's
+    // turn), animate their tiles ON the modal board: depot -> their storage slot, and
+    // their storage/depot -> their duchy hex, plus goods they drain into their goods
+    // row. Otherwise (board hidden) fly a single marker toward the View Opponent button.
+    if (viewOppRef.current) {
+      (oPlayer?.storage || []).forEach((t, i) => {
+        if (!t || prev.oppStorageIds.has(t.id)) return;          // newly in their storage
+        const f = mk(t, prev.loc[t.id] || prev.oppLoc[t.id], { kind: "oppslot", i });
+        if (f) add.push(f);
+      });
+      for (const [sid, t] of Object.entries(oPlayer?.duchy || {})) {
+        if (!t || prev.oppDuchyIds.has(t.id)) continue;          // newly in their duchy = placed
+        const f = mk(t, prev.oppLoc[t.id] || prev.loc[t.id], { kind: "oppsid", sid });
         if (f) add.push(f);
       }
+      const oGoodsDest = rectOf({ kind: "oppgoods" });
+      const oGoodsDelta = {};
+      for (const c of new Set([...Object.keys(oppGoods), ...Object.keys(prev.oppGoods || {})])) {
+        oGoodsDelta[c] = (oppGoods[c] || 0) - (prev.oppGoods?.[c] || 0);
+      }
+      if (oGoodsDest) for (const g of (prev.depotGoods || [])) {
+        if (curGoodIds.has(g.id) || (oGoodsDelta[g.color] || 0) <= 0) continue;
+        oGoodsDelta[g.color] -= 1;
+        const s = rectOf({ kind: "depot", d: g.d });
+        if (!s) continue;
+        const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
+        const dcx = oGoodsDest.left + 14, dcy = oGoodsDest.top + oGoodsDest.height / 2;
+        add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - 13, top: scy - 13, w: 26, h: 26, dx: dcx - scx, dy: dcy - scy, s1: 1 });
+      }
+    } else {
+      const oppDest = rectOf({ kind: "viewopp" });
+      if (oppDest) {
+        for (const [tid, t] of Object.entries(oppTiles)) {
+          if (prev.oppTileIds.has(tid)) continue;              // opponent already had it
+          const src = prev.loc[tid];                           // was it in a visible depot / black?
+          if (!src) continue;                                  // internal (hidden) opp move -> skip
+          const f = mk(t, src, { kind: "viewopp" });
+          if (f) add.push(f);
+        }
+      }
+    }
+    // Skip a flood of TILE changes (reconnect / initial catch-up) so we animate only
+    // normal, incremental updates. NB: we can't gate on the move-log length — engine.py
+    // caps game["moves"], so its delta is 0 late-game, which once disabled ALL animation.
+    if (add.length > 8) return;
+    // Workers / silver token flyers: pop tokens OUT of the counter when spent (Δ<0),
+    // fly them IN when gained (Δ>0). Diff-driven, so it covers every source/sink
+    // (die-adjust, buy-black, sell, phase income) without knowing which move caused it.
+    const resFly = (attr, kind, cur, prevV) => {
+      const delta = (cur || 0) - (prevV || 0);
+      if (!delta) return;
+      const el = document.querySelector(`[data-${attr}]`);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const spent = delta < 0, n = Math.min(Math.abs(delta), 6);
+      for (let k = 0; k < n; k++) {
+        const ang = -Math.PI / 2 + (k - (n - 1) / 2) * 0.5;   // fan upward
+        const dist = 28 + k * 4;
+        const ox = Math.cos(ang) * dist, oy = Math.sin(ang) * dist;
+        add.push({
+          id: `f${flyerSeq.current++}`, token: kind, spent,
+          left: (spent ? cx : cx + ox) - 11, top: (spent ? cy : cy + oy) - 11, w: 22, h: 22,
+          dx: spent ? ox : -ox, dy: spent ? oy : -oy,
+        });
+      }
+    };
+    resFly("workers", "worker", me.workers, prev.workers);
+    resFly("silver", "silver", me.silver, prev.silver);
+    if (viewOppRef.current) {                              // opponent's spends, on the open modal
+      resFly("opp-workers", "worker", oPlayer?.workers, prev.oppWorkers);
+      resFly("opp-silver", "silver", oPlayer?.silver, prev.oppSilver);
     }
     if (!add.length) return;
-    // Skip a flood of changes (reconnect / initial catch-up) so we animate only normal,
-    // incremental updates. NB: we can't gate on the move-log length — engine.py caps
-    // game["moves"] at 50, so its delta is 0 for every move after the 50th, which had
-    // silently disabled ALL animations mid/late game.
-    if (add.length > 8) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
-    setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 560);
+    setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 640);
   }, [game, me]);
   // Deselect a die once it's been used (its action applied) — adjust_die leaves
   // the die unused, so it stays selected.
@@ -1332,7 +1415,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // or this client recorded an action (covers worker-only die adjusts).
   const hasActed = actedThisTurn || (!!dice && (dice.used[0] || dice.used[1]))
     || !!game.black_depot_used_this_turn || !!game.m6_used_this_turn;
-  const renderDuchy = (pdata, interactive) => {
+  const renderDuchy = (pdata, interactive, opp = false) => {
     const spaces = boardSpaces(pdata.board_id);
     const sids = Object.keys(spaces);
     let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
@@ -1381,7 +1464,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           else if (placed) { stroke = "#fff2c0"; strokeWidth = 2.6; }
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
-            <g key={sid} data-sid={interactive ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
+            <g key={sid} data-sid={interactive ? sid : undefined} data-oppsid={opp ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
               onClick={() => { if (interactive && legal) clickHex(sid, legal); else if (tile) setToast(tileDesc(tile, board)); }}>
               <title>{tile ? tileDesc(tile, board)
                 : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
@@ -1597,8 +1680,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     )}
                   </div>
                 ))}
-                <span className="coc-res" style={{ marginLeft: 8 }}><span className="coc-res-ic">⚒</span> Workers <b>{me?.workers ?? 0}</b></span>
-                <span className="coc-res"><span className="coc-res-ic">⛃</span> Silver <b>{me?.silver ?? 0}</b></span>
+                <span className="coc-token-chip" data-workers="1" style={{ marginLeft: 8 }} title="Workers — spent to adjust dice">
+                  <span className="coc-token worker">⚒</span><b>{me?.workers ?? 0}</b>
+                </span>
+                <span className="coc-token-chip" data-silver="1" title="Silver — spent to buy black-depot tiles">
+                  <span className="coc-token silver">⛃</span><b>{me?.silver ?? 0}</b>
+                </span>
               </div>
 
               {/* storage + goods */}
@@ -1683,7 +1770,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <h3>Log</h3>
           <div className="coc-log">
             {(game.moves || []).map((m, i) => (
-              <div key={i}>{players[m.pid] || m.pid} {moveText(m)}{m.vp ? ` (+${m.vp} VP)` : ""}</div>
+              <div key={i}>
+                <span className="coc-log-t">{m.t ? `T${m.t}` : "·"}</span>
+                {players[m.pid] || m.pid} {moveText(m, board)}{m.vp ? ` (+${m.vp} VP)` : ""}
+              </div>
             ))}
           </div>
         </div>
@@ -1698,7 +1788,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-modal-bg" onClick={() => setViewOpp(false)}>
           <div className="coc-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <h3>{players[oppId]} — {opp.vp} VP</h3>
-            <p style={{ marginBottom: 10 }}>Silver {opp.silver} · Workers {opp.workers}</p>
+            <div style={{ display: "flex", gap: 14, marginBottom: 10 }}>
+              <span className="coc-token-chip" data-opp-workers="1"><span className="coc-token worker">⚒</span><b>{opp.workers}</b></span>
+              <span className="coc-token-chip" data-opp-silver="1"><span className="coc-token silver">⛃</span><b>{opp.silver}</b></span>
+            </div>
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
               <div>
                 <div className="coc-pill" style={{ marginBottom: 4 }}>Dice</div>
@@ -1713,14 +1806,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-storage">
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
-                    if (!t) return <div key={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
-                    return <div key={t.id} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
+                    if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                    return <div key={t.id} data-oppstorage-slot={i} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
                   })}
                 </div>
               </div>
               <div>
                 <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
-                <div className="coc-goods-row">
+                <div className="coc-goods-row" data-oppgoods="1">
                   {Object.entries(opp.goods).length === 0 && <span className="coc-card-meta">none</span>}
                   {Object.entries(opp.goods).map(([c, n]) => (
                     <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
@@ -1728,7 +1821,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               </div>
             </div>
-            {renderDuchy(opp, false)}
+            {renderDuchy(opp, false, true)}
             <div className="coc-modal-row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
               <button className="coc-btn gold sm" onClick={() => setViewOpp(false)}>Close</button>
             </div>
@@ -1739,7 +1832,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       {flyers.length > 0 && (
         <div className="coc-fly-layer">
           {flyers.map((f) => (
-            f.goods ? (
+            f.token ? (
+              <div key={f.id} className={`coc-token-flyer ${f.token} ${f.spent ? "spent" : "gain"}`}
+                style={{ left: f.left, top: f.top, width: f.w, height: f.h, "--dx": `${f.dx}px`, "--dy": `${f.dy}px` }}>
+                {f.token === "worker" ? "⚒" : "⛃"}
+              </div>
+            ) : f.goods ? (
               <div key={f.id} className="coc-flyer goods"
                 style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: GOODS_HEX[f.color] || "#555",
                   "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>

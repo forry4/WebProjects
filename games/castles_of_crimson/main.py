@@ -47,7 +47,8 @@ AI_DIFFICULTIES = ("normal", "hard")
 DEFAULT_DIFFICULTY = "hard"
 # Pause between the bot's individual moves so the client animates each tile in turn
 # (a whole-turn bulk update trips the flyer's catch-up guard and animates nothing).
-_BOT_MOVE_DELAY = 0.5
+# Slow enough to watch each move land on the opponent board (the flyer plays ~0.5s).
+_BOT_MOVE_DELAY = 1.25
 
 
 def _valid_difficulty(value) -> str:
