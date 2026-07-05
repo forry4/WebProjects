@@ -31,7 +31,39 @@ def test_castle_extra_action_placing_a_ship_chains_to_ship_depot_pending():
     assert ok, err
     assert p["duchy"][blue] is not None and p["duchy"][blue]["type"] == "ship"
     assert g["pending_kind"] == "ship_choose_depot"          # the new pending from the ship effect
-    assert g["ship_advance_pending"] >= 1                    # and the ship queued its track advance
+    assert engine._player_space(g, "p1") >= 1                # and the ship advanced the track immediately
+
+
+def test_region_completion_logged_before_tile_ability():
+    """Completing a region is logged the moment the tile lands — BEFORE the tile's own
+    ability (here: livestock scoring), so the log reads placed -> region -> ability."""
+    g = _playing(50)
+    p = g["players"]["p1"]
+    b = board.get_board(p["board_id"])
+    sid = next(list(r["spaces"])[0] for r in b.REGIONS.values() if r["size"] == 1 and r["color"] == "green")
+    tile = tiles._hex_tile("livestock", "green", animal="pig", count=2)
+    p["duchy"][sid] = tile                        # place it, then run the on-placed effects
+    g["moves"] = []
+    engine._on_tile_placed(g, "p1", sid, tile)
+    types = [m["type"] for m in g["moves"]]       # newest-first
+    assert "area_complete" in types and "livestock_score" in types
+    # chronological order is the reverse of the log; region must come first
+    assert types.index("area_complete") > types.index("livestock_score")
+
+
+def test_ship_track_advance_is_undone_by_undo_turn():
+    """A ship advances the track immediately; undoing the whole turn restores it."""
+    g = _playing(51)
+    g["turn"] = "p1"
+    for d in range(1, 7):
+        g["depots"][str(d)]["goods"] = []         # no goods -> ship sets no depot pending
+    engine._snapshot_turn(g)                       # mark the turn-start state
+    sp0 = engine._player_space(g, "p1")
+    engine._place_ship_effect(g, "p1", g["players"]["p1"]["castle_sid"], tiles._hex_tile("ship", "blue"))
+    assert engine._player_space(g, "p1") == min(sp0 + 1, engine.NUM_TRACK_SPACES - 1)
+    ok, err = engine.apply_move(g, "p1", {"type": "undo_turn"})
+    assert ok, err
+    assert engine._player_space(g, "p1") == sp0    # track restored to before the ship
 
 
 def test_ship_pending_must_be_resolved_before_other_moves():

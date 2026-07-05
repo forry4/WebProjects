@@ -234,13 +234,12 @@ def test_ship_takes_goods_and_queues_track_advance():
     assert engine._player_space(g, "p1") == 0
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "sh", "space_id": sid})
     assert ok, err
-    assert g["ship_advance_pending"] == 1
+    assert engine._player_space(g, "p1") == 1           # ship advances the track IMMEDIATELY on placement
     assert g["pending_kind"] == "ship_choose_depot"
     ok2, err2 = engine.apply_move(g, "p1", {"type": "ship_take_goods", "depot": 4})
     assert ok2, err2
     assert g["players"]["p1"]["goods"].get("rose") == 1
-    assert engine._player_space(g, "p1") == 0          # not advanced yet
-    engine.apply_move(g, "p1", {"type": "end_turn"})   # advance applies now
+    engine.apply_move(g, "p1", {"type": "end_turn"})   # no further advance at end of turn
     assert engine._player_space(g, "p1") == 1
 
 

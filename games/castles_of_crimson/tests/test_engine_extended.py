@@ -249,8 +249,9 @@ def test_ship_with_no_goods_anywhere_sets_no_depot_pending():
     g = _playing(11)
     for d in range(1, 7):
         g["depots"][str(d)]["goods"] = []
+    sp0 = engine._player_space(g, "p1")
     engine._place_ship_effect(g, "p1", g["players"]["p1"]["castle_sid"], tiles._hex_tile("ship", "blue"))
-    assert g["ship_advance_pending"] >= 1              # the track advance is still queued
+    assert engine._player_space(g, "p1") == min(sp0 + 1, engine.NUM_TRACK_SPACES - 1)  # advanced immediately
     assert g["pending_pid"] is None                    # but no depot-choice pending (nothing to take)
 
 

@@ -531,15 +531,16 @@ def _on_tile_placed(game: dict, pid: str, sid: str, tile: dict) -> None:
     t = tile["type"]
     if t == "mine":
         p["mines_count"] += 1
-    elif t == "livestock":
+    # Region/color completion is scored IMMEDIATELY on placement — BEFORE the tile's
+    # own ability — so the log reads: placed tile -> completed region -> used ability.
+    _score_area_and_bonus(game, pid, sid)
+    # The tile's own effect. Effects that hand the player a sub-decision (ship/castle/
+    # monastery) run last so the pending state is the final result of this placement.
+    if t == "livestock":
         _score_livestock(game, pid, sid, tile)
     elif t == "building":
         _place_building_effect(game, pid, sid, tile)
-    # Immediate area/color scoring happens for every placement.
-    _score_area_and_bonus(game, pid, sid)
-    # Effects that hand the player a sub-decision are queued LAST so the pending
-    # state is the final result of this placement.
-    if t == "ship":
+    elif t == "ship":
         _place_ship_effect(game, pid, sid, tile)
     elif t == "castle":
         _place_castle_effect(game, pid, sid, tile)
@@ -694,8 +695,11 @@ def _offer_m5_adjacent(game: dict, pid: str, from_depot: int) -> None:
 
 
 def _place_ship_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
-    # Each ship advances your track marker one space when you end your turn.
-    game["ship_advance_pending"] = game.get("ship_advance_pending", 0) + 1
+    # Each ship advances your track marker one space — applied RIGHT AWAY (was deferred
+    # to end-of-turn) so the turn-order track updates the moment the ship is placed. A
+    # whole-turn undo restores the pre-ship track from the turn-start snapshot.
+    _advance_track(game, pid, 1)
+    _log(game, pid, "track_advance", spaces=1)
     # Plus you immediately take all goods from a depot of your choice (if any exist).
     total_goods = sum(len(game["depots"][str(d)]["goods"]) for d in range(1, 7))
     if total_goods > 0:
@@ -914,11 +918,14 @@ def _h_discard_storage(game, pid, move):
 
 
 def _h_end_turn(game, pid, move):
-    # Apply this turn's queued ship advances to the track (each ship = 1 space).
+    # Ships now advance the track immediately on placement (see _place_ship_effect).
+    # Back-compat: a game saved mid-turn under the OLD deferred scheme may still carry a
+    # pending count — apply it here so its ships aren't lost. New games always have 0.
     n = game.get("ship_advance_pending", 0)
     if n > 0:
         _advance_track(game, pid, n)
         _log(game, pid, "track_advance", spaces=n)
+        game["ship_advance_pending"] = 0
     _log(game, pid, "end_turn")
     _advance_turn(game)
     return True, None
