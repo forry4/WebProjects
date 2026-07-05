@@ -507,13 +507,12 @@ Fix (now in **`core/db.py`** — extracted out of `games/spender/main.py`):
 
 ## WWSD ("What Would Steve Do") — variant-N autoplayer for a FRIEND's external Splendor site
 
-`wwsd/` plays/advises moves for a **friend's external site** — mattle's "spendee" (`spendee.mattle.online`,
-a **Meteor** app), NOT the user's own Spender game. **CURRENT (do not assume the old path): a CLIENT-SIDE
-browser userscript runs variant N (= the card-set attention net `net_attn_3`) entirely in the browser via
-Rust→WASM** — no server compute — and **hands-off autoplays** via synthetic canvas clicks. See "Browser-N
-userscript" below; it **supersedes** the original bookmarklet + Render-`wwsd` (variant **S**) advisor, kept
-only as a fallback. The userscript logs every game to IndexedDB for offline loss-mining (the source of the
-human-game corpus). See memory `wwsd-deployed`.
+`wwsd/` (top-level package) is a standalone tool that recommends a move for a Splendor position taken
+from a **friend's external site** — mattle's "spendee" (`spendee.mattle.online`, a **Meteor** app),
+NOT the user's own Spender game. A browser **bookmarklet** on the friend's page reads the live game
+state out of the Meteor client cache (`Meteor.connection._mongo_livedata_collections['games'].find()
+.fetch()` — a request-free LOCAL read of already-synced Minimongo), POSTs it to a public endpoint,
+and renders variant **S**'s move (+ position eval) in an injected overlay panel.
 
 ### Deployed as a SECOND Render service (process isolation is the whole point)
 - Its own Render web service **`wwsd`** → `https://wwsd.onrender.com`, a **separate process** from
@@ -535,16 +534,11 @@ human-game corpus). See memory `wwsd-deployed`.
 ### The deck (`wwsd/wwsd_defs.json`)
 The friend's 90-card + 10-noble deck, **extracted from THEIR site's client** (their Meteor module
 `games/spendee/imports/api/utils/constants.js`, read via the browser console — no server request).
-It's the **exact same canonical Splendor deck as ours** — a verified **90/90 one-to-one bijection** by
-(level, points, bonus, cost), including friend #3 → Spender #36 (both `white bonus, cost 2+2`, exactly
-equal; the old "89/90, one inexact card" note was wrong — that's what the *card-36 fix* corrected). The
-ONLY difference is **ORDER: friend card index ≠ our engine card index** (only ~5/90 happen to share an
-index; e.g. friend #0 is white-bonus, our #0 is black-bonus). This matters per
-serving path: `analyze.override_engine()` (the Python/Render-S path) **rebuilds** the engine's
-card/noble tables from THEIRS by index, so S analyses their EXACT game with no remap needed. **The
-WASM browser-N path CANNOT override** the compiled Spender deck, so it MUST remap friend ids ↔ Spender
-ids (see "Browser-N userscript" → deck remap below). Validated against a finished-game dump (90-card
-partition + token conservation + noble satisfaction).
+It's the canonical Splendor deck in the SAME colour order as ours (identity matches **89/90**; our
+Spender deck deviates on one card). `analyze.override_engine()` rebuilds the engine's card/noble
+tables from THEIRS so S analyses their EXACT game (their card index = our engine card id; 0-39 L1 /
+40-69 L2 / 70-89 L3). Validated against a finished-game dump (90-card partition + token conservation
++ noble satisfaction).
 
 ### Files + API
 - `wwsd/analyze.py` — `analyze(doc, time_limit)` (a dumped `{games:[...]}` doc → engine State →
@@ -582,6 +576,8 @@ or the bookmarklet's `SECS` (`?t=`) to climb toward the local strength (capped b
 `SERVE_MAX_SIMS`). For full local strength without the wait, a tunnel (Tailscale Funnel / Cloudflare)
 or a cheap dedicated-core VPS beats the free tier. `turns_table.json` (H3-vs-H2-measured, 15-pt) feeds
 S's leaf eval → 15-pt games exact, 21-pt approximate.
+
+---
 
 ### Browser-N userscript — run variant N (`net_attn_3` attention net) in the friend's browser via WASM (LIVE June 2026; CSP confirmed; FULL UI AUTOPLAY working)
 **Status:** the advisor overlay AND fully hands-off **UI autoplay** both work on spendee (WASM CSP is
@@ -705,6 +701,7 @@ advisor overlay (top move + position eval + alternatives) is leaf-agnostic, so i
   needs no backend).
 
 ---
+
 
 ## `core/` — shared backend platform (DB + auth)
 
@@ -1683,38 +1680,24 @@ website variant **"S"**.
     **Gold weighting is NOT supported either** — controlling for reserves, gold advances you LESS per token than
     a colored gem (coef −0.20 vs −0.41); its raw effect was just reserve-correlation. **Keep `RESERVE_TURN_ADJ=0`.**
     Net lesson: R² gain ≠ strength; the turns horizon is not a strength lever for S (3 independent washes).
-  - **Net retrain / learnable-leaf path — OPEN, NOT exhausted (prior results are INCONCLUSIVE, not a
-    ceiling — reclassified 2026-06-25).** Earlier this was written up as "EXHAUSTED, beats nothing"; that
-    over-read the evidence. A pre-retrain derisking sweep (offline scripts: `distill_features.py`/
-    `distill_fit.py`/`leaf_ab.py`, `bootstrap_harvest.py`/`bootstrap_train.py`/`net_vs_s.py`,
-    `policy_arch_test.py`) produced real measurements — kept here for reference — but **every one was either
-    ANCHORED to S/H3 (distill / imitate) or a flat-feature/small/short self-play run, so none of them tests
-    the actual question "can a net EXCEED S."** The data: (a) **leaf-swap** — an enriched ridge leaf distilled
-    toward V_search (held-out AUC 0.718 vs static 0.670) made S only **0.534** vs frozen-S (n.s.) → a sharper
-    *static* leaf doesn't convert through search. (b) **base-feature bootstrap** (trained to *imitate* S) —
-    **0.042** vs S. (c) **enriched bootstrap** (imitate S) — value sharp (MSE 0.027), policy 0.52 top-1,
-    **0.315** vs S. (d) **structured/per-card policy head** trained to *predict H3* — 0.554 top-1 ≈ flat 0.535,
-    ≪ H3's **0.86**. **Read correctly, (a)-(d) only show that IMITATING S/H3 rebuilds ≈S — which is true by
-    construction (a student capped at its teacher) and says NOTHING about a net trained to win.** The framing
-    "no net configuration beats S / S is at the ceiling" does not follow from these and is RETRACTED.
-    - **Two reasons the negatives are inconclusive, not a wall:** (1) the **decisive experiment was never run** —
-      UN-ANCHORED self-play discovering a >H3 policy; it was deprioritized "low odds, not pursued" *because
-      Python-slow self-play made it infeasible* — the exact blocker the Rust rewrite removed. (2) The
-      self-play runs that COULD exceed (variant Z, the curriculum runs) used flat/lossy features + a tiny
-      (~600k) MLP and **may simply be UNDERTRAINED** — too few iterations/games to converge, not a proven cap
-      (user's point, 2026-06-25: a sub-S result after limited iterations is just as consistent with
-      undertraining as with a ceiling).
-    - **Fresh evidence it's headroom, not a wall (the #3 premise test, 2026-06-25):** early-game outcomes are
-      ~**0.54**-predictable from a static snapshot for *everyone* (v_state, linear, AND a nonlinear MLP on 95
-      enriched features). A learned leaf's gain is all mid/late (search-redundant), which explains the
-      calibrated-leaf wash — but it also means **S plays the decisive early phase on a coin-flip static eval**,
-      an unevaluated phase no heuristic has touched. That's located headroom, not a ceiling.
-    - **So this path is OPEN.** The real test = **un-anchored + enriched features + relational/attention net +
-      Rust-scale volume + ENOUGH iterations**, with explicit kill-criteria to bound the effort. Full scope:
-      `.claude-plans/az-retrain-rust-scale.md`. (Reusable byproduct on main: `league.py`/`train_az.py` accept
-      **`S` as a league/gate opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/
-      `net.SpenderNet(in_features=)` byte-identical-default. `*cache*.npz`/`leaf_model.npz`/
-      `checkpoints_bootstrap*` are gitignored scratch.)
+  - **Net retrain / learnable-leaf path — EXHAUSTED, beats nothing (DO NOT relitigate).** A pre-retrain
+    derisking sweep (offline scripts: `distill_features.py`/`distill_fit.py`/`leaf_ab.py`, `bootstrap_harvest.py`/
+    `bootstrap_train.py`/`net_vs_s.py`, `policy_arch_test.py`) tested every lever a learned net could give S.
+    **Six converging negatives:** (a) **leaf-swap** — an enriched ridge leaf distilled toward V_search (held-out
+    AUC 0.718 vs the static leaf's 0.670) made S only **0.534** vs frozen-S (n.s.), panel wash → a sharper static
+    leaf does NOT convert through search. (b) **base-feature bootstrap** — a net distilled from S (value+policy)
+    scored **0.042** vs S (near-uniform policy CE 2.67). (c) **enriched bootstrap** — value sharp (MSE 0.027),
+    policy lifted to 0.52 top-1 but still **0.315** vs S. (d) **structured/per-card policy head** — 0.554 top-1 ≈
+    flat 0.535, both ≪ the H3 prior's **0.86**. The wall is NOT features or architecture: **S's search move ≈
+    H3's greedy move 86%, and predicting it essentially requires recomputing H3** — any net is a lossy
+    approximation (~0.55). So the best static policy IS the H3 prior, which **S already uses**; "H3 prior + net
+    value" just rebuilds ≈ S. Combined with "better value doesn't convert," **no net configuration beats S.**
+    The only untested path is self-play discovering a >H3 policy from the 0.315 enriched bootstrap, but the net
+    represents policies at ~0.55 fidelity and base-feature self-play already capped sub-S (variant Z) → low odds,
+    not pursued. **Conclusion: S is at the ceiling of the heuristic+search approach; the learnable-net path can't
+    surpass it.** (Reusable byproduct kept on main: `league.py`/`train_az.py` now accept **`S` as a league/gate
+    opponent** via `--heur-variants S` + `--opp-s-sims`; `vsearch.LEAF_MODE`/`net.SpenderNet(in_features=)` are
+    byte-identical-default. `*cache*.npz`/`leaf_model.npz`/`checkpoints_bootstrap*` are gitignored scratch.)
 - **21-point "Long" mode — LIVE + specialized.** Per-game `win_points` (default 15) is wired through the
   engine, production rules (`main._win_points`), and the AI stack (v_state convex zone, `victory_closeness`,
   heuristic3 win-checks all read `s.win_points`); the lobby has a **Classic 15 / Long 21** toggle threading
@@ -2053,28 +2036,208 @@ S's v_state search if the client doesn't submit in time.**
   mover-perspective; `npm run smoke` clean (CLS 0). The WASM was UNCHANGED (already shipped `searchN` in
   `c96e3fd`); this was a Python-timeout + JS-gating + CSS fix only.
 
+### Session (June 26 2026) — Plan-A AZ retrain → variant PV (policy+VALUE net) SHIPPED as "N"; league run launched
+**The learnable-net path is REALIZED (this UPDATES the "learnable-leaf path" question above):** a
+warm-started **policy+value** net ("PV", `net_pv_4`) BEATS both old-N and S in search. Prior learnable
+attempts lost because they distilled-S / trained from-scratch on flat features; PV wins because it pairs
+the **enriched 125-feat encoder** + a **warm start from the N value-leaf bootstrap** + AZ self-play.
+
+- **The PV stack (Rust, `rust-search` worktree + `C:\Users\Forrest\az_run`):** `PolicyValueNet`
+  (valuenet.rs — trunk + value head + 70-action policy head), `feats::features_az` (125 = base 101 +
+  per-card `engine_value`+`noble_progress`; the per-card adds earned their slot in a policy pre-check,
+  +0.024/+0.017; engfwd/turns/oppdem DROPPED as no-lift), `vsearch::root_visits_until_pv` (determinized
+  PUCT, legal-masked softmax of net policy logits at PLAY, H3-prior fallback at discard/noble, net value
+  leaf). Bins: `selfplay_pv` (self-play harvest), `train_pv.py` (GPU value+policy trainer, value MSE +
+  policy CE, reward-shaped `(1-a)(2y-1)+a·tanh(margin/6)`), `eval_pv` (vs S), `eval_vs_n` (vs old-N via
+  `features_n101`, the 101 encoder lifted from HEAD), `harvest_az` (S-vs-S bootstrap → `boot125.csv`,
+  2.26M rows). `azloop.sh` ran it.
+- **Self-play PLATEAUED (do not relitigate):** vs-S FLAT ~0.735 across 12 iters while value-AUC kept
+  RISING — the documented self-play-diverges-from-the-external-opponent signature (the net got better at
+  beating its own clones, not S). The per-iter "peaks" (0.80) were **n=160 eval noise**; a 600-game
+  fresh-decks re-eval regressed them to ~0.73–0.76 (net_pv_4/8/12 statistically tied). One-time gain
+  over N, did NOT compound. **net_pv_4 = champion.**
+- **PV champion validated:** vs old-N **0.60 / 0.66 / 0.67 @ 160 / 400 / 800 sims** (robust, edge GROWS
+  with sims — a good policy compounds with depth), replicated on net_pv_8/12 (0.63/0.68); vs S **0.758**.
+  The learned POLICY adds **+0.58 over the H3 prior** at a matched value head (control bin
+  `eval_policy_ctrl`: full-PV vs PV-value+H3-prior). So both the richer value head AND the policy head
+  pull their weight.
+- **SHIPPED, served AS variant "N" (Nina, the top tier):** first as a separate "PV"/Percy variant (commit
+  `2a50b5a`), then **folded INTO "N"** (commit `12fc540`) per the user — `Spender.jsx` routes
+  `ai_variant==="N"` → `searchPV`, and the Percy/PV lobby option + persona were removed. **Old value-leaf
+  N is KEPT AS A RECORD** (`n_model.json` + `search_visits_n_timed`/`searchN`/`build_n_net` all stay in
+  code, just not routed to). **Upgrade path: swap `spender-core/src/pv_model.json` → rebuild wasm → push;
+  "N" instantly plays the stronger net, no UI change.** (The WWSD browser autoplayer also adopted PV —
+  `search_pv_full_timed`, v0.9.0; see the WWSD section.) See memory [[spender-variant-pv-shipped]].
+- **DEPLOY GOTCHA (do not relitigate):** the AZ/WASM work was built on **stale `rust-search` (49 behind
+  origin/main)**; production = main ALREADY had the WASM client-AI + variant-N foundation via a different
+  history, but NOT the Plan-A additions. So deploy = **PORT onto main** (fresh worktree off `origin/main`,
+  add-only edits, `push origin <branch>:main`) — **NEVER push `rust-search:main`** (non-ff wipes 49
+  commits). **Dual-encoder split (load-bearing):** main's `features()` stays **101 (old-N's net)**;
+  `features_az()` is the NEW **125 (PV)** — kept separate so old-N isn't fed the wrong dims (on rust-search
+  `features()` had been redefined to 125, which BREAKS old-N — that working tree isn't deployable as-is).
+  All Rust diffs onto main verified **purely additive (0 deletions)** → N byte-unchanged. The built
+  `spender_core_bg.wasm` is a COMMITTED artifact (Pages CI does NOT rebuild Rust→wasm); wasm grew to
+  ~2.07MB (embeds the net) — candidate for external-load later.
+- **Discard-search = WASH (do not relitigate):** `selfgate_discard.rs` found **93/93 multi-option discards
+  where the searched pick == greedy H3 `choose_discard` (0% divergence)** → the greedy discard is already
+  search-optimal; searching it just burns sims. `root_visits_until_leaf_ds` parked on the branch.
+- **LEAGUE run (IN PROGRESS, `az_run/league_loop.sh`) — escape the plateau via opponent diversity (the
+  documented cure for self-play tunneling):** `league_pv.rs` (the BEST net records ONLY its own moves vs a
+  FIXED opponent — S / old-N / a rotating past-PV checkpoint — shaped by margin; learn to BEAT them, not
+  imitate) + `pv_vs_pv.rs` (gate PRIMARY: candidate vs frozen best, paired-CRN, =0.5000 for identical
+  nets). Mix **self .4 / past-PV .25 / S .2 / old-N .15** — **H3 DROPPED** (PV crushes it ~95% → saturated
+  targets, near-zero margin gradient; its share went to past-PV, the closest/most-informative opponent).
+  Buffer ~**50/50** (subsampled `boot125_sub.csv` anchor, 600k rows, so the league signal isn't drowned —
+  the self-play loop's 87% bootstrap anchor was part of why it stalled). **Gate = beat frozen best ≥0.52
+  AND RPS guard (vs-S ≥0.72, vs-old-N ≥0.60 — net_pv_4's scores minus noise).** **Verdict to watch: the
+  per-promotion `best vs SHIPPED net_pv_4` line — >~0.55 = the league broke the plateau (swap
+  `pv_model.json` + ship); ~0.5 across many iters = the architecture ceiling, net_pv_4 stands.**
+
+### Session (June 27 2026) — ENRICHED 178-feat retrain BEATS net_pv_4; `net_ext_19` SHIPPED as "N" (`613c91f`)
+**The feature-enrich retrain WORKED — refuting the "variant N is at the ceiling" pessimism (the league above only TIED net_pv_4; ENRICHING THE FEATURES + self-play broke through).** `net_ext_19` (a 178-feat policy+value net) beats the shipped champion net_pv_4 **~0.59-0.60, DEPTH-ROBUST** (256/800/3200 sims = 0.586/0.584/0.602 on fresh decks — no decay, unlike the calibrated-leaf wash). **DEPLOYED as N** (`613c91f` on main): selecting N now plays net_ext_19. The enrich+self-play loop is now a REPEATABLE strength engine, not a one-off.
+- **Encoder `feats::features_ext` (178)** = deployed base 125 (`features_az`) + 5 groups: A per-color self-need (5), B opp face-up reserve content (12), C own reserve content (12), D per-card take_value (12), E per-card turns-to-afford (12). Trained on the **rust-search** worktree (`az_run/loop_ext.sh`): warm-started by distilling net_pv_4's PV-vs-PV play into the 178 net (clean distill 0.517 vs net_pv_4), then self-play with the anchor annealed off. CONVERGED at iter 24 (champion edge flat ~0.58-0.60 for ~10 iters; `cand_vs_best` oscillating at the 0.52 bar).
+- **Pick the best net by RE-GATING ALL candidates on FRESH decks — NOT the in-loop promotion (winner's curse; DO NOT regress).** The noisy 0.52 gate (SE 0.032 ⇒ ~27% false-promote on a tie) doesn't reliably pick the strongest net. High-N re-gate (960 games, disjoint deck base): `net_ext_15` (highest in-loop, 0.635) REGRESSED to 0.577; **`net_ext_19` (a KEPT, not-promoted iter, logged 0.606) held/rose to 0.618 → the actual best.** Always re-gate the candidate set on fresh decks.
+- **C_PUCT swept** (`gate_cpuct.rs` self-gate vs varying c_puct + `vsearch::root_visits_until_pv_c`): flat 1.0-2.0, falloff >2.0; the faint c_puct=1.0 edge (+0.02 @ 800 sims) VANISHED at 3200 (0.489) → **keep C_PUCT=1.5** (same low-sims crossover trap documented for S).
+- **Deploy = PORT onto main** (worktree `forrestm_projects-pvdeploy`, branch `ext-deploy` off origin/main; **NEVER push rust-search:main**): added `features_ext` to main's feats.rs (reuses `features_az` as base — VERIFIED functionally byte-identical to rust-search's `features()`) + the 5 groups VERBATIM; **encoder PARITY byte-verified over 170 states** (`dump_ext.rs` on both crates — guaranteed because engine/valuation/v_state/heuristic are byte-identical across the branches); overwrote embedded `pv_model.json` with net_ext_19; switched the two PV serving closures `features_az`→`features_ext` in wasm.rs; rebuilt wasm (`wasm-pack build --target web --release --no-typescript` → cp to `webapp/public/wasm/`); `npm run smoke` PASS. **N routing UNCHANGED** (`ai_variant N`→`searchPV`→`search_visits_pv_timed`). **Rollback = `git revert 613c91f`** (restores net_pv_4 + the features_az path; both kept in the tree). wasm ~2.07→2.37MB.
+- **The 0.59-0.60 is a SELF-GATE edge — it does NOT prove the human-found weakness is fixed.** That weakness (efficient **race-to-15 ignoring nobles**; single-strategy collapse) is self-gate-BLIND. Confirmed offline on real game **`XJJJDF`** (user won 15-11 vs deployed N): the human raced 12 cards / 15 pts all-from-cards / 0 nobles / **1.25 pts-per-card** (two 4/7 L3s + a 3/6 L2), while N went wide+noble — 16 cards, **12 zero-point**, 0.50 pts/card + a noble (spent turns 33-43 on six straight 0-point L1s). The static leaf rated N AHEAD the whole midgame (it under-prices the human's reserved-but-uncashed L3 race). Regression set: `XJJJDF`/`IYGWJQ`/`YINAIM`. **The live playtest is the real test; the RACER track is still the gate** (build a Rust racer proxy → confirm the weakness reproduces → add the racer to the training mix + gate vs it; the generic league is REJECTED, but a TARGETED racer is the new ingredient self-play can't generate).
+- **Overnight (RUNNING, `az_run/loop_night.sh`, capped ITERS=40):** continuation from net_ext_19 at **SIMS=512** (the documented plateau lever — higher-quality targets) + TEMP=30, gating vs net_ext_19. Crosses ~0.55+ → high-N re-gate + ship; flat → 200 sims wasn't the ceiling, pivot to the feature round + racer track.
+- **Next enrichment round = MORE FEATURES (the proven higher-EV lever), done ATTENDED** (new dim ⇒ warm-start distill, a multi-step build like this one). Memory `spender-feature-backlog`: **HEADLINE = the user's same-color payoff-concentration / denial-robust-fork idea** — ≥2 steep same-color point cards ⇒ that color is a multi-target, *un-deniable* investment (opp can reserve-deny ONE payoff card, not both without crippling themselves); encode as a per-color top-2 of `PTS×color-need` (distinct from per-card `engine_value`). Plus racing-aware features (points-per-turn race read, per-card noble-overlap, victory-proximity) + the parked H2 net-feature candidates.
+- **Offline tooling added** (rust-search + pvdeploy crates): `gate_seat.rs` (per-seat win-rate split), `gate_cpuct.rs` + `vsearch::root_visits_until_pv_c` (c_puct sweep, byte-identical to `root_visits_until_pv` but caller-chosen c_puct), `dump_ext.rs` (feature-parity dump). Prod finished-game analysis: query Turso direct (creds `C:\Users\Forrest\.spender_turso`; `list_user_games` excludes `status='over'`; the saved row is the ROOM dict — game is `state_json→game`, carries `setup` → replayable via `replay.py`).
+
+### Session (June 27-28 2026) — net_night_14 → 15-pt N; **21-pt Long-mode net SHIPPED**; three feature/exploration verdicts (15-pt N at ceiling); card-set-attention big bet started
+- **`net_night_14` was the deployed 15-point N** (`6c3e66b`, superseded net_ext_19): a higher-sims (512) self-play continuation, beats net_ext_19 ~0.55-0.58, S 0.827. PURE net swap (same 178 `features_ext` encoder). **(SUPERSEDED for Classic 15 by the card-set attention net `net_attn_3` — see "Variant N (CURRENT CHAMPION)" below; net_night_14 now lives on only as the 21-pt N base.)**
+- **21-POINT ("Long" mode) SPECIALIST SHIPPED — `b91a744` on main. The one clear win this session.** N now serves **`net_ext21_13`** when `win_points==21`, keeping net_night_14 for Classic 15 — ONE opponent, auto-picked by game length (like S auto-adapts), NOT a separate lobby entry. The deployed 15-net was trained ONLY on 15-pt self-play and merely auto-adapted to 21; a net that actually TRAINS on 21-pt games captures real Long-mode signal it never had. **Validated: beats net_night_14 AT 21 = 0.6325 on fresh decks (600g), holds 0.58-0.65 across the 256/512/1024/2048 sims-ladder (depth-robust), beats runner-up net_ext21_32 head-to-head 0.477/0.467.** Mechanism: `wasm.rs` `search_visits_pv_timed`+`search_pv_full_timed` branch on `s.win_points` → `build_pv_net_21()`; `pv_model_21.json` embedded next to `pv_model.json` (both 178-feat, same encoder/serving path; wasm 2.37→3.78MB). Trained by `az_run/loop_ext21.sh` (`selfplay_ext`+`gate_ext` gained a `win_points` arg, default 15 = byte-identical; the whole Rust stack is already win_points-parametric — it's even an encoder feature, feats.rs:27), warm-started by WEIGHT-COPY from net_night_14. The loop CONVERGED (~0.58-0.60 vs champion, best net_ext21_13 by iter 13, plateau through iter 32). **Lesson: the gain came from NEW TRAINING EXPERIENCE (21-pt games), not new features/arch** — the pattern that actually works. Classic byte-identical; rollback = `git revert b91a744`. (Deploy gotcha: pvdeploy `ext-deploy` was 13 wwsd-commits BEHIND origin/main → rebased the 1 commit on top before pushing; core unchanged across them.)
+- **THREE NEGATIVE VERDICTS — the 15-point N is at its ceiling (DO NOT RELITIGATE):**
+  1. **Round-2 feature enrichment WASHED.** `features_ext2` (204 = 178 + 5 AGGREGATE groups: same-color concentration/fork, race-state, noble-race, buying-power, color-coverage) self-play loop (`loop_ext2*`) plateaued ~0.547 vs net_night_14, no promotion past the early best in 13 iters. The aggregates are REDUNDANT with the per-card features the net already has — unlike round-1's per-card features which converted. (Note: the user's headline "payoff-concentration/fork" idea was IN this round → washed.)
+  2. **Dirichlet root-noise exploration WASHED.** The self-play loop had NO Dirichlet (only visit-sampling first 30 plies); ADDED it (`mcts::Search::apply_root_dirichlet` Marsaglia-Tsang gamma/dirichlet + `vsearch::root_visits_until_pv_noise` + `selfplay_ext2` `dir_eps/dir_alpha` args, default 0 = byte-identical). eps=0.25 tracked dead-even with no-noise (9 iters); eps=0.40/alpha=0.15 dipped (noise-degraded data) then recovered to parity. **Exploration is NOT the bottleneck.**
+  3. **Round-3 per-card features WASHED (cheap pre-check, ~15 min — no loop spent).** `features_ext3` (214 = 178 + 3 NEW per-card groups: per-card CLOSING `(my pts after buying ci incl. free noble)/win_points`, per-card OPP take_value, per-card OPP-affordable-now) → harvest net_night_14 self-play (227k rows) → `precheck3.py` leave-one-out vs the deployed 178 base. ALL washed: closing dtop1 **-0.0004** (the net already derives closeness-to-win), opptv **+0.0046** (sub-threshold + AUC down), oppaff **-0.0031**. (Round-1's +0.009 didn't convert, so +0.0046 won't.) **The "new per-card info" well that fed round-1's win is dry — adding more derived per-card quantities is redundant once the net has take/turns/engine/reserves.**
+- **RACER ROUTE REFUTED (DO NOT relitigate the heuristic-racer form).** Hypothesis: N is blind to a pure-efficient-L2 racer that ignores nobles (the human's winning style). Built `heuristic::choose_action_racer` (H3 with a `Valuation.noble_scale` field, default `heuristic::NOBLE_SCALE`=3.0, lowered to de-emphasize noble-CHASING; `noble_completion_pts` untouched so it still grabs free nobles) + `racer_probe.rs`. **N CRUSHES the racer 0.92-0.95 at every noble weight {3.0,1.2,0.5,0.0}, and win-rate RISES as nobles drop** (a low-noble H3 is just a weaker H3). N out-searches ANY 1-ply heuristic regardless of style → a heuristic racer can't expose the weakness (the documented "MCTS saturates a competent heuristic"). The human's exploit is value-CALIBRATION (N read +0.8 in a 15-13 coin-flip), not "N loses to racers" (it doesn't). A search-based racer is the only untested racer form (low odds; S already loses 0.24 to N).
+- **BIG BET STARTED (user-chosen): CARD-SET ATTENTION net.** The deployed net is a tiny single-hidden-layer MLP over a flat 178-vector; untested whether a better INDUCTIVE BIAS (attention over per-card tokens) breaks the ~0.65 plateau via the same self-play (the earlier ~0.66 cap was a feature-limited DISTILL test, not a self-play policy net). **Arch locked:** 18 tokens (12 board + 3 own-reserved + 3 nobles, masked) × ~24 feats → embed D=64 → 2×[4-head MHA + FFN128] (residual+LN) → mean-pool + state-embed(28) → trunk128 → value(tanh)+70-policy. **Phase 0 throughput gate PASS** (`attn_bench.rs`): attention forward 2041 eval/s vs MLP 49055 = **24× slower** → ~17k aggregate sims/move, but the deployed MLP is ~400k sims/move (~500-1000× past the ~400-800 sim diminishing-returns knee) so 17k is still ~20-40× past it → **servable client-side** (WASM ~1.5-2× + per-call allocs ~2-3× recoverable → ~8-12k real, still fine). **Next = Phase 0 PARITY**: `features_tokens(s,seat)→(tokens,mask,state)` + the attention forward in BOTH Rust lib (`attn.rs`, for self-play+serving) AND PyTorch (training), parity ±1e-4 (self-play infers in Rust, trains in PyTorch — MUST match), then Phase 1 self-play→train→gate vs net_night_14. Memory `spender-variant-pv-shipped` + `spender-racer-blindspot-confirmed`.
+
+
+### Variant N is now the CARD-SET ATTENTION net (Rust→WASM, client-side) — context for June 29
+The deployed 15-pt variant **N** is no longer the heuristic/MLP stack: it's a **card-set attention net**
+(`net_attn_3`: 18 card-tokens × 24 feats → attention → value+policy heads), trained offline (PyTorch
+`az_run/attn_net.py` + `train_attn.py`) and **served client-side via Rust→WASM determinized PUCT** in the
+player's browser (the `forrestm_projects-rust/spender-core` crate: `feats.rs` tokenizer, `attn.rs` forward,
+`vsearch.rs`/`mcts.rs` search). It beats variant S ~0.88 and the prior MLP N (`net_night_14`) ~0.567 on
+fresh decks. **Prod sim budget is ~20k sims/move** (measured telemetry — the heavier attention leaf dropped
+it from the MLP's ~100k; still well above the ~1.2k saturation knee, so matched-sims strength transfers).
+Full history in memory: `spender-attention-net`, `spender-variant-pv-shipped`, `spender-rust-search-rewrite`.
+
+### Session (July 2026) — DISCARD-root search fix (deployed N + wwsd) + Rust-WASM build facts
+**The determinized PUCT one-hot the H3 pick at ANY non-PLAY root, so DISCARDS were decided by H3's STATIC
+heuristic — NOT the net (DO NOT regress).** In `spender-core/src/vsearch.rs`, `root_visits_until_pv` and
+`root_nw_until_pv` short-circuited `if s.phase != PLAY || legal.len()==1 { one-hot heuristic::choose_action }`.
+So a discard used H3's `choose_discard` (drops ITS OWN least-needed color) — a DIFFERENT brain than the net
+that chose the take → the "take gems, then discard the ones it wants" loop, with zero lookahead. **Fix:** search
+DISCARD roots too — `if legal.len()==1 || (s.phase != PLAY && s.phase != DISCARD)` — so the net's value head
+evaluates each of the ≤6 discard options after rolling into the opponent's turn (ONE brain decides take+discard,
+with lookahead). NOBLE/OVER/single-legal still one-hot H3. Lib regression test `discard_root_is_searched`. Only
+the `_pv` variants (variant **N**) were fixed; the `_leaf` variants (variant **S**, `root_*_until_leaf`) still
+one-hot H3 discards — left as-is (changing S is an unvalidated strength change).
+- **Two serving paths share this crate (both fixed):** website N = `Spender.jsx` `ai_variant==="N"` → worker
+  `kind:"searchPV"` → `search_visits_pv_timed` → `root_visits_until_pv`; the wwsd userscript →
+  `search_pv_full_timed` → `root_nw_until_pv` (its `decideDiscards` builds the post-take DISCARD state
+  `phase=1` and reads the searched top action — was 1 sim ≈ raw H3, now a real search).
+- **wasm is NOT built by CI — it's committed pre-built artifacts.** Website:
+  `webapp/public/wasm/{spender_core.js,spender_core_bg.wasm}` (`wasm-pack --target web`), loaded by the
+  hand-written `webapp/public/wasm/s-worker.js`; rebuild + commit those two files, CI (deploy-pages, watches
+  `webapp/**`) publishes. **Same filename ⇒ browsers may serve the CACHED old wasm** (~10 min GH-Pages TTL /
+  hard-refresh). Variant routing: N→"searchPV", S/others→"search", old value-leaf N→"searchN" (not routed).
+  wwsd: `wasm-pack --target no-modules --out-dir pkg-nomod` → `wwsd/build_browser_n.py` inlines base64 wasm+glue
+  into `wwsd/wwsd_browser_n.user.js` (manual Tampermonkey install; no prod/CI surface).
+- **Toolchain is now LOCAL** (cargo 1.96 + wasm-pack 0.15 + wasm32 + MSVC, `$HOME/.cargo/bin` off PATH →
+  `export PATH="$HOME/.cargo/bin:$PATH"`). Use `cargo test --lib` (the `src/bin/*` need `--features bridge`).
+  The crate lives in the **forry4.github.io repo** (`spender-core/`), NOT a separate repo — despite memory
+  `spender-rust-search-rewrite` naming it `forrestm_projects-rust/spender-core`. Build worktree:
+  `forrestm_projects-wwsd-wasm` (branch `wwsd-wasm`); the `vsearch.rs` edit was made there then copied to main.
+- **wwsd userscript this session (v0.9.29):** minimize/collapse toggle; chat capture (schema-agnostic Minimongo
+  auto-detect → per-game `chat[]` for suggestion-mining; `WWSD_N.chatProbe()`/`listCollections()`,
+  `CONFIG.CHAT_COLL` override — UNVERIFIED vs spendee's real schema, run chatProbe live); reserve hold fix
+  (`synthHoldCanvas` keeps the press ALIVE with ~90ms sub-pixel pointermoves — a static long-press is ignored by
+  the canvas; `HOLD_MS`→2200); auto-lobby **circuit-breaker** (a loss where NOBODY hit the target = our
+  timeout/forfeit → `CONFIG.AUTO_LOBBY=false` in `logFinalize`, before the tick's `autoLobbyStep`, so no runaway;
+  `AUTO_START` is dead code). Console paste is blocked by the browser self-XSS guard → type `allow pasting` once.
+
+### Session (June 29 2026) — eval-axis screens: FEATURES + VALUE-TARGET both saturated for the champion
+Two independent, cheap "harvest → ablation/gate" screens, both NEGATIVE for raising N, both pointing the
+same way: **the remaining lever is the training DISTRIBUTION, not the evaluation.** Reusable tooling on the
+rust-search worktree + `az_run`: `harvest_attn_v{3,4}` / `harvest_attn_val` (net_attn_3 self-play logging
+candidate features / the search root value; a `game` id col for leak-free game-split), `gate_attn_attn`
+(attn-vs-attn paired-CRN gate), `ablate_v{3,4}.py` (a small MLP distill predicting the OUTCOME, leave-one-
+IN/OUT column-zeroing configs; the box has <800MB free + no pandas, so the loader STREAMS the CSV straight
+to the GPU), `train_attn.py` gained a `value`-column/`BETA` value-target blend + a warm-start JSON loader +
+a low-RAM streaming/`MAXROWS` parser (the old list-of-floats parse peaked ~2.8GB and OOM'd).
+
+- **Eval-FEATURE enrichment is saturated ON THE NET (do not relitigate these four).** Held-out-outcome-AUC
+  ablation over net_attn_3's v1 features: per-card **deck-unlock**, **post-buy-unlock**, **opponent-model**
+  (opp eng/nob/tempo), state **fork-count** ALL fail to clear the bar (full vs v1only ≈ −0.0002; same even
+  restricted to the uncertain ply≤28 regime). Only deck-unlock flickered +0.0007 (~1σ). Reason: the
+  attention mechanism already computes board-card cross-aggregates, so explicit versions are redundant.
+  **CAVEAT: the screen runs on SELF-PLAY data → it is structurally BLIND to the racer weakness** (a
+  distribution problem); a flat feature screen on self-play cannot evaluate that. Memory `spender-v3-feature-screen`.
+- **#3 value-bootstrap raises the FLOOR not the CEILING (RESOLVED).** Extend AlphaZero's policy-distillation
+  to the VALUE head: value target = `(1-β)·outcome + β·search_root_value` (the denoised verdict the 128-sim
+  PUCT *concluded*, vs the raw win/loss). From-scratch it beats the outcome-only baseline **+0.077, FLAT
+  across 256/512/1024 sims** (transfers past the knee to ~20k) — the OPPOSITE of the S leaf-swap precedent.
+  BUT warm-fine-tuning the CHAMPION toward its own search values gives NO gain (β=0.3 vs ship 0.463, β=1.0
+  0.468, β1.0==β0.3 0.498; control β=0 ≈ ship 0.489): search-value is a more EFFICIENT target (helps an
+  under-fit head catch up) but ship already sits at that fixed point from its outcome-trained loop. **KEEPER:
+  use β≈0.3 in any FRESH retrain** (better/faster value signal while the head is being built; keep β<1 in a
+  loop so the outcome anchor prevents value drift). Memory `spender-value-bootstrap`.
+- **Blind (deck-top) reserve — a structural MCTS blind spot, not a tuning miss.** The bot never blind-reserves
+  even though it's legal (`engine.A_RES_DECK` = actions 43–45). Determinized PUCT can't value it: (1) the deck
+  is reshuffled per sim and the tree keys the child by ACTION not drawn card, so all blind draws MERGE into
+  one node → the move's convex/upside-tail payoff (game-winning when stuck/behind on a dead board) is
+  collapsed to a mediocre mean it can't plan around; (2) the opponent is modeled as knowing everything, so the
+  hidden-information value is invisible. Near-unfixable without belief-state / chance-node (expectimax-over-
+  draw) search; niche → not worth it. Same CLASS as the denial/racer blind spots (perfect-info determinization).
+- **Per-level deck (the user's idea) — passed the flat-MLP AUC screen but WASHED in play (do not relitigate).**
+  N has NO explicit deck features (only an aggregate, level-blind term inside `engine_value`). `features_tokens_v4`
+  adds STATE groups: per-level×color demand (P), aggregate control (G), per-level counts (N3). The flat-MLP screen
+  liked it (full vs v1only +0.0033 ~3 SE; level-split onlyP−onlyG +0.0005/+0.0011 marginal), BUT on the real
+  AttnNet the value-AUC was near-tied (+0.0010) and the **PLAY A/B washed: v4net vs v1ctl 0.533@256 → 0.507@1024**
+  (decays with sims → ~0 at prod's ~20k; sanity v1ctl-vs-ship 0.40 healthy). The attention net already extracts the
+  deck signal from the `engine_value` tokens, so explicit deck features help a weak FLAT learner but NOT the real
+  architecture. **NOT a keeper.** GOTCHA (cost an hour): `train_attn.py` didn't skip `harvest_v3/v4`'s leading
+  `game` column → trained on features shifted one slot → train/serve mismatch → a FAKE 0.66→0.76-GROWING result;
+  the **sanity control (v1ctl-vs-ship = 0/400) caught it**. Fixed (`f0` skip); `data_attn_val.csv`/the #3 nets were
+  unaffected (no game col). Lesson: always gate vs a known reference — a bug can fake a play gain AND a transfer curve.
+
+### Session (June 30 2026) — EXPLOITER net vs champion N = NO EXPLOIT (clean mirror; DO NOT relitigate)
+The greenlit research bet from `spender-racer-league-deadend` (train a net whose SOLE objective is to BEAT the
+deployed attention-net champion **N**, AlphaStar-style, to DISCOVER the human's racing exploit) was run
+(`az_run/loop_exploit.sh`, Rust `selfplay_attn_exploit.exe` + `gate_attn_attn.exe`, 10 iters). **Result: no
+exploit found — N is unexploitable by a same-arch warm-start mirror.**
+- **Setup:** the exploiter is a **byte copy of ship N** (`cp net_attn3_ship.json exploit_best.json`) — SAME
+  card-set-attention architecture, SAME 24-feat tokens, SAME initial weights. The ONLY differences are the
+  training *distribution* and *target*: each iter the best exploiter plays **1500 games vs the FIXED ship**
+  (`self_frac=0`, recording ONLY its own moves + search root value), heavy early-ply exploration (`temp=15`),
+  warm-from-ship fine-tune (LR 5e-4, value-target β=0.3, rolling 2-iter window, MAXROWS 100k), gate 300g@256
+  vs ship, promote iff `cand_vs_ship > best`.
+- **All 10 gated results bounced in 0.45–0.51 with NO upward trend:** 0.491 / 0.481 / 0.478 / 0.471 /
+  **0.5083 (iter 5, the only "promotion", within noise of 0.50)** / 0.489 / 0.505 / 0.449 / (iter 9) / **0.456
+  (iter 10)**. best_wr ended at **0.5083** — a dead-even mirror. (Train-time win-rate ~0.36–0.39 is just the
+  temp-15 exploration depressing play; the clean gate is the truth and it says EVEN.)
+- **Diagnosis (exactly the pre-flagged risk):** a net with N's architecture, N's features, initialized to N's
+  weights, taking small gradient steps on games against N has **no structural asymmetry to exploit** — gradient
+  just walks around N's own policy basin and the gate sits at ~0.50. This is the "same-arch exploiter mirrors
+  to ~0.5 without asymmetry" failure mode called out in `spender-racer-league-deadend`.
+- **Conclusion:** a real exploiter REQUIRES injected asymmetry the mirror loop deliberately omitted — enriched/
+  racer-aware features, a racer-biased reward or opponent track, a **cold (from-scratch) init** so it can't fall
+  back into N's basin, or a different head/arch. As configured this is a clean NEGATIVE control proving N is not
+  exploitable by a mirror of itself. Reusable harness kept: `loop_exploit.sh` + `selfplay_attn_exploit.exe` +
+  `gate_attn_attn.exe`. Memory `spender-racer-league-deadend` (updated with this outcome).
+
+
 ### Hard-won conclusions — DO NOT relitigate
-**SCOPING (read first): each conclusion binds ONLY the bot/approach it was established on.** A result from
-variant Z (the AZ MLP), the heuristics, or S does NOT automatically transfer to the current champion
-`net_attn_3` (a different architecture) — N has already OVERTURNED the "no learned eval beats the hand
-value" line below (an outcome-trained search leaf beats v_state, verified 5 ways, June 25). Re-TEST a
-conclusion on the current net before reusing it. These cost many self-play/training cycles to establish
-(the "evaluation quality is not the bottleneck" line is SUPERSEDED for the SEARCH-LEAF case; the ~0.65
-plateau still holds for STATIC/1-ply use and for V_search-distilled leaves):
+These cost many self-play/training cycles to establish:
 - **Eval-weight tuning is saturated.** One gain (0.725 vs original), nothing since. The first run captured it.
 - **Evaluation quality is NOT the bottleneck.** Static-eval accuracy plateaus ~0.65 *regardless of model class or features*: an **MLP** (more capacity) and **Stage 1c richer features** (per-colour bonuses/tokens, reachability/threat) both gave the same ~0.64–0.66 and were reverted. The missing information (future deck draws, deep lines) isn't in any static snapshot — it needs **lookahead**. **The remaining lever is SEARCH, not evaluation.**
 - **Self-play is blind to blocking/contested tactics** — its opponent never threatens coherently, so denial never pays off and those features (`contested_weight`, `block_urgency_gate`) train toward off. A scripted `strategist.py` opponent is competent (~greedy strength) but **MCTS saturates it 12–0**, so it can't measure improvements above current strength either. **The only reliable judge of the human-exploitable weakness is a human playtest.**
 - **Next lever = search**: (1) audit `_get_all_moves` pruning (winning lines may never be enumerated), (2) tree reuse between moves + UCB sweep, (3) AlphaZero-style policy head + real exploration (the eventual cure for tactics, biggest build). **UPDATE (June 2026): the search lever is realized by variant S** — `v_state` V(state) + determinized PUCT on the H3 eval — at **0.733 vs greedy H3 / 0.758 panel**, confirming search (not eval) was the bottleneck. See "Variant S" above.
-- **[CURRENT CHAMPION `net_attn_3`, re-tested on N — not inherited] N's EVAL AXIS is saturated** on BOTH
-  sub-axes (June 29 2026): (a) eval-FEATURE enrichment — four candidate groups fail the held-out-AUC ablation
-  over N's own features (attention already does board-card cross-aggregates); (b) value-TARGET (search-value
-  bootstrap) — raises a from-scratch net (+0.077, transfers) but NOT the champion (warm-from-ship washes; N is
-  at the fixed point). Neither richer inputs nor a sharper value target moves N. **N's remaining lever is the
-  training DISTRIBUTION** — a racer track for the human-playtest-confirmed racer / early-midgame-tempo weakness
-  self-play can't generate (mining the WWSD human-game corpus is the concrete data source). **KEEPER for a
-  FRESH N retrain: β≈0.3 search-value target.** (CAVEAT: the eval screens ran on self-play data, so they are
-  structurally blind to the racer weakness — they say the eval is saturated *within the self-play
-  distribution*, which is exactly why the lever is the distribution.)
+- **The EVAL AXIS is saturated for the champion attention net N — confirmed on BOTH sub-axes (June 29, do not relitigate; see the "Session (June 29 2026)" entry above).** (a) Eval-FEATURE enrichment: four candidate groups all fail the held-out-AUC ablation over N's features (attention already does board-card cross-aggregates). (b) Value-TARGET (search-value bootstrap, #3): raises a from-scratch net (+0.077, transfers) but NOT the champion (warm-from-ship washes — N is already at the fixed point). So neither richer inputs nor a sharper value target moves N. **The remaining lever is the training DISTRIBUTION** — a racer-track league targeting the confirmed (human-playtest) racer/early-midgame weakness self-play can't generate. KEEPER for any fresh retrain: train with the β≈0.3 search-value target.
 
 ### Move handler error hierarchy
 ```python
@@ -2305,29 +2468,6 @@ state before confirming the delete.
 - **Tab-back only rejoins ACTIVE games.** The visibilitychange reconnect (iOS kills backgrounded
   WS) now also guards `screenRef.current === "game"` — without it, tabbing back while in the
   lobby/waiting re-opened a stale waiting room (the "dumped into waiting" report).
-- **Tab-back must NOT reconnect during a PUZZLE (July 2026; do not regress).** A puzzle drives the
-  **game screen** with `roomId` set to the puzzle id (`startPuzzle` does `setRoomId(id)`) but **no
-  socket** (it's a local scripted line — `disconnect()` on entry). The visibilitychange reconnect
-  guard checked only `screen==="game"` + `!reviewing` + `roomId` + `socket!==OPEN` — **all true in a
-  puzzle** — so tabbing out and back opened a bogus WS to a room named after the puzzle
-  (`/ws/advantage_003/<id>`); the server's reply hit `handleMessage`→`setRoomData(msg.room)`, which
-  **replaced the puzzle's roomData and wiped the board** (18→0 cards), leaving a blank/loading-looking
-  screen that only a refresh cleared. This was the user's "stuck on LOADING, mostly in puzzles"
-  report — puzzle-specific because it fires on EVERY tab-out/in during a puzzle (the app-level loading
-  screen only appears on a fresh mount, so it read as intermittent elsewhere). Fix: added a
-  `puzzlingRef` and guard the reconnect with `!puzzlingRef.current`. Reproduced + verified with
-  Playwright (pre-fix: tab-back opened the puzzle-id socket, board collapsed 18→0; post-fix: no
-  socket, board intact). Shipped to main (`01f8b17`). A SECOND, separate fix rode along (`b6b0fbc`):
-  **re-fire the loading poll on foreground** — a tab reloaded on wake (Firefox tab-unload / Edge
-  sleeping tabs) lands on the loading screen and its poll fetch can hang with the `AbortController`
-  timeout throttled while backgrounded; bump a `loadingKick` (added to the loading effect's deps) on
-  `visibilitychange`→visible while `screen==="loading"` so the effect re-runs with a fresh fetch.
-  **Staging gotcha this session:** the **Cloudflare staging pipeline was stuck** — it never rebuilt
-  across two `staging` pushes (kept serving the pre-fix bundle `index-BP69f09i.js` for 30+ min), so
-  validation was done on **local vite-against-prod** + the GitHub-Actions prod deploy, NOT the
-  workers.dev URL. If staging ever shows old code, check the `webprojectsstaging` Cloudflare build
-  logs (branch trigger disconnected / build failing) — don't trust it as a validation surface until
-  its bundle hash actually changes.
 - **Joining a cancelled game is rejected.** On WS connect the handler `ROOMS.setdefault`s a fresh
   empty room for ANY id (needed so the creator can then `create`). After a host cancels (room
   popped from ROOMS + deleted from DB), a second client connecting to that id fabricated a
@@ -2359,10 +2499,6 @@ state before confirming the delete.
   shared by the desktop `.hint-col` and the mobile action-bar placements.
 
 ### Responsive game layout (June 2026 — the big UI overhaul; do not regress)
-**The DESKTOP portion below is SUPERSEDED by the June 25 2026 proportional rewrite (next
-section): the fixed `1fr 560px` grid, the `132px` bank, the `≈144×185` cards, and the
-max-height breakpoints described here are GONE — desktop now scales from one `--card-h`
-anchor. The TABLET/PHONE parts (`max-width:900px` / `600px`) still apply unchanged.**
 The game screen has THREE layouts driven by width; all CSS lives in the one `css`
 string in `Spender.jsx`. **The base styles are the small/compact foundation; the
 DESKTOP look is added in `@media(min-width:901px)`** (an inversion worth knowing —
@@ -2490,153 +2626,6 @@ value + now works in game review. All frontend in `Spender.jsx`; backend in `mai
   TDZ rule) that read the rewound snapshot when `reviewing`, else live `roomData`; the Vals
   toggle no longer hides on a finished game (so it shows while rewound to a playing turn).
 
-### Session (June 26 2026) — Plan-A AZ retrain → variant PV (policy+VALUE net) SHIPPED as "N"; league run launched
-**The learnable-net path is REALIZED (this UPDATES the "learnable-leaf path" question above):** a
-warm-started **policy+value** net ("PV", `net_pv_4`) BEATS both old-N and S in search. Prior learnable
-attempts lost because they distilled-S / trained from-scratch on flat features; PV wins because it pairs
-the **enriched 125-feat encoder** + a **warm start from the N value-leaf bootstrap** + AZ self-play.
-
-- **The PV stack (Rust, `rust-search` worktree + `C:\Users\Forrest\az_run`):** `PolicyValueNet`
-  (valuenet.rs — trunk + value head + 70-action policy head), `feats::features_az` (125 = base 101 +
-  per-card `engine_value`+`noble_progress`; the per-card adds earned their slot in a policy pre-check,
-  +0.024/+0.017; engfwd/turns/oppdem DROPPED as no-lift), `vsearch::root_visits_until_pv` (determinized
-  PUCT, legal-masked softmax of net policy logits at PLAY, H3-prior fallback at discard/noble, net value
-  leaf). Bins: `selfplay_pv` (self-play harvest), `train_pv.py` (GPU value+policy trainer, value MSE +
-  policy CE, reward-shaped `(1-a)(2y-1)+a·tanh(margin/6)`), `eval_pv` (vs S), `eval_vs_n` (vs old-N via
-  `features_n101`, the 101 encoder lifted from HEAD), `harvest_az` (S-vs-S bootstrap → `boot125.csv`,
-  2.26M rows). `azloop.sh` ran it.
-- **Self-play PLATEAUED (do not relitigate):** vs-S FLAT ~0.735 across 12 iters while value-AUC kept
-  RISING — the documented self-play-diverges-from-the-external-opponent signature (the net got better at
-  beating its own clones, not S). The per-iter "peaks" (0.80) were **n=160 eval noise**; a 600-game
-  fresh-decks re-eval regressed them to ~0.73–0.76 (net_pv_4/8/12 statistically tied). One-time gain
-  over N, did NOT compound. **net_pv_4 = champion.**
-- **PV champion validated:** vs old-N **0.60 / 0.66 / 0.67 @ 160 / 400 / 800 sims** (robust, edge GROWS
-  with sims — a good policy compounds with depth), replicated on net_pv_8/12 (0.63/0.68); vs S **0.758**.
-  The learned POLICY adds **+0.58 over the H3 prior** at a matched value head (control bin
-  `eval_policy_ctrl`: full-PV vs PV-value+H3-prior). So both the richer value head AND the policy head
-  pull their weight.
-- **SHIPPED, served AS variant "N" (Nina, the top tier):** first as a separate "PV"/Percy variant (commit
-  `2a50b5a`), then **folded INTO "N"** (commit `12fc540`) per the user — `Spender.jsx` routes
-  `ai_variant==="N"` → `searchPV`, and the Percy/PV lobby option + persona were removed. **Old value-leaf
-  N is KEPT AS A RECORD** (`n_model.json` + `search_visits_n_timed`/`searchN`/`build_n_net` all stay in
-  code, just not routed to). **Upgrade path: swap `spender-core/src/pv_model.json` → rebuild wasm → push;
-  "N" instantly plays the stronger net, no UI change.** (The WWSD browser autoplayer also adopted PV —
-  `search_pv_full_timed`, v0.9.0; see the WWSD section.) See memory [[spender-variant-pv-shipped]].
-- **DEPLOY GOTCHA (do not relitigate):** the AZ/WASM work was built on **stale `rust-search` (49 behind
-  origin/main)**; production = main ALREADY had the WASM client-AI + variant-N foundation via a different
-  history, but NOT the Plan-A additions. So deploy = **PORT onto main** (fresh worktree off `origin/main`,
-  add-only edits, `push origin <branch>:main`) — **NEVER push `rust-search:main`** (non-ff wipes 49
-  commits). **Dual-encoder split (load-bearing):** main's `features()` stays **101 (old-N's net)**;
-  `features_az()` is the NEW **125 (PV)** — kept separate so old-N isn't fed the wrong dims (on rust-search
-  `features()` had been redefined to 125, which BREAKS old-N — that working tree isn't deployable as-is).
-  All Rust diffs onto main verified **purely additive (0 deletions)** → N byte-unchanged. The built
-  `spender_core_bg.wasm` is a COMMITTED artifact (Pages CI does NOT rebuild Rust→wasm); wasm grew to
-  ~2.07MB (embeds the net) — candidate for external-load later.
-- **Discard-search = WASH (do not relitigate):** `selfgate_discard.rs` found **93/93 multi-option discards
-  where the searched pick == greedy H3 `choose_discard` (0% divergence)** → the greedy discard is already
-  search-optimal; searching it just burns sims. `root_visits_until_leaf_ds` parked on the branch.
-- **LEAGUE run (IN PROGRESS, `az_run/league_loop.sh`) — escape the plateau via opponent diversity (the
-  documented cure for self-play tunneling):** `league_pv.rs` (the BEST net records ONLY its own moves vs a
-  FIXED opponent — S / old-N / a rotating past-PV checkpoint — shaped by margin; learn to BEAT them, not
-  imitate) + `pv_vs_pv.rs` (gate PRIMARY: candidate vs frozen best, paired-CRN, =0.5000 for identical
-  nets). Mix **self .4 / past-PV .25 / S .2 / old-N .15** — **H3 DROPPED** (PV crushes it ~95% → saturated
-  targets, near-zero margin gradient; its share went to past-PV, the closest/most-informative opponent).
-  Buffer ~**50/50** (subsampled `boot125_sub.csv` anchor, 600k rows, so the league signal isn't drowned —
-  the self-play loop's 87% bootstrap anchor was part of why it stalled). **Gate = beat frozen best ≥0.52
-  AND RPS guard (vs-S ≥0.72, vs-old-N ≥0.60 — net_pv_4's scores minus noise).** **Verdict to watch: the
-  per-promotion `best vs SHIPPED net_pv_4` line — >~0.55 = the league broke the plateau (swap
-  `pv_model.json` + ship); ~0.5 across many iters = the architecture ceiling, net_pv_4 stands.**
-
-### Session (June 27 2026) — ENRICHED 178-feat retrain BEATS net_pv_4; `net_ext_19` SHIPPED as "N" (`613c91f`)
-**The feature-enrich retrain WORKED — refuting the "variant N is at the ceiling" pessimism (the league above only TIED net_pv_4; ENRICHING THE FEATURES + self-play broke through).** `net_ext_19` (a 178-feat policy+value net) beats the shipped champion net_pv_4 **~0.59-0.60, DEPTH-ROBUST** (256/800/3200 sims = 0.586/0.584/0.602 on fresh decks — no decay, unlike the calibrated-leaf wash). **DEPLOYED as N** (`613c91f` on main): selecting N now plays net_ext_19. The enrich+self-play loop is now a REPEATABLE strength engine, not a one-off.
-- **Encoder `feats::features_ext` (178)** = deployed base 125 (`features_az`) + 5 groups: A per-color self-need (5), B opp face-up reserve content (12), C own reserve content (12), D per-card take_value (12), E per-card turns-to-afford (12). Trained on the **rust-search** worktree (`az_run/loop_ext.sh`): warm-started by distilling net_pv_4's PV-vs-PV play into the 178 net (clean distill 0.517 vs net_pv_4), then self-play with the anchor annealed off. CONVERGED at iter 24 (champion edge flat ~0.58-0.60 for ~10 iters; `cand_vs_best` oscillating at the 0.52 bar).
-- **Pick the best net by RE-GATING ALL candidates on FRESH decks — NOT the in-loop promotion (winner's curse; DO NOT regress).** The noisy 0.52 gate (SE 0.032 ⇒ ~27% false-promote on a tie) doesn't reliably pick the strongest net. High-N re-gate (960 games, disjoint deck base): `net_ext_15` (highest in-loop, 0.635) REGRESSED to 0.577; **`net_ext_19` (a KEPT, not-promoted iter, logged 0.606) held/rose to 0.618 → the actual best.** Always re-gate the candidate set on fresh decks.
-- **C_PUCT swept** (`gate_cpuct.rs` self-gate vs varying c_puct + `vsearch::root_visits_until_pv_c`): flat 1.0-2.0, falloff >2.0; the faint c_puct=1.0 edge (+0.02 @ 800 sims) VANISHED at 3200 (0.489) → **keep C_PUCT=1.5** (same low-sims crossover trap documented for S).
-- **Deploy = PORT onto main** (worktree `forrestm_projects-pvdeploy`, branch `ext-deploy` off origin/main; **NEVER push rust-search:main**): added `features_ext` to main's feats.rs (reuses `features_az` as base — VERIFIED functionally byte-identical to rust-search's `features()`) + the 5 groups VERBATIM; **encoder PARITY byte-verified over 170 states** (`dump_ext.rs` on both crates — guaranteed because engine/valuation/v_state/heuristic are byte-identical across the branches); overwrote embedded `pv_model.json` with net_ext_19; switched the two PV serving closures `features_az`→`features_ext` in wasm.rs; rebuilt wasm (`wasm-pack build --target web --release --no-typescript` → cp to `webapp/public/wasm/`); `npm run smoke` PASS. **N routing UNCHANGED** (`ai_variant N`→`searchPV`→`search_visits_pv_timed`). **Rollback = `git revert 613c91f`** (restores net_pv_4 + the features_az path; both kept in the tree). wasm ~2.07→2.37MB.
-- **The 0.59-0.60 is a SELF-GATE edge — it does NOT prove the human-found weakness is fixed.** That weakness (efficient **race-to-15 ignoring nobles**; single-strategy collapse) is self-gate-BLIND. Confirmed offline on real game **`XJJJDF`** (user won 15-11 vs deployed N): the human raced 12 cards / 15 pts all-from-cards / 0 nobles / **1.25 pts-per-card** (two 4/7 L3s + a 3/6 L2), while N went wide+noble — 16 cards, **12 zero-point**, 0.50 pts/card + a noble (spent turns 33-43 on six straight 0-point L1s). The static leaf rated N AHEAD the whole midgame (it under-prices the human's reserved-but-uncashed L3 race). Regression set: `XJJJDF`/`IYGWJQ`/`YINAIM`. **The live playtest is the real test; the RACER track is still the gate** (build a Rust racer proxy → confirm the weakness reproduces → add the racer to the training mix + gate vs it; the generic league is REJECTED, but a TARGETED racer is the new ingredient self-play can't generate).
-- **Overnight (RUNNING, `az_run/loop_night.sh`, capped ITERS=40):** continuation from net_ext_19 at **SIMS=512** (the documented plateau lever — higher-quality targets) + TEMP=30, gating vs net_ext_19. Crosses ~0.55+ → high-N re-gate + ship; flat → 200 sims wasn't the ceiling, pivot to the feature round + racer track.
-- **Next enrichment round = MORE FEATURES (the proven higher-EV lever), done ATTENDED** (new dim ⇒ warm-start distill, a multi-step build like this one). Memory `spender-feature-backlog`: **HEADLINE = the user's same-color payoff-concentration / denial-robust-fork idea** — ≥2 steep same-color point cards ⇒ that color is a multi-target, *un-deniable* investment (opp can reserve-deny ONE payoff card, not both without crippling themselves); encode as a per-color top-2 of `PTS×color-need` (distinct from per-card `engine_value`). Plus racing-aware features (points-per-turn race read, per-card noble-overlap, victory-proximity) + the parked H2 net-feature candidates.
-- **Offline tooling added** (rust-search + pvdeploy crates): `gate_seat.rs` (per-seat win-rate split), `gate_cpuct.rs` + `vsearch::root_visits_until_pv_c` (c_puct sweep, byte-identical to `root_visits_until_pv` but caller-chosen c_puct), `dump_ext.rs` (feature-parity dump). Prod finished-game analysis: query Turso direct (creds `C:\Users\Forrest\.spender_turso`; `list_user_games` excludes `status='over'`; the saved row is the ROOM dict — game is `state_json→game`, carries `setup` → replayable via `replay.py`).
-
-### Session (June 27-28 2026) — net_night_14 → 15-pt N; **21-pt Long-mode net SHIPPED**; three feature/exploration verdicts (15-pt N at ceiling); card-set-attention big bet started
-- **`net_night_14` was the deployed 15-point N** (`6c3e66b`, superseded net_ext_19): a higher-sims (512) self-play continuation, beats net_ext_19 ~0.55-0.58, S 0.827. PURE net swap (same 178 `features_ext` encoder). **(SUPERSEDED for Classic 15 by the card-set attention net `net_attn_3` — see "Variant N (CURRENT CHAMPION)" below; net_night_14 now lives on only as the 21-pt N base.)**
-- **21-POINT ("Long" mode) SPECIALIST SHIPPED — `b91a744` on main. The one clear win this session.** N now serves **`net_ext21_13`** when `win_points==21`, keeping net_night_14 for Classic 15 — ONE opponent, auto-picked by game length (like S auto-adapts), NOT a separate lobby entry. The deployed 15-net was trained ONLY on 15-pt self-play and merely auto-adapted to 21; a net that actually TRAINS on 21-pt games captures real Long-mode signal it never had. **Validated: beats net_night_14 AT 21 = 0.6325 on fresh decks (600g), holds 0.58-0.65 across the 256/512/1024/2048 sims-ladder (depth-robust), beats runner-up net_ext21_32 head-to-head 0.477/0.467.** Mechanism: `wasm.rs` `search_visits_pv_timed`+`search_pv_full_timed` branch on `s.win_points` → `build_pv_net_21()`; `pv_model_21.json` embedded next to `pv_model.json` (both 178-feat, same encoder/serving path; wasm 2.37→3.78MB). Trained by `az_run/loop_ext21.sh` (`selfplay_ext`+`gate_ext` gained a `win_points` arg, default 15 = byte-identical; the whole Rust stack is already win_points-parametric — it's even an encoder feature, feats.rs:27), warm-started by WEIGHT-COPY from net_night_14. The loop CONVERGED (~0.58-0.60 vs champion, best net_ext21_13 by iter 13, plateau through iter 32). **Lesson: the gain came from NEW TRAINING EXPERIENCE (21-pt games), not new features/arch** — the pattern that actually works. Classic byte-identical; rollback = `git revert b91a744`. (Deploy gotcha: pvdeploy `ext-deploy` was 13 wwsd-commits BEHIND origin/main → rebased the 1 commit on top before pushing; core unchanged across them.)
-- **THREE NEGATIVE VERDICTS — the 15-point N is at its ceiling (DO NOT RELITIGATE):**
-  1. **Round-2 feature enrichment WASHED.** `features_ext2` (204 = 178 + 5 AGGREGATE groups: same-color concentration/fork, race-state, noble-race, buying-power, color-coverage) self-play loop (`loop_ext2*`) plateaued ~0.547 vs net_night_14, no promotion past the early best in 13 iters. The aggregates are REDUNDANT with the per-card features the net already has — unlike round-1's per-card features which converted. (Note: the user's headline "payoff-concentration/fork" idea was IN this round → washed.)
-  2. **Dirichlet root-noise exploration WASHED.** The self-play loop had NO Dirichlet (only visit-sampling first 30 plies); ADDED it (`mcts::Search::apply_root_dirichlet` Marsaglia-Tsang gamma/dirichlet + `vsearch::root_visits_until_pv_noise` + `selfplay_ext2` `dir_eps/dir_alpha` args, default 0 = byte-identical). eps=0.25 tracked dead-even with no-noise (9 iters); eps=0.40/alpha=0.15 dipped (noise-degraded data) then recovered to parity. **Exploration is NOT the bottleneck.**
-  3. **Round-3 per-card features WASHED (cheap pre-check, ~15 min — no loop spent).** `features_ext3` (214 = 178 + 3 NEW per-card groups: per-card CLOSING `(my pts after buying ci incl. free noble)/win_points`, per-card OPP take_value, per-card OPP-affordable-now) → harvest net_night_14 self-play (227k rows) → `precheck3.py` leave-one-out vs the deployed 178 base. ALL washed: closing dtop1 **-0.0004** (the net already derives closeness-to-win), opptv **+0.0046** (sub-threshold + AUC down), oppaff **-0.0031**. (Round-1's +0.009 didn't convert, so +0.0046 won't.) **The "new per-card info" well that fed round-1's win is dry — adding more derived per-card quantities is redundant once the net has take/turns/engine/reserves.**
-- **RACER ROUTE REFUTED (DO NOT relitigate the heuristic-racer form).** Hypothesis: N is blind to a pure-efficient-L2 racer that ignores nobles (the human's winning style). Built `heuristic::choose_action_racer` (H3 with a `Valuation.noble_scale` field, default `heuristic::NOBLE_SCALE`=3.0, lowered to de-emphasize noble-CHASING; `noble_completion_pts` untouched so it still grabs free nobles) + `racer_probe.rs`. **N CRUSHES the racer 0.92-0.95 at every noble weight {3.0,1.2,0.5,0.0}, and win-rate RISES as nobles drop** (a low-noble H3 is just a weaker H3). N out-searches ANY 1-ply heuristic regardless of style → a heuristic racer can't expose the weakness (the documented "MCTS saturates a competent heuristic"). The human's exploit is value-CALIBRATION (N read +0.8 in a 15-13 coin-flip), not "N loses to racers" (it doesn't). A search-based racer is the only untested racer form (low odds; S already loses 0.24 to N).
-- **BIG BET STARTED (user-chosen): CARD-SET ATTENTION net.** The deployed net is a tiny single-hidden-layer MLP over a flat 178-vector; untested whether a better INDUCTIVE BIAS (attention over per-card tokens) breaks the ~0.65 plateau via the same self-play (the earlier ~0.66 cap was a feature-limited DISTILL test, not a self-play policy net). **Arch locked:** 18 tokens (12 board + 3 own-reserved + 3 nobles, masked) × ~24 feats → embed D=64 → 2×[4-head MHA + FFN128] (residual+LN) → mean-pool + state-embed(28) → trunk128 → value(tanh)+70-policy. **Phase 0 throughput gate PASS** (`attn_bench.rs`): attention forward 2041 eval/s vs MLP 49055 = **24× slower** → ~17k aggregate sims/move, but the deployed MLP is ~400k sims/move (~500-1000× past the ~400-800 sim diminishing-returns knee) so 17k is still ~20-40× past it → **servable client-side** (WASM ~1.5-2× + per-call allocs ~2-3× recoverable → ~8-12k real, still fine). **Next = Phase 0 PARITY**: `features_tokens(s,seat)→(tokens,mask,state)` + the attention forward in BOTH Rust lib (`attn.rs`, for self-play+serving) AND PyTorch (training), parity ±1e-4 (self-play infers in Rust, trains in PyTorch — MUST match), then Phase 1 self-play→train→gate vs net_night_14. Memory `spender-variant-pv-shipped` + `spender-racer-blindspot-confirmed`.
-
-### Variant N (CURRENT CHAMPION) = the CARD-SET ATTENTION net `net_attn_3` (SHIPPED June 29 2026)
-The attention "big bet" above **shipped**: `net_attn_3` is the **deployed 15-point variant N** (commit
-`49003b0`), superseding `net_night_14` for Classic 15. (`net_night_14` / `pv_model_21.json` remain the **21-pt
-Long** N — the attention net is 15-pt only.) Arch: 18 card-tokens × 24 feats → attention → value+policy heads;
-trained offline in PyTorch (`az_run/attn_net.py` + `train_attn.py`); **served CLIENT-SIDE via Rust→WASM
-determinized PUCT** (the `spender-core` crate: `feats.rs` tokenizer, `attn.rs` forward, `vsearch.rs`/`mcts.rs`
-search; the weights are embedded `spender-core/src/attn_model.json`). It beats `net_night_14` ~0.567 on fresh
-decks at depth (512/1024 sims) and variant S ~0.88.
-- **Both surfaces serve it.** The website (`Spender.jsx`) routes variant N → `kind:"searchPV"` → the WASM
-  `search_pv_full_timed`, whose **15-pt branch runs the attention net** (`searchPV` is a LEGACY name from the
-  PV era — the function body is net_attn_3 for Classic, `pv_model_21` for Long). WWSD's browser userscript
-  calls the SAME `search_pv_full_timed` entry, so WWSD also runs net_attn_3. The Spender.jsx comment about
-  "swap pv_model.json to update what N plays" is stale wording (15-pt N is `attn_model.json`).
-- **Prod sim budget ≈ 20k sims/move.** Budget history: pure-Python **S** ran fewest (hundreds–few-thousand on
-  Render's shared CPU); the **Rust→WASM MLP nets** (net_ext_19 / net_night_14, flat 178-vector leaf) jumped to
-  **~100–400k**; the heavier **attention leaf** is tokenized and quite a bit slower, dropping it back to ~20k —
-  still well above the ~1.2k saturation knee, so matched-sims strength transfers.
-
-### Session (June 29 2026) — eval-axis screens: FEATURES + VALUE-TARGET both saturated for `net_attn_3`
-Two cheap "harvest → ablation/gate" screens, both NEGATIVE for raising N, both pointing the same way: **the
-remaining lever is the training DISTRIBUTION, not the evaluation.** Tooling (rust-search worktree + `az_run`):
-`harvest_attn_v{3,4}` / `harvest_attn_val`, `gate_attn_attn` (attn-vs-attn paired-CRN gate), `ablate_v{3,4}.py`
-(small-MLP outcome-distill, leave-one-IN/OUT column-zeroing), `train_attn.py` `value`-column/`BETA` blend +
-warm-start loader + low-RAM streaming parser.
-- **Eval-FEATURE enrichment is saturated ON THE NET (do not relitigate these four).** Held-out-outcome-AUC
-  ablation over `net_attn_3`'s v1 features: per-card deck-unlock, post-buy-unlock, opponent-model, state
-  fork-count ALL fail the bar (full vs v1only ≈ −0.0002). The attention mechanism already computes board-card
-  cross-aggregates, so explicit versions are redundant. **CAVEAT: the screen runs on SELF-PLAY data → it is
-  structurally BLIND to the racer weakness** (a distribution problem). Memory `spender-v3-feature-screen`.
-- **#3 value-bootstrap raises the FLOOR not the CEILING.** Value target `(1-β)·outcome + β·search_root_value`:
-  from-scratch it beats the outcome-only baseline **+0.077, FLAT across 256/512/1024 sims** (transfers to
-  ~20k), but warm-fine-tuning the CHAMPION toward its own search values washes (N already sits at that fixed
-  point). **KEEPER: use β≈0.3 in any FRESH retrain** (β<1 keeps the outcome anchor). Memory `spender-value-bootstrap`.
-- **Blind (deck-top) reserve — a structural MCTS blind spot, not a tuning miss.** Determinized PUCT can't value
-  `A_RES_DECK` (deck reshuffled per sim, child keyed by ACTION not drawn card → all blind draws merge to one
-  mediocre-mean node; opponent modeled as knowing everything). Near-unfixable without belief-state / chance-node
-  search; niche → not worth it. Same CLASS as the denial/racer blind spots.
-- **Per-level deck features — passed the flat-MLP AUC screen but WASHED in play (do not relitigate).**
-  `features_tokens_v4` (per-level×color demand / control / counts) liked by the flat-MLP screen (+0.0033) but on
-  the real AttnNet the play A/B washed (v4net vs v1ctl 0.533@256 → 0.507@1024, decays with sims). The attention
-  net already extracts the deck signal from the `engine_value` tokens. GOTCHA (cost an hour): `train_attn.py`
-  didn't skip the harvest's leading `game` column → train/serve feature-shift → a FAKE 0.66→0.76-GROWING result;
-  the **sanity control (v1ctl-vs-ship = 0/400) caught it**. Lesson: always gate vs a known reference.
-
-### Session (June 30 2026) — EXPLOITER net vs champion N = NO EXPLOIT (clean mirror; DO NOT relitigate)
-The greenlit research bet from `spender-racer-league-deadend` (train a net whose SOLE objective is to BEAT the
-deployed attention-net champion **N**, AlphaStar-style, to DISCOVER the human's racing exploit) was run
-(`az_run/loop_exploit.sh`, Rust `selfplay_attn_exploit.exe` + `gate_attn_attn.exe`, 10 iters). **Result: no
-exploit found — N is unexploitable by a same-arch warm-start mirror.**
-- **Setup:** the exploiter is a **byte copy of ship N** (`cp net_attn3_ship.json exploit_best.json`) — SAME
-  card-set-attention architecture, SAME 24-feat tokens, SAME initial weights. The ONLY differences are the
-  training *distribution* and *target*: each iter the best exploiter plays **1500 games vs the FIXED ship**
-  (`self_frac=0`, recording ONLY its own moves + search root value), heavy early-ply exploration (`temp=15`),
-  warm-from-ship fine-tune (LR 5e-4, value-target β=0.3, rolling 2-iter window, MAXROWS 100k), gate 300g@256
-  vs ship, promote iff `cand_vs_ship > best`.
-- **All 10 gated results bounced in 0.45–0.51 with NO upward trend:** 0.491 / 0.481 / 0.478 / 0.471 /
-  **0.5083 (iter 5, the only "promotion", within noise of 0.50)** / 0.489 / 0.505 / 0.449 / (iter 9) / **0.456
-  (iter 10)**. best_wr ended at **0.5083** — a dead-even mirror. (Train-time win-rate ~0.36–0.39 is just the
-  temp-15 exploration depressing play; the clean gate is the truth and it says EVEN.)
-- **Diagnosis (exactly the pre-flagged risk):** a net with N's architecture, N's features, initialized to N's
-  weights, taking small gradient steps on games against N has **no structural asymmetry to exploit** — gradient
-  just walks around N's own policy basin and the gate sits at ~0.50. This is the "same-arch exploiter mirrors
-  to ~0.5 without asymmetry" failure mode called out in `spender-racer-league-deadend`.
-- **Conclusion:** a real exploiter REQUIRES injected asymmetry the mirror loop deliberately omitted — enriched/
-  racer-aware features, a racer-biased reward or opponent track, a **cold (from-scratch) init** so it can't fall
-  back into N's basin, or a different head/arch. As configured this is a clean NEGATIVE control proving N is not
-  exploitable by a mirror of itself. Reusable harness kept: `loop_exploit.sh` + `selfplay_attn_exploit.exe` +
-  `gate_attn_attn.exe`. Memory `spender-racer-league-deadend` (updated with this outcome).
-
 ### Session (June 25 2026) — tap-to-ping, "waiting for you" tab alert, reserved-card + actions-box sizing (SHIPPED to main; do not regress)
 Four small Spender UI changes, all frontend-only except the ping relay (one backend WS action). Built in the
 `forrestm_projects-sound` worktree (branch `sound`), pushed straight to `main`. The `sound` worktree is the
@@ -2688,6 +2677,7 @@ standing scratchpad for these one-off UI fixes.
   waiting text WRAPS to the next line for a long name (no ellipsis — show the full name) while `overflow-wrap:
   anywhere` breaks a long unbroken name so it still can't force the column wider (keeps the width guarantee); a
   2-3 line wrap of that short string stays within the nobles' height, so it doesn't regrow the actions row.
+
 
 ### Player box + nobles details (desktop; do not regress)
 - **Indicator sizing uses `zoom`, not font/padding math.** The desktop player box scales
@@ -2901,8 +2891,6 @@ being whack-a-mole):
 - Known longer-term option (not done): the CSS-in-JS `<style>{baseCss+css}</style>` injects
   styles at render; a static `<link>` stylesheet would make them render-blocking/earlier, but
   it conflicts with the self-contained single-`.jsx` game pattern, so it was deferred.
-
----
 
 ## Spender Puzzle mode (`games/spender/puzzle/`) — LIVE on prod (July 2026)
 
