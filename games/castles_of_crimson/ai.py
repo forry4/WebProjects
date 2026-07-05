@@ -87,7 +87,8 @@ def _clone_game(g):
             "goods": dict(p["goods"]),
             "sold_goods": list(p["sold_goods"]),
             "workers": p["workers"], "silver": p["silver"], "vp": p["vp"],
-            "claimed_bonus": [dict(b) for b in p["claimed_bonus"]],
+            "claimed_bonus": list(p["claimed_bonus"]),   # append-only entries -> shallow copy is safe
+
             "mines_count": p["mines_count"],
             "buildings_placed": dict(p["buildings_placed"]),
             "livestock_types": list(p["livestock_types"]),
@@ -97,6 +98,7 @@ def _clone_game(g):
     return {
         "num_players": g["num_players"], "phase_letter": g["phase_letter"],
         "round": g["round"], "round_in_game": g["round_in_game"], "phase": g["phase"],
+        "turn_number": g.get("turn_number", 0),
         "winner": g["winner"], "order": list(g["order"]),
         "track": [list(s) for s in g["track"]], "round_order": list(g["round_order"]),
         "ship_advance_pending": g.get("ship_advance_pending", 0),
@@ -244,7 +246,7 @@ _ROLLOUT_PRIORITY = {
     "place_tile": 5, "townhall_place": 5, "extra_action": 4, "building_take_choice": 4,
     "ship_take_goods": 4, "ship_adjacent_take": 3, "take_hex": 3, "sell_goods": 3,
     "goods_pick": 3, "warehouse_sell": 3, "buy_black": 2, "monastery6_take": 2, "adjust_die": 1,
-    "take_workers": 1, "discard_storage": 0, "skip_pending": 0, "end_turn": 0,
+    "take_workers": 1, "skip_pending": 0, "end_turn": 0,   # _legal strips discard_storage before the rollout sees it
 }
 
 
@@ -321,7 +323,7 @@ def _iterate(root, state, ai_pid, rng, rollout_depth):
     while True:
         if node.untried is None:
             node.actor = _actor(state)
-            node.untried = list(_legal(state, node.actor)) if node.actor is not None else []
+            node.untried = _legal(state, node.actor) if node.actor is not None else []   # _legal returns a fresh list
         if engine.is_over(state) or node.actor is None:
             break
         if node.untried or depth >= _MAX_TREE_DEPTH or not node.children:

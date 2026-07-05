@@ -345,7 +345,6 @@ function TileArtSvg({ tile, cx, cy, box }) {
     fontFamily="'Cinzel', serif" fontWeight="700" fontSize={(box * 0.42).toFixed(1)} fill="#15100a">{g}</text> : null;
 }
 
-function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 
 // Hexagon-ring vertex positions (% of the board box) for the 6 numbered depots,
@@ -837,7 +836,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
 
   const playerName = authUser?.name || "Player";
-  const pendingAction = useRef(null);
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
 

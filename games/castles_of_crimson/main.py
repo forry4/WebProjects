@@ -602,8 +602,9 @@ async def _handle_join(ws, room_id, pid, msg):
         room.setdefault("boards", {})[pid] = _valid_board(msg.get("board_id"))
         room["sockets"][pid] = ws
         save_game(room_id)
-    await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id)})
-    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    state = mk_room_state(room_id)          # build once; reuse for the reply + the broadcast
+    await _send(ws, {"type": "joined", "room_id": room_id, "room": state})
+    await broadcast_room(room_id, {"type": "room_update", "room": state})
 
 
 async def _handle_start(ws, room_id, pid):

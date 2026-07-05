@@ -418,13 +418,6 @@ def _adjust_cost(game: dict, pid: str, frm: int, to: int) -> int:
     return (steps + per_worker - 1) // per_worker
 
 
-def _die(game: dict, pid: str, i: int):
-    d = game["dice"].get(pid)
-    if d is None or i not in (0, 1):
-        return None
-    return d
-
-
 # ── Free die-shift monasteries (9-12) ─────────────────────────────────────────
 def _free_shift_for_tile(p: dict, ttype: str) -> bool:
     eff = p["monastery_effects"]
