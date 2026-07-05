@@ -102,6 +102,55 @@ function tileDesc(t, board) {
   }
 }
 
+// Full building name (for the move log).
+const BUILDING_NAME = {
+  market: "Market", carpenter: "Carpenter's Workshop", church: "Church",
+  warehouse: "Warehouse", boarding: "Boarding House", bank: "Bank",
+  townhall: "Town Hall", watchtower: "Watchtower",
+};
+// Short name for a tile in the move log, e.g. "a Ship", "Monastery #5", "Market".
+function tileName(t) {
+  if (!t) return "a tile";
+  if (t.kind === "goods") return "goods";
+  switch (t.type) {
+    case "castle": return "a Castle";
+    case "ship": return "a Ship";
+    case "mine": return "a Mine";
+    case "monastery": return `Monastery #${t.effect_id}`;
+    case "building": return BUILDING_NAME[t.building] || "a Building";
+    case "livestock": return `Livestock (${t.animal || "?"}${t.count ? " ×" + t.count : ""})`;
+    default: return TYPE_LABEL[t.type] || "a tile";
+  }
+}
+// Descriptive move-log line built from the data already in each record (tile, depot, …).
+function moveText(m) {
+  const t = m.tile;
+  switch (m.type) {
+    case "take_hex": return `took ${tileName(t)} from depot ${m.depot}`;
+    case "place_tile": return `placed ${tileName(t)}`;
+    case "buy_black": return `bought ${tileName(t)} from the black depot`;
+    case "monastery6_take": return `took ${tileName(t)} (monastery)`;
+    case "building_take": return `took ${tileName(t)} (building action)`;
+    case "discard_storage": return `discarded ${tileName(t)}`;
+    case "place_starting_castle": return "placed their starting castle";
+    case "sell_goods": return `sold ${m.count} ${colorLabel(m.color)} goods`;
+    case "take_workers": return "took 2 workers";
+    case "adjust_die": return `adjusted a die to ${m.to}`;
+    case "ship_take_goods": return `took goods from depot ${m.depot} (ship)`;
+    case "ship_adjacent_take": return `took goods from depot ${m.depot} (monastery)`;
+    case "building_effect": return `used ${BUILDING_NAME[m.building] || "a building"}`;
+    case "monastery_placed": return `placed Monastery #${m.effect_id}`;
+    case "area_complete": return "completed a region";
+    case "bonus_tile": return `earned a ${colorLabel(m.color)} bonus tile`;
+    case "livestock_score": return `scored ${m.animal || "livestock"}`;
+    case "track_advance": return `advanced ${m.spaces} on the turn track`;
+    case "end_turn": return "ended their turn";
+    case "undo_turn": return "undid their turn";
+    case "skip_pending": return "skipped";
+    default: return m.type;
+  }
+}
+
 // ─── Tile icons ──────────────────────────────────────────────────────────────
 // Little monochrome SVG icons (drawn in a 0..24 box, single color `c`). ship /
 // castle / mine sit on dark tiles, so they're drawn in a light glyph; livestock
@@ -437,6 +486,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-depots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .coc-depot{border:1px solid var(--border);border-radius:var(--radius);padding:6px;min-height:78px;background:var(--surface2)}
 .coc-depot.match{border-color:var(--gold);box-shadow:0 0 0 1px var(--gold) inset}
+/* A ship/monastery is asking which depot to drain — the eligible depots pulse and are clickable. */
+.coc-depot-pick,.coc-depot-pick *{cursor:pointer}
+.coc-depot-pick{animation:coc-pickpulse 1.1s ease-in-out infinite}
+@keyframes coc-pickpulse{0%,100%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 8px rgba(232,201,106,.35)}50%{box-shadow:0 0 0 2px var(--gold-l) inset,0 0 18px rgba(232,201,106,.75)}}
 /* hexagon board layout */
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
@@ -952,6 +1005,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const inExtra = pendingMine && game?.pending_kind === "extra_action";
   const actionValue = inExtra ? extraValue : (selDie != null ? game?.dice?.[myId]?.values?.[selDie] : null);
 
+  // Ship goods-depot pick: while a ship/monastery is asking which depot to drain, you
+  // can click the depot directly on the board (in addition to the modal buttons).
+  const shipPickMine = pendingMine && (game?.pending_kind === "ship_choose_depot" || game?.pending_kind === "ship_adjacent_depot");
+  const shipCands = !shipPickMine ? []
+    : (game.pending_kind === "ship_adjacent_depot" ? (game.pending?.ctx?.candidates || []) : [1, 2, 3, 4, 5, 6]);
+  const shipPick = (d) => {
+    if (game.pending_kind === "ship_choose_depot") { mv({ type: "ship_take_goods", depot: d }); return; }
+    if (game.pending_kind === "ship_adjacent_depot" && shipCands.includes(d)) mv({ type: "ship_adjacent_take", depot: d });
+  };
+
   const doTakeWorkers = () => {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
     else if (selDie != null) mv({ type: "take_workers", die_index: selDie });
@@ -963,6 +1026,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // Tapping a tile you can't act on yet shows its description (mobile has no hover,
   // so this mirrors the PC title-tooltip — see also clickBlackTile).
   const clickDepotTile = (depot, tile) => {
+    if (shipPickMine) return;   // clicking anywhere in a depot picks it (handled on the depot div)
     if (!pendingMine && !myTurnRaw) { setToast(tileDesc(tile, board)); return; }
     if (pendingMine && game.pending_kind === "building_take_choice") {
       mv({ type: "building_take_choice", tile_id: tile.id }); return;
@@ -1406,8 +1470,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
                   : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
               }
+              const pickable = shipPickMine && shipCands.includes(d);
               return (
-                <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}`} style={{ left: `${pos.left}%`, top: `${pos.top}%` }}>
+                <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                  style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
+                  onClick={pickable ? () => shipPick(d) : undefined}
+                  title={pickable ? `Take all goods from depot ${d}` : undefined}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
@@ -1423,7 +1491,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     ))}
                     {depot.goods.map((gt) => (
                       <div key={gt.id} className="coc-tile goods" style={{ background: GOODS_HEX[gt.color] }} title={tileDesc(gt, board)}
-                        onClick={() => setToast(tileDesc(gt, board))}>{goodsSellNum(gt.color)}</div>
+                        onClick={() => { if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
                     ))}
                   </div>
                 </div>
@@ -1563,7 +1631,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <h3>Log</h3>
           <div className="coc-log">
             {(game.moves || []).slice(0, 15).map((m, i) => (
-              <div key={i}>{players[m.pid] || m.pid}: {m.type}{m.vp ? ` (+${m.vp} VP)` : ""}</div>
+              <div key={i}>{players[m.pid] || m.pid} {moveText(m)}{m.vp ? ` (+${m.vp} VP)` : ""}</div>
             ))}
           </div>
         </div>
@@ -1649,7 +1717,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
 
   if (kind === "ship_choose_depot") {
     return (
-      <Modal title="Ship — take goods" desc="Choose a depot to take all its goods from." interactive>
+      <Modal title="Ship — take goods" desc="Click a highlighted depot on the board (or a button below) to take all its goods." interactive>
         <div className="coc-modal-row">
           {[1, 2, 3, 4, 5, 6].map((d) => {
             const n = game.depots[String(d)].goods.length;
@@ -1663,7 +1731,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
   if (kind === "ship_adjacent_depot") {
     const cands = game.pending?.ctx?.candidates || [];
     return (
-      <Modal title="Monastery — adjacent depot" desc="You may also take all goods from one adjacent depot." interactive>
+      <Modal title="Monastery — adjacent depot" desc="Click a highlighted adjacent depot on the board (or a button below) to also take its goods." interactive>
         <div className="coc-modal-row">
           {cands.map((d) => {
             const n = game.depots[String(d)].goods.length;
