@@ -2,8 +2,11 @@
 //! per searched decision: mover features + root visit distribution + searched root
 //! value, then per-game outcome labels. The distill warm-start trains on this.
 //!
-//!   cargo run --release --bin harvest_boot -- <out_prefix> <games> <sims> <temp_micro> <seed0> <threads>
-//!   e.g. harvest_boot C:/Users/Forrest/coc_run/boot 6000 1500 20 0 10
+//!   harvest_boot <out_prefix> <games> <sims> <temp_micro> <seed0> <threads> [model.json] [mode]
+//!   mode: scaffold (default, heuristic rollout leaf) | hybrid (net prior +
+//!   rollout value — the P4 ratchet's self-play config) | pv (pure net leaf)
+//!   e.g. harvest_boot C:/Users/Forrest/coc_run/boot 5000 1500 20 0 10
+//!        harvest_boot C:/Users/Forrest/coc_run/it1 3000 600 20 5000 10 best.json hybrid
 //!
 //! Writes <out_prefix>.t<k>.csv per thread. Columns (no header):
 //!   game_id, f0..f933, label (1/0 mover won), margin (mover score diff),
@@ -17,8 +20,17 @@ use std::io::{BufWriter, Write};
 
 use coc_core::engine::{self, State};
 use coc_core::feats;
+use coc_core::mcts::Search;
 use coc_core::rng::Rng;
+use coc_core::valuenet::PolicyValueNet;
 use coc_core::vsearch;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Scaffold,
+    Hybrid,
+    Pv,
+}
 
 struct Row {
     actor: usize,
@@ -27,7 +39,43 @@ struct Row {
     value: f64,
 }
 
-fn run_thread(out: &str, t: usize, games: u64, sims: u32, temp_micro: usize, seed0: u64) {
+fn root_readout(
+    s: &State,
+    sims: u32,
+    seed: u64,
+    mode: Mode,
+    net: Option<&PolicyValueNet>,
+) -> (Vec<i32>, f64) {
+    match mode {
+        Mode::Scaffold => vsearch::root_readout_heur(s, sims, vsearch::C_PUCT, seed),
+        Mode::Pv => vsearch::root_readout_pv(net.unwrap(), s, sims, vsearch::C_PUCT, seed),
+        Mode::Hybrid => {
+            let net = net.unwrap();
+            let mut search = Search::new(s.clone(), vsearch::C_PUCT);
+            let mut rng = Rng::new(seed ^ 0x9E77);
+            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
+                vsearch::hybrid_eval(net, st, actor, lg, r)
+            };
+            for _ in 0..sims {
+                search.sim(&mut rng, &eval);
+            }
+            let n: i64 = search.root_visits().iter().map(|&x| x as i64).sum();
+            let w: f64 = search.root_wins().iter().sum();
+            (search.root_visits().to_vec(), if n > 0 { w / n as f64 } else { 0.0 })
+        }
+    }
+}
+
+fn run_thread(
+    out: &str,
+    t: usize,
+    games: u64,
+    sims: u32,
+    temp_micro: usize,
+    seed0: u64,
+    mode: Mode,
+    net: Option<&PolicyValueNet>,
+) {
     let path = format!("{out}.t{t}.csv");
     let mut w = BufWriter::new(File::create(&path).expect("create out"));
     let mut rng = Rng::new(seed0 ^ 0xB007_0000 ^ (t as u64) << 32);
@@ -45,7 +93,7 @@ fn run_thread(out: &str, t: usize, games: u64, sims: u32, temp_micro: usize, see
             }
             let actor = s.actor() as usize;
             let (visits, value) =
-                vsearch::root_readout_heur(&s, sims, vsearch::C_PUCT, seed.wrapping_mul(977) + searched as u64);
+                root_readout(&s, sims, seed.wrapping_mul(977) + searched as u64, mode, net);
             let mut policy = String::new();
             for &a in &legal {
                 if visits[a] > 0 {
@@ -118,11 +166,24 @@ fn main() {
     let temp_micro: usize = args[4].parse().unwrap();
     let seed0: u64 = args[5].parse().unwrap();
     let threads: usize = args[6].parse().unwrap();
+    let net: Option<PolicyValueNet> = args.get(7).map(|p| {
+        coc_core::netio::pv_from_json(&std::fs::read_to_string(p).expect("model"))
+    });
+    let mode = match args.get(8).map(|s| s.as_str()) {
+        None | Some("scaffold") => Mode::Scaffold,
+        Some("hybrid") => Mode::Hybrid,
+        Some("pv") => Mode::Pv,
+        Some(m) => panic!("bad mode {m}"),
+    };
+    if mode != Mode::Scaffold {
+        assert!(net.is_some(), "hybrid/pv modes need a model path");
+    }
     let per = games / threads as u64;
+    let net_ref = net.as_ref();
     std::thread::scope(|scope| {
         for t in 0..threads {
             let out = out.clone();
-            scope.spawn(move || run_thread(&out, t, per, sims, temp_micro, seed0));
+            scope.spawn(move || run_thread(&out, t, per, sims, temp_micro, seed0, mode, net_ref));
         }
     });
     eprintln!("harvest complete: {} games total", per * threads as u64);

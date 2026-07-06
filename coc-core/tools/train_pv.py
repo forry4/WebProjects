@@ -163,7 +163,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    files = sorted(glob.glob(args.data))
+    files = sorted(set(sum((glob.glob(g) for g in args.data.split(";")), [])))
     assert files, f"no files match {args.data}"
     torch.manual_seed(args.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"

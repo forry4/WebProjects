@@ -18,6 +18,7 @@ enum Player {
     Scaffold,
     Net(PolicyValueNet),
     NetArgmax(PolicyValueNet),
+    Hybrid(PolicyValueNet), // net prior + rollout-heuristic value
 }
 
 impl Player {
@@ -30,6 +31,11 @@ impl Player {
                 &std::fs::read_to_string(path).expect("model"),
             ));
         }
+        if let Some(path) = spec.strip_suffix(":hybrid") {
+            return Player::Hybrid(pv_from_json(
+                &std::fs::read_to_string(path).expect("model"),
+            ));
+        }
         Player::Net(pv_from_json(&std::fs::read_to_string(spec).expect("model")))
     }
 
@@ -38,6 +44,22 @@ impl Player {
             Player::Scaffold => vsearch::choose_action_heur(s, sims, seed),
             Player::Net(net) => vsearch::choose_action_pv(net, s, sims, seed),
             Player::NetArgmax(net) => vsearch::choose_action_pv_argmax(net, s, seed),
+            Player::Hybrid(net) => {
+                let legal = engine::legal_actions(s);
+                if legal.len() == 1 {
+                    return legal[0];
+                }
+                let mut search = coc_core::mcts::Search::new(s.clone(), vsearch::C_PUCT);
+                let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
+                let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
+                    vsearch::hybrid_eval(net, st, actor, lg, r)
+                };
+                for _ in 0..sims {
+                    search.sim(&mut rng, &eval);
+                }
+                let visits = search.root_visits();
+                *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
+            }
         }
     }
 }

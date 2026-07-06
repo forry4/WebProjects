@@ -144,6 +144,20 @@ pub fn pv_eval(
     (p, v as f64)
 }
 
+/// Hybrid leaf: NET policy prior + ROLLOUT-heuristic value (isolates prior quality;
+/// also the S-style config — strong hand value + learned prior).
+pub fn hybrid_eval(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+    rng: &mut Rng,
+) -> (Vec<f64>, f64) {
+    let (p, _) = pv_eval(net, s, actor, legal);
+    let (_, v) = heur_eval(s, actor, legal, rng);
+    (p, v)
+}
+
 /// PV-net search: visits + root value (root actor's perspective).
 pub fn root_readout_pv(
     net: &crate::valuenet::PolicyValueNet,
