@@ -403,13 +403,25 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
   `ai.py`, breaking `from . import ai as coc_ai` in prod (bot turns would AttributeError). Tooling now
   lives at **`games/castles_of_crimson/az/`** (compact.py projection, bridge.py engine-dict⇄compact
   moves both directions, spaces.py generated, rust_arena.py).
-- **NEXT (P3, per plan):** `feats.rs` flat encoder (~650-900 dims; per-space block feeds the 37-way
-  SPACE policy head; heuristic V(me)−V(opp) + margin-if-now as baseline features; opp dice + denial
-  flags), `harvest_boot` bin (scaffold self-play @1-2k sims, temp openings, uniform board-pair
-  sampling), `coc_run/` training home (mirror az_run; pv_net.py parity-locked twin + net_export_check
-  ≤1e-4), distill warm-start, then the P4 AZ ratchet (value target: outcome ⊕ tanh(margin/SCALE)
-  SHAPE_A=0.3 ⊕ β=0.3 root value; gates paired-CRN + fresh-seed confirm + winner's-curse re-gate +
-  known-equal sanity 0.500).
+- **P3 (done): bootstrap net + the pivotal decomposition.** `feats.rs` = the FROZEN 934-dim encoder
+  (groups documented in-file; per-space block feeds the 37-way SPACE head; input-dim change = full
+  restart). Harvest 5000 scaffold self-play games (1.15M rows, `C:\Users\Forrest\coc_run\boot.t*.csv`);
+  `tools/train_pv.py` (streaming, GAME-split holdout, SHAPE_A=0.3 ⊕ β=0.3 root value, margin SCALE
+  auto ≈34) → `pv_boot.json`: val AUC 0.798, top-1 0.586; torch↔Rust `net_export_check` 3.5e-7.
+  **CRN is EXACT in CoC** (the dice stream advances 5 rolls/round regardless of play ⇒ one seed fixes
+  deck+dice for both seat orders; position-derived search seeds make the A-vs-A gate control EXACTLY
+  0.5000). **VERDICT (do not relitigate): the pure net leaf LOSES to the scaffold at equal sims
+  (0.275 @128v128; depth doesn't rescue it), but the HYBRID — net PRIOR + rollout-heuristic VALUE —
+  BEATS the scaffold 0.567 at equal sims.** The policy head distilled well; the value head lags
+  (CoC's rollout-augmented teacher leaf sets a higher bar than Spender's static v_state). Net-argmax
+  vs full search ≈0.03 is normal (1-ply), not a distill failure.
+- **P4 (RUNNING): hybrid ratchet** — `tools/loop_coc.sh` (resumable: `progress_coc` + ITER-k-DONE):
+  hybrid self-play (`harvest_boot <out> <games> <sims> 20 <seed> 10 pv_best.json hybrid`) → train both
+  heads warm-from-best (2-iter window + boot anchor) → cand-vs-best hybrid gate (promote ≥0.52) +
+  **pure-pv-vs-hybrid probe (the value-head takeover signal: flip self-play mode to `pv` when it
+  crosses 0.5)** + scaffold@2000 yardstick. Watch `coc_run/loop_log.txt`. If flat after ~8 iters:
+  raise self-play sims first (the proven lever) before touching targets/architecture. P5 (serving)
+  can ship the hybrid config if the value head still lags — net prior + rollout value runs in wasm too.
 
 ---
 
