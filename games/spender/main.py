@@ -602,21 +602,18 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
 # applies it (the cheap discard/noble finishing stays server-side via _run_ai_turn). _schedule_ai_turn
 # waits CLIENT_AI_TIMEOUT for the client, then computes server-side as the fallback. All gated on the
 # per-room `client_ai` flag, so absent a WASM client the behavior is byte-identical to before.
-CLIENT_AI_TIMEOUT = 8.0   # seconds to wait for a VISIBLE client's move before the server falls back.
-                          # Variant N's WASM worker parses its embedded ~600KB value-net JSON ONCE
-                          # per move (before its own search budget even starts), so N's wall-clock
-                          # runs ~1-2s longer than S's; 6.0 left N losing the race on slower devices
-                          # (its late ai_move then hit "not the AI's turn"). 8.0 lets N reliably win —
-                          # and when the client wins, the move applies the instant it's submitted, so
-                          # the human never actually waits the full timeout (it only bounds the
-                          # truly-can't-compute fallback).
-CLIENT_AI_TIMEOUT_HIDDEN = 1.5  # seconds to wait when the client says its tab is BACKGROUNDED
-                          # (`client_hidden`). A hidden tab throttles/freezes its WASM workers, so it
-                          # usually can't answer in the full window — and when it can't, the move is the
-                          # server fallback EITHER WAY, so the long wait is pure latency (the "slow to
-                          # take its turn when tabbed out" report; it compounds on discard turns). Bail
-                          # fast to the fallback instead. A snappy desktop tab that still answers inside
-                          # this short window keeps its (stronger) N move; the flag flips back on focus.
+CLIENT_AI_TIMEOUT = 15.0  # seconds a VISIBLE tab may take before the server computes its own move.
+                          # This is a pure ANTI-HANG safety net, NOT the normal path: an armed client
+                          # ALWAYS plays the full-strength N move (the whole point of the offload), and
+                          # normally answers in ~6-7s — variant N's WASM worker parses its embedded ~600KB
+                          # net once per move before its search budget even starts, so it runs a couple
+                          # seconds longer than S. 15s gives even slow devices ample room to WIN with N;
+                          # the fallback only fires on a genuine crash while the user is watching.
+                          # When the tab is BACKGROUNDED (client_hidden) there is NO fallback at all — we
+                          # never substitute the weaker S move for N. The server just waits for the
+                          # client's N move however long the throttled/frozen tab takes (it delivers when
+                          # it next gets CPU, usually on refocus). The lone unavoidable S is a browser
+                          # with no WASM (never armed) or a genuine focused crash — both rare.
 CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
 
 
@@ -2383,8 +2380,10 @@ async def _schedule_ai_discard_fallback(room_id: str, ai_pid: str, at_ply: int) 
     mid-discard. Ply-guarded — if the client made progress (logged a discard), a newer fallback covers the
     next one and this bails; the whole path degrades to today's server-side heuristic on any client failure."""
     _r0 = ROOMS.get(room_id)                       # atomic read (no await between get + use)
-    _hidden = bool(_r0.get("client_hidden")) if _r0 else False
-    await asyncio.sleep(CLIENT_AI_TIMEOUT_HIDDEN if _hidden else CLIENT_AI_TIMEOUT)
+    if _r0 and _r0.get("client_hidden"):
+        return  # backgrounded tab: wait for the client's net-chosen discard (full-strength N), don't
+                # substitute the heuristic discard; it delivers when the tab next gets CPU (usually refocus).
+    await asyncio.sleep(CLIENT_AI_TIMEOUT)
     changed = False
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -2393,6 +2392,8 @@ async def _schedule_ai_discard_fallback(room_id: str, ai_pid: str, at_ply: int) 
             return  # already resolved (client submitted, or the game moved on)
         if len(g.get("moves", [])) != at_ply:
             return  # the client progressed; a newer fallback (or completion) handles it
+        if bool(r.get("client_hidden")):
+            return  # went hidden mid-wait → keep waiting for the client's net discard
         ps = g["players"][ai_pid]
         while sum(ps["tokens"].values()) > 10:
             dc = _ai_discard_one(g, ai_pid)
@@ -2460,7 +2461,12 @@ async def _schedule_ai_turn(room_id: str) -> None:
         client_hidden = bool(r.get("client_hidden"))
         wait_ply = len(g.get("moves", []))
     if client_ai:
-        await asyncio.sleep(CLIENT_AI_TIMEOUT_HIDDEN if client_hidden else CLIENT_AI_TIMEOUT)
+        if client_hidden:
+            return  # backgrounded tab: NEVER substitute the weaker S move. The client always plays the
+                    # full-strength N move; it just delivers whenever the throttled/frozen tab next gets
+                    # CPU (usually on refocus). The ai_move handler applies it whenever it lands, so there
+                    # is no server timer to race — we simply wait for it.
+        await asyncio.sleep(CLIENT_AI_TIMEOUT)
         async with ROOM_LOCK:
             r = ROOMS.get(room_id)
             g = r.get("game") if r else None
@@ -2469,6 +2475,8 @@ async def _schedule_ai_turn(room_id: str) -> None:
             if g.get("turn") != ai_pid or g.get("phase") != "playing" \
                     or len(g.get("moves", [])) != wait_ply:
                 return  # the client submitted in time (turn/ply advanced) — nothing to do
+            if bool(r.get("client_hidden")):
+                return  # tab went hidden mid-wait → keep waiting for the client's N move, don't fall back
 
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -2986,10 +2994,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
             # ── client_ai_hidden (the client's tab is backgrounded/foregrounded) ──
-            # A hidden tab throttles/freezes its WASM workers, so it usually misses the client-AI
-            # window. Recording it lets _schedule_ai_turn wait CLIENT_AI_TIMEOUT_HIDDEN instead of the
-            # full CLIENT_AI_TIMEOUT before falling back — no benefit to waiting for a client that
-            # can't answer (the move is the server fallback either way). Purely a latency knob.
+            # A hidden tab throttles/freezes its WASM workers, so it may not answer within the anti-hang
+            # window. Recording it lets _schedule_ai_turn skip the S fallback ENTIRELY while hidden and
+            # wait for the client's full-strength N move (delivered when the tab next gets CPU, usually on
+            # refocus) — we never substitute the weaker S move for N.
             elif action == "client_ai_hidden":
                 _hidden = bool(msg.get("hidden"))
                 async with ROOM_LOCK:

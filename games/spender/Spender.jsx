@@ -1303,10 +1303,10 @@ export default function SpenderApp() {
 		}
 	}, [wasmReady, roomData?.room_id, roomData?.ai_variant, send]);
 
-	// Tell the server when this tab backgrounds/foregrounds so it uses a SHORT fallback window while
-	// hidden: a backgrounded tab throttles/freezes its WASM search workers and usually can't deliver a
-	// move in the full 8s window — so waiting it out just delays the (identical) server fallback (the
-	// "slow to move when tabbed out" report). On focus the flag flips back and the normal window resumes.
+	// Tell the server when this tab backgrounds/foregrounds. While hidden the server does NOT fall back
+	// to its weaker S move — it waits for this client's full-strength N move, which a throttled/frozen
+	// tab delivers whenever it next gets CPU (usually on refocus). Without this signal the server's
+	// anti-hang timeout would substitute S; the flag suppresses that so the bot always plays N.
 	useEffect(() => {
 		const notify = () => {
 			if (clientAiArmedRef.current) send({ action: "client_ai_hidden", hidden: document.hidden });
