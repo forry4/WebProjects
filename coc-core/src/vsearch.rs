@@ -36,8 +36,30 @@ fn action_priority(a: usize) -> f64 {
     }
 }
 
-/// Heuristic scaffold leaf: (softmax-of-priority priors, tanh heuristic margin).
-pub fn heur_eval(s: &State, actor: usize, legal: &[usize]) -> (Vec<f64>, f64) {
+/// Rollout depth in MICRO actions (~= ai.py's 8 ENGINE moves at ~2.5 micro/move).
+/// The rollout-then-eval leaf matters: CoC's `_value` was tuned as a PAIR with the
+/// Python bot's rollout (a stored tile at 0.35 credit is really "about to be placed
+/// for a region score"), so a purely static leaf systematically undervalues
+/// in-flight turns — measured 0.235 vs hard static, vs the rollout leaf's pass.
+pub const ROLLOUT_MICRO_STEPS: usize = 20;
+
+fn priority_rollout_step(s: &mut State, rng: &mut Rng) {
+    let acts = engine::legal_actions(s);
+    let mut mx = f64::NEG_INFINITY;
+    for &a in &acts {
+        let v = action_priority(a);
+        if v > mx {
+            mx = v;
+        }
+    }
+    let top: Vec<usize> = acts.into_iter().filter(|&a| action_priority(a) == mx).collect();
+    let a = top[rng.below(top.len())];
+    engine::apply(s, a);
+}
+
+/// Heuristic scaffold leaf: (softmax-of-priority priors, tanh heuristic margin
+/// after a short priority rollout — mirrors ai.py `_rollout` + `_eval_reward`).
+pub fn heur_eval(s: &State, actor: usize, legal: &[usize], rng: &mut Rng) -> (Vec<f64>, f64) {
     let mut p = vec![0.0f64; N_ACTIONS];
     let mut mx = f64::NEG_INFINITY;
     for &a in legal {
@@ -56,7 +78,18 @@ pub fn heur_eval(s: &State, actor: usize, legal: &[usize]) -> (Vec<f64>, f64) {
     for &a in legal {
         p[a] /= sum;
     }
-    (p, heuristic::eval_reward(s, actor))
+    let mut r = s.clone();
+    let mut steps = 0;
+    while r.mode != crate::engine::OVER && steps < ROLLOUT_MICRO_STEPS {
+        priority_rollout_step(&mut r, rng);
+        steps += 1;
+    }
+    let v = if r.mode == crate::engine::OVER {
+        heuristic::terminal_reward(&r, actor)
+    } else {
+        heuristic::eval_reward(&r, actor)
+    };
+    (p, v)
 }
 
 /// Run `sims` simulations from `s` and return the root visit counts.

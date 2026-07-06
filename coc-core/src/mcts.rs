@@ -101,11 +101,12 @@ impl Search {
         }
     }
 
-    /// One simulation. `eval(leaf_state, actor, legal) -> (priors[N_ACTIONS], value)`;
-    /// value from `actor`'s perspective. Terminals back up tanh-margin internally.
+    /// One simulation. `eval(leaf_state, actor, legal, rng) -> (priors[N_ACTIONS],
+    /// value)`; value from `actor`'s perspective (the rng lets the leaf run a
+    /// rollout). Terminals back up tanh-margin internally.
     pub fn sim<F>(&mut self, rng: &mut Rng, eval: &F)
     where
-        F: Fn(&State, usize, &[usize]) -> (Vec<f64>, f64),
+        F: Fn(&State, usize, &[usize], &mut Rng) -> (Vec<f64>, f64),
     {
         let mut s = determinize(&self.root_state, rng);
         let mut idx = 0usize;
@@ -135,7 +136,7 @@ impl Search {
         }
         let legal = engine::legal_actions(&s);
         let actor = s.actor() as usize;
-        let (probs, value) = eval(&s, actor, &legal);
+        let (probs, value) = eval(&s, actor, &legal, rng);
         self.nodes[idx].expanded = true;
         self.nodes[idx].p.copy_from_slice(&probs);
         self.backup(&path, value, actor as i8);
