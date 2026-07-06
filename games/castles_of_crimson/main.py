@@ -34,6 +34,14 @@ from . import tiles
 from . import bot
 from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
 
+# Expert-tier client-side AI (browser WASM): the compact projection + the
+# compact-move bridge. Defensive import (same rationale as the /coc mount guard):
+# if az/ is ever absent, expert rooms silently degrade to the hard server bot.
+try:
+    from .az import bridge as az_bridge, compact as az_compact
+except Exception:                                        # pragma: no cover
+    az_bridge = az_compact = None
+
 from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
@@ -43,8 +51,21 @@ from core.config import cors_allowed_origins
 LOG = logging.getLogger("games.castles_of_crimson")
 
 # Valid AI difficulty levels; unknown values fall back to the default.
-AI_DIFFICULTIES = ("normal", "hard")
+# "expert" = the learned net searched CLIENT-side (browser WASM, coc-core); the
+# server ships each of the bot's decisions via `ai_search` and validates the
+# returned move. Any client failure degrades that decision to the hard server bot.
+AI_DIFFICULTIES = ("normal", "hard", "expert")
 DEFAULT_DIFFICULTY = "hard"
+
+# Expert client-search config. _EXPERT_MODE mirrors the offline gate verdict:
+# "hybrid" = net policy prior + rollout-heuristic value (the config that beats the
+# scaffold); flip to "pv" when the P4 takeover probe crosses 0.5.
+_EXPERT_MODE = "hybrid"
+_EXPERT_BUDGET_MS = 900          # per micro-decision, per worker
+_EXPERT_MAX_SIMS = 20000         # per worker (bounds browser-tab memory)
+# Per-decision watchdog: if the client hasn't answered in this window, the server
+# finishes the TURN with the hard bot (play_turn_plan) — same envelope as Spender.
+CLIENT_AI_TIMEOUT = 8.0
 # Pause between the bot's individual moves so the client animates each tile in turn
 # (a whole-turn bulk update trips the flyer's catch-up guard and animates nothing).
 # Slow enough to watch each move land on the opponent board (the flyer plays ~0.5s).
@@ -389,6 +410,11 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
     if g and isinstance(g, dict) and g.get("players"):
         state["final_scores"] = engine.final_scores(g)
         state["vp_breakdown"] = {pid: engine.vp_breakdown(g, pid) for pid in g["players"]}
+    # Expert tier: the bot decision currently awaiting the client's WASM search.
+    # Living in room state (not a one-shot message) means reconnects/re-broadcasts
+    # re-ship it — the same durability rule as the engine's pending sub-decisions.
+    if room.get("_ai_search"):
+        state["ai_search"] = room["_ai_search"]
     return state
 
 
@@ -399,13 +425,99 @@ def _sync_status_from_game(room: dict) -> None:
 
 
 # ── Opponent (bot) turn scheduler ─────────────────────────────────────────────
+async def _client_bot_turn(room_id: str) -> None:
+    """Expert tier: drive the bot's turn one ENGINE-MOVE DECISION at a time through
+    the human's browser (WASM search). Each iteration ships the decision via
+    `ai_search` in room state, then waits for the `ai_move` handler (which applies
+    the searched move and sets the event). Single-legal decisions are applied
+    server-side without a round-trip. Returns when the bot's turn is over, or on
+    any timeout/error — the caller's server path then finishes the turn, so
+    degradation is per-turn, never a deadlock."""
+    for _ in range(60):                          # decision guard (a turn is a handful of moves)
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room:
+                return
+            game = room.get("game")
+            ai_pid = room.get("ai_player")
+            if not _bot_should_act(room):
+                return                           # turn over — done
+            if not room.get("client_ai"):
+                return                           # no armed client — server path
+            legal = engine.legal_moves(game, ai_pid)
+            if not legal:
+                return                           # engine contract violation — server path
+            phase_changed = False
+            evt = None
+            if len(legal) == 1:
+                # Forced decision: apply directly (no client round-trip).
+                phase_before = game.get("phase_letter")
+                ok, _err = engine.apply_move(game, ai_pid, legal[0])
+                if not ok:
+                    return
+                phase_changed = game.get("phase_letter") != phase_before
+                room["_bot_last_phase"] = game.get("phase_letter")
+                _sync_status_from_game(room)
+            else:
+                seq = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
+                proj = az_compact.project(game)
+                # Canonicalize the undrawn pools (search determinization re-sorts
+                # them per sim anyway — this just avoids shipping the true order).
+                for k in ("supply", "black_supply", "goods_supply"):
+                    proj[k] = sorted(proj[k])
+                room["_ai_search"] = {
+                    "decision": seq,
+                    "seat": game["order"].index(ai_pid),
+                    "mode": _EXPERT_MODE,
+                    "budget_ms": _EXPERT_BUDGET_MS,
+                    "max_sims": _EXPERT_MAX_SIMS,
+                    "state": proj,
+                }
+                evt = room["_ai_move_evt"] = asyncio.Event()
+            state = mk_room_state(room_id)
+        await broadcast_room(room_id, {"type": "room_update", "room": state})
+
+        if evt is None:                          # forced move applied above
+            save_game(room_id)
+            async with ROOM_LOCK:
+                r = ROOMS.get(room_id)
+                done = not r or not _bot_should_act(r)
+            if done:
+                return
+            await asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
+            continue
+
+        # Wait for the client's ai_move (the handler applies + broadcasts + saves).
+        try:
+            await asyncio.wait_for(evt.wait(), CLIENT_AI_TIMEOUT)
+        except asyncio.TimeoutError:
+            async with ROOM_LOCK:
+                r = ROOMS.get(room_id)
+                if r:
+                    r["_ai_search"] = None       # a late reply is ignored (stale decision)
+            LOG.info("CoC client AI timed out; server finishes the turn (room %s)", room_id)
+            return
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            if not r:
+                return
+            phase_changed = r.pop("_ai_phase_changed", False)
+            done = not _bot_should_act(r)
+        if done:
+            return
+        await asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
+
+
 async def _schedule_bot_turn(room_id: str) -> None:
     """Drive the AI opponent's whole turn.
 
-    The MCTS is heavy, so it plans the turn on a snapshot **in a thread pool**
-    (mirrors Spender's `_schedule_ai_turn`) and the planned move sequence is applied
-    back under the lock. A trivial-bot finisher guarantees the turn always ends, so
-    the game can never deadlock even if planning fails or the state drifts."""
+    Expert rooms with an armed WASM client first try the per-decision client path
+    (`_client_bot_turn`); any shortfall falls through to the server path below.
+    The server MCTS is heavy, so it plans the turn on a snapshot **in a thread
+    pool** (mirrors Spender's `_schedule_ai_turn`) and the planned move sequence is
+    applied back under the lock. A trivial-bot finisher guarantees the turn always
+    ends, so the game can never deadlock even if planning fails or the state
+    drifts."""
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room:
@@ -421,7 +533,6 @@ async def _schedule_bot_turn(room_id: str) -> None:
         room["_bot_running"] = True              # guard: only one bot turn at a time (we release
                                                  # the lock between moves for per-move animation)
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
-        snapshot = coc_ai._clone_game(game)      # independent of the live game
         # If a phase advanced since the bot last acted (e.g. the human ended it), pause
         # before the bot's first move so the phase overlay + income are seen first.
         phase_now = game.get("phase_letter")
@@ -432,16 +543,32 @@ async def _schedule_bot_turn(room_id: str) -> None:
     try:
         if pause_before_first:
             await asyncio.sleep(_PHASE_END_PAUSE)
-        # Plan the bot's turn off the event loop (MCTS may take a couple seconds).
-        loop = asyncio.get_event_loop()
-        try:
-            seq = await loop.run_in_executor(
-                None,
-                lambda: coc_ai.play_turn_plan(snapshot, ai_pid, difficulty=difficulty, rng=random.Random()),
-            )
-        except Exception:
-            LOG.exception("CoC AI planning failed; finishing with the trivial bot")
-            seq = None
+
+        if difficulty == "expert" and az_compact is not None:
+            await _client_bot_turn(room_id)
+
+        # Server path (normal/hard, and the expert fallback). Snapshot AFTER the
+        # client attempt — the client may have applied part of the turn.
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room:
+                return
+            need_server = _bot_should_act(room)
+            snapshot = coc_ai._clone_game(room["game"]) if need_server else None
+        plan_diff = "hard" if difficulty == "expert" else difficulty
+
+        seq = None
+        if need_server:
+            # Plan the bot's turn off the event loop (MCTS may take a couple seconds).
+            loop = asyncio.get_event_loop()
+            try:
+                seq = await loop.run_in_executor(
+                    None,
+                    lambda: coc_ai.play_turn_plan(snapshot, ai_pid, difficulty=plan_diff, rng=random.Random()),
+                )
+            except Exception:
+                LOG.exception("CoC AI planning failed; finishing with the trivial bot")
+                seq = None
 
         # Apply the planned sequence ONE MOVE AT A TIME, broadcasting after each so the
         # client animates the bot's tiles individually (a single bulk update trips the
@@ -499,6 +626,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
             r = ROOMS.get(room_id)
             if r:
                 r["_bot_running"] = False
+                r["_ai_search"] = None           # never leave a stale client decision armed
 
 
 def _bot_should_act(room: dict) -> bool:
@@ -539,6 +667,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 await _handle_auth_reconnect(websocket, room_id, pid, msg)
             elif action == "abandon":
                 await _handle_abandon(websocket, room_id, pid)
+            elif action == "client_ai_ready":
+                await _handle_client_ai_ready(websocket, room_id, pid, msg)
+            elif action == "ai_move":
+                await _handle_ai_move(websocket, room_id, pid, msg)
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
     except WebSocketDisconnect:
@@ -548,6 +680,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         room = ROOMS.get(room_id)
         if room and room.get("sockets", {}).get(pid) is websocket:
             room["sockets"].pop(pid, None)
+            # Disarm the client AI when its tab goes away, so the bot's next
+            # decisions go straight to the server path instead of waiting out the
+            # per-decision watchdog. A reconnecting client re-arms itself.
+            room["client_ai"] = False
             if not room["sockets"] and room.get("status") != "playing":
                 # keep playing/over games in memory; drop empty open rooms only
                 if room.get("status") == "open" and room.get("game") is None:
@@ -674,6 +810,70 @@ async def _handle_move(ws, room_id, pid, msg):
     save_game(room_id)
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_client_ai_ready(ws, room_id, pid, msg):
+    """The client's WASM worker pool is up — arm the room for client-side expert
+    search. Kicks the scheduler in case the bot is already waiting on a decision."""
+    bot_turn = False
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            return
+        room["client_ai"] = True
+        bot_turn = _bot_should_act(room) and not room.get("_bot_running")
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_ai_move(ws, room_id, pid, msg):
+    """Apply the client's searched bot move (expert tier). The move arrives as the
+    compact dict-move JSON (bridge.py shape) tagged with the decision seq; it is
+    resolved via the bridge and validated by MEMBERSHIP in engine.legal_moves
+    before applying. A stale/illegal submission is LOGGED and dropped, never
+    errored to the user (the watchdog fallback guarantees the turn advances —
+    the Spender 'not the AI's turn' toast lesson)."""
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            return
+        game = room.get("game")
+        ai_pid = room.get("ai_player")
+        pend = room.get("_ai_search")
+        if not (game and ai_pid and pend) or msg.get("decision") != pend.get("decision"):
+            LOG.info("stale/unexpected ai_move ignored (room %s)", room_id)
+            return
+        if az_bridge is None or not _bot_should_act(room):
+            return
+        compact_mv = msg.get("move")
+        if isinstance(compact_mv, str):
+            try:
+                compact_mv = json.loads(compact_mv)
+            except Exception:
+                compact_mv = None
+        try:
+            mv = az_bridge.compact_to_move(game, ai_pid, compact_mv or {})
+        except Exception:
+            LOG.warning("ai_move bridge resolution failed (room %s)", room_id, exc_info=True)
+            mv = None
+        if mv is None or mv not in engine.legal_moves(game, ai_pid):
+            LOG.warning("client ai_move not legal; leaving to the watchdog (room %s)", room_id)
+            return
+        phase_before = game.get("phase_letter")
+        ok, err = engine.apply_move(game, ai_pid, mv)
+        if not ok:
+            LOG.warning("client ai_move apply failed: %s (room %s)", err, room_id)
+            return
+        room["_ai_search"] = None
+        room["_ai_phase_changed"] = game.get("phase_letter") != phase_before
+        room["_bot_last_phase"] = game.get("phase_letter")
+        _sync_status_from_game(room)
+        state = mk_room_state(room_id)
+        evt = room.get("_ai_move_evt")
+    await broadcast_room(room_id, {"type": "room_update", "room": state})
+    save_game(room_id)
+    if evt:
+        evt.set()                                # wake the waiting _client_bot_turn
 
 
 async def _handle_reconnect(ws, room_id, pid, msg):
