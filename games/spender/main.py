@@ -644,7 +644,7 @@ def _compact_state_dict(game: dict) -> dict:
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
-    _STRIP = ("setup", "s_searched", "_s_eval_running")
+    _STRIP = ("setup", "s_searched", "_s_eval_running", "ai_server_fallbacks")
     if isinstance(game_view, dict) and any(k in game_view for k in _STRIP):
         # `setup` is static replay metadata (the dealt deck order) — persisted by save_game
         # and served by the admin /full dump, but kept OFF the wire. `s_searched`/`_s_eval_running`
@@ -2395,6 +2395,7 @@ async def _schedule_ai_discard_fallback(room_id: str, ai_pid: str, at_ply: int) 
         if bool(r.get("client_hidden")):
             return  # went hidden mid-wait → keep waiting for the client's net discard
         ps = g["players"][ai_pid]
+        g["ai_server_fallbacks"] = g.get("ai_server_fallbacks", 0) + 1  # heuristic discard (client didn't answer)
         while sum(ps["tokens"].values()) > 10:
             dc = _ai_discard_one(g, ai_pid)
             if dc:
@@ -2528,6 +2529,12 @@ async def _schedule_ai_turn(room_id: str) -> None:
             return  # game changed while AI was thinking (e.g. abandoned)
         try:
             _run_ai_turn(g, ai_pid, mv)
+            if client_ai:
+                # This is a client-AI room but the browser didn't deliver in time, so the server
+                # computed the (weaker) fallback move (variant N falls back to S). Count it — persisted
+                # + queryable — so we can tell a game that ran full-strength client-N from one that
+                # limped on the fallback (the sims-starved S that churns/loses).
+                g["ai_server_fallbacks"] = g.get("ai_server_fallbacks", 0) + 1
         except Exception:
             # Applying the chosen move failed — guarantee forward progress by ending the AI's
             # turn so the human can keep playing rather than the game freezing on the AI.
