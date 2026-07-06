@@ -9,8 +9,9 @@
 #   ITERS=8 GAMES=2000 SIMS=400 bash coc-core/tools/loop_coc.sh
 set -e -o pipefail
 RUN=${RUN:-/c/Users/Forrest/coc_run}
-# Windows-style mirror for args passed to native tools: MSYS auto-converts /c/...
-# args EXCEPT those containing '*', so the --data globs must be pre-converted.
+# Windows-style mirror for args passed to native tools: MSYS auto-conversion of
+# /c/... args SKIPS those containing '*' (the --data globs) and ':' (the
+# model.json:hybrid gate specs), so every native-tool arg uses $RUNW explicitly.
 RUNW=$(cygpath -m "$RUN")
 CR=${CR:-/c/Users/Forrest/forrestm_projects/coc-core/target/release}
 TOOLS=${TOOLS:-/c/Users/Forrest/forrestm_projects/coc-core/tools}
@@ -19,9 +20,14 @@ GAMES=${GAMES:-2000}
 SIMS=${SIMS:-400}
 GATE_PAIRS=${GATE_PAIRS:-60}
 GATE_SIMS=${GATE_SIMS:-200}
+PROBE_PAIRS=${PROBE_PAIRS:-40}
+YARD_PAIRS=${YARD_PAIRS:-40}
+YARD_SIMS=${YARD_SIMS:-512}
+YARD_OPP_SIMS=${YARD_OPP_SIMS:-2000}
 THREADS=${THREADS:-10}
 LOG=$RUN/loop_log.txt
 BEST=$RUN/pv_best.json
+BESTW=$RUNW/pv_best.json
 PROG=$RUN/progress_coc
 
 [ -f "$BEST" ] || cp "$RUN/pv_boot.json" "$BEST"
@@ -34,7 +40,7 @@ for ((k = start; k < ITERS; k++)); do
     else
         echo "--- iter $k: self-play ---" | tee -a "$LOG"
         seed=$((100000 + k * 100000))
-        "$CR/harvest_boot.exe" "$RUN/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BEST" hybrid \
+        "$CR/harvest_boot.exe" "$RUNW/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BESTW" hybrid \
             2>>"$LOG"
         touch "$RUN/sp_$k.HARVESTED"
     fi
@@ -42,20 +48,20 @@ for ((k = start; k < ITERS; k++)); do
     data="$RUNW/sp_$k.t*.csv"
     if [ "$k" -gt 0 ]; then data="$data;$RUNW/sp_$((k - 1)).t*.csv"; else data="$data;$RUNW/boot.t0.csv;$RUNW/boot.t1.csv"; fi
     echo "--- iter $k: train (warm from best) ---" | tee -a "$LOG"
-    python "$TOOLS/train_pv.py" --data "$data" --out "$RUN/pv_cand_$k.json" \
-        --warm "$BEST" --epochs 2 2>&1 | tee -a "$LOG"
+    python "$TOOLS/train_pv.py" --data "$data" --out "$RUNW/pv_cand_$k.json" \
+        --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG"
 
     echo "--- iter $k: gates ---" | tee -a "$LOG"
-    "$CR/net_export_check.exe" "$RUN/pv_cand_$k.json" | tee -a "$LOG"
-    g1=$("$CR/gate_coc.exe" "$RUN/pv_cand_$k.json:hybrid" "$BEST:hybrid" "$GATE_PAIRS" \
+    "$CR/net_export_check.exe" "$RUNW/pv_cand_$k.json" | tee -a "$LOG"
+    g1=$("$CR/gate_coc.exe" "$RUNW/pv_cand_$k.json:hybrid" "$BESTW:hybrid" "$GATE_PAIRS" \
         "$GATE_SIMS" "$GATE_SIMS" $((7000 + k)) "$THREADS" 2>/dev/null | tail -1)
     echo "iter $k gate(cand-vs-best hybrid): $g1" | tee -a "$LOG"
-    g2=$("$CR/gate_coc.exe" "$RUN/pv_cand_$k.json" "$RUN/pv_cand_$k.json:hybrid" 40 \
+    g2=$("$CR/gate_coc.exe" "$RUNW/pv_cand_$k.json" "$RUNW/pv_cand_$k.json:hybrid" "$PROBE_PAIRS" \
         "$GATE_SIMS" "$GATE_SIMS" $((8000 + k)) "$THREADS" 2>/dev/null | tail -1)
     echo "iter $k probe(pure-pv vs hybrid): $g2" | tee -a "$LOG"
-    g3=$("$CR/gate_coc.exe" "$RUN/pv_cand_$k.json:hybrid" SCAFFOLD 40 512 2000 \
+    g3=$("$CR/gate_coc.exe" "$RUNW/pv_cand_$k.json:hybrid" SCAFFOLD "$YARD_PAIRS" "$YARD_SIMS" "$YARD_OPP_SIMS" \
         $((9000 + k)) "$THREADS" 2>/dev/null | tail -1)
-    echo "iter $k yardstick(hybrid@512 vs scaffold@2000): $g3" | tee -a "$LOG"
+    echo "iter $k yardstick(hybrid@$YARD_SIMS vs scaffold@$YARD_OPP_SIMS): $g3" | tee -a "$LOG"
 
     wr=$(echo "$g1" | sed -E 's/.*: ([0-9.]+) \+-.*/\1/')
     if [ -z "$wr" ] || ! awk "BEGIN{exit !($wr >= 0)}" 2>/dev/null; then
