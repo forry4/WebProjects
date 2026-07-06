@@ -27,6 +27,14 @@ bridge = ["dep:serde", "dep:serde_json"]
 name = "move_server_coc"
 required-features = ["bridge"]
 
+[[bin]]
+name = "net_export_check"
+required-features = ["bridge"]
+
+[[bin]]
+name = "gate_coc"
+required-features = ["bridge"]
+
 [[test]]
 name = "engine_parity"
 required-features = ["bridge"]
