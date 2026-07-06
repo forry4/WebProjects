@@ -29,10 +29,15 @@ start=$(cat "$PROG" 2>/dev/null || echo 0)
 echo "=== loop_coc from iter $start / $ITERS (games=$GAMES sims=$SIMS) ===" | tee -a "$LOG"
 
 for ((k = start; k < ITERS; k++)); do
-    echo "--- iter $k: self-play ---" | tee -a "$LOG"
-    seed=$((100000 + k * 100000))
-    "$CR/harvest_boot.exe" "$RUN/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BEST" hybrid \
-        2>>"$LOG"
+    if [ -f "$RUN/sp_$k.HARVESTED" ]; then
+        echo "--- iter $k: self-play already complete, skipping ---" | tee -a "$LOG"
+    else
+        echo "--- iter $k: self-play ---" | tee -a "$LOG"
+        seed=$((100000 + k * 100000))
+        "$CR/harvest_boot.exe" "$RUN/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BEST" hybrid \
+            2>>"$LOG"
+        touch "$RUN/sp_$k.HARVESTED"
+    fi
 
     data="$RUNW/sp_$k.t*.csv"
     if [ "$k" -gt 0 ]; then data="$data;$RUNW/sp_$((k - 1)).t*.csv"; else data="$data;$RUNW/boot.t0.csv;$RUNW/boot.t1.csv"; fi
@@ -65,7 +70,7 @@ for ((k = start; k < ITERS; k++)); do
         echo "iter $k kept best ($wr)" | tee -a "$LOG"
     fi
     # keep disk bounded: drop self-play data older than the training window
-    rm -f "$RUN"/sp_$((k - 2)).t*.csv 2>/dev/null || true
+    rm -f "$RUN"/sp_$((k - 2)).t*.csv "$RUN/sp_$((k - 2)).HARVESTED" 2>/dev/null || true
     echo $((k + 1)) >"$PROG"
     echo "ITER $k DONE" | tee -a "$LOG"
 done
