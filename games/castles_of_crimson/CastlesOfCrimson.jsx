@@ -692,6 +692,19 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
 .coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}
 .coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
+/* Between-phase overlay: announces the new phase + the mine income you just collected.
+   Sits below the flyer layer (z 140) so the silver tokens fly IN over it; pointer-events
+   off so the board stays interactive underneath. Fades itself out (JS also dismisses). */
+.coc-phase-pop{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;pointer-events:none;padding:16px;animation:coc-phasepop-fade 3.3s ease-in-out forwards}
+@keyframes coc-phasepop-fade{0%{opacity:0}7%{opacity:1}82%{opacity:1}100%{opacity:0}}
+.coc-phase-pop-card{background:linear-gradient(160deg,rgba(34,20,22,.97),rgba(16,11,12,.97));border:1px solid var(--gold);border-radius:16px;padding:22px 44px;text-align:center;box-shadow:0 16px 54px rgba(0,0,0,.72);animation:coc-phasepop-scale .42s cubic-bezier(.2,.85,.3,1.25)}
+@keyframes coc-phasepop-scale{from{transform:scale(.82)}to{transform:scale(1)}}
+.coc-phase-pop-sub{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.2em;text-transform:uppercase;color:var(--text-dim)}
+.coc-phase-pop-big{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:2.5rem;color:var(--gold-l);letter-spacing:.05em;margin:2px 0 6px}
+.coc-phase-pop-inc{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:6px 12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:var(--text)}
+.coc-phase-pop-gain{display:inline-flex;align-items:center;gap:6px}
+.coc-phase-pop-gain .coc-token{width:26px;height:26px;font-size:.9rem}
+.coc-phase-pop-src{width:100%;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--text-dim)}
 .coc-winner{max-width:460px;margin:50px auto;text-align:center;background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius-lg);padding:30px}
 .coc-winner h2{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;color:var(--gold)}
 /* End-of-game VP review: itemized breakdown per player (turn-stamped + end-of-game). */
@@ -860,10 +873,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
   const [oppBoard, setOppBoard] = useState("1");        // board chosen for the bot (vs-AI)
   const [flyers, setFlyers] = useState([]);             // tile-move animations (depot->storage, storage->duchy)
+  const [phasePop, setPhasePop] = useState(null);       // {from,to,silver,workers} — the between-phase overlay
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
   const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
   const setupOpenTimer = useRef(null);                  // delays the setup auto-view (see the effect)
+  const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
+  const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
 
   const playerName = authUser?.name || "Player";
@@ -1174,6 +1190,22 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const ids = new Set(add.map((f) => f.id));
     setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 640);
   }, [game, me]);
+  // Between-phase overlay: when the phase letter advances (A->B->C->D->E), pop a banner
+  // announcing the new phase + the mine income you just collected, so the phase-end silver
+  // (which flies to your counter on the same update) is never missed. Skipped while
+  // reviewing and at game end (the results screen covers the final phase's income).
+  useEffect(() => {
+    const cur = game?.phase_letter;
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = cur;
+    if (reviewing || !cur || !prev || prev === cur || game?.phase === "over") return;
+    const mines = me?.mines_count || 0;                 // mines held = silver gained this phase-end
+    const workers = (me?.monastery_effects || []).includes(2) ? mines : 0;  // Monastery 2: +1 worker/mine
+    setPhasePop({ from: prev, to: cur, silver: mines, workers });
+    if (phasePopTimer.current) clearTimeout(phasePopTimer.current);
+    phasePopTimer.current = setTimeout(() => { phasePopTimer.current = null; setPhasePop(null); }, 3300);
+  }, [game?.phase_letter]);
+  useEffect(() => () => { if (phasePopTimer.current) clearTimeout(phasePopTimer.current); }, []);  // tidy on unmount
   // Deselect a die once it's been used (its action applied) — adjust_die leaves
   // the die unused, so it stays selected.
   useEffect(() => {
@@ -2133,6 +2165,26 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               </div>
             )
           ))}
+        </div>
+      )}
+
+      {phasePop && (
+        <div className="coc-phase-pop" key={`${phasePop.from}${phasePop.to}`}>
+          <div className="coc-phase-pop-card">
+            <div className="coc-phase-pop-sub">Phase {phasePop.from} complete</div>
+            <div className="coc-phase-pop-big">Phase {phasePop.to}</div>
+            {(phasePop.silver > 0 || phasePop.workers > 0) ? (
+              <div className="coc-phase-pop-inc">
+                {phasePop.silver > 0 && (
+                  <span className="coc-phase-pop-gain"><span className="coc-token silver">⛃</span>+{phasePop.silver}</span>
+                )}
+                {phasePop.workers > 0 && (
+                  <span className="coc-phase-pop-gain"><span className="coc-token worker">⚒</span>+{phasePop.workers}</span>
+                )}
+                <span className="coc-phase-pop-src">from your mines</span>
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 

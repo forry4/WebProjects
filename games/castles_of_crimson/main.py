@@ -49,6 +49,9 @@ DEFAULT_DIFFICULTY = "hard"
 # (a whole-turn bulk update trips the flyer's catch-up guard and animates nothing).
 # Slow enough to watch each move land on the opponent board (the flyer plays ~0.5s).
 _BOT_MOVE_DELAY = 1.0
+# A longer pause when a phase has just ended, so the phase-end overlay + the mine-income
+# tokens (silver/workers) have time to show before the bot plays on into the new phase.
+_PHASE_END_PAUSE = 2.6
 
 
 def _valid_difficulty(value) -> str:
@@ -419,8 +422,16 @@ async def _schedule_bot_turn(room_id: str) -> None:
                                                  # the lock between moves for per-move animation)
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
         snapshot = coc_ai._clone_game(game)      # independent of the live game
+        # If a phase advanced since the bot last acted (e.g. the human ended it), pause
+        # before the bot's first move so the phase overlay + income are seen first.
+        phase_now = game.get("phase_letter")
+        prev_bot_phase = room.get("_bot_last_phase")
+        room["_bot_last_phase"] = phase_now
+        pause_before_first = prev_bot_phase is not None and prev_bot_phase != phase_now
 
     try:
+        if pause_before_first:
+            await asyncio.sleep(_PHASE_END_PAUSE)
         # Plan the bot's turn off the event loop (MCTS may take a couple seconds).
         loop = asyncio.get_event_loop()
         try:
@@ -448,9 +459,12 @@ async def _schedule_bot_turn(room_id: str) -> None:
                     break
                 if (game.get("pending_pid") or game.get("turn")) != ai_pid:
                     break
+                phase_before = game.get("phase_letter")
                 ok, _ = engine.apply_move(game, ai_pid, mv)
                 if not ok:
                     break
+                phase_changed = game.get("phase_letter") != phase_before   # this move ended a phase
+                room["_bot_last_phase"] = game.get("phase_letter")
                 _sync_status_from_game(room)
                 over = engine.is_over(game)
                 still_bot = (game.get("pending_pid") or game.get("turn")) == ai_pid
@@ -458,7 +472,8 @@ async def _schedule_bot_turn(room_id: str) -> None:
             await broadcast_room(room_id, {"type": "room_update", "room": state})
             if over or not still_bot:
                 break                             # turn ended — stop pacing
-            await asyncio.sleep(_BOT_MOVE_DELAY)   # let each tile animation (~0.5s) play
+            # A phase-ending move gets the longer pause so the overlay + income land first.
+            await asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
 
         # Finisher: ensure the bot's turn actually ended (empty/failed plan or drift).
         async with ROOM_LOCK:
