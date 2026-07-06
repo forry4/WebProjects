@@ -567,14 +567,20 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-status-right{justify-content:center}
   /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
   .coc-create{gap:8px}
-  /* workers + silver drop to their OWN full row below the dice (not just silver) */
-  .coc-resbar{flex-basis:100%;margin-left:0;margin-top:2px}
-  /* the wide "Color bonuses" Cinzel label + 6 chips can't share one row on a phone;
-     give that label its own line so all 6 color chips sit together on the next row */
-  .coc-bonusbar{gap:6px;padding:7px 9px}
-  .coc-bonusbar-lbl:not(.coc-regbonus-lbl){flex-basis:100%;margin-bottom:-1px}
-  .coc-bonuschip{gap:3px}
-  .coc-bonus-sw{width:13px;height:13px}
+  /* The "Dice" label (renamed from "Your dice") + 2 dice + workers/silver now fit on one
+     phone row with no CSS help. NOTE: base component rules live LATER in this sheet, so a
+     plain single-class override here loses to them on source order at equal specificity —
+     hence the .coc ancestor prefix below, which raises specificity so it wins on mobile. */
+  /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
+  .coc .coc-bonusbar{gap:4px;padding:7px 6px}
+  .coc .coc-bonusbar-lbl{letter-spacing:.05em}
+  .coc .coc-bonuschip{gap:2px}
+  .coc .coc-bonuschip b{font-size:.8rem}
+  .coc .coc-bonus-sw{width:12px;height:12px}
+  /* force the color-bonus group onto its OWN fresh line (turn the 2nd divider into a
+     full-width zero-height break) so the 6 chips never split depending on how the region
+     labels above happen to wrap at a given width */
+  .coc .coc-bonus-div ~ .coc-bonus-div{flex-basis:100%;width:auto;height:0;margin:0;background:none}
   /* lobby header: the big centered title overlapped the ← Back button on phones, making
      it un-tappable. Shrink the title and trim the header padding so Back stays clickable
      and the header isn't so tall. */
@@ -1741,7 +1747,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             Region size bonus <b className="coc-regbonus coc-regsize">{AREA_SCORE.join("/")}</b>
           </span>
           <span className="coc-bonus-div" />
-          <span className="coc-bonusbar-lbl">Color bonuses</span>
+          <span className="coc-bonusbar-lbl">Color bonus</span>
           {BOARD_COLORS.map((c) => {
             const rem = game.bonus_tiles?.[c] || [];
             const size = rem.length >= 2 ? "large" : rem.length === 1 ? "small" : null;
@@ -1885,7 +1891,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               )}
               {/* dice + resources */}
               <div className="coc-dicebar">
-                <span className="coc-pill">Your dice</span>
+                <span className="coc-pill">Dice</span>
                 {dice && [0, 1].map((i) => (
                   <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
