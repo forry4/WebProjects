@@ -7,8 +7,11 @@
 #
 #   bash coc-core/tools/loop_coc.sh            (from the repo root)
 #   ITERS=8 GAMES=2000 SIMS=400 bash coc-core/tools/loop_coc.sh
-set -e
+set -e -o pipefail
 RUN=${RUN:-/c/Users/Forrest/coc_run}
+# Windows-style mirror for args passed to native tools: MSYS auto-converts /c/...
+# args EXCEPT those containing '*', so the --data globs must be pre-converted.
+RUNW=$(cygpath -m "$RUN")
 CR=${CR:-/c/Users/Forrest/forrestm_projects/coc-core/target/release}
 TOOLS=${TOOLS:-/c/Users/Forrest/forrestm_projects/coc-core/tools}
 ITERS=${ITERS:-8}
@@ -31,8 +34,8 @@ for ((k = start; k < ITERS; k++)); do
     "$CR/harvest_boot.exe" "$RUN/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BEST" hybrid \
         2>>"$LOG"
 
-    data="$RUN/sp_$k.t*.csv"
-    if [ "$k" -gt 0 ]; then data="$data;$RUN/sp_$((k - 1)).t*.csv"; else data="$data;$RUN/boot.t0.csv;$RUN/boot.t1.csv"; fi
+    data="$RUNW/sp_$k.t*.csv"
+    if [ "$k" -gt 0 ]; then data="$data;$RUNW/sp_$((k - 1)).t*.csv"; else data="$data;$RUNW/boot.t0.csv;$RUNW/boot.t1.csv"; fi
     echo "--- iter $k: train (warm from best) ---" | tee -a "$LOG"
     python "$TOOLS/train_pv.py" --data "$data" --out "$RUN/pv_cand_$k.json" \
         --warm "$BEST" --epochs 2 2>&1 | tee -a "$LOG"
@@ -50,6 +53,10 @@ for ((k = start; k < ITERS; k++)); do
     echo "iter $k yardstick(hybrid@512 vs scaffold@2000): $g3" | tee -a "$LOG"
 
     wr=$(echo "$g1" | sed -E 's/.*: ([0-9.]+) \+-.*/\1/')
+    if [ -z "$wr" ] || ! awk "BEGIN{exit !($wr >= 0)}" 2>/dev/null; then
+        echo "iter $k FATAL: gate produced no parseable win rate ('$g1')" | tee -a "$LOG"
+        exit 1
+    fi
     if awk "BEGIN{exit !($wr >= 0.52)}"; then
         cp "$RUN/pv_cand_$k.json" "$BEST"
         cp "$RUN/pv_cand_$k.json.check" "$BEST.check" 2>/dev/null || true
