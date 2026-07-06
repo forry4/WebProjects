@@ -144,7 +144,7 @@ function moveText(m, board) {
     case "place_starting_castle": return "placed their starting castle";
     case "sell_goods": return `sold ${m.count} #${gnum(m.color)} goods`;
     case "take_workers": return "took 2 workers";
-    case "adjust_die": return `adjusted die ${m.die_index != null ? m.die_index + 1 : "?"} to ${m.to}`;
+    case "adjust_die": return m.frm != null ? `adjusted a ${m.frm} to a ${m.to}` : `adjusted a die to a ${m.to}`;
     case "ship_take_goods": return `took goods from depot ${m.depot} (ship)`;
     case "ship_adjacent_take": return `took goods from depot ${m.depot} (monastery)`;
     case "building_effect": return `used ${BUILDING_NAME[m.building] || "a building"}`;
@@ -1054,6 +1054,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
         : spec.kind === "mygoods" ? "[data-mygoods]"
+        : spec.kind === "goodchip" ? `[data-goodchip="${spec.c}"]`
+        : spec.kind === "oppgoodchip" ? `[data-oppgoodchip="${spec.c}"]`
         : spec.kind === "viewopp" ? "[data-viewopp]"
         : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
         : spec.kind === "oppsid" ? `[data-oppsid="${spec.sid}"]`
@@ -1109,7 +1111,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       if (!s) continue;
       const W = 26, H = 26;
       const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
-      const dcx = gDest.left + 18, dcy = gDest.top + gDest.height / 2;
+      // Land on the actual goods chip for this color; fall back to the row's left edge.
+      const chip = rectOf({ kind: "goodchip", c: g.color });
+      const dcx = chip ? chip.left + chip.width / 2 : gDest.left + 18;
+      const dcy = chip ? chip.top + chip.height / 2 : gDest.top + gDest.height / 2;
       add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1: 1 });
     }
     // Opponent's moves. While you're VIEWING their board (auto-opens on the bot's
@@ -1138,7 +1143,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         const s = rectOf({ kind: "depot", d: g.d });
         if (!s) continue;
         const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
-        const dcx = oGoodsDest.left + 14, dcy = oGoodsDest.top + oGoodsDest.height / 2;
+        const oChip = rectOf({ kind: "oppgoodchip", c: g.color });
+        const dcx = oChip ? oChip.left + oChip.width / 2 : oGoodsDest.left + 14;
+        const dcy = oChip ? oChip.top + oChip.height / 2 : oGoodsDest.top + oGoodsDest.height / 2;
         add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - 13, top: scy - 13, w: 26, h: 26, dx: dcx - scx, dy: dcy - scy, s1: 1 });
       }
     } else {
@@ -1972,11 +1979,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   </div>
                 ))}
                 <div className="coc-resbar">
-                  <span className="coc-token-chip" data-workers="1" title="Workers — spent to adjust dice">
-                    <span className="coc-token worker">⚒</span><b>{me?.workers ?? 0}</b>
+                  <span className="coc-token-chip" title="Workers — spent to adjust dice">
+                    <span className="coc-token worker" data-workers="1">⚒</span><b>{me?.workers ?? 0}</b>
                   </span>
-                  <span className="coc-token-chip" data-silver="1" title="Silver — spent to buy black-depot tiles">
-                    <span className="coc-token silver">⛃</span><b>{me?.silver ?? 0}</b>
+                  <span className="coc-token-chip" title="Silver — spent to buy black-depot tiles">
+                    <span className="coc-token silver" data-silver="1">⛃</span><b>{me?.silver ?? 0}</b>
                   </span>
                 </div>
               </div>
@@ -2017,7 +2024,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     {me && Object.entries(me.goods).map(([c, n]) => {
                       const sellable = warehouseMine && n > 0;
                       return (
-                        <span key={c} className={`coc-goods-chip${sellable ? " coc-goods-pick" : ""}`}
+                        <span key={c} data-goodchip={c} className={`coc-goods-chip${sellable ? " coc-goods-pick" : ""}`}
                           title={sellable ? `Sell a #${goodsSellNum(c)} goods for silver` : tileDesc({ kind: "goods", color: c }, board)}
                           onClick={() => sellable ? warehouseSell(c) : setToast(tileDesc({ kind: "goods", color: c }, board))}>
                           <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
@@ -2050,7 +2057,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <span className="coc-card-meta" style={{ alignSelf: "center" }}>
                     {me?.storage?.length >= 3 && selStorage ? "Storage full — Discard frees this slot."
                       : selStorage ? "Click a glowing hex to place."
-                      : selDie != null ? "Click a depot tile to take, or a storage tile to place." : "Select a die to act."}
+                      : selDie != null ? "Click a depot tile to take, or a storage tile to place." : ""}
                   </span>
                 </div>
               )}
@@ -2087,8 +2094,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <h3>{players[oppId]} — {opp.vp} VP</h3>
             <div style={{ display: "flex", gap: 14, marginBottom: 10 }}>
-              <span className="coc-token-chip" data-opp-workers="1"><span className="coc-token worker">⚒</span><b>{opp.workers}</b></span>
-              <span className="coc-token-chip" data-opp-silver="1"><span className="coc-token silver">⛃</span><b>{opp.silver}</b></span>
+              <span className="coc-token-chip"><span className="coc-token worker" data-opp-workers="1">⚒</span><b>{opp.workers}</b></span>
+              <span className="coc-token-chip"><span className="coc-token silver" data-opp-silver="1">⛃</span><b>{opp.silver}</b></span>
             </div>
             <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
               <div>
@@ -2113,7 +2120,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                 <div className="coc-goods-row" data-oppgoods="1">
                   {Object.entries(opp.goods).map(([c, n]) => (
-                    <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
+                    <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
                   ))}
                 </div>
               </div>

@@ -13,6 +13,10 @@ from . import engine
 # Moves that pass/skip rather than do something; deprioritized so the bot
 # actually plays the game instead of immediately ending its turn.
 _PASSIVE = {"end_turn", "skip_pending"}
+# Adjusting a die SPENDS workers with no direct payoff (it only sets up a value-specific
+# action) — a last resort, so the finisher takes workers / acts instead of pointlessly
+# adjusting a die and then getting stuck (the "adjust both dice then end" waste).
+_WASTEFUL = {"adjust_die"}
 
 
 def choose(game: dict, pid: str, rng: random.Random | None = None) -> dict | None:
@@ -21,6 +25,12 @@ def choose(game: dict, pid: str, rng: random.Random | None = None) -> dict | Non
     if not moves:
         return None
     r = rng or random
+    # Prefer a real action or take_workers over a wasteful adjust over passing. take_workers
+    # is legal with any unused die, so `useful` is non-empty whenever a die is unused → the
+    # finisher never ends a turn with an unused die and never burns workers adjusting.
+    useful = [m for m in moves if m["type"] not in _PASSIVE and m["type"] not in _WASTEFUL]
+    if useful:
+        return r.choice(useful)
     active = [m for m in moves if m["type"] not in _PASSIVE]
     return r.choice(active if active else moves)
 

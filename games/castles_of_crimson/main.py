@@ -592,7 +592,9 @@ async def _handle_create(ws, room_id, pid, msg):
             room["ai_player"] = AI_PID
             room["status"] = "playing"
             room["boards"][AI_PID] = opp_board
-            room["game"] = engine.new_game([pid, AI_PID], names={pid: name, AI_PID: "Bot"},
+            seats = [pid, AI_PID]
+            random.shuffle(seats)                     # randomize who takes the first turn
+            room["game"] = engine.new_game(seats, names={pid: name, AI_PID: "Bot"},
                                            boards=room["boards"])
         save_game(room_id)
         bot_turn = vs_ai and _bot_should_act(room)

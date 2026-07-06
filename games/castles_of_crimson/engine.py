@@ -888,7 +888,7 @@ def _h_adjust_die(game, pid, move):
     # wastefully re-adjusting a die it has already set (with refunds it can reach any
     # value in one priced jump).
     d.setdefault("adjusted", [False, False])[i] = True
-    _log(game, pid, "adjust_die", die_index=i, to=to, workers=delta)
+    _log(game, pid, "adjust_die", die_index=i, frm=frm, to=to, workers=delta)
     return True, None
 
 

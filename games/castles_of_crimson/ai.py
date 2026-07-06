@@ -161,20 +161,24 @@ def _legal(state, pid):
     moves = [m for m in moves if m.get("type") != "discard_storage"]
     d = state["dice"].get(pid)
     if d is not None:
-        # For a die the bot has already adjusted this turn, drop two wasteful moves:
-        #   • re-adjusting it (one direct jump reaches any value — a 2nd only burns
-        #     workers), and
-        #   • taking workers with it — take_workers ignores the die's VALUE, so having
-        #     spent workers to set that value first is pure waste. Pruning it makes a
-        #     pointless adjust self-defeating in the search, so the bot stops doing the
-        #     "adjust a die, then take 2 workers with it" flail from the logs.
-        # Humans keep the incremental ±1 UI; this caps only the AI.
-        adjusted = d.get("adjusted")
-        if adjusted and any(adjusted):
-            moves = [m for m in moves
-                     if not (m.get("type") in ("adjust_die", "take_workers")
-                             and adjusted[m.get("die_index", 0)])]
+        adjusted = d.get("adjusted") or [False, False]
+        # Always drop a 2nd adjust of an already-adjusted die: one priced jump reaches any
+        # value (with refunds), so re-adjusting only burns workers. Humans keep the ±1 UI.
+        moves = [m for m in moves
+                 if not (m.get("type") == "adjust_die" and adjusted[m.get("die_index", 0)])]
+        # Taking workers with an already-adjusted die is wasteful (take_workers ignores the
+        # die VALUE, so paying to set it first was pointless) — but only prune it when a REAL
+        # action still remains. Otherwise take_workers is the best salvage, and pruning it
+        # forced the bot to END with an unused die (the logged "adjust both dice then end,
+        # wasting workers" bug). So keep take_workers as the guaranteed fallback.
+        if any(adjusted):
+            productive = [m for m in moves
+                          if m.get("type") not in ("take_workers", "adjust_die", "end_turn", "skip_pending")]
+            if productive:
+                moves = [m for m in moves
+                         if not (m.get("type") == "take_workers" and adjusted[m.get("die_index", 0)])]
         if not (d["used"][0] and d["used"][1]):
+            # With a die still unused, never voluntarily end — take workers if nothing else.
             non_end = [m for m in moves if m.get("type") != "end_turn"]
             if non_end:
                 return non_end
