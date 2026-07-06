@@ -1148,6 +1148,10 @@ export default function SpenderApp() {
 			// If you're on another tab, also raise the "waiting for you" tab indicator.
 			if (document.hidden) setPinged(true);
 		} else if (msg.type === "error") {
+			// "unknown action" is only ever emitted by the server's final dispatch else — a client/
+			// backend VERSION SKEW (e.g. a new client sends an action a not-yet-deployed backend lacks,
+			// like client_ai_hidden during a deploy window). Never user-actionable → swallow it silently.
+			if (msg.message === "unknown action") return;
 			// A join into a cancelled/gone game (the backend rejects it now instead of
 			// fabricating a hostless room): clear the stale pointer + refresh the list
 			// so the dead game disappears.
@@ -1295,8 +1299,21 @@ export default function SpenderApp() {
 			&& clientAiArmedRef.current !== roomData.room_id) {
 			clientAiArmedRef.current = roomData.room_id;
 			send({ action: "client_ai_ready" });
+			send({ action: "client_ai_hidden", hidden: document.hidden }); // seed the server's tab-state
 		}
 	}, [wasmReady, roomData?.room_id, roomData?.ai_variant, send]);
+
+	// Tell the server when this tab backgrounds/foregrounds so it uses a SHORT fallback window while
+	// hidden: a backgrounded tab throttles/freezes its WASM search workers and usually can't deliver a
+	// move in the full 8s window — so waiting it out just delays the (identical) server fallback (the
+	// "slow to move when tabbed out" report). On focus the flag flips back and the normal window resumes.
+	useEffect(() => {
+		const notify = () => {
+			if (clientAiArmedRef.current) send({ action: "client_ai_hidden", hidden: document.hidden });
+		};
+		document.addEventListener("visibilitychange", notify);
+		return () => document.removeEventListener("visibilitychange", notify);
+	}, [send]);
 
 	// On the AI's turn the server ships `ai_search` → fan a seeded search to every worker, SUM their
 	// root visit vectors, argmax, convert the winner to a move, and submit it.

@@ -602,7 +602,7 @@ def _redact_blind_reserves(game: dict | None, viewer_pid: str | None) -> dict | 
 # applies it (the cheap discard/noble finishing stays server-side via _run_ai_turn). _schedule_ai_turn
 # waits CLIENT_AI_TIMEOUT for the client, then computes server-side as the fallback. All gated on the
 # per-room `client_ai` flag, so absent a WASM client the behavior is byte-identical to before.
-CLIENT_AI_TIMEOUT = 8.0   # seconds to wait for the client's move before the server falls back.
+CLIENT_AI_TIMEOUT = 8.0   # seconds to wait for a VISIBLE client's move before the server falls back.
                           # Variant N's WASM worker parses its embedded ~600KB value-net JSON ONCE
                           # per move (before its own search budget even starts), so N's wall-clock
                           # runs ~1-2s longer than S's; 6.0 left N losing the race on slower devices
@@ -610,6 +610,13 @@ CLIENT_AI_TIMEOUT = 8.0   # seconds to wait for the client's move before the ser
                           # and when the client wins, the move applies the instant it's submitted, so
                           # the human never actually waits the full timeout (it only bounds the
                           # truly-can't-compute fallback).
+CLIENT_AI_TIMEOUT_HIDDEN = 1.5  # seconds to wait when the client says its tab is BACKGROUNDED
+                          # (`client_hidden`). A hidden tab throttles/freezes its WASM workers, so it
+                          # usually can't answer in the full window — and when it can't, the move is the
+                          # server fallback EITHER WAY, so the long wait is pure latency (the "slow to
+                          # take its turn when tabbed out" report; it compounds on discard turns). Bail
+                          # fast to the fallback instead. A snappy desktop tab that still answers inside
+                          # this short window keeps its (stronger) N move; the flag flips back on focus.
 CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
 
 
@@ -2375,7 +2382,9 @@ async def _schedule_ai_discard_fallback(room_id: str, ai_pid: str, at_ply: int) 
     within CLIENT_AI_TIMEOUT, finish the AI's over-cap discard with the heuristic so a turn can never hang
     mid-discard. Ply-guarded — if the client made progress (logged a discard), a newer fallback covers the
     next one and this bails; the whole path degrades to today's server-side heuristic on any client failure."""
-    await asyncio.sleep(CLIENT_AI_TIMEOUT)
+    _r0 = ROOMS.get(room_id)                       # atomic read (no await between get + use)
+    _hidden = bool(_r0.get("client_hidden")) if _r0 else False
+    await asyncio.sleep(CLIENT_AI_TIMEOUT_HIDDEN if _hidden else CLIENT_AI_TIMEOUT)
     changed = False
     async with ROOM_LOCK:
         r = ROOMS.get(room_id)
@@ -2448,9 +2457,10 @@ async def _schedule_ai_turn(room_id: str) -> None:
         if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
             return
         client_ai = bool(r.get("client_ai"))
+        client_hidden = bool(r.get("client_hidden"))
         wait_ply = len(g.get("moves", []))
     if client_ai:
-        await asyncio.sleep(CLIENT_AI_TIMEOUT)
+        await asyncio.sleep(CLIENT_AI_TIMEOUT_HIDDEN if client_hidden else CLIENT_AI_TIMEOUT)
         async with ROOM_LOCK:
             r = ROOMS.get(room_id)
             g = r.get("game") if r else None
@@ -2974,6 +2984,18 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         r["client_ai"] = True
                 # Push a fresh state so that if it's already the AI's turn the client gets ai_search now.
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+
+            # ── client_ai_hidden (the client's tab is backgrounded/foregrounded) ──
+            # A hidden tab throttles/freezes its WASM workers, so it usually misses the client-AI
+            # window. Recording it lets _schedule_ai_turn wait CLIENT_AI_TIMEOUT_HIDDEN instead of the
+            # full CLIENT_AI_TIMEOUT before falling back — no benefit to waiting for a client that
+            # can't answer (the move is the server fallback either way). Purely a latency knob.
+            elif action == "client_ai_hidden":
+                _hidden = bool(msg.get("hidden"))
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r is not None:
+                        r["client_hidden"] = _hidden
 
             # ── ai_move (client-computed AI move in a vs-S game) ──────────────
             elif action == "ai_move":
