@@ -1231,6 +1231,127 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (!inStorage || !placeCtx) setSelStorage(null);
   }, [me, selDie, selStorage, pendingMine, game?.pending_kind, extraValue]);
 
+  // ── Expert tier: client-side WASM search (coc-core) ──
+  // The server ships each bot ENGINE-MOVE decision via `ai_search` in room state;
+  // this pool searches the decision's micro-actions one at a time (root-parallel:
+  // every worker searches the same micro with a distinct seed, root visits are
+  // SUMMED), builds the action chain, converts it to the compact dict-move and
+  // submits it as `ai_move`. The server validates by legal-move membership and
+  // applies; ANY failure here (worker crash, wasm blocked, tab lag) just times out
+  // into the server's hard bot for that turn — never a stuck game.
+  const COC_AI_SIMS_FALLBACK = 20000;      // aggregate per micro-decision if the server sends no cap
+  const wasmPoolRef = useRef(null);        // [{ ready, request, terminate }]
+  const [wasmReady, setWasmReady] = useState(false);
+  const clientAiArmedRef = useRef(null);   // room we've announced capability for (reset per socket)
+  const aiDecisionRef = useRef(-1);        // decision seq already dispatched
+
+  useEffect(() => {
+    if (roomData?.ai_difficulty !== "expert" || !roomData?.vs_ai || reviewOnly
+        || wasmPoolRef.current || typeof Worker === "undefined") return;
+    const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js`;
+    const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+    const makeWorker = () => {
+      let w;
+      try { w = new Worker(url, { type: "module" }); } catch { return null; }
+      const pending = new Map();
+      let resolveReady, nextId = 1;
+      const ready = new Promise((res) => (resolveReady = res));
+      w.onmessage = (e) => {
+        const d = e.data || {};
+        if (d.ready !== undefined) { resolveReady(!!d.ready); return; }
+        if (d.id != null && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+      };
+      w.onerror = () => resolveReady(false);
+      return {
+        ready,
+        request(payload) {
+          const id = nextId++;
+          return new Promise((res) => { pending.set(id, res); w.postMessage({ ...payload, id }); });
+        },
+        terminate() { try { w.terminate(); } catch {} },
+      };
+    };
+    const pool = Array.from({ length: cores }, makeWorker).filter(Boolean);
+    wasmPoolRef.current = pool;
+    Promise.all(pool.map((wk) => wk.ready)).then((flags) => {
+      const live = pool.filter((_, i) => flags[i]);
+      if (live.length > 0) {
+        wasmPoolRef.current = live;
+        setWasmReady(true);
+        console.info(`[coc client-AI] ${live.length}/${cores} WASM workers ready`);
+      } else {
+        console.warn("[coc client-AI] no WASM workers loaded → server bot");
+      }
+    });
+    return () => { pool.forEach((wk) => wk.terminate()); wasmPoolRef.current = null; setWasmReady(false); };
+  }, [roomData?.ai_difficulty, roomData?.vs_ai, reviewOnly]);
+
+  // Announce capability once per socket connection — the server disarms client_ai
+  // on disconnect, so a reconnect must re-announce (hence the reset effect).
+  useEffect(() => { if (!connected) clientAiArmedRef.current = null; }, [connected]);
+  useEffect(() => {
+    if (wasmReady && connected && roomData?.ai_difficulty === "expert" && roomData?.room_id
+        && clientAiArmedRef.current !== roomData.room_id) {
+      clientAiArmedRef.current = roomData.room_id;
+      send({ action: "client_ai_ready" });
+    }
+  }, [wasmReady, connected, roomData?.room_id, roomData?.ai_difficulty, send]);
+
+  // Drive one shipped decision: probe → (forced | fan-out search) → append → repeat
+  // to the engine-move boundary → convert → submit. One dispatch per decision seq.
+  useEffect(() => {
+    const as = roomData?.ai_search;
+    const pool = wasmPoolRef.current;
+    if (!as || !wasmReady || !pool || pool.length === 0 || reviewOnly) return;
+    if (aiDecisionRef.current === as.decision) return;
+    aiDecisionRef.current = as.decision;
+    const stateStr = JSON.stringify(as.state);
+    const perWorkerSims = Math.max(1, Math.ceil((as.max_sims || COC_AI_SIMS_FALLBACK) / pool.length));
+    let cancelled = false;
+    (async () => {
+      try {
+        const prefix = [];
+        for (let step = 0; step < 16 && !cancelled; step++) {
+          const probe = await pool[0].request({ kind: "stepInfo", state: stateStr, prefix: JSON.stringify(prefix) });
+          const info = probe?.info;
+          if (!info || info.error) return;                    // server watchdog takes over
+          if (info.boundary || (info.over && prefix.length)) {
+            const conv = await pool[0].request({ kind: "chainMove", state: stateStr, prefix: JSON.stringify(prefix) });
+            const mv = conv?.move;
+            if (!cancelled && mv && !mv.includes('"error"')) {
+              send({ action: "ai_move", decision: as.decision, move: JSON.parse(mv) });
+            }
+            return;
+          }
+          if (info.over) return;
+          let action;
+          if (info.forced >= 0) {
+            action = info.forced;                             // single-legal: no search needed
+          } else {
+            const results = await Promise.all(pool.map((wk, i) => wk.request({
+              kind: "searchCoC", state: stateStr, prefix: JSON.stringify(prefix),
+              mode: as.mode || "hybrid", budget: as.budget_ms || 900, maxSims: perWorkerSims,
+              seed: ((as.decision * 2654435761) ^ (step * 97 + i * 40503 + 1)) >>> 0,
+            }).catch(() => null)));
+            const total = new Int32Array(102);
+            let got = 0;
+            for (const r of results) {
+              const v = r && r.visits;
+              if (!v || v.length < 102) continue;
+              got++;
+              for (let a = 0; a < 102; a++) total[a] += v[a];
+            }
+            if (!got) return;
+            action = 0;
+            for (let a = 1; a < 102; a++) if (total[a] > total[action]) action = a;
+          }
+          prefix.push(action);
+        }
+      } catch { /* watchdog fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [roomData?.ai_search?.decision, wasmReady, reviewOnly, send]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── actions ──
   const startCreate = (vsAi, difficulty = "hard") => {
     const rid = roomCode();
@@ -1473,6 +1594,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <button className="coc-btn outline sm" title="Full-strength search — a real challenge"
                     onClick={() => { setShowCreateMenu(false); startCreate(true, "hard"); }}>
                     Hard
+                  </button>
+                  <button className="coc-btn outline sm" title="The learned neural net, searched in your browser — the strongest opponent"
+                    onClick={() => { setShowCreateMenu(false); startCreate(true, "expert"); }}>
+                    Expert
                   </button>
                 </div>
               )}
