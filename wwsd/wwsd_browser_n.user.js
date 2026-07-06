@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.32
+// @version      0.9.33
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -41,8 +41,6 @@
     HOVER_MS:   160,    // pause after a priming hover (pointermove) before the click — lets the canvas engine
                         //   process the new hover target on its next frame so the click isn't dropped (1st-gem fix)
     HOLD_MS:    2200,   // press-and-hold duration for the Reserve button (kept ALIVE with pointermoves) — raise if a reserve doesn't register
-    MIN_DELAY_MS: 2000, // autoplay pacing: each turn takes a RANDOM MIN..MAX ms total (compute counts toward it),
-    MAX_DELAY_MS: 4000, // so it never plays instantly — looks like a person thinking 2-4s
     ENABLED:    true,   // master switch (auto-analyzes on your turn) — toggle from the panel
     MINIMIZED:  false,  // collapse the overlay to just its title bar (toggle from the panel; persisted)
     LOG_CHAT:   true,   // capture in-game chat messages into each game log (for bot-suggestion mining)
@@ -1680,18 +1678,13 @@
         setStatus('sub-decision (' + job + ') — resolve manually'); lastKey = key; return;
       }
       setStatus('PV thinking…');
-      const t0 = Date.now();
       const r = await analyzePosition(g, seat);
       renderResult(r);
       logAttachSearch(r);                      // attach the bot's search output to this ply's log record
       if (!CONFIG.AUTO_PLAY) { lastKey = key; return; }
-      // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
-      // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
-      // Skip the artificial wait entirely when the tab is hidden — nobody's watching it "think," and
-      // playing as fast as the search allows gives the most margin against spendee's turn timer.
-      const target = document.hidden ? 0 : (CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS));
-      const wait = target - (Date.now() - t0);
-      if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
+      // No artificial "human pacing" delay — the ~2-3s capped search already spaces moves naturally, and
+      // the per-modal render waits (SETTLE_MS/OPEN_MS/TAKE_OPEN_MS/STEP_MS inside playMove) still apply.
+      // Play as soon as the search finishes: fastest, and the most margin against spendee's turn timer.
       await playMove(r.action, r.dump);            // execute via the canvas UI (synthetic clicks)
       setStatus('played: ' + r.recommendation);
       // Verify the move COMMITTED. If a click missed, the turn won't advance and a modal is left open →
