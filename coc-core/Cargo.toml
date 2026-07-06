@@ -23,6 +23,14 @@ serde_json = "1"
 # native-only cross-impl bridge (move_server / fixture replay); keeps serde out of the native lib otherwise.
 bridge = ["dep:serde", "dep:serde_json"]
 
+[[bin]]
+name = "move_server_coc"
+required-features = ["bridge"]
+
+[[test]]
+name = "engine_parity"
+required-features = ["bridge"]
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

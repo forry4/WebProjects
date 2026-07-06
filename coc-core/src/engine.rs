@@ -922,6 +922,54 @@ impl State {
     fn take_hex_depot_mask(&self, seat: usize, v: u8) -> u8 {
         Self::allowed_mask(v, self.players[seat].has_effect(12))
     }
+
+    /// Whether die `die`'s menu holds a REAL action (sell / take-hex / place) —
+    /// the flat-move notion behind ai.py `_legal`'s "productive" test.
+    fn die_menu_has_real_action(&self, seat: usize, die: usize) -> bool {
+        let v = self.dice[seat][die].value;
+        if self.players[seat].goods[v as usize - 1] > 0 {
+            return true;
+        }
+        if self.players[seat].free_storage() {
+            let dmask = self.take_hex_depot_mask(seat, v);
+            for d in 0..6 {
+                if dmask >> d & 1 == 1 && self.depot_hex[d][0] != 0 {
+                    return true;
+                }
+            }
+        }
+        for slot in 0..self.players[seat].storage_len() {
+            if self.place_where_mask(seat, die as i8, v, slot) != 0 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Any flat "productive" move at the main level (not workers/adjust/end/skip):
+    /// a real die-menu action, a black buy, or a monastery-6 take.
+    fn main_productive(&self, seat: usize) -> bool {
+        let p = &self.players[seat];
+        for die in 0..2 {
+            if !self.dice[seat][die].used && self.die_menu_has_real_action(seat, die) {
+                return true;
+            }
+        }
+        if !self.black_used && p.silver >= 2 && p.free_storage() && self.black_depot[0] != 0 {
+            return true;
+        }
+        if p.has_effect(6) && !self.m6_used && p.workers >= 2 && p.free_storage() {
+            let any = self
+                .depot_hex
+                .iter()
+                .flatten()
+                .any(|&t| t != 0 && type_of(t) == TileType::Building);
+            if any {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 const T_LIVESTOCK_LO: u16 = tiles::T_LIVESTOCK0;
@@ -1102,11 +1150,53 @@ pub fn legal_actions_full(s: &State) -> Vec<usize> {
     out
 }
 
-/// Search-facing legal actions. For now identical to the full set; the ai.py
-/// `_legal` pruning (discard/re-adjust/wasteful-workers/forced-die-use) lands with
-/// the scaffold search (P2).
+/// Search-facing legal actions — the ai.py `_legal` pruning in micro space
+/// (strictly-dominated moves only; never empties a decision):
+/// - never discard a stored tile;
+/// - never re-adjust an already-adjusted die;
+/// - with an adjusted die, drop its wasteful take_workers while a REAL action
+///   remains anywhere (in micro space: drop A_WORKERS inside its menu, and drop
+///   its SPEND_DIE entirely when workers was the menu's only content);
+/// - with an unused die, never voluntarily end the turn.
 pub fn legal_actions(s: &State) -> Vec<usize> {
-    legal_actions_full(s)
+    let mut out = legal_actions_full(s);
+    if s.is_over() || s.mode == SETUP {
+        return out;
+    }
+    let seat = s.actor() as usize;
+    match s.micro {
+        Micro::DieMenu { die, .. } if die >= 0 => {
+            if s.dice[seat][die as usize].adjusted && out.len() > 1 && s.main_productive(seat) {
+                out.retain(|&a| a != A_WORKERS);
+            }
+            out
+        }
+        Micro::None if s.pending == Pending::None => {
+            out.retain(|&a| !(A_DISCARD0..A_DISCARD0 + 3).contains(&a));
+            for die in 0..2 {
+                if s.dice[seat][die].adjusted {
+                    let lo = A_ADJUST0 + die * 6;
+                    out.retain(|&a| !(lo..lo + 6).contains(&a));
+                }
+            }
+            let productive = s.main_productive(seat);
+            for die in 0..2 {
+                let d = s.dice[seat][die];
+                if !d.used
+                    && d.adjusted
+                    && productive
+                    && !s.die_menu_has_real_action(seat, die)
+                {
+                    out.retain(|&a| a != A_SPEND_DIE0 + die);
+                }
+            }
+            if s.dice[seat].iter().any(|d| !d.used) && out.len() > 1 {
+                out.retain(|&a| a != A_END_TURN);
+            }
+            out
+        }
+        _ => out,
+    }
 }
 
 // ── apply ─────────────────────────────────────────────────────────────────────

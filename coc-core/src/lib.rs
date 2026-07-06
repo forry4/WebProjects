@@ -8,8 +8,13 @@ pub mod rng;
 pub mod tiles;
 pub mod valuenet;
 
+pub mod actions;
 pub mod engine;
+pub mod heuristic;
+pub mod mcts;
 pub mod proj;
+pub mod pxio;
+pub mod vsearch;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
