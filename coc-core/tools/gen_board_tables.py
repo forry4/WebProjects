@@ -1,4 +1,4 @@
-"""Generate coc-core/src/boards_gen.rs + games/castles_of_crimson/ai/az/spaces.py.
+"""Generate coc-core/src/boards_gen.rs + games/castles_of_crimson/az/spaces.py.
 
 Reads the authoritative board data (games/castles_of_crimson/board.py) and emits static
 int tables for the Rust engine, plus the canonical space-index mapping for the Python
@@ -26,7 +26,7 @@ sys.path.insert(0, _REPO)
 from games.castles_of_crimson import board  # noqa: E402
 
 RS_OUT = os.path.join(_REPO, "coc-core", "src", "boards_gen.rs")
-PY_OUT = os.path.join(_REPO, "games", "castles_of_crimson", "ai", "az", "spaces.py")
+PY_OUT = os.path.join(_REPO, "games", "castles_of_crimson", "az", "spaces.py")
 
 COLORS = board.COLORS  # burgundy, blue, gray, green, beige, yellow
 BOARD_IDS = [str(i) for i in range(1, 10)]

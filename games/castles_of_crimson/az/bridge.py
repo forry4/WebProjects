@@ -27,7 +27,7 @@ coc-core (tests/engine_parity.rs; later wasm.rs) — keep the two in sync.
 from __future__ import annotations
 
 from games.castles_of_crimson import tiles
-from games.castles_of_crimson.ai.az import spaces
+from games.castles_of_crimson.az import spaces
 
 GOODS = tiles.GOODS_COLORS
 

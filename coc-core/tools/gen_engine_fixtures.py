@@ -31,7 +31,7 @@ _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _REPO)
 
 from games.castles_of_crimson import engine, tiles  # noqa: E402
-from games.castles_of_crimson.ai.az import bridge, compact  # noqa: E402
+from games.castles_of_crimson.az import bridge, compact  # noqa: E402
 
 PIDS = ["P0", "P1"]
 

@@ -16,7 +16,7 @@ Tile codes (mirror of coc-core/src/tiles.rs):
 from __future__ import annotations
 
 from games.castles_of_crimson import board, tiles
-from games.castles_of_crimson.ai.az import spaces
+from games.castles_of_crimson.az import spaces
 
 COLORS = board.COLORS  # burgundy blue gray green beige yellow
 GOODS = tiles.GOODS_COLORS
