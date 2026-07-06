@@ -49,6 +49,22 @@ SPACE_IDS = [
 # space id -> canonical index
 INDEX_OF = {sid: i for i, sid in enumerate(SPACE_IDS)}
 
+MAX_REGIONS = 21
+
+# per board (index 0..8): region id string -> canonical region index
+# (region order: color order, then min canonical space index — matches boards_gen.rs)
+REGION_INDEX = [
+    {'burgundy-2': 0, 'burgundy-1': 1, 'blue-1': 2, 'blue-2': 3, 'gray-1': 4, 'green-1': 5, 'green-2': 6, 'beige-4': 7, 'beige-2': 8, 'beige-1': 9, 'beige-3': 10, 'yellow-2': 11, 'yellow-1': 12},
+    {'burgundy-3': 0, 'burgundy-4': 1, 'burgundy-1': 2, 'burgundy-2': 3, 'blue-2': 4, 'blue-3': 5, 'blue-1': 6, 'gray-1': 7, 'gray-2': 8, 'green-2': 9, 'green-1': 10, 'beige-1': 11, 'beige-3': 12, 'beige-2': 13, 'yellow-3': 14, 'yellow-1': 15, 'yellow-2': 16},
+    {'burgundy-3': 0, 'burgundy-2': 1, 'burgundy-1': 2, 'burgundy-4': 3, 'blue-1': 4, 'blue-3': 5, 'blue-2': 6, 'gray-1': 7, 'gray-2': 8, 'green-2': 9, 'green-1': 10, 'beige-1': 11, 'beige-4': 12, 'beige-2': 13, 'beige-3': 14, 'yellow-1': 15},
+    {'burgundy-2': 0, 'burgundy-4': 1, 'burgundy-1': 2, 'burgundy-3': 3, 'blue-2': 4, 'blue-3': 5, 'blue-1': 6, 'gray-2': 7, 'gray-1': 8, 'green-1': 9, 'green-2': 10, 'beige-1': 11, 'beige-3': 12, 'beige-2': 13, 'yellow-1': 14, 'yellow-2': 15},
+    {'burgundy-1': 0, 'burgundy-4': 1, 'burgundy-2': 2, 'burgundy-3': 3, 'blue-3': 4, 'blue-1': 5, 'blue-2': 6, 'gray-2': 7, 'gray-1': 8, 'green-1': 9, 'green-2': 10, 'beige-4': 11, 'beige-2': 12, 'beige-5': 13, 'beige-3': 14, 'beige-1': 15, 'yellow-3': 16, 'yellow-2': 17, 'yellow-1': 18},
+    {'burgundy-4': 0, 'burgundy-2': 1, 'burgundy-1': 2, 'burgundy-3': 3, 'blue-1': 4, 'gray-2': 5, 'gray-3': 6, 'gray-1': 7, 'green-1': 8, 'green-2': 9, 'beige-2': 10, 'beige-3': 11, 'beige-1': 12, 'yellow-1': 13, 'yellow-2': 14},
+    {'burgundy-2': 0, 'burgundy-1': 1, 'blue-3': 2, 'blue-1': 3, 'blue-2': 4, 'gray-1': 5, 'gray-3': 6, 'gray-2': 7, 'green-1': 8, 'green-2': 9, 'beige-1': 10, 'beige-3': 11, 'beige-2': 12, 'yellow-1': 13, 'yellow-2': 14, 'yellow-3': 15},
+    {'burgundy-2': 0, 'burgundy-4': 1, 'burgundy-1': 2, 'burgundy-3': 3, 'blue-5': 4, 'blue-1': 5, 'blue-6': 6, 'blue-3': 7, 'blue-4': 8, 'blue-2': 9, 'gray-1': 10, 'gray-2': 11, 'green-1': 12, 'beige-4': 13, 'beige-6': 14, 'beige-2': 15, 'beige-5': 16, 'beige-3': 17, 'beige-1': 18, 'yellow-2': 19, 'yellow-1': 20},
+    {'burgundy-3': 0, 'burgundy-2': 1, 'burgundy-4': 2, 'burgundy-1': 3, 'blue-2': 4, 'blue-1': 5, 'gray-2': 6, 'gray-1': 7, 'green-1': 8, 'green-2': 9, 'beige-1': 10, 'beige-2': 11, 'yellow-3': 12, 'yellow-1': 13, 'yellow-4': 14, 'yellow-2': 15},
+]
+
 
 def board_index(board_id) -> int:
     """Board id "1".."9" -> 0..8 (unknown/None falls back to the default board 0),

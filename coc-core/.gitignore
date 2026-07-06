@@ -1,4 +1,4 @@
 /target
 /pkg
 Cargo.lock
-tests/fixtures/
+tests/fixtures*/

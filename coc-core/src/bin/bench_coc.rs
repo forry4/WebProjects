@@ -103,9 +103,38 @@ fn bench_pv(in_dim: usize, trunk: &[usize]) {
     );
 }
 
+fn bench_playout() {
+    // Random full games through legal_actions_full + apply — the P1 gate is
+    // >= 100k micro-moves/s (this measures the full legal-enumeration cost too,
+    // which dominates; apply alone is far cheaper).
+    use coc_core::engine::{apply, legal_actions_full, State};
+    use coc_core::rng::Rng;
+    let mut rng = Rng::new(0xBEEF);
+    let n_games = 2_000u64;
+    let mut moves = 0u64;
+    let t0 = Instant::now();
+    for g in 0..n_games {
+        let mut s = State::new_game([(g % 9) as u8, ((g / 9) % 9) as u8], g);
+        while !s.is_over() {
+            let acts = legal_actions_full(&s);
+            let a = acts[rng.below(acts.len())];
+            apply(&mut s, a);
+            moves += 1;
+        }
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!(
+        "playout: {:.0} games/s, {:.2}M micro-moves/s ({:.0} micro-moves/game, legal+apply)",
+        n_games as f64 / dt,
+        moves as f64 / dt / 1e6,
+        moves as f64 / n_games as f64
+    );
+}
+
 fn main() {
     let s = midgame_state();
     bench_clone(&s);
+    bench_playout();
     for (in_dim, trunk) in [
         (700usize, vec![384usize, 256]),
         (800, vec![512, 256]),

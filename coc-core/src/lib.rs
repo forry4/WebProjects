@@ -9,6 +9,7 @@ pub mod tiles;
 pub mod valuenet;
 
 pub mod engine;
+pub mod proj;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;

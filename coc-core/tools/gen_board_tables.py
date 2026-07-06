@@ -68,6 +68,7 @@ def main() -> None:
     color_mask = []    # [board][6] u64
     region_of = []     # [board][37] region idx
     regions = []       # [board] -> list of (color_idx, size, mask, has_castle)
+    region_indices = []  # [board] -> {region id str: canonical region idx}
     for b in boards:
         sc, sn = [], []
         for sid in grid:
@@ -87,6 +88,7 @@ def main() -> None:
 
         # deterministic region order: color order, then min canonical index
         regs = []
+        reg_index = {}  # region id string -> canonical region index (for spaces.py)
         for ci, c in enumerate(COLORS):
             col_regs = [r for r in b.REGIONS.values() if r["color"] == c]
             col_regs.sort(key=lambda r: min(index_of[s] for s in r["spaces"]))
@@ -94,6 +96,7 @@ def main() -> None:
                 m = 0
                 for s in r["spaces"]:
                     m |= 1 << index_of[s]
+                reg_index[r["id"]] = len(regs)
                 regs.append((ci, r["size"], m, r["has_castle"]))
         # sanity: regions partition the 37 spaces
         assert sum(r[1] for r in regs) == 37
@@ -104,6 +107,7 @@ def main() -> None:
                     ro[i] = ri
         regions.append(regs)
         region_of.append(ro)
+        region_indices.append(reg_index)
 
     n_regions = [len(r) for r in regions]
     max_regions = max(n_regions)
@@ -198,6 +202,16 @@ def main() -> None:
     py.append("")
     py.append("# space id -> canonical index")
     py.append("INDEX_OF = {sid: i for i, sid in enumerate(SPACE_IDS)}")
+    py.append("")
+    py.append(f"MAX_REGIONS = {max_regions}")
+    py.append("")
+    py.append("# per board (index 0..8): region id string -> canonical region index")
+    py.append("# (region order: color order, then min canonical space index — matches boards_gen.rs)")
+    py.append("REGION_INDEX = [")
+    for reg_index in region_indices:
+        items = ", ".join(f"{rid!r}: {i}" for rid, i in reg_index.items())
+        py.append("    {" + items + "},")
+    py.append("]")
     py.append("")
     py.append("")
     py.append("def board_index(board_id) -> int:")
