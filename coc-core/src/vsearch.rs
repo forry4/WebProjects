@@ -102,6 +102,101 @@ pub fn root_visits_heur(s: &State, sims: u32, c_puct: f64, seed: u64) -> Vec<i32
     search.root_visits().to_vec()
 }
 
+/// Scaffold search returning (visits, searched root value from the root actor's
+/// perspective = sum W / sum N) — the harvest readout.
+pub fn root_readout_heur(s: &State, sims: u32, c_puct: f64, seed: u64) -> (Vec<i32>, f64) {
+    let mut search = Search::new(s.clone(), c_puct);
+    let mut rng = Rng::new(seed ^ 0x5EA2C4);
+    for _ in 0..sims {
+        search.sim(&mut rng, &heur_eval);
+    }
+    let n: i64 = search.root_visits().iter().map(|&x| x as i64).sum();
+    let w: f64 = search.root_wins().iter().sum();
+    (search.root_visits().to_vec(), if n > 0 { w / n as f64 } else { 0.0 })
+}
+
+/// Net leaf: (legal-masked softmax of the policy logits, value head) — both from
+/// the leaf actor's perspective (features are mover-relative).
+pub fn pv_eval(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+) -> (Vec<f64>, f64) {
+    let f = crate::feats::features(s, actor);
+    let (v, logits) = net.forward_raw(&f);
+    let mut p = vec![0.0f64; N_ACTIONS];
+    let mut mx = f32::NEG_INFINITY;
+    for &a in legal {
+        if logits[a] > mx {
+            mx = logits[a];
+        }
+    }
+    let mut sum = 0.0f64;
+    for &a in legal {
+        let e = ((logits[a] - mx) as f64).exp();
+        p[a] = e;
+        sum += e;
+    }
+    for &a in legal {
+        p[a] /= sum;
+    }
+    (p, v as f64)
+}
+
+/// PV-net search: visits + root value (root actor's perspective).
+pub fn root_readout_pv(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    sims: u32,
+    c_puct: f64,
+    seed: u64,
+) -> (Vec<i32>, f64) {
+    let mut search = Search::new(s.clone(), c_puct);
+    let mut rng = Rng::new(seed ^ 0x9E77);
+    let eval = |st: &State, actor: usize, legal: &[usize], _rng: &mut Rng| {
+        pv_eval(net, st, actor, legal)
+    };
+    for _ in 0..sims {
+        search.sim(&mut rng, &eval);
+    }
+    let n: i64 = search.root_visits().iter().map(|&x| x as i64).sum();
+    let w: f64 = search.root_wins().iter().sum();
+    (search.root_visits().to_vec(), if n > 0 { w / n as f64 } else { 0.0 })
+}
+
+/// Pick the most-visited legal root action with the PV net leaf.
+pub fn choose_action_pv(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    sims: u32,
+    seed: u64,
+) -> usize {
+    let legal = engine::legal_actions(s);
+    if legal.len() == 1 {
+        return legal[0];
+    }
+    let (visits, _) = root_readout_pv(net, s, sims, C_PUCT, seed);
+    *legal.iter().max_by_key(|&&a| visits[a]).expect("nonempty legal")
+}
+
+/// Net-argmax policy (0 sims — the distill sanity probe).
+pub fn choose_action_pv_argmax(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    _seed: u64,
+) -> usize {
+    let legal = engine::legal_actions(s);
+    if legal.len() == 1 {
+        return legal[0];
+    }
+    let (p, _) = pv_eval(net, s, s.actor() as usize, &legal);
+    *legal
+        .iter()
+        .max_by(|&&a, &&b| p[a].partial_cmp(&p[b]).unwrap())
+        .expect("nonempty legal")
+}
+
 /// Pick the most-visited legal root action.
 pub fn choose_action_heur(s: &State, sims: u32, seed: u64) -> usize {
     let legal = engine::legal_actions(s);

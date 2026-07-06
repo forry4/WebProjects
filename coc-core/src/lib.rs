@@ -10,8 +10,10 @@ pub mod valuenet;
 
 pub mod actions;
 pub mod engine;
+pub mod feats;
 pub mod heuristic;
 pub mod mcts;
+pub mod netio;
 pub mod proj;
 pub mod pxio;
 pub mod vsearch;
