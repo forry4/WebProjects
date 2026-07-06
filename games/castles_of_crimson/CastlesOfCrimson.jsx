@@ -674,6 +674,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* Goods are shown in their own bordered box (empty box when you hold none — no "none" text). */
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:44px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
+/* A goods chip you can click to sell during a Warehouse pending — pulses like the pick depots. */
+.coc-goods-pick{color:var(--text);border-radius:6px;padding:1px 5px;margin:-1px -1px;animation:coc-goodspick 1.1s ease-in-out infinite}
+@keyframes coc-goodspick{0%,100%{box-shadow:0 0 0 2px var(--gold-l),0 0 8px rgba(232,201,106,.4)}50%{box-shadow:0 0 0 2px var(--gold-l),0 0 16px rgba(232,201,106,.75)}}
 .coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
 .coc-hexsvg{width:100%;max-width:520px;display:block;margin:0 auto}
@@ -1278,6 +1281,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const goodsPickColors = goodsPickMine ? (game.pending?.ctx?.colors || []) : [];
   const goodsPickDepot = goodsPickMine ? game.pending?.ctx?.depot : null;
   const goodsPick = (color) => { if (goodsPickColors.includes(color)) mv({ type: "goods_pick", color }); };
+
+  // Warehouse: sell one goods type for silver. Optional — click one of YOUR goods
+  // (they pulse), a button in the floating modal, or Skip. Mirrors the ship/goods picks.
+  const warehouseMine = pendingMine && game?.pending_kind === "warehouse_sell";
+  const warehouseSell = (color) => { if ((me?.goods?.[color] || 0) > 0) mv({ type: "warehouse_sell", color }); };
 
   const doTakeWorkers = () => {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
@@ -1974,12 +1982,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div>
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                   <div className="coc-goods-row" data-mygoods="1">
-                    {me && Object.entries(me.goods).map(([c, n]) => (
-                      <span key={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
-                        onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}>
-                        <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
-                      </span>
-                    ))}
+                    {me && Object.entries(me.goods).map(([c, n]) => {
+                      const sellable = warehouseMine && n > 0;
+                      return (
+                        <span key={c} className={`coc-goods-chip${sellable ? " coc-goods-pick" : ""}`}
+                          title={sellable ? `Sell a #${goodsSellNum(c)} goods for silver` : tileDesc({ kind: "goods", color: c }, board)}
+                          onClick={() => sellable ? warehouseSell(c) : setToast(tileDesc({ kind: "goods", color: c }, board))}>
+                          <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -2248,9 +2260,9 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
   }
   if (kind === "warehouse_sell") {
     return (
-      <Modal title="Warehouse — sell goods" desc="Choose a goods type to sell.">
+      <Modal title="Warehouse — sell goods" desc="Click one of your goods (or a button below) to sell it for silver — optional." interactive>
         <div className="coc-modal-row">
-          {Object.keys(me.goods).map((c) => (
+          {Object.keys(me.goods).filter((c) => me.goods[c] > 0).map((c) => (
             <button key={c} className="coc-btn outline sm" onClick={() => mv({ type: "warehouse_sell", color: c })}>
               <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[c], marginRight: 5 }}>{sellNum(c)}</span>×{me.goods[c]}
             </button>
