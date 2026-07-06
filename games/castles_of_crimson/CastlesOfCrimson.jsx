@@ -569,8 +569,10 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-create{gap:8px}
   /* workers + silver drop to their OWN full row below the dice (not just silver) */
   .coc-resbar{flex-basis:100%;margin-left:0;margin-top:2px}
-  /* tighten the bonus bar so the 6 color-bonus chips fit on a single row */
+  /* the wide "Color bonuses" Cinzel label + 6 chips can't share one row on a phone;
+     give that label its own line so all 6 color chips sit together on the next row */
   .coc-bonusbar{gap:6px;padding:7px 9px}
+  .coc-bonusbar-lbl:not(.coc-regbonus-lbl){flex-basis:100%;margin-bottom:-1px}
   .coc-bonuschip{gap:3px}
   .coc-bonus-sw{width:13px;height:13px}
   /* lobby header: the big centered title overlapped the ← Back button on phones, making
