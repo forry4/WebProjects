@@ -1,0 +1,33 @@
+[package]
+name = "coc-core"
+version = "0.1.0"
+edition = "2021"
+description = "Castles of Crimson search core (compact engine + determinized PUCT + PV net leaf), ported from games/castles_of_crimson for max sims/s. Compiles native (dev/test/offline training) and WASM (browser serving). Patterns cloned from spender-core."
+
+[lib]
+# rlib for native tests/benches + cdylib for wasm-pack (serving phase).
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+# WASM-only deps (cfg-gated so native builds / cargo test never pull them).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# native-only cross-impl bridge (move_server / fixture replay); keeps serde out of the native lib otherwise.
+bridge = ["dep:serde", "dep:serde_json"]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
