@@ -1,7 +1,7 @@
-//! Projection I/O (bridge feature): build a State from the canonical JSON
-//! projection compact.py emits. Shared by the parity test, the move server, and
-//! (later) the wasm Dump path.
-#![cfg(feature = "bridge")]
+//! Projection I/O: build a State from the canonical JSON projection compact.py
+//! emits. Shared by the parity test, the move server, and the wasm serving path
+//! (the server ships this exact shape in `ai_search`).
+#![cfg(any(feature = "bridge", target_arch = "wasm32"))]
 
 use crate::boards_gen::{MAX_REGIONS, N_SPACES};
 use crate::engine::{Die, Pending, PlayerState, State};

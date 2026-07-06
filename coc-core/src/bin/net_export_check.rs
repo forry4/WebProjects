@@ -1,14 +1,24 @@
 //! Torch↔Rust net parity: forward_raw the check vectors train_pv.py exported and
 //! compare value + first-8 logits (<=1e-3; f32 summation order differs slightly).
+//! With a second arg (a pv_json_to_bin.py blob), also verifies the bin loader
+//! yields a BIT-IDENTICAL forward (both readers round float-text -> f64 -> f32).
 //!
-//!   cargo run --release --features bridge --bin net_export_check -- <model.json>
+//!   cargo run --release --features bridge --bin net_export_check -- <model.json> [model.bin]
 
-use coc_core::netio::pv_from_json;
+use coc_core::netio::{pv_from_bin, pv_from_json};
 use serde_json::Value;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: net_export_check <model.json>");
+    let path = std::env::args().nth(1).expect("usage: net_export_check <model.json> [model.bin]");
     let net = pv_from_json(&std::fs::read_to_string(&path).expect("model"));
+    if let Some(bin_path) = std::env::args().nth(2) {
+        let bnet = pv_from_bin(&std::fs::read(&bin_path).expect("bin")).expect("bin parse");
+        let x = vec![0.1f32; coc_core::feats::N_FEATS];
+        let (v1, l1) = net.forward_raw(&x);
+        let (v2, l2) = bnet.forward_raw(&x);
+        assert!(v1 == v2 && l1 == l2, "bin blob not bit-identical to json model");
+        println!("bin check: bit-identical forward PASS ({bin_path})");
+    }
     let check: Value = serde_json::from_str(
         &std::fs::read_to_string(format!("{path}.check")).expect("check file"),
     )
