@@ -860,6 +860,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
   const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
+  const setupOpenTimer = useRef(null);                  // delays the setup auto-view (see the effect)
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
 
   const playerName = authUser?.name || "Player";
@@ -975,10 +976,23 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // Vs the bot: auto-open the opponent view when the bot's turn begins (so you can
   // watch it build), and auto-close when your turn returns (the view is a blocking
   // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
+  // During SETUP the open is briefly DELAYED: placing your starting castle ends your
+  // turn, so the bot's turn (and this auto-open) fires immediately — without the delay
+  // the modal would cover your board before your own castle's pop-in plays. The bot's
+  // own planning latency keeps the modal open in time to still show ITS castle land.
   useEffect(() => {
-    if (aiThinking && !prevAiThinking.current) setViewOpp(true);
-    else if (!aiThinking && prevAiThinking.current) setViewOpp(false);
+    const clearTimer = () => { if (setupOpenTimer.current) { clearTimeout(setupOpenTimer.current); setupOpenTimer.current = null; } };
+    if (aiThinking && !prevAiThinking.current) {
+      if (setupPhase) {
+        clearTimer();
+        setupOpenTimer.current = setTimeout(() => { setupOpenTimer.current = null; setViewOpp(true); }, 550);
+      } else setViewOpp(true);
+    } else if (!aiThinking && prevAiThinking.current) {
+      clearTimer();                                     // bot's turn ended before the delay elapsed
+      setViewOpp(false);
+    }
     prevAiThinking.current = aiThinking;
+    return clearTimer;                                  // cancel a pending open when the bot's turn flips / on unmount
   }, [aiThinking]);
   useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
 
@@ -1652,7 +1666,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           if (legal || placed) { stroke = "none"; strokeWidth = 0; }
           else { stroke = "rgba(0,0,0,.4)"; strokeWidth = 1; }
           return (
-            <g key={sid} data-sid={interactive ? sid : undefined} data-oppsid={opp ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
+            <g key={sid} data-sid={opp ? undefined : sid} data-oppsid={opp ? sid : undefined} className={`coc-hex${legal ? " legal" : ""}`}
               onClick={() => { if (interactive && legal) clickHex(sid, legal); else if (tile) setToast(tileDesc(tile, board)); }}>
               <title>{tile ? tileDesc(tile, board)
                 : setupPhase ? (sp.color === "burgundy" ? "Click to place your starting castle here." : `${colorLabel(sp.color)} space (die ${sp.number}).`)
