@@ -356,6 +356,61 @@ A batch of CoC UI/UX fixes + two engine/bot fixes, all on prod. Durable, non-obv
   setup auto-view-opponent is **delayed 550ms** (`setupOpenTimer` ref + cleanup) so the placement flyer plays
   before the peek swaps the view.
 
+### CoC Expert AI campaign ("CoC-N") — coc-core crate (July 2026; P0-P2 DONE, gates passed)
+Building an N-class learned AI for CoC by the proven Spender recipe. Approved plan:
+`.claude-plans/i-want-to-develop-staged-charm.md` (user decisions: plateau-gated strength, client-side
+Rust→WASM serving, straight-to-learned-net — the heuristic scaffold is training infra only, never
+shipped — and a NEW "Expert" lobby tier; Normal/Hard untouched). New **`coc-core/` crate at repo root**
+(sibling of spender-core, patterns cloned not shared; in NO CI path filter, so committing it never
+deploys anything). Memory: [[coc-expert-ai-campaign-status]].
+- **P0 (done):** generated static tables (`tools/gen_board_tables.py` → `boards_gen.rs` + the canonical
+  space index mirrored to `games/castles_of_crimson/az/spaces.py` — spaces sorted by (r,q); the 37-cell
+  grid AND adjacency are IDENTICAL across all 9 boards, asserted; MAX_REGIONS=21). Tile codes u16
+  (1 start-castle, 2 castle, 3 mine, 4 ship, 5-13 livestock, 14-21 building, 22-47 monastery=effect_id).
+  State = fully inline fixed-capacity (816B, clone=memcpy 22ns); PV-net probe 2.8-4.5k evals/s/core at
+  700-900 dims → feature budget up to ~900 dims is fine.
+- **P1 (done): Rust engine port + differential parity.** `engine.rs` behind a fixed **102-action
+  micro-decomposed space** ("spend die → menu → place-slot → space"; XVALUE kills the 150-move
+  extra_action node; `Micro::None` invariant at every engine-move boundary; A_WORKERS always legal ⇒
+  no micro deadlock). Monastery effects = one 26-bit `mon_mask` switch. 7.8M micro-moves/s
+  (legal+apply). **Parity: 2300 fixture games / 567,080 engine moves, state-exact** (FNV-64 of the
+  canonical projection string after EVERY move; `compact.py` ⇄ `proj.rs` must never drift
+  independently), legal-move TRIE equality at recorded positions (proves the decomposition equals
+  `engine.legal_moves` in BOTH directions), coverage gate all-green (all 26 monasteries, all pending
+  chains, refunds, tiebreaks; "loaded" scenario games backfill rare paths). Dice injected per-move via
+  `State.dice_script` (sidesteps Mersenne-vs-splitmix). Parity-critical engine facts: `_draw` pops the
+  pile END / `_draw_type` scans from 0; legal-adjust affordability uses cost-from-CURRENT-value while
+  apply charges net-from-orig; ship_choose offers all 6 depots even empty; pendings clear BEFORE their
+  sub-action (chains survive); dice roll in SEAT order; ShipAdj pending stores the CANDIDATES mask
+  (source depot unrecoverable from engine ctx). Run tests with `--features bridge`
+  (`cargo test --release --features bridge`; fixtures via `tools/gen_engine_fixtures.py`, gitignored).
+- **P2 (done, gate PASSED): scaffold search.** `mcts.rs` = spender determinized-PUCT clone
+  (canonicalize-sort + shuffle the 3 undrawn piles + reseed dice stream per sim; identity-based backup;
+  terminal = tanh(margin/12)); `heuristic.rs` = exact ai.py `_value` port (scalar parity 857 pos ≤1e-9);
+  `vsearch.rs` = priors from move-type priority softmax + **rollout-then-eval leaf**; ai.py `_legal`
+  pruning ported into `engine::legal_actions` (full vs search variants). Cross-impl gate via
+  `move_server_coc` (bridge bin) + `games/castles_of_crimson/az/rust_arena.py` (CRN seat-swapped pairs,
+  per-decision server calls, Python side driven exactly like ai_selfplay): **0.715 [0.649,0.773] vs
+  ai.py hard over 200 games** at 2000 sims/decision (vs normal 0.95).
+- **FINDING (do not regress): a PURELY STATIC heuristic leaf FAILS in CoC** — 0.235 vs hard. CoC's
+  `_value` was tuned as a PAIR with the Python bot's rollout (storage credit 0.35/tile stands in for
+  "about to be placed for a region score"), so a static leaf undervalues in-flight turns. The scaffold
+  leaf runs a 20-micro-step priority rollout then evaluates → 0.715. This does NOT contradict the
+  Spender static-value-leaf lesson; it means the P3 learned value must price in-turn continuations
+  (outcome-trained does this naturally).
+- **OUTAGE-CLASS LESSON (fixed in `6dbbcbf`): never create a package named like an existing module.**
+  The az tooling briefly lived at `games/castles_of_crimson/ai/az/` — the new `ai/` PACKAGE shadowed
+  `ai.py`, breaking `from . import ai as coc_ai` in prod (bot turns would AttributeError). Tooling now
+  lives at **`games/castles_of_crimson/az/`** (compact.py projection, bridge.py engine-dict⇄compact
+  moves both directions, spaces.py generated, rust_arena.py).
+- **NEXT (P3, per plan):** `feats.rs` flat encoder (~650-900 dims; per-space block feeds the 37-way
+  SPACE policy head; heuristic V(me)−V(opp) + margin-if-now as baseline features; opp dice + denial
+  flags), `harvest_boot` bin (scaffold self-play @1-2k sims, temp openings, uniform board-pair
+  sampling), `coc_run/` training home (mirror az_run; pv_net.py parity-locked twin + net_export_check
+  ≤1e-4), distill warm-start, then the P4 AZ ratchet (value target: outcome ⊕ tanh(margin/SCALE)
+  SHAPE_A=0.3 ⊕ β=0.3 root value; gates paired-CRN + fresh-seed confirm + winner's-curse re-gate +
+  known-equal sanity 0.500).
+
 ---
 
 ## Where Wolf? (third game)
