@@ -567,10 +567,21 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-status-right{justify-content:center}
   /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
   .coc-create{gap:8px}
-  /* The "Dice" label (renamed from "Your dice") + 2 dice + workers/silver now fit on one
-     phone row with no CSS help. NOTE: base component rules live LATER in this sheet, so a
-     plain single-class override here loses to them on source order at equal specificity —
-     hence the .coc ancestor prefix below, which raises specificity so it wins on mobile. */
+  /* In-game "Your Duchy" controls sit in a narrow panel (viewport - wrap 32 - panel 28),
+     so shrink the dice + worker/silver tokens a touch and tighten gaps to keep BOTH the
+     Dice row (dice + workers/silver) and the action buttons (Take/Sell/End Turn) each on a
+     SINGLE row down to ~360px. NOTE: base component rules live LATER in this sheet, so a
+     plain single-class override loses on source order at equal specificity — the .coc
+     ancestor prefix raises specificity so these win on mobile. */
+  .coc .coc-dicebar{gap:7px}
+  .coc .coc-die{width:38px;height:38px;font-size:1.1rem}
+  .coc .coc-die-adj button{width:18px;height:18px}
+  .coc .coc-resbar{gap:8px;margin-left:4px}
+  .coc .coc-token{width:34px;height:34px;font-size:1.05rem}
+  .coc .coc-token-chip{gap:5px}
+  .coc .coc-token-chip b{font-size:1.15rem}
+  .coc .coc-actions{gap:6px}
+  .coc .coc-actions .coc-btn.sm{padding:6px 8px;font-size:.72rem}
   /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
   .coc .coc-bonusbar{gap:4px;padding:7px 6px}
   .coc .coc-bonusbar-lbl{letter-spacing:.05em}
