@@ -305,6 +305,57 @@ goods named "#N goods"; **1s bot move pacing** (`_BOT_MOVE_DELAY`); auto-open Vi
   (MCTS in the thread pool, apply move-by-move with per-move broadcast + `_BOT_MOVE_DELAY`); never loop
   heavy synchronous engine work under the lock. This is the same class of hazard as any lock-held blocking.
 
+### Session (July 2026) — mobile layout, warehouse modal, phase pause+popup, bot no-waste, randomize first, log/animation polish (SHIPPED `45ea1ae`)
+A batch of CoC UI/UX fixes + two engine/bot fixes, all on prod. Durable, non-obvious facts:
+- **MOBILE CSS CASCADE TRAP (do not regress — bit us repeatedly).** The `@media(max-width:600px)` block sits
+  BEFORE the base component rules in the `css` string, so a **single-class** mobile override
+  (`.coc-bonus-sw{…}`) LOSES to a later equal-specificity base rule (silently dead). **Every mobile override
+  must be `.coc `-prefixed** (`.coc .coc-bonus-sw{…}`) to win on specificity. Noted in a code comment. (This
+  is the CoC analog of Spender's documented media-query ordering footgun.)
+- **Color-bonus chips no longer wrap to a 2nd row on mobile.** The wide Cinzel "Color bonus" label can't
+  share the row, so the label is forced onto its own line and a `~`-sibling divider break
+  (`.coc .coc-bonus-div ~ .coc-bonus-div{flex-basis:100%;height:0;background:none}`) wraps the chips under it.
+  Labels renamed **"Color bonuses"→"Color bonus"** and **"Your dice"→"Dice"** so dice+silver/workers fit one
+  row and label+chips fit one row on mobile.
+- **Warehouse ability is now a FLOATING bottom modal** (`<Modal interactive>` = `coc-modal-float`,
+  pointer-events pass through), matching every other ability — click a Sell chip in the modal OR click one of
+  your own goods (`.coc-goods-pick`, a pulsing chip, shown when `warehouseMine && me.goods[c]>0`) to sell.
+  **AUDIT RESULT (recorded): `warehouse_sell` was the ONLY ability covering the whole screen.** View Opponent
+  + the score breakdown stay full-screen deliberately (they're informational views, not abilities).
+- **Phase-end pause + phase popup.** `_PHASE_END_PAUSE=2.6s` in `main.py`: `_schedule_bot_turn` sleeps this
+  (instead of `_BOT_MOVE_DELAY`) whenever `game["phase_letter"]` advanced (before its first move + between
+  moves that cross a phase boundary), so the player can see mine-silver/monastery income before the board
+  moves on. Frontend: a `phasePop` overlay (`.coc-phase-pop`, z-120) driven by a `[game.phase_letter]` effect
+  that diffs `prevPhaseRef` and shows `{from,to,silver:me.mines_count,workers}` for 3300ms (skipped while
+  reviewing/over).
+- **Bot no longer wastes a die (TWO fixes; verified 0/0 wasted across 60 sim games).** The waste ("adjust both
+  dice to no purpose, then end") came from the search painting itself into a corner: `ai._legal` pruned
+  `take_workers` for an already-`adjusted` die, so when no depot action remained the only legal move left was
+  `end_turn`. Fix: **`ai._legal` keeps `take_workers` as a guaranteed fallback** — it only prunes the wasteful
+  take-workers when a *productive* move still exists (`productive` = any move not in
+  `take_workers/adjust_die/end_turn/skip_pending`), and it still forbids `end_turn` while an unused die has a
+  non-end option. And **`bot.py` (the random finisher) `choose` prefers real actions + take_workers over
+  wasteful adjusts over passing** (`_WASTEFUL={"adjust_die"}`; `useful` excludes `_PASSIVE`∪`_WASTEFUL`;
+  `take_workers` is legal with any unused die so `useful` is non-empty whenever a die is unused → the finisher
+  never ends with an unused die and never burns workers adjusting).
+- **First player randomized for vs-bot games.** `main.py` create-vs-AI now `random.shuffle(seats)` before
+  `engine.new_game(seats,…)` (seats = `[pid, AI_PID]`), so the bot is start-player ~half the time (also
+  fairer — starting workers are seat-dependent).
+- **"Select a die to act" hint removed** (the action-hint fallback is now `""`).
+- **Die-adjust log states the VALUE, not the index.** `engine._h_adjust_die` now logs `frm` (the die value
+  BEFORE the adjust: `frm = d["values"][i]`); frontend `moveText` renders **"adjusted a 5 to a 1"** (falls
+  back to "adjusted a die to a X" for old saved games without `frm`).
+- **Flyer alignment fixes (two fragile endpoints).** Goods flyers landed at a hardcoded offset into the goods
+  row; they now target the **exact per-color goods chip** (`rectOf({kind:"goodchip",c})`, anchored by
+  `data-goodchip`/`data-oppgoodchip` on each chip). Silver/worker token flyers landed between the icon and the
+  count; the token anchors (`data-workers`/`data-silver` + opp variants) **moved onto the icon `<span>`** so
+  they land on the coin/hammer glyph.
+- **Starting-castle placement animation** (was broken for the human AND when viewing the bot): the `data-sid`
+  placement anchor was gated on `interactive` (gone once the turn ended) and the View-Opponent modal covered
+  the board instantly. Fix: `data-sid` is **always** on my board (`data-sid={opp ? undefined : sid}`), and the
+  setup auto-view-opponent is **delayed 550ms** (`setupOpenTimer` ref + cleanup) so the placement flyer plays
+  before the peek swaps the view.
+
 ---
 
 ## Where Wolf? (third game)
