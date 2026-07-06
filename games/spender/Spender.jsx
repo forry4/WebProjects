@@ -1239,10 +1239,11 @@ export default function SpenderApp() {
 	// validates the submitted move and falls back to its own search if the client doesn't answer.
 	// Graceful — if no worker loads we never announce capability and the server computes as before.
 	// Pool capped (each worker builds a large search tree at the budget → bounded memory across devices).
-	const CLIENT_AI_BUDGET_MS = 4500;   // slow-device time ceiling
-	const CLIENT_AI_MAX_SIMS = 100000;  // per-worker sims cap (~1 node/sim → bounds tree memory; fast
-	                                    // devices hit this in ~2s, snappy; 0 = no cap). ~400k aggregate
-	                                    // across the pool — far past saturation, no strength cost.
+	const CLIENT_AI_BUDGET_MS = 4500;     // slow-device time ceiling
+	const CLIENT_AI_MAX_SIMS_TOTAL = 10000; // AGGREGATE sims/move across the whole pool (visits are summed).
+	                                        // Split evenly per worker at dispatch (perWorker = ceil(TOTAL/pool)).
+	                                        // ~1 node/sim → also bounds tree memory; slow devices hit the time
+	                                        // budget first. wwsd is NOT capped this way (own MAX_SIMS knob).
 	const wasmPoolRef = useRef(null);          // [{ ready, request, terminate }] — RPC-wrapped workers
 	const [wasmReady, setWasmReady] = useState(false);
 	const clientAiArmedRef = useRef(null);     // room_id we've announced capability for
@@ -1307,6 +1308,8 @@ export default function SpenderApp() {
 		aiDispatchPlyRef.current = as.ply;
 		const stateStr = JSON.stringify(as.state);
 		const t0 = performance.now();
+		// Aggregate cap (10k) split across the pool so the SUMMED sims never exceed the total.
+		const perWorkerSims = Math.max(1, Math.ceil(CLIENT_AI_MAX_SIMS_TOTAL / pool.length));
 		(async () => {
 			try {
 				const visitsArrays = await Promise.all(pool.map((wk, i) =>
@@ -1315,7 +1318,7 @@ export default function SpenderApp() {
 						// The old value-leaf N serving (searchN / n_model.json) is RETAINED in the worker + wasm
 						// as a record, just no longer routed to. Swap pv_model.json to update what "N" plays.
 						kind: roomData?.ai_variant === "N" ? "searchPV" : "search", state: stateStr, seat: as.seat,
-						budget: CLIENT_AI_BUDGET_MS, maxSims: CLIENT_AI_MAX_SIMS,
+						budget: CLIENT_AI_BUDGET_MS, maxSims: perWorkerSims,
 						seed: ((as.ply * 2654435761) ^ (i * 40503 + 1)) >>> 0,
 					}).then((d) => d.visits).catch(() => null)));
 				const total = new Int32Array(70);
