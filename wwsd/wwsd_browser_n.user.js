@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WWSD Browser-N (Steve runs in your browser)
 // @namespace    wwsd
-// @version      0.9.31
+// @version      0.9.32
 // @description  Runs Splendor variant PV (the AlphaZero policy+value net, strongest AI) entirely in YOUR browser via WASM on the friend's spendee site — no server. Shows PV's recommended move, position eval, and top alternatives; optional autoplay. Logs every game (board + search per ply + outcome) to IndexedDB; export from the panel for offline analysis.
 // @match        https://spendee.mattle.online/*
 // @grant        none
@@ -1252,6 +1252,33 @@
   }
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+  // ── Background keepalive (the tabbed-out fix) ─────────────────────────────
+  // Backgrounded tabs THROTTLE setTimeout/setInterval: >=1s, and after ~5min hidden Chrome's
+  // "intensive throttling" cuts them to ~ONCE PER MINUTE. That stretches every click-gap AND the
+  // poll loop, so a move that takes ~5s focused blows past spendee's turn timer when you tab away
+  // (the "plays too slowly / fails until it runs out of time" report). A tab that is PRODUCING
+  // AUDIO is exempt from that throttling, so we run a silent (inaudible, near-zero-gain) oscillator
+  // whenever autoplay is on → the whole loop keeps full speed in the background. Needs a user
+  // gesture to start the AudioContext; the Autoplay toggle click (or any page click) provides it.
+  // Side effect: the browser tab shows a small "playing audio" icon while autoplay is on.
+  let _keepCtx = null;
+  function startKeepAlive() {
+    try {
+      if (!_keepCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        _keepCtx = new AC();
+        const osc = _keepCtx.createOscillator(), gain = _keepCtx.createGain();
+        gain.gain.value = 0.0001;            // -80dB: inaudible, but non-zero so the tab counts as "playing audio"
+        osc.frequency.value = 30;            // sub-audible
+        osc.connect(gain); gain.connect(_keepCtx.destination);
+        osc.start();
+      }
+      if (_keepCtx.state === 'suspended') _keepCtx.resume();
+    } catch (e) { /* audio blocked (no gesture yet / policy) — autoplay still works while focused */ }
+  }
+  function stopKeepAlive() { try { if (_keepCtx && _keepCtx.state === 'running') _keepCtx.suspend(); } catch (e) {} }
+
   // ─────────────────────────────────────────────────────────────────────────
   // LOBBY ADAPTER (plain DOM, on /lobby/rooms) — create a room, leave, start.
   // Unlike the in-game canvas (synthetic clicks) and moves (Meteor method), the lobby is a
@@ -1660,7 +1687,9 @@
       if (!CONFIG.AUTO_PLAY) { lastKey = key; return; }
       // human-like pacing: make the whole turn take a RANDOM 2-4s. The capped search (~2-3s) counts
       // toward it, so a fast result waits out the remainder rather than slamming the move instantly.
-      const target = CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS);
+      // Skip the artificial wait entirely when the tab is hidden — nobody's watching it "think," and
+      // playing as fast as the search allows gives the most margin against spendee's turn timer.
+      const target = document.hidden ? 0 : (CONFIG.MIN_DELAY_MS + Math.random() * (CONFIG.MAX_DELAY_MS - CONFIG.MIN_DELAY_MS));
       const wait = target - (Date.now() - t0);
       if (wait > 0) { setStatus('playing in ' + (wait / 1000).toFixed(1) + 's…'); await sleep(wait); }
       await playMove(r.action, r.dump);            // execute via the canvas UI (synthetic clicks)
@@ -1743,11 +1772,11 @@
     once.onclick = async () => { lastKey = null; const w = CONFIG.ENABLED; CONFIG.ENABLED = true; await tick(); CONFIG.ENABLED = w; };
     const auto = mk('Autoplay: off');
     const setAuto = () => { auto.textContent = 'Autoplay: ' + (CONFIG.AUTO_PLAY ? 'on' : 'off'); auto.style.background = CONFIG.AUTO_PLAY ? '#4a8f4a' : '#b5852f'; };
-    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; setAuto(); saveCfg(); if (CONFIG.AUTO_PLAY) { lastKey = null; tick(); } };
+    auto.onclick = () => { CONFIG.AUTO_PLAY = !CONFIG.AUTO_PLAY; setAuto(); saveCfg(); if (CONFIG.AUTO_PLAY) { startKeepAlive(); lastKey = null; tick(); } else { stopKeepAlive(); } };
     setAuto();
     const loop = mk('Auto-lobby: off');
     const setLoop = () => { loop.textContent = 'Auto-lobby: ' + (CONFIG.AUTO_LOBBY ? 'on' : 'off'); loop.style.background = CONFIG.AUTO_LOBBY ? '#4a8f4a' : '#b5852f'; };
-    loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; if (CONFIG.AUTO_LOBBY) CONFIG.AUTO_PLAY = true; setAuto(); setLoop(); saveCfg(); if (CONFIG.AUTO_LOBBY) { lastKey = null; tick(); } };
+    loop.onclick = () => { CONFIG.AUTO_LOBBY = !CONFIG.AUTO_LOBBY; if (CONFIG.AUTO_LOBBY) CONFIG.AUTO_PLAY = true; setAuto(); setLoop(); saveCfg(); if (CONFIG.AUTO_LOBBY) { startKeepAlive(); lastKey = null; tick(); } };
     setLoop();
     _syncToggles = () => { setAuto(); setLoop(); };   // let the safety circuit-breaker refresh these buttons
     const methods = mk('List methods'); methods.onclick = () => { listMethods(); setStatus('methods → console'); };
@@ -1779,6 +1808,12 @@
     buildPanel();
     loadWasm().then(() => setStatus('ready')).catch(e => setStatus('WASM failed: ' + e.message + ' (CSP?)'));
     setInterval(tick, CONFIG.POLL_MS);
+    // If autoplay was persisted ON, the keepalive needs a user gesture to start the AudioContext —
+    // arm it on the first interaction anywhere on the page (then remove the listener).
+    if (CONFIG.AUTO_PLAY) {
+      const armKeep = () => { startKeepAlive(); document.removeEventListener('pointerdown', armKeep, true); };
+      document.addEventListener('pointerdown', armKeep, true);
+    }
     window.WWSD_N = { analyzePosition, findMyActiveGame, listMethods, toggleRecord, toggleDomRecord, synthClickCanvas, synthHoldCanvas, boardCanvas, uiTakeGems, uiBuyBoard, uiReserveBoard, uiReserveDeck, uiBuyReserved, uiPass, uiDiscard, uiClaimNoble, claimNoble, qualifyingNobleId, playMove, cardSlotFrac, UI, toDump, CONFIG, createLobby, leaveLobby, startGame, autoLobbyStep, findMyWaitingRoom, ensurePool, searchPV, exportLogs, clearLogs, logCount, listCollections, chatProbe, logFailures };
     console.log('[WWSD] browser-N loaded. window.WWSD_N available.');
   }
