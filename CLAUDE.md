@@ -415,13 +415,51 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
   BEATS the scaffold 0.567 at equal sims.** The policy head distilled well; the value head lags
   (CoC's rollout-augmented teacher leaf sets a higher bar than Spender's static v_state). Net-argmax
   vs full search ≈0.03 is normal (1-ply), not a distill failure.
-- **P4 (RUNNING): hybrid ratchet** — `tools/loop_coc.sh` (resumable: `progress_coc` + ITER-k-DONE):
+- **P4 (RUNNING): hybrid ratchet** — `tools/loop_coc.sh` (resumable: `progress_coc` + ITER-k-DONE +
+  `sp_k.HARVESTED` markers so a mid-iter restart skips a completed harvest):
   hybrid self-play (`harvest_boot <out> <games> <sims> 20 <seed> 10 pv_best.json hybrid`) → train both
   heads warm-from-best (2-iter window + boot anchor) → cand-vs-best hybrid gate (promote ≥0.52) +
   **pure-pv-vs-hybrid probe (the value-head takeover signal: flip self-play mode to `pv` when it
   crosses 0.5)** + scaffold@2000 yardstick. Watch `coc_run/loop_log.txt`. If flat after ~8 iters:
-  raise self-play sims first (the proven lever) before touching targets/architecture. P5 (serving)
-  can ship the hybrid config if the value head still lags — net prior + rollout value runs in wasm too.
+  raise self-play sims first (the proven lever) before touching targets/architecture.
+  **MSYS ARG-CONVERSION FOOTGUN (cost 3 silent no-op iterations — do not regress):** Git Bash
+  auto-converts `/c/...` args for native exes but SKIPS args containing `*` (train_pv's `--data`
+  globs → Python glob matched NOTHING) and `:` (`model.json:hybrid` gate specs → Rust `File::open`
+  on an unresolvable POSIX path). loop_coc.sh now passes **cygpath'd `$RUNW` Windows-style paths to
+  every native tool** + `set -o pipefail` + a gate-parse FATAL guard so a failed stage aborts loudly
+  instead of "kept best ()". Validate any loop change with a miniature dry iteration
+  (`RUN=<dry-dir> ITERS=1 GAMES=20 SIMS=32 GATE_PAIRS=2 ... bash tools/loop_coc.sh`).
+- **P5 (DONE, LIVE on prod): Expert tier = client-side WASM serving.** Prod e2e PASSED (Playwright
+  on forry4.github.io: guest → CoC → Expert game → the bot's decision shipped as `ai_search`, the
+  browser's 4-worker pool searched it and submitted `ai_move`, server validated + applied).
+  - **Protocol (per-DECISION, prefix-based):** the server (`games/castles_of_crimson/main.py`)
+    ships each bot ENGINE-MOVE decision in room state as `ai_search = {decision, seat, mode,
+    budget_ms, max_sims, state: az.compact.project(game) with the 3 undrawn pools SORTED}` (lives in
+    room state so re-broadcasts/reconnects re-ship it); the client loops stepInfo → (forced |
+    root-parallel `coc_search_timed`, visits SUMMED across workers) → append to prefix → at the
+    Micro::None boundary `coc_chain_move` → `ai_move {decision, move}`. Server resolves via
+    `az.bridge.compact_to_move`, validates by MEMBERSHIP in `engine.legal_moves`, applies, wakes the
+    scheduler (`_client_bot_turn` + asyncio.Event). Single-legal decisions apply server-side.
+    Watchdog `CLIENT_AI_TIMEOUT=8s` → the turn falls back to the HARD server bot (per-turn
+    degradation, deadlock impossible — the finisher still guarantees turn end); stale/illegal
+    ai_moves are logged + dropped (never a user toast); `client_ai` disarms on socket disconnect.
+    Tests: `tests/test_client_ai.py` (full game through the simulated client, watchdog, illegal-drop).
+  - **Model is NOT embedded in the wasm** (improves on the Spender include_str pattern): the worker
+    fetches `webapp/public/wasm/coc_pv_model.bin` (compact f32 blob, ~2.6MB, browser-cached) once
+    and passes it to `coc_init_model`. **A model upgrade = `python coc-core/tools/pv_json_to_bin.py
+    <winner.json> webapp/public/wasm/coc_pv_model.bin` + push — NO wasm rebuild.** The wasm itself is
+    192KB (`coc_core.js`/`coc_core_bg.wasm`, wasm-pack --target web). `netio::pv_from_bin` is
+    bit-identical to the JSON loader (verified by `net_export_check <json> <bin>`).
+  - **Serving mode `_EXPERT_MODE="hybrid"`** in CoC main.py (net prior + rollout value — the config
+    that beats the scaffold); flip to `"pv"` when the P4 takeover probe crosses 0.5. Currently
+    serving the P3 bootstrap net until the ratchet's winner is swapped in (P6). Lobby: Expert joins
+    Normal/Hard in the vs-Bot picker (`AI_DIFFICULTIES` += "expert").
+  - **wasm entries** (`coc-core/src/wasm.rs`): `coc_init_model(bytes)`, `coc_step_info(state,
+    prefix)` → `{over,boundary,actor,forced,legal}`, `coc_search_timed(state, prefix, mode,
+    budget_ms, max_sims, seed)` → visits[102], `coc_chain_move(state, prefix)` → compact move JSON.
+    `pxio::from_proj` (the P2-arena-validated ingestion) is the shared Dump path (gate widened to
+    wasm32). Worker: `webapp/public/wasm/coc-worker.js`; frontend pool + driver effect in
+    `CastlesOfCrimson.jsx` (Spender s-worker pattern; re-announces `client_ai_ready` per socket).
 
 ---
 
