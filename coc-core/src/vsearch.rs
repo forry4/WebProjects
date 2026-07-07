@@ -51,7 +51,7 @@ fn action_priority(a: usize) -> f64 {
 /// in-flight turns — measured 0.235 vs hard static, vs the rollout leaf's pass.
 pub const ROLLOUT_MICRO_STEPS: usize = 20;
 
-fn priority_rollout_step(s: &mut State, rng: &mut Rng) {
+pub(crate) fn priority_rollout_step(s: &mut State, rng: &mut Rng) {
     let acts = engine::legal_actions(s);
     let mut mx = f64::NEG_INFINITY;
     for &a in &acts {
@@ -123,16 +123,10 @@ pub fn root_readout_heur(s: &State, sims: u32, c_puct: f64, seed: u64) -> (Vec<i
     (search.root_visits().to_vec(), if n > 0 { w / n as f64 } else { 0.0 })
 }
 
-/// Net leaf: (legal-masked softmax of the policy logits, value head) — both from
-/// the leaf actor's perspective (features are mover-relative).
-pub fn pv_eval(
-    net: &crate::valuenet::PolicyValueNet,
-    s: &State,
-    actor: usize,
-    legal: &[usize],
-) -> (Vec<f64>, f64) {
-    let f = crate::feats::features(s, actor);
-    let (v, logits) = net.forward_raw(&f);
+/// Legal-masked softmax of policy logits — the ONE conversion both the
+/// sequential leaf (`pv_eval`) and the batched driver use, so their priors are
+/// bit-identical by construction.
+pub fn priors_from_logits(logits: &[f32], legal: &[usize]) -> Vec<f64> {
     let mut p = vec![0.0f64; N_ACTIONS];
     let mut mx = f32::NEG_INFINITY;
     for &a in legal {
@@ -149,7 +143,20 @@ pub fn pv_eval(
     for &a in legal {
         p[a] /= sum;
     }
-    (p, v as f64)
+    p
+}
+
+/// Net leaf: (legal-masked softmax of the policy logits, value head) — both from
+/// the leaf actor's perspective (features are mover-relative).
+pub fn pv_eval(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+) -> (Vec<f64>, f64) {
+    let f = crate::feats::features(s, actor);
+    let (v, logits) = net.forward_raw(&f);
+    (priors_from_logits(&logits, legal), v as f64)
 }
 
 /// Hybrid leaf: NET policy prior + ROLLOUT-heuristic value (isolates prior quality;

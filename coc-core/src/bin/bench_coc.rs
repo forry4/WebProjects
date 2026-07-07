@@ -208,6 +208,26 @@ fn bench_leaf_breakdown() {
     let dt = t0.elapsed().as_secs_f64();
     println!("netval leaf (2 fwd + rollout): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
 
+    // batched forward: per-eval cost at K=8/16/32 (the batch.rs operating points)
+    for k in [8usize, 16, 32] {
+        let refs: Vec<&[f32]> = (0..k).map(|i| fs[i % fs.len()].as_slice()).collect();
+        let need: Vec<bool> = (0..k).map(|i| i % 2 == 0).collect();
+        let n = 40_000usize / k;
+        let t0 = Instant::now();
+        let mut acc = 0.0f32;
+        for _ in 0..n {
+            let out = net.forward_batch(black_box(&refs), &need);
+            acc += out[0].0 + out[0].1[7];
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        println!(
+            "forward_batch K={k}: {:.1} us/eval ({:.0} evals/s/core)  [acc {:.3}]",
+            dt / (n * k) as f64 * 1e6,
+            (n * k) as f64 / dt,
+            acc
+        );
+    }
+
     // full search: sims/s at the self-play operating point
     for (label, state) in [("mid", &states[20]), ("late", &states[60])] {
         let sims = 2_000u32;

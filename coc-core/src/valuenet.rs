@@ -18,35 +18,71 @@ fn relu_inplace(v: &mut [f32]) {
     }
 }
 
-/// Chunked multi-accumulator dot product. The single-accumulator form is a serial
-/// FP dependency chain the compiler may NOT vectorize (float reassociation is
-/// forbidden), which ran the matvec at ~1% of the core's FMA throughput — 32
-/// independent lanes let LLVM emit SIMD FMAs (AVX2/AVX-512 with target-cpu=native,
-/// simd128 on wasm). Summation order differs from the scalar form by ~1e-6 relative
-/// — net_export_check's 1e-4 parity bar still holds (re-verified after this change).
+/// Chunked 8-lane dot product. The naive single-accumulator form is a serial FP
+/// dependency chain the compiler may NOT vectorize (float reassociation is
+/// forbidden), which ran the matvec at ~1% of the core's FMA throughput; 8
+/// independent lanes let LLVM emit SIMD FMAs (AVX2/AVX-512 with
+/// target-cpu=native, simd128 on wasm). The 8-lane chunk + lane-sum + scalar
+/// tail is the CANONICAL accumulation order — `dot4` (the batched kernel) uses
+/// the exact same order per pair, which is what makes batched search runs
+/// bit-identical to sequential ones. Matvec speed is load/L3-bound, so a single
+/// 8-lane chain measures the same as wider multi-chain variants.
 #[inline]
 fn dot(a: &[f32], b: &[f32]) -> f32 {
     const L: usize = 8;
-    let mut acc = [[0.0f32; L]; 4];
-    let mut ca = a.chunks_exact(4 * L);
-    let mut cb = b.chunks_exact(4 * L);
+    let mut acc = [0.0f32; L];
+    let mut ca = a.chunks_exact(L);
+    let mut cb = b.chunks_exact(L);
     for (xa, xb) in (&mut ca).zip(&mut cb) {
-        for k in 0..4 {
-            for l in 0..L {
-                acc[k][l] += xa[k * L + l] * xb[k * L + l];
-            }
+        for l in 0..L {
+            acc[l] += xa[l] * xb[l];
         }
     }
     let mut s = 0.0f32;
-    for k in 0..4 {
-        for l in 0..L {
-            s += acc[k][l];
-        }
+    for l in 0..L {
+        s += acc[l];
     }
     for (xa, xb) in ca.remainder().iter().zip(cb.remainder()) {
         s += xa * xb;
     }
     s
+}
+
+/// Register-blocked 4-input dot: one weight-row sweep dotted against FOUR
+/// activation vectors at once. The row chunk is loaded once per 4 FMAs and the
+/// four 8-lane accumulators live in registers, so a batched layer streams the
+/// weights K/4 times instead of K times while the x-block (4 x ~4KB) stays
+/// L1-resident — this is what turns `forward_batch` from a wash into a real
+/// win (the first row-reuse tiling just traded L3 weight traffic for L2
+/// activation traffic). Each output's accumulation order is IDENTICAL to
+/// `dot`, preserving batched==sequential bit-identity.
+#[inline]
+fn dot4(row: &[f32], xs: [&[f32]; 4]) -> [f32; 4] {
+    const L: usize = 8;
+    let n = row.len();
+    let chunks = n / L;
+    let mut acc = [[0.0f32; L]; 4];
+    for c in 0..chunks {
+        let r = &row[c * L..c * L + L];
+        for (k, x) in xs.iter().enumerate() {
+            let xc = &x[c * L..c * L + L];
+            for l in 0..L {
+                acc[k][l] += r[l] * xc[l];
+            }
+        }
+    }
+    let mut out = [0.0f32; 4];
+    for k in 0..4 {
+        let mut s = 0.0f32;
+        for l in 0..L {
+            s += acc[k][l];
+        }
+        for i in chunks * L..n {
+            s += row[i] * xs[k][i];
+        }
+        out[k] = s;
+    }
+    out
 }
 
 /// y[out] = W[out x in] @ x[in] + b[out]  (row-major W).
@@ -248,6 +284,99 @@ impl PolicyValueNet {
         let mut vo = [0.0f32; 1];
         linear(&self.vw, &self.vb, &cur, 1, hd, &mut vo);
         vo[0].tanh()
+    }
+
+    /// Batched forward: K inputs through the net with ROW-REUSE tiling — each
+    /// weight row is loaded from L3 once and dotted against all K activations
+    /// (which sit in L1/L2), so weight traffic per eval drops ~K-fold. The
+    /// single-input forward was MEMORY-bound (2.5MB of weights streamed per
+    /// call across 10 threads ≈ the shared-L3 ceiling); batching makes it
+    /// compute-bound. Each output is BIT-IDENTICAL to forward_raw /
+    /// forward_value_raw on the same input (same per-row `dot`, same order).
+    /// `need_policy[k]` false skips the policy head for that row (returns an
+    /// empty Vec) — the netval truncation rows only need the value.
+    pub fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)> {
+        let k = raws.len();
+        assert_eq!(need_policy.len(), k);
+        if k == 0 {
+            return Vec::new();
+        }
+        // standardize all inputs
+        let n = self.mu.len();
+        let mut acts: Vec<Vec<f32>> = raws
+            .iter()
+            .map(|raw| {
+                let mut z = vec![0.0f32; n];
+                for i in 0..n {
+                    z[i] = (raw[i] - self.mu[i]) * self.inv_sd[i];
+                }
+                z
+            })
+            .collect();
+        // trunk layers: input-blocks of 4 through the register-blocked kernel
+        // (weights stream once per block; the x-block stays L1-resident),
+        // remaining 1-3 inputs through the plain dot (same accumulation order).
+        for l in 0..self.tw.len() {
+            let (i, o) = (self.tdims[l], self.tdims[l + 1]);
+            let w = &self.tw[l];
+            let b = &self.tb[l];
+            let mut next: Vec<Vec<f32>> = vec![vec![0.0f32; o]; k];
+            let mut kk = 0usize;
+            while kk + 4 <= k {
+                for oi in 0..o {
+                    let row = &w[oi * i..oi * i + i];
+                    let d = dot4(row, [&acts[kk], &acts[kk + 1], &acts[kk + 2], &acts[kk + 3]]);
+                    for j in 0..4 {
+                        next[kk + j][oi] = b[oi] + d[j];
+                    }
+                }
+                kk += 4;
+            }
+            while kk < k {
+                for oi in 0..o {
+                    let row = &w[oi * i..oi * i + i];
+                    next[kk][oi] = b[oi] + dot(row, &acts[kk]);
+                }
+                kk += 1;
+            }
+            for nx in next.iter_mut() {
+                relu_inplace(nx);
+            }
+            acts = next;
+        }
+        let hd = *self.tdims.last().unwrap();
+        // value head for every row (1 x H — trivial)
+        let mut out: Vec<(f32, Vec<f32>)> = acts
+            .iter()
+            .map(|act| ((self.vb[0] + dot(&self.vw[..hd], act)).tanh(), Vec::new()))
+            .collect();
+        // policy head over the rows that need it, same 4-input blocking
+        let wants: Vec<usize> = (0..k).filter(|&kk| need_policy[kk]).collect();
+        for &kk in &wants {
+            out[kk].1 = vec![0.0f32; self.n_act];
+        }
+        let mut wi = 0usize;
+        while wi + 4 <= wants.len() {
+            let (k0, k1, k2, k3) = (wants[wi], wants[wi + 1], wants[wi + 2], wants[wi + 3]);
+            for a in 0..self.n_act {
+                let row = &self.pw[a * hd..a * hd + hd];
+                let d = dot4(row, [&acts[k0], &acts[k1], &acts[k2], &acts[k3]]);
+                out[k0].1[a] = self.pb[a] + d[0];
+                out[k1].1[a] = self.pb[a] + d[1];
+                out[k2].1[a] = self.pb[a] + d[2];
+                out[k3].1[a] = self.pb[a] + d[3];
+            }
+            wi += 4;
+        }
+        while wi < wants.len() {
+            let kk = wants[wi];
+            for a in 0..self.n_act {
+                let row = &self.pw[a * hd..a * hd + hd];
+                out[kk].1[a] = self.pb[a] + dot(row, &acts[kk]);
+            }
+            wi += 1;
+        }
+        out
     }
 }
 

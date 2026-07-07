@@ -59,6 +59,21 @@ pub fn determinize(s: &State, rng: &mut Rng) -> State {
     d
 }
 
+/// An in-flight simulation paused at its unexpanded leaf (the batching seam).
+pub struct LeafCtx {
+    idx: usize,
+    path: Vec<(usize, usize)>,
+    pub state: State,
+}
+
+/// Outcome of `Search::descend`.
+pub enum Descent {
+    /// Terminal reached during descent; already backed up — the sim is done.
+    Done,
+    /// Unexpanded leaf reached; evaluate it and call `complete`.
+    Leaf(LeafCtx),
+}
+
 pub struct Search {
     root_state: State,
     c_puct: f64,
@@ -103,11 +118,26 @@ impl Search {
 
     /// One simulation. `eval(leaf_state, actor, legal, rng) -> (priors[N_ACTIONS],
     /// value)`; value from `actor`'s perspective (the rng lets the leaf run a
-    /// rollout). Terminals back up tanh-margin internally.
+    /// rollout). Terminals back up tanh-margin internally. Composed from
+    /// `descend` + `complete` so the batched drivers share this exact code path.
     pub fn sim<F>(&mut self, rng: &mut Rng, eval: &F)
     where
         F: Fn(&State, usize, &[usize], &mut Rng) -> (Vec<f64>, f64),
     {
+        if let Descent::Leaf(leaf) = self.descend(rng) {
+            let legal = engine::legal_actions(&leaf.state);
+            let actor = leaf.state.actor() as usize;
+            let (probs, value) = eval(&leaf.state, actor, &legal, rng);
+            self.complete(leaf, &probs, value);
+        }
+    }
+
+    /// First half of one simulation: determinize + tree descent. Either the
+    /// descent hit a terminal (backed up internally — the sim is DONE) or it
+    /// reached an unexpanded leaf whose eval the caller must supply via
+    /// `complete` (this is the batching seam: collect K leaves, evaluate them
+    /// in one net pass, then complete each).
+    pub fn descend(&mut self, rng: &mut Rng) -> Descent {
         let mut s = determinize(&self.root_state, rng);
         let mut idx = 0usize;
         let mut path: Vec<(usize, usize)> = Vec::new();
@@ -122,7 +152,7 @@ impl Search {
             if s.mode == OVER {
                 let v0 = heuristic::terminal_reward(&s, 0);
                 self.backup(&path, v0, 0);
-                return;
+                return Descent::Done;
             }
             idx = match self.nodes[idx].children.get(&a) {
                 Some(&c) => c,
@@ -134,12 +164,16 @@ impl Search {
                 }
             };
         }
-        let legal = engine::legal_actions(&s);
-        let actor = s.actor() as usize;
-        let (probs, value) = eval(&s, actor, &legal, rng);
-        self.nodes[idx].expanded = true;
-        self.nodes[idx].p.copy_from_slice(&probs);
-        self.backup(&path, value, actor as i8);
+        Descent::Leaf(LeafCtx { idx, path, state: s })
+    }
+
+    /// Second half: expand the leaf with `probs` (len N_ACTIONS) and back up
+    /// `value` (from the leaf actor's perspective).
+    pub fn complete(&mut self, leaf: LeafCtx, probs: &[f64], value: f64) {
+        let actor = leaf.state.actor();
+        self.nodes[leaf.idx].expanded = true;
+        self.nodes[leaf.idx].p.copy_from_slice(probs);
+        self.backup(&leaf.path, value, actor);
     }
 
     pub fn root_visits(&self) -> &[i32] {
