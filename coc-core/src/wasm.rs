@@ -111,7 +111,9 @@ pub fn coc_search_timed(
         visits[legal[0]] = 1;
         return visits;
     }
-    let mut search = Search::new(s, vsearch::C_PUCT);
+    // netval serves with its tuned exploration constant; other modes use C_PUCT.
+    let c_puct = if mode == "netval" { vsearch::NETVAL_C_PUCT } else { vsearch::C_PUCT };
+    let mut search = Search::new(s, c_puct);
     let mut rng = Rng::new(seed ^ 0x9E77);
     let start = js_sys::Date::now();
     let budget_left = |n: u32| {
@@ -138,13 +140,15 @@ pub fn coc_search_timed(
             }
         }),
         "netval" => MODEL.with(|m| {
-            // net prior + 20-step rollout + net VALUE at the truncation — beats the
-            // heuristic-truncation hybrid ~0.58-0.61 (grows with depth), the
-            // campaign's one genuine gain over the bootstrap.
+            // net prior + NETVAL_ROLLOUT_STEPS rollout + net VALUE at the truncation
+            // (with NETVAL_C_PUCT, set above). Beats the heuristic-truncation hybrid
+            // ~0.58-0.61, and the tuned config (30 steps + c_puct 1.0) adds another
+            // ~0.62-0.64 over netval@20@1.5 — both gains GROW with depth so they
+            // transfer to serving's ~20k sims. The campaign's gain over the bootstrap.
             let mb = m.borrow();
             let net = mb.as_ref().expect("coc_init_model not called");
             let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
-                vsearch::hybrid_netval_eval(net, st, actor, lg, r)
+                vsearch::hybrid_netval_eval_steps(net, st, actor, lg, r, vsearch::NETVAL_ROLLOUT_STEPS)
             };
             while budget_left(n) {
                 search.sim(&mut rng, &eval);

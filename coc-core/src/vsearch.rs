@@ -13,6 +13,14 @@ use crate::rng::Rng;
 
 pub const C_PUCT: f64 = 1.5;
 
+/// Serving config for the netval leaf, tuned by the offline sweep (fresh-seed
+/// confirmed, and it GROWS with sims so it transfers to serving's ~20k): a longer
+/// rollout truncation (more delayed-payoff resolution before the net value reads)
+/// + lower exploration (commit faster). The combo beats netval@20@1.5 ~0.62-0.64
+/// across 200-1024 sims. Scaffold/hybrid/pv keep C_PUCT + ROLLOUT_MICRO_STEPS.
+pub const NETVAL_ROLLOUT_STEPS: usize = 30;
+pub const NETVAL_C_PUCT: f64 = 1.0;
+
 /// Rough action-type priority (the ai.py `_ROLLOUT_PRIORITY` shape, adapted to
 /// micro actions). Only a PRIOR — PUCT corrects it.
 fn action_priority(a: usize) -> f64 {
