@@ -8,12 +8,13 @@ name: Keep backend warm
 # 7am-10pm PST/PDT with <=1h overhang either side:
 #   PST (UTC-8): 06:00-21:59 local  (starts ~1h early)
 #   PDT (UTC-7): 07:00-22:59 local  (ends ~1h late)
-# Scheduled runs can be delayed/skipped under GitHub load; every 10 min gives slack
-# against the 15-min spin-down. Public-repo Actions minutes are free.
+# Scheduled runs are frequently delayed/skipped under GitHub load (unreliable for a
+# 15-min spin-down), so this is only a BACKSTOP — a dedicated pinger (cron-job.org)
+# is the primary keep-alive. Every 5 min for tighter slack. Public-repo Actions free.
 
 on:
   schedule:
-    - cron: "*/10 14-23,0-5 * * *"
+    - cron: "*/5 14-23,0-5 * * *"
   workflow_dispatch: {}   # manual trigger for testing
 
 # Never let overlapping runs pile up.
