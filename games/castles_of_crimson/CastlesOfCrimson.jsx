@@ -956,7 +956,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // Load + show a finished game's board + results, read-only over HTTP (no WebSocket).
   const enterCocReview = (id) => {
-    fetch(`${COC_HTTP}/games/${id}/review`).then((r) => r.json()).then((d) => {
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    fetch(`${COC_HTTP}/games/${id}/review?player_id=${encodeURIComponent(myId)}`, { headers }).then((r) => r.json()).then((d) => {
       if (!d.ok) { setToast(d.message || "Could not load review"); return; }
       setRoomData({
         game: d.game, players: d.players || {}, host: null, status: "over",

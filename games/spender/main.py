@@ -657,7 +657,14 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "host": room.get("host"),
         "status": room.get("status", "open"),
         "game": game_view,
-        "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
+        # Only the recipient's OWN reconnect token — never other seats'. broadcast_room
+        # rebuilds this per viewer; the direct reply paths pass viewer_pid=pid. A
+        # no-viewer build (transient, always rebuilt before it reaches a client) carries
+        # none. (Was: every seat's token to everyone — a needless secret leak.)
+        "reconnect_tokens": (
+            {viewer_pid: room.get("meta", {}).get(viewer_pid, {}).get("token")}
+            if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
+        ),
     }
     if room.get("ai_variant"):
         state["ai_variant"] = room["ai_variant"]
@@ -2600,6 +2607,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    # Both segments are client-supplied and become dict keys / persisted state. Reject
+    # absurd lengths so a client can't bloat memory + every save/broadcast (legit room
+    # codes are ~6 chars, ids ~8-10).
+    if len(room_id) > 64 or len(pid) > 64:
+        await websocket.close(code=1008)
+        return
     LOG.info("ws connect room=%s player=%s", room_id, pid)
 
     async with ROOM_LOCK:
@@ -2625,7 +2638,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── create ──────────────────────────────────────────────────────
             if action == "create":
-                name = msg.get("name") or pid
+                name = str(msg.get("name") or pid).strip()[:24] or "Player"
                 vs_ai = bool(msg.get("vs_ai"))
                 ai_variant = msg.get("ai_variant", "A") if vs_ai else None
                 if vs_ai and not _ai_variant_valid(ai_variant):
@@ -2683,7 +2696,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── join ────────────────────────────────────────────────────────
             elif action == "join":
-                name = msg.get("name") or pid
+                name = str(msg.get("name") or pid).strip()[:24] or "Player"
                 async with ROOM_LOCK:
                     if room_id not in ROOMS:
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))

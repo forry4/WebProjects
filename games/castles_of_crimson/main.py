@@ -379,15 +379,27 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]) -> None:
     room = ROOMS.get(room_id)
     if not room:
         return
-    data = json.dumps(msg)
-    for ws in list(room.get("sockets", {}).values()):
+    meta = room.get("meta", {})
+    # Scope the reconnect token per recipient: the caller builds one consistent room
+    # snapshot (no token), and each socket gets ONLY its own token injected — never
+    # other seats'. Non-"room" messages fan out flat.
+    room_state = msg.get("room") if isinstance(msg.get("room"), dict) else None
+    flat = json.dumps(msg) if room_state is None else None
+    for pid, ws in list(room.get("sockets", {}).items()):
+        if room_state is not None:
+            tok = meta.get(pid, {}).get("token")
+            m = dict(msg)
+            m["room"] = {**room_state, "reconnect_tokens": {pid: tok} if tok else {}}
+            data = json.dumps(m)
+        else:
+            data = flat
         try:
             await ws.send_text(data)
         except Exception:
             pass
 
 
-def mk_room_state(room_id: str) -> dict[str, Any]:
+def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
     state = {
@@ -400,7 +412,13 @@ def mk_room_state(room_id: str) -> dict[str, Any]:
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "boards": room.get("boards", {}),
-        "reconnect_tokens": {p: info.get("token") for p, info in room.get("meta", {}).items()} if room.get("meta") else {},
+        # Only the recipient's OWN reconnect token. Direct replies pass viewer_pid=pid;
+        # broadcast_room injects each recipient's token per socket. (Was: every seat's
+        # token to everyone — a needless secret leak.)
+        "reconnect_tokens": (
+            {viewer_pid: room.get("meta", {}).get(viewer_pid, {}).get("token")}
+            if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
+        ),
     }
     # Ship the itemized VP breakdown + (projected) final scores so the review can show
     # exactly where each player's points came from and on which turn. Computed every
@@ -734,7 +752,7 @@ async def _handle_create(ws, room_id, pid, msg):
                                            boards=room["boards"])
         save_game(room_id)
         bot_turn = vs_ai and _bot_should_act(room)
-    await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id)})
+    await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
 
@@ -755,9 +773,10 @@ async def _handle_join(ws, room_id, pid, msg):
         room.setdefault("boards", {})[pid] = _valid_board(msg.get("board_id"))
         room["sockets"][pid] = ws
         save_game(room_id)
-    state = mk_room_state(room_id)          # build once; reuse for the reply + the broadcast
-    await _send(ws, {"type": "joined", "room_id": room_id, "room": state})
-    await broadcast_room(room_id, {"type": "room_update", "room": state})
+    # Reply gets the joiner's own token; the broadcast base carries none (broadcast_room
+    # injects each recipient's token per socket).
+    await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
+    await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
 
 
 async def _handle_start(ws, room_id, pid):
@@ -888,7 +907,7 @@ async def _handle_reconnect(ws, room_id, pid, msg):
             return
         room["sockets"][pid] = ws
         bot_turn = _bot_should_act(room)
-    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id)})
+    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
 
@@ -910,7 +929,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
         room.setdefault("meta", {}).setdefault(pid, {})["token"] = _gen_token()
         save_game(room_id)
         bot_turn = _bot_should_act(room)
-    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id)})
+    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
 
@@ -1006,10 +1025,14 @@ async def games_history(token: str | None = Depends(_bearer_token)):
 
 
 @coc_app.get("/games/{game_id}/review")
-async def games_review(game_id: str):
+async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None):
     """Read-only review of a FINISHED game: final board + itemized VP breakdown +
     scores, for the lobby History 'Review' button. Restricted to over games so an
-    in-progress game's full state isn't exposed here (resume it over WS instead)."""
+    in-progress game's full state isn't exposed here (resume it over WS instead), AND
+    to a PARTICIPANT (mirrors Spender's /review): a logged-in player whose account id is
+    in the game, or a guest presenting their in-game player_id — so an anonymous id-guess
+    can't read another table's finished board."""
     game_id = normalize_room(game_id)
     room = ROOMS.get(game_id)
     if room and room.get("game"):
@@ -1021,6 +1044,10 @@ async def games_review(game_id: str):
         g, players = state.get("game"), state.get("players", {})
     if not isinstance(g, dict) or not g.get("players") or g.get("phase") != "over":
         return {"ok": False, "message": "game not finished"}
+    user = get_user_by_session(token) if token else None
+    requester = (user or {}).get("id") or player_id
+    if not requester or requester not in players:
+        return {"ok": False, "message": "not your game"}
     return {
         "ok": True, "game": g, "players": players, "winner": g.get("winner"),
         "final_scores": engine.final_scores(g),
