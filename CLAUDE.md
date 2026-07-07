@@ -505,6 +505,21 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       net → re-gate the winner at the serving config (30/1.0) + swap `coc_pv_model.bin`. Loop
       self-plays at the default 20/1.5 (leaf config is ~irrelevant to the value head, which trains on
       outcomes; re-gate the winner at 30/1.0 before shipping). Watch `coc_run_nv/loop_log.txt`.
+      Iter 0: gate 0.475 (flat), probe netval-vs-hybrid 0.59 ✓, yardstick vs scaffold@2000 0.55 ✓.
+    - **PERF: vectorized net forward ~6.5x native / ~3x wasm (`21c7d9a` + `89099bc` — DO NOT regress).**
+      The netval leaf was ~97% net forward (bench_coc breakdown: forward 489µs vs features 2.9µs, heur
+      0.1µs, rollout ~6µs), and `valuenet::linear`'s single-accumulator dot is a serial FP dependency
+      chain LLVM may NOT vectorize (float reassociation forbidden) — ~1.3 GFLOPS on a Zen 4 core. Fix:
+      32-lane (4×8) chunked multi-accumulator `dot` (autovectorizes) + **`coc-core/.cargo/config.toml`
+      `-C target-cpu=native`** (native x86_64-msvc only; wasm32 untouched) + `forward_value_raw`
+      (value-head-only truncation eval) + inv_sd precomputed at load. **Native: forward 489→73µs, netval
+      search ~1,000→~5,300-5,800 sims/s/core (~5.5x); wasm (`+simd128` via RUSTFLAGS on the wasm-pack
+      call): 466→~1,420 sims/s single-thread → the live Expert gets ~3x the sims/decision in its 900ms
+      budget (same net/protocol; a no-simd browser fails wasm init → existing hard-bot fallback).**
+      Parity holds (net_export_check 3.3e-7, tighter than before). The netval loop was killed mid-iter-1
+      + relaunched on the fast build (clean: HARVESTED markers + File::create truncation; iter-0 gate ran
+      on the old binary — win rates stay comparable, CRN is within-gate). Remaining perf levers if ever
+      needed (diminishing): int8 quantization, leaf batching, GPU inference server.
     - Still open: a human playtest of the shipped tuned-netval Expert.
 
 ---
