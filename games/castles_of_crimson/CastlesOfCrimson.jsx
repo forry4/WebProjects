@@ -878,7 +878,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
   const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
-  const setupOpenTimer = useRef(null);                  // delays the setup auto-view (see the effect)
+  const aiThinkingRef = useRef(false);                  // latest aiThinking, read inside timeouts
+  const revealHoldRef = useRef(false);                  // setup-castle reveal owns the modal (blocks the generic auto-close)
+  const prevOppCastleRef = useRef(undefined);           // opp starting-castle presence last seen (undefined = no snapshot yet)
+  const revealCloseTimer = useRef(null);                // auto-close timer for the setup-castle reveal
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
@@ -994,28 +997,63 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
-  // Vs the bot: auto-open the opponent view when the bot's turn begins (so you can
-  // watch it build), and auto-close when your turn returns (the view is a blocking
+  // Vs the bot: auto-open the opponent view when the bot's PLAYING turn begins (so you
+  // can watch it build), and auto-close when your turn returns (the view is a blocking
   // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
-  // During SETUP the open is briefly DELAYED: placing your starting castle ends your
-  // turn, so the bot's turn (and this auto-open) fires immediately — without the delay
-  // the modal would cover your board before your own castle's pop-in plays. The bot's
-  // own planning latency keeps the modal open in time to still show ITS castle land.
+  // The SETUP starting-castle reveal is owned by its own effect below; while it holds
+  // the modal (revealHoldRef), this generic handler must NOT close it — otherwise the
+  // board vanishes on the very update that places the castle (the reported bug).
   useEffect(() => {
-    const clearTimer = () => { if (setupOpenTimer.current) { clearTimeout(setupOpenTimer.current); setupOpenTimer.current = null; } };
-    if (aiThinking && !prevAiThinking.current) {
-      if (setupPhase) {
-        clearTimer();
-        setupOpenTimer.current = setTimeout(() => { setupOpenTimer.current = null; setViewOpp(true); }, 550);
-      } else setViewOpp(true);
-    } else if (!aiThinking && prevAiThinking.current) {
-      clearTimer();                                     // bot's turn ended before the delay elapsed
-      setViewOpp(false);
-    }
+    aiThinkingRef.current = aiThinking;
+    const wasAi = prevAiThinking.current;
     prevAiThinking.current = aiThinking;
-    return clearTimer;                                  // cancel a pending open when the bot's turn flips / on unmount
+    if (revealHoldRef.current) return;                  // setup-castle reveal owns the modal
+    if (aiThinking && !wasAi) setViewOpp(true);
+    else if (!aiThinking && wasAi) setViewOpp(false);
   }, [aiThinking]);
   useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
+
+  // Setup starting-castle reveal (vs the bot). When the opponent's starting castle first
+  // appears on their board, force their board OPEN, pop the castle in on it, hold it
+  // visible long enough to watch, then close (unless it's already the bot's playing turn,
+  // in which case the generic handler keeps it open for A-1). This is decoupled from
+  // aiThinking because the bot's SECOND castle transitions the game straight to "playing"
+  // in the same update — so the naive auto-close fired at the exact moment the castle
+  // landed, closing the board just as the animation played (the reported bug).
+  useEffect(() => {
+    if (!game || !roomData?.vs_ai) { prevOppCastleRef.current = undefined; return; }
+    const castle = opp && opp.castle_sid ? opp.duchy?.[opp.castle_sid] : null;
+    const had = prevOppCastleRef.current;
+    prevOppCastleRef.current = !!castle;
+    // Reveal ONLY on a null->placed transition we actually witnessed (had === false).
+    // `undefined` = first snapshot this mount (fresh create OR reconnect mid-game) —
+    // never reveal then, so reconnecting to an in-progress game doesn't replay it.
+    if (over || reviewing || !castle || had !== false) return;
+    revealHoldRef.current = true;
+    setViewOpp(true);                                            // show their board
+    // Pop the castle in AFTER the modal mounts (two rAFs) so [data-oppsid] exists.
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-oppsid="${opp.castle_sid}"]`);
+      if (el) {
+        const d = el.getBoundingClientRect();
+        const W = 58, H = 67;
+        const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
+        const s1 = Math.max(0.5, Math.min(1, d.width / W));
+        const f = { id: `f${flyerSeq.current++}`, tile: castle, left: dcx - W / 2, top: dcy - H / 2, w: W, h: H, dx: 0, dy: 0, s0: 0.2, s1 };
+        setFlyers((fs) => [...fs, f]);
+        setTimeout(() => setFlyers((fs) => fs.filter((x) => x.id !== f.id)), 640);
+      }
+    }));
+    // Hold the board open so the pop-in is seen, then release the modal to the generic
+    // handler: close it unless it's now the bot's playing turn (bot was start player).
+    if (revealCloseTimer.current) clearTimeout(revealCloseTimer.current);
+    revealCloseTimer.current = setTimeout(() => {
+      revealCloseTimer.current = null;
+      revealHoldRef.current = false;
+      if (!aiThinkingRef.current) setViewOpp(false);
+    }, 1900);
+    return () => cancelAnimationFrame(raf);
+  }, [game]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tile-move animations: diff MY storage/duchy each update and fly the moved tile
   // from where it was (depot / black depot / storage) to its new home. Mirrors
