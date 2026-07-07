@@ -10,9 +10,11 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use coc_core::engine::State;
+use coc_core::engine::{self, State};
+use coc_core::rng::Rng;
 use coc_core::tiles;
 use coc_core::valuenet::PolicyValueNet;
+use coc_core::{feats, heuristic, vsearch};
 
 const N_ACTIONS: usize = 102;
 
@@ -131,6 +133,98 @@ fn bench_playout() {
     );
 }
 
+/// Realistic mid-game PLAYING states via random playout (snapshots every ~40
+/// micro-moves) — the netval-leaf breakdown benches run over these, not the
+/// synthetic clone-probe state.
+fn playout_states(n: usize) -> Vec<State> {
+    let mut rng = Rng::new(0xFEED);
+    let mut out = Vec::with_capacity(n);
+    let mut g = 0u64;
+    while out.len() < n {
+        let mut s = State::new_game([(g % 9) as u8, ((g / 9) % 9) as u8], 1000 + g);
+        let mut moves = 0u64;
+        while !s.is_over() && out.len() < n {
+            let acts = engine::legal_actions_full(&s);
+            let a = acts[rng.below(acts.len())];
+            engine::apply(&mut s, a);
+            moves += 1;
+            if moves % 40 == 0 && s.mode == engine::PLAYING {
+                out.push(s.clone());
+            }
+        }
+        g += 1;
+    }
+    out
+}
+
+/// The netval-leaf cost breakdown: encoder / heuristic eval / net forward /
+/// full leaf / full search sims/s. This is where self-play + serving time goes.
+fn bench_leaf_breakdown() {
+    let states = playout_states(64);
+    let net = PolicyValueNet::random(feats::N_FEATS, &[512, 256], N_ACTIONS, 7);
+
+    let n = 20_000usize;
+    let t0 = Instant::now();
+    let mut acc = 0.0f32;
+    for i in 0..n {
+        let s = &states[i % states.len()];
+        let f = feats::features(black_box(s), s.actor() as usize);
+        acc += f[i % feats::N_FEATS];
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("features(): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
+
+    let t0 = Instant::now();
+    let mut acc = 0.0f64;
+    for i in 0..n {
+        let s = &states[i % states.len()];
+        acc += heuristic::eval_reward(black_box(s), s.actor() as usize);
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("heur eval_reward: {:.1} us/call  [acc {:.3}]", dt / n as f64 * 1e6, acc);
+
+    // forward on precomputed features (isolates the net matvec)
+    let fs: Vec<Vec<f32>> = states.iter().map(|s| feats::features(s, s.actor() as usize)).collect();
+    let n = 20_000usize;
+    let t0 = Instant::now();
+    let mut acc = 0.0f32;
+    for i in 0..n {
+        let (v, pol) = net.forward_raw(black_box(&fs[i % fs.len()]));
+        acc += v + pol[i % N_ACTIONS];
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("forward_raw (934->[512,256]): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
+
+    let n = 5_000usize;
+    let mut rng = Rng::new(0xABCD);
+    let t0 = Instant::now();
+    let mut acc = 0.0f64;
+    for i in 0..n {
+        let s = &states[i % states.len()];
+        let legal = engine::legal_actions(s);
+        let (p, v) = vsearch::hybrid_netval_eval(&net, black_box(s), s.actor() as usize, &legal, &mut rng);
+        acc += v + p[legal[0]];
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("netval leaf (2 fwd + rollout): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
+
+    // full search: sims/s at the self-play operating point
+    for (label, state) in [("mid", &states[20]), ("late", &states[60])] {
+        let sims = 2_000u32;
+        let mut search = coc_core::mcts::Search::new(state.clone(), vsearch::C_PUCT);
+        let mut rng = Rng::new(0x5EED);
+        let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
+            vsearch::hybrid_netval_eval(&net, st, actor, lg, r)
+        };
+        let t0 = Instant::now();
+        for _ in 0..sims {
+            search.sim(&mut rng, &eval);
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        println!("netval SEARCH ({label}): {:.0} sims/s/core", sims as f64 / dt);
+    }
+}
+
 fn main() {
     let s = midgame_state();
     bench_clone(&s);
@@ -143,4 +237,5 @@ fn main() {
     ] {
         bench_pv(in_dim, &trunk);
     }
+    bench_leaf_breakdown();
 }

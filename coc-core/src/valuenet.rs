@@ -18,15 +18,42 @@ fn relu_inplace(v: &mut [f32]) {
     }
 }
 
+/// Chunked multi-accumulator dot product. The single-accumulator form is a serial
+/// FP dependency chain the compiler may NOT vectorize (float reassociation is
+/// forbidden), which ran the matvec at ~1% of the core's FMA throughput — 32
+/// independent lanes let LLVM emit SIMD FMAs (AVX2/AVX-512 with target-cpu=native,
+/// simd128 on wasm). Summation order differs from the scalar form by ~1e-6 relative
+/// — net_export_check's 1e-4 parity bar still holds (re-verified after this change).
+#[inline]
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    const L: usize = 8;
+    let mut acc = [[0.0f32; L]; 4];
+    let mut ca = a.chunks_exact(4 * L);
+    let mut cb = b.chunks_exact(4 * L);
+    for (xa, xb) in (&mut ca).zip(&mut cb) {
+        for k in 0..4 {
+            for l in 0..L {
+                acc[k][l] += xa[k * L + l] * xb[k * L + l];
+            }
+        }
+    }
+    let mut s = 0.0f32;
+    for k in 0..4 {
+        for l in 0..L {
+            s += acc[k][l];
+        }
+    }
+    for (xa, xb) in ca.remainder().iter().zip(cb.remainder()) {
+        s += xa * xb;
+    }
+    s
+}
+
 /// y[out] = W[out x in] @ x[in] + b[out]  (row-major W).
 fn linear(w: &[f32], b: &[f32], x: &[f32], out_dim: usize, in_dim: usize, y: &mut [f32]) {
     for o in 0..out_dim {
         let row = &w[o * in_dim..o * in_dim + in_dim];
-        let mut acc = b[o];
-        for i in 0..in_dim {
-            acc += row[i] * x[i];
-        }
-        y[o] = acc;
+        y[o] = b[o] + dot(row, x);
     }
 }
 
@@ -125,7 +152,7 @@ impl StandardizedMlp {
 // (value in [-1,1], policy logits over the action space). The Python trainer exports this JSON layout.
 pub struct PolicyValueNet {
     mu: Vec<f32>,
-    sd: Vec<f32>,
+    inv_sd: Vec<f32>, // 1/sd precomputed at load (sd==0 -> 1.0); a mul beats 934 divs/forward
     tdims: Vec<usize>, // trunk dims: [in, h1, ..., H]
     tw: Vec<Vec<f32>>, // trunk weights per layer (row-major out x in)
     tb: Vec<Vec<f32>>,
@@ -144,7 +171,8 @@ impl PolicyValueNet {
     ) -> Self {
         assert_eq!(tw.len(), tdims.len() - 1);
         assert_eq!(tb.len(), tdims.len() - 1);
-        PolicyValueNet { mu, sd, tdims, tw, tb, vw, vb, pw, pb, n_act }
+        let inv_sd = sd.iter().map(|&s| if s != 0.0 { 1.0 / s } else { 1.0 }).collect();
+        PolicyValueNet { mu, inv_sd, tdims, tw, tb, vw, vb, pw, pb, n_act }
     }
     pub fn in_dim(&self) -> usize {
         self.mu.len()
@@ -171,7 +199,7 @@ impl PolicyValueNet {
         let s = (1.0 / hd as f32).sqrt();
         PolicyValueNet {
             mu: vec![0.0; in_dim],
-            sd: vec![1.0; in_dim],
+            inv_sd: vec![1.0; in_dim],
             tdims,
             tw,
             tb,
@@ -183,13 +211,12 @@ impl PolicyValueNet {
         }
     }
 
-    /// (value in [-1,1], policy logits[n_act]) from the raw feature vector.
-    pub fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+    /// Standardize + trunk layers -> the shared hidden vector both heads read.
+    fn trunk(&self, raw: &[f32]) -> Vec<f32> {
         let n = self.mu.len();
         let mut cur = vec![0.0f32; n];
         for i in 0..n {
-            let s = if self.sd[i] != 0.0 { self.sd[i] } else { 1.0 };
-            cur[i] = (raw[i] - self.mu[i]) / s;
+            cur[i] = (raw[i] - self.mu[i]) * self.inv_sd[i];
         }
         for l in 0..self.tw.len() {
             let (i, o) = (self.tdims[l], self.tdims[l + 1]);
@@ -198,12 +225,29 @@ impl PolicyValueNet {
             relu_inplace(&mut next);
             cur = next;
         }
+        cur
+    }
+
+    /// (value in [-1,1], policy logits[n_act]) from the raw feature vector.
+    pub fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+        let cur = self.trunk(raw);
         let hd = *self.tdims.last().unwrap();
         let mut vo = [0.0f32; 1];
         linear(&self.vw, &self.vb, &cur, 1, hd, &mut vo);
         let mut po = vec![0.0f32; self.n_act];
         linear(&self.pw, &self.pb, &cur, self.n_act, hd, &mut po);
         (vo[0].tanh(), po)
+    }
+
+    /// Value head only — skips the n_act x H policy matvec. The netval leaf's
+    /// truncation eval needs only the value, so this shaves the policy head's
+    /// share off the second forward of every sim.
+    pub fn forward_value_raw(&self, raw: &[f32]) -> f32 {
+        let cur = self.trunk(raw);
+        let hd = *self.tdims.last().unwrap();
+        let mut vo = [0.0f32; 1];
+        linear(&self.vw, &self.vb, &cur, 1, hd, &mut vo);
+        vo[0].tanh()
     }
 }
 

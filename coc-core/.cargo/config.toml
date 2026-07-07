@@ -1,0 +1,7 @@
+# Native builds target THIS box (the crate's native bins are offline tooling only —
+# harvest/gate/bench run here and nowhere else). target-cpu=native unlocks AVX-512/FMA
+# on the Zen 4 dev box for the chunked-dot matvec (valuenet::dot); the wasm serving
+# build is untouched (target-specific rustflags don't apply to wasm32-unknown-unknown;
+# the wasm build gets SIMD via -C target-feature=+simd128 on the wasm-pack invocation).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-cpu=native"]

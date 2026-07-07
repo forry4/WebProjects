@@ -202,7 +202,7 @@ pub fn hybrid_netval_eval_steps(
     let v = if r.mode == crate::engine::OVER {
         heuristic::terminal_reward(&r, actor)
     } else {
-        net.forward_raw(&crate::feats::features(&r, actor)).0 as f64
+        net.forward_value_raw(&crate::feats::features(&r, actor)) as f64
     };
     (p, v)
 }
