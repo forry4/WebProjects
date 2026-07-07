@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { Fragment, useState, useEffect, useRef, useCallback } from "react";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -718,6 +718,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-review-hd b{color:var(--gold);font-size:1.1rem}
 .coc-review-list{font-size:.82rem}
 .coc-review-sub{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);opacity:.8;margin:8px 0 3px}
+.coc-review-phase{text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold);opacity:.6;padding:5px 0 2px}
 .coc-review-row{display:flex;align-items:baseline;gap:8px;padding:2px 0;color:var(--text-dim)}
 .coc-review-t{flex:0 0 34px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:700;color:var(--gold);opacity:.75}
 .coc-review-lbl{flex:1;color:var(--text)}
@@ -1761,9 +1762,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-review">
             <h2>{isMe ? "Victory!" : tie ? "It's a tie!" : "Defeat"}</h2>
             <p className="coc-card-meta" style={{ margin: "6px 0 4px" }}>
-              {tie ? "The duchy is shared." : `${winnerName} wins the duchy.`}
+              {tie ? "The duchy is shared." : `${winnerName} has the greater duchy`}
             </p>
-            <p className="coc-review-hint">Every point, by turn (T#) or scored at the end — so you can verify the total.</p>
             <VpReview order={order} players={players} myId={myId} scores={scores}
               breakdowns={breakdowns} winnerPid={w} projected={false} />
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
@@ -2202,7 +2202,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               m.type === "phase_end"
                 ? <div key={i} className="coc-log-phase">{moveText(m, board)}</div>
                 : <div key={i}>
-                    <span className="coc-log-t">{m.t ? `T${m.t}` : "·"}</span>
+                    {/* phase-round label ("A-1".."E-5"); T# fallback for pre-ph saved games */}
+                    <span className="coc-log-t">{m.t ? (m.ph ? `${m.ph}-${m.rd}` : `T${m.t}`) : "·"}</span>
                     {m.pid ? `${players[m.pid] || m.pid} ` : ""}{moveText(m, board)}{m.vp ? ` (+${m.vp} VP)` : ""}
                   </div>
             ))}
@@ -2265,7 +2266,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-modal-bg" onClick={() => setShowScores(false)}>
           <div className="coc-modal coc-review-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Score breakdown</h3>
-            <p className="coc-review-hint">Every point so far, by turn (T#). End-of-game bonuses are faded — they're projected and only count once the game ends.</p>
+            <p className="coc-review-hint">End-of-game bonuses are faded — they're projected and only count once the game ends.</p>
             <VpReview order={game.order || Object.keys(players)} players={players} myId={myId}
               scores={roomData?.final_scores || {}} breakdowns={roomData?.vp_breakdown || {}}
               winnerPid={null} projected />
@@ -2350,11 +2351,18 @@ function VpReview({ order, players, myId, scores, breakdowns, winnerPid, project
               {bd.length === 0 && <div className="coc-review-empty">No breakdown available for this game.</div>}
               {during.length > 0 && <div className="coc-review-sub">During the game</div>}
               {during.map((i, k) => (
-                <div key={`d${k}`} className="coc-review-row">
-                  <span className="coc-review-t">T{i.t}</span>
-                  <span className="coc-review-lbl">{i.label}</span>
-                  <span className="coc-review-vp">+{i.vp}</span>
-                </div>
+                <Fragment key={`d${k}`}>
+                  {/* segment by phase (like the log's phase dividers); items carry ph/rd
+                      from the move log — absent on pre-ph saved games (no dividers, T# label) */}
+                  {i.ph && i.ph !== during[k - 1]?.ph && (
+                    <div className="coc-review-phase">— Phase {i.ph} —</div>
+                  )}
+                  <div className="coc-review-row">
+                    <span className="coc-review-t">{i.ph ? `${i.ph}-${i.rd}` : `T${i.t}`}</span>
+                    <span className="coc-review-lbl">{i.label}</span>
+                    <span className="coc-review-vp">+{i.vp}</span>
+                  </div>
+                </Fragment>
               ))}
               {ends.length > 0 && <div className={`coc-review-sub${projected ? " proj" : ""}`}>End of game{projected ? " — projected" : ""}</div>}
               {ends.map((i, k) => (
@@ -2449,7 +2457,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
         <div className="coc-modal-row">
           {Object.keys(me.goods).filter((c) => me.goods[c] > 0).map((c) => (
             <button key={c} className="coc-btn outline sm" onClick={() => mv({ type: "warehouse_sell", color: c })}>
-              <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[c], marginRight: 5 }}>{sellNum(c)}</span>×{me.goods[c]}
+              <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[c], marginRight: 5 }}>{sellNum(c)}</span>#{sellNum(c)} goods ×{me.goods[c]}
             </button>
           ))}
           <button className="coc-btn ghost sm" onClick={skip}>Skip</button>
@@ -2477,7 +2485,7 @@ function PendingModal({ game, board, me, extraValue, setExtraValue, mv, goodsFor
             <button className="coc-btn ghost sm" onClick={() => mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } })}>Take 2 Workers</button>
             <button className="coc-btn ghost sm" disabled={!(me.goods[goodsForDie] > 0)} onClick={() => mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } })}>
               Sell{goodsForDie
-                ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{sellNum(goodsForDie)}</span>{me.goods[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
+                ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{sellNum(goodsForDie)}</span> #{sellNum(goodsForDie)} goods{me.goods[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
                 : " goods"}</button>
           </div>
         )}

@@ -326,16 +326,22 @@ def vp_breakdown(game: dict, pid: str) -> list[dict]:
         if typ == "area_complete":
             label = f"Completed a size-{m.get('size', '?')} region"
         elif typ == "bonus_tile":
-            label = f"Color bonus ({m.get('color', '?')})"
+            c = m.get("color", "?")
+            # display name: the castle color's data key is "burgundy", shown as "crimson"
+            label = f"Color bonus ({'crimson' if c == 'burgundy' else c})"
         elif typ == "livestock_score":
             label = f"Livestock scored ({m.get('animal', '?')})"
         elif typ == "sell_goods":
-            label = f"Sold {m.get('count', '?')} goods"
+            # goods are named by number ("#N goods"), never by color; keep the count too
+            c = m.get("color")
+            n = tiles.GOODS_COLORS.index(c) + 1 if c in tiles.GOODS_COLORS else "?"
+            label = f"Sold #{n} goods x {m.get('count', '?')}"
         elif typ == "building_effect":               # only the watchtower carries vp>0
             label = "Watchtower"
         else:
             label = typ
-        items.append({"t": t, "source": typ, "label": label, "vp": vp})
+        items.append({"t": t, "ph": m.get("ph"), "rd": m.get("rd"),
+                      "source": typ, "label": label, "vp": vp})
     goods = sum(p["goods"].values())
     if goods:
         items.append({"t": None, "source": "goods", "label": f"Leftover goods x {goods}", "vp": goods})
@@ -371,7 +377,11 @@ def winner(game: dict) -> str | list[str]:
 
 # ── Small helpers ───────────────────────────────────────────────────────────
 def _log(game: dict, pid: str, mtype: str, **kw) -> None:
-    rec = {"pid": pid, "type": mtype, "t": game.get("turn_number", 0)}
+    # `ph`/`rd` = the phase letter + round when the move happened, so the UI can label
+    # entries "A-1".."E-5" (income/phase_end log before phase_letter advances, so they
+    # correctly stamp the ENDING phase). Old saved games lack them → UI falls back to t.
+    rec = {"pid": pid, "type": mtype, "t": game.get("turn_number", 0),
+           "ph": game.get("phase_letter"), "rd": game.get("round")}
     rec.update(kw)
     game["moves"].insert(0, rec)
     # Keep the WHOLE game's log (records are tiny — {pid, type, +a few fields}) so the
@@ -933,7 +943,8 @@ def _h_place_starting_castle(game, pid, move):
     if sid not in b.SPACES:
         return False, "invalid space"
     if b.SPACES[sid]["color"] != "burgundy":
-        return False, "starting castle must be placed on a burgundy space"
+        # "burgundy" is the data key; the player-facing name for the castle color is crimson
+        return False, "starting castle must be placed on a crimson space"
     if p["duchy"][sid] is not None:
         return False, "space already occupied"
     p["duchy"][sid] = tiles.starting_castle_tile()

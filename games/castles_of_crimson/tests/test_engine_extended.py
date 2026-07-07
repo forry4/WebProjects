@@ -352,7 +352,7 @@ def test_place_starting_castle_on_non_burgundy_rejected():
     g = engine.new_game(["p1", "p2"], seed=18)
     sid = next(s for s, i in board.SPACES.items() if i["color"] != "burgundy")
     ok, err = engine.apply_move(g, g["turn"], {"type": "place_starting_castle", "space_id": sid})
-    assert not ok and "burgundy" in err
+    assert not ok and "crimson" in err   # player-facing name for the burgundy data key
 
 
 def test_place_starting_castle_on_occupied_rejected():
