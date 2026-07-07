@@ -228,6 +228,43 @@ fn bench_leaf_breakdown() {
         );
     }
 
+    // int8+VNNI quantized forward (single + agreement vs f32)
+    {
+        let qnet = coc_core::valuenet::QuantPolicyValueNet::from_f32(&net);
+        use coc_core::valuenet::PvEval;
+        let n = 20_000usize;
+        let t0 = Instant::now();
+        let mut acc = 0.0f32;
+        for i in 0..n {
+            let (v, pol) = PvEval::forward_raw(&qnet, black_box(&fs[i % fs.len()]));
+            acc += v + pol[i % N_ACTIONS];
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        println!(
+            "forward_q int8 (single): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]",
+            dt / n as f64 * 1e6,
+            n as f64 / dt,
+            acc
+        );
+        // agreement vs f32 on the playout states
+        let mut vmae = 0.0f64;
+        let mut agree = 0usize;
+        for f in &fs {
+            let (v32, l32) = net.forward_raw(f);
+            let (v8, l8) = PvEval::forward_raw(&qnet, f);
+            vmae += (v32 as f64 - v8 as f64).abs();
+            let am32 = (0..N_ACTIONS).max_by(|&a, &b| l32[a].partial_cmp(&l32[b]).unwrap()).unwrap();
+            let am8 = (0..N_ACTIONS).max_by(|&a, &b| l8[a].partial_cmp(&l8[b]).unwrap()).unwrap();
+            agree += (am32 == am8) as usize;
+        }
+        println!(
+            "int8 vs f32: value MAE {:.5}, policy-argmax agreement {}/{}",
+            vmae / fs.len() as f64,
+            agree,
+            fs.len()
+        );
+    }
+
     // full search: sims/s at the self-play operating point
     for (label, state) in [("mid", &states[20]), ("late", &states[60])] {
         let sims = 2_000u32;

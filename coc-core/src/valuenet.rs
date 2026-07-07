@@ -380,6 +380,209 @@ impl PolicyValueNet {
     }
 }
 
+/// The one abstraction the search/leaf/batch drivers need from a policy+value
+/// net — implemented by the f32 `PolicyValueNet` (delegating to its inherent
+/// methods) and the int8 `QuantPolicyValueNet`, so `:netval8` players run
+/// through the exact same search code as f32 ones.
+pub trait PvEval: Sync {
+    fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>);
+    fn forward_value_raw(&self, raw: &[f32]) -> f32;
+    fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)>;
+}
+
+impl PvEval for PolicyValueNet {
+    fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+        PolicyValueNet::forward_raw(self, raw)
+    }
+    fn forward_value_raw(&self, raw: &[f32]) -> f32 {
+        PolicyValueNet::forward_value_raw(self, raw)
+    }
+    fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)> {
+        PolicyValueNet::forward_batch(self, raws, need_policy)
+    }
+}
+
+// ─── int8 + VNNI quantized PV net ────────────────────────────────────────────
+// Trunk layers (96% of the MACs) quantized to int8 at LOAD from the f32 net (no
+// new file format): per-output-row symmetric weight scales, DYNAMIC per-vector
+// activation quantization (scale = amax/127, zero-point 128 -> u8 for
+// vpdpbusd's u8 x i8 form, with the precomputed 128*rowsum correction). Heads
+// + z-scoring stay f32. Integer accumulation is EXACT, so the VNNI and scalar
+// fallback paths produce identical outputs (deterministic across machines) —
+// but int8 != f32, so this is an OPT-IN net (:netval8 / netval8 mode) gated by
+// STRENGTH vs the f32 netval, not by float parity.
+
+/// u8 x i8 dot with i32 accumulation — AVX-512 VNNI (`vpdpbusd`) when compiled
+/// for it (target-cpu=native on the Zen 4 box), exact-same-result scalar loop
+/// otherwise (wasm/CI).
+#[cfg(all(target_arch = "x86_64", target_feature = "avx512vnni"))]
+#[inline]
+fn qdot(w: &[i8], x: &[u8]) -> i32 {
+    use std::arch::x86_64::*;
+    unsafe {
+        let n = w.len();
+        let chunks = n / 64;
+        let mut acc = _mm512_setzero_si512();
+        for c in 0..chunks {
+            let xv = _mm512_loadu_si512(x.as_ptr().add(c * 64) as *const _);
+            let wv = _mm512_loadu_si512(w.as_ptr().add(c * 64) as *const _);
+            acc = _mm512_dpbusd_epi32(acc, xv, wv);
+        }
+        let mut s = _mm512_reduce_add_epi32(acc);
+        for i in chunks * 64..n {
+            s += (x[i] as i32) * (w[i] as i32);
+        }
+        s
+    }
+}
+
+#[cfg(not(all(target_arch = "x86_64", target_feature = "avx512vnni")))]
+#[inline]
+fn qdot(w: &[i8], x: &[u8]) -> i32 {
+    let mut s = 0i32;
+    for (wi, xi) in w.iter().zip(x.iter()) {
+        s += (*xi as i32) * (*wi as i32);
+    }
+    s
+}
+
+/// Quantize one activation vector: symmetric i8 (amax/127) shifted to u8 with
+/// zero-point 128. Returns (quantized, scale).
+#[inline]
+fn quantize_act(x: &[f32], out: &mut Vec<u8>) -> f32 {
+    let mut amax = 0.0f32;
+    for &v in x {
+        amax = amax.max(v.abs());
+    }
+    let s = if amax > 0.0 { amax / 127.0 } else { 1.0 };
+    let inv = 1.0 / s;
+    out.clear();
+    out.extend(x.iter().map(|&v| {
+        let q = (v * inv).round().clamp(-127.0, 127.0) as i32;
+        (q + 128) as u8
+    }));
+    s
+}
+
+pub struct QuantPolicyValueNet {
+    mu: Vec<f32>,
+    inv_sd: Vec<f32>,
+    tdims: Vec<usize>,
+    qw: Vec<Vec<i8>>,   // per trunk layer: row-major int8 weights
+    qs: Vec<Vec<f32>>,  // per layer: per-row weight scale
+    qrs: Vec<Vec<i32>>, // per layer: per-row weight sum (zero-point correction)
+    tb: Vec<Vec<f32>>,  // f32 biases
+    vw: Vec<f32>,
+    vb: Vec<f32>,
+    pw: Vec<f32>,
+    pb: Vec<f32>,
+    n_act: usize,
+}
+
+impl QuantPolicyValueNet {
+    pub fn from_f32(net: &PolicyValueNet) -> Self {
+        let mut qw = Vec::new();
+        let mut qs = Vec::new();
+        let mut qrs = Vec::new();
+        for l in 0..net.tw.len() {
+            let (i, o) = (net.tdims[l], net.tdims[l + 1]);
+            let w = &net.tw[l];
+            let mut lw = vec![0i8; i * o];
+            let mut ls = vec![1.0f32; o];
+            let mut lrs = vec![0i32; o];
+            for oi in 0..o {
+                let row = &w[oi * i..oi * i + i];
+                let mut amax = 0.0f32;
+                for &v in row {
+                    amax = amax.max(v.abs());
+                }
+                let s = if amax > 0.0 { amax / 127.0 } else { 1.0 };
+                let inv = 1.0 / s;
+                let mut rs = 0i32;
+                for (j, &v) in row.iter().enumerate() {
+                    let q = (v * inv).round().clamp(-127.0, 127.0) as i32;
+                    lw[oi * i + j] = q as i8;
+                    rs += q;
+                }
+                ls[oi] = s;
+                lrs[oi] = rs;
+            }
+            qw.push(lw);
+            qs.push(ls);
+            qrs.push(lrs);
+        }
+        QuantPolicyValueNet {
+            mu: net.mu.clone(),
+            inv_sd: net.inv_sd.clone(),
+            tdims: net.tdims.clone(),
+            qw,
+            qs,
+            qrs,
+            tb: net.tb.clone(),
+            vw: net.vw.clone(),
+            vb: net.vb.clone(),
+            pw: net.pw.clone(),
+            pb: net.pb.clone(),
+            n_act: net.n_act,
+        }
+    }
+
+    /// Quantized trunk: standardize f32 -> per layer (quantize acts -> int8
+    /// matvec -> dequant + bias + ReLU in f32).
+    fn trunk_q(&self, raw: &[f32]) -> Vec<f32> {
+        let n = self.mu.len();
+        let mut cur = vec![0.0f32; n];
+        for i in 0..n {
+            cur[i] = (raw[i] - self.mu[i]) * self.inv_sd[i];
+        }
+        let mut xq: Vec<u8> = Vec::new();
+        for l in 0..self.qw.len() {
+            let (i, o) = (self.tdims[l], self.tdims[l + 1]);
+            let sx = quantize_act(&cur, &mut xq);
+            let mut next = vec![0.0f32; o];
+            let w = &self.qw[l];
+            for oi in 0..o {
+                let acc = qdot(&w[oi * i..oi * i + i], &xq);
+                let corrected = acc - 128 * self.qrs[l][oi];
+                let y = corrected as f32 * (sx * self.qs[l][oi]) + self.tb[l][oi];
+                next[oi] = if y > 0.0 { y } else { 0.0 };
+            }
+            cur = next;
+        }
+        cur
+    }
+}
+
+impl PvEval for QuantPolicyValueNet {
+    fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+        let cur = self.trunk_q(raw);
+        let hd = *self.tdims.last().unwrap();
+        let v = (self.vb[0] + dot(&self.vw[..hd], &cur)).tanh();
+        let mut po = vec![0.0f32; self.n_act];
+        linear(&self.pw, &self.pb, &cur, self.n_act, hd, &mut po);
+        (v, po)
+    }
+    fn forward_value_raw(&self, raw: &[f32]) -> f32 {
+        let cur = self.trunk_q(raw);
+        let hd = *self.tdims.last().unwrap();
+        (self.vb[0] + dot(&self.vw[..hd], &cur)).tanh()
+    }
+    /// Per-input loop: with int8 the whole model is ~640KB (L2-resident), so
+    /// the memory-traffic case for cross-input blocking largely evaporates.
+    fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)> {
+        raws.iter()
+            .zip(need_policy)
+            .map(|(raw, &np)| {
+                if np {
+                    self.forward_raw(raw)
+                } else {
+                    (self.forward_value_raw(raw), Vec::new())
+                }
+            })
+            .collect()
+    }
+}
+
 // ─── Single-block self-attention over entity tokens ──────────────────────────
 // tokens: T x d → linear Q,K,V (d x d) → softmax(QKᵀ/√d) V → residual+meanpool → MLP head → scalar.
 pub struct AttnNet {

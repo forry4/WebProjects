@@ -17,7 +17,7 @@
 use coc_core::batch::{step_netval, SearchTask};
 use coc_core::engine::{self, State};
 use coc_core::netio::pv_from_json;
-use coc_core::valuenet::PolicyValueNet;
+use coc_core::valuenet::{PolicyValueNet, PvEval, QuantPolicyValueNet};
 use coc_core::vsearch;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -27,6 +27,7 @@ enum Player {
     NetArgmax(PolicyValueNet),
     Hybrid(PolicyValueNet),          // net prior + rollout-heuristic value
     NetVal(PolicyValueNet, usize, f64), // net prior + rollout(steps) + net-value; c_puct
+    NetVal8(QuantPolicyValueNet, usize, f64), // netval on the int8+VNNI quantized net
 }
 
 impl Player {
@@ -43,6 +44,19 @@ impl Player {
             return Player::Hybrid(pv_from_json(
                 &std::fs::read_to_string(path).expect("model"),
             ));
+        }
+        // netval8: int8-quantized netval (same @STEPS@CPUCT params). Checked
+        // BEFORE :netval — find(":netval") would also match ":netval8".
+        if let Some(idx) = spec.find(":netval8") {
+            let path = &spec[..idx];
+            let params: Vec<&str> = spec[idx + ":netval8".len()..]
+                .split('@')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let steps = params.first().and_then(|s| s.parse().ok()).unwrap_or(20);
+            let cpuct = params.get(1).and_then(|s| s.parse().ok()).unwrap_or(vsearch::C_PUCT);
+            let f32net = pv_from_json(&std::fs::read_to_string(path).expect("model"));
+            return Player::NetVal8(QuantPolicyValueNet::from_f32(&f32net), steps, cpuct);
         }
         // netval, optionally parameterized: "path:netval", "path:netval@STEPS",
         // "path:netval@STEPS@CPUCT" (@-delimited so a Windows path's ':' is safe).
@@ -64,11 +78,11 @@ impl Player {
     }
 
     /// (net, rollout_steps, c_puct) when this player is batchable netval.
-    fn netval(&self) -> Option<(&PolicyValueNet, usize, f64)> {
-        if let Player::NetVal(net, steps, cpuct) = self {
-            Some((net, *steps, *cpuct))
-        } else {
-            None
+    fn netval(&self) -> Option<(&dyn PvEval, usize, f64)> {
+        match self {
+            Player::NetVal(net, steps, cpuct) => Some((net, *steps, *cpuct)),
+            Player::NetVal8(net, steps, cpuct) => Some((net, *steps, *cpuct)),
+            _ => None,
         }
     }
 
@@ -94,23 +108,38 @@ impl Player {
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             }
             Player::NetVal(net, steps, cpuct) => {
-                let legal = engine::legal_actions(s);
-                if legal.len() == 1 {
-                    return legal[0];
-                }
-                let mut search = coc_core::mcts::Search::new(s.clone(), *cpuct);
-                let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
-                let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
-                    vsearch::hybrid_netval_eval_steps(net, st, actor, lg, r, *steps)
-                };
-                for _ in 0..sims {
-                    search.sim(&mut rng, &eval);
-                }
-                let visits = search.root_visits();
-                *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
+                choose_netval(net, s, sims, seed, *steps, *cpuct)
+            }
+            Player::NetVal8(net, steps, cpuct) => {
+                choose_netval(net, s, sims, seed, *steps, *cpuct)
             }
         }
     }
+}
+
+/// Sequential netval decision (shared by the f32 and int8 players).
+fn choose_netval(
+    net: &dyn PvEval,
+    s: &State,
+    sims: u32,
+    seed: u64,
+    steps: usize,
+    cpuct: f64,
+) -> usize {
+    let legal = engine::legal_actions(s);
+    if legal.len() == 1 {
+        return legal[0];
+    }
+    let mut search = coc_core::mcts::Search::new(s.clone(), cpuct);
+    let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
+    let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
+        vsearch::hybrid_netval_eval_steps(net, st, actor, lg, r, steps)
+    };
+    for _ in 0..sims {
+        search.sim(&mut rng, &eval);
+    }
+    let visits = search.root_visits();
+    *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
 }
 
 fn play(a: &Player, b: &Player, seed: u64, a_seat: usize, sims_a: u32, sims_b: u32) -> (f64, i32) {

@@ -29,7 +29,7 @@ use coc_core::engine::{self, State};
 use coc_core::feats;
 use coc_core::mcts::Search;
 use coc_core::rng::Rng;
-use coc_core::valuenet::PolicyValueNet;
+use coc_core::valuenet::{PolicyValueNet, PvEval, QuantPolicyValueNet};
 use coc_core::vsearch;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -52,7 +52,7 @@ fn root_readout(
     sims: u32,
     seed: u64,
     mode: Mode,
-    net: Option<&PolicyValueNet>,
+    net: Option<&dyn PvEval>,
 ) -> (Vec<i32>, f64) {
     match mode {
         Mode::Scaffold => vsearch::root_readout_heur(s, sims, vsearch::C_PUCT, seed),
@@ -96,7 +96,7 @@ fn run_thread(
     temp_micro: usize,
     seed0: u64,
     mode: Mode,
-    net: Option<&PolicyValueNet>,
+    net: Option<&dyn PvEval>,
 ) {
     let path = format!("{out}.t{t}.csv");
     let mut w = BufWriter::new(File::create(&path).expect("create out"));
@@ -186,7 +186,7 @@ fn run_thread_batched(
     sims: u32,
     temp_micro: usize,
     seed0: u64,
-    net: &PolicyValueNet,
+    net: &dyn PvEval,
     batch: usize,
 ) {
     use coc_core::batch::{step_netval, SearchTask};
@@ -334,11 +334,16 @@ fn main() {
     let net: Option<PolicyValueNet> = args.get(7).map(|p| {
         coc_core::netio::pv_from_json(&std::fs::read_to_string(p).expect("model"))
     });
-    let mode = match args.get(8).map(|s| s.as_str()) {
+    // "netval8" = netval search on the int8+VNNI quantized net (quantized at
+    // load from the same f32 json — no new file format); everything downstream
+    // treats it as Netval with a different net behind the PvEval seam.
+    let mode_arg = args.get(8).map(|s| s.as_str());
+    let quantize = mode_arg == Some("netval8");
+    let mode = match mode_arg {
         None | Some("scaffold") => Mode::Scaffold,
         Some("hybrid") => Mode::Hybrid,
         Some("pv") => Mode::Pv,
-        Some("netval") => Mode::Netval,
+        Some("netval") | Some("netval8") => Mode::Netval,
         Some(m) => panic!("bad mode {m}"),
     };
     if mode != Mode::Scaffold {
@@ -346,7 +351,13 @@ fn main() {
     }
     let batch: usize = args.get(9).map(|s| s.parse().unwrap()).unwrap_or(8);
     let per = games / threads as u64;
-    let net_ref = net.as_ref();
+    let qnet: Option<QuantPolicyValueNet> =
+        if quantize { net.as_ref().map(QuantPolicyValueNet::from_f32) } else { None };
+    let net_ref: Option<&dyn PvEval> = if quantize {
+        qnet.as_ref().map(|q| q as &dyn PvEval)
+    } else {
+        net.as_ref().map(|n| n as &dyn PvEval)
+    };
     std::thread::scope(|scope| {
         for t in 0..threads {
             let out = out.clone();

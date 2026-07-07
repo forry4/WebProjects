@@ -22,7 +22,6 @@ use crate::feats;
 use crate::heuristic;
 use crate::mcts::{Descent, LeafCtx, Search};
 use crate::rng::Rng;
-use crate::valuenet::PolicyValueNet;
 use crate::vsearch;
 
 /// One in-flight netval search (one game's current decision).
@@ -79,7 +78,7 @@ struct Pending {
 /// Advance every UNFINISHED task by exactly one simulation, evaluating all
 /// their leaves in one batched net pass. Tasks sharing this call must share
 /// `net` (the gate driver groups tasks per player before calling).
-pub fn step_netval(net: &PolicyValueNet, tasks: &mut [&mut SearchTask]) {
+pub fn step_netval<N: crate::valuenet::PvEval + ?Sized>(net: &N, tasks: &mut [&mut SearchTask]) {
     let mut rows: Vec<Vec<f32>> = Vec::with_capacity(tasks.len() * 2);
     let mut need_policy: Vec<bool> = Vec::with_capacity(tasks.len() * 2);
     let mut pendings: Vec<Pending> = Vec::with_capacity(tasks.len());

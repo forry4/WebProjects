@@ -148,8 +148,8 @@ pub fn priors_from_logits(logits: &[f32], legal: &[usize]) -> Vec<f64> {
 
 /// Net leaf: (legal-masked softmax of the policy logits, value head) — both from
 /// the leaf actor's perspective (features are mover-relative).
-pub fn pv_eval(
-    net: &crate::valuenet::PolicyValueNet,
+pub fn pv_eval<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
     s: &State,
     actor: usize,
     legal: &[usize],
@@ -161,8 +161,8 @@ pub fn pv_eval(
 
 /// Hybrid leaf: NET policy prior + ROLLOUT-heuristic value (isolates prior quality;
 /// also the S-style config — strong hand value + learned prior).
-pub fn hybrid_eval(
-    net: &crate::valuenet::PolicyValueNet,
+pub fn hybrid_eval<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
     s: &State,
     actor: usize,
     legal: &[usize],
@@ -179,8 +179,8 @@ pub fn hybrid_eval(
 /// (income/region/endgame); this plays them PART-way out (20 micro-steps) then
 /// applies the LEARNED long-horizon eval — the one untested lever after the pure
 /// value-leaf path closed. Terminal positions still use the exact terminal reward.
-pub fn hybrid_netval_eval(
-    net: &crate::valuenet::PolicyValueNet,
+pub fn hybrid_netval_eval<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
     s: &State,
     actor: usize,
     legal: &[usize],
@@ -191,8 +191,8 @@ pub fn hybrid_netval_eval(
 
 /// netval leaf with a configurable rollout truncation length (for the sweep — 20
 /// was inherited from the hybrid scaffold, never tuned for the net-value leaf).
-pub fn hybrid_netval_eval_steps(
-    net: &crate::valuenet::PolicyValueNet,
+pub fn hybrid_netval_eval_steps<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
     s: &State,
     actor: usize,
     legal: &[usize],
@@ -215,8 +215,8 @@ pub fn hybrid_netval_eval_steps(
 }
 
 /// PV-net search: visits + root value (root actor's perspective).
-pub fn root_readout_pv(
-    net: &crate::valuenet::PolicyValueNet,
+pub fn root_readout_pv<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
     s: &State,
     sims: u32,
     c_puct: f64,
