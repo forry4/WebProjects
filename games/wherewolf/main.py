@@ -24,6 +24,7 @@ No bots — humans only (3..10 players). Site identity/DB come from the shared
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import time
@@ -107,7 +108,70 @@ cleanup_stale_games("werewolf_games")   # cold-start prune
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
+# On the prod libSQL/Turso backend a write is a TLS+auth round-trip (~hundreds of ms).
+# These writes fire on EVERY state change (night step, move, join, reconnect), all
+# under ROOM_LOCK on the single event loop — so a synchronous inline write here (the
+# original code) blocked the whole game AND every other room per move. Mirrors the
+# Spender/CoC fix: writes go to a DEDICATED SINGLE-THREAD executor with its own
+# persistent connection — save_game snapshots+serializes on the CALLING thread (fast,
+# race-free vs ROOMS) then fires the write off; the single worker keeps writes strictly
+# in submission order; a failed write drops the connection so the next one reconnects.
+_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="ww-db-write")
+_save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
+
+
+def _drop_save_conn() -> None:
+    global _save_conn
+    try:
+        if _save_conn is not None:
+            _save_conn.close()
+    except Exception:
+        pass
+    _save_conn = None
+
+
+def _persist_row(room_id, status, host_id, host_name, p1id, p2id, player_ids_json,
+                 state_json, now, created_at) -> None:
+    """Upsert one werewolf_games row on the dedicated write thread (reused connection)."""
+    global _save_conn
+    try:
+        if _save_conn is None:
+            _save_conn = _db()
+        cur = _save_conn.cursor()
+        cur.execute("SELECT id FROM werewolf_games WHERE id=?", (room_id,))
+        if cur.fetchone() is not None:
+            cur.execute("""UPDATE werewolf_games SET status=?, player2_id=?, player_ids=?, state_json=?, updated_at=?
+                           WHERE id=?""",
+                        (status, p2id, player_ids_json, state_json, now, room_id))
+        else:
+            cur.execute("""INSERT INTO werewolf_games
+                           (id,status,host_id,host_name,player1_id,player2_id,player_ids,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, host_id, host_name, p1id, p2id,
+                         player_ids_json, state_json, created_at, now))
+        _save_conn.commit()
+    except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn
+        LOG.warning("wherewolf save_game write failed for %s; dropping connection", room_id, exc_info=True)
+        _drop_save_conn()
+
+
+def _delete_row(room_id) -> None:
+    """Delete one row on the SAME write thread so it serializes after pending saves."""
+    global _save_conn
+    try:
+        if _save_conn is None:
+            _save_conn = _db()
+        cur = _save_conn.cursor()
+        cur.execute("DELETE FROM werewolf_games WHERE id=?", (room_id,))
+        _save_conn.commit()
+    except Exception:  # noqa: BLE001
+        LOG.warning("wherewolf delete_game failed for %s; dropping connection", room_id, exc_info=True)
+        _drop_save_conn()
+
+
 def save_game(room_id: str) -> None:
+    """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
+    event loop via the single-thread write executor (fire-and-forget)."""
     room = ROOMS.get(room_id)
     if not room:
         return
@@ -121,36 +185,17 @@ def save_game(room_id: str) -> None:
         "deck": room.get("deck"),
     }
     now = int(time.time())
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM werewolf_games WHERE id=?", (room_id,))
-    exists = cur.fetchone() is not None
-    if exists:
-        cur.execute("""UPDATE werewolf_games SET status=?, player2_id=?, player_ids=?, state_json=?, updated_at=?
-                       WHERE id=?""",
-                    (room.get("status"),
-                     pids[1] if len(pids) > 1 else None,
-                     json.dumps(pids),
-                     json.dumps(state), now, room_id))
-    else:
-        cur.execute("""INSERT INTO werewolf_games
-                       (id,status,host_id,host_name,player1_id,player2_id,player_ids,state_json,created_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (room_id, room.get("status", "open"),
-                     room.get("host"), room.get("players", {}).get(room.get("host")),
-                     pids[0] if pids else None,
-                     pids[1] if len(pids) > 1 else None,
-                     json.dumps(pids), json.dumps(state), now, now))
-    conn.commit()
-    conn.close()
+    _DB_WRITE_EXEC.submit(
+        _persist_row, room_id, room.get("status", "open"),
+        room.get("host"), room.get("players", {}).get(room.get("host")),
+        pids[0] if pids else None,
+        pids[1] if len(pids) > 1 else None,
+        json.dumps(pids), json.dumps(state), now, now,
+    )
 
 
 def delete_game(room_id: str) -> None:
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM werewolf_games WHERE id=?", (room_id,))
-    conn.commit()
-    conn.close()
+    _DB_WRITE_EXEC.submit(_delete_row, room_id)
 
 
 def load_game_to_memory(room_id: str) -> bool:
@@ -440,6 +485,15 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: anyone can open a
+    # socket claiming any pid (all pids are broadcast in the public players map). So a
+    # socket must PROVE ownership of `pid` before it can act as that seat or receive
+    # that seat's private (secret-role / night-action) view. `authed` flips true only
+    # through a handshake that establishes ownership — create (minted it), join as a
+    # brand-new seat, reconnect with the per-seat room token, auth_reconnect with a
+    # valid server token, or join to an existing seat proven by a matching session
+    # token. Every mutating/host action is gated on it, so a spoofed pid is inert.
+    authed = False
     try:
         while True:
             raw = await websocket.receive_text()
@@ -450,21 +504,29 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 continue
             action = msg.get("action")
             if action == "create":
-                await _handle_create(websocket, room_id, pid, msg)
+                authed = await _handle_create(websocket, room_id, pid, msg) or authed
             elif action == "join":
-                await _handle_join(websocket, room_id, pid, msg)
-            elif action == "set_roles":
-                await _handle_set_roles(websocket, room_id, pid, msg)
-            elif action == "start":
-                await _handle_start(websocket, room_id, pid)
-            elif action == "move":
-                await _handle_move(websocket, room_id, pid, msg)
+                authed = await _handle_join(websocket, room_id, pid, msg) or authed
             elif action == "reconnect":
-                await _handle_reconnect(websocket, room_id, pid, msg)
+                authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
-                await _handle_auth_reconnect(websocket, room_id, pid, msg)
-            elif action == "abandon":
-                await _handle_abandon(websocket, room_id, pid)
+                authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
+            elif action in ("set_roles", "start", "move", "abandon"):
+                # Privileged: only an authenticated seat may act. (set_roles/start also
+                # re-check host==pid, but pid alone is spoofable, so authed is what makes
+                # that check meaningful.)
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
+                if action == "set_roles":
+                    await _handle_set_roles(websocket, room_id, pid, msg)
+                elif action == "start":
+                    await _handle_start(websocket, room_id, pid)
+                elif action == "move":
+                    await _handle_move(websocket, room_id, pid, msg)
+                else:
+                    await _handle_abandon(websocket, room_id, pid)
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
     except WebSocketDisconnect:
@@ -488,12 +550,12 @@ async def _send(ws: WebSocket, payload: dict) -> None:
     await ws.send_text(json.dumps(payload))
 
 
-async def _handle_create(ws, room_id, pid, msg):
+async def _handle_create(ws, room_id, pid, msg) -> bool:
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
-            return
+            return False
         ROOMS[room_id] = {
             "players": {pid: name},
             "sockets": {pid: ws},
@@ -506,29 +568,48 @@ async def _handle_create(ws, room_id, pid, msg):
         }
         save_game(room_id)
     await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, pid)})
+    return True   # the creator minted this seat → owns it
 
 
-async def _handle_join(ws, room_id, pid, msg):
+async def _handle_join(ws, room_id, pid, msg) -> bool:
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
+    # A logged-in user re-entering a seat they ALREADY hold (new device / cleared
+    # storage → no per-seat room token) proves ownership with their session token:
+    # pid == their account id, which an attacker can't forge. Resolved before the lock
+    # (a DB read; mirrors _handle_auth_reconnect validating before ROOM_LOCK).
+    sess = msg.get("session_token")
+    session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
-        if pid not in room["players"]:
+            return False
+        if pid in room["players"]:
+            # Re-entry to an EXISTING seat. Identity MUST be proven or the "joined"
+            # reply below would hand a stranger this seat's secret role / night view.
+            # `join` carries no room token (that's `reconnect`), so the only proof
+            # here is a session token whose account id == pid.
+            if session_uid != pid:
+                await _send(ws, {"type": "error",
+                                 "message": "seat already taken — reconnect to rejoin"})
+                return False
+            room["sockets"][pid] = ws
+            save_game(room_id)
+        else:
             if room.get("status") != "open":
                 await _send(ws, {"type": "error", "message": "game already started"})
-                return
+                return False
             if len(room["players"]) >= MAX_PLAYERS:
                 await _send(ws, {"type": "error", "message": "room is full"})
-                return
+                return False
             room["players"][pid] = name
             room.setdefault("meta", {})[pid] = {"token": _gen_token()}
-        room["sockets"][pid] = ws
-        save_game(room_id)
+            room["sockets"][pid] = ws
+            save_game(room_id)
     await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, pid)})
     await broadcast_room(room_id)
     _ensure_day_timer(room_id)
+    return True
 
 
 async def _handle_set_roles(ws, room_id, pid, msg):
@@ -620,39 +701,41 @@ async def _handle_move(ws, room_id, pid, msg):
         asyncio.create_task(_run_night(room_id))
 
 
-async def _handle_reconnect(ws, room_id, pid, msg):
+async def _handle_reconnect(ws, room_id, pid, msg) -> bool:
     token = msg.get("token")
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         if room.get("meta", {}).get(pid, {}).get("token") != token:
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         room["sockets"][pid] = ws
         save_game(room_id)
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, pid)})
     _ensure_day_timer(room_id)
+    return True   # proved ownership via the per-seat room token
 
 
-async def _handle_auth_reconnect(ws, room_id, pid, msg):
+async def _handle_auth_reconnect(ws, room_id, pid, msg) -> bool:
     token = msg.get("token")
     info = validate_reconnect_token(token)
     if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
         await _send(ws, {"type": "error", "message": "invalid token"})
-        return
+        return False
     mark_reconnect_token_used(token)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
+            return False
         room["sockets"][pid] = ws
         room.setdefault("meta", {}).setdefault(pid, {})["token"] = _gen_token()
         save_game(room_id)
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, pid)})
     _ensure_day_timer(room_id)
+    return True   # proved ownership via a valid server reconnect token
 
 
 async def _handle_abandon(ws, room_id, pid):

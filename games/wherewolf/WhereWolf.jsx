@@ -385,7 +385,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       // stale socket) — retry it once before giving up.
       if (stale && at.kind === "join" && !at.retried) {
         at.retried = true;
-        setTimeout(() => { try { connect(`${WW_WS}/${at.rid}/${myId}`, { action: "join", name: playerName }); } catch {} }, 600);
+        setTimeout(() => { try { connect(`${WW_WS}/${at.rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token }); } catch {} }, 600);
         return;
       }
       if (stale) {
@@ -483,7 +483,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       let tok = null;
       try { tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`); } catch {}
       attemptRef.current = { kind: "reconnect", rid, retried: true };   // silent on failure
-      connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+      connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
     }, 1500);
     return () => clearTimeout(t);
   }, [connected, screen, roomId, myId]); // eslint-disable-line
@@ -506,14 +506,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: "join", rid, retried: false };
-    connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName });
+    connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`werewolf_token_${rid}_${myId}`);
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: tok ? "resume" : "join", rid, retried: false };
-    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   // Step out to the lobby but STAY a member of the room (socket only drops): the
   // resume pointer + reconnect token are kept so the Resume card / Your Games can
@@ -532,7 +532,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     reconnectTries.current = 0;
     setRoomId(rid);
     attemptRef.current = { kind: tok ? "reconnect" : "join", rid, retried: !tok ? false : true };
-    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const handleCancel = (id) => {
     const params = new URLSearchParams();
