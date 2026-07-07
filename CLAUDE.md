@@ -82,7 +82,6 @@ games/castles_of_crimson/
   board.py     # the ONE standard duchy: radius-3 hexagon (37 spaces), axial (q,r),
                #   computed ADJACENCY + REGIONS (same-color connected components, size 1-8)
   tiles.py     # tile/supply data, AREA_SCORE/PHASE_BONUS, 8 buildings, 26 monastery meta
-  effects.py   # (reserved) data-driven effect dispatch — currently effects live in engine.py
   engine.py    # PURE rules engine (no web deps): new_game/legal_moves/apply_move/
                #   final_scores/winner/is_over + all placement effects + lifecycle
   bot.py       # trivial random-legal-move opponent (choose / play_turn); rollout policy + fallback

@@ -32,6 +32,11 @@ games/spender/ai/az/checkpoints*/
 games/spender/ai/az/*.out
 games/spender/ai/az/turns_table_s.json
 
+# one-off AI experiment run scripts (self-labeled throwaway; not part of the serving path)
+games/spender/ai/ablation_run.py
+games/spender/ai/sweep_run.py
+games/spender/ai/confirm_c2.py
+
 # net-retrain investigation scratch (harvested caches + fitted leaf model; regenerable)
 games/spender/ai/az/*cache*.npz
 games/spender/ai/az/leaf_model.npz

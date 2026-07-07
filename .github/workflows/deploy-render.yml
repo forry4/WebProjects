@@ -22,7 +22,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Gate the deploy on the test suite: previously the Render hook fired on push with no
+  # test dependency, so a red suite still deployed. `deploy` now `needs: test`, so the
+  # hook only fires when tests pass on this push.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r games/spender/requirements.txt
+      - name: Run tests
+        run: |
+          python -m pytest core/tests/ games/spender/tests/ books/tests/ games/castles_of_crimson/tests/ games/wherewolf/tests/ wwsd/tests/ -q
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy
