@@ -488,9 +488,24 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
     netval-vs-netval = 0.5000.** SAME bootstrap net — the gain is the leaf.
   - **LEVER LESSON:** in CoC the value head IS impactful, but only AFTER a short rollout resolves the
     near-term delayed payoffs. More hybrid-ratchet self-play/sims is dead; the leaf architecture was
-    the lever. Untested further levers: rollout-truncation-length sweep (20 was inherited), a
-    `netval` self-play loop (the value head is now actually USED as the leaf, so no longer passively
-    trained), C_PUCT/steps re-tune for netval, and a human playtest of the shipped netval Expert.
+    the lever.
+  - **UNTESTED LEVERS DONE (2026-07-07):**
+    - **Rollout-length + C_PUCT sweep → tuned netval SHIPPED (`c119eb3`).** The inherited 20-step
+      rollout was too SHORT for the net-value leaf. Fresh-seed confirmed vs `netval@20@1.5`:
+      steps=30 alone 0.583 @200 but SOFTENS to 0.54 @1024 (a low-sims win); c_puct=1.0 alone 0.538;
+      **COMBO steps=30 + c_puct=1.0 = 0.617 @200 / 0.570 @512 / 0.642 @1024 — GROWS with sims so it
+      TRANSFERS** (the c_puct=1.0 'commit faster' part carries at depth; steps alone decays). Serving
+      uses `vsearch::NETVAL_ROLLOUT_STEPS=30` + `NETVAL_C_PUCT=1.0` (wasm netval arm); scaffold/
+      hybrid/pv keep 1.5/20. Same net (`coc_pv_model.bin` unchanged) — the gain is the leaf CONFIG.
+      Tool: `gate_coc <path>:netval@STEPS@CPUCT` (@-delimited so a Windows path's `:` is safe).
+    - **`netval` self-play loop — `coc-core/tools/loop_coc_netval.sh` (RUN=`/c/Users/Forrest/coc_run_nv`).**
+      The structural test the hybrid ratchet couldn't be: self-play + gate BOTH use the netval leaf
+      (`harvest_boot` gained a `netval` mode), so the value head trains WHERE IT'S USED. If the
+      promote gate MOVES (unlike the hybrid ratchet's flat plateau) → netval self-play improves the
+      net → re-gate the winner at the serving config (30/1.0) + swap `coc_pv_model.bin`. Loop
+      self-plays at the default 20/1.5 (leaf config is ~irrelevant to the value head, which trains on
+      outcomes; re-gate the winner at 30/1.0 before shipping). Watch `coc_run_nv/loop_log.txt`.
+    - Still open: a human playtest of the shipped tuned-netval Expert.
 
 ---
 
