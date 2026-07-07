@@ -171,10 +171,23 @@ pub fn hybrid_netval_eval(
     legal: &[usize],
     rng: &mut Rng,
 ) -> (Vec<f64>, f64) {
+    hybrid_netval_eval_steps(net, s, actor, legal, rng, ROLLOUT_MICRO_STEPS)
+}
+
+/// netval leaf with a configurable rollout truncation length (for the sweep — 20
+/// was inherited from the hybrid scaffold, never tuned for the net-value leaf).
+pub fn hybrid_netval_eval_steps(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+    rng: &mut Rng,
+    max_steps: usize,
+) -> (Vec<f64>, f64) {
     let (p, _) = pv_eval(net, s, actor, legal);
     let mut r = s.clone();
     let mut steps = 0;
-    while r.mode != crate::engine::OVER && steps < ROLLOUT_MICRO_STEPS {
+    while r.mode != crate::engine::OVER && steps < max_steps {
         priority_rollout_step(&mut r, rng);
         steps += 1;
     }

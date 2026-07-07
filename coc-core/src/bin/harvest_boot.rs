@@ -30,6 +30,7 @@ enum Mode {
     Scaffold,
     Hybrid,
     Pv,
+    Netval, // net prior + rollout + net-value-at-truncation (the shipped Expert leaf)
 }
 
 struct Row {
@@ -55,6 +56,20 @@ fn root_readout(
             let mut rng = Rng::new(seed ^ 0x9E77);
             let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
                 vsearch::hybrid_eval(net, st, actor, lg, r)
+            };
+            for _ in 0..sims {
+                search.sim(&mut rng, &eval);
+            }
+            let n: i64 = search.root_visits().iter().map(|&x| x as i64).sum();
+            let w: f64 = search.root_wins().iter().sum();
+            (search.root_visits().to_vec(), if n > 0 { w / n as f64 } else { 0.0 })
+        }
+        Mode::Netval => {
+            let net = net.unwrap();
+            let mut search = Search::new(s.clone(), vsearch::C_PUCT);
+            let mut rng = Rng::new(seed ^ 0x9E77);
+            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
+                vsearch::hybrid_netval_eval(net, st, actor, lg, r)
             };
             for _ in 0..sims {
                 search.sim(&mut rng, &eval);
@@ -173,6 +188,7 @@ fn main() {
         None | Some("scaffold") => Mode::Scaffold,
         Some("hybrid") => Mode::Hybrid,
         Some("pv") => Mode::Pv,
+        Some("netval") => Mode::Netval,
         Some(m) => panic!("bad mode {m}"),
     };
     if mode != Mode::Scaffold {

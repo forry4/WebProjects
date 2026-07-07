@@ -18,8 +18,8 @@ enum Player {
     Scaffold,
     Net(PolicyValueNet),
     NetArgmax(PolicyValueNet),
-    Hybrid(PolicyValueNet),  // net prior + rollout-heuristic value
-    NetVal(PolicyValueNet),  // net prior + rollout + net-value-at-truncation (exp b)
+    Hybrid(PolicyValueNet),          // net prior + rollout-heuristic value
+    NetVal(PolicyValueNet, usize, f64), // net prior + rollout(steps) + net-value; c_puct
 }
 
 impl Player {
@@ -37,10 +37,21 @@ impl Player {
                 &std::fs::read_to_string(path).expect("model"),
             ));
         }
-        if let Some(path) = spec.strip_suffix(":netval") {
-            return Player::NetVal(pv_from_json(
-                &std::fs::read_to_string(path).expect("model"),
-            ));
+        // netval, optionally parameterized: "path:netval", "path:netval@STEPS",
+        // "path:netval@STEPS@CPUCT" (@-delimited so a Windows path's ':' is safe).
+        if let Some(idx) = spec.find(":netval") {
+            let path = &spec[..idx];
+            let params: Vec<&str> = spec[idx + ":netval".len()..]
+                .split('@')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let steps = params.first().and_then(|s| s.parse().ok()).unwrap_or(20);
+            let cpuct = params.get(1).and_then(|s| s.parse().ok()).unwrap_or(vsearch::C_PUCT);
+            return Player::NetVal(
+                pv_from_json(&std::fs::read_to_string(path).expect("model")),
+                steps,
+                cpuct,
+            );
         }
         Player::Net(pv_from_json(&std::fs::read_to_string(spec).expect("model")))
     }
@@ -66,15 +77,15 @@ impl Player {
                 let visits = search.root_visits();
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             }
-            Player::NetVal(net) => {
+            Player::NetVal(net, steps, cpuct) => {
                 let legal = engine::legal_actions(s);
                 if legal.len() == 1 {
                     return legal[0];
                 }
-                let mut search = coc_core::mcts::Search::new(s.clone(), vsearch::C_PUCT);
+                let mut search = coc_core::mcts::Search::new(s.clone(), *cpuct);
                 let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
                 let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
-                    vsearch::hybrid_netval_eval(net, st, actor, lg, r)
+                    vsearch::hybrid_netval_eval_steps(net, st, actor, lg, r, *steps)
                 };
                 for _ in 0..sims {
                     search.sim(&mut rng, &eval);
