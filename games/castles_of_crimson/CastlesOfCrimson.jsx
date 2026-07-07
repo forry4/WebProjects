@@ -1001,27 +1001,30 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // Vs the bot: auto-open the opponent view when the bot's PLAYING turn begins (so you
   // can watch it build), and auto-close when your turn returns (the view is a blocking
   // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
-  // The open is DELAYED ~1s (a settle) so finishing your own turn isn't immediately
-  // steamrolled by the opponent board slamming up — matched by the backend's
-  // _POST_TURN_PAUSE so the board is up before the bot's first move lands.
-  // The SETUP starting-castle reveal is owned by its own effect below; while it holds
-  // the modal (revealHoldRef), this generic handler must NOT touch it — otherwise the
-  // board vanishes on the very update that places the castle (the reported bug).
+  // Both transitions get a ~1s settle: the OPEN is delayed so finishing your own turn
+  // isn't immediately steamrolled by the opponent board (matched by the backend's
+  // _POST_TURN_PAUSE so the board is up before the bot's first move lands), and the
+  // CLOSE lingers so you see the bot's finished board for a beat before it returns you
+  // to your own. The SETUP starting-castle reveal is owned by its own effect below;
+  // while it holds the modal (revealHoldRef), this generic handler must NOT touch it.
   useEffect(() => {
     aiThinkingRef.current = aiThinking;
     const wasAi = prevAiThinking.current;
     prevAiThinking.current = aiThinking;
-    const clearOpen = () => { if (botViewTimer.current) { clearTimeout(botViewTimer.current); botViewTimer.current = null; } };
+    const clearTimer = () => { if (botViewTimer.current) { clearTimeout(botViewTimer.current); botViewTimer.current = null; } };
     if (revealHoldRef.current) return;                  // setup-castle reveal owns the modal
-    if (aiThinking && !wasAi && !setupPhase) {           // setup is owned by the reveal effect
-      clearOpen();
+    if (aiThinking && !wasAi && !setupPhase) {           // bot's playing turn begins: open after a settle
+      clearTimer();
       botViewTimer.current = setTimeout(() => {
         botViewTimer.current = null;
         if (aiThinkingRef.current && !revealHoldRef.current) setViewOpp(true);
       }, 1000);
-    } else if (!aiThinking && wasAi) {
-      clearOpen();                                      // bot's turn ended before the settle elapsed
-      setViewOpp(false);
+    } else if (!aiThinking && wasAi) {                    // bot's turn ended: linger on their board, then return
+      clearTimer();
+      botViewTimer.current = setTimeout(() => {
+        botViewTimer.current = null;
+        if (!aiThinkingRef.current && !revealHoldRef.current) setViewOpp(false);
+      }, 1000);
     }
   }, [aiThinking]);
   useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
