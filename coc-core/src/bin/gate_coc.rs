@@ -18,7 +18,8 @@ enum Player {
     Scaffold,
     Net(PolicyValueNet),
     NetArgmax(PolicyValueNet),
-    Hybrid(PolicyValueNet), // net prior + rollout-heuristic value
+    Hybrid(PolicyValueNet),  // net prior + rollout-heuristic value
+    NetVal(PolicyValueNet),  // net prior + rollout + net-value-at-truncation (exp b)
 }
 
 impl Player {
@@ -33,6 +34,11 @@ impl Player {
         }
         if let Some(path) = spec.strip_suffix(":hybrid") {
             return Player::Hybrid(pv_from_json(
+                &std::fs::read_to_string(path).expect("model"),
+            ));
+        }
+        if let Some(path) = spec.strip_suffix(":netval") {
+            return Player::NetVal(pv_from_json(
                 &std::fs::read_to_string(path).expect("model"),
             ));
         }
@@ -53,6 +59,22 @@ impl Player {
                 let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
                 let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
                     vsearch::hybrid_eval(net, st, actor, lg, r)
+                };
+                for _ in 0..sims {
+                    search.sim(&mut rng, &eval);
+                }
+                let visits = search.root_visits();
+                *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
+            }
+            Player::NetVal(net) => {
+                let legal = engine::legal_actions(s);
+                if legal.len() == 1 {
+                    return legal[0];
+                }
+                let mut search = coc_core::mcts::Search::new(s.clone(), vsearch::C_PUCT);
+                let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
+                let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
+                    vsearch::hybrid_netval_eval(net, st, actor, lg, r)
                 };
                 for _ in 0..sims {
                     search.sim(&mut rng, &eval);

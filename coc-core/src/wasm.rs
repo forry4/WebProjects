@@ -137,6 +137,20 @@ pub fn coc_search_timed(
                 n += 1;
             }
         }),
+        "netval" => MODEL.with(|m| {
+            // net prior + 20-step rollout + net VALUE at the truncation — beats the
+            // heuristic-truncation hybrid ~0.58-0.61 (grows with depth), the
+            // campaign's one genuine gain over the bootstrap.
+            let mb = m.borrow();
+            let net = mb.as_ref().expect("coc_init_model not called");
+            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
+                vsearch::hybrid_netval_eval(net, st, actor, lg, r)
+            };
+            while budget_left(n) {
+                search.sim(&mut rng, &eval);
+                n += 1;
+            }
+        }),
         _ => MODEL.with(|m| {
             // "hybrid" (default): net prior + rollout-heuristic value
             let mb = m.borrow();

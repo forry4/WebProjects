@@ -58,9 +58,12 @@ AI_DIFFICULTIES = ("normal", "hard", "expert")
 DEFAULT_DIFFICULTY = "hard"
 
 # Expert client-search config. _EXPERT_MODE mirrors the offline gate verdict:
-# "hybrid" = net policy prior + rollout-heuristic value (the config that beats the
-# scaffold); flip to "pv" when the P4 takeover probe crosses 0.5.
-_EXPERT_MODE = "hybrid"
+# "netval" = net policy prior + 20-step rollout + the net VALUE HEAD at the
+# truncation. It beats the plain-"hybrid" (heuristic-truncation) leaf ~0.58-0.61,
+# and the edge GROWS with sims (gated on two fresh seed bases + a scaffold
+# yardstick jump 0.36->0.52) — the campaign's one genuine gain over the bootstrap.
+# "pv" (pure static net leaf) and "hybrid" both LOSE to netval; kept as references.
+_EXPERT_MODE = "netval"
 _EXPERT_BUDGET_MS = 900          # per micro-decision, per worker
 _EXPERT_MAX_SIMS = 20000         # per worker (bounds browser-tab memory)
 # Per-decision watchdog: if the client hasn't answered in this window, the server

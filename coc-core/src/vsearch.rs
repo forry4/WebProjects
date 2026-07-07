@@ -158,6 +158,34 @@ pub fn hybrid_eval(
     (p, v)
 }
 
+/// Experiment (b) leaf: NET policy prior + 20-step priority rollout + the NET
+/// VALUE HEAD at the truncation (instead of heuristic::eval_reward). The static
+/// value leaf loses in CoC because a 0-step eval can't see the delayed payoffs
+/// (income/region/endgame); this plays them PART-way out (20 micro-steps) then
+/// applies the LEARNED long-horizon eval — the one untested lever after the pure
+/// value-leaf path closed. Terminal positions still use the exact terminal reward.
+pub fn hybrid_netval_eval(
+    net: &crate::valuenet::PolicyValueNet,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+    rng: &mut Rng,
+) -> (Vec<f64>, f64) {
+    let (p, _) = pv_eval(net, s, actor, legal);
+    let mut r = s.clone();
+    let mut steps = 0;
+    while r.mode != crate::engine::OVER && steps < ROLLOUT_MICRO_STEPS {
+        priority_rollout_step(&mut r, rng);
+        steps += 1;
+    }
+    let v = if r.mode == crate::engine::OVER {
+        heuristic::terminal_reward(&r, actor)
+    } else {
+        net.forward_raw(&crate::feats::features(&r, actor)).0 as f64
+    };
+    (p, v)
+}
+
 /// PV-net search: visits + root value (root actor's perspective).
 pub fn root_readout_pv(
     net: &crate::valuenet::PolicyValueNet,
