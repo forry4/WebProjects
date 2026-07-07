@@ -882,6 +882,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const revealHoldRef = useRef(false);                  // setup-castle reveal owns the modal (blocks the generic auto-close)
   const prevOppCastleRef = useRef(undefined);           // opp starting-castle presence last seen (undefined = no snapshot yet)
   const revealCloseTimer = useRef(null);                // auto-close timer for the setup-castle reveal
+  const botViewTimer = useRef(null);                    // settle delay before the opponent board auto-opens
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
@@ -1000,16 +1001,28 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // Vs the bot: auto-open the opponent view when the bot's PLAYING turn begins (so you
   // can watch it build), and auto-close when your turn returns (the view is a blocking
   // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
+  // The open is DELAYED ~1s (a settle) so finishing your own turn isn't immediately
+  // steamrolled by the opponent board slamming up — matched by the backend's
+  // _POST_TURN_PAUSE so the board is up before the bot's first move lands.
   // The SETUP starting-castle reveal is owned by its own effect below; while it holds
-  // the modal (revealHoldRef), this generic handler must NOT close it — otherwise the
+  // the modal (revealHoldRef), this generic handler must NOT touch it — otherwise the
   // board vanishes on the very update that places the castle (the reported bug).
   useEffect(() => {
     aiThinkingRef.current = aiThinking;
     const wasAi = prevAiThinking.current;
     prevAiThinking.current = aiThinking;
+    const clearOpen = () => { if (botViewTimer.current) { clearTimeout(botViewTimer.current); botViewTimer.current = null; } };
     if (revealHoldRef.current) return;                  // setup-castle reveal owns the modal
-    if (aiThinking && !wasAi) setViewOpp(true);
-    else if (!aiThinking && wasAi) setViewOpp(false);
+    if (aiThinking && !wasAi && !setupPhase) {           // setup is owned by the reveal effect
+      clearOpen();
+      botViewTimer.current = setTimeout(() => {
+        botViewTimer.current = null;
+        if (aiThinkingRef.current && !revealHoldRef.current) setViewOpp(true);
+      }, 1000);
+    } else if (!aiThinking && wasAi) {
+      clearOpen();                                      // bot's turn ended before the settle elapsed
+      setViewOpp(false);
+    }
   }, [aiThinking]);
   useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
 

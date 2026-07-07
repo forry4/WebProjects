@@ -76,6 +76,10 @@ _BOT_MOVE_DELAY = 1.0
 # A longer pause when a phase has just ended, so the phase-end overlay + the mine-income
 # tokens (silver/workers) have time to show before the bot plays on into the new phase.
 _PHASE_END_PAUSE = 2.6
+# A short settle after the human ends their turn, before the bot acts + their board comes
+# up — so finishing your turn isn't immediately steamrolled by the opponent view. Matches
+# the client's board-open delay so the board is up before the bot's first move lands.
+_POST_TURN_PAUSE = 1.0
 
 
 def _valid_difficulty(value) -> str:
@@ -554,16 +558,23 @@ async def _schedule_bot_turn(room_id: str) -> None:
         room["_bot_running"] = True              # guard: only one bot turn at a time (we release
                                                  # the lock between moves for per-move animation)
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
-        # If a phase advanced since the bot last acted (e.g. the human ended it), pause
-        # before the bot's first move so the phase overlay + income are seen first.
+        # Settle before the bot's first move. If a phase advanced (e.g. the human ended it),
+        # use the longer pause so the phase overlay + income are seen first; otherwise a short
+        # post-turn settle so finishing your turn isn't immediately steamrolled by the bot +
+        # its board. Skip during setup (the bot-as-start-player case, no human turn preceded).
         phase_now = game.get("phase_letter")
         prev_bot_phase = room.get("_bot_last_phase")
         room["_bot_last_phase"] = phase_now
-        pause_before_first = prev_bot_phase is not None and prev_bot_phase != phase_now
+        if prev_bot_phase is not None and prev_bot_phase != phase_now:
+            first_pause = _PHASE_END_PAUSE
+        elif game.get("phase") == "playing":
+            first_pause = _POST_TURN_PAUSE
+        else:
+            first_pause = 0.0
 
     try:
-        if pause_before_first:
-            await asyncio.sleep(_PHASE_END_PAUSE)
+        if first_pause:
+            await asyncio.sleep(first_pause)
 
         if difficulty == "expert" and az_compact is not None:
             await _client_bot_turn(room_id)
