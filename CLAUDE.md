@@ -538,6 +538,23 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       delta vs sequential). **WASM CAUTION:** dot's chain width changed (4×8→1×8); native is identical
       (load-bound) but v128 has no FMA — A/B any future wasm rebuild in Node vs the deployed 466→1,420
       sims/s baseline before shipping.
+    - **PERF round 3 (`ed579dd`): int8+VNNI quantized netval — STRENGTH-NEUTRAL (fresh-seed gate
+      0.5000 ±0.069 n=200; a first-gate 0.450 was seed noise, pooled 0.481 ±0.055) — use for
+      SCREENING experiments.** Opt-in: gate spec `:netval8[@STEPS@CPUCT]` / harvest mode `netval8`;
+      f32 stays the default and model files stay f32 JSON (quantized at LOAD:
+      `QuantPolicyValueNet::from_f32`, per-row symmetric int8 on the two trunk layers = 96% of MACs;
+      heads/z-score f32; dynamic per-vector activation quant, zero-point-128 u8 for `vpdpbusd`).
+      `qdot` = AVX-512 VNNI intrinsic under `cfg(target_feature="avx512vnni")` (true via
+      target-cpu=native on the Zen 4 box) with an exact-same-INTEGER-result scalar fallback → int8
+      runs are deterministic and machine-portable (netval8 A-vs-A mirror = exactly 0.5000). Quality:
+      value MAE ~5e-4, policy-argmax 62/64 vs f32. Speed: int8 SINGLE forward (137µs loaded) already
+      beats the f32 blocked-BATCH path (169µs) — no int8 batch blocking built yet (model is
+      L2-resident at 640KB, so blocking pays less; optional future work). **USAGE GUIDANCE: int8 for
+      screening/paired experiments (both sides share arithmetic → unbiased); f32 for final/ship
+      gates and the FIXED scaffold-yardstick trend line (cross-arithmetic comparability). Do NOT
+      switch a RUNNING campaign's arithmetic mid-loop.** The `PvEval` trait (valuenet.rs) is the
+      seam: `pv_eval`/`hybrid*eval*`/`root_readout_pv`/`batch::step_netval` are generic over it.
+      NOTE `:netval8` must parse BEFORE `:netval` in gate_coc (substring).
     - Still open: a human playtest of the shipped tuned-netval Expert.
 
 ---
