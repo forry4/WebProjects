@@ -60,7 +60,7 @@ def test_expert_client_plays_full_game(monkeypatch):
                 break
             pend = room.get("_ai_search")
             if pend is not None:
-                assert pend["mode"] in ("hybrid", "pv")
+                assert pend["mode"] == m._EXPERT_MODE
                 assert pend["seat"] == g["order"].index(room["ai_player"])
                 # the shipped projection must not reveal the true draw order
                 assert pend["state"]["supply"] == sorted(pend["state"]["supply"])
