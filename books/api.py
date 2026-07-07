@@ -28,17 +28,28 @@ import random
 import string
 
 from fastapi import Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ── data model ───────────────────────────────────────────────────────────────
+# Per-field length caps bound how much an authenticated user can persist (the DB is
+# otherwise open to arbitrarily large title/note/blurb strings). The caps are far above
+# any legitimate value so they never fire for real input — cover_url is deliberately
+# roomy because covers are cached as inline `data:` URIs (a downscaled ~10KB JPEG), and
+# rejecting a real cover would break that feature; it only stops multi-MB abuse.
+_TEXT = 500        # title / author — a line of text
+_LONG = 5000       # note / blurb — a paragraph
+_COVER = 500_000   # cover_url — allows an inline data: URI, caps runaway blobs
+_ID = 64
+
+
 class BookIn(BaseModel):
-    id: str | None = None
-    title: str
-    author: str = ""
+    id: str | None = Field(default=None, max_length=_ID)
+    title: str = Field(max_length=_TEXT)
+    author: str = Field(default="", max_length=_TEXT)
     rating: int = 3
-    note: str = ""
-    cover_url: str = ""
+    note: str = Field(default="", max_length=_LONG)
+    cover_url: str = Field(default="", max_length=_COVER)
 
 
 class BooksPayload(BaseModel):
@@ -46,11 +57,11 @@ class BooksPayload(BaseModel):
 
 
 class SuggestionIn(BaseModel):
-    id: str | None = None
-    title: str
-    author: str = ""
-    cover_url: str = ""
-    blurb: str = ""
+    id: str | None = Field(default=None, max_length=_ID)
+    title: str = Field(max_length=_TEXT)
+    author: str = Field(default="", max_length=_TEXT)
+    cover_url: str = Field(default="", max_length=_COVER)
+    blurb: str = Field(default="", max_length=_LONG)
 
 
 class SuggestionsPayload(BaseModel):

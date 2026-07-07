@@ -205,7 +205,15 @@ export default function Books({ authUser, onExit }) {
 		return () => { cancelled = true; };
 	}, [token]);
 
-	const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2500); };
+	const showToast = (m) => setToast(m);
+	// Auto-dismiss with a TRACKED timer: a raw setTimeout per toast let an earlier
+	// timer clear a newer message early (and could setState after unmount). Re-armed
+	// whenever `toast` changes; cleared on change/unmount.
+	useEffect(() => {
+		if (!toast) return;
+		const t = setTimeout(() => setToast(""), 2500);
+		return () => clearTimeout(t);
+	}, [toast]);
 
 	// ── ranking edit ops ──
 	const startEdit = () => { rankSnap.current = JSON.parse(JSON.stringify(books)); setEditing(true); };
