@@ -1,0 +1,39 @@
+name: Keep backend warm
+
+# Pings the Render backend during play hours so its free-tier cold start (~30-50s;
+# spins down after ~15 min idle) doesn't hit real users. Only during the day, so it
+# stays well under Render's ~750 free instance-hours/month (16h/day x ~30 = ~480h).
+#
+# GitHub cron is UTC and does NOT adjust for DST. The window 14:00-05:59 UTC covers
+# 7am-10pm PST/PDT with <=1h overhang either side:
+#   PST (UTC-8): 06:00-21:59 local  (starts ~1h early)
+#   PDT (UTC-7): 07:00-22:59 local  (ends ~1h late)
+# Scheduled runs can be delayed/skipped under GitHub load; every 10 min gives slack
+# against the 15-min spin-down. Public-repo Actions minutes are free.
+
+on:
+  schedule:
+    - cron: "*/10 14-23,0-5 * * *"
+  workflow_dispatch: {}   # manual trigger for testing
+
+# Never let overlapping runs pile up.
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend health
+        run: |
+          # The ping itself may trigger the cold start, so allow a long per-try timeout
+          # and retry a couple times. Never fail the job (a keep-alive shouldn't page you).
+          url="https://splendid-nelz.onrender.com/health"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 70 "$url" || echo 000)
+            echo "attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "backend did not return 200 (cold-starting or down) — not failing the job"

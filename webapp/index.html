@@ -4,6 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <!-- Warm the Render backend as early as possible (before the bundle even loads) so its
+         cold start (~30-50s; free tier spins down after ~15 min idle) overlaps page load
+         instead of blocking the first real request. Fire-and-forget; prod hosts only, so
+         local dev never pings prod. A daytime cron (.github/workflows/keepalive.yml) keeps
+         it warm during play hours; this covers off-hours visitors. -->
+    <script>
+      (function () {
+        try {
+          var h = location.hostname;
+          if (h === "forry4.github.io" || h.slice(-11) === ".workers.dev") {
+            fetch("https://splendid-nelz.onrender.com/health", { mode: "no-cors", cache: "no-store" }).catch(function () {});
+          }
+        } catch (e) {}
+      })();
+    </script>
     <!-- favicon / bookmark icon. %BASE_URL% expands to the Vite build base (/ for the
          forry4.github.io root site; overridable via VITE_BASE), so the path stays
          correct under any base. Files live in webapp/public/. -->
