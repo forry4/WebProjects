@@ -519,7 +519,25 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       Parity holds (net_export_check 3.3e-7, tighter than before). The netval loop was killed mid-iter-1
       + relaunched on the fast build (clean: HARVESTED markers + File::create truncation; iter-0 gate ran
       on the old binary — win rates stay comparable, CRN is within-gate). Remaining perf levers if ever
-      needed (diminishing): int8 quantization, leaf batching, GPU inference server.
+      needed (diminishing): int8 quantization, GPU inference server.
+    - **PERF round 2 (`675f8c5`): BATCHED netval leaf evals, ~2.3x more on the forward, BIT-IDENTICAL —
+      the default for all offline experiments.** Each harvest/gate thread drives K games (default 8) in
+      lockstep — one sim per game per round, all leaves through ONE `valuenet::forward_batch` pass. No
+      virtual loss / no cross-thread sync → search semantics unchanged; **batched runs reproduce
+      sequential (`batch=1`) EXACTLY** (verified: identical gate lines netval-netval + netval-SCAFFOLD;
+      batched A-vs-A = 0.5000/+0.0). Key pieces: `valuenet::dot4` (register-blocked 4-input kernel —
+      weights stream K/4 times, x-block L1-resident; 80→34µs/eval @K=8), `mcts::Search::descend`/
+      `complete` (sim() split at the leaf seam, one shared code path), `batch.rs` (SearchTask +
+      step_netval), `[batch]` arg on gate_coc/harvest_boot (default 8 — loop scripts need no change).
+      **FINDINGS (do not relitigate): (1) plain row-reuse tiling was a WASH** — it trades L3 weight
+      traffic for L2 activation streaming; the register-blocked kernel is what pays; **(2) an 8-input
+      block CRATERED** (register spills, 4× worse) — 4 is the sweet spot; **(3) `dot` is now a single
+      8-lane chain = the CANONICAL accumulation order `dot4` replicates per pair** (this shared order IS
+      the bit-identity mechanism; multi-chain ILP bought nothing — the matvec is load-bound). Harvest
+      batched path uses a PER-GAME opening-temp rng (deterministic under interleaving; the one behavior
+      delta vs sequential). **WASM CAUTION:** dot's chain width changed (4×8→1×8); native is identical
+      (load-bound) but v128 has no FMA — A/B any future wasm rebuild in Node vs the deployed 466→1,420
+      sims/s baseline before shipping.
     - Still open: a human playtest of the shipped tuned-netval Expert.
 
 ---
