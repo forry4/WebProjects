@@ -449,16 +449,48 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
     <winner.json> webapp/public/wasm/coc_pv_model.bin` + push — NO wasm rebuild.** The wasm itself is
     192KB (`coc_core.js`/`coc_core_bg.wasm`, wasm-pack --target web). `netio::pv_from_bin` is
     bit-identical to the JSON loader (verified by `net_export_check <json> <bin>`).
-  - **Serving mode `_EXPERT_MODE="hybrid"`** in CoC main.py (net prior + rollout value — the config
-    that beats the scaffold); flip to `"pv"` when the P4 takeover probe crosses 0.5. Currently
-    serving the P3 bootstrap net until the ratchet's winner is swapped in (P6). Lobby: Expert joins
-    Normal/Hard in the vs-Bot picker (`AI_DIFFICULTIES` += "expert").
+  - **Serving mode `_EXPERT_MODE="netval"`** in CoC main.py (see the P4/P6 result below — netval
+    beats hybrid). Serves the P3 bootstrap net (`coc_pv_model.bin`) — the ratchet produced no
+    better net (winner's curse), and netval's gain is the LEAF not the weights, so no model swap.
+    Lobby: Expert joins Normal/Hard in the vs-Bot picker (`AI_DIFFICULTIES` += "expert").
   - **wasm entries** (`coc-core/src/wasm.rs`): `coc_init_model(bytes)`, `coc_step_info(state,
     prefix)` → `{over,boundary,actor,forced,legal}`, `coc_search_timed(state, prefix, mode,
-    budget_ms, max_sims, seed)` → visits[102], `coc_chain_move(state, prefix)` → compact move JSON.
-    `pxio::from_proj` (the P2-arena-validated ingestion) is the shared Dump path (gate widened to
-    wasm32). Worker: `webapp/public/wasm/coc-worker.js`; frontend pool + driver effect in
-    `CastlesOfCrimson.jsx` (Spender s-worker pattern; re-announces `client_ai_ready` per socket).
+    budget_ms, max_sims, seed)` → visits[102] (`mode` ∈ `netval`|`hybrid`|`pv`|`heur`),
+    `coc_chain_move(state, prefix)` → compact move JSON. `pxio::from_proj` (the P2-arena-validated
+    ingestion) is the shared Dump path (gate widened to wasm32). Worker:
+    `webapp/public/wasm/coc-worker.js`; frontend pool + driver effect in `CastlesOfCrimson.jsx`
+    (Spender s-worker pattern; re-announces `client_ai_ready` per socket; forwards the server's
+    `mode`).
+- **P4/P6 RESULT (2026-07-06/07) — the hybrid ratchet PLATEAUED; `netval` is the one real gain
+  (SHIPPED, `f0cb97a`). DO NOT relitigate.** Full detail in memory
+  [[coc-expert-ai-campaign-status]].
+  - The 8-iter hybrid ratchet (sims=400) produced NOTHING over the P3 bootstrap: its one "promotion"
+    (iter-3, gate 0.5417 @n=120) was **winner's curse** — a fresh-seed re-gate (iter-3 vs bootstrap,
+    both hybrid, n=240) = **0.4833**. The promote gate (candidate-vs-MOVING-best @200 sims, n=120,
+    ±0.09) is too noisy to detect small gains; the **scaffold yardstick (FIXED reference) is the
+    trustworthy signal** and was flat (~0.36-0.44) all run. (Loop bug fixed: MSYS skips `/c/`
+    conversion on args with `*` or `:`, so the trainer/gate got POSIX paths and silently no-op'd 3
+    iters → cygpath every native-tool arg (`$RUNW`), `set -o pipefail`, gate-parse FATAL guard,
+    `sp_k.HARVESTED` resume markers.)
+  - **Value-head takeover is CLOSED (two ways): (1)** outcome-target retrain
+    (`coc-core/tools/train_pv_exp.py`, `--shape-a/--beta`; 80% outcome vs the loop's 49%) left the
+    value head IDENTICAL as a pure-PV leaf (h2h 0.50, AUC unchanged 0.80) and still losing to the
+    rollout (0.275) — NOT a training-target problem. **(2)** P3 gates re-confirm the pure net fails
+    vs scaffold (argmax@0 vs scaffold@2000 = 0.025; pure-pv@128 vs scaffold@2000 = 0.135).
+  - **THE FIX = `netval` (`vsearch::hybrid_netval_eval`): net policy prior + 20-step priority
+    rollout + the net VALUE HEAD at the truncation** (learned long-horizon read) instead of the
+    heuristic `_value`. WHY it works where a static leaf fails: CoC is a DELAYED-PAYOFF game (mine
+    income compounds over phases, regions score at completion, monasteries at endgame), so a 0-step
+    static eval (heuristic OR net) undervalues in-flight turns (the P2 fact: static 0.235 vs rollout
+    0.715); netval plays the near-term payoffs out THEN applies the learned eval. **Gated: netval vs
+    hybrid = 0.542/0.579 (two fresh seed bases) @200, 0.606 @512 (edge GROWS with sims → transfers
+    to serving's ~20k); netval@512 vs scaffold@2000 = 0.52 (hybrid was 0.36); sanity
+    netval-vs-netval = 0.5000.** SAME bootstrap net — the gain is the leaf.
+  - **LEVER LESSON:** in CoC the value head IS impactful, but only AFTER a short rollout resolves the
+    near-term delayed payoffs. More hybrid-ratchet self-play/sims is dead; the leaf architecture was
+    the lever. Untested further levers: rollout-truncation-length sweep (20 was inherited), a
+    `netval` self-play loop (the value head is now actually USED as the leaf, so no longer passively
+    trained), C_PUCT/steps re-tune for netval, and a human playtest of the shipped netval Expert.
 
 ---
 
