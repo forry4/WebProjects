@@ -505,7 +505,18 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       net → re-gate the winner at the serving config (30/1.0) + swap `coc_pv_model.bin`. Loop
       self-plays at the default 20/1.5 (leaf config is ~irrelevant to the value head, which trains on
       outcomes; re-gate the winner at 30/1.0 before shipping). Watch `coc_run_nv/loop_log.txt`.
-      Iter 0: gate 0.475 (flat), probe netval-vs-hybrid 0.59 ✓, yardstick vs scaffold@2000 0.55 ✓.
+      **RESULT (2026-07-07): NETVAL SELF-PLAY WORKS — the loop's iter-5 net SHIPPED (`d0156cb`).**
+      Gates ran 0.475/0.4625/0.450 (flat — looked like the hybrid plateau) then CLIMBED
+      0.506/0.544*/0.569* (iters 4+5 promoted). **Fresh-seed re-gate vs the bootstrap: 0.5875
+      ±0.044 (n=480, margin +7.1) — NOT winner's curse**; at the SERVING config (30/1.0):
+      **0.6208 ±0.043 @200 (n=480), 0.6083 ±0.062 @512 (holds at depth → transfers to ~20k).**
+      Swapped `coc_pv_model.bin` (pv_json_to_bin, json↔bin bit-identical PASS; no wasm rebuild);
+      winner preserved as `coc_run_nv/pv_ship_iter5.json`. **LESSON (supersedes the early plateau
+      read): the flat first 3 iters were the BOOT-ANCHORED data washing out of the 2-iter training
+      window — judge a self-play loop only after the window is pure self-play data.** The
+      hybrid-ratchet conclusion stands unchanged (it benched the value head); netval self-play
+      trains it where it's used and genuinely improves it. Loop EXTENDED to ITERS=12 (iters 6-11)
+      — keep ratcheting while it climbs; re-gate fresh-seed + serving-config before any next ship.
     - **PERF: vectorized net forward ~6.5x native / ~3x wasm (`21c7d9a` + `89099bc` — DO NOT regress).**
       The netval leaf was ~97% net forward (bench_coc breakdown: forward 489µs vs features 2.9µs, heur
       0.1µs, rollout ~6µs), and `valuenet::linear`'s single-accumulator dot is a serial FP dependency
