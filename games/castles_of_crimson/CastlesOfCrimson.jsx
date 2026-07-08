@@ -374,7 +374,11 @@ function useSocket(onMessage) {
   }, []);
   const send = useCallback((obj) => { try { wsRef.current?.send(JSON.stringify(obj)); } catch {} }, []);
   const disconnect = useCallback(() => { try { wsRef.current?.close(); } catch {} wsRef.current = null; setConnected(false); }, []);
-  return { connected, connect, send, disconnect };
+  // readyState of the live socket (0 CONNECTING / 1 OPEN / 2 CLOSING / 3 CLOSED / undefined
+  // if none) — lets auto-reconnect avoid aborting a still-pending connection (a cold-starting
+  // Render can hold the WS in CONNECTING until the service is up).
+  const socketReady = useCallback(() => wsRef.current?.readyState, []);
+  return { connected, connect, send, disconnect, socketReady };
 }
 
 // Relative timestamp for the lobby game lists (mirrors Spender's timeAgo).
@@ -692,6 +696,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
 .coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}
 .coc-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--crimson);color:#fff;padding:10px 18px;border-radius:var(--radius);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.5);max-width:min(92vw,460px);text-align:center;line-height:1.35}
+.coc-reconnbar{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:center;gap:2px;background:var(--surface2);color:var(--gold-l);border-bottom:1px solid var(--gold);padding:7px 12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.08em;z-index:130;box-shadow:0 2px 10px rgba(0,0,0,.5)}
 /* Between-phase overlay: announces the new phase + the mine income you just collected.
    Sits below the flyer layer (z 140) so the silver tokens fly IN over it; pointer-events
    off so the board stays interactive underneath. Fades itself out (JS also dismisses). */
@@ -861,6 +866,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
   const [showCreateMenu, setShowCreateMenu] = useState(false);  // + Create Game dropdown (vs Friend / vs Bot)
 
   // interaction state
@@ -883,6 +889,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const prevOppCastleRef = useRef(undefined);           // opp starting-castle presence last seen (undefined = no snapshot yet)
   const revealCloseTimer = useRef(null);                // auto-close timer for the setup-castle reveal
   const botViewTimer = useRef(null);                    // settle delay before the opponent board auto-opens
+  const reconnTimer = useRef(null);                     // auto-reconnect backoff timer
+  const reconnTries = useRef(0);
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
   const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
@@ -925,7 +933,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     }
   }, [myId, roomId, screen]);
 
-  const { connected, connect, send, disconnect } = useSocket(handleMessage);
+  const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
   // fetch every selectable board layout once (shared meta + per-board spaces)
   useEffect(() => {
@@ -990,6 +998,56 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     } catch {}
     return () => disconnect();
   }, []); // eslint-disable-line
+
+  // Auto-reconnect: if the socket drops while in a LIVE game (Render cold start, a
+  // network blip, or iOS killing a backgrounded WS), keep retrying with backoff —
+  // through the ~30-50s a cold start takes — until we're back. This is load-bearing
+  // for vs-bot games: a bot's turn is only re-driven when our client reconnects
+  // (`_handle_reconnect` re-triggers the server scheduler), so WITHOUT this the bot's
+  // turn freezes until a manual refresh (the "hung for minutes" bug). Reconnect uses
+  // the `reconnect` action (NOT `join`) so the backend actually resumes the bot.
+  const inLiveGame = !!roomId && !reviewOnly
+    && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
+  // One reconnect attempt that reschedules itself — shared by the backoff loop AND the
+  // tab-focus nudge, so neither can leave the loop dead by clearing the other's timer.
+  const attemptReconnect = useCallback(() => {
+    if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
+    const rs = socketReady();
+    if (rs === 0 || rs === 1) {                          // CONNECTING/OPEN — don't abort it, re-check
+      reconnTimer.current = setTimeout(attemptReconnect, 3000);
+      return;
+    }
+    let tok = null;
+    try { tok = localStorage.getItem(`coc_token_${roomId}_${myId}`); } catch {}
+    if (tok) { setReconnecting(true); connect(`${COC_WS}/${roomId}/${myId}`, { action: "reconnect", token: tok }); }
+    reconnTries.current += 1;
+    // 2s, 4s, 6s … capped at 8s — retries indefinitely until connected (or we leave).
+    reconnTimer.current = setTimeout(attemptReconnect, Math.min(2000 * reconnTries.current, 8000));
+  }, [roomId, myId, connect, socketReady]);
+
+  useEffect(() => {
+    const clear = () => { if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; } };
+    if (connected || !inLiveGame) {
+      clear();
+      reconnTries.current = 0;
+      if (connected) setReconnecting(false);             // no-op re-render if already false
+      return;
+    }
+    if (!reconnTimer.current) attemptReconnect();        // start the loop if it isn't running
+    return clear;
+  }, [connected, inLiveGame, attemptReconnect]);
+
+  // Tab back into focus (iOS often kills a backgrounded socket without firing onclose):
+  // fire an immediate attempt instead of waiting out the backoff.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible" || connected || !inLiveGame) return;
+      reconnTries.current = 0;
+      attemptReconnect();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, [connected, inLiveGame, attemptReconnect]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
 
@@ -2376,6 +2434,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         </div>
       )}
 
+      {reconnecting && !connected && inLiveGame && (
+        <div className="coc-reconnbar"><span className="coc-spinner" /> Reconnecting…</div>
+      )}
       {toast && <div className="coc-toast">{toast}</div>}
     </div>
   );
