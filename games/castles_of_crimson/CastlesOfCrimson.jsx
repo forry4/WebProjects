@@ -138,6 +138,52 @@ function viaLabel(via) {
   if (via === "castle") return "Castle";
   return BUILDING_NAME[via] || "a tile";
 }
+// Optimistic move preview (client-side): return a COPY of the game dict with the
+// CERTAIN visible effect of `move` already applied, so the board reacts INSTANTLY
+// instead of waiting the ~90ms server round-trip. The server stays authoritative —
+// this preview is replaced wholesale by the next room_update (and reverted if the
+// move errors, see handleMessage), so a wrong guess self-heals in a beat. Only the
+// core, unambiguous moves are predicted (a tile moving in/out of storage/duchy + the
+// die marked used — NOT scoring, resources, goods, or pending sub-decisions, which
+// the server fills in on reconcile). Every other move returns null and falls through
+// to the plain send-and-wait path. Guards bail to null on anything it can't be sure
+// of (missing tile, occupied space, full storage) so it never shows a false board.
+function optimisticMove(game, move, myId) {
+  if (!game || !move || game.turn !== myId || game.phase !== "playing" || game.pending_pid) return null;
+  const type = move.type;
+  if (type !== "place_tile" && type !== "take_hex" && type !== "discard_storage") return null;
+  let g;
+  try { g = JSON.parse(JSON.stringify(game)); } catch { return null; }   // game is JSON-safe; board is small
+  const me = g.players?.[myId];
+  if (!me) return null;
+  const dice = g.dice?.[myId];
+  const useDie = () => { if (dice?.used && move.die_index != null) dice.used[move.die_index] = true; };
+  if (type === "place_tile") {
+    const st = me.storage || [];
+    const idx = st.findIndex((x) => x && x.id === move.tile_id);
+    me.duchy = me.duchy || {};
+    if (idx < 0 || !move.space_id || me.duchy[move.space_id]) return null;
+    me.duchy[move.space_id] = st.splice(idx, 1)[0];
+    useDie();
+    return g;
+  }
+  if (type === "take_hex") {
+    const hexes = g.depots?.[String(move.depot)]?.hexes;
+    if (!Array.isArray(hexes)) return null;
+    const idx = hexes.findIndex((x) => x && x.id === move.tile_id);
+    me.storage = me.storage || [];
+    if (idx < 0 || me.storage.length >= 3) return null;   // full storage: let the server decide
+    me.storage.push(hexes.splice(idx, 1)[0]);
+    useDie();
+    return g;
+  }
+  // discard_storage
+  const st = me.storage || [];
+  const idx = st.findIndex((x) => x && x.id === move.tile_id);
+  if (idx < 0) return null;
+  st.splice(idx, 1);
+  return g;
+}
 // Descriptive move-log line built from the data already in each record (tile, depot, …).
 // `board` supplies the goods number (goods are named "#N goods", never by color). The
 // source-tile parenthetical (`via`) + any VP are appended by the log renderer, NOT here.
@@ -668,7 +714,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 @keyframes coc-stt-sel{0%,100%{filter:drop-shadow(0 0 2px var(--gold))}50%{filter:drop-shadow(0 0 8px var(--gold-l)) drop-shadow(0 0 4px var(--gold-l))}}
 /* Tile-move animation overlay (depot->storage, storage->duchy) */
 .coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
-.coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .5s cubic-bezier(.4,.05,.25,1) forwards}
+.coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .35s cubic-bezier(.4,.05,.25,1) forwards}
 .coc-flyer::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
 .coc-flyer.goods{clip-path:none;border-radius:4px;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 .coc-flyer.goods::after{display:none}
@@ -677,8 +723,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-token-flyer{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:1rem;line-height:1;z-index:141;pointer-events:none;will-change:transform,opacity}
 .coc-token-flyer.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.18)}
 .coc-token-flyer.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a;box-shadow:0 1px 3px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.35)}
-.coc-token-flyer.spent{animation:coc-tok-out .6s ease-in forwards}
-.coc-token-flyer.gain{animation:coc-tok-in .6s ease-out forwards}
+.coc-token-flyer.spent{animation:coc-tok-out .42s ease-in forwards}
+.coc-token-flyer.gain{animation:coc-tok-in .42s ease-out forwards}
 @keyframes coc-tok-out{from{transform:translate(0,0) scale(1);opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(.55);opacity:0}}
 @keyframes coc-tok-in{from{transform:translate(0,0) scale(.55);opacity:0}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
 /* Resource token chips (workers / silver) in the dice bar + opponent modal. The
@@ -877,6 +923,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [screen, setScreen] = useState("lobby");        // lobby | waiting | game
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
+  const optimisticRef = useRef(false);          // a move preview is showing (awaiting the server's truth)
+  const preOptimisticRoomRef = useRef(null);    // last authoritative room, to revert to if the previewed move errors
   const [openGames, setOpenGames] = useState([]);
   const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
   const [history, setHistory] = useState([]);           // your finished games (lobby History column)
@@ -954,9 +1002,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
-    if (msg.type === "error") { setToast(msg.message || "error"); return; }
+    if (msg.type === "error") {
+      // Revert an optimistic preview the server rejected, so a bad guess doesn't linger.
+      if (optimisticRef.current && preOptimisticRoomRef.current) setRoomData(preOptimisticRoomRef.current);
+      optimisticRef.current = false;
+      setToast(msg.message || "error"); return;
+    }
     const room = msg.room;
     if (!room) return;
+    optimisticRef.current = false;                        // authoritative state arrived — reconcile below
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
     if (tok) { try { localStorage.setItem(`coc_token_${rid}_${myId}`, tok); localStorage.setItem("coc_roomId", rid); } catch {} }
@@ -1349,7 +1403,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
-    setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 640);
+    setTimeout(() => setFlyers((fs) => fs.filter((f) => !ids.has(f.id))), 460);
   }, [game, me]);
   // Between-phase overlay: when the phase letter advances (A->B->C->D->E), pop a banner
   // announcing the new phase + the mine income you just collected, so the phase-end silver
@@ -1575,6 +1629,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const mv = (move) => {
     // Any action other than the undo itself means there's now something to undo.
     if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    // Optimistic preview: show this move's certain visible effect instantly, then let
+    // the server's authoritative room_update reconcile (see handleMessage). Safe by
+    // construction — the server never sees the preview; it's overwritten on the next
+    // update and reverted on error. Unpredictable moves get null -> plain send.
+    const preview = optimisticMove(roomData?.game, move, myId);
+    if (preview) {
+      preOptimisticRoomRef.current = roomData;
+      optimisticRef.current = true;
+      setRoomData((prev) => (prev ? { ...prev, game: preview } : prev));
+    }
     send({ action: "move", move });
   };
 
