@@ -690,9 +690,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-token{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:50%;font-size:1.3rem;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15)}
 .coc-token.worker{background:radial-gradient(circle at 34% 28%,#c79a5c,#6f4a22);color:#f3ead8}
 .coc-token.silver{background:radial-gradient(circle at 34% 28%,#eef0f4,#9aa0ad);color:#2a2a2a}
-/* Workers token as the Monastery #6 trigger: a gold rim invites the click; armed = pulse. */
-.coc-token.coc-m6-arm{cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15),0 0 0 2px var(--gold-l)}
-.coc-token.coc-m6-on{cursor:pointer;animation:coc-goodspick 1.1s ease-in-out infinite}
+/* A resource token that triggers an action (workers→Monastery #6, silver→black-depot buy):
+   a gold rim invites the click; armed = pulse. */
+.coc-token.coc-arm{cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.15),0 0 0 2px var(--gold-l)}
+.coc-token.coc-on{cursor:pointer;animation:coc-goodspick 1.1s ease-in-out infinite}
 /* Goods are shown in their own bordered box (empty box when you hold none — no "none" text). */
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:44px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
@@ -891,6 +892,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [selDie, setSelDie] = useState(null);
   const [selStorage, setSelStorage] = useState(null);
   const [m6Armed, setM6Armed] = useState(false);        // Monastery #6: armed via the workers token
+  const [silverArmed, setSilverArmed] = useState(false);  // black-depot buy: armed via the silver token
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
   const [viewOpp, setViewOpp] = useState(false);
@@ -944,6 +946,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     && (me.monastery_effects || []).includes(6)
     && !game.m6_used_this_turn && (me.workers || 0) >= 2 && (me.storage?.length || 0) < 3
     && [1, 2, 3, 4, 5, 6].some((d) => (game.depots?.[String(d)]?.hexes || []).some((t) => t.type === "building"));
+  // Black-depot buy: on your turn, spend 2 silver to take a tile from the central depot.
+  // Usable once/turn, needs >=2 silver + a free storage slot + a tile in the black depot.
+  const canBuyBlack = !!me && myTurnRaw && !pendingMine
+    && !game.black_depot_used_this_turn && (me.silver || 0) >= 2 && (me.storage?.length || 0) < 3
+    && (game.black_depot?.length || 0) > 0;
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -1084,6 +1091,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   useEffect(() => { setSelDie(null); setSelStorage(null); setExtraValue(null); }, [game?.turn, game?.round, game?.pending_kind]);
   // Disarm Monastery #6 the moment it's no longer usable (turn ended, used, storage full…).
   useEffect(() => { if (!canUseM6) setM6Armed(false); }, [canUseM6]);
+  // Same for the silver / black-depot buy.
+  useEffect(() => { if (!canBuyBlack) setSilverArmed(false); }, [canBuyBlack]);
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
@@ -1661,8 +1670,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     mv({ type: "take_hex", die_index: selDie, depot, tile_id: tile.id });
   };
   const clickBlackTile = (tile) => {
-    if (!myTurnRaw || pendingMine) { setToast(`${tileDesc(tile, board)}  ·  buy for 2 silver`); return; }
-    mv({ type: "buy_black", tile_id: tile.id });
+    // Buying needs the silver token armed first; otherwise a click just shows the tile.
+    if (silverArmed) { mv({ type: "buy_black", tile_id: tile.id }); setSilverArmed(false); return; }
+    setToast(`${tileDesc(tile, board)}  ·  buy for 2 silver`);
   };
   const clickHex = (sid, legal) => {
     if (!legal) return;
@@ -2242,8 +2252,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 const k = BLACK_KITE[i];
                 if (!k) return null;   // the black depot holds at most 4 tiles
                 return (
-                  <div key={t.id} className="coc-tile" style={{ position: "absolute", left: `${k.left + BLACK_PAD}px`, top: `${k.top + BLACK_PAD}px`, background: TILE_HEX[t.color], opacity: .9 }}
-                    title={`${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
+                  <div key={t.id} className={`coc-tile${silverArmed ? " coc-tile-pick" : ""}`} style={{ position: "absolute", left: `${k.left + BLACK_PAD}px`, top: `${k.top + BLACK_PAD}px`, background: TILE_HEX[t.color], opacity: .9 }}
+                    title={silverArmed ? `Buy ${tileName(t)} for 2 silver` : `${tileDesc(t, board)}  (Black depot: buy for 2 silver.)`} onClick={() => clickBlackTile(t)}>
                     <TileArt tile={t} px={HEX_W} />
                   </div>
                 );
@@ -2294,11 +2304,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-resbar">
                   <span className="coc-token-chip"
                     title={canUseM6 ? (m6Armed ? "Monastery #6 armed — click a building tile in a depot (2 workers). Click again to cancel." : "Monastery #6: click, then a building tile in a depot to take it for 2 workers") : "Workers — spent to adjust dice"}>
-                    <span className={`coc-token worker${canUseM6 ? " coc-m6-arm" : ""}${m6Armed ? " coc-m6-on" : ""}`} data-workers="1"
+                    <span className={`coc-token worker${canUseM6 ? " coc-arm" : ""}${m6Armed ? " coc-on" : ""}`} data-workers="1"
                       onClick={canUseM6 ? () => setM6Armed((a) => !a) : undefined}>⚒</span><b>{me?.workers ?? 0}</b>
                   </span>
-                  <span className="coc-token-chip" title="Silver — spent to buy black-depot tiles">
-                    <span className="coc-token silver" data-silver="1">⛃</span><b>{me?.silver ?? 0}</b>
+                  <span className="coc-token-chip"
+                    title={canBuyBlack ? (silverArmed ? "Buy armed — click a tile in the central black depot (2 silver). Click again to cancel." : "Click, then a tile in the central black depot to buy it for 2 silver") : "Silver — spent to buy black-depot tiles"}>
+                    <span className={`coc-token silver${canBuyBlack ? " coc-arm" : ""}${silverArmed ? " coc-on" : ""}`} data-silver="1"
+                      onClick={canBuyBlack ? () => setSilverArmed((a) => !a) : undefined}>⛃</span><b>{me?.silver ?? 0}</b>
                   </span>
                 </div>
               </div>
