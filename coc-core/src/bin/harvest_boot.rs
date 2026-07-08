@@ -88,6 +88,7 @@ fn root_readout(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_thread(
     out: &str,
     t: usize,
@@ -97,6 +98,7 @@ fn run_thread(
     seed0: u64,
     mode: Mode,
     net: Option<&dyn PvEval>,
+    log_enc: feats::Enc,
 ) {
     let path = format!("{out}.t{t}.csv");
     let mut w = BufWriter::new(File::create(&path).expect("create out"));
@@ -141,7 +143,7 @@ fn run_thread(
             } else {
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             };
-            rows.push(Row { actor, feats: feats::features(&s, actor), policy, value });
+            rows.push(Row { actor, feats: feats::encode(log_enc, &s, actor), policy, value });
             engine::apply(&mut s, a);
             searched += 1;
         }
@@ -188,6 +190,7 @@ fn run_thread_batched(
     seed0: u64,
     net: &dyn PvEval,
     batch: usize,
+    log_enc: feats::Enc,
 ) {
     use coc_core::batch::{step_netval, SearchTask};
     let path = format!("{out}.t{t}.csv");
@@ -298,7 +301,7 @@ fn run_thread_batched(
             } else {
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             };
-            sl.rows.push(Row { actor, feats: feats::features(&sl.s, actor), policy, value });
+            sl.rows.push(Row { actor, feats: feats::encode(log_enc, &sl.s, actor), policy, value });
             engine::apply(&mut sl.s, a);
             sl.searched += 1;
             sl.task = None;
@@ -350,6 +353,15 @@ fn main() {
         assert!(net.is_some(), "hybrid/pv modes need a model path");
     }
     let batch: usize = args.get(9).map(|s| s.parse().unwrap()).unwrap_or(8);
+    // arg 10: which encoder to LOG in the rows (v1|v2). Defaults to the playing
+    // net's encoder (else v1) — override for a distill harvest where the v1
+    // champion PLAYS but the rows must carry the NEW encoder's features.
+    let log_enc = match args.get(10).map(|s| s.as_str()) {
+        Some("v1") => feats::Enc::V1,
+        Some("v2") => feats::Enc::V2,
+        None => net.as_ref().map_or(feats::Enc::V1, |n| feats::Enc::from_in_dim(n.in_dim())),
+        Some(m) => panic!("bad logenc {m}"),
+    };
     let per = games / threads as u64;
     let qnet: Option<QuantPolicyValueNet> =
         if quantize { net.as_ref().map(QuantPolicyValueNet::from_f32) } else { None };
@@ -364,10 +376,10 @@ fn main() {
             scope.spawn(move || {
                 if mode == Mode::Netval && batch > 1 {
                     run_thread_batched(
-                        &out, t, per, sims, temp_micro, seed0, net_ref.unwrap(), batch,
+                        &out, t, per, sims, temp_micro, seed0, net_ref.unwrap(), batch, log_enc,
                     );
                 } else {
-                    run_thread(&out, t, per, sims, temp_micro, seed0, mode, net_ref);
+                    run_thread(&out, t, per, sims, temp_micro, seed0, mode, net_ref, log_enc);
                 }
             });
         }

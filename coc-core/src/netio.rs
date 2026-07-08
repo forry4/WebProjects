@@ -31,7 +31,10 @@ pub fn pv_from_json(text: &str) -> PolicyValueNet {
     let pw = vf32(&j["pw"]);
     let pb = vf32(&j["pb"]);
     let n_act = j["n_act"].as_u64().expect("n_act") as usize;
-    assert_eq!(mu.len(), crate::feats::N_FEATS, "model in_dim != N_FEATS");
+    assert!(
+        mu.len() == crate::feats::N_FEATS || mu.len() == crate::feats::N_FEATS_V2,
+        "model in_dim {} matches no encoder", mu.len()
+    );
     assert_eq!(n_act, crate::engine::N_ACTIONS, "model n_act != N_ACTIONS");
     PolicyValueNet::from_parts(mu, sd, tdims, tw, tb, vw, vb, pw, pb, n_act)
 }
@@ -77,7 +80,10 @@ pub fn pv_from_bin(b: &[u8]) -> Option<PolicyValueNet> {
         tdims.push(r.u32()? as usize);
     }
     let n_act = r.u32()? as usize;
-    if in_dim != crate::feats::N_FEATS || tdims[0] != in_dim || n_act != crate::engine::N_ACTIONS {
+    if (in_dim != crate::feats::N_FEATS && in_dim != crate::feats::N_FEATS_V2)
+        || tdims[0] != in_dim
+        || n_act != crate::engine::N_ACTIONS
+    {
         return None;
     }
     let mu = r.f32s(in_dim)?;

@@ -30,11 +30,45 @@ use crate::boards_gen::{
 use crate::engine::{Micro, Pending, State, DIE_EXTRA, DIE_TOWNHALL};
 use crate::heuristic;
 use crate::tiles::{
-    building_type, color_of, livestock_of, monastery_effect, type_of, TileType, AREA_SCORE,
+    self, building_type, color_of, livestock_of, monastery_effect, type_of, TileType, AREA_SCORE,
     PHASE_BONUS,
 };
 
 pub const N_FEATS: usize = 934;
+
+/// Encoder version. A net declares its encoder by its INPUT DIM (934 -> V1,
+/// N_FEATS_V2 -> V2 — inferred at model load), so v1 and v2 nets can face each
+/// other in the same gate and the serving wasm picks the right encoder from
+/// whatever model blob it fetched.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Enc {
+    V1,
+    V2,
+}
+
+impl Enc {
+    pub fn from_in_dim(d: usize) -> Enc {
+        match d {
+            N_FEATS => Enc::V1,
+            N_FEATS_V2 => Enc::V2,
+            _ => panic!("unknown encoder input dim {d}"),
+        }
+    }
+    pub fn n_feats(self) -> usize {
+        match self {
+            Enc::V1 => N_FEATS,
+            Enc::V2 => N_FEATS_V2,
+        }
+    }
+}
+
+/// Encode `s` for `seat` under the given encoder version.
+pub fn encode(enc: Enc, s: &State, seat: usize) -> Vec<f32> {
+    match enc {
+        Enc::V1 => features(s, seat),
+        Enc::V2 => features_v2(s, seat),
+    }
+}
 
 #[inline]
 fn tile_sub(code: u16) -> f32 {
@@ -303,6 +337,187 @@ pub fn features(s: &State, seat: usize) -> Vec<f32> {
     out
 }
 
+// ─── Encoder v2: v1 + Group J (feature round 2) ──────────────────────────────
+// The v1 encoder gives offered tiles only a type one-hot + ONE subtype scalar
+// (effect_id/26 for monasteries), and NO time interaction — but a tile's worth
+// is clock-coupled: continuous monasteries/mines compound over the phases LEFT
+// (better early), endgame scorers pay by their CURRENT multiplier count plus
+// accumulation headroom. Group J hands the net those two curves precomputed
+// (the Spender per-card take_value lesson: explicit interactions >> making an
+// MLP learn identity-decode x clock internally), plus 26-way monastery-effect
+// availability unions (the subtype scalar can't be sliced into 26 categories).
+//
+// FROZEN LAYOUT v2 = the FULL v1 block (934, unchanged) + Group J (144):
+//   J1 (12) my time-value per numbered-depot hex slot (d0s0,d0s1,..,d5s1)
+//   J2  (4) my time-value per black-depot slot
+//   J3  (3) my time-value per own-storage slot
+//   J4 (16) OPP time-value per depot+black slot (denial read)
+//   J5 (38) is-continuous-mon / is-endgame-mon per the 19 offer slots
+//   J6 (19) my endgame multiplier count per slot (/8, 0 unless endgame mon)
+//   J7 (26) takeable monastery-effect union (depots + black)
+//   J8 (26) my-storage monastery-effect union
+
+pub const N_FEATS_V2: usize = N_FEATS + 144;
+
+/// Time-coupled acquisition value of `code` for `seat`, in rough VP-equivalents
+/// (silver ~ 1 VP per final_scores; worker ~ 0.5). Deliberately encodes ONLY
+/// the clock-coupled income/effect stream — placement/region VP is already
+/// richly covered by the per-space board block. Ships/livestock/buildings/
+/// castles have ~time-flat worth (their type one-hots suffice) -> 0 here.
+fn tile_time_value(s: &State, seat: usize, code: u16) -> f32 {
+    if code == 0 {
+        return 0.0;
+    }
+    let p = &s.players[seat];
+    let phases_left = (5 - s.phase) as f32; // phase-ends still ahead (incl. current)
+    let v = match type_of(code) {
+        TileType::Mine => {
+            // 1 silver/phase, +0.5 worker-value/phase if monastery 2 is held
+            let per_phase = 1.0 + if p.has_effect(2) { 0.5 } else { 0.0 };
+            per_phase * phases_left
+        }
+        TileType::Monastery => {
+            let e = monastery_effect(code);
+            match e {
+                // continuous: hand per-phase yield estimate x phases left
+                1 => 0.3 * phases_left,                          // multi-building towns
+                2 => 0.5 * (p.mines as f32 + 0.5) * phases_left, // worker per mine
+                3 => 0.6 * phases_left,                          // +1 silver per sell
+                4 => 0.3 * phases_left,                          // worker per sell
+                5 => 0.6 * phases_left,                          // ship: adjacent depot goods
+                6 => 0.5 * phases_left,                          // building->storage option
+                7 => 0.5 * phases_left,                          // +1 VP per scoring livestock
+                8 => 0.4 * phases_left,                          // adjust 2 per worker
+                9..=11 => 0.4 * phases_left,                     // free die shift (place)
+                12 => 0.5 * phases_left,                         // free die shift (take)
+                13 => 0.7 * phases_left,                         // +1 silver on take-workers
+                14 => 0.7 * phases_left,                         // take-workers gives 4
+                // endgame: exact current multiplier + accumulation headroom
+                15 => {
+                    let kinds = p.sold.iter().filter(|&&c| c > 0).count() as f32;
+                    2.0 * kinds + 2.0 * phases_left * 0.4
+                }
+                16..=23 => {
+                    const EFF_BT: [u8; 8] = [
+                        tiles::B_MARKET,
+                        tiles::B_WATCHTOWER,
+                        tiles::B_CARPENTER,
+                        tiles::B_CHURCH,
+                        tiles::B_WAREHOUSE,
+                        tiles::B_BOARDING,
+                        tiles::B_BANK,
+                        tiles::B_TOWNHALL,
+                    ];
+                    let bt = EFF_BT[(e - 16) as usize] as usize;
+                    4.0 * p.buildings[bt] as f32 + 4.0 * phases_left * 0.3
+                }
+                24 => {
+                    4.0 * p.livestock_mask.count_ones() as f32 + 4.0 * phases_left * 0.3
+                }
+                25 => {
+                    let sold: u32 = p.sold.iter().map(|&c| c as u32).sum();
+                    sold as f32 + phases_left * 0.8
+                }
+                26 => 3.0 * p.bonus_claimed as f32 + 3.0 * phases_left * 0.3,
+                _ => 0.0,
+            }
+        }
+        _ => 0.0,
+    };
+    (v / 8.0).tanh()
+}
+
+/// My endgame-multiplier count for an offered endgame monastery (0 otherwise).
+fn endgame_mult(s: &State, seat: usize, code: u16) -> f32 {
+    if code == 0 || type_of(code) != TileType::Monastery {
+        return 0.0;
+    }
+    let p = &s.players[seat];
+    let e = monastery_effect(code);
+    let n = match e {
+        15 => p.sold.iter().filter(|&&c| c > 0).count() as u32,
+        16..=23 => {
+            const EFF_BT: [u8; 8] = [
+                tiles::B_MARKET,
+                tiles::B_WATCHTOWER,
+                tiles::B_CARPENTER,
+                tiles::B_CHURCH,
+                tiles::B_WAREHOUSE,
+                tiles::B_BOARDING,
+                tiles::B_BANK,
+                tiles::B_TOWNHALL,
+            ];
+            p.buildings[EFF_BT[(e - 16) as usize] as usize] as u32
+        }
+        24 => p.livestock_mask.count_ones(),
+        25 => p.sold.iter().map(|&c| c as u32).sum(),
+        26 => p.bonus_claimed as u32,
+        _ => return 0.0,
+    };
+    (n as f32 / 8.0).min(1.0)
+}
+
+/// v2 = the full v1 vector (byte-identical prefix) + Group J appended.
+pub fn features_v2(s: &State, seat: usize) -> Vec<f32> {
+    let mut out = features(s, seat);
+    out.reserve(N_FEATS_V2 - N_FEATS);
+    let opp = 1 - seat;
+    // the 19 offer slots in a fixed order: 12 numbered-depot hexes, 4 black, 3 storage
+    let mut slots: [u16; 19] = [0; 19];
+    for d in 0..6 {
+        slots[d * 2] = s.depot_hex[d][0];
+        slots[d * 2 + 1] = s.depot_hex[d][1];
+    }
+    for k in 0..4 {
+        slots[12 + k] = s.black_depot[k];
+    }
+    for k in 0..3 {
+        slots[16 + k] = s.players[seat].storage[k];
+    }
+    // J1-J3: my time-values (12 + 4 + 3)
+    for &c in &slots {
+        out.push(tile_time_value(s, seat, c));
+    }
+    // J4: opp time-values for the CONTESTED slots (depots + black)
+    for &c in &slots[..16] {
+        out.push(tile_time_value(s, opp, c));
+    }
+    // J5: continuous/endgame monastery flags per slot
+    for &c in &slots {
+        let (cont, end) = if c != 0 && type_of(c) == TileType::Monastery {
+            let e = monastery_effect(c);
+            ((e <= 14) as u8 as f32, (e >= 15) as u8 as f32)
+        } else {
+            (0.0, 0.0)
+        };
+        out.push(cont);
+        out.push(end);
+    }
+    // J6: my endgame multiplier count per slot
+    for &c in &slots {
+        out.push(endgame_mult(s, seat, c));
+    }
+    // J7: takeable monastery-effect union (depots + black)
+    let mut take_union = [0.0f32; 26];
+    for &c in &slots[..16] {
+        if c != 0 && type_of(c) == TileType::Monastery {
+            take_union[(monastery_effect(c) - 1) as usize] = 1.0;
+        }
+    }
+    out.extend_from_slice(&take_union);
+    // J8: my storage monastery-effect union
+    let mut sto_union = [0.0f32; 26];
+    for &c in &slots[16..] {
+        if c != 0 && type_of(c) == TileType::Monastery {
+            sto_union[(monastery_effect(c) - 1) as usize] = 1.0;
+        }
+    }
+    out.extend_from_slice(&sto_union);
+
+    debug_assert_eq!(out.len(), N_FEATS_V2);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +537,32 @@ mod tests {
                         assert!(
                             x.is_finite() && (-1.5..=1.5).contains(&x),
                             "feature {i} out of range: {x} (seed {seed})"
+                        );
+                    }
+                }
+                let acts = legal_actions(&s);
+                let a = acts[rng.below(acts.len())];
+                apply(&mut s, a);
+            }
+        }
+    }
+
+    #[test]
+    fn v2_extends_v1_with_bounded_group_j() {
+        let mut rng = Rng::new(11);
+        for seed in 20..28u64 {
+            let mut s = State::new_game([(seed % 9) as u8, ((seed * 7) % 9) as u8], seed);
+            while !s.is_over() {
+                for seat in 0..2 {
+                    let f1 = features(&s, seat);
+                    let f2 = features_v2(&s, seat);
+                    assert_eq!(f2.len(), N_FEATS_V2);
+                    // v1 must be a byte-identical prefix of v2 (frozen layout)
+                    assert_eq!(&f2[..N_FEATS], &f1[..]);
+                    for (i, &x) in f2[N_FEATS..].iter().enumerate() {
+                        assert!(
+                            x.is_finite() && (-1.5..=1.5).contains(&x),
+                            "group-J feature {i} out of range: {x} (seed {seed})"
                         );
                     }
                 }

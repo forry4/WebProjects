@@ -30,7 +30,10 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pv_net import IN_DIM, N_ACT, PVNet, export_json, load_json  # noqa: E402
+import pv_net  # noqa: E402
+from pv_net import N_ACT, PVNet, export_json, load_json  # noqa: E402
+
+IN_DIM = pv_net.IN_DIM  # reset by --in-dim before any parsing
 
 SHAPE_A = 0.3
 BETA = 0.3
@@ -161,7 +164,11 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--warm", default=None, help="warm-start from an exported json")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--in-dim", type=int, default=pv_net.IN_DIM,
+                    help="feature count in the harvest rows (934=v1, 1078=v2)")
     args = ap.parse_args()
+    global IN_DIM
+    IN_DIM = args.in_dim
 
     files = sorted(set(sum((glob.glob(g) for g in args.data.split(";")), [])))
     assert files, f"no files match {args.data}"
@@ -178,7 +185,7 @@ def main():
         mu, sd = np.array(wmu, dtype=np.float32), np.array(wsd, dtype=np.float32)
         print(f"warm-start from {args.warm}")
     else:
-        net = PVNet()
+        net = PVNet(in_dim=args.in_dim)
     net.to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
 

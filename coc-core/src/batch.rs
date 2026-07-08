@@ -18,7 +18,6 @@
 //! producing identical win/margin lines).
 
 use crate::engine::{self, State, OVER};
-use crate::feats;
 use crate::heuristic;
 use crate::mcts::{Descent, LeafCtx, Search};
 use crate::rng::Rng;
@@ -94,7 +93,7 @@ pub fn step_netval<N: crate::valuenet::PvEval + ?Sized>(net: &N, tasks: &mut [&m
                 let legal = engine::legal_actions(&leaf.state);
                 let actor = leaf.state.actor() as usize;
                 let prior_row = rows.len();
-                rows.push(feats::features(&leaf.state, actor));
+                rows.push(net.encode_state(&leaf.state, actor));
                 need_policy.push(true);
                 // the rollout consumes the task rng in the same order the
                 // sequential hybrid_netval_eval_steps would (after descend)
@@ -108,7 +107,7 @@ pub fn step_netval<N: crate::valuenet::PvEval + ?Sized>(net: &N, tasks: &mut [&m
                     Err(heuristic::terminal_reward(&r, actor))
                 } else {
                     let row = rows.len();
-                    rows.push(feats::features(&r, actor));
+                    rows.push(net.encode_state(&r, actor));
                     need_policy.push(false);
                     Ok(row)
                 };

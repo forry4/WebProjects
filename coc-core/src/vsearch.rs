@@ -154,7 +154,7 @@ pub fn pv_eval<N: crate::valuenet::PvEval + ?Sized>(
     actor: usize,
     legal: &[usize],
 ) -> (Vec<f64>, f64) {
-    let f = crate::feats::features(s, actor);
+    let f = net.encode_state(s, actor);
     let (v, logits) = net.forward_raw(&f);
     (priors_from_logits(&logits, legal), v as f64)
 }
@@ -209,7 +209,7 @@ pub fn hybrid_netval_eval_steps<N: crate::valuenet::PvEval + ?Sized>(
     let v = if r.mode == crate::engine::OVER {
         heuristic::terminal_reward(&r, actor)
     } else {
-        net.forward_value_raw(&crate::feats::features(&r, actor)) as f64
+        net.forward_value_raw(&net.encode_state(&r, actor)) as f64
     };
     (p, v)
 }

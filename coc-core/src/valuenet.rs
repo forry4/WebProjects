@@ -187,6 +187,7 @@ impl StandardizedMlp {
 // `forward_raw` takes the RAW `feats::features` vector, standardizes (z-score), and returns
 // (value in [-1,1], policy logits over the action space). The Python trainer exports this JSON layout.
 pub struct PolicyValueNet {
+    enc: crate::feats::Enc, // encoder version, inferred from in_dim at load
     mu: Vec<f32>,
     inv_sd: Vec<f32>, // 1/sd precomputed at load (sd==0 -> 1.0); a mul beats 934 divs/forward
     tdims: Vec<usize>, // trunk dims: [in, h1, ..., H]
@@ -208,7 +209,8 @@ impl PolicyValueNet {
         assert_eq!(tw.len(), tdims.len() - 1);
         assert_eq!(tb.len(), tdims.len() - 1);
         let inv_sd = sd.iter().map(|&s| if s != 0.0 { 1.0 / s } else { 1.0 }).collect();
-        PolicyValueNet { mu, inv_sd, tdims, tw, tb, vw, vb, pw, pb, n_act }
+        let enc = crate::feats::Enc::from_in_dim(mu.len());
+        PolicyValueNet { enc, mu, inv_sd, tdims, tw, tb, vw, vb, pw, pb, n_act }
     }
     pub fn in_dim(&self) -> usize {
         self.mu.len()
@@ -234,6 +236,7 @@ impl PolicyValueNet {
         let hd = *tdims.last().unwrap();
         let s = (1.0 / hd as f32).sqrt();
         PolicyValueNet {
+            enc: crate::feats::Enc::from_in_dim(in_dim),
             mu: vec![0.0; in_dim],
             inv_sd: vec![1.0; in_dim],
             tdims,
@@ -383,11 +386,15 @@ impl PolicyValueNet {
 /// The one abstraction the search/leaf/batch drivers need from a policy+value
 /// net — implemented by the f32 `PolicyValueNet` (delegating to its inherent
 /// methods) and the int8 `QuantPolicyValueNet`, so `:netval8` players run
-/// through the exact same search code as f32 ones.
+/// through the exact same search code as f32 ones. `encode_state` is the
+/// ENCODER seam: a net carries its own feature version (inferred from its
+/// input dim at load), so v1 and v2 nets face each other in one gate and the
+/// wasm serves whichever model blob it fetched with the right encoder.
 pub trait PvEval: Sync {
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>);
     fn forward_value_raw(&self, raw: &[f32]) -> f32;
     fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)>;
+    fn encode_state(&self, s: &crate::engine::State, seat: usize) -> Vec<f32>;
 }
 
 impl PvEval for PolicyValueNet {
@@ -399,6 +406,9 @@ impl PvEval for PolicyValueNet {
     }
     fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)> {
         PolicyValueNet::forward_batch(self, raws, need_policy)
+    }
+    fn encode_state(&self, s: &crate::engine::State, seat: usize) -> Vec<f32> {
+        crate::feats::encode(self.enc, s, seat)
     }
 }
 
@@ -465,6 +475,7 @@ fn quantize_act(x: &[f32], out: &mut Vec<u8>) -> f32 {
 }
 
 pub struct QuantPolicyValueNet {
+    enc: crate::feats::Enc,
     mu: Vec<f32>,
     inv_sd: Vec<f32>,
     tdims: Vec<usize>,
@@ -512,6 +523,7 @@ impl QuantPolicyValueNet {
             qrs.push(lrs);
         }
         QuantPolicyValueNet {
+            enc: net.enc,
             mu: net.mu.clone(),
             inv_sd: net.inv_sd.clone(),
             tdims: net.tdims.clone(),
@@ -580,6 +592,9 @@ impl PvEval for QuantPolicyValueNet {
                 }
             })
             .collect()
+    }
+    fn encode_state(&self, s: &crate::engine::State, seat: usize) -> Vec<f32> {
+        crate::feats::encode(self.enc, s, seat)
     }
 }
 
