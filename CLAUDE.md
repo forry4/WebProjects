@@ -353,7 +353,106 @@ A batch of CoC UI/UX fixes + two engine/bot fixes, all on prod. Durable, non-obv
   placement anchor was gated on `interactive` (gone once the turn ended) and the View-Opponent modal covered
   the board instantly. Fix: `data-sid` is **always** on my board (`data-sid={opp ? undefined : sid}`), and the
   setup auto-view-opponent is **delayed 550ms** (`setupOpenTimer` ref + cleanup) so the placement flyer plays
-  before the peek swaps the view.
+  before the peek swaps the view. (SUPERSEDED — see the reveal rewrite in the next session entry.)
+
+### Session (July 2026) — labels, crimson, ability logging, reconnect fix, keep-alive, arm-then-act, review polish
+A large batch of CoC UI/UX + one load-bearing reliability fix, all shipped to prod. Durable, non-obvious facts:
+- **Phase-round labels ("A-1".."E-5") replace turn numbers in the log + review.** `engine._log` stamps every
+  record with `ph`/`rd` (phase letter + round). Income/`phase_end` log BEFORE `phase_letter` advances, so they
+  correctly stamp the ENDING phase. Old saved games lack `ph` → the UI falls back to the `T#` turn number
+  (`m.ph ? \`${m.ph}-${m.rd}\` : \`T${m.t}\``). `vp_breakdown` items carry `ph`/`rd` too so the review segments
+  by phase.
+- **"burgundy" is the DATA KEY, "crimson" the display name (do not rename the key).** All user-facing text
+  says crimson (`colorLabel`, the setup error message, the `vp_breakdown` "Color bonus" label). But the space
+  ids (`burgundy-1`, …) are **persisted in every saved game** AND generated into the Rust **coc-core parity
+  tables**, so renaming the key would corrupt saved games + break engine parity. Only the *display* maps
+  burgundy→crimson.
+- **Color bonus is labeled small/large.** `bonus_tile` is tagged `large=(len(remaining)==2)` before the
+  `remaining.pop(0)` — the FIRST claim (both tiles present) takes the LARGE bonus (`bonus_first`, n+3), the
+  second the SMALL (`bonus_second`, n). `vp_breakdown` falls back to comparing `vp == tiles.bonus_first(n)` for
+  pre-flag saved games. Label: "Color bonus — large (crimson)".
+- **Tile-ability logging via a `via` field (the consistency fix).** Every ability-driven ACTION log carries
+  `via` = a source-tile key: a building key (`market`…), `"ship"`, `"castle"`, or `"monastery:N"`. The FRONTEND
+  LOG RENDER appends ` (${viaLabel(via)})` at the very END of the line (NOT `moveText`, so the tile name lands
+  after any "(+VP)"): "took a Ship (Market)", "sold #3 goods x2 (+4 VP) (Warehouse)", "advanced 1 on the turn
+  track (Ship)", "(Castle)", "(Monastery #6)". `_log` drops a `None` via so normal actions stay clean.
+  Threading: the immediate-gain buildings (boarding/bank/watchtower) log a NEW `build_gain` record
+  (`via=bt`, + workers/silver/vp) INSTEAD of the old generic `building_effect` "used X" line; pending-action
+  buildings (market/carpenter/church/warehouse/townhall) log NOTHING at placement — their resolver tags the
+  resulting action's log with the building; ship/castle/monastery pass `via` into the shared cores
+  (`_do_take_hex/_do_place_tile/_do_sell_goods/_do_take_workers` + `_sell_color` gained a `via=` param).
+  `vp_breakdown` catches watchtower under `build_gain` (only vp-bearing building). The log render skips the
+  generic "(+VP)" suffix for `build_gain` (it already states "gained 4 VP") to avoid doubling. **Legacy
+  `building_effect` records still render** ("used X") for old saved games.
+- **THE RECONNECT FIX (load-bearing — a bot turn froze for MINUTES).** CoC's `useSocket` had **NO
+  auto-reconnect** — `ws.onclose` only set `connected=false`. A vs-bot turn is re-driven ONLY when the client
+  reconnects (`_handle_reconnect` re-triggers `_schedule_bot_turn`), so a Render cold-start (or any blip / iOS
+  backgrounding) that dropped the socket left the bot's turn un-driven until a manual refresh. Fix (frontend-
+  only): a backoff reconnect loop (`attemptReconnect`, reused by a `visibilitychange` nudge so neither leaves
+  the loop dead) that reconnects with the **`reconnect` action, NOT `join`** (join doesn't resume the bot),
+  retries through the ~30-50s cold-start window, and **checks `socketReady()` (readyState) to NOT abort a
+  pending CONNECTING socket** (a cold-starting Render holds the WS open until up — aborting it every timer tick
+  would thrash). A "Reconnecting…" banner (`.coc-reconnbar`) shows the state. On reconnect the client
+  re-arms `client_ai` automatically (existing effect). Diagnosed by pulling the stuck game from Turso (it had
+  COMPLETED — proving it was a client-side un-driven-turn issue, not a backend deadlock).
+- **Post-turn settle + close linger (bot-turn pacing).** Backend `_POST_TURN_PAUSE=1.0` in `_schedule_bot_turn`:
+  waits before the bot's FIRST move on a *playing* turn (skipped during setup / superseded by the longer
+  `_PHASE_END_PAUSE` on a phase change) so finishing your turn isn't instantly steamrolled. Frontend matches it:
+  the opponent-board auto-open is **delayed ~1s**, and when the bot's turn ends the board **lingers ~1s** before
+  returning to yours (both via `botViewTimer`, gated so the setup-reveal `revealHoldRef` wins). **GOTCHA (cost a
+  CI failure):** `test_client_ai.py`'s isolation zeroes the pacing constants for speed but didn't know about the
+  new `_POST_TURN_PAUSE`, so the real 1s-per-turn sleeps overflowed its driver loop on CI's fine timers (it
+  passed locally only because Windows' coarse timer resolution inflated the loop's wall-clock) → **any new
+  pacing constant must be zeroed in `_isolate`.**
+- **Setup castle reveal REWRITE (supersedes the 550ms delay above).** The bug: the bot's SECOND starting castle
+  transitions the game straight to "playing" in the SAME update that places it, so the generic `aiThinking`
+  auto-close fired at the exact moment the pop-in played → board vanished as the animation ran. Fix: a DEDICATED
+  effect owns the reveal — on a **witnessed null→placed transition** of the opponent's castle (`prevOppCastleRef`
+  starts `undefined` = first snapshot = never reveal → reconnect-safe), it opens their board, spawns the pop-in
+  (two rAFs so `[data-oppsid]` exists), holds ~1.9s (`revealHoldRef` BLOCKS the generic handler from closing),
+  then releases. `botViewTimer`/`revealHoldRef`/`aiThinkingRef` coordinate the generic open/close with the reveal.
+- **Arm-then-act interaction pattern (now consistent across the game).** Every resource spend requires an
+  explicit selection first, then a target click: **select a die** before take-hex/place/sell; **click the
+  workers token** to arm **Monastery #6** then click a building tile in a depot (2 workers); **click the silver
+  token** to arm a **black-depot buy** then click a black tile (2 silver). `canUseM6`/`canBuyBlack` mirror the
+  engine's `legal_moves` gates so the token only rings gold (`.coc-arm`) / pulses when armed (`.coc-on`) when the
+  action will actually succeed; a reset effect disarms the moment it's no longer usable. **Monastery #6 had NO
+  UI at all before this** (the frontend never sent `monastery6_take` — the engine always supported it).
+- **Goods click-to-sell.** Click a goods chip in your storage to sell it. Ability sells (Warehouse pending /
+  Castle bonus's chosen die) sell on click directly; a NON-ability sell requires a **die SELECTED first** whose
+  value == the goods' sell number (only those goods pulse/are clickable), else the click just shows the goods
+  description. `sellDieForGood`/`canSellGood`/`sellGood`.
+- **Review section headers.** Dropped the "During the game" subheader (the per-phase dividers already segment
+  it) and render "End of game" as a **centered divider** (`.coc-review-phase`, `.proj` fade), so the review reads
+  Phase A…E then End of game.
+- **Client-AI sim logging (Expert tier).** The client-AI driver prints ONE `[coc client-AI] turn used N sims`
+  line per bot turn to the dev console (sum of root visits across the worker pool, accumulated in `turnSimsRef`
+  across the turn's decisions, printed when the bot hands back). Nothing prints if the server watchdog took the
+  turn (client did no searching).
+
+### Session (July 2026) — keep-alive / cold-start mitigation (deploy infra, NOT a game change)
+Render free tier spins the backend down after ~15 min idle (~30-50s cold start), which surfaced as slow site
+loads AND mid-game freezes (see the reconnect fix above). Durable facts:
+- **GitHub Actions SCHEDULED workflows are too unreliable for keep-alive** — measured **~1 of 28 expected 5-min
+  runs actually fired** in 2+ hours (they're heavily delayed/skipped, worst near :00). So `.github/workflows/
+  keepalive.yml` is now a **LONG-LIVED pinger**: each run pings `/health` every ~4 min for ~56 min before
+  exiting (public repo → free Actions minutes), so a single sparse firing keeps the backend warm for ~an hour;
+  hourly-ish starts (`23 14-23,0-5 * * *`, off-peak minute) chain to cover the window. **This is only a backup.**
+- **cron-job.org is the recommended RELIABLE primary** (fires on time; user sets it up — external account): URL
+  `https://splendid-nelz.onrender.com/health`, every 5 min, timezone **America/Los_Angeles** (auto-DST) restricted
+  to **07:00-22:00**. GitHub cron is UTC-only (no DST); the window `14:00-05:59 UTC` covers 7am-10pm PST/PDT with
+  ≤1h overhang.
+- **Budget:** Render free tier caps at **~750 instance-hours/month**; daytime-only warming (~15h/day ≈ 450h)
+  fits with headroom, but keeping BOTH Render services (spender-backend + the decommissionable wwsd one) warm
+  24/7 would blow it. `/health` (site-root, no DB) is the cheap warm endpoint.
+- **Warm-on-load ping** in `webapp/index.html` (`<head>` inline script, **prod hosts only** — `forry4.github.io`
+  / `*.workers.dev`): fires a fire-and-forget `fetch('/health')` before the bundle loads so a cold start overlaps
+  page load. CAVEAT (do not oversell): this does NOT help the visitor who TRIGGERS the cold start (the site needs
+  the backend immediately; the spin-up takes 30-50s regardless) — it only helps a later visitor. The daytime cron
+  is the load-bearing part. The only *guaranteed* fix is the $7/mo Render Starter tier (no spin-down).
+- Query the stuck/finished prod game state directly from Turso (creds in gitignored `C:\Users\Forrest\.spender_turso`;
+  `curl` POST to `<https-host>/v2/pipeline`, use a BOUND arg `{"type":"text","value":"ROOMID"}` — a
+  double-quoted id in SQL is read as a column). The room dict is `state_json`; `coc_games` has the game.
 
 ### CoC Expert AI campaign ("CoC-N") — coc-core crate (July 2026; P0-P2 DONE, gates passed)
 Building an N-class learned AI for CoC by the proven Spender recipe. Approved plan:
