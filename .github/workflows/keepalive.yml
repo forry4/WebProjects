@@ -2,22 +2,24 @@ name: Keep backend warm
 
 # Pings the Render backend during play hours so its free-tier cold start (~30-50s;
 # spins down after ~15 min idle) doesn't hit real users. Only during the day, so it
-# stays well under Render's ~750 free instance-hours/month (16h/day x ~30 = ~480h).
+# stays well under Render's ~750 free instance-hours/month.
 #
-# GitHub cron is UTC and does NOT adjust for DST. The window 14:00-05:59 UTC covers
-# 7am-10pm PST/PDT with <=1h overhang either side:
-#   PST (UTC-8): 06:00-21:59 local  (starts ~1h early)
-#   PDT (UTC-7): 07:00-22:59 local  (ends ~1h late)
-# Scheduled runs are frequently delayed/skipped under GitHub load (unreliable for a
-# 15-min spin-down), so this is only a BACKSTOP — a dedicated pinger (cron-job.org)
-# is the primary keep-alive. Every 5 min for tighter slack. Public-repo Actions free.
+# GitHub Actions SCHEDULED workflows are unreliable — they get heavily delayed/skipped
+# (observed: ~1 of 28 expected 5-min runs actually fired). So instead of relying on a
+# frequent schedule, EACH run is LONG-LIVED: it pings for ~56 min before exiting, so a
+# single firing keeps the backend warm for ~an hour. Hourly starts chain to cover the
+# window; even if most starts are dropped, each that fires still covers an hour. Public
+# repo => Actions minutes are free. A dedicated pinger (cron-job.org) is still the more
+# reliable primary; this is the zero-setup fallback.
+#
+# Window is UTC (no DST): 14:00-05:59 covers 7am-10pm PST/PDT with <=1h overhang. Starts
+# at :23 (off-peak — GitHub delays :00 the most).
 
 on:
   schedule:
-    - cron: "*/5 14-23,0-5 * * *"
-  workflow_dispatch: {}   # manual trigger for testing
+    - cron: "23 14-23,0-5 * * *"
+  workflow_dispatch: {}
 
-# Never let overlapping runs pile up.
 concurrency:
   group: keepalive
   cancel-in-progress: false
@@ -25,16 +27,16 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 62
     steps:
-      - name: Ping backend health
+      - name: Warm the backend for ~an hour
         run: |
-          # The ping itself may trigger the cold start, so allow a long per-try timeout
-          # and retry a couple times. Never fail the job (a keep-alive shouldn't page you).
           url="https://splendid-nelz.onrender.com/health"
-          for i in 1 2 3; do
+          # Ping every 4 min for ~56 min (well under the 15-min spin-down). The first
+          # ping may itself trigger a cold start, so allow a long per-try timeout.
+          end=$(( $(date +%s) + 3360 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 70 "$url" || echo 000)
-            echo "attempt $i -> HTTP $code"
-            [ "$code" = "200" ] && exit 0
-            sleep 15
+            echo "$(date -u +%H:%M:%SZ) -> HTTP $code"
+            sleep 240
           done
-          echo "backend did not return 200 (cold-starting or down) — not failing the job"
