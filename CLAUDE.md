@@ -515,8 +515,16 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       read): the flat first 3 iters were the BOOT-ANCHORED data washing out of the 2-iter training
       window — judge a self-play loop only after the window is pure self-play data.** The
       hybrid-ratchet conclusion stands unchanged (it benched the value head); netval self-play
-      trains it where it's used and genuinely improves it. Loop EXTENDED to ITERS=12 (iters 6-11)
-      — keep ratcheting while it climbs; re-gate fresh-seed + serving-config before any next ship.
+      trains it where it's used and genuinely improves it. **EXTENDED RUN COMPLETE (12 iters
+      total): iters 6-11 = SIX consecutive non-promotions vs the iter-5 bar (0.475/0.475/0.425/
+      0.469/0.506/0.469) → the recipe CONVERGED on the iter-5 net (the shipped one). Do not
+      re-run this loop as-is expecting more** — the next gain needs a STRUCTURAL change first
+      (feature round 2: time-discounted per-tile depot values + 26-way monastery identity —
+      per-depot tiles are currently type-onehot + ONE effect_id/26 scalar, see feats.rs
+      push_tile; and/or higher-sims teacher; and/or attention P4b), then netval self-play to
+      consolidate it (now proven to work in CoC). Human playtest verdict pre-upgrade: the user
+      beats the Expert soundly; re-test against the upgraded one, and mine the user's coc_games
+      for the concrete edge before locking the feature set.
     - **PERF: vectorized net forward ~6.5x native / ~3x wasm (`21c7d9a` + `89099bc` — DO NOT regress).**
       The netval leaf was ~97% net forward (bench_coc breakdown: forward 489µs vs features 2.9µs, heur
       0.1µs, rollout ~6µs), and `valuenet::linear`'s single-accumulator dot is a serial FP dependency
