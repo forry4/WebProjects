@@ -328,7 +328,11 @@ def vp_breakdown(game: dict, pid: str) -> list[dict]:
         elif typ == "bonus_tile":
             c = m.get("color", "?")
             # display name: the castle color's data key is "burgundy", shown as "crimson"
-            label = f"Color bonus ({'crimson' if c == 'burgundy' else c})"
+            cname = "crimson" if c == "burgundy" else c
+            # large = first (bonus_first, n+3); small = second (bonus_second, n). Prefer the
+            # explicit flag; fall back to the vp value for pre-flag saved games.
+            is_large = m["large"] if "large" in m else (m.get("vp") == tiles.bonus_first(game["num_players"]))
+            label = f"Color bonus — {'large' if is_large else 'small'} ({cname})"
         elif typ == "livestock_score":
             label = f"Livestock scored ({m.get('animal', '?')})"
         elif typ == "sell_goods":
@@ -336,7 +340,7 @@ def vp_breakdown(game: dict, pid: str) -> list[dict]:
             c = m.get("color")
             n = tiles.GOODS_COLORS.index(c) + 1 if c in tiles.GOODS_COLORS else "?"
             label = f"Sold #{n} goods x {m.get('count', '?')}"
-        elif typ == "building_effect":               # only the watchtower carries vp>0
+        elif typ in ("building_effect", "build_gain"):    # only the watchtower carries vp>0
             label = "Watchtower"
         else:
             label = typ
@@ -380,6 +384,11 @@ def _log(game: dict, pid: str, mtype: str, **kw) -> None:
     # `ph`/`rd` = the phase letter + round when the move happened, so the UI can label
     # entries "A-1".."E-5" (income/phase_end log before phase_letter advances, so they
     # correctly stamp the ENDING phase). Old saved games lack them → UI falls back to t.
+    # `via` (optional) names the source tile/ability an action came from (e.g. "market",
+    # "ship", "monastery:6") — the UI appends it in parens so ability-driven actions read
+    # "took a Ship (Market)". Drop a None via so normal actions don't carry the field.
+    if kw.get("via") is None:
+        kw.pop("via", None)
     rec = {"pid": pid, "type": mtype, "t": game.get("turn_number", 0),
            "ph": game.get("phase_letter"), "rd": game.get("round")}
     rec.update(kw)
@@ -566,14 +575,17 @@ def _score_area_and_bonus(game: dict, pid: str, sid: str) -> None:
         p["vp"] += vp
         _log(game, pid, "area_complete", region=region["id"], size=size, vp=vp)
 
-    # Color bonus: first/second player to fully cover every space of this color.
+    # Color bonus: first/second player to fully cover every space of this color. The
+    # FIRST claim (both tiles still present) takes the LARGE bonus (bonus_first, n+3);
+    # the second takes the SMALL one (bonus_second, n). Record which so the UI can say so.
     if all(duchy[s] is not None for s in b.SPACES_BY_COLOR[color]):
         remaining = game["bonus_tiles"].get(color, [])
         if remaining:
+            large = len(remaining) == 2
             val = remaining.pop(0)
             p["claimed_bonus"].append({"color": color, "vp": val})
             p["vp"] += val
-            _log(game, pid, "bonus_tile", color=color, vp=val)
+            _log(game, pid, "bonus_tile", color=color, vp=val, large=large)
 
 
 # ── Pending sub-decision helpers ──────────────────────────────────────────────
@@ -621,14 +633,19 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     bt = tile["building"]
     p["buildings_placed"][bt] += 1
     p["town_buildings"].setdefault(_pboard(p).region_of(sid), []).append(bt)
-    vp_gain = 0
+    # Immediate-gain buildings log their gain, tagged with the building (via) so the UI
+    # reads "gained 4 workers (Boarding House)". Buildings with a FOLLOW-UP action
+    # (market/carpenter/church/warehouse/townhall) log nothing here — their action gets
+    # tagged with the building when it resolves (no redundant "used X" line).
     if bt == "boarding":
         p["workers"] += 4
+        _log(game, pid, "build_gain", via=bt, workers=4)
     elif bt == "bank":
         p["silver"] += 2
+        _log(game, pid, "build_gain", via=bt, silver=2)
     elif bt == "watchtower":
         p["vp"] += 4
-        vp_gain = 4
+        _log(game, pid, "build_gain", via=bt, vp=4)
     elif bt == "market":
         _building_take_pending(game, pid, bt, ("ship", "livestock"))
     elif bt == "carpenter":
@@ -641,7 +658,6 @@ def _place_building_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     elif bt == "townhall":
         if p["storage"]:
             _set_pending(game, pid, "townhall_place", {"building": bt})
-    _log(game, pid, "building_effect", building=bt, vp=vp_gain)
 
 
 def _take_goods_colors(game: dict, pid: str, depot: int, colors) -> None:
@@ -702,7 +718,7 @@ def _place_ship_effect(game: dict, pid: str, sid: str, tile: dict) -> None:
     # to end-of-turn) so the turn-order track updates the moment the ship is placed. A
     # whole-turn undo restores the pre-ship track from the turn-start snapshot.
     _advance_track(game, pid, 1)
-    _log(game, pid, "track_advance", spaces=1)
+    _log(game, pid, "track_advance", spaces=1, via="ship")
     # Plus you immediately take all goods from a depot of your choice (if any exist).
     total_goods = sum(len(game["depots"][str(d)]["goods"]) for d in range(1, 7))
     if total_goods > 0:
@@ -732,7 +748,7 @@ def _monastery_on_place(game: dict, pid: str, sid: str, tile: dict) -> None:
 
 
 # ── Action cores (shared by die-actions and pending resolvers) ────────────────
-def _do_take_hex(game, pid, value, depot, tile_id):
+def _do_take_hex(game, pid, value, depot, tile_id, via=None):
     p = game["players"][pid]
     if not _free_storage(p):
         return False, "storage full"
@@ -745,11 +761,11 @@ def _do_take_hex(game, pid, value, depot, tile_id):
         return False, "tile not in matching depot"
     d["hexes"].remove(tile)
     p["storage"].append(tile)
-    _log(game, pid, "take_hex", tile=tile, depot=depot)
+    _log(game, pid, "take_hex", tile=tile, depot=depot, via=via)
     return True, None
 
 
-def _do_place_tile(game, pid, value, tile_id, sid, ignore_number=False):
+def _do_place_tile(game, pid, value, tile_id, sid, ignore_number=False, via=None):
     p = game["players"][pid]
     tile = _storage_tile(p, tile_id)
     if tile is None:
@@ -769,12 +785,12 @@ def _do_place_tile(game, pid, value, tile_id, sid, ignore_number=False):
         return False, "already have that building in this town"
     p["storage"].remove(tile)
     p["duchy"][sid] = tile
-    _log(game, pid, "place_tile", tile=tile, space_id=sid)
+    _log(game, pid, "place_tile", tile=tile, space_id=sid, via=via)
     _on_tile_placed(game, pid, sid, tile)
     return True, None
 
 
-def _sell_color(game, pid, color, count):
+def _sell_color(game, pid, color, count, via=None):
     p = game["players"][pid]
     p["silver"] += 2 if 3 in p["monastery_effects"] else tiles.SELL_SILVER
     vp = tiles.sell_vp_per_tile(game["num_players"]) * count
@@ -783,25 +799,25 @@ def _sell_color(game, pid, color, count):
         p["workers"] += 1
     del p["goods"][color]
     p["sold_goods"].extend([color] * count)
-    _log(game, pid, "sell_goods", color=color, count=count, vp=vp)
+    _log(game, pid, "sell_goods", color=color, count=count, vp=vp, via=via)
 
 
-def _do_sell_goods(game, pid, value):
+def _do_sell_goods(game, pid, value, via=None):
     p = game["players"][pid]
     color = tiles.goods_color_for_die(value)
     count = p["goods"].get(color, 0)
     if count <= 0:
         return False, "no goods of that color to sell"
-    _sell_color(game, pid, color, count)
+    _sell_color(game, pid, color, count, via=via)
     return True, None
 
 
-def _do_take_workers(game, pid):
+def _do_take_workers(game, pid, via=None):
     p = game["players"][pid]
     p["workers"] += 4 if 14 in p["monastery_effects"] else 2
     if 13 in p["monastery_effects"]:
         p["silver"] += 1
-    _log(game, pid, "take_workers")
+    _log(game, pid, "take_workers", via=via)
     return True, None
 
 
@@ -866,7 +882,7 @@ def _h_monastery6_take(game, pid, move):
             p["storage"].append(t)
             p["workers"] -= 2
             game["m6_used_this_turn"] = True
-            _log(game, pid, "monastery6_take", tile=t)
+            _log(game, pid, "monastery6_take", tile=t, via="monastery:6")
             return True, None
     return False, "no such building tile in a depot"
 
@@ -983,13 +999,13 @@ def _r_extra_action(game, pid, move):
     st = sub.get("type")
     _clear_pending(game)                      # cleared first; the sub may set a new pending
     if st == "take_hex":
-        ok, err = _do_take_hex(game, pid, v, sub.get("depot", v), sub.get("tile_id"))
+        ok, err = _do_take_hex(game, pid, v, sub.get("depot", v), sub.get("tile_id"), via="castle")
     elif st == "place_tile":
-        ok, err = _do_place_tile(game, pid, v, sub.get("tile_id"), sub.get("space_id"))
+        ok, err = _do_place_tile(game, pid, v, sub.get("tile_id"), sub.get("space_id"), via="castle")
     elif st == "sell_goods":
-        ok, err = _do_sell_goods(game, pid, v)
+        ok, err = _do_sell_goods(game, pid, v, via="castle")
     elif st == "take_workers":
-        ok, err = _do_take_workers(game, pid)
+        ok, err = _do_take_workers(game, pid, via="castle")
     else:
         ok, err = False, "bad extra action"
     if not ok:
@@ -1004,7 +1020,7 @@ def _r_ship_take_goods(game, pid, move):
         return False, "choose a depot 1-6"
     _clear_pending(game)
     needs_pick, colors = _take_goods_from_depot(game, pid, d)
-    _log(game, pid, "ship_take_goods", depot=d)
+    _log(game, pid, "ship_take_goods", depot=d, via="ship")
     # Monastery 5 may add an adjacent depot AFTER this take resolves; if a goods pick
     # is needed first, carry the m5 continuation on the pick's context.
     m5_from = d if 5 in game["players"][pid]["monastery_effects"] else None
@@ -1024,7 +1040,7 @@ def _r_ship_adjacent_take(game, pid, move):
         return False, "not an adjacent depot with goods"
     _clear_pending(game)
     needs_pick, colors = _take_goods_from_depot(game, pid, d)
-    _log(game, pid, "ship_adjacent_take", depot=d)
+    _log(game, pid, "ship_adjacent_take", depot=d, via="monastery:5")
     if needs_pick:
         _set_pending(game, pid, "goods_pick", {"depot": d, "colors": colors, "m5_from": None})
     return True, None
@@ -1066,8 +1082,9 @@ def _r_building_take(game, pid, move):
         if t is not None:
             depot["hexes"].remove(t)
             p["storage"].append(t)
+            via = ctx.get("building")
             _clear_pending(game)
-            _log(game, pid, "building_take", tile=t)
+            _log(game, pid, "building_take", tile=t, via=via)
             return True, None
     return False, "tile no longer available"
 
@@ -1077,14 +1094,14 @@ def _r_warehouse_sell(game, pid, move):
     count = game["players"][pid]["goods"].get(color, 0)
     if count <= 0:
         return False, "no goods of that color"
-    _sell_color(game, pid, color, count)
+    _sell_color(game, pid, color, count, via="warehouse")
     _clear_pending(game)
     return True, None
 
 
 def _r_townhall_place(game, pid, move):
     _clear_pending(game)                      # cleared first; the placed tile may set a new pending
-    ok, err = _do_place_tile(game, pid, None, move.get("tile_id"), move.get("space_id"), ignore_number=True)
+    ok, err = _do_place_tile(game, pid, None, move.get("tile_id"), move.get("space_id"), ignore_number=True, via="townhall")
     if not ok:
         _set_pending(game, pid, "townhall_place", {"building": "townhall"})
         return False, err

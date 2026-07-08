@@ -129,8 +129,18 @@ function tileName(t) {
     default: return TYPE_LABEL[t.type] || "a tile";
   }
 }
+// Display name for a log record's source tile/ability (`via`), appended in parens so
+// ability-driven actions read "took a Ship (Market)" / "gained 4 workers (Boarding House)".
+function viaLabel(via) {
+  if (!via) return "";
+  if (via.slice(0, 10) === "monastery:") return `Monastery #${via.slice(10)}`;
+  if (via === "ship") return "Ship";
+  if (via === "castle") return "Castle";
+  return BUILDING_NAME[via] || "a tile";
+}
 // Descriptive move-log line built from the data already in each record (tile, depot, …).
-// `board` supplies the goods number (goods are named "#N goods", never by color).
+// `board` supplies the goods number (goods are named "#N goods", never by color). The
+// source-tile parenthetical (`via`) + any VP are appended by the log renderer, NOT here.
 function moveText(m, board) {
   const t = m.tile;
   const gnum = (c) => (board ? board.goods_colors.indexOf(c) + 1 : "?");
@@ -138,16 +148,21 @@ function moveText(m, board) {
     case "take_hex": return `took ${tileName(t)} from depot ${m.depot}`;
     case "place_tile": return `placed ${tileName(t)}`;
     case "buy_black": return `bought ${tileName(t)} from the black depot`;
-    case "monastery6_take": return `took ${tileName(t)} (monastery)`;
-    case "building_take": return `took ${tileName(t)} (building action)`;
+    case "monastery6_take": return `took ${tileName(t)}`;
+    case "building_take": return `took ${tileName(t)}`;
     case "discard_storage": return `discarded ${tileName(t)}`;
     case "place_starting_castle": return "placed their starting castle";
     case "sell_goods": return `sold ${m.count} #${gnum(m.color)} goods`;
     case "take_workers": return "took 2 workers";
     case "adjust_die": return m.frm != null ? `adjusted a ${m.frm} to a ${m.to}` : `adjusted a die to a ${m.to}`;
-    case "ship_take_goods": return `took goods from depot ${m.depot} (ship)`;
-    case "ship_adjacent_take": return `took goods from depot ${m.depot} (monastery)`;
-    case "building_effect": return `used ${BUILDING_NAME[m.building] || "a building"}`;
+    case "ship_take_goods": return `took goods from depot ${m.depot}`;
+    case "ship_adjacent_take": return `took goods from depot ${m.depot}`;
+    case "build_gain":                                   // immediate-gain building effect
+      if (m.workers) return `gained ${m.workers} worker${m.workers === 1 ? "" : "s"}`;
+      if (m.silver) return `gained ${m.silver} silver`;
+      if (m.vp) return `gained ${m.vp} VP`;
+      return "used a building";
+    case "building_effect": return `used ${BUILDING_NAME[m.building] || "a building"}`;  // legacy saved games
     case "monastery_placed": return `placed Monastery #${m.effect_id}`;
     case "area_complete": return "completed a region";
     case "bonus_tile": return `earned a ${colorLabel(m.color)} bonus tile`;
@@ -731,7 +746,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-review-total{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);color:var(--text)}
 .coc-review-total .coc-review-lbl,.coc-review-total .coc-review-vp{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold)}
 .coc-review-empty{color:var(--text-dim);font-size:.78rem;padding:6px 0}
-.coc-review-row.proj,.coc-review-sub.proj,.coc-review-total.proj{opacity:.4}
+.coc-review-row.proj,.coc-review-sub.proj,.coc-review-total.proj,.coc-review-phase.proj{opacity:.4}
 .coc-review-modal{max-width:760px;width:100%;max-height:88vh;overflow-y:auto}
 /* Clickable score in the status bar -> opens the mid-game VP breakdown. */
 .coc-vp-click{cursor:pointer;border-radius:var(--radius);transition:background .12s}
@@ -1577,6 +1592,31 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const warehouseMine = pendingMine && game?.pending_kind === "warehouse_sell";
   const warehouseSell = (color) => { if ((me?.goods?.[color] || 0) > 0) mv({ type: "warehouse_sell", color }); };
 
+  // Click a goods chip in YOUR storage to sell it — in every scenario selling is legal:
+  // a Warehouse pending, the Castle bonus's chosen die, OR (on your normal turn) any
+  // UNUSED die already showing that goods' sell number. A goods color is sold with the
+  // die whose value == its number, so we look for a matching unused die.
+  const dieForGood = (color) => {
+    const d = game?.dice?.[myId];
+    if (!d) return -1;
+    const want = goodsSellNum(color);
+    for (let i = 0; i < 2; i++) if (!d.used[i] && d.values[i] === want) return i;
+    return -1;
+  };
+  const extraSellColor = (inExtra && extraValue != null) ? board?.goods_colors?.[extraValue - 1] : null;
+  const canSellGood = (color) => (me?.goods?.[color] || 0) > 0 && (
+    warehouseMine
+    || extraSellColor === color
+    || (myTurnRaw && !pendingMine && dieForGood(color) >= 0)
+  );
+  const sellGood = (color) => {
+    if (!((me?.goods?.[color] || 0) > 0)) return;
+    if (warehouseMine) { warehouseSell(color); return; }
+    if (extraSellColor === color) { mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } }); return; }
+    const i = dieForGood(color);
+    if (myTurnRaw && !pendingMine && i >= 0) mv({ type: "sell_goods", die_index: i });
+  };
+
   const doTakeWorkers = () => {
     if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
     else if (selDie != null) mv({ type: "take_workers", die_index: selDie });
@@ -2276,11 +2316,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                   <div className="coc-goods-row" data-mygoods="1">
                     {me && Object.entries(me.goods).map(([c, n]) => {
-                      const sellable = warehouseMine && n > 0;
+                      const sellable = canSellGood(c);
                       return (
                         <span key={c} data-goodchip={c} className={`coc-goods-chip${sellable ? " coc-goods-pick" : ""}`}
-                          title={sellable ? `Sell a #${goodsSellNum(c)} goods for silver` : tileDesc({ kind: "goods", color: c }, board)}
-                          onClick={() => sellable ? warehouseSell(c) : setToast(tileDesc({ kind: "goods", color: c }, board))}>
+                          title={sellable ? `Sell #${goodsSellNum(c)} goods for silver` : tileDesc({ kind: "goods", color: c }, board)}
+                          onClick={() => sellable ? sellGood(c) : setToast(tileDesc({ kind: "goods", color: c }, board))}>
                           <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
                         </span>
                       );
@@ -2332,7 +2372,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : <div key={i}>
                     {/* phase-round label ("A-1".."E-5"); T# fallback for pre-ph saved games */}
                     <span className="coc-log-t">{m.t ? (m.ph ? `${m.ph}-${m.rd}` : `T${m.t}`) : "·"}</span>
-                    {m.pid ? `${players[m.pid] || m.pid} ` : ""}{moveText(m, board)}{m.vp ? ` (+${m.vp} VP)` : ""}
+                    {/* base text, then VP (build_gain already states its VP), then the source
+                        tile in parens so ability actions end with e.g. "(Market)". */}
+                    {m.pid ? `${players[m.pid] || m.pid} ` : ""}{moveText(m, board)}{(m.type !== "build_gain" && m.vp) ? ` (+${m.vp} VP)` : ""}{m.via ? ` (${viaLabel(m.via)})` : ""}
                   </div>
             ))}
           </div>
@@ -2480,7 +2522,6 @@ function VpReview({ order, players, myId, scores, breakdowns, winnerPid, project
             </div>
             <div className="coc-review-list">
               {bd.length === 0 && <div className="coc-review-empty">No breakdown available for this game.</div>}
-              {during.length > 0 && <div className="coc-review-sub">During the game</div>}
               {during.map((i, k) => (
                 <Fragment key={`d${k}`}>
                   {/* segment by phase (like the log's phase dividers); items carry ph/rd
@@ -2495,7 +2536,7 @@ function VpReview({ order, players, myId, scores, breakdowns, winnerPid, project
                   </div>
                 </Fragment>
               ))}
-              {ends.length > 0 && <div className={`coc-review-sub${projected ? " proj" : ""}`}>End of game{projected ? " — projected" : ""}</div>}
+              {ends.length > 0 && <div className={`coc-review-phase${projected ? " proj" : ""}`}>— End of game{projected ? " (projected)" : ""} —</div>}
               {ends.map((i, k) => (
                 <div key={`e${k}`} className={`coc-review-row${projected ? " proj" : ""}`}>
                   <span className="coc-review-t">end</span>
