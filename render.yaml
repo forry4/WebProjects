@@ -9,25 +9,10 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
 
-  # WWSD ("What Would Steve Do") — a SEPARATE process from the game backend, on purpose:
-  # wwsd.analyze rewrites the engine's deck globals to a friend's Splendor deck, which would
-  # corrupt the live game AI if they shared a process. Same repo/image (COPY . /app ships wwsd/),
-  # different start command. Reached by a browser bookmarklet on the friend's site.
-  - type: web
-    name: wwsd-backend
-    env: docker
-    plan: free
-    branch: main
-    dockerfilePath: games/spender/Dockerfile
-    dockerCommand: sh -c "uvicorn wwsd.app:app --host 0.0.0.0 --port ${PORT:-8000}"
-    envVars:
-      - key: PYTHONUNBUFFERED
-        value: "1"
-      - key: SPENDER_AZ_MODEL          # skip the numpy AZ-model load (smaller RAM + faster cold start)
-        value: "none"
-      - key: WWSD_SECRET               # shared secret the bookmarklet sends; set in the dashboard
-        sync: false
-      - key: WWSD_ORIGIN
-        value: "https://spendee.mattle.online"
-      - key: WWSD_TIME                 # search budget (s); below local 4.5 for the slow free CPU
-        value: "3.5"
+# wwsd-backend (the "What Would Steve Do" Splendor advisor for a friend's external site) used to
+# be a 2nd free Render web service defined here. DECOMMISSIONED 2026-07-08: WWSD now runs entirely
+# in the friend's browser via the Rust->WASM Tampermonkey userscript (wwsd/wwsd_browser_n.user.js),
+# which makes NO backend calls, so the Render service served nothing (it only ever cold-started on
+# demand). The wwsd/ Python package (app.py + analyze.py) stays in the repo as reference. To
+# restore: re-add a `- type: web` block running `uvicorn wwsd.app:app ...` with the
+# WWSD_SECRET/WWSD_ORIGIN/WWSD_TIME env vars, and recreate the service in the Render dashboard.
