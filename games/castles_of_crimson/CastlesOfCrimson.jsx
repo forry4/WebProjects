@@ -1796,9 +1796,29 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : new Set([placeValue]);
       if (!allowed.has(sp.number)) return false;
     }
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
+    // One-building-per-region: a building can't go in a region that already holds the
+    // SAME building type, UNLESS you own the enabling monastery (effect 1). Mirrors
+    // engine._building_town_ok — the region is the same-color connected component of
+    // `sid` (matches the engine REGIONS); scan its placed tiles for a duplicate. All
+    // placement paths (die / extra_action / townhall) enforce this in the engine.
+    if (tile.type === "building" && !(me.monastery_effects || []).includes(1)) {
+      const spaces = boardSpaces(me.board_id);
+      const seen = new Set([sid]);
+      const stack = [sid];
+      while (stack.length) {
+        const cur = stack.pop();
+        const placed = cur === sid ? null : me.duchy[cur];
+        if (placed && placed.type === "building" && placed.building === tile.building) return false;
+        const [cq, cr] = cur.split(",").map(Number);
+        for (const [dq, dr] of dirs) {
+          const nb = `${cq + dq},${cr + dr}`;
+          if (!seen.has(nb) && spaces[nb] && spaces[nb].color === sp.color) { seen.add(nb); stack.push(nb); }
+        }
+      }
+    }
     // adjacency: any filled neighbor
     const [q, r] = sid.split(",").map(Number);
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]];
     return dirs.some(([dq, dr]) => me.duchy[`${q + dq},${r + dr}`]);
   };
 
