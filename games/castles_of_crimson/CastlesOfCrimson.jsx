@@ -1425,11 +1425,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     (async () => {
       try {
         const prefix = [];
+        let decisionSims = 0, searchSteps = 0;              // sims across this engine-move decision
         for (let step = 0; step < 16 && !cancelled; step++) {
           const probe = await pool[0].request({ kind: "stepInfo", state: stateStr, prefix: JSON.stringify(prefix) });
           const info = probe?.info;
           if (!info || info.error) return;                    // server watchdog takes over
           if (info.boundary || (info.over && prefix.length)) {
+            if (searchSteps) console.info(`[coc client-AI] decision ${as.decision}: ${decisionSims} sims total over ${searchSteps} search(es)`);
             const conv = await pool[0].request({ kind: "chainMove", state: stateStr, prefix: JSON.stringify(prefix) });
             const mv = conv?.move;
             if (!cancelled && mv && !mv.includes('"error"')) {
@@ -1457,7 +1459,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             }
             if (!got) return;
             action = 0;
-            for (let a = 1; a < 102; a++) if (total[a] > total[action]) action = a;
+            let stepSims = 0;
+            for (let a = 0; a < 102; a++) { stepSims += total[a]; if (total[a] > total[action]) action = a; }
+            decisionSims += stepSims;
+            searchSteps += 1;
+            // Total root visits summed across the worker pool = the sims this search ran.
+            console.info(`[coc client-AI] search: ${stepSims} sims (${got}/${pool.length} workers · ${as.mode || "hybrid"} · ${as.budget_ms || 900}ms · cap ${as.max_sims}) — decision ${as.decision}, step ${step}`);
           }
           prefix.push(action);
         }
