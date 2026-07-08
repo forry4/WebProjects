@@ -454,6 +454,54 @@ loads AND mid-game freezes (see the reconnect fix above). Durable facts:
   `curl` POST to `<https-host>/v2/pipeline`, use a BOUND arg `{"type":"text","value":"ROOMID"}` — a
   double-quoted id in SQL is read as a column). The room dict is `state_json`; `coc_games` has the game.
 
+### Session (2026-07-08) — wwsd decommission + CoC turn-latency levers + building-placement highlight fix
+- **wwsd Render service DECOMMISSIONED (`bdcf8e6`).** The 2nd free Render web service (`wwsd-backend`) is removed
+  from `render.yaml` (user deleted it in the Render dashboard). WWSD runs entirely in the friend's browser now —
+  the Rust→WASM Tampermonkey userscript `wwsd/wwsd_browser_n.user.js` makes ZERO backend calls (verified: 0
+  `onrender` refs; its lone `fetch` is dead wasm-loader boilerplate, since the wasm is inlined as base64). The old
+  `wwsd/autoplay.user.js` was the only remaining caller of `/move` (long superseded). The `wwsd/` Python package
+  stays as reference; to restore, re-add a `- type: web` block running `uvicorn wwsd.app:app` + recreate the
+  service. Unrelated: the spender-backend keep-alive (cron-job.org) auto-disabled after a Render-side **~2h 503**
+  outage that aligned exactly with the daytime cron window OPENING (14:00–16:05 UTC = the first pings after the
+  overnight spin-down; NOT a deploy — last deploy was 8h prior) → re-enable the cron + loosen its failure
+  tolerance; the only *guaranteed* cold-start/blip fix stays the $7/mo Render Starter tier.
+- **④ Overlap the Expert bot's client search with its move-animation pause (`f86fe3e`, backend — CORRECTS the P5
+  "the ai_move handler applies" doc).** `_client_bot_turn` now ships the NEXT decision's `ai_search` BEFORE
+  awaiting the current move's animation pause, and **`_handle_ai_move` BUFFERS the resolved move into
+  `room["_ai_pending_move"]` (+ clears `_ai_search`, sets the evt) — it NO LONGER applies/broadcasts/saves**; the
+  apply moved into `_client_bot_turn`, which applies the buffered move AFTER awaiting the pause (a `pause_task`
+  from the previous move that runs concurrently with the client's next search). So the ~900ms search hides under
+  the ~1s inter-move pace instead of adding to it (~0.9s/decision, ~2-3s/bot turn saved; NO strength or per-move
+  pacing change). DO NOT REGRESS: the illegal/stale early-returns stay ABOVE the buffer (an illegal submit leaves
+  `_ai_search` armed for the watchdog — `test_illegal_client_move_is_dropped`); `_ai_pending_move` is cleared
+  alongside `_ai_search` on timeout AND in `_schedule_bot_turn`'s finally so a stale move can't leak; the old
+  `_ai_phase_changed` room key was REMOVED (phase_changed is computed in the apply block). `test_client_ai.py` +
+  the full 307-test CoC suite pass.
+- **① Optimistic move preview (`d35d3ce`, frontend).** Your own moves render INSTANTLY instead of waiting the
+  ~90ms round trip. `mv()` runs the module-level `optimisticMove(game, move, myId)` — deep-clones the game dict
+  and applies the CERTAIN visible effect of the core moves (place_tile / take_hex / discard_storage: tile in/out
+  of storage/duchy + die marked used), then `setRoomData` shows it; the server's authoritative `room_update`
+  reconciles wholesale (clears `optimisticRef`), and an `error` reverts to `preOptimisticRoomRef`. SAFE BY
+  CONSTRUCTION — the server never sees the preview (it's a PREVIEW not a client engine: the coc-core WASM is
+  search-only, `coc_step_info`/`coc_search_timed`/`coc_chain_move` over the LOSSY compact projection, no
+  apply→renderable-dict entry), it's scoped + guarded (bails to null on not-my-turn / a pending / missing tile /
+  occupied space / full storage), and it can't corrupt game state. Only those 3 moves are predicted — they don't
+  touch workers/silver/goods, so no spurious resource flyers; everything else falls through to send-and-wait. The
+  diff-based flyer animates the previewed tile ~90ms SOONER with no double-fire (the reconcile diffs
+  optimistic→server, same tile → no re-animate). ① lives in its own commit; `git revert d35d3ce` removes ①+②.
+- **② Faster flyers (`d35d3ce`, frontend).** Tile flyer `coc-fly .5s→.35s`, worker/silver token flyers
+  `coc-tok-out/in .6s→.42s`, flyer cleanup timer `640→460ms`.
+- **BUILDING-PLACEMENT HIGHLIGHT FIX (frontend-only).** The yellow legal-placement glow wrongly invited placing a
+  building in a region that ALREADY holds that same building type. The engine's `_building_town_ok` rejects that
+  (unless you own **monastery effect 1**) — enforced in `_do_place_tile` + all three `legal_moves` enumerations
+  (die / extra_action / townhall) — so the CLICK failed, but the `legalTarget` highlight in
+  `CastlesOfCrimson.jsx` mirrored color/number/adjacency/occupancy and OMITTED the one-building-per-region rule.
+  Fixed by reproducing `_building_town_ok` client-side: flood-fill the same-color connected component of `sid`
+  (== the engine REGIONS, since the 37-cell grid + adjacency are identical across all boards) over the board
+  spaces, reject if any placed tile in that region is a building of the same `.building` type; skipped when
+  `me.monastery_effects` includes 1. No backend/payload change — tiles already carry `.type`/`.building` (used
+  elsewhere in the render) and regions are derivable from the board-space colors the client already has.
+
 ### CoC Expert AI campaign ("CoC-N") — coc-core crate (July 2026; P0-P2 DONE, gates passed)
 Building an N-class learned AI for CoC by the proven Spender recipe. Approved plan:
 `.claude-plans/i-want-to-develop-staged-charm.md` (user decisions: plateau-gated strength, client-side
@@ -673,7 +721,40 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       switch a RUNNING campaign's arithmetic mid-loop.** The `PvEval` trait (valuenet.rs) is the
       seam: `pv_eval`/`hybrid*eval*`/`root_readout_pv`/`batch::step_netval` are generic over it.
       NOTE `:netval8` must parse BEFORE `:netval` in gate_coc (substring).
-    - Still open: a human playtest of the shipped tuned-netval Expert.
+    - **PERF round 4 (`384eb49`): GPU inference sidecar for harvests — ~3.7x (325-333k evals/s vs
+      ~88k CPU f32-batch).** `tools/gpu_server.py` (torch cu128, localhost TCP, z-score FOLDED into
+      trunk[0] at load + zero-copy request parse) + `src/gpueval.rs` (`GpuEval` behind the `PvEval`
+      seam, pooled connections, native-only) + harvest mode `netvalgpu` (addr via `COC_GPU_ADDR`).
+      **Startup parity guard (do not remove): harvest forwards one probe through BOTH paths and
+      asserts ≤1e-3/1e-2 — a stale/wrong server model can never poison a harvest** (measured diff
+      3.6e-7). HARVEST TIER ONLY (torch GPU arithmetic, not bit-identical) — ship gates stay CPU
+      f32. FINDINGS: per-REQUEST overhead (client RPC + server GIL ~590µs) is the whole game —
+      rows/request = 2×K, so **K=64 is the config** (128-row requests; the 20-game smoke test at
+      K=2-per-thread ran 60x slower than CPU); **K=128 memory-thrashes** (~1280 in-flight trees
+      blow past free RAM → near-zero throughput, not a crash); games/thread must be ≥K to fill the
+      lockstep. Server prints 10s `[stats]` lines (evals/s, reqs/s, rows/req). Loop wiring
+      (`loop_coc_hs.sh`): server started per iteration with the CURRENT pv_best, **PID-killed
+      after harvest — NEVER `taskkill //IM python.exe` mid-loop (the trainer is python too)**.
+      Net effect: a 2000g@1200-sims harvest ~2.3h → ~36 min; hs-loop iteration ~2.8h → ~1.1h.
+    - **FEATURE ROUND 2 (2026-07-08): time-value features = WASH (do not relitigate the flat-MLP
+      form).** Encoder v2 (`feats::features_v2`, 1078 = v1 934 byte-identical prefix + Group J 144:
+      per-offer-slot `tile_time_value` (mine/continuous-monastery yield × phases_left; endgame-mon
+      exact multiplier + headroom) for my 19 slots + 16 contested opp slots, flags, 26-dim effect
+      unions). Full unattended chain (`tools/loop_coc_v2.sh` + overnight orchestration): champion
+      distill-harvest 5000g@500 logging v2 (`coc_run_v2/boot2`) → fresh v2 distill (val AUC 0.791,
+      top1 0.695, parity 1.8e-7; **0.425 vs champion** — distill compression loss) → 9 netval
+      self-play iters. The v2 line ONLY RECOVERED its distill deficit: fresh-seed cross-gates vs
+      the v1 champion **0.496 ±0.045 (n=480) train config / 0.521 ±0.045 serving config @200 /
+      0.492 ±0.063 @512** (no depth transfer), then iters 6-8 = 0.481/0.450/0.506 non-promotions →
+      user stopped it. **Verdict: the MLP already infers the time×tile-value interaction from
+      phase/round one-hots × tile types; explicit Group J adds nothing** (the CoC analog of
+      Spender's v3/v4 feature-screen washes — attention/MLP already computes the cross-terms).
+      Infra keeps: the `Enc` seam (input-dim → encoder, so v1/v2 nets coexist), `logenc` harvest
+      arg (play vX, log vY — the distill-harvest pattern), `train_pv.py --in-dim`. State preserved
+      resumable in `coc_run_v2` (progress_v2=9). **Next levers, in order: mine the user's
+      coc_games for the concrete human edge (BEFORE more feature guesses); higher-sims teacher
+      re-bootstrap; attention (P4b).**
+    - Still open: a human playtest of the shipped tuned-netval Expert (iter-5 net + 3x sims).
 
 ---
 
