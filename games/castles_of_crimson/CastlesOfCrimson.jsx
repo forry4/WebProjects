@@ -1592,28 +1592,27 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const warehouseMine = pendingMine && game?.pending_kind === "warehouse_sell";
   const warehouseSell = (color) => { if ((me?.goods?.[color] || 0) > 0) mv({ type: "warehouse_sell", color }); };
 
-  // Click a goods chip in YOUR storage to sell it — in every scenario selling is legal:
-  // a Warehouse pending, the Castle bonus's chosen die, OR (on your normal turn) any
-  // UNUSED die already showing that goods' sell number. A goods color is sold with the
-  // die whose value == its number, so we look for a matching unused die.
-  const dieForGood = (color) => {
+  // Click a goods chip in YOUR storage to sell it. Ability scenarios (a Warehouse
+  // pending, the Castle bonus's chosen die) sell on click directly. Selling WITHOUT an
+  // ability needs a die SELECTED first, and only the goods that die can sell (its value
+  // == the goods' sell number) are clickable — otherwise a click just shows the goods
+  // description, like before.
+  const sellDieForGood = (color) => {
     const d = game?.dice?.[myId];
-    if (!d) return -1;
-    const want = goodsSellNum(color);
-    for (let i = 0; i < 2; i++) if (!d.used[i] && d.values[i] === want) return i;
-    return -1;
+    if (!d || selDie == null || d.used[selDie]) return -1;
+    return d.values[selDie] === goodsSellNum(color) ? selDie : -1;
   };
   const extraSellColor = (inExtra && extraValue != null) ? board?.goods_colors?.[extraValue - 1] : null;
   const canSellGood = (color) => (me?.goods?.[color] || 0) > 0 && (
     warehouseMine
     || extraSellColor === color
-    || (myTurnRaw && !pendingMine && dieForGood(color) >= 0)
+    || (myTurnRaw && !pendingMine && sellDieForGood(color) >= 0)
   );
   const sellGood = (color) => {
     if (!((me?.goods?.[color] || 0) > 0)) return;
     if (warehouseMine) { warehouseSell(color); return; }
     if (extraSellColor === color) { mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } }); return; }
-    const i = dieForGood(color);
+    const i = sellDieForGood(color);
     if (myTurnRaw && !pendingMine && i >= 0) mv({ type: "sell_goods", die_index: i });
   };
 
