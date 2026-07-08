@@ -452,85 +452,114 @@ def _sync_status_from_game(room: dict) -> None:
 # ── Opponent (bot) turn scheduler ─────────────────────────────────────────────
 async def _client_bot_turn(room_id: str) -> None:
     """Expert tier: drive the bot's turn one ENGINE-MOVE DECISION at a time through
-    the human's browser (WASM search). Each iteration ships the decision via
-    `ai_search` in room state, then waits for the `ai_move` handler (which applies
-    the searched move and sets the event). Single-legal decisions are applied
-    server-side without a round-trip. Returns when the bot's turn is over, or on
-    any timeout/error — the caller's server path then finishes the turn, so
-    degradation is per-turn, never a deadlock."""
-    for _ in range(60):                          # decision guard (a turn is a handful of moves)
-        async with ROOM_LOCK:
-            room = ROOMS.get(room_id)
-            if not room:
-                return
-            game = room.get("game")
-            ai_pid = room.get("ai_player")
-            if not _bot_should_act(room):
-                return                           # turn over — done
-            if not room.get("client_ai"):
-                return                           # no armed client — server path
-            legal = engine.legal_moves(game, ai_pid)
-            if not legal:
-                return                           # engine contract violation — server path
-            phase_changed = False
-            evt = None
-            if len(legal) == 1:
-                # Forced decision: apply directly (no client round-trip).
-                phase_before = game.get("phase_letter")
-                ok, _err = engine.apply_move(game, ai_pid, legal[0])
-                if not ok:
+    the human's browser (WASM search). Each searched decision ships via `ai_search`
+    in room state; the `ai_move` handler validates + BUFFERS the returned move (it no
+    longer applies it) and wakes us. We ship the NEXT decision's `ai_search` BEFORE
+    awaiting the CURRENT move's animation pause, so the client searches the next move
+    WHILE this one animates — the ~900ms search hides under the ~1s pace instead of
+    adding to it. Single-legal decisions are applied server-side without a
+    round-trip. Returns when the bot's turn is over, or on any timeout/error — the
+    caller's server path then finishes the turn, so degradation is per-turn, never a
+    deadlock."""
+    pause_task = None                            # the PREVIOUS move's animation pause (overlaps the next search)
+    try:
+        for _ in range(60):                      # decision guard (a turn is a handful of moves)
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room:
                     return
+                game = room.get("game")
+                ai_pid = room.get("ai_player")
+                if not _bot_should_act(room):
+                    return                       # turn over — done
+                if not room.get("client_ai"):
+                    return                       # no armed client — server path
+                legal = engine.legal_moves(game, ai_pid)
+                if not legal:
+                    return                       # engine contract violation — server path
+                forced_move = None
+                evt = None
+                search_state = None
+                if len(legal) == 1:
+                    forced_move = legal[0]       # apply below (after the prev pause) — no round-trip
+                else:
+                    seq = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
+                    proj = az_compact.project(game)
+                    # Canonicalize the undrawn pools (search determinization re-sorts
+                    # them per sim anyway — this just avoids shipping the true order).
+                    for k in ("supply", "black_supply", "goods_supply"):
+                        proj[k] = sorted(proj[k])
+                    room["_ai_search"] = {
+                        "decision": seq,
+                        "seat": game["order"].index(ai_pid),
+                        "mode": _EXPERT_MODE,
+                        "budget_ms": _EXPERT_BUDGET_MS,
+                        "max_sims": _EXPERT_MAX_SIMS,
+                        "state": proj,
+                    }
+                    room["_ai_pending_move"] = None
+                    evt = room["_ai_move_evt"] = asyncio.Event()
+                    search_state = mk_room_state(room_id)
+            # Ship the search request NOW so the client searches DURING the pause below.
+            if search_state is not None:
+                await broadcast_room(room_id, {"type": "room_update", "room": search_state})
+            # Let the PREVIOUS move finish animating (overlaps the client's search above).
+            if pause_task is not None:
+                await pause_task
+                pause_task = None
+            # Resolve the move: forced -> local; searched -> the client's buffered move.
+            if evt is None:
+                move = forced_move
+            else:
+                try:
+                    await asyncio.wait_for(evt.wait(), CLIENT_AI_TIMEOUT)
+                except asyncio.TimeoutError:
+                    async with ROOM_LOCK:
+                        r = ROOMS.get(room_id)
+                        if r:
+                            r["_ai_search"] = None       # a late reply is ignored (stale decision)
+                            r["_ai_pending_move"] = None
+                    LOG.info("CoC client AI timed out; server finishes the turn (room %s)", room_id)
+                    return
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    move = r.pop("_ai_pending_move", None) if r else None
+                if move is None:
+                    return                       # stale/invalid submit — server finishes the turn
+            # Apply the move, broadcast it (this is the move landing on the board), persist.
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room:
+                    return
+                game = room.get("game")
+                ai_pid = room.get("ai_player")
+                if not game or not ai_pid or not _bot_should_act(room):
+                    return
+                phase_before = game.get("phase_letter")
+                ok, _err = engine.apply_move(game, ai_pid, move)
+                if not ok:
+                    return                       # unexpected drift — server finishes the turn
                 phase_changed = game.get("phase_letter") != phase_before
                 room["_bot_last_phase"] = game.get("phase_letter")
+                room["_ai_search"] = None
                 _sync_status_from_game(room)
-            else:
-                seq = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
-                proj = az_compact.project(game)
-                # Canonicalize the undrawn pools (search determinization re-sorts
-                # them per sim anyway — this just avoids shipping the true order).
-                for k in ("supply", "black_supply", "goods_supply"):
-                    proj[k] = sorted(proj[k])
-                room["_ai_search"] = {
-                    "decision": seq,
-                    "seat": game["order"].index(ai_pid),
-                    "mode": _EXPERT_MODE,
-                    "budget_ms": _EXPERT_BUDGET_MS,
-                    "max_sims": _EXPERT_MAX_SIMS,
-                    "state": proj,
-                }
-                evt = room["_ai_move_evt"] = asyncio.Event()
-            state = mk_room_state(room_id)
-        await broadcast_room(room_id, {"type": "room_update", "room": state})
-
-        if evt is None:                          # forced move applied above
+                done = not _bot_should_act(room)
+                state = mk_room_state(room_id)
+            await broadcast_room(room_id, {"type": "room_update", "room": state})
             save_game(room_id)
-            async with ROOM_LOCK:
-                r = ROOMS.get(room_id)
-                done = not r or not _bot_should_act(r)
             if done:
-                return
-            await asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
-            continue
-
-        # Wait for the client's ai_move (the handler applies + broadcasts + saves).
-        try:
-            await asyncio.wait_for(evt.wait(), CLIENT_AI_TIMEOUT)
-        except asyncio.TimeoutError:
-            async with ROOM_LOCK:
-                r = ROOMS.get(room_id)
-                if r:
-                    r["_ai_search"] = None       # a late reply is ignored (stale decision)
-            LOG.info("CoC client AI timed out; server finishes the turn (room %s)", room_id)
-            return
-        async with ROOM_LOCK:
-            r = ROOMS.get(room_id)
-            if not r:
-                return
-            phase_changed = r.pop("_ai_phase_changed", False)
-            done = not _bot_should_act(r)
-        if done:
-            return
-        await asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
+                return                           # turn over — no trailing pause needed
+            # Start THIS move's animation pause; the next iteration ships its search while it runs.
+            pause_task = asyncio.create_task(
+                asyncio.sleep(_PHASE_END_PAUSE if phase_changed else _BOT_MOVE_DELAY)
+            )
+    finally:
+        if pause_task is not None and not pause_task.done():
+            pause_task.cancel()
+            try:
+                await pause_task
+            except asyncio.CancelledError:
+                pass
 
 
 async def _schedule_bot_turn(room_id: str) -> None:
@@ -659,6 +688,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
             if r:
                 r["_bot_running"] = False
                 r["_ai_search"] = None           # never leave a stale client decision armed
+                r["_ai_pending_move"] = None     # nor a buffered move the turn never applied
 
 
 def _bot_should_act(room: dict) -> bool:
@@ -860,12 +890,14 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
 
 
 async def _handle_ai_move(ws, room_id, pid, msg):
-    """Apply the client's searched bot move (expert tier). The move arrives as the
-    compact dict-move JSON (bridge.py shape) tagged with the decision seq; it is
-    resolved via the bridge and validated by MEMBERSHIP in engine.legal_moves
-    before applying. A stale/illegal submission is LOGGED and dropped, never
-    errored to the user (the watchdog fallback guarantees the turn advances —
-    the Spender 'not the AI's turn' toast lesson)."""
+    """Validate the client's searched bot move (expert tier) and BUFFER it for
+    `_client_bot_turn` to apply after the current animation pause — it no longer
+    applies the move here, which lets the bot's NEXT search overlap that pause. The
+    move arrives as the compact dict-move JSON (bridge.py shape) tagged with the
+    decision seq; it is resolved via the bridge and validated by MEMBERSHIP in
+    engine.legal_moves before buffering. A stale/illegal submission is LOGGED and
+    dropped, never errored to the user (the watchdog fallback guarantees the turn
+    advances — the Spender 'not the AI's turn' toast lesson)."""
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
@@ -892,19 +924,11 @@ async def _handle_ai_move(ws, room_id, pid, msg):
         if mv is None or mv not in engine.legal_moves(game, ai_pid):
             LOG.warning("client ai_move not legal; leaving to the watchdog (room %s)", room_id)
             return
-        phase_before = game.get("phase_letter")
-        ok, err = engine.apply_move(game, ai_pid, mv)
-        if not ok:
-            LOG.warning("client ai_move apply failed: %s (room %s)", err, room_id)
-            return
+        # Buffer the resolved move + consume the request; _client_bot_turn applies it
+        # once the previous move's animation pause elapses (see that fn for the overlap).
+        room["_ai_pending_move"] = mv
         room["_ai_search"] = None
-        room["_ai_phase_changed"] = game.get("phase_letter") != phase_before
-        room["_bot_last_phase"] = game.get("phase_letter")
-        _sync_status_from_game(room)
-        state = mk_room_state(room_id)
         evt = room.get("_ai_move_evt")
-    await broadcast_room(room_id, {"type": "room_update", "room": state})
-    save_game(room_id)
     if evt:
         evt.set()                                # wake the waiting _client_bot_turn
 
