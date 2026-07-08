@@ -19,5 +19,8 @@ pub mod proj;
 pub mod pxio;
 pub mod vsearch;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod gpueval;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;

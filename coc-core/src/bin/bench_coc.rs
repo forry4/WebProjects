@@ -286,11 +286,10 @@ fn main() {
     let s = midgame_state();
     bench_clone(&s);
     bench_playout();
+    // Probe dims must be valid encoder dims now that from_parts infers Enc from in_dim.
     for (in_dim, trunk) in [
-        (700usize, vec![384usize, 256]),
-        (800, vec![512, 256]),
-        (900, vec![512, 256]),
-        (900, vec![768, 384]),
+        (coc_core::feats::N_FEATS, vec![512usize, 256]),
+        (coc_core::feats::N_FEATS_V2, vec![512, 256]),
     ] {
         bench_pv(in_dim, &trunk);
     }

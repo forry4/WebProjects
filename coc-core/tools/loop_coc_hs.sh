@@ -8,16 +8,24 @@
 # Everything else matches loop_coc_netval.sh (gates, probe, yardstick, promote
 # 0.52, resumable markers); GATE_PAIRS is 120 (tighter promote gate, +-0.063).
 #
-#   RUN=/c/Users/Forrest/coc_run_hs ITERS=4 GAMES=2000 SIMS=1200 bash coc-core/tools/loop_coc_hs.sh
+# Self-play runs the GPU sidecar (mode netvalgpu, tools/gpu_server.py, ~3.7x the
+# CPU f32-batch harvest): the server is started per iteration with the CURRENT
+# pv_best and PID-killed after the harvest (never taskkill python — the trainer
+# is python too). GATES STAY CPU f32 (ship-comparable arithmetic); the harvest's
+# startup parity guard verifies the server serves the same model every launch.
+#
+#   RUN=/c/Users/Forrest/coc_run_hs ITERS=8 GAMES=2000 SIMS=1200 bash coc-core/tools/loop_coc_hs.sh
 set -e -o pipefail
 RUN=${RUN:-/c/Users/Forrest/coc_run_hs}
 RUNW=$(cygpath -m "$RUN")
 CR=${CR:-/c/Users/Forrest/forrestm_projects/coc-core/target/release}
 TOOLS=${TOOLS:-/c/Users/Forrest/forrestm_projects/coc-core/tools}
 CHAMP=${CHAMP:-/c/Users/Forrest/coc_run_nv/pv_ship_iter5.json}
-ITERS=${ITERS:-4}
+ITERS=${ITERS:-8}
 GAMES=${GAMES:-2000}
 SIMS=${SIMS:-1200}
+GPU_BATCH=${GPU_BATCH:-64}
+GPU_PORT=${GPU_PORT:-9911}
 GATE_PAIRS=${GATE_PAIRS:-120}
 GATE_SIMS=${GATE_SIMS:-200}
 PROBE_PAIRS=${PROBE_PAIRS:-60}
@@ -39,10 +47,18 @@ for ((k = start; k < ITERS; k++)); do
     if [ -f "$RUN/sp_$k.HARVESTED" ]; then
         echo "--- iter $k: high-sims netval self-play already complete, skipping ---" | tee -a "$LOG"
     else
-        echo "--- iter $k: high-sims netval self-play ---" | tee -a "$LOG"
+        echo "--- iter $k: high-sims netval self-play (gpu) ---" | tee -a "$LOG"
+        python "$TOOLS/gpu_server.py" "$BESTW" --port "$GPU_PORT" >"$RUN/gpu_server_$k.log" 2>&1 &
+        gpu_pid=$!
+        for _ in $(seq 1 30); do
+            grep -q "ready" "$RUN/gpu_server_$k.log" 2>/dev/null && break
+            sleep 2
+        done
+        grep -q "ready" "$RUN/gpu_server_$k.log" || { echo "iter $k FATAL: gpu server never came up" | tee -a "$LOG"; exit 1; }
         seed=$((4000000 + k * 100000))
-        "$CR/harvest_boot.exe" "$RUNW/sp_$k" "$GAMES" "$SIMS" 20 "$seed" "$THREADS" "$BESTW" netval 8 \
-            2>>"$LOG"
+        COC_GPU_ADDR="127.0.0.1:$GPU_PORT" "$CR/harvest_boot.exe" "$RUNW/sp_$k" "$GAMES" "$SIMS" 20 \
+            "$seed" "$THREADS" "$BESTW" netvalgpu "$GPU_BATCH" 2>>"$LOG"
+        kill "$gpu_pid" 2>/dev/null || true
         touch "$RUN/sp_$k.HARVESTED"
     fi
 

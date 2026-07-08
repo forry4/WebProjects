@@ -3,6 +3,7 @@
 //! value, then per-game outcome labels. The distill warm-start trains on this.
 //!
 //!   harvest_boot <out_prefix> <games> <sims> <temp_micro> <seed0> <threads> [model.json] [mode] [batch]
+//!   mode netvalgpu: netval with the forward on tools/gpu_server.py (COC_GPU_ADDR)
 //!   mode: scaffold (default, heuristic rollout leaf) | hybrid (net prior +
 //!   rollout value — the P4 ratchet's self-play config) | pv (pure net leaf)
 //!   e.g. harvest_boot C:/Users/Forrest/coc_run/boot 5000 1500 20 0 10
@@ -340,13 +341,18 @@ fn main() {
     // "netval8" = netval search on the int8+VNNI quantized net (quantized at
     // load from the same f32 json — no new file format); everything downstream
     // treats it as Netval with a different net behind the PvEval seam.
+    // "netvalgpu" = netval with the forward on the torch sidecar
+    // (tools/gpu_server.py, addr from COC_GPU_ADDR, default 127.0.0.1:9911);
+    // the model path arg is still required — it is forward-checked against the
+    // server at startup so a stale server model can't poison a harvest.
     let mode_arg = args.get(8).map(|s| s.as_str());
     let quantize = mode_arg == Some("netval8");
+    let gpu = mode_arg == Some("netvalgpu");
     let mode = match mode_arg {
         None | Some("scaffold") => Mode::Scaffold,
         Some("hybrid") => Mode::Hybrid,
         Some("pv") => Mode::Pv,
-        Some("netval") | Some("netval8") => Mode::Netval,
+        Some("netval") | Some("netval8") | Some("netvalgpu") => Mode::Netval,
         Some(m) => panic!("bad mode {m}"),
     };
     if mode != Mode::Scaffold {
@@ -365,7 +371,37 @@ fn main() {
     let per = games / threads as u64;
     let qnet: Option<QuantPolicyValueNet> =
         if quantize { net.as_ref().map(QuantPolicyValueNet::from_f32) } else { None };
-    let net_ref: Option<&dyn PvEval> = if quantize {
+    let gnet: Option<coc_core::gpueval::GpuEval> = if gpu {
+        let addr =
+            std::env::var("COC_GPU_ADDR").unwrap_or_else(|_| "127.0.0.1:9911".to_string());
+        let g = coc_core::gpueval::GpuEval::connect(&addr).expect("gpu server connect");
+        let n = net.as_ref().unwrap();
+        assert_eq!(g.in_dim, n.in_dim(), "gpu server model dim != local model dim");
+        // same-model guard: one deterministic probe forward, CPU vs server
+        let mut rng = coc_core::rng::Rng::new(0xC0C0_57A7);
+        let raw: Vec<f32> =
+            (0..g.in_dim).map(|_| (rng.next_u64() % 2000) as f32 / 1000.0 - 1.0).collect();
+        let (cv, cl) = PvEval::forward_raw(n, &raw);
+        let (gv, gl) = g.forward_raw(&raw);
+        let md = cl.iter().zip(&gl).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
+        assert!(
+            (cv - gv).abs() < 1e-3 && md < 1e-2,
+            "gpu server output != local model (value {cv} vs {gv}, max logit diff {md}) — \
+             is the server serving a different model?"
+        );
+        eprintln!(
+            "[gpu] server verified: in_dim {}, value diff {:.2e}, max logit diff {:.2e}",
+            g.in_dim,
+            (cv - gv).abs(),
+            md
+        );
+        Some(g)
+    } else {
+        None
+    };
+    let net_ref: Option<&dyn PvEval> = if gpu {
+        gnet.as_ref().map(|g| g as &dyn PvEval)
+    } else if quantize {
         qnet.as_ref().map(|q| q as &dyn PvEval)
     } else {
         net.as_ref().map(|n| n as &dyn PvEval)
