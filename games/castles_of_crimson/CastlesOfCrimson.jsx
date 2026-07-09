@@ -1439,7 +1439,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (!inStorage || !placeCtx) setSelStorage(null);
   }, [me, selDie, selStorage, pendingMine, game?.pending_kind, extraValue]);
 
-  // ── Expert tier: client-side WASM search (coc-core) ──
+  // ── Hard/Expert tiers: client-side WASM search (coc-core) ──
   // The server ships each bot ENGINE-MOVE decision via `ai_search` in room state;
   // this pool searches the decision's micro-actions one at a time (root-parallel:
   // every worker searches the same micro with a distinct seed, root visits are
@@ -1447,16 +1447,21 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // submits it as `ai_move`. The server validates by legal-move membership and
   // applies; ANY failure here (worker crash, wasm blocked, tab lag) just times out
   // into the server's hard bot for that turn — never a stuck game.
+  // The two tiers differ only in the MODEL the workers load (?model= on the
+  // worker URL): hard = the first netval champion (coc_pv_model_hard.bin),
+  // expert = the r2 net (coc_pv_model.bin).
   const COC_AI_SIMS_FALLBACK = 20000;      // aggregate per micro-decision if the server sends no cap
+  const CLIENT_AI_TIERS = ["hard", "expert"];
   const wasmPoolRef = useRef(null);        // [{ ready, request, terminate }]
   const [wasmReady, setWasmReady] = useState(false);
   const clientAiArmedRef = useRef(null);   // room we've announced capability for (reset per socket)
   const aiDecisionRef = useRef(-1);        // decision seq already dispatched
 
   useEffect(() => {
-    if (roomData?.ai_difficulty !== "expert" || !roomData?.vs_ai || reviewOnly
+    if (!CLIENT_AI_TIERS.includes(roomData?.ai_difficulty) || !roomData?.vs_ai || reviewOnly
         || wasmPoolRef.current || typeof Worker === "undefined") return;
-    const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js`;
+    const model = roomData.ai_difficulty === "hard" ? "coc_pv_model_hard.bin" : "coc_pv_model.bin";
+    const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js?model=${model}`;
     const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
     const makeWorker = () => {
       let w;
@@ -1498,12 +1503,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // on disconnect, so a reconnect must re-announce (hence the reset effect).
   useEffect(() => { if (!connected) clientAiArmedRef.current = null; }, [connected]);
   useEffect(() => {
-    if (wasmReady && connected && roomData?.ai_difficulty === "expert" && roomData?.room_id
-        && clientAiArmedRef.current !== roomData.room_id) {
+    if (wasmReady && connected && CLIENT_AI_TIERS.includes(roomData?.ai_difficulty)
+        && roomData?.room_id && clientAiArmedRef.current !== roomData.room_id) {
       clientAiArmedRef.current = roomData.room_id;
       send({ action: "client_ai_ready" });
     }
-  }, [wasmReady, connected, roomData?.room_id, roomData?.ai_difficulty, send]);
+  }, [wasmReady, connected, roomData?.room_id, roomData?.ai_difficulty, send]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drive one shipped decision: probe → (forced | fan-out search) → append → repeat
   // to the engine-move boundary → convert → submit. One dispatch per decision seq.
@@ -1870,15 +1875,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     vs Friend
                   </button>
                   <span className="coc-ai-picker-label">vs Bot</span>
-                  <button className="coc-btn outline sm" title="A capable opponent that makes the occasional mistake"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "normal"); }}>
-                    Normal
+                  <button className="coc-btn outline sm" title="A capable search opponent — a solid game without neural-net strength"
+                    onClick={() => { setShowCreateMenu(false); startCreate(true, "easy"); }}>
+                    Easy
                   </button>
-                  <button className="coc-btn outline sm" title="Full-strength search — a real challenge"
+                  <button className="coc-btn outline sm" title="The first-generation neural net, searched in your browser — a real challenge"
                     onClick={() => { setShowCreateMenu(false); startCreate(true, "hard"); }}>
                     Hard
                   </button>
-                  <button className="coc-btn outline sm" title="The learned neural net, searched in your browser — the strongest opponent"
+                  <button className="coc-btn outline sm" title="The strongest neural net, searched in your browser"
                     onClick={() => { setShowCreateMenu(false); startCreate(true, "expert"); }}>
                     Expert
                   </button>

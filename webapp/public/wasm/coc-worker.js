@@ -1,12 +1,14 @@
-// Castles of Crimson Expert-tier search worker (ROOT-PARALLEL). Loaded as a MODULE worker;
+// Castles of Crimson Hard/Expert-tier search worker (ROOT-PARALLEL). Loaded as a MODULE worker;
 // the wasm-pack (--target web) glue + .wasm sit beside this file. One of N identical workers —
 // the main thread fans a seeded search of the CURRENT MICRO DECISION to each, SUMS their root
 // visit vectors, argmaxes, appends the action to the shared prefix, and repeats until the
 // prefix forms a complete engine move (stepInfo boundary), then asks one worker to convert the
 // chain to the compact dict-move JSON the server's ai_move handler accepts.
 //
-// The PV model is NOT embedded in the wasm: this worker fetches coc_pv_model.bin (compact f32
-// blob, ~2.6MB, browser-cached) once at init — a model upgrade is a file replace, no rebuild.
+// The PV model is NOT embedded in the wasm: this worker fetches a model bin (compact f32 blob,
+// ~2.6MB, browser-cached) once at init — a model upgrade is a file replace, no rebuild. WHICH
+// bin comes from the worker URL's ?model= query (the tier's model): coc_pv_model.bin (Expert,
+// the default) or coc_pv_model_hard.bin (Hard, the previous champion net).
 //
 // Protocol (main -> worker):
 //   { id, kind:"searchCoC", state, prefix, mode, budget, maxSims, seed } -> { id, visits:[102 ints] }
@@ -24,7 +26,10 @@ const readyP = new Promise((res) => (readyResolve = res));
 (async () => {
   try {
     await init();
-    const resp = await fetch(new URL("./coc_pv_model.bin", import.meta.url));
+    const wanted = new URL(import.meta.url).searchParams.get("model") || "coc_pv_model.bin";
+    // whitelist so a crafted query can never fetch an arbitrary URL
+    const model = wanted === "coc_pv_model_hard.bin" ? wanted : "coc_pv_model.bin";
+    const resp = await fetch(new URL(`./${model}`, import.meta.url));
     if (!resp.ok) throw new Error("model fetch " + resp.status);
     const bytes = new Uint8Array(await resp.arrayBuffer());
     if (!coc_init_model(bytes)) throw new Error("model parse failed");
