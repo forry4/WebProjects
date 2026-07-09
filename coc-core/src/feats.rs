@@ -44,6 +44,8 @@ pub const N_FEATS: usize = 934;
 pub enum Enc {
     V1,
     V2,
+    /// P4b attention rows (tokfeats.rs): 32x28 tokens + mask + state = 1024.
+    Tokens,
 }
 
 impl Enc {
@@ -51,6 +53,7 @@ impl Enc {
         match d {
             N_FEATS => Enc::V1,
             N_FEATS_V2 => Enc::V2,
+            crate::tokfeats::N_FEATS_TOK => Enc::Tokens,
             _ => panic!("unknown encoder input dim {d}"),
         }
     }
@@ -58,6 +61,7 @@ impl Enc {
         match self {
             Enc::V1 => N_FEATS,
             Enc::V2 => N_FEATS_V2,
+            Enc::Tokens => crate::tokfeats::N_FEATS_TOK,
         }
     }
 }
@@ -67,11 +71,12 @@ pub fn encode(enc: Enc, s: &State, seat: usize) -> Vec<f32> {
     match enc {
         Enc::V1 => features(s, seat),
         Enc::V2 => features_v2(s, seat),
+        Enc::Tokens => crate::tokfeats::encode_row(s, seat),
     }
 }
 
 #[inline]
-fn tile_sub(code: u16) -> f32 {
+pub(crate) fn tile_sub(code: u16) -> f32 {
     if code == 0 {
         return 0.0;
     }
@@ -364,7 +369,7 @@ pub const N_FEATS_V2: usize = N_FEATS + 144;
 /// the clock-coupled income/effect stream — placement/region VP is already
 /// richly covered by the per-space board block. Ships/livestock/buildings/
 /// castles have ~time-flat worth (their type one-hots suffice) -> 0 here.
-fn tile_time_value(s: &State, seat: usize, code: u16) -> f32 {
+pub(crate) fn tile_time_value(s: &State, seat: usize, code: u16) -> f32 {
     if code == 0 {
         return 0.0;
     }
@@ -428,7 +433,7 @@ fn tile_time_value(s: &State, seat: usize, code: u16) -> f32 {
 }
 
 /// My endgame-multiplier count for an offered endgame monastery (0 otherwise).
-fn endgame_mult(s: &State, seat: usize, code: u16) -> f32 {
+pub(crate) fn endgame_mult(s: &State, seat: usize, code: u16) -> f32 {
     if code == 0 || type_of(code) != TileType::Monastery {
         return 0.0;
     }

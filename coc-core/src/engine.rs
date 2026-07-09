@@ -899,7 +899,7 @@ impl State {
 
     /// Bitmask of legal target spaces for placing `code` with `number_mask` allowed
     /// die numbers (or any number when `ignore_number`).
-    fn legal_space_mask(&self, seat: usize, code: u16, number_mask: u8, ignore_number: bool) -> u64 {
+    pub(crate) fn legal_space_mask(&self, seat: usize, code: u16, number_mask: u8, ignore_number: bool) -> u64 {
         let b = self.boards[seat] as usize;
         let color = color_of(code);
         let p = &self.players[seat];

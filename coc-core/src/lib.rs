@@ -17,6 +17,7 @@ pub mod heuristic;
 pub mod mcts;
 pub mod netio;
 pub mod proj;
+pub mod tokfeats;
 pub mod pxio;
 pub mod vsearch;
 
