@@ -51,11 +51,24 @@ from core.config import cors_allowed_origins
 LOG = logging.getLogger("games.castles_of_crimson")
 
 # Valid AI difficulty levels; unknown values fall back to the default.
-# "expert" = the learned net searched CLIENT-side (browser WASM, coc-core); the
-# server ships each of the bot's decisions via `ai_search` and validates the
-# returned move. Any client failure degrades that decision to the hard server bot.
-AI_DIFFICULTIES = ("normal", "hard", "expert")
+# The ladder was reshuffled 2026-07-09 (each tier took the one above's brain):
+#   "easy"   = the MCTS-heuristic server bot at its strong config (the tier
+#              formerly SERVED as "hard"; ai.play_turn_plan difficulty="hard").
+#   "hard"   = the previous Expert: the first netval champion net, searched
+#              CLIENT-side (browser WASM) from coc_pv_model_hard.bin.
+#   "expert" = the r2 net (high-sims + PCR self-play lineage), client-side
+#              from coc_pv_model.bin. Beats the hard-tier net 0.61 train /
+#              0.53-0.55 serving config on fresh seeds.
+# "normal" is LEGACY (pre-reshuffle saved rooms + old cached clients): kept
+# valid so old games keep playing their original weaker server bot, but the
+# lobby no longer offers it. Client-side tiers degrade per-decision to the
+# hard SERVER bot on any client failure (watchdog), same as before.
+AI_DIFFICULTIES = ("easy", "normal", "hard", "expert")
 DEFAULT_DIFFICULTY = "hard"
+# Tiers whose moves are searched client-side (browser WASM) + the model file
+# tag the client should load for each (see coc-worker.js).
+CLIENT_AI_TIERS = ("hard", "expert")
+_CLIENT_AI_MODEL = {"hard": "coc_pv_model_hard.bin", "expert": "coc_pv_model.bin"}
 
 # Expert client-search config. _EXPERT_MODE mirrors the offline gate verdict:
 # "netval" = net policy prior + 20-step rollout + the net VALUE HEAD at the
@@ -493,6 +506,10 @@ async def _client_bot_turn(room_id: str) -> None:
                         "decision": seq,
                         "seat": game["order"].index(ai_pid),
                         "mode": _EXPERT_MODE,
+                        "model": _CLIENT_AI_MODEL.get(
+                            _valid_difficulty(room.get("ai_difficulty")),
+                            _CLIENT_AI_MODEL["expert"],
+                        ),
                         "budget_ms": _EXPERT_BUDGET_MS,
                         "max_sims": _EXPERT_MAX_SIMS,
                         "state": proj,
@@ -605,18 +622,21 @@ async def _schedule_bot_turn(room_id: str) -> None:
         if first_pause:
             await asyncio.sleep(first_pause)
 
-        if difficulty == "expert" and az_compact is not None:
+        if difficulty in CLIENT_AI_TIERS and az_compact is not None:
             await _client_bot_turn(room_id)
 
-        # Server path (normal/hard, and the expert fallback). Snapshot AFTER the
-        # client attempt — the client may have applied part of the turn.
+        # Server path (easy/normal, and the hard/expert fallback). Snapshot AFTER
+        # the client attempt — the client may have applied part of the turn.
         async with ROOM_LOCK:
             room = ROOMS.get(room_id)
             if not room:
                 return
             need_server = _bot_should_act(room)
             snapshot = coc_ai._clone_game(room["game"]) if need_server else None
-        plan_diff = "hard" if difficulty == "expert" else difficulty
+        # "easy" (and the client tiers' fallback) run the server bot at its
+        # STRONG config — ai.py only knows normal/hard; legacy "normal" keeps
+        # its original weaker config.
+        plan_diff = "normal" if difficulty == "normal" else "hard"
 
         seq = None
         if need_server:
