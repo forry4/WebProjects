@@ -65,14 +65,14 @@ def bump_stats(n):
             STATS["t0"] = time.time()
 
 
-def handle(conn, net, in_dim, dev):
+def handle(conn, forward, in_dim, dev):
     try:
-        handle_inner(conn, net, in_dim, dev)
+        handle_inner(conn, forward, in_dim, dev)
     except (ConnectionError, OSError):
         pass  # client gone (normal teardown) — never noise, never a crash
 
 
-def handle_inner(conn, net, in_dim, dev):
+def handle_inner(conn, forward, in_dim, dev):
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     conn.sendall(struct.pack("<I", in_dim))
     row_bytes = in_dim * 4
@@ -91,7 +91,7 @@ def handle_inner(conn, net, in_dim, dev):
             # trunk[0] at load, so raw features go straight in)
             x = torch.frombuffer(raw, dtype=torch.float32).view(n, in_dim).to(
                 dev, non_blocking=True)
-            val, logits = net(x)
+            val, logits = forward(x)
             out = torch.cat([val.reshape(n, 1), logits], dim=1).cpu().numpy()
             conn.sendall(out.astype(np.float32, copy=False).tobytes())
             bump_stats(n)
@@ -104,23 +104,34 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
-    net, mu, sd = load_json(args.model)
-    in_dim = len(mu)
     dev = args.device
-    net.to(dev).eval()
-    # Fold the z-score into trunk[0] so requests skip the normalize kernels:
-    #   relu(W(x-mu)/sd + b) = relu(W' x + b') with W' = W*inv_sd (col-wise),
-    #   b' = b - W' @ mu. Pure algebra; the harvest's startup parity guard
-    #   (CPU forward vs server) verifies it end-to-end on every run.
-    mu_t = torch.tensor(mu, dtype=torch.float32, device=dev)
-    inv_sd = 1.0 / torch.tensor(sd, dtype=torch.float32, device=dev)
-    with torch.no_grad():
-        l0 = net.trunk[0]
-        l0.weight.mul_(inv_sd)
-        l0.bias.sub_(l0.weight @ mu_t)
+    with open(args.model, encoding="utf-8") as f:
+        head = f.read(4096)
+    if '"emb_w"' in head:
+        # ATTENTION net (attn_net twin): forward_flat takes the tokfeats flat
+        # row directly — no normalization anywhere by design.
+        import attn_net
+        net = attn_net.import_json(args.model).to(dev).eval()
+        in_dim = attn_net.TOK_N * attn_net.TOK_F + attn_net.TOK_N + attn_net.TOK_STATE
+        forward = net.forward_flat
+    else:
+        net, mu, sd = load_json(args.model)
+        in_dim = len(mu)
+        net.to(dev).eval()
+        # Fold the z-score into trunk[0] so requests skip the normalize kernels:
+        #   relu(W(x-mu)/sd + b) = relu(W' x + b') with W' = W*inv_sd (col-wise),
+        #   b' = b - W' @ mu. Pure algebra; the harvest's startup parity guard
+        #   (CPU forward vs server) verifies it end-to-end on every run.
+        mu_t = torch.tensor(mu, dtype=torch.float32, device=dev)
+        inv_sd = 1.0 / torch.tensor(sd, dtype=torch.float32, device=dev)
+        with torch.no_grad():
+            l0 = net.trunk[0]
+            l0.weight.mul_(inv_sd)
+            l0.bias.sub_(l0.weight @ mu_t)
+        forward = net
     # warm the kernels so the first real request isn't slow
     with torch.inference_mode():
-        net(torch.zeros(8, in_dim, device=dev))
+        forward(torch.zeros(8, in_dim, device=dev))
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -131,7 +142,7 @@ def main():
     while True:
         conn, _ = srv.accept()
         threading.Thread(
-            target=handle, args=(conn, net, in_dim, dev), daemon=True
+            target=handle, args=(conn, forward, in_dim, dev), daemon=True
         ).start()
 
 

@@ -64,6 +64,9 @@ impl GpuEval {
 }
 
 impl PvEval for GpuEval {
+    fn in_dim(&self) -> usize {
+        self.in_dim
+    }
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
         self.forward_batch(&[raw], &[true]).pop().unwrap()
     }

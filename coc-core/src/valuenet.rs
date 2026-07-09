@@ -391,6 +391,8 @@ impl PolicyValueNet {
 /// input dim at load), so v1 and v2 nets face each other in one gate and the
 /// wasm serves whichever model blob it fetched with the right encoder.
 pub trait PvEval: Sync {
+    /// The flat input-row length this net expects (also selects its encoder).
+    fn in_dim(&self) -> usize;
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>);
     fn forward_value_raw(&self, raw: &[f32]) -> f32;
     fn forward_batch(&self, raws: &[&[f32]], need_policy: &[bool]) -> Vec<(f32, Vec<f32>)>;
@@ -398,6 +400,9 @@ pub trait PvEval: Sync {
 }
 
 impl PvEval for PolicyValueNet {
+    fn in_dim(&self) -> usize {
+        PolicyValueNet::in_dim(self)
+    }
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
         PolicyValueNet::forward_raw(self, raw)
     }
@@ -566,6 +571,9 @@ impl QuantPolicyValueNet {
 }
 
 impl PvEval for QuantPolicyValueNet {
+    fn in_dim(&self) -> usize {
+        self.tdims[0]
+    }
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
         let cur = self.trunk_q(raw);
         let hd = *self.tdims.last().unwrap();

@@ -265,6 +265,9 @@ pub fn coc_cfg() -> AttnCfg {
 }
 
 impl crate::valuenet::PvEval for AttnNet {
+    fn in_dim(&self) -> usize {
+        self.cfg.t * self.cfg.f + self.cfg.t + self.cfg.state
+    }
     fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
         let c = self.cfg;
         debug_assert_eq!(raw.len(), c.t * c.f + c.t + c.state);

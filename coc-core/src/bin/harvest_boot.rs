@@ -351,8 +351,19 @@ fn main() {
     let temp_micro: usize = args[4].parse().unwrap();
     let seed0: u64 = args[5].parse().unwrap();
     let threads: usize = args[6].parse().unwrap();
-    let net: Option<PolicyValueNet> = args.get(7).map(|p| {
-        coc_core::netio::pv_from_json(&std::fs::read_to_string(p).expect("model"))
+    // MLP or ATTENTION json, detected by content ("emb_w" = attention). The
+    // attention path exists for GPU self-play: the sidecar runs the torch twin,
+    // the local net here only feeds the startup parity guard + logenc default
+    // (an attention net's in_dim -> Enc::Tokens, so it logs token rows).
+    let model_js: Option<String> =
+        args.get(7).map(|p| std::fs::read_to_string(p).expect("model"));
+    let is_attn = model_js.as_deref().is_some_and(|js| js.contains("\"emb_w\""));
+    let net: Option<Box<dyn PvEval>> = model_js.as_deref().map(|js| {
+        if is_attn {
+            Box::new(coc_core::attn::AttnNet::from_json_str(js)) as Box<dyn PvEval>
+        } else {
+            Box::new(coc_core::netio::pv_from_json(js)) as Box<dyn PvEval>
+        }
     });
     // "netval8" = netval search on the int8+VNNI quantized net (quantized at
     // load from the same f32 json — no new file format); everything downstream
@@ -395,23 +406,29 @@ fn main() {
         Some("v1") => feats::Enc::V1,
         Some("v2") => feats::Enc::V2,
         Some("tok") => feats::Enc::Tokens, // P4b attention rows (tokfeats layout)
-        None => net.as_ref().map_or(feats::Enc::V1, |n| feats::Enc::from_in_dim(n.in_dim())),
+        None => net.as_deref().map_or(feats::Enc::V1, |n| feats::Enc::from_in_dim(n.in_dim())),
         Some(m) => panic!("bad logenc {m}"),
     };
     let per = games / threads as u64;
-    let qnet: Option<QuantPolicyValueNet> =
-        if quantize { net.as_ref().map(QuantPolicyValueNet::from_f32) } else { None };
+    let qnet: Option<QuantPolicyValueNet> = if quantize {
+        assert!(!is_attn, "netval8 is MLP-only");
+        model_js.as_deref().map(|js| {
+            QuantPolicyValueNet::from_f32(&coc_core::netio::pv_from_json(js))
+        })
+    } else {
+        None
+    };
     let gnet: Option<coc_core::gpueval::GpuEval> = if gpu {
         let addr =
             std::env::var("COC_GPU_ADDR").unwrap_or_else(|_| "127.0.0.1:9911".to_string());
         let g = coc_core::gpueval::GpuEval::connect(&addr).expect("gpu server connect");
-        let n = net.as_ref().unwrap();
+        let n = net.as_ref().unwrap().as_ref();
         assert_eq!(g.in_dim, n.in_dim(), "gpu server model dim != local model dim");
         // same-model guard: one deterministic probe forward, CPU vs server
         let mut rng = coc_core::rng::Rng::new(0xC0C0_57A7);
         let raw: Vec<f32> =
             (0..g.in_dim).map(|_| (rng.next_u64() % 2000) as f32 / 1000.0 - 1.0).collect();
-        let (cv, cl) = PvEval::forward_raw(n, &raw);
+        let (cv, cl) = n.forward_raw(&raw);
         let (gv, gl) = g.forward_raw(&raw);
         let md = cl.iter().zip(&gl).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
         assert!(
@@ -434,7 +451,7 @@ fn main() {
     } else if quantize {
         qnet.as_ref().map(|q| q as &dyn PvEval)
     } else {
-        net.as_ref().map(|n| n as &dyn PvEval)
+        net.as_ref().map(|n| n.as_ref())
     };
     std::thread::scope(|scope| {
         for t in 0..threads {

@@ -150,3 +150,27 @@ if __name__ == "__main__":
         print(f"selfcheck net -> {sys.argv[2]} (+.check)")
     else:
         print(__doc__)
+
+
+def import_json(path: str) -> "AttnNet":
+    """Inverse of export_json — load an exported net back into torch (warm starts,
+    and the sidecar's attention branch)."""
+    with open(path, encoding="utf-8") as f:
+        j = json.load(f)
+    assert j["t"] == TOK_N and j["d"] == D and j["trunk"] == TRUNK, "shape mismatch"
+    net = AttnNet()
+    with torch.no_grad():
+        def cp(param, vals):
+            param.copy_(torch.tensor(vals, dtype=torch.float32).view_as(param))
+        cp(net.emb.weight, j["emb_w"]); cp(net.emb.bias, j["emb_b"])
+        for l in range(LAYERS):
+            cp(net.wq[l].weight, j["wq"][l]); cp(net.wk[l].weight, j["wk"][l])
+            cp(net.wv[l].weight, j["wv"][l]); cp(net.wo[l].weight, j["wo"][l])
+            cp(net.f1[l].weight, j["f1w"][l]); cp(net.f1[l].bias, j["f1b"][l])
+            cp(net.f2[l].weight, j["f2w"][l]); cp(net.f2[l].bias, j["f2b"][l])
+        cp(net.se.weight, j["sw"]); cp(net.se.bias, j["sb"])
+        cp(net.trunk.weight, j["tw"]); cp(net.trunk.bias, j["tb"])
+        cp(net.vh.weight, j["vw"]); cp(net.vh.bias, j["vb"])
+        cp(net.pg.weight, j["pw"]); cp(net.pg.bias, j["pb"])
+        cp(net.ptok.weight, j["ptok_w"]); cp(net.ptok.bias, j["ptok_b"])
+    return net

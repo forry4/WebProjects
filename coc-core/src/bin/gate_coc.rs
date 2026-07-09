@@ -26,8 +26,19 @@ enum Player {
     Net(PolicyValueNet),
     NetArgmax(PolicyValueNet),
     Hybrid(PolicyValueNet),          // net prior + rollout-heuristic value
-    NetVal(PolicyValueNet, usize, f64), // net prior + rollout(steps) + net-value; c_puct
+    NetVal(Box<dyn PvEval>, usize, f64), // net prior + rollout(steps) + net-value; c_puct
+                                         // (MLP or ATTENTION json - detected by content)
     NetVal8(QuantPolicyValueNet, usize, f64), // netval on the int8+VNNI quantized net
+}
+
+/// Load an MLP or ATTENTION net by json content ("emb_w" = attention).
+fn load_any(path: &str) -> Box<dyn PvEval> {
+    let js = std::fs::read_to_string(path).expect("model");
+    if js.contains("\"emb_w\"") {
+        Box::new(coc_core::attn::AttnNet::from_json_str(&js))
+    } else {
+        Box::new(pv_from_json(&js))
+    }
 }
 
 impl Player {
@@ -68,11 +79,7 @@ impl Player {
                 .collect();
             let steps = params.first().and_then(|s| s.parse().ok()).unwrap_or(20);
             let cpuct = params.get(1).and_then(|s| s.parse().ok()).unwrap_or(vsearch::C_PUCT);
-            return Player::NetVal(
-                pv_from_json(&std::fs::read_to_string(path).expect("model")),
-                steps,
-                cpuct,
-            );
+            return Player::NetVal(load_any(path), steps, cpuct);
         }
         Player::Net(pv_from_json(&std::fs::read_to_string(spec).expect("model")))
     }
@@ -80,7 +87,7 @@ impl Player {
     /// (net, rollout_steps, c_puct) when this player is batchable netval.
     fn netval(&self) -> Option<(&dyn PvEval, usize, f64)> {
         match self {
-            Player::NetVal(net, steps, cpuct) => Some((net, *steps, *cpuct)),
+            Player::NetVal(net, steps, cpuct) => Some((net.as_ref(), *steps, *cpuct)),
             Player::NetVal8(net, steps, cpuct) => Some((net, *steps, *cpuct)),
             _ => None,
         }
@@ -108,7 +115,7 @@ impl Player {
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             }
             Player::NetVal(net, steps, cpuct) => {
-                choose_netval(net, s, sims, seed, *steps, *cpuct)
+                choose_netval(net.as_ref(), s, sims, seed, *steps, *cpuct)
             }
             Player::NetVal8(net, steps, cpuct) => {
                 choose_netval(net, s, sims, seed, *steps, *cpuct)
