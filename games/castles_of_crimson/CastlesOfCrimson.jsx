@@ -1462,7 +1462,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         || wasmPoolRef.current || typeof Worker === "undefined") return;
     const model = roomData.ai_difficulty === "hard" ? "coc_pv_model_hard.bin" : "coc_pv_model.bin";
     const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js?model=${model}`;
-    const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+    // Worker count: small devices keep the old min(cores,4); bigger machines get
+    // up to 8 workers, always leaving 2 cores for the main thread + OS (CoC trees
+    // are small — ~30MB at the sims cap — so RAM is not the constraint here).
+    const hc = navigator.hardwareConcurrency || 4;
+    const cores = hc <= 4 ? Math.max(1, hc) : Math.min(hc - 2, 8);
     const makeWorker = () => {
       let w;
       try { w = new Worker(url, { type: "module" }); } catch { return null; }
@@ -1541,6 +1545,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           if (info.forced >= 0) {
             action = info.forced;                             // single-legal: no search needed
           } else {
+            // NOTE: no `ntrees` — the multi-tree batched-eval path (coc_search_timed_multi)
+            // measured 3.3x SLOWER in wasm (v128 is COMPUTE-bound; the batched kernel is a
+            // memory-bandwidth optimization + register-blocks past what v128 codegen has).
+            // Single-tree per worker is the wasm optimum; parallelism comes from the pool.
             const results = await Promise.all(pool.map((wk, i) => wk.request({
               kind: "searchCoC", state: stateStr, prefix: JSON.stringify(prefix),
               mode: as.mode || "hybrid", budget: as.budget_ms || 900, maxSims: perWorkerSims,

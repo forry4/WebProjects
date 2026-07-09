@@ -18,7 +18,10 @@
 //   (the main thread drops this worker; if none are ready it never announces client_ai_ready
 //   and the server computes the bot turn — the pre-existing hard path).
 
-import init, { coc_init_model, coc_step_info, coc_search_timed, coc_chain_move } from "./coc_core.js";
+// Namespace import so a cached OLD glue (without newer exports) still loads —
+// newer entries are feature-detected at call time instead of breaking the import.
+import init, * as coc from "./coc_core.js";
+const { coc_init_model, coc_step_info, coc_search_timed, coc_chain_move } = coc;
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -48,9 +51,16 @@ self.onmessage = async (e) => {
   if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
     if (msg.kind === "searchCoC") {
-      const visits = coc_search_timed(
-        String(msg.state), String(msg.prefix), String(msg.mode || "hybrid"),
-        Number(msg.budget), (msg.maxSims >>> 0) || 0, BigInt(msg.seed >>> 0));
+      // ntrees>1 runs K root-parallel trees in lockstep with BATCHED net evals
+      // (coc_search_timed_multi) — feature-detected so a cached old wasm still works.
+      const ntrees = (msg.ntrees >>> 0) || 0;
+      const visits = (ntrees > 1 && typeof coc.coc_search_timed_multi === "function")
+        ? coc.coc_search_timed_multi(
+            String(msg.state), String(msg.prefix), String(msg.mode || "hybrid"),
+            Number(msg.budget), (msg.maxSims >>> 0) || 0, BigInt(msg.seed >>> 0), ntrees)
+        : coc_search_timed(
+            String(msg.state), String(msg.prefix), String(msg.mode || "hybrid"),
+            Number(msg.budget), (msg.maxSims >>> 0) || 0, BigInt(msg.seed >>> 0));
       if (!visits || !visits.length) { self.postMessage({ id: msg.id, error: "bad state/prefix" }); return; }
       self.postMessage({ id: msg.id, visits: Array.from(visits) });
     } else if (msg.kind === "stepInfo") {

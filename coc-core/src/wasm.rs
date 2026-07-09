@@ -172,6 +172,82 @@ pub fn coc_search_timed(
     visits
 }
 
+/// Multi-tree variant of `coc_search_timed` (NETVAL): `ntrees` root-parallel
+/// searches in LOCKSTEP, leaf evals batched through one `forward_batch` pass.
+/// **MEASURED NEGATIVE IN WASM — do not route serving here (2026-07-09 Node
+/// A/B: 874 vs 2,852 sims/s single-tree, flat across K=8/16).** The batched
+/// kernel is a memory-BANDWIDTH optimization built on register blocking; the
+/// native forward is load-bound with 16 wide registers, but v128 is 4-lane,
+/// FMA-less and COMPUTE-bound, and the 4-input block spills — so batching
+/// only adds overhead. Kept as tooling for a future relaxed-SIMD attempt
+/// (i8 dot products would change the arithmetic economics). Correctness is
+/// fine (visits sum to the same argmax as single-tree). Non-netval modes and
+/// `ntrees<=1` fall back to the single-tree path.
+#[wasm_bindgen]
+pub fn coc_search_timed_multi(
+    state_json: &str,
+    prefix_json: &str,
+    mode: &str,
+    budget_ms: f64,
+    max_sims: u32,
+    seed: u64,
+    ntrees: u32,
+) -> Vec<i32> {
+    if mode != "netval" || ntrees <= 1 {
+        return coc_search_timed(state_json, prefix_json, mode, budget_ms, max_sims, seed);
+    }
+    let Some((s, _)) = state_after(state_json, prefix_json) else {
+        return Vec::new();
+    };
+    if s.is_over() {
+        return Vec::new();
+    }
+    let mut visits = vec![0i32; engine::N_ACTIONS];
+    let legal = engine::legal_actions(&s);
+    if legal.len() == 1 {
+        visits[legal[0]] = 1;
+        return visits;
+    }
+    let k = ntrees as usize;
+    let per_tree_cap = if max_sims == 0 { u32::MAX } else { (max_sims / ntrees).max(1) };
+    MODEL.with(|m| {
+        let mb = m.borrow();
+        let net = mb.as_ref().expect("coc_init_model not called");
+        let mut tasks: Vec<crate::batch::SearchTask> = (0..k)
+            .map(|i| {
+                crate::batch::SearchTask::new(
+                    s.clone(),
+                    vsearch::NETVAL_C_PUCT,
+                    seed.wrapping_add(0x9E37_79B9_7F4A_7C15u64.wrapping_mul(i as u64)),
+                    per_tree_cap,
+                    vsearch::NETVAL_ROLLOUT_STEPS,
+                )
+            })
+            .collect();
+        let start = js_sys::Date::now();
+        let mut rounds: u32 = 0;
+        loop {
+            let mut live: Vec<&mut crate::batch::SearchTask> =
+                tasks.iter_mut().filter(|t| !t.finished()).collect();
+            if live.is_empty() {
+                break;
+            }
+            crate::batch::step_netval(net, &mut live);
+            rounds += 1;
+            // one round = one sim per live tree; clock cadence ~= the single-tree n%64
+            if rounds % 8 == 0 && js_sys::Date::now() - start >= budget_ms {
+                break;
+            }
+        }
+        for t in &tasks {
+            for (v, rv) in visits.iter_mut().zip(t.search.root_visits()) {
+                *v += rv;
+            }
+        }
+    });
+    visits
+}
+
 /// Compose a boundary-complete prefix into the compact dict-move JSON
 /// (bridge.py::compact_to_move shape — the exact payload for the `ai_move` WS
 /// action). `{"error":...}` if the prefix doesn't parse / isn't a full move.

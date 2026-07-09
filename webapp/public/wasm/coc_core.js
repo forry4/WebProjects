@@ -66,6 +66,38 @@ export function coc_search_timed(state_json, prefix_json, mode, budget_ms, max_s
 }
 
 /**
+ * Multi-tree variant of `coc_search_timed` for the NETVAL serving mode: runs
+ * `ntrees` independent root-parallel searches in LOCKSTEP inside this worker,
+ * pushing every tree's leaf net evals through ONE `forward_batch` pass per
+ * round (the register-blocked kernel — the offline round-2 win; the forward is
+ * ~80% of wasm per-sim cost, so this is the browser's biggest sims/s lever).
+ * Returns the SUMMED root visit vector — the same contract as the main thread
+ * summing across workers, just K trees deeper. `max_sims` remains the
+ * PER-WORKER cap (split across trees). Non-netval modes and `ntrees<=1` fall
+ * back to the single-tree path (also the safety net for old callers).
+ * @param {string} state_json
+ * @param {string} prefix_json
+ * @param {string} mode
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {bigint} seed
+ * @param {number} ntrees
+ * @returns {Int32Array}
+ */
+export function coc_search_timed_multi(state_json, prefix_json, mode, budget_ms, max_sims, seed, ntrees) {
+    const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(prefix_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.coc_search_timed_multi(ptr0, len0, ptr1, len1, ptr2, len2, budget_ms, max_sims, seed, ntrees);
+    var v4 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v4;
+}
+
+/**
  * Position probe after applying `prefix`:
  * `{"over":0|1,"boundary":0|1,"actor":i,"forced":a|-1,"legal":n}`.
  * `boundary` = the prefix forms a complete engine move (Micro back to None);
