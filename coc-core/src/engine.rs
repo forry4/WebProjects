@@ -877,6 +877,26 @@ impl State {
         self.players[seat].town_bldg[region] >> building_type(code) & 1 == 0
     }
 
+    /// True when the stored tile in `slot` is SURPLUS for `seat`: its color
+    /// already has more stored copies than the board has empty spaces of that
+    /// color left, so this copy can provably never be placed. Deliberately
+    /// counts ONLY the fixed color capacity (ignores adjacency/number/town
+    /// gates, which can open up later) — a tile is only ever called surplus
+    /// when it is dead under every possible future.
+    fn storage_surplus(&self, seat: usize, slot: usize) -> bool {
+        let p = &self.players[seat];
+        let code = p.storage[slot];
+        if code == 0 {
+            return false;
+        }
+        let color = color_of(code);
+        let b = self.boards[seat] as usize;
+        let empties = (COLOR_MASK[b][color as usize] & !p.filled).count_ones();
+        let stored =
+            p.storage.iter().filter(|&&t| t != 0 && color_of(t) == color).count() as u32;
+        stored > empties
+    }
+
     /// Bitmask of legal target spaces for placing `code` with `number_mask` allowed
     /// die numbers (or any number when `ignore_number`).
     fn legal_space_mask(&self, seat: usize, code: u16, number_mask: u8, ignore_number: bool) -> u64 {
@@ -1152,7 +1172,11 @@ pub fn legal_actions_full(s: &State) -> Vec<usize> {
 
 /// Search-facing legal actions — the ai.py `_legal` pruning in micro space
 /// (strictly-dominated moves only; never empties a decision):
-/// - never discard a stored tile;
+/// - never discard a LIVE stored tile; a SURPLUS tile (color capacity provably
+///   exhausted — see `storage_surplus`) MAY be discarded: the discard is free,
+///   opponent-independent, and the board never grows, so freeing the slot
+///   weakly dominates holding a dead tile (without this the search could lock
+///   itself out of hex-taking for the rest of the game on a full dead storage);
 /// - never re-adjust an already-adjusted die;
 /// - with an adjusted die, drop its wasteful take_workers while a REAL action
 ///   remains anywhere (in micro space: drop A_WORKERS inside its menu, and drop
@@ -1172,7 +1196,13 @@ pub fn legal_actions(s: &State) -> Vec<usize> {
             out
         }
         Micro::None if s.pending == Pending::None => {
-            out.retain(|&a| !(A_DISCARD0..A_DISCARD0 + 3).contains(&a));
+            out.retain(|&a| {
+                if (A_DISCARD0..A_DISCARD0 + 3).contains(&a) {
+                    s.storage_surplus(seat, a - A_DISCARD0)
+                } else {
+                    true
+                }
+            });
             for die in 0..2 {
                 if s.dice[seat][die].adjusted {
                     let lo = A_ADJUST0 + die * 6;
@@ -1413,6 +1443,52 @@ fn clear_pending(s: &mut State) {
 mod tests {
     use super::*;
     use crate::rng::Rng;
+    use crate::tiles::{T_CASTLE, T_MINE};
+
+    /// Search legality offers a discard for exactly the SURPLUS (provably dead)
+    /// stored tiles: color capacity exhausted -> discardable; live tiles stay
+    /// pruned; and with no surplus the whole discard head stays pruned.
+    #[test]
+    fn search_discards_only_surplus_tiles() {
+        // Drive a real game to a main-turn decision point (never hand-build
+        // mode/dice), then hand-set storage + board fill for the scenario.
+        let mut s = State::new_game([0, 0], 11);
+        let mut rng = Rng::new(3);
+        while s.mode == SETUP || s.micro != Micro::None || s.pending != Pending::None {
+            let acts = legal_actions_full(&s);
+            s_apply_first_nonend(&mut s, &acts, &mut rng);
+        }
+        let seat = s.actor() as usize;
+        let b = s.boards[seat] as usize;
+        // Storage full: two castle tiles + one mine tile.
+        s.players[seat].storage = [T_CASTLE, T_CASTLE, T_MINE];
+        let castle_color = color_of(T_CASTLE) as usize;
+        let mine_color = color_of(T_MINE) as usize;
+        // Fill every castle-colored space but ONE -> stored 2 > empty 1 = surplus;
+        // leave >=2 mine spaces empty -> mine tile live.
+        let castle_mask = COLOR_MASK[b][castle_color];
+        let keep_one = 1u64 << castle_mask.trailing_zeros();
+        s.players[seat].filled |= castle_mask & !keep_one;
+        s.players[seat].filled &= !COLOR_MASK[b][mine_color];
+        assert!((COLOR_MASK[b][mine_color] & !s.players[seat].filled).count_ones() >= 2);
+
+        let acts = legal_actions(&s);
+        assert!(acts.contains(&A_DISCARD0), "surplus castle slot 0 discardable");
+        assert!(acts.contains(&(A_DISCARD0 + 1)), "surplus castle slot 1 discardable");
+        assert!(!acts.contains(&(A_DISCARD0 + 2)), "live mine tile stays pruned");
+        // Both castle spaces open -> nothing surplus -> no discards at all.
+        s.players[seat].filled &= !castle_mask;
+        let acts = legal_actions(&s);
+        assert!(
+            !acts.iter().any(|&a| (A_DISCARD0..A_DISCARD0 + 3).contains(&a)),
+            "no surplus -> discard head fully pruned (old behavior)"
+        );
+    }
+
+    fn s_apply_first_nonend(s: &mut State, acts: &[usize], rng: &mut Rng) {
+        let a = acts[rng.below(acts.len())];
+        apply(s, a);
+    }
 
     /// Random playout smoke: every game completes, all listed actions apply, the
     /// mode/score invariants hold. (True rule parity is the Python differential.)
