@@ -1,0 +1,152 @@
+"""PyTorch twin of coc-core's attention net (src/attn.rs). PARITY-LOCKED:
+attn_export_check.exe verifies torch and Rust agree <=1e-3 on stored check
+vectors before any trained json is trusted.
+
+Shape (the P4b throughput-gate winner): 32 tokens x 28 feats -> embed D=48 ->
+2 x [4-head MHA (key-masked) + FFN96] (residual + LayerNorm WITHOUT affine) ->
+masked mean-pool + state-embed(96) -> trunk 128 -> value(tanh) + policy:
+80 GLOBAL logits scattered to their action ids + token-TIED logits (tokens
+0..19: 12 depot->TAKE_HEX, 4 black->BUY_BLACK, 3 my-storage->DISCARD +
+PLACE_SLOT). Masked/tied-absent logits are -1e9. NO input normalization —
+tokfeats features are bounded by construction (no mu/sd anywhere).
+
+  python attn_net.py selfcheck out.json    # random net -> json + .check (parity fixture)
+"""
+from __future__ import annotations
+
+import json
+import sys
+
+import torch
+import torch.nn as nn
+
+TOK_N, TOK_F, TOK_STATE = 32, 28, 96
+D, HEADS, FF, LAYERS, TRUNK = 48, 4, 96, 2, 128
+N_ACT = 102
+NEG = -1e9
+
+# token-tied action map (mirror of attn.rs tied_actions / tokfeats layout)
+A_BUY_BLACK0, A_DISCARD0, A_TAKE_HEX0, A_PLACE_SLOT0 = 15, 19, 48, 62
+TIED = {}
+for t in range(12):
+    TIED[t] = (A_TAKE_HEX0 + t, None)
+for t in range(4):
+    TIED[12 + t] = (A_BUY_BLACK0 + t, None)
+for t in range(3):
+    TIED[16 + t] = (A_DISCARD0 + t, A_PLACE_SLOT0 + t)
+TIED_IDS = {a for pair in TIED.values() for a in pair if a is not None}
+GIDX = [a for a in range(N_ACT) if a not in TIED_IDS]
+assert len(GIDX) == 80
+
+
+class AttnNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = nn.Linear(TOK_F, D)
+        self.wq = nn.ModuleList(nn.Linear(D, D, bias=False) for _ in range(LAYERS))
+        self.wk = nn.ModuleList(nn.Linear(D, D, bias=False) for _ in range(LAYERS))
+        self.wv = nn.ModuleList(nn.Linear(D, D, bias=False) for _ in range(LAYERS))
+        self.wo = nn.ModuleList(nn.Linear(D, D, bias=False) for _ in range(LAYERS))
+        self.f1 = nn.ModuleList(nn.Linear(D, FF) for _ in range(LAYERS))
+        self.f2 = nn.ModuleList(nn.Linear(FF, D) for _ in range(LAYERS))
+        self.ln1 = nn.ModuleList(nn.LayerNorm(D, elementwise_affine=False) for _ in range(LAYERS))
+        self.ln2 = nn.ModuleList(nn.LayerNorm(D, elementwise_affine=False) for _ in range(LAYERS))
+        self.se = nn.Linear(TOK_STATE, D)
+        self.trunk = nn.Linear(2 * D, TRUNK)
+        self.vh = nn.Linear(TRUNK, 1)
+        self.pg = nn.Linear(TRUNK, len(GIDX))
+        self.ptok = nn.Linear(D, 2)
+
+    def forward(self, tokens, mask, state):
+        """tokens [B,TOK_N,TOK_F], mask [B,TOK_N] (0/1), state [B,TOK_STATE]
+        -> (value [B], policy [B,N_ACT] with -1e9 at masked/absent slots)."""
+        b = tokens.shape[0]
+        x = self.emb(tokens)                                  # [B,T,D]
+        keymask = mask < 0.5                                  # True = masked OUT
+        hd = D // HEADS
+        for l in range(LAYERS):
+            q = self.wq[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)   # [B,H,T,hd]
+            k = self.wk[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)
+            v = self.wv[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)
+            sc = q @ k.transpose(-2, -1) / (hd ** 0.5)                    # [B,H,T,T]
+            sc = sc.masked_fill(keymask[:, None, None, :], float("-inf"))
+            ctx = torch.softmax(sc, dim=-1) @ v                           # [B,H,T,hd]
+            ctx = ctx.transpose(1, 2).reshape(b, TOK_N, D)
+            x = self.ln1[l](x + self.wo[l](ctx))
+            x = self.ln2[l](x + self.f2[l](torch.relu(self.f1[l](x))))
+        pool = (x * mask[:, :, None]).sum(1) / mask.sum(1, keepdim=True).clamp(min=1.0)
+        cat = torch.cat([pool, self.se(state)], dim=1)
+        ht = torch.relu(self.trunk(cat))
+        val = torch.tanh(self.vh(ht)).squeeze(-1)
+        pol = torch.full((b, N_ACT), NEG, device=tokens.device, dtype=tokens.dtype)
+        pol[:, GIDX] = self.pg(ht)
+        tl = self.ptok(x)                                     # [B,T,2]
+        for t, (a0, a1) in TIED.items():
+            live = mask[:, t] >= 0.5
+            pol[live, a0] = tl[live, t, 0]
+            if a1 is not None:
+                pol[live, a1] = tl[live, t, 1]
+        return val, pol
+
+    def forward_flat(self, rows):
+        """rows [B, 1024] in the tokfeats layout -> (value, policy)."""
+        tokens = rows[:, : TOK_N * TOK_F].view(-1, TOK_N, TOK_F)
+        mask = rows[:, TOK_N * TOK_F : TOK_N * TOK_F + TOK_N]
+        state = rows[:, TOK_N * TOK_F + TOK_N :]
+        return self.forward(tokens, mask, state)
+
+
+def flat(t):
+    return [float(v) for v in t.detach().cpu().flatten().tolist()]
+
+
+def export_json(net: AttnNet, path: str) -> None:
+    out = {
+        "t": TOK_N, "f": TOK_F, "d": D, "heads": HEADS, "ff": FF,
+        "layers": LAYERS, "state": TOK_STATE, "trunk": TRUNK,
+        "emb_w": flat(net.emb.weight), "emb_b": flat(net.emb.bias),
+        "wq": [flat(m.weight) for m in net.wq], "wk": [flat(m.weight) for m in net.wk],
+        "wv": [flat(m.weight) for m in net.wv], "wo": [flat(m.weight) for m in net.wo],
+        "f1w": [flat(m.weight) for m in net.f1], "f1b": [flat(m.bias) for m in net.f1],
+        "f2w": [flat(m.weight) for m in net.f2], "f2b": [flat(m.bias) for m in net.f2],
+        "sw": flat(net.se.weight), "sb": flat(net.se.bias),
+        "tw": flat(net.trunk.weight), "tb": flat(net.trunk.bias),
+        "vw": flat(net.vh.weight), "vb": flat(net.vh.bias),
+        "pw": flat(net.pg.weight), "pb": flat(net.pg.bias),
+        "ptok_w": flat(net.ptok.weight), "ptok_b": flat(net.ptok.bias),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f)
+
+
+def write_check(net: AttnNet, path: str, n: int = 8) -> None:
+    """Parity fixture: n random rows (some tokens masked) + torch outputs."""
+    g = torch.Generator().manual_seed(7)
+    tokens = torch.rand((n, TOK_N, TOK_F), generator=g) * 1.4 - 0.2
+    mask = (torch.rand((n, TOK_N), generator=g) > 0.25).float()
+    mask[:, 0] = 1.0  # never fully masked
+    state = torch.rand((n, TOK_STATE), generator=g)
+    with torch.no_grad():
+        val, pol = net(tokens, mask, state)
+    rows = torch.cat([tokens.reshape(n, -1), mask, state], dim=1)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({
+            "rows": [[float(v) for v in r] for r in rows],
+            "values": [float(v) for v in val],
+            "logits": [[float(x) for x in row] for row in pol],
+        }, f)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "selfcheck":
+        torch.manual_seed(11)
+        net = AttnNet().eval()
+        # non-degenerate random weights
+        with torch.no_grad():
+            for p in net.parameters():
+                p.mul_(3.0)
+        export_json(net, sys.argv[2])
+        write_check(net, sys.argv[2] + ".check")
+        print(f"selfcheck net -> {sys.argv[2]} (+.check)")
+    else:
+        print(__doc__)

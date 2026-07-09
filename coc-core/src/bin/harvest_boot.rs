@@ -394,6 +394,7 @@ fn main() {
     let log_enc = match args.get(10).map(|s| s.as_str()) {
         Some("v1") => feats::Enc::V1,
         Some("v2") => feats::Enc::V2,
+        Some("tok") => feats::Enc::Tokens, // P4b attention rows (tokfeats layout)
         None => net.as_ref().map_or(feats::Enc::V1, |n| feats::Enc::from_in_dim(n.in_dim())),
         Some(m) => panic!("bad logenc {m}"),
     };

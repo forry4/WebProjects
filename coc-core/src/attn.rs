@@ -75,7 +75,7 @@ impl AttnNet {
             sw: w(d * cfg.state), sb: w(d),
             tw: w(cfg.trunk * 2 * d), tb: w(cfg.trunk),
             vw: w(cfg.trunk), vb: w(1),
-            pw: w(cfg.nact * cfg.trunk), pb: w(cfg.nact),
+            pw: w(N_GLOBAL * cfg.trunk), pb: w(N_GLOBAL),
             ptok_w: w(2 * d), ptok_b: w(2),
         }
     }
@@ -191,14 +191,132 @@ impl AttnNet {
         }
         let mut val = [0f32; 1];
         linear(&ht, &self.vw, &self.vb, c.trunk, 1, &mut val);
-        let mut pol = vec![0f32; c.nact];
-        linear(&ht, &self.pw, &self.pb, c.trunk, c.nact, &mut pol);
+        // Policy: 80 GLOBAL logits from the trunk scattered to their action ids,
+        // + token-TIED logits from each mappable token's own embedding (the
+        // Spender trick — a take/buy/discard/place is scored by the tile it
+        // touches). Masked-token tied actions stay at NEG (they are illegal
+        // whenever the token is empty, so the prior never reads them).
+        let mut gl = vec![0f32; N_GLOBAL];
+        linear(&ht, &self.pw, &self.pb, c.trunk, N_GLOBAL, &mut gl);
+        let mut pol = vec![NEG; c.nact];
+        for (gi, ai) in global_action_ids().enumerate() {
+            pol[ai] = gl[gi];
+        }
         let mut ptok = [0f32; 2];
-        for t in 0..t_n {
+        for t in 0..TIED_TOKENS.min(t_n) {
+            if mask[t] < 0.5 {
+                continue;
+            }
             linear(&x[t * d..(t + 1) * d], &self.ptok_w, &self.ptok_b, d, 2, &mut ptok);
-            // fold token logits into the tail so the probe pays the readout cost
-            pol[(t * 2) % c.nact] += ptok[0] * 1e-6;
+            let (a0, a1) = tied_actions(t);
+            pol[a0] = ptok[0];
+            if let Some(a1) = a1 {
+                pol[a1] = ptok[1];
+            }
         }
         (val[0].tanh(), pol)
+    }
+}
+
+pub const NEG: f32 = -1e9;
+/// Tokens 0..19 carry tied actions (12 depot + 4 black + 3 my-storage).
+pub const TIED_TOKENS: usize = 19;
+pub const N_TIED: usize = 22; // 12 take + 4 buy + 3 discard + 3 place
+pub const N_GLOBAL: usize = crate::engine::N_ACTIONS - N_TIED; // 80
+
+/// Token index -> (tied action, optional second tied action). Mirrors the
+/// tokfeats token layout; MUST match attn_net.py's scatter exactly.
+#[inline]
+pub fn tied_actions(t: usize) -> (usize, Option<usize>) {
+    use crate::engine::{A_BUY_BLACK0, A_DISCARD0, A_PLACE_SLOT0, A_TAKE_HEX0};
+    match t {
+        0..=11 => (A_TAKE_HEX0 + t, None),
+        12..=15 => (A_BUY_BLACK0 + (t - 12), None),
+        16..=18 => (A_DISCARD0 + (t - 16), Some(A_PLACE_SLOT0 + (t - 16))),
+        _ => unreachable!("token {t} has no tied action"),
+    }
+}
+
+/// The 80 action ids served by the global head, ascending (all ids minus the
+/// 22 token-tied ones).
+pub fn global_action_ids() -> impl Iterator<Item = usize> {
+    (0..crate::engine::N_ACTIONS).filter(|&a| {
+        use crate::engine::{A_BUY_BLACK0, A_DISCARD0, A_PLACE_SLOT0, A_TAKE_HEX0};
+        !(A_TAKE_HEX0..A_TAKE_HEX0 + 12).contains(&a)
+            && !(A_BUY_BLACK0..A_BUY_BLACK0 + 4).contains(&a)
+            && !(A_DISCARD0..A_DISCARD0 + 3).contains(&a)
+            && !(A_PLACE_SLOT0..A_PLACE_SLOT0 + 3).contains(&a)
+    })
+}
+
+/// The production CoC attention config (the P4b throughput-gate winner).
+pub fn coc_cfg() -> AttnCfg {
+    AttnCfg {
+        t: crate::tokfeats::TOK_N,
+        f: crate::tokfeats::TOK_F,
+        d: 48,
+        heads: 4,
+        ff: 96,
+        layers: 2,
+        state: crate::tokfeats::TOK_STATE,
+        trunk: 128,
+        nact: crate::engine::N_ACTIONS,
+    }
+}
+
+impl crate::valuenet::PvEval for AttnNet {
+    fn forward_raw(&self, raw: &[f32]) -> (f32, Vec<f32>) {
+        let c = self.cfg;
+        debug_assert_eq!(raw.len(), c.t * c.f + c.t + c.state);
+        let (tokens, rest) = raw.split_at(c.t * c.f);
+        let (mask, state) = rest.split_at(c.t);
+        self.forward(tokens, mask, state)
+    }
+    fn forward_value_raw(&self, raw: &[f32]) -> f32 {
+        self.forward_raw(raw).0
+    }
+    fn forward_batch(&self, raws: &[&[f32]], _need_policy: &[bool]) -> Vec<(f32, Vec<f32>)> {
+        // no batched kernel: the wasm A/B showed batching doesn't pay off-GPU,
+        // and attention training/self-play run on the torch sidecar anyway
+        raws.iter().map(|r| self.forward_raw(r)).collect()
+    }
+    fn encode_state(&self, s: &crate::engine::State, seat: usize) -> Vec<f32> {
+        crate::tokfeats::encode_row(s, seat)
+    }
+}
+
+#[cfg(feature = "bridge")]
+#[derive(serde::Deserialize)]
+struct AttnJson {
+    t: usize, f: usize, d: usize, heads: usize, ff: usize, layers: usize,
+    state: usize, trunk: usize,
+    emb_w: Vec<f32>, emb_b: Vec<f32>,
+    wq: Vec<Vec<f32>>, wk: Vec<Vec<f32>>, wv: Vec<Vec<f32>>, wo: Vec<Vec<f32>>,
+    f1w: Vec<Vec<f32>>, f1b: Vec<Vec<f32>>, f2w: Vec<Vec<f32>>, f2b: Vec<Vec<f32>>,
+    sw: Vec<f32>, sb: Vec<f32>, tw: Vec<f32>, tb: Vec<f32>,
+    vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>,
+    ptok_w: Vec<f32>, ptok_b: Vec<f32>,
+}
+
+#[cfg(feature = "bridge")]
+impl AttnNet {
+    pub fn from_json_str(js: &str) -> AttnNet {
+        let j: AttnJson = serde_json::from_str(js).expect("parse attn json");
+        let cfg = AttnCfg {
+            t: j.t, f: j.f, d: j.d, heads: j.heads, ff: j.ff, layers: j.layers,
+            state: j.state, trunk: j.trunk, nact: crate::engine::N_ACTIONS,
+        };
+        assert_eq!(j.pw.len(), N_GLOBAL * j.trunk, "global head shape");
+        assert_eq!(j.ptok_w.len(), 2 * j.d, "token head shape");
+        AttnNet {
+            cfg,
+            emb_w: j.emb_w, emb_b: j.emb_b, wq: j.wq, wk: j.wk, wv: j.wv, wo: j.wo,
+            f1w: j.f1w, f1b: j.f1b, f2w: j.f2w, f2b: j.f2b,
+            sw: j.sw, sb: j.sb, tw: j.tw, tb: j.tb, vw: j.vw, vb: j.vb,
+            pw: j.pw, pb: j.pb, ptok_w: j.ptok_w, ptok_b: j.ptok_b,
+        }
+    }
+    pub fn from_json(path: &str) -> AttnNet {
+        Self::from_json_str(&std::fs::read_to_string(path).expect("read attn json"))
     }
 }
