@@ -144,16 +144,43 @@ def test_ai_never_readjusts_within_a_planned_turn():
     assert all(n <= 1 for n in per_die.values()), per_die
 
 
-def test_ai_never_discards_a_stored_tile():
+def test_ai_discards_only_surplus_stored_tiles():
+    # Mirrors the Rust search prune (306517c): the bot may discard a SURPLUS
+    # (provably-dead) stored tile — its color's board capacity is exhausted — but
+    # never a LIVE tile, and nothing at all when there's no surplus.
     g = _playing_game(seed=9)
     pid = ai._actor(g)
     g["turn"] = pid
     p = g["players"][pid]
-    p["storage"] = [{"id": f"t{i}", "kind": "hex", "type": "mine", "color": "gray"} for i in range(3)]
-    raw = [m["type"] for m in engine.legal_moves(g, pid)]
-    assert "discard_storage" in raw            # the engine offers it (storage is full)
-    pruned = [m["type"] for m in ai._legal(g, pid)]
-    assert "discard_storage" not in pruned     # but the bot never considers discarding
+    b = board.get_board(p.get("board_id"))
+    cols = [c for c, sp in b.SPACES_BY_COLOR.items() if len(sp) >= 2]
+    assert len(cols) >= 2
+    surplus_color, live_color = cols[0], cols[1]
+    sc, lc = sorted(b.SPACES_BY_COLOR[surplus_color]), sorted(b.SPACES_BY_COLOR[live_color])
+    # storage full: two surplus-color tiles + one live-color tile
+    p["storage"] = [
+        {"id": "s0", "kind": "hex", "type": "mine", "color": surplus_color},
+        {"id": "s1", "kind": "hex", "type": "mine", "color": surplus_color},
+        {"id": "L", "kind": "hex", "type": "mine", "color": live_color},
+    ]
+    # surplus color: fill all but one space -> empties 1 < stored 2 => surplus
+    for sid in sc:
+        p["duchy"][sid] = {"id": f"f{sid}", "type": "castle", "color": surplus_color}
+    p["duchy"][sc[0]] = None
+    # live color: all empty -> empties (>=2) >= stored 1 => live
+    for sid in lc:
+        p["duchy"][sid] = None
+
+    raw = [m for m in engine.legal_moves(g, pid) if m["type"] == "discard_storage"]
+    assert raw, "engine offers discards when storage is full"
+    disc = {m["tile_id"] for m in ai._legal(g, pid) if m["type"] == "discard_storage"}
+    assert disc == {"s0", "s1"}, f"only surplus tiles discardable, got {disc}"
+
+    # empty every surplus-color space -> nothing surplus -> no discards at all
+    for sid in sc:
+        p["duchy"][sid] = None
+    disc2 = [m for m in ai._legal(g, pid) if m["type"] == "discard_storage"]
+    assert not disc2, "no surplus -> discard head fully pruned (old behavior)"
 
 
 def test_setup_move_picks_a_burgundy_space():

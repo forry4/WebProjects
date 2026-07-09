@@ -152,13 +152,36 @@ def _determinize(state, rng):
 
 
 # ── Legal-move helper: don't waste a die by ending early (matches the UI rule) ────
+def _storage_surplus(p, b, tile):
+    """A stored tile is SURPLUS (provably dead) when its color already has more
+    stored copies than the board has EMPTY spaces of that color left, so it can
+    never be placed. Counts fixed color capacity only (ignores number/adjacency/
+    town gates, which can open up later) — dead under every future. Mirrors the
+    Rust coc-core storage_surplus (306517c)."""
+    color = tile.get("color")
+    duchy = p["duchy"]
+    empties = sum(1 for s in b.SPACES_BY_COLOR.get(color, []) if duchy.get(s) is None)
+    stored = sum(1 for t in p["storage"] if t.get("color") == color)
+    return stored > empties
+
+
 def _legal(state, pid):
     moves = engine.legal_moves(state, pid)
-    # The bot NEVER discards a stored tile — discarding helps in only exceedingly rare
-    # cases, and otherwise the search wastes tiles it took. Safe: discard is always
-    # optional (never forced), and an unused die always still has take_workers, so
-    # pruning it can't deadlock.
-    moves = [m for m in moves if m.get("type") != "discard_storage"]
+    # Discarding a LIVE stored tile wastes a taken tile, so prune it — BUT a SURPLUS
+    # tile (its color's board capacity is provably exhausted, see _storage_surplus)
+    # can never be placed; freeing its dead slot weakly dominates holding it (discards
+    # are free + opponent-independent + the board never grows). Without this a storage
+    # full of dead tiles locks the bot out of taking/buying for the rest of the game.
+    # Mirrors the Rust coc-core search prune (306517c). NB legal_moves only OFFERS a
+    # discard when storage is full, so this only ever fires there. Discard stays
+    # optional (never forced) and an unused die always still has take_workers, so
+    # pruning live discards can't deadlock.
+    p = state["players"][pid]
+    b = board.get_board(p.get("board_id"))
+    _stored = {t["id"]: t for t in p["storage"]}
+    moves = [m for m in moves
+             if m.get("type") != "discard_storage"
+             or (m.get("tile_id") in _stored and _storage_surplus(p, b, _stored[m["tile_id"]]))]
     d = state["dice"].get(pid)
     if d is not None:
         adjusted = d.get("adjusted") or [False, False]
