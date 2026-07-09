@@ -28,7 +28,7 @@ fn relu_inplace(v: &mut [f32]) {
 /// bit-identical to sequential ones. Matvec speed is load/L3-bound, so a single
 /// 8-lane chain measures the same as wider multi-chain variants.
 #[inline]
-fn dot(a: &[f32], b: &[f32]) -> f32 {
+pub(crate) fn dot(a: &[f32], b: &[f32]) -> f32 {
     const L: usize = 8;
     let mut acc = [0.0f32; L];
     let mut ca = a.chunks_exact(L);

@@ -248,6 +248,50 @@ pub fn coc_search_timed_multi(
     visits
 }
 
+/// P4b throughput probe: attention forward evals/s at an arbitrary shape with
+/// random weights (cost depends only on shape). Bench tooling — never called by
+/// the serving path.
+#[wasm_bindgen]
+pub fn coc_attn_bench(t: u32, f: u32, d: u32, ff: u32, iters: u32) -> f64 {
+    let cfg = crate::attn::AttnCfg {
+        t: t as usize,
+        f: f as usize,
+        d: d as usize,
+        heads: 4,
+        ff: ff as usize,
+        layers: 2,
+        state: 80,
+        trunk: 128,
+        nact: engine::N_ACTIONS,
+    };
+    let net = crate::attn::AttnNet::random(cfg, 0xA77);
+    let mut rng = Rng::new(0xBEEF);
+    let mut r = |n: usize| -> Vec<f32> {
+        (0..n).map(|_| (rng.next_u64() % 2000) as f32 / 1000.0 - 1.0).collect()
+    };
+    let tokens = r(cfg.t * cfg.f);
+    let mut mask = vec![1.0f32; cfg.t];
+    for i in 0..cfg.t {
+        if i % 7 == 6 {
+            mask[i] = 0.0;
+        }
+    }
+    let state = r(cfg.state);
+    let mut acc = 0f32;
+    for _ in 0..30 {
+        acc += net.forward(&tokens, &mask, &state).0;
+    }
+    let t0 = js_sys::Date::now();
+    for _ in 0..iters {
+        acc += net.forward(&tokens, &mask, &state).0;
+    }
+    let dt = (js_sys::Date::now() - t0) / 1000.0;
+    if acc.is_nan() {
+        return -1.0;
+    }
+    iters as f64 / dt
+}
+
 /// Compose a boundary-complete prefix into the compact dict-move JSON
 /// (bridge.py::compact_to_move shape — the exact payload for the `ai_move` WS
 /// action). `{"error":...}` if the prefix doesn't parse / isn't a full move.

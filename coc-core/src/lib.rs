@@ -9,6 +9,7 @@ pub mod tiles;
 pub mod valuenet;
 
 pub mod actions;
+pub mod attn;
 pub mod batch;
 pub mod engine;
 pub mod feats;
