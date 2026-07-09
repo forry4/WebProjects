@@ -126,7 +126,7 @@ def batches(files, want_val, mu, sd, scale, batch, block=32768, shuffle=True, se
 
 def evaluate(net, dev, files, mu, sd, scale, batch):
     net.eval()
-    vs, labels, top1, n = [], [], 0, 0
+    vs, labels, top1, n, n_pol = [], [], 0, 0, 0
     with torch.no_grad():
         for gid, feats, label, margin, rootv, pol in stream_rows(files, True):
             vs.append((feats, label, policy_target(pol)))
@@ -135,10 +135,12 @@ def evaluate(net, dev, files, mu, sd, scale, batch):
                 x = torch.from_numpy((x - mu) / sd).to(dev)
                 val, logits = net(x)
                 pt = np.stack([v[2] for v in vs])
-                top1 += int((logits.argmax(1).cpu().numpy() == pt.argmax(1)).sum())
+                haspol = pt.sum(1) > 0  # PCR value-only rows carry no policy
+                top1 += int(((logits.argmax(1).cpu().numpy() == pt.argmax(1)) & haspol).sum())
                 labels.extend([(float(v_), l_) for v_, l_ in
                                zip(val.cpu().numpy(), [v[1] for v in vs])])
                 n += len(vs)
+                n_pol += int(haspol.sum())
                 vs = []
     if not labels:
         return 0.5, 0.0, 0
@@ -152,7 +154,7 @@ def evaluate(net, dev, files, mu, sd, scale, batch):
     npos, nneg = int(pos.sum()), int((~pos).sum())
     auc = 0.5 if not npos or not nneg else (
         (ranks[pos].sum() - npos * (npos + 1) / 2) / (npos * nneg))
-    return float(auc), top1 / max(n, 1), n
+    return float(auc), top1 / max(n_pol, 1), n
 
 
 def main():
@@ -198,7 +200,11 @@ def main():
             x, y, p = x.to(dev), y.to(dev), p.to(dev)
             val, logits = net(x)
             vloss = torch.mean((val - y) ** 2)
-            closs = -(p * torch.log_softmax(logits, 1)).sum(1).mean()
+            # normalize CE by rows that HAVE a policy target (PCR value-only
+            # rows are all-zero targets -> zero CE, and must not dilute scale)
+            ce_rows = -(p * torch.log_softmax(logits, 1)).sum(1)
+            n_pol = (p.sum(1) > 0).sum().clamp(min=1)
+            closs = ce_rows.sum() / n_pol
             loss = vloss + closs
             opt.zero_grad()
             loss.backward()

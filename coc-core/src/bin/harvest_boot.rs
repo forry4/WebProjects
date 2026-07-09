@@ -175,7 +175,12 @@ struct GSlot {
     rows: Vec<Row>,
     searched: usize,
     temp_rng: Rng,
+    // KataGo-style playout-cap randomization: a dedicated rng (so opening
+    // temp-sampling draws are untouched) decides per decision whether this
+    // search gets the FULL cap (policy row) or the CHEAP cap (value-only row).
+    pcr_rng: Rng,
     task: Option<coc_core::batch::SearchTask>,
+    task_full: bool,
 }
 
 /// Batched netval harvest thread: `batch` games in lockstep, one sim per game
@@ -192,6 +197,7 @@ fn run_thread_batched(
     net: &dyn PvEval,
     batch: usize,
     log_enc: feats::Enc,
+    pcr: Option<(u64, u32)>, // (full-cap permille, cheap sims)
 ) {
     use coc_core::batch::{step_netval, SearchTask};
     let path = format!("{out}.t{t}.csv");
@@ -211,7 +217,9 @@ fn run_thread_batched(
             rows: Vec::with_capacity(200),
             searched: 0,
             temp_rng: Rng::new(seed ^ 0x7E3A_1100),
+            pcr_rng: Rng::new(seed ^ 0x9C41_0C41),
             task: None,
+            task_full: true,
         })
     };
     let mut slots: Vec<Option<GSlot>> = (0..batch).map(|_| mk_slot(&mut next_g)).collect();
@@ -248,11 +256,17 @@ fn run_thread_batched(
                     continue 'adv;
                 }
                 let sseed = sl.seed.wrapping_mul(977) + sl.searched as u64;
+                // Playout-cap randomization: FULL cap -> policy+value row;
+                // CHEAP cap -> value-only row (empty policy field, which the
+                // trainer's CE treats as a zero target = no policy gradient).
+                let full = pcr.is_none_or(|(pm, _)| sl.pcr_rng.next_u64() % 1000 < pm);
+                sl.task_full = full;
+                let cap = if full { sims } else { pcr.unwrap().1 };
                 sl.task = Some(SearchTask::new(
                     sl.s.clone(),
                     vsearch::C_PUCT,
                     sseed,
-                    sims,
+                    cap,
                     vsearch::ROLLOUT_MICRO_STEPS,
                 ));
                 break 'adv;
@@ -279,12 +293,14 @@ fn run_thread_batched(
             let value = task.root_value();
             let actor = sl.s.actor() as usize;
             let mut policy = String::new();
-            for &a in &legal {
-                if visits[a] > 0 {
-                    if !policy.is_empty() {
-                        policy.push(' ');
+            if sl.task_full {
+                for &a in &legal {
+                    if visits[a] > 0 {
+                        if !policy.is_empty() {
+                            policy.push(' ');
+                        }
+                        policy.push_str(&format!("{}:{}", a, visits[a]));
                     }
-                    policy.push_str(&format!("{}:{}", a, visits[a]));
                 }
             }
             let a = if sl.searched < temp_micro {
@@ -359,6 +375,19 @@ fn main() {
         assert!(net.is_some(), "hybrid/pv modes need a model path");
     }
     let batch: usize = args.get(9).map(|s| s.parse().unwrap()).unwrap_or(8);
+    // arg 11: playout-cap randomization "PERMILLE@CHEAP_SIMS" (e.g. 250@200 =
+    // 25% of decisions get the FULL <sims> cap and a policy row; the rest get
+    // CHEAP_SIMS and a value-only row). Absent = off (every decision full).
+    // KataGo-style: value data is game-limited, policy data needs deep search —
+    // cheap moves buy ~2-3x more games/hour at the same compute. Batched
+    // netval path only. (@-delimited: MSYS mangles ':' args.)
+    let pcr: Option<(u64, u32)> = args.get(11).map(|s| {
+        let (pm, cheap) = s.split_once('@').expect("pcr spec is PERMILLE@CHEAP_SIMS");
+        (pm.parse().expect("pcr permille"), cheap.parse().expect("pcr cheap sims"))
+    });
+    if pcr.is_some() {
+        assert!(mode == Mode::Netval && batch > 1, "pcr needs the batched netval path");
+    }
     // arg 10: which encoder to LOG in the rows (v1|v2). Defaults to the playing
     // net's encoder (else v1) — override for a distill harvest where the v1
     // champion PLAYS but the rows must carry the NEW encoder's features.
@@ -413,6 +442,7 @@ fn main() {
                 if mode == Mode::Netval && batch > 1 {
                     run_thread_batched(
                         &out, t, per, sims, temp_micro, seed0, net_ref.unwrap(), batch, log_enc,
+                        pcr,
                     );
                 } else {
                     run_thread(&out, t, per, sims, temp_micro, seed0, mode, net_ref, log_enc);
