@@ -754,7 +754,103 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       resumable in `coc_run_v2` (progress_v2=9). **Next levers, in order: mine the user's
       coc_games for the concrete human edge (BEFORE more feature guesses); higher-sims teacher
       re-bootstrap; attention (P4b).**
-    - Still open: a human playtest of the shipped tuned-netval Expert (iter-5 net + 3x sims).
+    - **RUNG 1+2 (2026-07-08/09): high-sims teacher + PCR both PAID — new champion SHIPPED + the
+      lobby ladder RESHUFFLED (`1d93cdd` backend + `5ec78cf` frontend).**
+      - **Rung 1 — high-sims continuation (`loop_coc_hs.sh`, coc_run_hs):** netval self-play at
+        SIMS=1200 (4x the converged 300), warm-seeded FROM the champion (no distill compression —
+        the FR2 trap), NO boot anchor, GPU harvest. 4 iters, promotions at iter 0 (0.546) + iter 3
+        (0.521). Fresh-seed cross-gates: **iter-3 net = +0.04 real** (0.542 train / 0.548 serve /
+        0.521 @512); the iter-0 net's gain did NOT transfer to serving config (0.500) — always
+        cross-gate at the serving config before believing a training-config gain.
+      - **Rung 2 — PCR combined campaign (`loop_coc_r2.sh`, coc_run_r2):** PCR 250@200 (25% of
+        decisions at the FULL 2000-sim cap -> policy rows; 75% at 200 -> value-only rows) x 4000
+        games/iter x GPU, seeded from hs iter-3. Iter-1 promoted 0.550; iters 2-4 failed vs it
+        (0.413/0.488/0.408) -> converged; yardsticks hit RECORD levels (0.61-0.73 vs scaffold).
+        **SHIP GATES (fresh seeds): r2 net vs champion 0.6083 +-0.044 train / 0.5250 serve@200 /
+        0.5500 serve@512 (grows with depth); vs its hs seed 0.5604 serve.** Winner preserved as
+        `coc_run_r2/pv_ship_r2.json`. PER-ITER COST NOTE: r2 spent PCR's savings on 2x games +
+        deeper caps (~equal compute/iter, ~3.2-3.5h — and the end-of-harvest straggler tail is
+        LONGER under PCR: the last games crawl in tiny GPU batches; a shared work queue across
+        threads would fix it).
+      - **TIER RESHUFFLE (user-specified):** lobby = **Easy / Hard / Expert** — easy = the server
+        MCTS bot at its STRONG config (formerly sold as "hard"; ai.play_turn_plan "hard"), hard =
+        the first netval champion net (client WASM, **NEW `coc_pv_model_hard.bin`**), expert = the
+        r2 net (`coc_pv_model.bin`). "normal" is LEGACY-only (old saved rooms keep their weaker
+        bot; picker dropped). `CLIENT_AI_TIERS=("hard","expert")` both use the client path;
+        `ai_search` carries a `model` field; the worker picks its bin from `?model=` on its URL
+        (whitelisted). Watchdog fallback for both tiers = server hard bot, unchanged.
+      - **Ship hygiene:** bins bit-identical to their jsons (net_export_check json+bin); wasm
+        rebuilt (+simd128) carrying the surplus-discard fix — Node smoke on BOTH bins, 3.2-3.4k
+        sims/s single-thread (baseline 1,420 — no dot-chain regression); 307 CoC tests; npm smoke
+        CLS 0. Rollback = revert `1d93cdd`+`5ec78cf` (the old expert net lives on as the hard bin).
+    - **SURPLUS-DISCARD search fix (`306517c`) — from a USER OBSERVATION (do not regress).** The
+      search-legality prune dropped ALL discards ("never discard a stored tile"), so the bot could
+      never discard — with storage full of unplaceable tiles it was LOCKED OUT of hex takes/black
+      buys/m6 for the rest of the game. Now a SURPLUS tile (its color has more stored copies than
+      the board has empty spaces of that color left — fixed color capacity only, so provably dead
+      under every future) MAY be discarded; live-tile discards stay pruned; engine rules + parity
+      surface untouched. Weakly dominant (discards are free, opponent-independent, board never
+      grows). Mirror sanity exactly 0.5000. **Side effect: self-play now EXPERIENCES dead-tile
+      discards, creating the cost signal the over-TAKING problem needs.** The take-side prune
+      (don't take tiles you can't fit) is PARKED — denial takes can be correct (user call);
+      revisit with evidence.
+    - **Browser sims/s (`667b117`): worker pool now min(cores-2, 8) on >4-core machines (~2x
+      sims/decision on desktops; small devices keep min(cores,4)). MULTI-TREE BATCHED wasm search
+      = MEASURED NEGATIVE (do not relitigate): 874 vs 2,852 sims/s single-tree, flat across
+      K=8/16 — the batched forward is a memory-BANDWIDTH optimization (native is load-bound with
+      16 wide registers) but v128 is 4-lane FMA-less COMPUTE-bound and the 4-input block spills.**
+      `coc_search_timed_multi` stays in the wasm as tooling (feature-detected in the worker,
+      never routed); a relaxed-SIMD int8 build is the only thing that would change the economics.
+      Remaining browser levers: the 900ms budget (user UX call) and per-move tree reuse across
+      micro-decisions (~1.3x, unbuilt).
+    - **P4b ATTENTION campaign (STARTED 2026-07-09; commits `557ecc1`, `02b3bda`, `e51a6c4`,
+      `2933e6c`) — the architecture bet after the recipe axis was wrung out.** State + durable
+      facts:
+      - **Throughput gate PASSED — shape locked T=32 tokens x 28 feats, D=48, 4 heads, FF=96,
+        L=2, trunk 128.** Native 1,482 / wasm 917 evals/s single-thread → ~3.2k sims/decision on
+        8 workers (~1.6k on a 4-core visitor). T=44/D=64+ FAILS (467 native). The bench
+        calibration row reproduces Spender's documented 2,041 evals/s within 3% — after
+        replacing the naive serial dot with valuenet's chunked kernel (the round-1 lesson
+        re-bit: the first bench read 3-4x slow). **The explicit bet: per-sim quality must beat
+        a ~7x sims handicap vs the MLP's ~20k/decision — the final arbiter is an
+        equal-WALL-CLOCK gate, never equal-sims.**
+      - **`src/attn.rs`** = runtime-parameterized forward (adapted from spender-core's proven
+        attn.rs): embed → Lx[key-masked MHA + FFN, residual + no-affine LayerNorm] → masked
+        mean-pool + state-embed → trunk → value(tanh) + policy. **Policy = 80 GLOBAL logits
+        scattered to action ids + token-TIED logits** (depot tokens 1:1 with TAKE_HEX, black →
+        BUY_BLACK, my-storage → DISCARD + PLACE_SLOT — CoC's action space token-aligns BETTER
+        than Spender's); masked tokens stay -1e9 (their tied actions are illegal whenever the
+        token is empty, so priors never read them). `AttnNet: PvEval` (forward_raw splits the
+        flat row; encode_state = the token encoder) → gates/harvests/netval/self-play all work
+        UNCHANGED.
+      - **`src/tokfeats.rs` = the FROZEN input schema (code-as-spec): 32x28 tokens + 32 mask +
+        96 state = 1024 flat f32** (`Enc::Tokens`; in_dim 1024 discriminates in the seam).
+        Tokens: 12 depot-hex + 4 black + 3+3 storage (carries the SURPLUS/dead flag) + top-5
+        regions per player (**value-at-stake salience with deterministic tie-break lives in the
+        RUST encoder** so training rows and serving can never disagree). Tile tokens reuse the
+        FR2 `tile_time_value`/`endgame_mult` helpers — washed as flat-MLP inputs, but tokens
+        are where attention can cross-reference them. State: dice/track/resources/goods/phase/
+        round/bonus/monastery aggregates + pending/micro onehots (leaf evals happen mid-chain).
+      - **Torch twin `tools/attn_net.py` — PARITY PASS 5.4e-7 value / 2.6e-6 logits, masked
+        slots exact** (`attn_export_check` bin; non-negotiable before any trained json is
+        trusted). export_json/import_json/write_check; identity normalization everywhere
+        (tokfeats is bounded by construction — NO mu/sd in this stack).
+      - **Plumbing:** `PvEval` gained **`in_dim()`**; gate_coc + harvest_boot load MLP OR
+        attention jsons by CONTENT detection (`"emb_w"` = attention; netval8 stays MLP-only,
+        asserted); an attention model in harvest_boot auto-selects Enc::Tokens for logging via
+        in_dim (self-play logs token rows with zero extra flags); harvest `logenc` arg accepts
+        `tok`; gpu_server.py grew an attention branch (attn_net.import_json + forward_flat) so
+        attention SELF-PLAY runs the same sidecar protocol. `tools/train_attn.py` = streaming
+        token-row trainer (SHAPE_A=0.3 ⊕ BETA=0.3 blend — the proven fresh-retrain target;
+        PCR-safe CE normalization; game-split holdout; exports json + parity .check per best).
+      - **IN FLIGHT: the distill harvest** — the r2 champion plays 5000g @1200 sims (netvalgpu,
+        GPU sidecar ~165k evals/s) logging token rows → `coc_run_attn/attn_boot.t*.csv`. Next:
+        train_attn → attn_export_check → distill gate vs the r2 champion (expect a distill
+        deficit à la FR2's 0.425 — the loop's job is to climb past it) → attention netval
+        self-play loop (sidecar serves the torch twin) → equal-wall-clock ship gate. Serving,
+        if it wins: attn forward + tokfeats already compile to wasm; needs a wasm model loader
+        (bin format) + worker/JSX routing — not built yet.
+    - Still open: a human playtest of the NEW ladder (esp. Expert = the r2 net).
 
 ---
 
