@@ -919,15 +919,19 @@ def _h_adjust_die(game, pid, move):
 
 
 def _h_discard_storage(game, pid, move):
-    """Discard a tile from full storage (back to the box) to make room.
+    """Discard a stored tile (back to the box). A player may do this ANYTIME on
+    their turn — a house affordance to clear a tile you won't place, not just to
+    "make room" when full.
 
-    Per the rulebook, when you take a hex tile but have no empty key space, you
-    must first create room by discarding a stored tile. Only offered when
-    storage is full, so it is never a pointless move.
+    DELIBERATE ASYMMETRY WITH legal_moves (do not regress): `legal_moves` still
+    only ENUMERATES a discard when storage is FULL (its original "never a
+    pointless move" purpose), so the AI search AND the Rust coc-core parity trie
+    are unchanged — this handler just also ACCEPTS a discard when storage isn't
+    full, which only the human UI offers. Human moves are validated by this
+    handler (apply_move dispatches straight to it, no legal_moves gate), so the
+    looser rule reaches humans without touching the AI/parity surface.
     """
     p = game["players"][pid]
-    if _free_storage(p):
-        return False, "storage is not full"
     tile = _storage_tile(p, move.get("tile_id"))
     if tile is None:
         return False, "tile not in storage"

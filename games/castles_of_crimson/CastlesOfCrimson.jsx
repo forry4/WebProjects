@@ -2455,9 +2455,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{actionValue}</span>{me?.goods?.[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
                       : " goods"}
                   </button>
-                  {me?.storage?.length >= 3 && (
+                  {(me?.storage?.length || 0) > 0 && (
                     <button className="coc-btn ghost sm" disabled={!selStorage}
-                      title="Storage is full — discard a tile (back to the box) to make room"
+                      title="Discard the selected tile (back to the box) — free, anytime on your turn"
                       onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>
                       Discard
                     </button>
@@ -2466,8 +2466,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     title={bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
                     onClick={() => mv({ type: "end_turn" })}>End Turn</button>
                   <span className="coc-card-meta" style={{ alignSelf: "center" }}>
-                    {me?.storage?.length >= 3 && selStorage ? "Storage full — Discard frees this slot."
-                      : selStorage ? "Click a glowing hex to place."
+                    {selStorage ? "Click a glowing hex to place, or Discard to remove it."
                       : selDie != null ? "Click a depot tile to take, or a storage tile to place." : ""}
                   </span>
                 </div>

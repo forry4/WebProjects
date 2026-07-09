@@ -145,12 +145,17 @@ def test_discard_storage_then_take():
     assert any(t["id"] == "d3" for t in g["players"]["p1"]["storage"])
 
 
-def test_discard_storage_rejected_when_not_full():
+def test_discard_storage_allowed_anytime_but_not_ai_enumerated():
+    # Discarding a stored tile is a human affordance allowed ANYTIME (a house rule
+    # to clear a tile you won't place), so apply_move accepts it even when storage
+    # isn't full. But legal_moves (the AI / Rust-parity surface) still only
+    # ENUMERATES a discard when storage is FULL, so the bots + parity are unchanged.
     g = fresh()
-    g["players"]["p1"]["storage"] = [mine_tile("a")]
-    ok, err = engine.apply_move(g, "p1", {"type": "discard_storage", "tile_id": "a"})
-    assert not ok and "full" in err
+    g["players"]["p1"]["storage"] = [mine_tile("a"), mine_tile("b")]   # 2 of 3 -> not full
     assert {"type": "discard_storage", "tile_id": "a"} not in engine.legal_moves(g, "p1")
+    ok, err = engine.apply_move(g, "p1", {"type": "discard_storage", "tile_id": "a"})
+    assert ok, err
+    assert all(t["id"] != "a" for t in g["players"]["p1"]["storage"])
 
 
 # ── take_workers ──────────────────────────────────────────────────────────────
