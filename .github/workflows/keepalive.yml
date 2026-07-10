@@ -14,10 +14,21 @@ name: Keep backend warm
 #
 # Window is UTC (no DST): 14:00-05:59 covers 7am-10pm PST/PDT with <=1h overhang. Starts
 # at :23 (off-peak — GitHub delays :00 the most).
+#
+# EARLY WARM (13:xx UTC): the real 7-9am outages were the box waking COLD right as the
+# window opened, and a 30s managed pinger can't hold a connection through the ~50s spin-up
+# (it disconnects and ABORTS the wake — Render logged NOTHING for the 2h, the instance
+# never booted). So we (a) start BEFORE the window (13:15/13:45 UTC = 6:15/6:45 PDT) to
+# warm it ahead of players, and (b) each ping HOLDS the connection and RETRIES through the
+# 503s (curl --retry-all-errors + long --max-time), i.e. behaves like a browser, which
+# DOES wake it. The always-on box's 6:40 warm-up is the primary; this is the zero-box
+# backup. GitHub's scheduler is flaky, so we fire two early starts.
 
 on:
   schedule:
-    - cron: "23 14-23,0-5 * * *"
+    - cron: "15 13 * * *"          # early warm ~6:15 PDT / 5:15 PST, before the window
+    - cron: "45 13 * * *"          # second early try (GitHub often skips a given start)
+    - cron: "23 14-23,0-5 * * *"   # hourly through the play window
   workflow_dispatch: {}
 
 concurrency:
@@ -32,11 +43,16 @@ jobs:
       - name: Warm the backend for ~an hour
         run: |
           url="https://splendid-nelz.onrender.com/health"
-          # Ping every 4 min for ~56 min (well under the 15-min spin-down). The first
-          # ping may itself trigger a cold start, so allow a long per-try timeout.
           end=$(( $(date +%s) + 3360 ))
           while [ "$(date +%s)" -lt "$end" ]; do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 70 "$url" || echo 000)
+            # HOLD the connection open through a cold start (Render holds the request
+            # while spinning up, then serves 200) and RETRY through 503s — like a
+            # browser. A single held+retrying curl completes the wake that a 30s pinger
+            # aborts. --max-time bounds the whole retrying op; --retry-all-errors treats
+            # a 503 as retryable.
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              --max-time 160 --retry 10 --retry-delay 8 --retry-all-errors "$url" || echo 000)
             echo "$(date -u +%H:%M:%SZ) -> HTTP $code"
-            sleep 240
+            # Warm -> relax to a 4-min stay-warm cadence; still cold -> retry fast.
+            if [ "$code" = "200" ]; then sleep 240; else sleep 15; fi
           done
