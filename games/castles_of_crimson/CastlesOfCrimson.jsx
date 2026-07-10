@@ -2029,31 +2029,51 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <div className="coc-modal coc-rules" onClick={(e) => e.stopPropagation()}>
               <h3>📖 How to Play — Castles of Crimson</h3>
               <div className="coc-rules-body">
-                <p className="coc-rules-lead">Build up your duchy tile by tile across <b>5 phases of 5 rounds</b>. When the dust settles, the player with the most <b>victory points (VP)</b> wins.</p>
-                <h4>Your turn — roll two dice</h4>
-                <p>Each die lets you take <b>one</b> action (two actions per turn):</p>
+                <p className="coc-rules-lead">Fill your duchy — a board of colored hex regions — with tiles that score points and power your economy. The game runs <b>5 phases of 5 rounds</b>; the player with the most <b>victory points (VP)</b> at the end wins.</p>
+
+                <h4>Your duchy</h4>
                 <ul>
-                  <li><b>Take a hex tile</b> from the numbered depot matching the die, into your storage (holds 3).</li>
-                  <li><b>Place a tile</b> from storage onto an empty space showing that die's number, next to tiles you already own.</li>
-                  <li><b>Sell goods</b> whose number matches the die, for silver and VP.</li>
+                  <li>Every empty space shows a <b>number (1–6)</b> and belongs to a <b>colored region</b>. To fill a space you need a die matching its number.</li>
+                  <li>Tiles must be placed <b>next to tiles you already own</b> — your duchy grows outward from your two starting castles (which don't score).</li>
+                </ul>
+
+                <h4>Your turn — roll two dice</h4>
+                <p>Each die lets you take <b>one</b> action, so you act twice per turn. Before acting you may <b>spend a worker to change a die by 1</b> (nudging it back toward its roll refunds the worker).</p>
+                <ul>
+                  <li><b>Take a hex tile</b> from the depot whose number matches the die, into your <b>storage</b> — it holds 3, so discard to make room when it's full.</li>
+                  <li><b>Place a tile</b> from storage onto an empty space showing that die's number, adjacent to your duchy.</li>
+                  <li><b>Sell goods</b> whose number matches the die.</li>
                   <li><b>Buy a black tile</b> from the central depot — pay 2 silver, any die.</li>
                   <li><b>Take 2 workers</b> — any die.</li>
-                  <li><b>Adjust a die</b> up or down by 1, spending one worker per step.</li>
                 </ul>
-                <h4>Tile types</h4>
+
+                <h4>What each tile does when placed</h4>
                 <ul>
-                  <li><b>Castle</b> — take an extra action.</li>
-                  <li><b>Mine</b> — earns silver every phase.</li>
-                  <li><b>Ship</b> — brings goods and moves you up the turn order.</li>
-                  <li><b>Pasture</b> — collects animals for scoring.</li>
-                  <li><b>Building</b> — an instant effect (market, warehouse, and more).</li>
-                  <li><b>Monastery</b> — a unique power, shown by its number, plus an end-game bonus.</li>
+                  <li><b>Castle</b> — immediately take one <b>extra action</b>.</li>
+                  <li><b>Mine</b> — pays you <b>silver</b> every phase for the rest of the game.</li>
+                  <li><b>Ship</b> — brings <b>goods</b> and improves your <b>turn order</b>.</li>
+                  <li><b>Pasture</b> — <b>livestock</b> that score VP as you place them, worth more for grouping the same animal together.</li>
+                  <li><b>Building</b> — an instant effect. The eight are market, carpenter &amp; church (take a tile into storage), warehouse (sell goods), boarding house (+4 workers), bank (+2 silver), town hall (place another tile), and watchtower (+4 VP). Only one building of each type per region.</li>
+                  <li><b>Monastery</b> — one of 26 unique tiles (shown by its number) granting a special ongoing power and/or an end-game bonus.</li>
                 </ul>
-                <h4>Scoring</h4>
+
+                <h4>Selling goods</h4>
                 <ul>
-                  <li>Filling a connected <b>same-color region</b> scores for its size <b>plus</b> a time bonus — the earlier the phase, the bigger the bonus.</li>
-                  <li>Depots refill with the same tile <b>types</b> each phase; the faint ghost outlines remind you what returns.</li>
+                  <li>Match a die to a goods number to sell that batch for <b>silver plus VP</b> (the bigger the batch, the more VP). Ships are how you gather goods to sell.</li>
                 </ul>
+
+                <h4>Scoring regions &amp; colors</h4>
+                <ul>
+                  <li><b>Completely filling a same-color region</b> scores by its size — <b>1 / 3 / 6 / 10 / 15 / 21 / 28 / 36</b> VP for 1–8 tiles — <b>plus a time bonus</b> that shrinks every phase (10 → 8 → 6 → 4 → 2), so finishing regions early is worth far more.</li>
+                  <li>The first player to cover an <b>entire color</b> earns a large bonus; the second earns a smaller one.</li>
+                </ul>
+
+                <h4>Between phases &amp; end of game</h4>
+                <ul>
+                  <li>Each new phase, the numbered depots refill with the same tile <b>types</b> (the faint ghost outlines show what returns) and your mines pay out silver.</li>
+                  <li>At game end, leftover <b>goods, silver, and workers</b> are worth a little VP, and any <b>monastery end-game bonuses</b> are tallied.</li>
+                </ul>
+
                 <p className="coc-rules-note">2 players — challenge a friend or the bot (Easy / Hard / Expert).</p>
               </div>
               <div className="coc-modal-row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
