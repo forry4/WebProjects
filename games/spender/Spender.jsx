@@ -146,7 +146,7 @@ const css = baseCss + `
    back button far left, game name centered, user far right (left/right flex:1 so the
    title is truly centered). */
 .browser-header{display:flex;align-items:center;gap:12px;padding:12px 24px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);border-bottom:1px solid var(--border);background:var(--surface)}
-.browser-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;min-width:0}
+.browser-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0}
 .browser-title{flex:0 0 auto;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
