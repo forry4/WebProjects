@@ -25,7 +25,7 @@ enum Player {
     Scaffold,
     Net(PolicyValueNet),
     NetArgmax(PolicyValueNet),
-    Hybrid(PolicyValueNet),          // net prior + rollout-heuristic value
+    Hybrid(Box<dyn PvEval>),         // net prior + rollout-heuristic value (MLP or attention)
     NetVal(Box<dyn PvEval>, usize, f64), // net prior + rollout(steps) + net-value; c_puct
                                          // (MLP or ATTENTION json - detected by content)
     NetVal8(QuantPolicyValueNet, usize, f64), // netval on the int8+VNNI quantized net
@@ -52,9 +52,7 @@ impl Player {
             ));
         }
         if let Some(path) = spec.strip_suffix(":hybrid") {
-            return Player::Hybrid(pv_from_json(
-                &std::fs::read_to_string(path).expect("model"),
-            ));
+            return Player::Hybrid(load_any(path));
         }
         // netval8: int8-quantized netval (same @STEPS@CPUCT params). Checked
         // BEFORE :netval — find(":netval") would also match ":netval8".
@@ -106,7 +104,7 @@ impl Player {
                 let mut search = coc_core::mcts::Search::new(s.clone(), vsearch::C_PUCT);
                 let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
                 let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
-                    vsearch::hybrid_eval(net, st, actor, lg, r)
+                    vsearch::hybrid_eval(net.as_ref(), st, actor, lg, r)
                 };
                 for _ in 0..sims {
                     search.sim(&mut rng, &eval);

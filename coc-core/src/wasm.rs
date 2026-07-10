@@ -25,6 +25,30 @@ use crate::vsearch;
 
 thread_local! {
     static MODEL: RefCell<Option<PolicyValueNet>> = const { RefCell::new(None) };
+    // Per-decision TREE REUSE + chunked continuation: the last search survives the
+    // call, keyed by (state hash, mode, prefix). Same state + LONGER prefix →
+    // re-root through the applied actions (~1.3x: micro-decision N inherits the
+    // subtree micro-decision N-1 already built under the chosen action). Same
+    // state + SAME prefix → CONTINUE the same tree (the JSX searches in time
+    // slices and stops early once the summed visit lead is uncatchable — the
+    // adaptive budget). One tree per worker, replaced per call — memory bounded.
+    static TREE: RefCell<Option<TreeCache>> = const { RefCell::new(None) };
+}
+
+struct TreeCache {
+    key: u64,
+    mode: String,
+    prefix: Vec<usize>,
+    search: Search,
+}
+
+fn fnv1a(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// Load the PV model from the compact binary blob. Call once per worker before any
@@ -99,7 +123,7 @@ pub fn coc_search_timed(
     max_sims: u32,
     seed: u64,
 ) -> Vec<i32> {
-    let Some((s, _)) = state_after(state_json, prefix_json) else {
+    let Some((s, prefix)) = state_after(state_json, prefix_json) else {
         return Vec::new();
     };
     let mut visits = vec![0i32; engine::N_ACTIONS];
@@ -113,7 +137,29 @@ pub fn coc_search_timed(
     }
     // netval serves with its tuned exploration constant; other modes use C_PUCT.
     let c_puct = if mode == "netval" { vsearch::NETVAL_C_PUCT } else { vsearch::C_PUCT };
-    let mut search = Search::new(s, c_puct);
+    // Tree reuse: adopt the cached search when it belongs to this decision chain
+    // (same shipped state + mode, cached prefix is a prefix of ours — equal =
+    // chunked continuation, shorter = re-root through the applied actions).
+    let key = fnv1a(state_json);
+    let cached: Option<Search> = TREE.with(|t| {
+        let c = t.borrow_mut().take()?;
+        if c.key != key
+            || c.mode != mode
+            || c.prefix.len() > prefix.len()
+            || prefix[..c.prefix.len()] != c.prefix[..]
+        {
+            return None;
+        }
+        let mut se = c.search;
+        for &a in &prefix[c.prefix.len()..] {
+            if !se.advance_root_child(a) {
+                return None;
+            }
+        }
+        se.set_root_state(s.clone());
+        Some(se)
+    });
+    let mut search = cached.unwrap_or_else(|| Search::new(s, c_puct));
     let mut rng = Rng::new(seed ^ 0x9E77);
     let start = js_sys::Date::now();
     let budget_left = |n: u32| {
@@ -169,6 +215,9 @@ pub fn coc_search_timed(
         }),
     }
     visits.copy_from_slice(search.root_visits());
+    TREE.with(|t| {
+        *t.borrow_mut() = Some(TreeCache { key, mode: mode.to_string(), prefix, search });
+    });
     visits
 }
 

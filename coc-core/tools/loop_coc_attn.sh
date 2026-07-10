@@ -73,10 +73,10 @@ for ((k = start; k < ITERS; k++)); do
         "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) "$THREADS" 2>/dev/null | tail -1)
     echo "iter $k gate(cand-vs-best netval): $g1" | tee -a "$LOG"
     g2=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) "$THREADS" 2>/dev/null | tail -1)
+        "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
     echo "iter $k probe(netval vs hybrid, same net): $g2" | tee -a "$LOG"
     g3=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$CHAMP_YARD:netval" "$YARD_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) "$THREADS" 2>/dev/null | tail -1)
+        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
     echo "iter $k yardstick(cand vs r2-champ @$GATE_SIMS, baseline 0.2917): $g3" | tee -a "$LOG"
 
     wr=$(echo "$g1" | sed -E 's/.*: ([0-9.]+) \+-.*/\1/')

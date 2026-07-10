@@ -1,4 +1,20 @@
 /**
+ * P4b throughput probe: attention forward evals/s at an arbitrary shape with
+ * random weights (cost depends only on shape). Bench tooling — never called by
+ * the serving path.
+ * @param {number} t
+ * @param {number} f
+ * @param {number} d
+ * @param {number} ff
+ * @param {number} iters
+ * @returns {number}
+ */
+export function coc_attn_bench(t, f, d, ff, iters) {
+    const ret = wasm.coc_attn_bench(t, f, d, ff, iters);
+    return ret;
+}
+
+/**
  * Compose a boundary-complete prefix into the compact dict-move JSON
  * (bridge.py::compact_to_move shape — the exact payload for the `ai_move` WS
  * action). `{"error":...}` if the prefix doesn't parse / isn't a full move.
@@ -66,15 +82,17 @@ export function coc_search_timed(state_json, prefix_json, mode, budget_ms, max_s
 }
 
 /**
- * Multi-tree variant of `coc_search_timed` for the NETVAL serving mode: runs
- * `ntrees` independent root-parallel searches in LOCKSTEP inside this worker,
- * pushing every tree's leaf net evals through ONE `forward_batch` pass per
- * round (the register-blocked kernel — the offline round-2 win; the forward is
- * ~80% of wasm per-sim cost, so this is the browser's biggest sims/s lever).
- * Returns the SUMMED root visit vector — the same contract as the main thread
- * summing across workers, just K trees deeper. `max_sims` remains the
- * PER-WORKER cap (split across trees). Non-netval modes and `ntrees<=1` fall
- * back to the single-tree path (also the safety net for old callers).
+ * Multi-tree variant of `coc_search_timed` (NETVAL): `ntrees` root-parallel
+ * searches in LOCKSTEP, leaf evals batched through one `forward_batch` pass.
+ * **MEASURED NEGATIVE IN WASM — do not route serving here (2026-07-09 Node
+ * A/B: 874 vs 2,852 sims/s single-tree, flat across K=8/16).** The batched
+ * kernel is a memory-BANDWIDTH optimization built on register blocking; the
+ * native forward is load-bound with 16 wide registers, but v128 is 4-lane,
+ * FMA-less and COMPUTE-bound, and the 4-input block spills — so batching
+ * only adds overhead. Kept as tooling for a future relaxed-SIMD attempt
+ * (i8 dot products would change the arithmetic economics). Correctness is
+ * fine (visits sum to the same argmax as single-tree). Non-netval modes and
+ * `ntrees<=1` fall back to the single-tree path.
  * @param {string} state_json
  * @param {string} prefix_json
  * @param {string} mode

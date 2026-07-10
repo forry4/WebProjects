@@ -77,7 +77,12 @@ _CLIENT_AI_MODEL = {"hard": "coc_pv_model_hard.bin", "expert": "coc_pv_model.bin
 # yardstick jump 0.36->0.52) — the campaign's one genuine gain over the bootstrap.
 # "pv" (pure static net leaf) and "hybrid" both LOSE to netval; kept as references.
 _EXPERT_MODE = "netval"
-_EXPERT_BUDGET_MS = 900          # per micro-decision, per worker
+_EXPERT_BUDGET_MS = 1500         # TOTAL per micro-decision; the client searches in
+                                 # ~500ms slices with tree continuation and stops
+                                 # early when the visit lead is uncatchable, so easy
+                                 # decisions still resolve in ~500ms (sims ladder
+                                 # 2026-07-10: strength climbs to a 4-8k sims knee,
+                                 # so contested decisions earn the longer think)
 _EXPERT_MAX_SIMS = 20000         # per worker (bounds browser-tab memory)
 # Per-decision watchdog: if the client hasn't answered in this window, the server
 # finishes the TURN with the hard bot (play_turn_plan) — same envelope as Spender.

@@ -1560,22 +1560,46 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             // measured 3.3x SLOWER in wasm (v128 is COMPUTE-bound; the batched kernel is a
             // memory-bandwidth optimization + register-blocks past what v128 codegen has).
             // Single-tree per worker is the wasm optimum; parallelism comes from the pool.
-            const results = await Promise.all(pool.map((wk, i) => wk.request({
-              kind: "searchCoC", state: stateStr, prefix: JSON.stringify(prefix),
-              mode: as.mode || "hybrid", budget: as.budget_ms || 900, maxSims: perWorkerSims,
-              seed: ((as.decision * 2654435761) ^ (step * 97 + i * 40503 + 1)) >>> 0,
-            }).catch(() => null)));
-            const total = new Int32Array(102);
-            let got = 0;
-            for (const r of results) {
-              const v = r && r.visits;
-              if (!v || v.length < 102) continue;
-              got++;
-              for (let a = 0; a < 102; a++) total[a] += v[a];
+            //
+            // ADAPTIVE BUDGET: search in time slices up to budget_ms total. The wasm
+            // keeps each worker's tree alive between calls (same state+prefix →
+            // CONTINUE; the returned visits are therefore CUMULATIVE per worker — use
+            // the latest response, never add across chunks). Stop early once the
+            // summed visit lead is mathematically uncatchable in the remaining time —
+            // easy decisions finish in one slice, contested ones use the full budget.
+            const budgetTotal = as.budget_ms || 1500;
+            const CHUNK_MS = 500;
+            let total = null;
+            let spent = 0;
+            for (let chunk = 0; spent < budgetTotal && !cancelled; chunk++) {
+              const budget = Math.min(CHUNK_MS, budgetTotal - spent);
+              const results = await Promise.all(pool.map((wk, i) => wk.request({
+                kind: "searchCoC", state: stateStr, prefix: JSON.stringify(prefix),
+                mode: as.mode || "hybrid", budget, maxSims: perWorkerSims,
+                seed: ((as.decision * 2654435761) ^ (step * 97 + i * 40503 + chunk * 715827883 + 1)) >>> 0,
+              }).catch(() => null)));
+              const sum = new Int32Array(102);
+              let got = 0;
+              for (const r of results) {
+                const v = r && r.visits;
+                if (!v || v.length < 102) continue;
+                got++;
+                for (let a = 0; a < 102; a++) sum[a] += v[a];
+              }
+              if (!got) { total = null; break; }
+              total = sum;
+              spent += budget;
+              let v1 = 0, v2 = 0, t = 0;
+              for (let a = 0; a < 102; a++) {
+                t += sum[a];
+                if (sum[a] > v1) { v2 = v1; v1 = sum[a]; } else if (sum[a] > v2) v2 = sum[a];
+              }
+              const remaining = budgetTotal - spent;
+              if (remaining <= 0 || v1 - v2 > (t / spent) * remaining) break; // lead uncatchable
             }
-            if (!got) return;
+            if (!total) return;
             action = 0;
-            let stepSims = 0;                                // sum of root visits = sims this search ran
+            let stepSims = 0;   // cumulative root visits (slightly overcounts under tree reuse)
             for (let a = 0; a < 102; a++) { stepSims += total[a]; if (total[a] > total[action]) action = a; }
             turnSimsRef.current += stepSims;                 // accumulate across the whole bot turn
           }

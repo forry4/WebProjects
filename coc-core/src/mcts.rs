@@ -183,4 +183,30 @@ impl Search {
     pub fn root_wins(&self) -> &[f64] {
         &self.nodes[0].w
     }
+
+    /// Per-decision TREE REUSE: adopt the expanded child under `action` as the
+    /// new root (within one engine move the shipped state is fixed and the
+    /// prefix grows by the chosen action, so that child IS the next
+    /// micro-decision's root — its stats are valid ISMCTS averages for it).
+    /// Returns false when the child was never expanded (build a fresh Search).
+    /// The old root + sibling subtrees stay orphaned in the arena (bounded: a
+    /// few reroots per engine move, then the whole tree is dropped).
+    /// Caller MUST follow with `set_root_state` before the next sim.
+    pub fn advance_root_child(&mut self, action: usize) -> bool {
+        let Some(&child) = self.nodes[0].children.get(&action) else {
+            return false;
+        };
+        if !self.nodes[child].expanded {
+            return false;
+        }
+        self.nodes.swap(0, child);
+        true
+    }
+
+    /// Replace the root state after `advance_root_child` steps (the caller
+    /// recomputes it from the shipped state + full prefix — within-move micro
+    /// actions are deterministic, so replay and stepping agree).
+    pub fn set_root_state(&mut self, s: State) {
+        self.root_state = s;
+    }
 }
