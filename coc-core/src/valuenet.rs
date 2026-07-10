@@ -451,7 +451,46 @@ fn qdot(w: &[i8], x: &[u8]) -> i32 {
     }
 }
 
-#[cfg(not(all(target_arch = "x86_64", target_feature = "avx512vnni")))]
+/// wasm-simd128 arm: widen u8/i8 to i16x8 halves and use i32x4.dot_i16x8_s
+/// (v128 DOES have integer dot even though it lacks f32 FMA — this is what
+/// makes int8 the one path that changes the wasm forward economics). Products
+/// are computed in i32 pairwise (255*127 per element, n~1k accumulation —
+/// no overflow), so the result is the EXACT same integer as the scalar loop.
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[inline]
+fn qdot(w: &[i8], x: &[u8]) -> i32 {
+    use core::arch::wasm32::*;
+    let n = w.len();
+    let chunks = n / 16;
+    let mut acc = i32x4_splat(0);
+    for c in 0..chunks {
+        let (xv, wv) = unsafe {
+            (
+                v128_load(x.as_ptr().add(c * 16) as *const v128),
+                v128_load(w.as_ptr().add(c * 16) as *const v128),
+            )
+        };
+        let xl = u16x8_extend_low_u8x16(xv); // u8 (<=255) fits positive i16
+        let xh = u16x8_extend_high_u8x16(xv);
+        let wl = i16x8_extend_low_i8x16(wv);
+        let wh = i16x8_extend_high_i8x16(wv);
+        acc = i32x4_add(acc, i32x4_dot_i16x8(xl, wl));
+        acc = i32x4_add(acc, i32x4_dot_i16x8(xh, wh));
+    }
+    let mut s = i32x4_extract_lane::<0>(acc)
+        + i32x4_extract_lane::<1>(acc)
+        + i32x4_extract_lane::<2>(acc)
+        + i32x4_extract_lane::<3>(acc);
+    for i in chunks * 16..n {
+        s += (x[i] as i32) * (w[i] as i32);
+    }
+    s
+}
+
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_feature = "avx512vnni"),
+    all(target_arch = "wasm32", target_feature = "simd128")
+)))]
 #[inline]
 fn qdot(w: &[i8], x: &[u8]) -> i32 {
     let mut s = 0i32;

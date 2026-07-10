@@ -20,11 +20,18 @@ use crate::mcts::Search;
 use crate::netio;
 use crate::pxio::from_proj;
 use crate::rng::Rng;
-use crate::valuenet::PolicyValueNet;
+use crate::valuenet::{PolicyValueNet, QuantPolicyValueNet};
 use crate::vsearch;
 
 thread_local! {
     static MODEL: RefCell<Option<PolicyValueNet>> = const { RefCell::new(None) };
+    // int8 twin, quantized from the f32 net at load. v128 has no f32 FMA (the
+    // f32 forward is compute-bound) but DOES have integer dot — int8 is the one
+    // kernel change that speeds the wasm forward. Same quantization that gated
+    // STRENGTH-NEUTRAL natively (fresh-seed 0.5000), and the integer math is
+    // exact/deterministic, so that result transfers. "netval" serves int8;
+    // "netvalf32" keeps the f32 path (A/B + rollback).
+    static QMODEL: RefCell<Option<QuantPolicyValueNet>> = const { RefCell::new(None) };
     // Per-decision TREE REUSE + chunked continuation: the last search survives the
     // call, keyed by (state hash, mode, prefix). Same state + LONGER prefix →
     // re-root through the applied actions (~1.3x: micro-decision N inherits the
@@ -57,6 +64,7 @@ fn fnv1a(s: &str) -> u64 {
 pub fn coc_init_model(bytes: &[u8]) -> bool {
     match netio::pv_from_bin(bytes) {
         Some(net) => {
+            QMODEL.with(|q| *q.borrow_mut() = Some(QuantPolicyValueNet::from_f32(&net)));
             MODEL.with(|m| *m.borrow_mut() = Some(net));
             true
         }
@@ -135,8 +143,8 @@ pub fn coc_search_timed(
         visits[legal[0]] = 1;
         return visits;
     }
-    // netval serves with its tuned exploration constant; other modes use C_PUCT.
-    let c_puct = if mode == "netval" { vsearch::NETVAL_C_PUCT } else { vsearch::C_PUCT };
+    // netval (int8 or f32) serves with its tuned exploration constant.
+    let c_puct = if mode.starts_with("netval") { vsearch::NETVAL_C_PUCT } else { vsearch::C_PUCT };
     // Tree reuse: adopt the cached search when it belongs to this decision chain
     // (same shipped state + mode, cached prefix is a prefix of ours — equal =
     // chunked continuation, shorter = re-root through the applied actions).
@@ -185,12 +193,25 @@ pub fn coc_search_timed(
                 n += 1;
             }
         }),
-        "netval" => MODEL.with(|m| {
+        "netval" => QMODEL.with(|m| {
             // net prior + NETVAL_ROLLOUT_STEPS rollout + net VALUE at the truncation
             // (with NETVAL_C_PUCT, set above). Beats the heuristic-truncation hybrid
             // ~0.58-0.61, and the tuned config (30 steps + c_puct 1.0) adds another
             // ~0.62-0.64 over netval@20@1.5 — both gains GROW with depth so they
             // transfer to serving's ~20k sims. The campaign's gain over the bootstrap.
+            // Serves the INT8 twin (simd128 integer dot — see QMODEL note);
+            // "netvalf32" below is the f32 escape hatch.
+            let mb = m.borrow();
+            let net = mb.as_ref().expect("coc_init_model not called");
+            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
+                vsearch::hybrid_netval_eval_steps(net, st, actor, lg, r, vsearch::NETVAL_ROLLOUT_STEPS)
+            };
+            while budget_left(n) {
+                search.sim(&mut rng, &eval);
+                n += 1;
+            }
+        }),
+        "netvalf32" => MODEL.with(|m| {
             let mb = m.borrow();
             let net = mb.as_ref().expect("coc_init_model not called");
             let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
