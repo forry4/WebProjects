@@ -174,6 +174,30 @@ fn bench_leaf_breakdown() {
     let dt = t0.elapsed().as_secs_f64();
     println!("features(): {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
 
+    // tokfeats (the ATTENTION loop encodes this at EVERY leaf eval — if it is
+    // several times v1's cost it is a first-order per-sim item there)
+    let t0 = Instant::now();
+    let mut acc = 0.0f32;
+    for i in 0..n {
+        let s = &states[i % states.len()];
+        let f = feats::encode(feats::Enc::Tokens, black_box(s), s.actor() as usize);
+        acc += f[i % f.len()];
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("tokfeats encode: {:.1} us/call ({:.0}/s/core)  [acc {:.3}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
+
+    // determinize (per SIM at the root: canonicalize-sort + shuffle 3 pools)
+    let t0 = Instant::now();
+    let mut acc = 0u64;
+    let mut rng = Rng::new(0xD37);
+    for i in 0..n {
+        let s = &states[i % states.len()];
+        let d = coc_core::mcts::determinize(black_box(s), &mut rng);
+        acc = acc.wrapping_add(d.rng);
+    }
+    let dt = t0.elapsed().as_secs_f64();
+    println!("determinize: {:.1} us/call ({:.0}/s/core)  [acc {}]", dt / n as f64 * 1e6, n as f64 / dt, acc);
+
     let t0 = Instant::now();
     let mut acc = 0.0f64;
     for i in 0..n {

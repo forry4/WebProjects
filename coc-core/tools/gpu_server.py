@@ -73,7 +73,11 @@ class GraphRunner:
     outputs match eager bit-for-bit. Thread-safe via a lock (the static buffers
     are shared across client threads)."""
 
-    PAD = 256
+    # MUST match the harvest's request size (2 x GPU_BATCH rows): a replay costs
+    # the full padded batch regardless of useful rows, so a 256-pad graph serving
+    # 128-row requests caps at HALF its throughput (measured: 65k evals/s with
+    # clients at 27% CPU — starved). The loop exports COC_GPU_PAD=2*GPU_BATCH.
+    PAD = int(os.environ.get("COC_GPU_PAD", "256"))
 
     def __init__(self, net, in_dim, mask0, dev):
         for p in net.parameters():

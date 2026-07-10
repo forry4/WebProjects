@@ -24,7 +24,9 @@ ITERS=${ITERS:-8}
 GAMES=${GAMES:-2500}
 SIMS=${SIMS:-300}
 ANCHOR_ITERS=${ANCHOR_ITERS:-3}
-GPU_BATCH=${GPU_BATCH:-128}  # K=128 is RAM-safe at SIMS=300 (trees 4x smaller than the 1200-sim distill harvest where it thrashed)
+GPU_BATCH=${GPU_BATCH:-64}   # K=128 MEASURED SLOWER even at SIMS=300 (40-48k vs 70k+ evals/s,
+                             # CPU 91%/GPU 41%): 1280 in-flight trees thrash the CPU CACHE —
+                             # the K warning isn't just RAM. 64 is the sweet spot.
 GPU_PORT=${GPU_PORT:-9911}
 GATE_PAIRS=${GATE_PAIRS:-120}
 GATE_SIMS=${GATE_SIMS:-200}
@@ -46,7 +48,7 @@ for ((k = start; k < ITERS; k++)); do
         echo "--- iter $k: attention self-play already complete, skipping ---" | tee -a "$LOG"
     else
         echo "--- iter $k: attention netval self-play (gpu sidecar) ---" | tee -a "$LOG"
-        python "$TOOLS/gpu_server.py" "$BESTW" --port "$GPU_PORT" >"$RUN/gpu_server_a$k.log" 2>&1 &
+        COC_GPU_PAD=$((GPU_BATCH * 2)) python "$TOOLS/gpu_server.py" "$BESTW" --port "$GPU_PORT" >"$RUN/gpu_server_a$k.log" 2>&1 &
         gpu_pid=$!
         for _ in $(seq 1 30); do
             grep -q "ready" "$RUN/gpu_server_a$k.log" 2>/dev/null && break
