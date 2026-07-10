@@ -249,8 +249,12 @@ def main():
         if score > best:
             best = score
             net_cpu = net.cpu().eval()
-            export_json(net_cpu, args.out)
-            write_check(net_cpu, args.out + ".check")
+            # atomic export: write tmp then rename, so a reader (or a second
+            # writer — the 2026-07-10 triple-loop race) never sees a torn file
+            export_json(net_cpu, args.out + ".tmp")
+            os.replace(args.out + ".tmp", args.out)
+            write_check(net_cpu, args.out + ".check.tmp")
+            os.replace(args.out + ".check.tmp", args.out + ".check")
             net.to(dev)
     print(f"done; best val score {best:.4f} -> {args.out}")
 

@@ -39,6 +39,42 @@ BESTW=$RUNW/attn_best.json
 PROG=$RUN/progress_attn
 
 mkdir -p "$RUN"
+
+# ── SINGLETON + PRE-FLIGHT (2026-07-10 incident: three racing loop instances —
+# doubled gates, port fights, and two trainers sharing 6GB VRAM = the likely
+# cublas crashes). The lock refuses a second launch; the trap kills children on
+# any NORMAL/crash exit; the pre-flight catches stragglers a HARD kill (TaskStop
+# doesn't cascade on Windows) left behind, so the NEXT launch fails loudly
+# instead of racing them. ──
+LOCKDIR=$RUN/loop.lock
+if mkdir "$LOCKDIR" 2>/dev/null; then
+    echo $$ >"$LOCKDIR/pid"
+else
+    oldpid=$(cat "$LOCKDIR/pid" 2>/dev/null || true)
+    if [ -n "$oldpid" ] && kill -0 "$oldpid" 2>/dev/null; then
+        echo "FATAL: loop instance pid $oldpid is ALIVE — refusing to double-launch" | tee -a "$LOG"
+        exit 1
+    fi
+    echo "stale lock (pid ${oldpid:-?} dead) — taking over" | tee -a "$LOG"
+    echo $$ >"$LOCKDIR/pid"
+fi
+CHILDREN=""
+cleanup() {
+    for p in $CHILDREN; do kill "$p" 2>/dev/null || true; done
+    rm -rf "$LOCKDIR" 2>/dev/null || true
+}
+trap cleanup EXIT
+if tasklist //FI "IMAGENAME eq harvest_boot.exe" 2>/dev/null | grep -q harvest_boot; then
+    echo "FATAL: a harvest_boot.exe is already running — a prior run's straggler; clean up first" | tee -a "$LOG"
+    exit 1
+fi
+for port in "$GPU_PORT" 9913 9914; do
+    if netstat -ano 2>/dev/null | grep -q ":$port .*LISTENING"; then
+        echo "FATAL: port $port already bound — a gpu_server is lingering; clean up first" | tee -a "$LOG"
+        exit 1
+    fi
+done
+
 [ -f "$BEST" ] || { cp "$SEED_NET" "$BEST" && cp "$SEED_NET.check" "$BEST.check"; }
 start=$(cat "$PROG" 2>/dev/null || echo 0)
 echo "=== loop_coc_attn from iter $start / $ITERS (games=$GAMES sims=$SIMS seed=$SEED_NET) ===" | tee -a "$LOG"
@@ -50,6 +86,7 @@ for ((k = start; k < ITERS; k++)); do
         echo "--- iter $k: attention netval self-play (gpu sidecar) ---" | tee -a "$LOG"
         COC_GPU_PAD=$((GPU_BATCH * 2)) python "$TOOLS/gpu_server.py" "$BESTW" --port "$GPU_PORT" >"$RUN/gpu_server_a$k.log" 2>&1 &
         gpu_pid=$!
+        CHILDREN="$CHILDREN $gpu_pid"
         for _ in $(seq 1 30); do
             grep -q "ready" "$RUN/gpu_server_a$k.log" 2>/dev/null && break
             sleep 2
@@ -86,29 +123,33 @@ for ((k = start; k < ITERS; k++)); do
     # enough to feed useful GPU batches.
     COC_GPU_PAD=48 python "$TOOLS/gpu_server.py" "$RUNW/attn_cand_$k.json" --port 9913 >"$RUN/gpu_gate_c$k.log" 2>&1 &
     gpu_c=$!
+    CHILDREN="$CHILDREN $gpu_c"
     COC_GPU_PAD=48 python "$TOOLS/gpu_server.py" "$BESTW" --port 9914 >"$RUN/gpu_gate_b$k.log" 2>&1 &
     gpu_b=$!
+    CHILDREN="$CHILDREN $gpu_b"
     for _ in $(seq 1 30); do
         grep -q "ready" "$RUN/gpu_gate_c$k.log" 2>/dev/null && grep -q "ready" "$RUN/gpu_gate_b$k.log" 2>/dev/null && break
         sleep 2
     done
     g1=$(COC_GPU_ADDR_A=127.0.0.1:9913 COC_GPU_ADDR_B=127.0.0.1:9914 \
         "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$BESTW:netvalgpu" "$GATE_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) 4 24 2>/dev/null | tail -1)
+        "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) 4 24 2>>"$RUN/gates_err_$k.log" | tail -1)
+    [ -n "$g1" ] || { echo "iter $k FATAL: g1 produced NO output (see gates_err_$k.log)" | tee -a "$LOG"; exit 1; }
     echo "iter $k gate(cand-vs-best netval,gpu): $g1" | tee -a "$LOG"
     if [ $((k % 3)) -eq 0 ]; then
         # the value-head-vs-heuristic probe answered its question at iter 0
         # (0.55, value head ahead) — every 3rd iter is enough to watch it
         g2=$(COC_GPU_ADDR_A=127.0.0.1:9913 \
             "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
-            "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) 4 24 2>/dev/null | tail -1 || true)
+            "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) 4 24 2>>"$RUN/gates_err_$k.log" | tail -1 || true)
         echo "iter $k probe(netval vs hybrid, same net): $g2" | tee -a "$LOG"
     else
         echo "iter $k probe: skipped (runs every 3rd iter)" | tee -a "$LOG"
     fi
     g3=$(COC_GPU_ADDR_A=127.0.0.1:9913 \
         "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$CHAMP_YARD:netval" "$YARD_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) 4 24 2>/dev/null | tail -1 || true)
+        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) 4 24 2>>"$RUN/gates_err_$k.log" | tail -1 || true)
+    [ -n "$g3" ] || echo "iter $k WARNING: yardstick produced NO output (see gates_err_$k.log)" | tee -a "$LOG"
     echo "iter $k yardstick(cand vs r2-champ @$GATE_SIMS, baseline 0.2917): $g3" | tee -a "$LOG"
     kill "$gpu_c" "$gpu_b" 2>/dev/null || true
 
