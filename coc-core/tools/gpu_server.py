@@ -65,6 +65,57 @@ def bump_stats(n):
             STATS["t0"] = time.time()
 
 
+class GraphRunner:
+    """Serve a small forward through one captured CUDA graph: kernel-launch
+    overhead (the whole cost at these tensor sizes) collapses to a single graph
+    replay. Fixed padded batch; rows are copied into a static input buffer and
+    sliced out of static outputs. Replays run the exact captured kernels, so
+    outputs match eager bit-for-bit. Thread-safe via a lock (the static buffers
+    are shared across client threads)."""
+
+    PAD = 256
+
+    def __init__(self, net, in_dim, mask0, dev):
+        for p in net.parameters():
+            p.requires_grad_(False)
+        self.lock = threading.Lock()
+        self.mask0 = mask0
+        with torch.inference_mode():
+            self.inp = torch.zeros(self.PAD, in_dim, device=dev)
+            # keep every (pad) row's token 0 live — an all-masked row would hit
+            # SDPA's all-(-inf) softmax (NaN); sliced away anyway, but keep the
+            # graph NaN-free on principle
+            self.inp[:, mask0] = 1.0
+            s = torch.cuda.Stream()
+            s.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(s):
+                for _ in range(3):
+                    net.forward_flat(self.inp)
+            torch.cuda.current_stream().wait_stream(s)
+            self.graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self.graph):
+                v, p = net.forward_flat(self.inp)
+                self.val, self.pol = v, p
+
+    def run(self, x):
+        n = x.shape[0]
+        vs, ps = [], []
+        with self.lock:
+            for i in range(0, n, self.PAD):
+                chunk = x[i:i + self.PAD]
+                m = chunk.shape[0]
+                self.inp[:m].copy_(chunk)
+                if m < self.PAD:
+                    self.inp[m:].zero_()
+                    self.inp[m:, self.mask0] = 1.0
+                self.graph.replay()
+                vs.append(self.val[:m].clone())
+                ps.append(self.pol[:m].clone())
+        if len(vs) == 1:
+            return vs[0], ps[0]
+        return torch.cat(vs), torch.cat(ps)
+
+
 def handle(conn, forward, in_dim, dev):
     try:
         handle_inner(conn, forward, in_dim, dev)
@@ -109,11 +160,26 @@ def main():
         head = f.read(4096)
     if '"emb_w"' in head:
         # ATTENTION net (attn_net twin): forward_flat takes the tokfeats flat
-        # row directly — no normalization anywhere by design.
+        # row directly — no normalization anywhere by design. The forward is
+        # LAUNCH-BOUND at these tensor sizes (~40 kernels per call), so serve it
+        # through a captured CUDA GRAPH at a fixed padded batch: copy rows into a
+        # static buffer, one replay, slice the static output. Same kernels as
+        # eager (bit-identical outputs); the harvest's startup parity guard
+        # re-verifies vs the Rust forward on every launch regardless.
         import attn_net
         net = attn_net.import_json(args.model).to(dev).eval()
         in_dim = attn_net.TOK_N * attn_net.TOK_F + attn_net.TOK_N + attn_net.TOK_STATE
-        forward = net.forward_flat
+        mask0 = attn_net.TOK_N * attn_net.TOK_F  # tokfeats mask-block offset
+        use_graph = dev.startswith("cuda") and os.environ.get("COC_GPU_GRAPH", "1") != "0"
+        if use_graph:
+            try:
+                forward = GraphRunner(net, in_dim, mask0, dev).run
+                print("[graph] CUDA-graph forward armed (pad %d)" % GraphRunner.PAD, flush=True)
+            except Exception as e:  # capture unsupported -> eager fallback
+                print(f"[graph] capture failed ({e}); eager fallback", flush=True)
+                forward = net.forward_flat
+        else:
+            forward = net.forward_flat
     else:
         net, mu, sd = load_json(args.model)
         in_dim = len(mu)

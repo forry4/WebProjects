@@ -62,6 +62,14 @@ class AttnNet(nn.Module):
         self.vh = nn.Linear(TRUNK, 1)
         self.pg = nn.Linear(TRUNK, len(GIDX))
         self.ptok = nn.Linear(D, 2)
+        # index tensors as (non-persistent) buffers so they live on the net's
+        # device — indexing CUDA tensors with CPU indices does a host->device
+        # copy per call, which is both slow and ILLEGAL inside CUDA-graph capture
+        self.register_buffer("b_gidx", torch.tensor(GIDX), persistent=False)
+        self.register_buffer("b_tied_tok", TIED_TOK.clone(), persistent=False)
+        self.register_buffer("b_tied_a0", TIED_A0.clone(), persistent=False)
+        self.register_buffer("b_place_tok", PLACE_TOK.clone(), persistent=False)
+        self.register_buffer("b_place_a1", PLACE_A1.clone(), persistent=False)
 
     def forward(self, tokens, mask, state):
         """tokens [B,TOK_N,TOK_F], mask [B,TOK_N] (0/1), state [B,TOK_STATE]
@@ -83,11 +91,13 @@ class AttnNet(nn.Module):
         ht = torch.relu(self.trunk(cat))
         val = torch.tanh(self.vh(ht)).squeeze(-1)
         pol = torch.full((b, N_ACT), NEG, device=tokens.device, dtype=tokens.dtype)
-        pol[:, GIDX] = self.pg(ht)
+        pol[:, self.b_gidx] = self.pg(ht)
         tl = self.ptok(x)                                     # [B,T,2]
         neg = pol.new_full((), NEG)
-        pol[:, TIED_A0] = torch.where(mask[:, TIED_TOK] >= 0.5, tl[:, TIED_TOK, 0], neg)
-        pol[:, PLACE_A1] = torch.where(mask[:, PLACE_TOK] >= 0.5, tl[:, PLACE_TOK, 1], neg)
+        pol[:, self.b_tied_a0] = torch.where(
+            mask[:, self.b_tied_tok] >= 0.5, tl[:, self.b_tied_tok, 0], neg)
+        pol[:, self.b_place_a1] = torch.where(
+            mask[:, self.b_place_tok] >= 0.5, tl[:, self.b_place_tok, 1], neg)
         return val, pol
 
     def forward_flat(self, rows):
