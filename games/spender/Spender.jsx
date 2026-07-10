@@ -502,6 +502,16 @@ const css = baseCss + `
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;max-width:400px;width:90%}
 .modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);margin-bottom:8px}
 .modal p{color:var(--text-dim);font-size:.9rem;margin-bottom:16px}
+/* ─── How-to-play (Rules) modal ─────────────────────────────────────────── */
+.rules-modal{max-width:520px;display:flex;flex-direction:column;max-height:86vh}
+.rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px;margin:4px 0 14px}
+.rules-body p{margin-bottom:12px;line-height:1.5}
+.rules-lead{color:var(--text)}
+.rules-note{color:var(--text-muted);font-size:.82rem;font-style:italic;margin-bottom:0}
+.rules-body h4{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:.92rem;margin:14px 0 6px}
+.rules-body ul{margin:0 0 12px;padding-left:20px}
+.rules-body li{color:var(--text-dim);font-size:.88rem;line-height:1.5;margin-bottom:5px}
+.rules-body b{color:var(--text)}
 .discard-gems{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
 .discard-btn{padding:8px 16px;border-radius:var(--radius);border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;transition:all .12s;display:flex;align-items:center;gap:6px}
 .discard-btn:hover{border-color:var(--gold);color:var(--gold)}
@@ -1085,6 +1095,7 @@ export default function SpenderApp() {
 	const [historyGames, setHistoryGames] = useState([]); // your FINISHED games (vs AI or humans)
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showCreateMenu, setShowCreateMenu] = useState(false);
+	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
 	const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only: which lobby section is shown (open|active|history)
 
@@ -2606,6 +2617,9 @@ export default function SpenderApp() {
 						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
 							← Back
 						</button>
+						<button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>
+							📖 Rules
+						</button>
 					</div>
 					<div className="browser-title">Spender</div>
 					<div className="browser-user">
@@ -2802,6 +2816,38 @@ export default function SpenderApp() {
 					})()}
 					</div>
 				</div>
+				{showRules && (
+					<div className="modal-backdrop" onClick={() => setShowRules(false)}>
+						<div className="modal rules-modal" onClick={e => e.stopPropagation()}>
+							<h3 style={{ marginTop: 0 }}>📖 How to Play — Spender</h3>
+							<div className="rules-body">
+								<p className="rules-lead">Build an engine of gem-producing cards to earn <b>prestige points</b>. The first player to reach the target — <b>15</b> in Classic, <b>21</b> in Long — triggers the final round; then the most prestige wins (fewest cards breaks a tie).</p>
+								<h4>On your turn, do exactly one</h4>
+								<ul>
+									<li><b>Take 3 gems</b> of three different colors.</li>
+									<li><b>Take 2 gems</b> of one color — only if at least 4 of that color remain.</li>
+									<li><b>Buy a card</b> from the board or your reserve by paying its gem cost.</li>
+									<li><b>Reserve a card</b> into your hand (max 3) and take 1 gold. Gold is a wild that stands in for any color.</li>
+								</ul>
+								<h4>Cards &amp; bonuses</h4>
+								<ul>
+									<li>Every card you buy gives a permanent <b>bonus gem</b> of its color that discounts all future purchases.</li>
+									<li>Higher-level cards cost more but are worth more prestige — build up cheap cards first to afford them.</li>
+								</ul>
+								<h4>Nobles</h4>
+								<ul>
+									<li>At the end of your turn, if your card bonuses meet a noble's requirement, that noble visits for extra prestige (you choose if more than one qualifies). Nobles are never taken on purpose — they come to you.</li>
+								</ul>
+								<h4>Gem limit</h4>
+								<ul>
+									<li>You may hold at most <b>10 gems</b> (gold included). If a take puts you over, discard down to 10.</li>
+								</ul>
+								<p className="rules-note">Play 2 players against an AI opponent, or 2–4 players against friends.</p>
+							</div>
+							<button className="btn btn-gold" style={{ width: "100%", marginTop: 4 }} onClick={() => setShowRules(false)}>Got it</button>
+						</div>
+					</div>
+				)}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>

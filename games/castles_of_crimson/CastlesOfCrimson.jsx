@@ -757,6 +757,16 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
 .coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
 .coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
+/* How-to-play (Rules) modal */
+.coc-rules{max-width:540px;display:flex;flex-direction:column;max-height:86vh}
+.coc-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
+.coc-rules-body p{margin-bottom:10px;line-height:1.5}
+.coc-rules-lead{color:var(--text)}
+.coc-rules-note{color:var(--text-dim);font-size:.8rem;font-style:italic;margin-bottom:0}
+.coc-rules-body h4{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:.9rem;margin:14px 0 6px}
+.coc-rules-body ul{margin:0 0 10px;padding-left:20px}
+.coc-rules-body li{color:var(--text-dim);font-size:.86rem;line-height:1.5;margin-bottom:4px}
+.coc-rules-body b{color:var(--text)}
 /* non-blocking variant: clicks fall through to the board; panel pinned to the bottom */
 .coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
 .coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}
@@ -935,6 +945,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [reviewing, setReviewing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
   const [showCreateMenu, setShowCreateMenu] = useState(false);  // + Create Game dropdown (vs Friend / vs Bot)
+  const [showRules, setShowRules] = useState(false);            // lobby "How to Play" modal
 
   // interaction state
   const [selDie, setSelDie] = useState(null);
@@ -1846,6 +1857,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-top coc-top-lobby">
           <div className="coc-top-left">
             <button className="coc-btn ghost sm" onClick={onExit}>← Back</button>
+            <button className="coc-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
           </div>
           <span className="coc-title">Castles of Crimson</span>
           <span className="coc-user">{playerName}</span>
@@ -2012,6 +2024,44 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
           </div>
         </div>
+        {showRules && (
+          <div className="coc-modal-bg" onClick={() => setShowRules(false)}>
+            <div className="coc-modal coc-rules" onClick={(e) => e.stopPropagation()}>
+              <h3>📖 How to Play — Castles of Crimson</h3>
+              <div className="coc-rules-body">
+                <p className="coc-rules-lead">Build up your duchy tile by tile across <b>5 phases of 5 rounds</b>. When the dust settles, the player with the most <b>victory points (VP)</b> wins.</p>
+                <h4>Your turn — roll two dice</h4>
+                <p>Each die lets you take <b>one</b> action (two actions per turn):</p>
+                <ul>
+                  <li><b>Take a hex tile</b> from the numbered depot matching the die, into your storage (holds 3).</li>
+                  <li><b>Place a tile</b> from storage onto an empty space showing that die's number, next to tiles you already own.</li>
+                  <li><b>Sell goods</b> whose number matches the die, for silver and VP.</li>
+                  <li><b>Buy a black tile</b> from the central depot — pay 2 silver, any die.</li>
+                  <li><b>Take 2 workers</b> — any die.</li>
+                  <li><b>Adjust a die</b> up or down by 1, spending one worker per step.</li>
+                </ul>
+                <h4>Tile types</h4>
+                <ul>
+                  <li><b>Castle</b> — take an extra action.</li>
+                  <li><b>Mine</b> — earns silver every phase.</li>
+                  <li><b>Ship</b> — brings goods and moves you up the turn order.</li>
+                  <li><b>Pasture</b> — collects animals for scoring.</li>
+                  <li><b>Building</b> — an instant effect (market, warehouse, and more).</li>
+                  <li><b>Monastery</b> — a unique power, shown by its number, plus an end-game bonus.</li>
+                </ul>
+                <h4>Scoring</h4>
+                <ul>
+                  <li>Filling a connected <b>same-color region</b> scores for its size <b>plus</b> a time bonus — the earlier the phase, the bigger the bonus.</li>
+                  <li>Depots refill with the same tile <b>types</b> each phase; the faint ghost outlines remind you what returns.</li>
+                </ul>
+                <p className="coc-rules-note">2 players — challenge a friend or the bot (Easy / Hard / Expert).</p>
+              </div>
+              <div className="coc-modal-row" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+                <button className="coc-btn gold" onClick={() => setShowRules(false)}>Got it</button>
+              </div>
+            </div>
+          </div>
+        )}
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
     );

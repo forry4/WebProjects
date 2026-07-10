@@ -228,6 +228,18 @@ const css = baseCss + `
 .ww-empty{color:var(--text-muted);text-align:center;padding:20px}
 .ww-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#2a1c20;border:1px solid var(--gold);
   color:var(--gold-light);padding:10px 18px;border-radius:var(--radius);z-index:50;font-size:14px}
+/* How-to-play (Rules) modal */
+.ww-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
+.ww-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:20px;max-width:540px;width:100%;display:flex;flex-direction:column;max-height:86vh}
+.ww-modal h3{font-family:Cinzel,serif;color:var(--gold-light);font-size:1rem;margin-bottom:8px}
+.ww-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
+.ww-rules-body p{color:var(--text-dim);font-size:14px;line-height:1.5;margin-bottom:10px}
+.ww-rules-lead{color:var(--text)}
+.ww-rules-note{color:var(--text-muted);font-size:12px;font-style:italic;margin-bottom:0}
+.ww-rules-body h4{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin:14px 0 6px}
+.ww-rules-body ul{margin:0 0 10px;padding-left:20px}
+.ww-rules-body li{color:var(--text-dim);font-size:13px;line-height:1.5;margin-bottom:4px}
+.ww-rules-body b{color:var(--text)}
 
 /* waiting room */
 .ww-code{font-family:Cinzel,serif;font-size:40px;letter-spacing:8px;color:var(--gold-light);text-align:center}
@@ -333,6 +345,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState([]);
   const [myGames, setMyGames] = useState([]);
   const [joinCode, setJoinCode] = useState("");
+  const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
   const [toast, setToast] = useState("");
 
   // narration
@@ -619,6 +632,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           <div className="ww-top">
             <div className="ww-top-left">
               <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
+              <button className="ww-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
               <span className="ww-title">Where Wolf?</span>
             </div>
             <span className="ww-user">{playerName}</span>
@@ -677,8 +691,43 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               ))}
             </>
           )}
-          {toast && <div className="ww-toast">{toast}</div>}
         </div>
+        {showRules && (
+          <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
+            <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
+              <h3>📖 How to Play — Where Wolf?</h3>
+              <div className="ww-rules-body">
+                <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
+                <h4>Setup</h4>
+                <ul>
+                  <li>The host picks a deck of <b>players + 3</b> role cards. Each player is secretly dealt one; the extra <b>3 sit face-down in the center</b>.</li>
+                  <li>The role you're <b>dealt</b> is the one you act as during the night — even if your card changes later.</li>
+                </ul>
+                <h4>Night</h4>
+                <ul>
+                  <li>Roles wake in a set order and act: werewolves see each other, the <b>seer</b> peeks a card, the <b>robber</b> steals a role, the <b>troublemaker</b> swaps two other players, the <b>drunk</b> blind-swaps with the center, and more.</li>
+                  <li>Swaps move the <b>card in front of you</b> — so you may end the night as a role you don't know about.</li>
+                </ul>
+                <h4>Day &amp; the vote</h4>
+                <ul>
+                  <li>Everyone discusses (there's a timer) and argues about who the werewolves are.</li>
+                  <li>On the signal, all players vote at once. The player(s) with the <b>most votes die</b> — a tie kills everyone tied; if no one gets 2+ votes, nobody dies. A dead <b>hunter</b> also takes down whoever they voted for.</li>
+                </ul>
+                <h4>Who wins</h4>
+                <ul>
+                  <li><b>Village</b> wins if at least one <b>werewolf</b> card dies.</li>
+                  <li><b>Werewolves</b> win if a werewolf is in play and none of them die (the <b>minion</b> wins with them).</li>
+                  <li>The <b>tanner</b> wins only by dying — and their death blocks a werewolf win.</li>
+                </ul>
+                <p className="ww-rules-note">Your final card at dawn decides your team, so pay attention to what moved in the night.</p>
+              </div>
+              <div className="ww-row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
+                <button className="ww-btn gold" onClick={() => setShowRules(false)}>Got it</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {toast && <div className="ww-toast">{toast}</div>}
       </div>
     );
   }
