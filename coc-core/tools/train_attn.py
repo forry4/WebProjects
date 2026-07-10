@@ -64,7 +64,15 @@ def policy_target(pol_str):
 try:  # multithreaded C parser (~50-100x the per-row python parse, which was
     # ~the entire training wall-clock — the net itself is tiny). Row order,
     # values, and the gid split are identical; python path kept as fallback.
-    import pyarrow.csv as _pacsv
+    # OPT-IN (COC_ARROW=1): with arrow active in-process, the trainer's
+    # loss.backward() hit CUBLAS_STATUS_EXECUTION_FAILED twice on this box
+    # (2026-07-10; a clean arrow-then-backward mini-repro PASSES, so it's an
+    # emergent interaction — suspect arrow readahead memory pressure vs the
+    # CUDA context). Debug offline before making it the default.
+    if os.environ.get("COC_ARROW") == "1":
+        import pyarrow.csv as _pacsv
+    else:
+        _pacsv = None
 except ImportError:
     _pacsv = None
 
