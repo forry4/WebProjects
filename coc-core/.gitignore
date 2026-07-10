@@ -1,4 +1,5 @@
 /target
+/target-perf
 /pkg
 Cargo.lock
 tests/fixtures*/

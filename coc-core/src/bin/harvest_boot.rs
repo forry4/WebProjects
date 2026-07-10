@@ -426,8 +426,19 @@ fn main() {
         assert_eq!(g.in_dim, n.in_dim(), "gpu server model dim != local model dim");
         // same-model guard: one deterministic probe forward, CPU vs server
         let mut rng = coc_core::rng::Rng::new(0xC0C0_57A7);
-        let raw: Vec<f32> =
+        let mut raw: Vec<f32> =
             (0..g.in_dim).map(|_| (rng.next_u64() % 2000) as f32 / 1000.0 - 1.0).collect();
+        if g.in_dim == coc_core::tokfeats::N_FEATS_TOK {
+            // tokfeats contract: the mask block is 0/1 — the torch twin uses mask
+            // VALUES as pooling weights while Rust treats them as booleans, so a
+            // random-valued mask makes the two forwards legitimately diverge
+            // (false-alarmed this guard once; the .check fixtures are binary).
+            let m0 = coc_core::tokfeats::TOK_N * coc_core::tokfeats::TOK_F;
+            for v in raw.iter_mut().skip(m0).take(coc_core::tokfeats::TOK_N) {
+                *v = if *v > 0.0 { 1.0 } else { 0.0 };
+            }
+            raw[m0] = 1.0; // token 0 always live (never fully masked)
+        }
         let (cv, cl) = n.forward_raw(&raw);
         let (gv, gl) = g.forward_raw(&raw);
         let md = cl.iter().zip(&gl).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);

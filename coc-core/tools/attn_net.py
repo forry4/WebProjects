@@ -37,6 +37,12 @@ for t in range(3):
 TIED_IDS = {a for pair in TIED.values() for a in pair if a is not None}
 GIDX = [a for a in range(N_ACT) if a not in TIED_IDS]
 assert len(GIDX) == 80
+# vectorized-scatter index tensors (the python per-token loop was ~38 GPU kernel
+# launches per forward — it made the inference sidecar launch-bound, 10k evals/s)
+TIED_TOK = torch.tensor(sorted(TIED))                              # [19]
+TIED_A0 = torch.tensor([TIED[t][0] for t in sorted(TIED)])         # [19]
+PLACE_TOK = torch.tensor([t for t in sorted(TIED) if TIED[t][1] is not None])
+PLACE_A1 = torch.tensor([TIED[t][1] for t in sorted(TIED) if TIED[t][1] is not None])
 
 
 class AttnNet(nn.Module):
@@ -62,15 +68,13 @@ class AttnNet(nn.Module):
         -> (value [B], policy [B,N_ACT] with -1e9 at masked/absent slots)."""
         b = tokens.shape[0]
         x = self.emb(tokens)                                  # [B,T,D]
-        keymask = mask < 0.5                                  # True = masked OUT
+        keep = (mask >= 0.5)[:, None, None, :]                # SDPA: True = attend
         hd = D // HEADS
         for l in range(LAYERS):
             q = self.wq[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)   # [B,H,T,hd]
             k = self.wk[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)
             v = self.wv[l](x).view(b, TOK_N, HEADS, hd).transpose(1, 2)
-            sc = q @ k.transpose(-2, -1) / (hd ** 0.5)                    # [B,H,T,T]
-            sc = sc.masked_fill(keymask[:, None, None, :], float("-inf"))
-            ctx = torch.softmax(sc, dim=-1) @ v                           # [B,H,T,hd]
+            ctx = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=keep)
             ctx = ctx.transpose(1, 2).reshape(b, TOK_N, D)
             x = self.ln1[l](x + self.wo[l](ctx))
             x = self.ln2[l](x + self.f2[l](torch.relu(self.f1[l](x))))
@@ -81,11 +85,9 @@ class AttnNet(nn.Module):
         pol = torch.full((b, N_ACT), NEG, device=tokens.device, dtype=tokens.dtype)
         pol[:, GIDX] = self.pg(ht)
         tl = self.ptok(x)                                     # [B,T,2]
-        for t, (a0, a1) in TIED.items():
-            live = mask[:, t] >= 0.5
-            pol[live, a0] = tl[live, t, 0]
-            if a1 is not None:
-                pol[live, a1] = tl[live, t, 1]
+        neg = pol.new_full((), NEG)
+        pol[:, TIED_A0] = torch.where(mask[:, TIED_TOK] >= 0.5, tl[:, TIED_TOK, 0], neg)
+        pol[:, PLACE_A1] = torch.where(mask[:, PLACE_TOK] >= 0.5, tl[:, PLACE_TOK, 1], neg)
         return val, pol
 
     def forward_flat(self, rows):
