@@ -74,9 +74,15 @@ for ((k = start; k < ITERS; k++)); do
     g1=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$BESTW:netval" "$GATE_PAIRS" \
         "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) "$THREADS" 2>/dev/null | tail -1)
     echo "iter $k gate(cand-vs-best netval): $g1" | tee -a "$LOG"
-    g2=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
-    echo "iter $k probe(netval vs hybrid, same net): $g2" | tee -a "$LOG"
+    if [ $((k % 3)) -eq 0 ]; then
+        # the value-head-vs-heuristic probe answered its question at iter 0
+        # (0.55, value head ahead) — every 3rd iter is enough to watch it
+        g2=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
+            "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
+        echo "iter $k probe(netval vs hybrid, same net): $g2" | tee -a "$LOG"
+    else
+        echo "iter $k probe: skipped (runs every 3rd iter)" | tee -a "$LOG"
+    fi
     g3=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$CHAMP_YARD:netval" "$YARD_PAIRS" \
         "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
     echo "iter $k yardstick(cand vs r2-champ @$GATE_SIMS, baseline 0.2917): $g3" | tee -a "$LOG"

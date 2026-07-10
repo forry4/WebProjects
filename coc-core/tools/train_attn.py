@@ -61,26 +61,76 @@ def policy_target(pol_str):
     return t
 
 
+try:  # multithreaded C parser (~50-100x the per-row python parse, which was
+    # ~the entire training wall-clock — the net itself is tiny). Row order,
+    # values, and the gid split are identical; python path kept as fallback.
+    import pyarrow.csv as _pacsv
+except ImportError:
+    _pacsv = None
+
+_COLS = ["gid"] + [f"f{i}" for i in range(IN_DIM)] + ["label", "margin", "rootv", "pol"]
+
+
+def _arrow_batches(path):
+    import pyarrow as pa
+    types = {"gid": pa.int64(), "label": pa.float64(), "margin": pa.float64(),
+             "rootv": pa.float64(), "pol": pa.string()}
+    for i in range(IN_DIM):
+        types[f"f{i}"] = pa.float32()
+    reader = _pacsv.open_csv(
+        path,
+        read_options=_pacsv.ReadOptions(column_names=_COLS, block_size=1 << 24),
+        parse_options=_pacsv.ParseOptions(delimiter=","),
+        convert_options=_pacsv.ConvertOptions(column_types=types),
+    )
+    for batch in reader:
+        gids = batch.column(0).to_numpy()
+        feats = np.column_stack(
+            [batch.column(i).to_numpy(zero_copy_only=False) for i in range(1, 1 + IN_DIM)])
+        lab = batch.column(1 + IN_DIM).to_numpy()
+        mar = batch.column(2 + IN_DIM).to_numpy()
+        rv = batch.column(3 + IN_DIM).to_numpy()
+        pols = batch.column(4 + IN_DIM).to_pylist()
+        yield gids, feats, lab, mar, rv, pols
+
+
 def stream_rows(files, want_val):
     for path in files:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                gid = int(line[:line.index(",")])
-                if (gid % VAL_MOD == 0) != want_val:
-                    continue
-                yield parse_row(line)
+        if _pacsv is not None:
+            for gids, feats, lab, mar, rv, pols in _arrow_batches(path):
+                for i in range(len(gids)):
+                    gid = int(gids[i])
+                    if (gid % VAL_MOD == 0) != want_val:
+                        continue
+                    yield gid, feats[i], float(lab[i]), float(mar[i]), float(rv[i]), pols[i] or ""
+        else:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    gid = int(line[:line.index(",")])
+                    if (gid % VAL_MOD == 0) != want_val:
+                        continue
+                    yield parse_row(line)
 
 
 def margin_scale(files, sample_every=16):
     margins = []
     k = 0
     for path in files:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                k += 1
-                if k % sample_every:
-                    continue
-                margins.append(parse_row(line)[3])
+        if _pacsv is not None:
+            for _, _, _, mar, _, _ in _arrow_batches(path):
+                n = len(mar)
+                # same sample set as the line loop: keep lines where the global
+                # 1-based counter is a multiple of sample_every
+                first = (-(k + 1)) % sample_every
+                margins.extend(float(m) for m in mar[first::sample_every])
+                k += n
+        else:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    k += 1
+                    if k % sample_every:
+                        continue
+                    margins.append(parse_row(line)[3])
     return float(np.std(margins)) or 12.0, k
 
 
