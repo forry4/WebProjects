@@ -66,8 +66,16 @@ for ((k = start; k < ITERS; k++)); do
     if [ "$k" -gt 0 ]; then data="$data;$RUNW/asp_$((k - 1)).t*.csv"; fi
     if [ "$k" -lt "$ANCHOR_ITERS" ]; then data="$data;$RUNW/attn_boot.t*.csv"; fi
     echo "--- iter $k: train_attn (warm from best) ---" | tee -a "$LOG"
-    python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
-        --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG"
+    # CUDA_LAUNCH_BLOCKING: three cublas-backward crashes on 2026-07-10 with a
+    # misattributed async op — sync reporting captures the TRUE op if it recurs.
+    # Retry once: a transient GPU hiccup self-heals; a deterministic crash
+    # fails twice and stops the loop with two full tracebacks in the log.
+    CUDA_LAUNCH_BLOCKING=1 python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
+        --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG" || {
+        echo "iter $k train CRASHED — retrying once" | tee -a "$LOG"
+        CUDA_LAUNCH_BLOCKING=1 python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
+            --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG"
+    }
 
     echo "--- iter $k: gates (gpu) ---" | tee -a "$LOG"
     "$CR/attn_export_check.exe" "$RUNW/attn_cand_$k.json" | tee -a "$LOG"
