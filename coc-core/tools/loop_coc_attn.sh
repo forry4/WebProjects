@@ -69,23 +69,40 @@ for ((k = start; k < ITERS; k++)); do
     python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
         --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG"
 
-    echo "--- iter $k: gates ---" | tee -a "$LOG"
+    echo "--- iter $k: gates (gpu) ---" | tee -a "$LOG"
     "$CR/attn_export_check.exe" "$RUNW/attn_cand_$k.json" | tee -a "$LOG"
-    g1=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$BESTW:netval" "$GATE_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) "$THREADS" 2>/dev/null | tail -1)
-    echo "iter $k gate(cand-vs-best netval): $g1" | tee -a "$LOG"
+    # GPU-served gates: the attention forwards go through graphed sidecars
+    # (cand on 9913, best on 9914). g1 is both-sides-gpu (shared arithmetic =
+    # unbiased, the int8 screening discipline); final SHIP gates stay CPU f32.
+    # Gate threads drop to 4 with batch 24 so each thread's lockstep is big
+    # enough to feed useful GPU batches.
+    COC_GPU_PAD=48 python "$TOOLS/gpu_server.py" "$RUNW/attn_cand_$k.json" --port 9913 >"$RUN/gpu_gate_c$k.log" 2>&1 &
+    gpu_c=$!
+    COC_GPU_PAD=48 python "$TOOLS/gpu_server.py" "$BESTW" --port 9914 >"$RUN/gpu_gate_b$k.log" 2>&1 &
+    gpu_b=$!
+    for _ in $(seq 1 30); do
+        grep -q "ready" "$RUN/gpu_gate_c$k.log" 2>/dev/null && grep -q "ready" "$RUN/gpu_gate_b$k.log" 2>/dev/null && break
+        sleep 2
+    done
+    g1=$(COC_GPU_ADDR_A=127.0.0.1:9913 COC_GPU_ADDR_B=127.0.0.1:9914 \
+        "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$BESTW:netvalgpu" "$GATE_PAIRS" \
+        "$GATE_SIMS" "$GATE_SIMS" $((7500 + k)) 4 24 2>/dev/null | tail -1)
+    echo "iter $k gate(cand-vs-best netval,gpu): $g1" | tee -a "$LOG"
     if [ $((k % 3)) -eq 0 ]; then
         # the value-head-vs-heuristic probe answered its question at iter 0
         # (0.55, value head ahead) — every 3rd iter is enough to watch it
-        g2=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
-            "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
+        g2=$(COC_GPU_ADDR_A=127.0.0.1:9913 \
+            "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$RUNW/attn_cand_$k.json:hybrid" "$PROBE_PAIRS" \
+            "$GATE_SIMS" "$GATE_SIMS" $((8500 + k)) 4 24 2>/dev/null | tail -1 || true)
         echo "iter $k probe(netval vs hybrid, same net): $g2" | tee -a "$LOG"
     else
         echo "iter $k probe: skipped (runs every 3rd iter)" | tee -a "$LOG"
     fi
-    g3=$("$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netval" "$CHAMP_YARD:netval" "$YARD_PAIRS" \
-        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) "$THREADS" 2>/dev/null | tail -1 || true)
+    g3=$(COC_GPU_ADDR_A=127.0.0.1:9913 \
+        "$CR/gate_coc.exe" "$RUNW/attn_cand_$k.json:netvalgpu" "$CHAMP_YARD:netval" "$YARD_PAIRS" \
+        "$GATE_SIMS" "$GATE_SIMS" $((9500 + k)) 4 24 2>/dev/null | tail -1 || true)
     echo "iter $k yardstick(cand vs r2-champ @$GATE_SIMS, baseline 0.2917): $g3" | tee -a "$LOG"
+    kill "$gpu_c" "$gpu_b" 2>/dev/null || true
 
     wr=$(echo "$g1" | sed -E 's/.*: ([0-9.]+) \+-.*/\1/')
     if [ -z "$wr" ] || ! awk "BEGIN{exit !($wr >= 0)}" 2>/dev/null; then
