@@ -606,8 +606,8 @@ def _score_livestock(game: dict, pid: str, sid: str, tile: dict) -> None:
     p = game["players"][pid]
     animal = tile["animal"]
     b = _pboard(p)
-    pasture = b.REGIONS[b.region_of(sid)]["spaces"]
-    same = [s for s in pasture if p["duchy"][s] is not None and p["duchy"][s].get("animal") == animal]
+    region_spaces = b.REGIONS[b.region_of(sid)]["spaces"]
+    same = [s for s in region_spaces if p["duchy"][s] is not None and p["duchy"][s].get("animal") == animal]
     total = sum(p["duchy"][s]["count"] for s in same)
     gain = total
     if 7 in p["monastery_effects"]:

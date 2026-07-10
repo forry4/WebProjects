@@ -243,7 +243,7 @@ def test_ship_takes_goods_and_queues_track_advance():
     assert engine._player_space(g, "p1") == 1
 
 
-# ── Livestock pasture re-scoring ──────────────────────────────────────────────
+# ── Livestock same-region re-scoring ──────────────────────────────────────────
 def green_pair():
     reg = next(r for r in board.REGIONS.values() if r["color"] == "green")
     for a in reg["spaces"]:
@@ -262,7 +262,7 @@ def test_livestock_same_animal_rescore():
     g["players"]["p1"]["vp"] = 0
     ok, err = engine.apply_move(g, "p1", {"type": "place_tile", "die_index": 0, "tile_id": "cowB", "space_id": b})
     assert ok, err
-    # new 4-cow + existing 3-cow in same pasture = 7
+    # new 4-cow + existing 3-cow in same region = 7
     assert g["players"]["p1"]["vp"] == 7
     assert "cow" in g["players"]["p1"]["livestock_types"]
 

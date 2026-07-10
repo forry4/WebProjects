@@ -99,7 +99,7 @@ function tileDesc(t, board) {
     case "castle": return "Castle — when placed, take an immediate bonus action (a die of your choice).";
     case "ship": return "Ship — when placed, take all goods from one depot and advance the turn order.";
     case "mine": return "Mine — gain 1 silver at the end of each phase.";
-    case "livestock": return `Livestock (${t.animal} ×${t.count}) — score VP for the animals; same-type animals in a pasture re-score.`;
+    case "livestock": return `Livestock (${t.animal} ×${t.count}) — score VP for the animals; same-type animals grouped in one region re-score.`;
     case "building": return BUILDING_DESC[t.building] || "Building.";
     case "monastery": {
       const d = board?.monastery_meta?.[t.effect_id];
@@ -228,7 +228,7 @@ function moveText(m, board) {
 // ─── Tile icons ──────────────────────────────────────────────────────────────
 // Little monochrome SVG icons (drawn in a 0..24 box, single color `c`). ship /
 // castle / mine sit on dark tiles, so they're drawn in a light glyph; livestock
-// animals sit on the light-green pasture, so they're dark with small white facial
+// animals sit on the light-green livestock tile, so they're dark with small white facial
 // details to keep cow / pig / sheep distinguishable at tiny sizes.
 const ICON = {
   ship: (c) => (<>
@@ -2052,7 +2052,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <li><b>Castle</b> — immediately take one <b>extra action</b>.</li>
                   <li><b>Mine</b> — pays you <b>silver</b> every phase for the rest of the game.</li>
                   <li><b>Ship</b> — brings <b>goods</b> and improves your <b>turn order</b>.</li>
-                  <li><b>Pasture</b> — <b>livestock</b> that score VP as you place them, worth more for grouping the same animal together.</li>
+                  <li><b>Livestock</b> — animal tiles that score VP as you place them, worth more for grouping the same animal together.</li>
                   <li><b>Building</b> — an instant effect. The eight are market, carpenter &amp; church (take a tile into storage), warehouse (sell goods), boarding house (+4 workers), bank (+2 silver), town hall (place another tile), and watchtower (+4 VP). Only one building of each type per region.</li>
                   <li><b>Monastery</b> — one of 26 unique tiles (shown by its number) granting a special ongoing power and/or an end-game bonus.</li>
                 </ul>
