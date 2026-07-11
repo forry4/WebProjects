@@ -850,12 +850,35 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
         VALUE-head calibration is what the netval leaf consumes; always re-GATE after more
         training.** Starts above FR2's 0.425. `attn_distill2.json` = the loop seed.
       - **SELF-PLAY LOOP (`tools/loop_coc_attn.sh`, RUN=coc_run_attn, ITERS=8, 2500g@300 sims,
-        boot anchor first 3 iters, promote ≥0.52, FIXED r2-champ yardstick @200 each iter).**
+        promote ≥0.52, FIXED r2-champ yardstick @200 each iter) — RUN COMPLETE (2026-07-11).**
         Iter 0 PROMOTED 0.5750 (first self-play iter beats the distill seed +7.5pp); its probe
         netval-vs-hybrid = **0.5500 — the attention VALUE head beats the heuristic leaf at iter
-        0** (took the MLP line a whole campaign). Iter 1 kept (0.5042). **Yardstick trend:
-        0.4458 → 0.4417 → 0.4667, margins −4.0 → −4.6 → −1.9** (margins improving before wins
-        flip); judge from iter 3+ (anchor drained — the nv washout rule).
+        0** (took the MLP line a whole campaign). Iter 1 kept (0.5042), iter 2 kept (0.4708).
+      - **ITER-3 CRATER — the ANCHOR-CLIFF lesson (fixed in `1168e9c`; DO NOT return to a hard
+        anchor cliff).** The first fully-anchor-free train (the designed ANCHOR_ITERS=3 drop)
+        collapsed BOTH heads onto the self-play distribution: gate **0.2667 (margin −25)**,
+        yardstick 0.4333→**0.2083**, probe 0.55→0.46 — while **val AUC/top1 hit record HIGHS
+        (0.8377/0.6106): the val split shares the collapsed distribution, so train metrics are
+        structurally BLIND to this failure.** Data + harness exonerated (asp_3 row stats ==
+        asp_2; parity probes green). The MLP nv loop survived this same cliff; the
+        higher-capacity attention net does not. **Fix: post-anchor iters keep a ~22%-of-mix
+        anchor TAIL (attn_boot.t[0-2] — champion-quality 1200-sims rows) + lr halved to 5e-4.**
+        Validated immediately: iter 4 gated 0.5250 → PROMOTED (first since iter 0); iters 5-7
+        back in the normal band (0.3958/0.4750/0.4917, kept).
+      - **RUN VERDICT (iters 0-7): the value head improves but the PACKAGE is FLAT.** Probe
+        (netval-vs-hybrid, same net) climbed 0.5500 (it0) → **0.5917 (it6) — the largest
+        value-head-over-heuristic edge measured in the whole CoC campaign.** But the yardstick
+        was FLAT across all 8 healthy points: 0.4458 → 0.4417 → 0.4667 → 0.4333 → [crater
+        excluded] → 0.4417 → 0.4250 → 0.4250 → 0.4667 (±0.089 each; no slope — the policy
+        head / whole package is the bottleneck at 300-sims self-play targets).
+        **EQUAL-WALL-CLOCK ship gate (the arbiter, 500ms/decision both sides, CPU f32, n=120):
+        attn_best:netval@20@1.5 vs r2-champ:netval@30@1.0 = 0.3083 ±0.083 (margin −12)** —
+        the equal-sims 0.4417 minus the predicted 12-16pp sims handicap lands EXACTLY on the
+        measurement, empirically confirming the two-gate model (ship bar ≈ 0.63-0.65
+        equal-sims). Gap to ship: ~20pp equal-sims with zero slope after 8 iters. Escalation
+        options if resumed: self-play sims 300→1200 + PCR (the levers that built r2 itself;
+        ~2.5-3h/iter with the GPU sidecar), int8-ATTENTION wasm kernel (halves the serving
+        handicap → bar ~0.57). Crater net preserved: `attn_cand_3_crater.json`.
     - **SIMS-SATURATION LADDER (2026-07-10, user hypothesis CONFIRMED — do not relitigate): CoC's
       knee is ~4-8k sims vs Spender's ~1.2k.** Champion self-gates at serving config (30/1.0),
       CRN adjacent doublings: 512v1024 **0.5417**, 1024v2048 **0.5833**, 2048v4096 **0.5667**,
@@ -928,10 +951,12 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       content AFTER an armed byte offset. (Curio from forensics: iter-0's net emits ~1e8 logits
       on off-manifold random inputs while fully sane on-manifold — Adam with no weight decay
       leaves unconstrained directions; harmless so far, worth remembering.)
-    - Still open: the loop's iter 3-7 yardstick trend (the campaign verdict); the equal-wall-clock
-      ship gate when/if the line approaches 0.65; int8-ATTENTION wasm kernel (halves the ship
-      bar's handicap) if it does; a human playtest of the NEW ladder (esp. Expert = the r2 net,
-      now with the adaptive 1.5s budget).
+    - Still open: whether to ESCALATE the attention line (sims 300→1200 + PCR, then the
+      int8-attention kernel if it moves) or FOLD it (the run verdict above: flat at ~0.44
+      equal-sims, 0.3083 equal-time, ~20pp short of ship) — user decision pending; a human
+      playtest of the NEW ladder (esp. Expert = the r2 net, now with the adaptive 1.5s budget +
+      tree reuse + int8 ≈ 3× the sims of the last playtested Expert, BELOW the 4-8k knee so it
+      should play meaningfully stronger — do this before more architecture work).
 
 ---
 
