@@ -843,14 +843,95 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
         attention SELF-PLAY runs the same sidecar protocol. `tools/train_attn.py` = streaming
         token-row trainer (SHAPE_A=0.3 ⊕ BETA=0.3 blend — the proven fresh-retrain target;
         PCR-safe CE normalization; game-split holdout; exports json + parity .check per best).
-      - **IN FLIGHT: the distill harvest** — the r2 champion plays 5000g @1200 sims (netvalgpu,
-        GPU sidecar ~165k evals/s) logging token rows → `coc_run_attn/attn_boot.t*.csv`. Next:
-        train_attn → attn_export_check → distill gate vs the r2 champion (expect a distill
-        deficit à la FR2's 0.425 — the loop's job is to climb past it) → attention netval
-        self-play loop (sidecar serves the torch twin) → equal-wall-clock ship gate. Serving,
-        if it wins: attn forward + tokfeats already compile to wasm; needs a wasm model loader
-        (bin format) + worker/JSX routing — not built yet.
-    - Still open: a human playtest of the NEW ladder (esp. Expert = the r2 net).
+      - **DISTILL LINE (2026-07-09/10): harvested 5000g/1.21M token rows @1200 sims → trained
+        (AUC 0.838 / top1 0.448) → gate 0.2917 vs the r2 champion → 8 MORE warm epochs @lr 5e-4
+        (top1 → 0.4646, decelerating — NOT epoch-starved) → re-gate 0.4458.** The +15pp from
+        extended training dwarfs what +1.7pp top1 implied — **val top1/AUC are weak proxies; the
+        VALUE-head calibration is what the netval leaf consumes; always re-GATE after more
+        training.** Starts above FR2's 0.425. `attn_distill2.json` = the loop seed.
+      - **SELF-PLAY LOOP (`tools/loop_coc_attn.sh`, RUN=coc_run_attn, ITERS=8, 2500g@300 sims,
+        boot anchor first 3 iters, promote ≥0.52, FIXED r2-champ yardstick @200 each iter).**
+        Iter 0 PROMOTED 0.5750 (first self-play iter beats the distill seed +7.5pp); its probe
+        netval-vs-hybrid = **0.5500 — the attention VALUE head beats the heuristic leaf at iter
+        0** (took the MLP line a whole campaign). Iter 1 kept (0.5042). **Yardstick trend:
+        0.4458 → 0.4417 → 0.4667, margins −4.0 → −4.6 → −1.9** (margins improving before wins
+        flip); judge from iter 3+ (anchor drained — the nv washout rule).
+    - **SIMS-SATURATION LADDER (2026-07-10, user hypothesis CONFIRMED — do not relitigate): CoC's
+      knee is ~4-8k sims vs Spender's ~1.2k.** Champion self-gates at serving config (30/1.0),
+      CRN adjacent doublings: 512v1024 **0.5417**, 1024v2048 **0.5833**, 2048v4096 **0.5667**,
+      4096v8192 **0.5000** (knee). Mechanism: multiplicative micro-decision turn chains + dice
+      chance every round + delayed payoffs. Consequences: the browser Expert sat BELOW the knee
+      (→ the serving push below); the **attention wall-clock ship bar ≈ 0.65 equal-sims vs the
+      champion** (~7× eval cost ≈ 2.5-3 doublings ≈ 12-16pp on this curve). Spender transfer
+      DECLINED by user (its serving is ~16× past its knee; an N-specific ladder was offered).
+      Tool: `scratchpad simgate_ladder` pattern — early-exit rung chain, results in
+      `coc_run_simgate/ladder_log.txt`.
+    - **SERVING SHIPPED (`ce747ca` + `5ecd735`, live on Pages/Render):**
+      (a) **Per-decision TREE REUSE** — wasm `TreeCache` (thread-local, keyed state-hash + mode +
+      prefix): a LONGER prefix re-roots through applied actions (`mcts::advance_root_child` =
+      arena `nodes.swap(0, child)` + `set_root_state`; orphans bounded per move; micro actions
+      within a chain are deterministic so replay==stepping); an EQUAL prefix CONTINUES the tree.
+      **Returned visits are CUMULATIVE per worker under reuse — the JSX uses the LATEST response,
+      never sums across chunks.** (b) **Adaptive Expert budget**: `_EXPERT_BUDGET_MS` 900→1500
+      TOTAL; the JSX searches in ~500ms slices (continuation = same prefix) and stops early when
+      the summed visit lead > achievable-remaining-sims (uncatchable) — easy decisions ~500ms,
+      contested get 1.5s. (c) **int8+simd128 wasm forward (+24%)**: `qdot` gained a wasm arm via
+      `i32x4_dot_i16x8` (v128 lacks f32 FMA but HAS integer dot — the one kernel change that
+      pays); quantized at `coc_init_model`; wasm "netval" now serves int8, **"netvalf32" = the
+      A/B + rollback mode**; strength-neutrality transfers from the native int8 gate
+      (deterministic integer math). Node A/B: 3,514 vs 2,825 sims/s.
+    - **SIDECAR PERF (torch twin serving; `d603891` + `4d3128a`): 10.5k → ~150k evals/s.**
+      (1) The attention forward was KERNEL-LAUNCH-BOUND (python tied-scatter loop ≈38 launches +
+      manual attention ≈140/req → 11.5ms per 121-row request): vectorized the scatter (index
+      tensors as **non-persistent module buffers** — CPU-index H2D copies are both slow AND
+      ILLEGAL inside CUDA-graph capture) + SDPA → 70k (6.7×), bit-vs-.check 0.00e0. (2)
+      **CUDA-graph runner** (`GraphRunner`, static padded buffers, lock-serialized replays;
+      eager fallback + `COC_GPU_GRAPH=0`) → 146k @8 clients (~2.1×); replays are the captured
+      kernels = eager-exact. **(3) THE PAD MUST MATCH THE REQUEST SIZE (`COC_GPU_PAD` =
+      2×GPU_BATCH)**: a 256-pad graph on 128-row requests pays the full replay → capped 65k with
+      clients starved at 27% CPU. **(4) K=128 thrashes the CLIENT CPU cache even at 300 sims**
+      (40-48k evals/s, CPU 91%/GPU 41%) — the K warning isn't just RAM; **64 is the sweet spot**.
+      (`torch.compile` unusable — inductor needs Triton, Linux-only; manual graph capture is the
+      Windows path.)
+    - **GPU GATES + WALL-CLOCK GATES (`5fa8b90`):** gate_coc spec `path:netvalgpu[@S@C]` routes a
+      netval player's forward through a sidecar — addr per SIDE via `COC_GPU_ADDR_A/_B` (TWO
+      servers when A≠B models), per-side startup parity probe vs the local json. **GPU-vs-CPU
+      same-net CRN mirror = 0.5000 with margin +0.0 — identical decisions every game**, so the
+      yardstick trend is comparable across the switch; ship gates stay CPU f32 by discipline.
+      Sims args also accept **"1500ms" = per-DECISION wall-clock budgets** (sequential path only)
+      — **the equal-TIME harness for the attention ship decision** (at equal ms the faster net
+      earns its sims advantage naturally; native cost ratios ≈ wasm ratios). Loop gates run GPU
+      (cand 9913 / best 9914, threads 4 batch 24, pads 48); g2 probe every 3rd iter.
+    - **TRAINER PARSE (do not relitigate the numpy paths): np.fromstring(sep) AND np.loadtxt both
+      ~0.55µs/field — same as split+array; NO fast numpy text path.** pyarrow verified BIT-exact
+      (0 mismatches, margin-scale bit-equal, same row order) and multithreaded — **but two
+      cublas-backward crashes with arrow in-process → OPT-IN via `COC_ARROW=1`** (attribution
+      unresolved: arrow readahead RAM vs the triple-race VRAM contention below; a clean
+      arrow-then-backward mini-repro PASSES). Trainer runs the python loader (~40-min trains)
+      with **CUDA_LAUNCH_BLOCKING=1 + retry-once armor** (async CUDA errors misattribute to later
+      ops — sync mode captures the true op if it recurs) + **atomic exports** (tmp+rename).
+    - **PER-SIM CPU PROFILE (bench_coc arms, do not re-derive): NO dominant component.** tokfeats
+      encode **5.5µs** (~2× v1's 2.6µs — NOT first-order), determinize **1.9µs**, rollout ~6µs,
+      engine ~0.56µs/micro-move. Encoder-caching and sort-hoisting levers are DEAD; remaining
+      offline throughput levers = straggler-tail work queue (10-20%), cloud burst (~3×), PCR.
+      Iterations now ~35-50 min (was ~2.5h).
+    - **TRIPLE-RACE POSTMORTEM (2026-07-10) + LOOP HARDENING (`f7ed70d`) — DO NOT regress.** Three
+      loop instances raced (relaunch-after-crash without verifying death, twice): doubled log
+      lines, gate-port fights (a blank yardstick line — recovered manually: iter-1 = 0.4667),
+      and plausibly the cublas crashes (two trainers on 6GB VRAM). A watcher also matched a
+      STALE traceback in the log tail → a false "crash #3" → a wrong "pyarrow exonerated" call
+      (corrected). Hardening now in the loop script: **singleton lock** (mkdir-atomic + live-pid;
+      refuses double launch), **trap-EXIT cleanup** of registered child servers (crash exits),
+      **launch pre-flight** (straggler harvest_boot / bound ports → refuse loudly; covers HARD
+      kills, which don't cascade on Windows), **gate stderr → per-iter `gates_err_$k.log`** with
+      empty-result guards (g1 fatal, yardstick loud warning). Watcher discipline: match only
+      content AFTER an armed byte offset. (Curio from forensics: iter-0's net emits ~1e8 logits
+      on off-manifold random inputs while fully sane on-manifold — Adam with no weight decay
+      leaves unconstrained directions; harmless so far, worth remembering.)
+    - Still open: the loop's iter 3-7 yardstick trend (the campaign verdict); the equal-wall-clock
+      ship gate when/if the line approaches 0.65; int8-ATTENTION wasm kernel (halves the ship
+      bar's handicap) if it does; a human playtest of the NEW ladder (esp. Expert = the r2 net,
+      now with the adaptive 1.5s budget).
 
 ---
 
