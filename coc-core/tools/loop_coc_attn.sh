@@ -101,17 +101,32 @@ for ((k = start; k < ITERS; k++)); do
 
     data="$RUNW/asp_$k.t*.csv"
     if [ "$k" -gt 0 ]; then data="$data;$RUNW/asp_$((k - 1)).t*.csv"; fi
-    if [ "$k" -lt "$ANCHOR_ITERS" ]; then data="$data;$RUNW/attn_boot.t*.csv"; fi
-    echo "--- iter $k: train_attn (warm from best) ---" | tee -a "$LOG"
+    lr=1e-3
+    if [ "$k" -lt "$ANCHOR_ITERS" ]; then
+        data="$data;$RUNW/attn_boot.t*.csv"
+    else
+        # ITER-3 CRATER (2026-07-10): the first fully-anchor-free train collapsed
+        # BOTH heads onto the self-play distribution — gate 0.2667 (margin −25),
+        # yardstick 0.4333→0.2083, probe netval-vs-hybrid 0.55→0.46 — while val
+        # AUC/top1 hit record HIGHS (the val split shares the collapsed
+        # distribution, so the metrics can't see it). The MLP nv loop survived
+        # this same cliff; the higher-capacity attention net does not. Fix: keep
+        # a ~22%-of-mix anchor TAIL (3 of 10 boot files — champion-quality
+        # 1200-sims rows tether BOTH heads' calibration) + halve the lr (warm
+        # fine-tune precedent 5e-4). Do NOT return this to a hard anchor cliff.
+        data="$data;$RUNW/attn_boot.t[0-2].csv"
+        lr=5e-4
+    fi
+    echo "--- iter $k: train_attn (warm from best, lr $lr) ---" | tee -a "$LOG"
     # CUDA_LAUNCH_BLOCKING: three cublas-backward crashes on 2026-07-10 with a
     # misattributed async op — sync reporting captures the TRUE op if it recurs.
     # Retry once: a transient GPU hiccup self-heals; a deterministic crash
     # fails twice and stops the loop with two full tracebacks in the log.
     CUDA_LAUNCH_BLOCKING=1 python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
-        --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG" || {
+        --warm "$BESTW" --lr "$lr" --epochs 2 2>&1 | tee -a "$LOG" || {
         echo "iter $k train CRASHED — retrying once" | tee -a "$LOG"
         CUDA_LAUNCH_BLOCKING=1 python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn_cand_$k.json" \
-            --warm "$BESTW" --epochs 2 2>&1 | tee -a "$LOG"
+            --warm "$BESTW" --lr "$lr" --epochs 2 2>&1 | tee -a "$LOG"
     }
 
     echo "--- iter $k: gates (gpu) ---" | tee -a "$LOG"
