@@ -409,14 +409,16 @@ function TileArtSvg({ tile, cx, cy, box }) {
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 
 // Hexagon-ring vertex positions (% of the board box) for the 6 numbered depots,
-// depot 1 at top going clockwise; the black depot sits in the center.
+// depot 1 at top going clockwise; the black depot sits in the center. The four
+// ring-SIDE depots (2/3/5/6) stack their tiles vertically (narrow + tall boxes),
+// so they sit a touch further apart vertically than the old 35/65.
 const DEPOT_POS = [
   { left: 50, top: 13 },   // 1 top
-  { left: 83, top: 35 },   // 2 top-right
-  { left: 83, top: 65 },   // 3 bottom-right
+  { left: 83, top: 32 },   // 2 top-right
+  { left: 83, top: 68 },   // 3 bottom-right
   { left: 50, top: 87 },   // 4 bottom
-  { left: 17, top: 65 },   // 5 bottom-left
-  { left: 17, top: 35 },   // 6 top-left
+  { left: 17, top: 68 },   // 5 bottom-left
+  { left: 17, top: 32 },   // 6 top-left
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -848,6 +850,20 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
 .coc-opp-sections{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+/* Ring-SIDE depots (2/3/5/6) stack their two tiles VERTICALLY (goods wrap into a
+   mini-column beside the hexes via the max-height) so the ring's sides stay narrow
+   and nothing overflows the box. Top/bottom depots (1/4) keep the horizontal row.
+   Phones reflow the depots to a grid instead, so this is desktop/tablet only. */
+@media (min-width:601px){
+  .coc-board-hex .coc-depot.coc-depot-side{width:24%}
+  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:wrap;align-content:center;max-height:176px}
+}
+/* Fixed-size goods box — it must NOT grow/shrink with the goods you happen to hold —
+   plus the face-down pile of goods you've already sold, pinned to its right edge. */
+.coc-goods-row{width:300px;max-width:100%}
+.coc-goods-sold{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:6px}
+.coc-goods-sold.none{opacity:.45}
+.coc-goods-back{width:30px;height:30px;border-radius:4px;background:linear-gradient(140deg,#5a4046 0%,#3a292e 55%,#2a1d21 100%);box-shadow:-2px 2px 0 -1px #241a1d,-4px 4px 0 -2px #191114,inset 0 0 0 1px rgba(255,255,255,.14)}
 @media (min-width:880px){
   .coc-game-cols{grid-template-columns:1fr 1fr}
   .coc-col-board{grid-column:1/-1}
@@ -1023,6 +1039,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const canBuyBlack = !!me && myTurnRaw && !pendingMine
     && !game.black_depot_used_this_turn && (me.silver || 0) >= 2 && (me.storage?.length || 0) < 3
     && (game.black_depot?.length || 0) > 0;
+  // Take 2 workers = select a die, then click the workers token (replaces the old
+  // "Take 2 Workers" button). Takes priority over arming Monastery #6 while a die
+  // is selected — deselect the die to arm #6 instead.
+  const canTakeWorkers = !!me && myTurnRaw && !pendingMine && selDie != null
+    && !!game.dice?.[myId] && !game.dice[myId].used[selDie];
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -1678,14 +1699,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     if (myTurnRaw && !pendingMine && i >= 0) mv({ type: "sell_goods", die_index: i });
   };
 
-  const doTakeWorkers = () => {
-    if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "take_workers" } }); }
-    else if (selDie != null) mv({ type: "take_workers", die_index: selDie });
-  };
-  const doSell = () => {
-    if (inExtra) { if (extraValue == null) return; mv({ type: "extra_action", value: extraValue, sub: { type: "sell_goods" } }); }
-    else if (selDie != null) mv({ type: "sell_goods", die_index: selDie });
-  };
   // Tapping a tile you can't act on yet shows its description (mobile has no hover,
   // so this mirrors the PC title-tooltip — see also clickBlackTile).
   const clickDepotTile = (depot, tile, e) => {
@@ -2329,8 +2342,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : false;
               const depotPick = shipPickMine ? () => shipPick(d)
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
+              const isSide = d !== 1 && d !== 4;           // ring-side depots stack tiles vertically
               return (
-                <div key={d} data-depot={d} className={`coc-depot${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : ""}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
@@ -2380,9 +2394,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-duchy-head">
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
             {game.turn === myId && !over && !setupPhase && (
-              <button className="coc-btn ghost sm" disabled={!hasActed}
-                title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
-                onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="coc-btn ghost sm" disabled={!hasActed}
+                  title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
+                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+                <button className="coc-btn crimson sm" disabled={!bothDiceUsed || pendingMine}
+                  title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
+                  onClick={() => mv({ type: "end_turn" })}>End Turn</button>
+              </div>
             )}
           </div>
           <div className="coc-duchy-layout">
@@ -2416,9 +2435,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 ))}
                 <div className="coc-resbar">
                   <span className="coc-token-chip"
-                    title={canUseM6 ? (m6Armed ? "Monastery #6 armed — click a building tile in a depot (2 workers). Click again to cancel." : "Monastery #6: click, then a building tile in a depot to take it for 2 workers") : "Workers — spent to adjust dice"}>
-                    <span className={`coc-token worker${canUseM6 ? " coc-arm" : ""}${m6Armed ? " coc-on" : ""}`} data-workers="1"
-                      onClick={canUseM6 ? () => setM6Armed((a) => !a) : undefined}>⚒</span><b>{me?.workers ?? 0}</b>
+                    title={canTakeWorkers ? "Take 2 workers with the selected die"
+                      : canUseM6 ? (m6Armed ? "Monastery #6 armed — click a building tile in a depot (2 workers). Click again to cancel." : "Monastery #6: click, then a building tile in a depot to take it for 2 workers")
+                      : "Workers — spent to adjust dice. Select a die, then click here to take 2 workers."}>
+                    <span className={`coc-token worker${(canTakeWorkers || canUseM6) ? " coc-arm" : ""}${m6Armed ? " coc-on" : ""}`} data-workers="1"
+                      onClick={canTakeWorkers ? () => mv({ type: "take_workers", die_index: selDie })
+                        : canUseM6 ? () => setM6Armed((a) => !a) : undefined}>⚒</span><b>{me?.workers ?? 0}</b>
                   </span>
                   <span className="coc-token-chip"
                     title={canBuyBlack ? (silverArmed ? "Buy armed — click a tile in the central black depot (2 silver). Click again to cancel." : "Click, then a tile in the central black depot to buy it for 2 silver") : "Silver — spent to buy black-depot tiles"}>
@@ -2471,19 +2493,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                         </span>
                       );
                     })}
+                    <span className={`coc-goods-sold${(me?.sold_goods?.length || 0) ? "" : " none"}`}
+                      title={`Goods you've sold this game: ${me?.sold_goods?.length || 0}`}>
+                      <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              {/* action buttons */}
+              {/* action row: Discard + a contextual hint. (Take-2-workers = die then
+                  the workers token; selling = click your goods; End Turn lives beside
+                  Undo Turn in the panel header.) */}
               {myTurnRaw && !pendingMine && !setupPhase && (
                 <div className="coc-actions">
-                  <button className="coc-btn tool sm" disabled={selDie == null} onClick={doTakeWorkers}>Take 2 Workers</button>
-                  <button className="coc-btn tool sm" disabled={selDie == null || !(me?.goods?.[goodsForDie] > 0)} onClick={doSell}>
-                    Sell{goodsForDie
-                      ? <> <span className="coc-tile goods" style={{ display: "inline-flex", width: 15, height: 15, fontSize: ".55rem", background: GOODS_HEX[goodsForDie] }}>{actionValue}</span>{me?.goods?.[goodsForDie] ? ` ×${me.goods[goodsForDie]}` : ""}</>
-                      : " goods"}
-                  </button>
                   {(me?.storage?.length || 0) > 0 && (
                     <button className="coc-btn ghost sm" disabled={!selStorage}
                       title="Discard the selected tile (back to the box) — free, anytime on your turn"
@@ -2491,12 +2513,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       Discard
                     </button>
                   )}
-                  <button className="coc-btn crimson sm" disabled={!bothDiceUsed}
-                    title={bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
-                    onClick={() => mv({ type: "end_turn" })}>End Turn</button>
                   <span className="coc-card-meta" style={{ alignSelf: "center" }}>
                     {selStorage ? "Click a glowing hex to place, or Discard to remove it."
-                      : selDie != null ? "Click a depot tile to take, or a storage tile to place." : ""}
+                      : selDie != null ? "Click a depot tile to take, a storage tile to place, goods to sell, or the workers token for 2 workers." : ""}
                   </span>
                 </div>
               )}
@@ -2552,6 +2571,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
                     </span>
                   ))}
+                  <span className={`coc-goods-sold${(opp.sold_goods?.length || 0) ? "" : " none"}`}
+                    title={`Goods they've sold this game: ${opp.sold_goods?.length || 0}`}>
+                    <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}
+                  </span>
                 </div>
               </div>
             </div>
