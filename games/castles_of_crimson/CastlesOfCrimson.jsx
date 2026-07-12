@@ -415,10 +415,10 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 12 },   // 1 top
+  { left: 50, top: 11 },   // 1 top
   { left: 83, top: 26 },   // 2 top-right
   { left: 83, top: 74 },   // 3 bottom-right
-  { left: 50, top: 88 },   // 4 bottom
+  { left: 50, top: 89 },   // 4 bottom
   { left: 17, top: 74 },   // 5 bottom-left
   { left: 17, top: 26 },   // 6 top-left
 ];
@@ -644,8 +644,6 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc .coc-resbar{gap:10px;margin-left:4px}
   .coc .coc-token{width:40px;height:40px;font-size:1.15rem}
   .coc .coc-token-chip{gap:5px}
-  .coc .coc-actions{gap:6px}
-  .coc .coc-actions .coc-btn.sm{padding:6px 9px}
   /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
   .coc .coc-bonusbar{gap:4px;padding:7px 6px}
   .coc .coc-bonusbar-lbl{letter-spacing:.05em}
@@ -747,7 +745,6 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* A goods chip you can click to sell during a Warehouse pending — pulses like the pick depots. */
 .coc-goods-pick{color:var(--text);border-radius:6px;padding:1px 5px;margin:-1px -1px;animation:coc-goodspick 1.1s ease-in-out infinite}
 @keyframes coc-goodspick{0%,100%{box-shadow:0 0 0 2px var(--gold-l),0 0 8px rgba(232,201,106,.4)}50%{box-shadow:0 0 0 2px var(--gold-l),0 0 16px rgba(232,201,106,.75)}}
-.coc-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .coc-setup-banner{background:rgba(212,160,74,.14);border:1px solid var(--gold);border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.35}
 .coc-hexsvg{width:100%;max-width:520px;display:block;margin:0 auto}
 .coc-hex{cursor:default;transition:opacity .12s}
@@ -848,7 +845,9 @@ html,body{margin:0;padding:0;background:#120c0d}
    physical table). NOTE: this section is LAST in the sheet so its rules win
    equal-specificity ties against the base rules above. */
 .coc-wrap-game{max-width:1800px}
-.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px;align-items:start}
+/* grid items STRETCH (no align-items:start) so all three panels share the row's
+   height — the board panel then flex-fills its spare height with the depot ring */
+.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
 .coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
@@ -881,14 +880,22 @@ html,body{margin:0;padding:0;background:#120c0d}
 }
 @media (min-width:1280px){
   .coc-game-cols{grid-template-columns:minmax(360px,9fr) minmax(0,11.5fr) minmax(0,11.5fr)}
-  .coc-col-board{grid-column:auto}
-  /* Shrink the whole depot ring uniformly — its tiles / black-depot kite / mini-dice
-     are fixed px, so zoom the container. NO width compensation: percentages inside a
-     zoomed element already resolve in zoomed units (100% of the column = column/.78
-     inner units), so width:100% fills the column exactly — a calc(100%/.78) here
-     DOUBLE-compensates and spills past the panel (the round-3 bug). Slightly taller
-     than the base 1/0.9 so the tall side depots (tiles + goods below) fit. */
-  .coc-col-board .coc-board-hex{zoom:.78;width:100%;max-width:none;aspect-ratio:1/1.02}
+  .coc-col-board{grid-column:auto;display:flex;flex-direction:column}
+  /* The ring FILLS the board panel's remaining height (the panel is stretched to the
+     duchies' height by the grid), instead of a fixed aspect — so the board is always
+     exactly as tall as the duchy panels. Zoom scales the fixed-px tiles/kite/mini-dice;
+     NO width compensation: percentages inside a zoomed element already resolve in
+     zoomed units (100% of the column = column/zoom inner units), so width:100% fills
+     the column exactly — a calc(100%/zoom) here DOUBLE-compensates and spills past
+     the panel (a prior bug). Bigger zoom = bigger tiles; the wider the viewport, the
+     more room the ring has, so the zoom steps up at 1600px. */
+  .coc-col-board .coc-board-hex{zoom:.85;width:100%;max-width:none;aspect-ratio:auto;flex:1 1 auto;min-height:380px}
+  /* the zoomed column has fewer inner units, so the top/bottom depots need a bigger
+     share to keep their two tiles side by side (34% stacks them -> too tall) */
+  .coc-col-board .coc-depot-tb{width:46%}
+}
+@media (min-width:1600px){
+  .coc-col-board .coc-board-hex{zoom:1}
 }
 `;
 
@@ -2357,10 +2364,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               const isSide = d !== 1 && d !== 4;           // ring-side depots stack tiles vertically
               // Side depots anchor to the board's edges (left for 5/6 — the same gutter
-              // as the turn-order track — right for 2/3) instead of centering on left%.
+              // as the turn-order track — right for 2/3) instead of centering on left%;
+              // top/bottom depots (coc-depot-tb) keep the horizontal tile row.
               const anchor = isSide ? (pos.left < 50 ? " coc-anchor-l" : " coc-anchor-r") : "";
               return (
-                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : ""}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: isSide ? (pos.left < 50 ? 0 : "100%") : `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
@@ -2413,6 +2421,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
             {game.turn === myId && !over && !setupPhase && (
               <div style={{ display: "flex", gap: 8 }}>
+                <button className="coc-btn ghost sm" disabled={!selStorage || pendingMine}
+                  title="Discard the selected storage tile (back to the box) — free, anytime on your turn"
+                  onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
                 <button className="coc-btn ghost sm" disabled={!hasActed}
                   title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
                   onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
@@ -2519,24 +2530,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               </div>
 
-              {/* action row: Discard + a contextual hint. (Take-2-workers = die then
-                  the workers token; selling = click your goods; End Turn lives beside
-                  Undo Turn in the panel header.) */}
-              {myTurnRaw && !pendingMine && !setupPhase && (
-                <div className="coc-actions">
-                  {(me?.storage?.length || 0) > 0 && (
-                    <button className="coc-btn ghost sm" disabled={!selStorage}
-                      title="Discard the selected tile (back to the box) — free, anytime on your turn"
-                      onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>
-                      Discard
-                    </button>
-                  )}
-                  <span className="coc-card-meta" style={{ alignSelf: "center" }}>
-                    {selStorage ? "Click a glowing hex to place, or Discard to remove it."
-                      : selDie != null ? "Click a depot tile to take, a storage tile to place, goods to sell, or the workers token for 2 workers." : ""}
-                  </span>
-                </div>
-              )}
+              {/* No action row: Discard/Undo/End Turn live in the panel header, selling
+                  is click-your-goods, take-2-workers is die -> workers token. The panel
+                  therefore matches the opponent panel's height (a deliberate ask). */}
             </div>
             <div className="coc-duchy-board">
               {renderDuchy(me, myTurnRaw)}
