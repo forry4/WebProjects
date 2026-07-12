@@ -614,13 +614,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* Top-align the h3 (flex-start) so "Your Duchy — X VP" sits at the same small gap
    below the panel edge whether or not the action buttons are present — otherwise the
    h3 jumps up at game-over (buttons gone) and no longer matches "The Board". */
-.coc-duchy-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px 12px;flex-wrap:wrap;margin-bottom:10px;min-height:30px}
-.coc-duchy-head h3{margin-bottom:0;white-space:nowrap;flex:0 0 auto}
-/* The turn badge + Discard/Undo/End are ONE nowrap group (badge just left of Discard);
-   when the header is too narrow for it to sit beside the title, the whole group wraps to
-   its own line (still intact) instead of the badge/buttons squeezing onto stacked lines. */
-.coc-duchy-headright{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;justify-content:flex-end;margin-left:auto}
-.coc-duchy-btns{display:flex;gap:8px}
+.coc-duchy-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;min-height:30px}
+.coc-duchy-head h3{margin-bottom:0}
 .coc-turnbadge{white-space:nowrap}
 .coc-duchy-layout{display:flex;flex-direction:column;gap:14px}
 .coc-duchy-controls{display:flex;flex-direction:column;gap:14px}
@@ -2247,7 +2242,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // Whose turn is it? The badge shows on the ACTIVE player's own panel — beside your
   // Discard/End buttons on your turn, in the same header spot on the opponent's turn.
   const mineActive = !over && (setupPhase ? setupMine : myTurnRaw);
-  const oppActive = !over && !mineActive;
   const myBadgeText = setupPhase ? "Place your starting castle" : (pendingMine ? "Your decision" : "Your turn");
   const oppBadgeText = setupPhase
     ? (aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
@@ -2313,7 +2307,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <span className="coc-vp-info">ⓘ</span>
           </div>
           <span className="coc-bonus-spacer">
-            {over && <span className="coc-turnbadge you coc-gameover-badge">Game over</span>}
+            {over
+              ? <span className="coc-turnbadge you coc-gameover-badge">Game over</span>
+              : mineActive
+                ? <span className="coc-turnbadge you">{myBadgeText}</span>
+                : <span className="coc-turnbadge them">{oppBadgeText}</span>}
           </span>
         </div>
 
@@ -2458,25 +2456,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             {/* At game end show the FINAL score (leftover resources + monastery
                 end-game bonuses folded in) so it matches the top score bar. */}
             <h3>Your Duchy — {over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)} VP</h3>
-            {/* Turn badge sits at the left of this group (so it's just left of Discard on
-                your turn); the buttons are always shown during play (not setup/over) so the
-                panel keeps a stable height, each fading when it can't act. */}
-            {!over && (
-              <div className="coc-duchy-headright">
-                {mineActive && <span className="coc-turnbadge you">{myBadgeText}</span>}
-                {!setupPhase && (
-                  <div className="coc-duchy-btns">
-                    <button className="coc-btn ghost sm" disabled={!myTurnRaw || !selStorage || pendingMine}
-                      title="Discard the selected storage tile (back to the box) — free, anytime on your turn"
-                      onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
-                    <button className="coc-btn ghost sm" disabled={!myTurnRaw || !hasActed}
-                      title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
-                      onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
-                    <button className="coc-btn crimson sm" disabled={!myTurnRaw || !bothDiceUsed || pendingMine}
-                      title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
-                      onClick={() => mv({ type: "end_turn" })}>End Turn</button>
-                  </div>
-                )}
+            {/* Always shown during play (not setup/over) so the panel keeps a stable
+                height across turns; each button just disables (fades) when it can't act,
+                including on the opponent's turn (!myTurnRaw). */}
+            {!over && !setupPhase && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="coc-btn ghost sm" disabled={!myTurnRaw || !selStorage || pendingMine}
+                  title="Discard the selected storage tile (back to the box) — free, anytime on your turn"
+                  onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
+                <button className="coc-btn ghost sm" disabled={!myTurnRaw || !hasActed}
+                  title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
+                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+                <button className="coc-btn crimson sm" disabled={!myTurnRaw || !bothDiceUsed || pendingMine}
+                  title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
+                  onClick={() => mv({ type: "end_turn" })}>End Turn</button>
               </div>
             )}
           </div>
@@ -2594,7 +2587,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-panel">
             <div className="coc-duchy-head">
               <h3>{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
-              {oppActive && <span className="coc-turnbadge them">{oppBadgeText}</span>}
             </div>
             <div className="coc-oppbar coc-dicebar">
               {oppDice && (<>
