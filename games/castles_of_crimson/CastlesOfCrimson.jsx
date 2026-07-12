@@ -552,11 +552,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-vp{display:flex;gap:14px;justify-self:center}
 .coc-vp .v{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem}
 .coc-vp .v b{color:var(--gold);font-size:1.05rem}
-/* Abandon / View Opponent + the opponent's dice, at the right end of the status bar. */
+/* Abandon, at the right end of the status bar. */
 .coc-status-right{display:flex;align-items:center;gap:10px;justify-self:end;flex-wrap:wrap;justify-content:flex-end}
-.coc-oppdice{display:inline-flex;gap:4px;align-items:center}
-.coc-oppdie{width:26px;height:26px;border-radius:5px;background:#f3ead8;display:inline-flex;align-items:center;justify-content:center;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.5)}
-.coc-oppdie.used{opacity:.4}
 /* Workers / silver resources — a bit larger than the plain pills. */
 .coc-res{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.92rem;letter-spacing:.04em;color:var(--text-dim);display:inline-flex;align-items:center;gap:5px}
 .coc-res b{color:var(--text)}
@@ -583,11 +580,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
-/* The board panel is the positioning context for the turn-order track (pinned to its
-   left gutter, beside the centered hexagon). */
 .coc-board-panel{position:relative}
-/* turn-order track — boxed, pinned flush to the panel's upper-left gutter */
-.coc-track-block{position:absolute;left:14px;top:66px;z-index:3;max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+/* turn-order track — a boxed block ABOVE the depot ring. It used to be absolutely
+   pinned into the panel's left gutter, but the board now shares the screen with both
+   duchies (no gutter), so it flows in the normal column like on mobile. */
+.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;margin:0 0 8px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
 .coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
@@ -598,14 +595,14 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-track-token.start{box-shadow:0 0 0 2px #fff}
 .coc-track-cap{display:block;margin:3px 0 0;font-size:.58rem;color:var(--text-dim);font-style:italic}
 
-/* duchy: controls on the left, board on the right */
+/* duchy panel: controls stacked ABOVE the board (the panel lives in a grid column
+   now that both duchies share the screen — no room for the old side-by-side split) */
 .coc-duchy-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
 .coc-duchy-head h3{margin-bottom:0}
-.coc-duchy-layout{display:flex;gap:20px;align-items:flex-start}
-.coc-duchy-controls{flex:1 1 0;min-width:240px;display:flex;flex-direction:column;gap:14px}
-.coc-duchy-board{flex:0 0 auto;width:clamp(300px,50%,560px)}
+.coc-duchy-layout{display:flex;flex-direction:column;gap:14px}
+.coc-duchy-controls{display:flex;flex-direction:column;gap:14px}
+.coc-duchy-board{width:100%;max-width:560px;align-self:center}
 .coc-duchy-board .coc-hexsvg{max-width:100%;margin:0}
-@media (max-width:760px){.coc-duchy-layout{flex-direction:column}.coc-duchy-board{width:100%}}
 .coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
 .coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
 /* Phone: the hexagonal depot ring + absolutely-positioned turn-order track overflow
@@ -614,8 +611,8 @@ html,body{margin:0;padding:0;background:#120c0d}
    the black depot centered below. !important beats the inline left/top/transform. */
 @media (max-width:600px){
   .coc-board-hex{display:grid;grid-template-columns:1fr 1fr;gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
-  /* track now lives OUTSIDE the board-hex (a panel child); reflow it to a plain block above the board */
-  .coc-track-block{position:static;left:auto;top:auto;max-width:none;margin:0 0 8px;padding:6px 7px}
+  /* the track is a static block above the board at every width now; just tighten it */
+  .coc-track-block{max-width:none;padding:6px 7px}
   /* shrink the 7 turn-order spaces so 0-6 fit on one row */
   .coc-track-spaces{flex-wrap:wrap;gap:2px}
   .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
@@ -626,7 +623,7 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-board-hex .coc-minidie{position:static!important;left:auto!important;top:auto!important;transform:none!important;margin:0 auto 6px}
   .coc-board-hex .coc-black-center{position:relative;grid-column:1/-1;justify-self:center;left:auto!important;top:auto!important;transform:none!important}
   /* status bar: the 3-zone grid is too tight on phones — stack the left group on its
-     own row, then center the score + right group (Abandon/View Opp/opp dice) below */
+     own row, then center the score + right group (Abandon) below */
   .coc-statusbar{display:flex;flex-wrap:wrap;justify-content:center}
   .coc-status-left{width:100%;justify-content:center}
   .coc-status-right{justify-content:center}
@@ -840,6 +837,30 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-bthumb-svg{width:72px;height:66px;display:block}
 .coc-bthumb-name{font-size:.6rem;color:var(--text-dim);text-align:center;line-height:1.05;font-family:'Cinzel','Cinzel Fallback',serif}
 .coc-bthumb.sel .coc-bthumb-name{color:var(--gold)}
+/* ── Game layout: the shared board + BOTH duchies visible together ────────────
+   One grid holds the three panels: stacked on phones; 2 columns >=880px (the board
+   spans the top row, the two duchies sit side by side under it); 3 columns >=1280px
+   (board | your duchy | opponent duchy — everything on screen at once, like the
+   physical table). NOTE: this section is LAST in the sheet so its rules win
+   equal-specificity ties against the base rules above. */
+.coc-wrap-game{max-width:1800px}
+.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px;align-items:start}
+/* opponent panel: dice + resources row, then storage/goods, then their board */
+.coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
+.coc-opp-sections{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+@media (min-width:880px){
+  .coc-game-cols{grid-template-columns:1fr 1fr}
+  .coc-col-board{grid-column:1/-1}
+}
+@media (min-width:1280px){
+  .coc-game-cols{grid-template-columns:minmax(390px,10fr) minmax(0,11fr) minmax(0,11fr)}
+  .coc-col-board{grid-column:auto}
+  /* Shrink the whole depot ring uniformly — its tiles / black-depot kite / mini-dice
+     are fixed px, so zoom the container and widen it by the inverse factor so the
+     VISUAL width still fills the (narrower) board column. getBoundingClientRect
+     returns post-zoom coords, so the tile-flyer animations stay aligned. */
+  .coc-col-board .coc-board-hex{zoom:.78;width:calc(100% / .78);max-width:none}
+}
 `;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
@@ -954,7 +975,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [silverArmed, setSilverArmed] = useState(false);  // black-depot buy: armed via the silver token
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
-  const [viewOpp, setViewOpp] = useState(false);
   const [showScores, setShowScores] = useState(false);   // mid-game VP breakdown popup
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [myBoard, setMyBoard] = useState("1");          // board the local player picked
@@ -963,19 +983,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [phasePop, setPhasePop] = useState(null);       // {from,to,silver,workers} — the between-phase overlay
   const animSnap = useRef(null);                        // prev snapshot for diffing my tile moves
   const flyerSeq = useRef(0);
-  const prevAiThinking = useRef(false);                 // edge-detect the bot's turn (auto-view)
-  const aiThinkingRef = useRef(false);                  // latest aiThinking, read inside timeouts
-  const revealHoldRef = useRef(false);                  // setup-castle reveal owns the modal (blocks the generic auto-close)
-  const prevOppCastleRef = useRef(undefined);           // opp starting-castle presence last seen (undefined = no snapshot yet)
-  const revealCloseTimer = useRef(null);                // auto-close timer for the setup-castle reveal
-  const botViewTimer = useRef(null);                    // settle delay before the opponent board auto-opens
   const reconnTimer = useRef(null);                     // auto-reconnect backoff timer
   const reconnTries = useRef(0);
   const turnSimsRef = useRef(0);                         // client-AI sims accumulated across the bot's turn
   const prevAiSimRef = useRef(false);                    // edge-detect the bot turn for the per-turn sim log
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
-  const viewOppRef = useRef(false);                     // current viewOpp, read inside the flyer effect
 
   const playerName = authUser?.name || "Player";
   // The die value needed to sell a goods color (its index in the goods order + 1).
@@ -1161,78 +1174,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // "acted this turn" resets only when the turn itself changes (NOT on pending
   // open/close, since opening a pending means you already acted).
   useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.round, game?.phase_letter]);
-  // Vs the bot: auto-open the opponent view when the bot's PLAYING turn begins (so you
-  // can watch it build), and auto-close when your turn returns (the view is a blocking
-  // modal). Edge-triggered on aiThinking, so a manual open/close mid-bot-turn stands.
-  // Both transitions get a ~1s settle: the OPEN is delayed so finishing your own turn
-  // isn't immediately steamrolled by the opponent board (matched by the backend's
-  // _POST_TURN_PAUSE so the board is up before the bot's first move lands), and the
-  // CLOSE lingers so you see the bot's finished board for a beat before it returns you
-  // to your own. The SETUP starting-castle reveal is owned by its own effect below;
-  // while it holds the modal (revealHoldRef), this generic handler must NOT touch it.
-  useEffect(() => {
-    aiThinkingRef.current = aiThinking;
-    const wasAi = prevAiThinking.current;
-    prevAiThinking.current = aiThinking;
-    const clearTimer = () => { if (botViewTimer.current) { clearTimeout(botViewTimer.current); botViewTimer.current = null; } };
-    if (revealHoldRef.current) return;                  // setup-castle reveal owns the modal
-    if (aiThinking && !wasAi && !setupPhase) {           // bot's playing turn begins: open after a settle
-      clearTimer();
-      botViewTimer.current = setTimeout(() => {
-        botViewTimer.current = null;
-        if (aiThinkingRef.current && !revealHoldRef.current) setViewOpp(true);
-      }, 1000);
-    } else if (!aiThinking && wasAi) {                    // bot's turn ended: linger on their board, then return
-      clearTimer();
-      botViewTimer.current = setTimeout(() => {
-        botViewTimer.current = null;
-        if (!aiThinkingRef.current && !revealHoldRef.current) setViewOpp(false);
-      }, 1000);
-    }
-  }, [aiThinking]);
-  useEffect(() => { viewOppRef.current = viewOpp; }, [viewOpp]);   // latest value for the flyer effect
-
-  // Setup starting-castle reveal (vs the bot). When the opponent's starting castle first
-  // appears on their board, force their board OPEN, pop the castle in on it, hold it
-  // visible long enough to watch, then close (unless it's already the bot's playing turn,
-  // in which case the generic handler keeps it open for A-1). This is decoupled from
-  // aiThinking because the bot's SECOND castle transitions the game straight to "playing"
-  // in the same update — so the naive auto-close fired at the exact moment the castle
-  // landed, closing the board just as the animation played (the reported bug).
-  useEffect(() => {
-    if (!game || !roomData?.vs_ai) { prevOppCastleRef.current = undefined; return; }
-    const castle = opp && opp.castle_sid ? opp.duchy?.[opp.castle_sid] : null;
-    const had = prevOppCastleRef.current;
-    prevOppCastleRef.current = !!castle;
-    // Reveal ONLY on a null->placed transition we actually witnessed (had === false).
-    // `undefined` = first snapshot this mount (fresh create OR reconnect mid-game) —
-    // never reveal then, so reconnecting to an in-progress game doesn't replay it.
-    if (over || reviewing || !castle || had !== false) return;
-    revealHoldRef.current = true;
-    setViewOpp(true);                                            // show their board
-    // Pop the castle in AFTER the modal mounts (two rAFs) so [data-oppsid] exists.
-    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-oppsid="${opp.castle_sid}"]`);
-      if (el) {
-        const d = el.getBoundingClientRect();
-        const W = 58, H = 67;
-        const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
-        const s1 = Math.max(0.5, Math.min(1, d.width / W));
-        const f = { id: `f${flyerSeq.current++}`, tile: castle, left: dcx - W / 2, top: dcy - H / 2, w: W, h: H, dx: 0, dy: 0, s0: 0.2, s1 };
-        setFlyers((fs) => [...fs, f]);
-        setTimeout(() => setFlyers((fs) => fs.filter((x) => x.id !== f.id)), 640);
-      }
-    }));
-    // Hold the board open so the pop-in is seen, then release the modal to the generic
-    // handler: close it unless it's now the bot's playing turn (bot was start player).
-    if (revealCloseTimer.current) clearTimeout(revealCloseTimer.current);
-    revealCloseTimer.current = setTimeout(() => {
-      revealCloseTimer.current = null;
-      revealHoldRef.current = false;
-      if (!aiThinkingRef.current) setViewOpp(false);
-    }, 1900);
-    return () => cancelAnimationFrame(raf);
-  }, [game]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // NOTE: the old View-Opponent modal (auto-open on the bot's turn + the setup-castle
+  // reveal choreography) is GONE — the opponent's duchy is now permanently on screen
+  // beside yours, so the generic flyer diff below animates their moves (including the
+  // starting-castle pop-in, via its popIn fallback) with no modal to orchestrate.
 
   // Tile-move animations: diff MY storage/duchy each update and fly the moved tile
   // from where it was (depot / black depot / storage) to its new home. Mirrors
@@ -1248,21 +1193,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     const depotGoods = [];
     for (const d of [1, 2, 3, 4, 5, 6]) (game.depots?.[String(d)]?.goods || []).forEach((g) => depotGoods.push({ id: g.id, color: g.color, d }));
     const myGoods = { ...(me.goods || {}) };
-    // opponent's currently-held tiles (storage + duchy), keyed by id — to detect what
-    // the bot/opponent just acquired (their board isn't rendered, so it flies toward
-    // the View Opponent button instead of a hidden slot).
+    // The opponent's board is permanently rendered beside yours, so their moves
+    // animate directly on it (depot -> their storage slot / duchy hex, goods into
+    // their goods row) — same diff as for your own board.
     const oId = game.players ? Object.keys(game.players).find((p) => p !== myId) : null;
     const oPlayer = oId ? game.players[oId] : null;
-    const oppTiles = {};
-    const oppLoc = {};   // opponent tile id -> where it sits on THEIR board (for in-modal anim)
-    (oPlayer?.storage || []).forEach((t, i) => { if (t) { oppTiles[t.id] = t; oppLoc[t.id] = { kind: "oppslot", i }; } });
-    Object.entries(oPlayer?.duchy || {}).forEach(([sid, t]) => { if (t) { oppTiles[t.id] = t; oppLoc[t.id] = { kind: "oppsid", sid }; } });
-    const oppTileIds = new Set(Object.keys(oppTiles));
+    const oppLoc = {};   // opponent tile id -> where it sits on THEIR board
+    (oPlayer?.storage || []).forEach((t, i) => { if (t) oppLoc[t.id] = { kind: "oppslot", i }; });
+    Object.entries(oPlayer?.duchy || {}).forEach(([sid, t]) => { if (t) oppLoc[t.id] = { kind: "oppsid", sid }; });
     const oppStorageIds = new Set((oPlayer?.storage || []).filter(Boolean).map((t) => t.id));
     const oppDuchyIds = new Set(Object.values(oPlayer?.duchy || {}).filter(Boolean).map((t) => t.id));
     const oppGoods = { ...(oPlayer?.goods || {}) };
     const prev = animSnap.current;
-    animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppTileIds, oppLoc, oppStorageIds, oppDuchyIds, oppGoods,
+    animSnap.current = { loc, storageIds, duchyIds, depotGoods, myGoods, oppLoc, oppStorageIds, oppDuchyIds, oppGoods,
       workers: me.workers, silver: me.silver, oppWorkers: oPlayer?.workers, oppSilver: oPlayer?.silver };
     if (!prev) return;                                  // first paint: nothing to animate
     const rectOf = (spec) => {
@@ -1275,7 +1218,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "mygoods" ? "[data-mygoods]"
         : spec.kind === "goodchip" ? `[data-goodchip="${spec.c}"]`
         : spec.kind === "oppgoodchip" ? `[data-oppgoodchip="${spec.c}"]`
-        : spec.kind === "viewopp" ? "[data-viewopp]"
         : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
         : spec.kind === "oppsid" ? `[data-oppsid="${spec.sid}"]`
         : spec.kind === "oppgoods" ? "[data-oppgoods]" : null;
@@ -1288,8 +1230,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const W = 58, H = 67;
       const scx = s.left + s.width / 2, scy = s.top + s.height / 2;
       const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
-      const s1 = (dest.kind === "hex" || dest.kind === "oppsid") ? Math.max(0.5, Math.min(1, d.width / W))
-        : dest.kind === "viewopp" ? 0.4 : 1;
+      const s1 = (dest.kind === "hex" || dest.kind === "oppsid") ? Math.max(0.5, Math.min(1, d.width / W)) : 1;
       return { id: `f${flyerSeq.current++}`, tile, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1 };
     };
     // A placement with no source (a starting castle isn't drawn from a depot/storage) —
@@ -1336,21 +1277,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const dcy = chip ? chip.top + chip.height / 2 : gDest.top + gDest.height / 2;
       add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s1: 1 });
     }
-    // Opponent's moves. While you're VIEWING their board (auto-opens on the bot's
-    // turn), animate their tiles ON the modal board: depot -> their storage slot, and
-    // their storage/depot -> their duchy hex, plus goods they drain into their goods
-    // row. Otherwise (board hidden) fly a single marker toward the View Opponent button.
-    if (viewOppRef.current) {
-      (oPlayer?.storage || []).forEach((t, i) => {
-        if (!t || prev.oppStorageIds.has(t.id)) return;          // newly in their storage
-        const f = mk(t, prev.loc[t.id] || prev.oppLoc[t.id], { kind: "oppslot", i });
-        if (f) add.push(f);
-      });
-      for (const [sid, t] of Object.entries(oPlayer?.duchy || {})) {
-        if (!t || prev.oppDuchyIds.has(t.id)) continue;          // newly in their duchy = placed
-        const f = mk(t, prev.oppLoc[t.id] || prev.loc[t.id], { kind: "oppsid", sid }) || popIn(t, { kind: "oppsid", sid });
-        if (f) add.push(f);
-      }
+    // Opponent's moves, animated on their always-visible board: depot -> their
+    // storage slot, their storage/depot -> their duchy hex (popIn covers sourceless
+    // placements like the starting castle), plus goods they drain into their goods row.
+    (oPlayer?.storage || []).forEach((t, i) => {
+      if (!t || prev.oppStorageIds.has(t.id)) return;          // newly in their storage
+      const f = mk(t, prev.loc[t.id] || prev.oppLoc[t.id], { kind: "oppslot", i });
+      if (f) add.push(f);
+    });
+    for (const [sid, t] of Object.entries(oPlayer?.duchy || {})) {
+      if (!t || prev.oppDuchyIds.has(t.id)) continue;          // newly in their duchy = placed
+      const f = mk(t, prev.oppLoc[t.id] || prev.loc[t.id], { kind: "oppsid", sid }) || popIn(t, { kind: "oppsid", sid });
+      if (f) add.push(f);
+    }
+    {
       const oGoodsDest = rectOf({ kind: "oppgoods" });
       const oGoodsDelta = {};
       for (const c of new Set([...Object.keys(oppGoods), ...Object.keys(prev.oppGoods || {})])) {
@@ -1366,17 +1306,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         const dcx = oChip ? oChip.left + oChip.width / 2 : oGoodsDest.left + 14;
         const dcy = oChip ? oChip.top + oChip.height / 2 : oGoodsDest.top + oGoodsDest.height / 2;
         add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - 13, top: scy - 13, w: 26, h: 26, dx: dcx - scx, dy: dcy - scy, s1: 1 });
-      }
-    } else {
-      const oppDest = rectOf({ kind: "viewopp" });
-      if (oppDest) {
-        for (const [tid, t] of Object.entries(oppTiles)) {
-          if (prev.oppTileIds.has(tid)) continue;              // opponent already had it
-          const src = prev.loc[tid];                           // was it in a visible depot / black?
-          if (!src) continue;                                  // internal (hidden) opp move -> skip
-          const f = mk(t, src, { kind: "viewopp" });
-          if (f) add.push(f);
-        }
       }
     }
     // Skip a flood of TILE changes (reconnect / initial catch-up) so we animate only
@@ -1407,10 +1336,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     };
     resFly("workers", "worker", me.workers, prev.workers);
     resFly("silver", "silver", me.silver, prev.silver);
-    if (viewOppRef.current) {                              // opponent's spends, on the open modal
-      resFly("opp-workers", "worker", oPlayer?.workers, prev.oppWorkers);
-      resFly("opp-silver", "silver", oPlayer?.silver, prev.oppSilver);
-    }
+    resFly("opp-workers", "worker", oPlayer?.workers, prev.oppWorkers);   // opponent's spends,
+    resFly("opp-silver", "silver", oPlayer?.silver, prev.oppSilver);      // on their visible panel
     if (!add.length) return;
     setFlyers((fs) => [...fs, ...add]);
     const ids = new Set(add.map((f) => f.id));
@@ -2254,7 +2181,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   return (
     <div className="coc"><style>{css}</style>
-      <div className="coc-wrap">
+      <div className="coc-wrap coc-wrap-game">
         <div className="coc-top">
           <div className="coc-top-left">
             <button className="coc-btn ghost sm" onClick={over ? () => setReviewing(false) : leaveToLobby}>← {over ? "Results" : "Menu"}</button>
@@ -2307,14 +2234,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(false)}>No</button>
                 </>
               : <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>)}
-            <button className="coc-btn outline sm" data-viewopp="1" onClick={() => setViewOpp(true)}>View Opponent</button>
-            {oppDice && (
-              <span className="coc-oppdice" title={`${players[oppId] || "Opponent"}'s dice`}>
-                {[0, 1].map((i) => (
-                  <span key={i} className={`coc-oppdie${oppDice.used?.[i] ? " used" : ""}`}><Pips n={oppDice.values[i]} /></span>
-                ))}
-              </span>
-            )}
           </div>
         </div>
 
@@ -2345,8 +2264,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           })}
         </div>
 
+        {/* The table: shared board + your duchy + the opponent's duchy, all visible
+            together (3 columns on wide screens, 2+1 on medium, stacked on phones). */}
+        <div className="coc-game-cols">
         {/* Shared board: 6 numbered depots arranged as a hexagon, black depot centered */}
-        <div className="coc-panel coc-board-panel">
+        <div className="coc-panel coc-board-panel coc-col-board">
           <div className="coc-board-head">
             <h3>The Board</h3>
             <div className="coc-whitedie">
@@ -2453,7 +2375,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
-        {/* Your area: controls on the left, duchy board on the right */}
+        {/* Your area: dice/storage/goods controls, your duchy board below */}
         <div className="coc-panel">
           <div className="coc-duchy-head">
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
@@ -2585,6 +2507,61 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
+        {/* Opponent's area: always on screen (replaces the old View Opponent modal).
+            The data-opp* anchors here are the flyer-animation targets. */}
+        {opp && (
+          <div className="coc-panel">
+            <div className="coc-duchy-head">
+              <h3>{players[oppId] || "Opponent"} — {opp.vp ?? 0} VP</h3>
+            </div>
+            <div className="coc-oppbar">
+              {oppDice && (
+                <div className="coc-dicebar">
+                  <span className="coc-pill">Dice</span>
+                  {[0, 1].map((i) => (
+                    <div key={i} className={`coc-die${oppDice.used?.[i] ? " used" : ""}`}
+                      style={{ width: 34, height: 34, cursor: "default" }}><Pips n={oppDice.values[i]} /></div>
+                  ))}
+                </div>
+              )}
+              <span className="coc-token-chip" title="Their workers">
+                <span className="coc-token worker" data-opp-workers="1" style={{ width: 34, height: 34, fontSize: "1rem" }}>⚒</span><b>{opp.workers ?? 0}</b>
+              </span>
+              <span className="coc-token-chip" title="Their silver">
+                <span className="coc-token silver" data-opp-silver="1" style={{ width: 34, height: 34, fontSize: "1rem" }}>⛃</span><b>{opp.silver ?? 0}</b>
+              </span>
+            </div>
+            <div className="coc-opp-sections">
+              <div>
+                <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
+                <div className="coc-storage">
+                  {[0, 1, 2].map((i) => {
+                    const t = opp.storage?.[i];
+                    if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
+                    return <div key={t.id} data-oppstorage-slot={i} className="coc-stt" style={{ background: TILE_HEX[t.color] }}
+                      title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
+                <div className="coc-goods-row" data-oppgoods="1">
+                  {Object.entries(opp.goods || {}).map(([c, n]) => (
+                    <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
+                      onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}>
+                      <span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="coc-duchy-board">
+              {renderDuchy(opp, false, true)}
+            </div>
+          </div>
+        )}
+        </div>
+
         {/* move log */}
         <div className="coc-panel">
           <h3>Log</h3>
@@ -2607,51 +2584,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       {/* pending decision modals */}
       {pendingMine && <PendingModal game={game} board={board} me={me} extraValue={extraValue}
         setExtraValue={setExtraValue} mv={mv} goodsForDie={goodsForDie} />}
-
-      {/* opponent view */}
-      {viewOpp && opp && (
-        <div className="coc-modal-bg" onClick={() => setViewOpp(false)}>
-          <div className="coc-modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-            <h3>{players[oppId]} — {opp.vp} VP</h3>
-            <div style={{ display: "flex", gap: 14, marginBottom: 10 }}>
-              <span className="coc-token-chip"><span className="coc-token worker" data-opp-workers="1">⚒</span><b>{opp.workers}</b></span>
-              <span className="coc-token-chip"><span className="coc-token silver" data-opp-silver="1">⛃</span><b>{opp.silver}</b></span>
-            </div>
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Dice</div>
-                <div className="coc-dicebar">
-                  {game.dice?.[oppId]?.values.map((v, i) => (
-                    <div key={i} className={`coc-die${game.dice[oppId].used[i] ? " used" : ""}`} style={{ width: 34, height: 34, fontSize: "1rem" }}><Pips n={v} /></div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
-                <div className="coc-storage">
-                  {[0, 1, 2].map((i) => {
-                    const t = opp.storage?.[i];
-                    if (!t) return <div key={i} data-oppstorage-slot={i} className="coc-stt empty" style={{ background: "var(--surface2)" }} />;
-                    return <div key={t.id} data-oppstorage-slot={i} className="coc-stt" style={{ background: TILE_HEX[t.color] }} title={tileDesc(t, board)} onClick={() => setToast(tileDesc(t, board))}><TileArt tile={t} px={70} /></div>;
-                  })}
-                </div>
-              </div>
-              <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
-                <div className="coc-goods-row" data-oppgoods="1">
-                  {Object.entries(opp.goods).map(([c, n]) => (
-                    <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)} onClick={() => setToast(tileDesc({ kind: "goods", color: c }, board))}><span className="coc-tile goods" style={{ background: GOODS_HEX[c] }}>{goodsSellNum(c)}</span>×{n}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            {renderDuchy(opp, false, true)}
-            <div className="coc-modal-row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
-              <button className="coc-btn gold sm" onClick={() => setViewOpp(false)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Mid-game VP breakdown (click the score). End-of-game bonuses are faded — a
           projection that only counts once the game ends. */}
