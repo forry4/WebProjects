@@ -410,15 +410,17 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 
 // Hexagon-ring vertex positions (% of the board box) for the 6 numbered depots,
 // depot 1 at top going clockwise; the black depot sits in the center. The four
-// ring-SIDE depots (2/3/5/6) stack their tiles vertically (narrow + tall boxes),
-// so they sit a touch further apart vertically than the old 35/65.
+// ring-SIDE depots (2/3/5/6) are narrow-and-tall (tiles stacked, goods below), so
+// they need a wide vertical spread — and they don't use `left` at all: 5/6 hug the
+// board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
+// right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 13 },   // 1 top
-  { left: 83, top: 32 },   // 2 top-right
-  { left: 83, top: 68 },   // 3 bottom-right
-  { left: 50, top: 87 },   // 4 bottom
-  { left: 17, top: 68 },   // 5 bottom-left
-  { left: 17, top: 32 },   // 6 top-left
+  { left: 50, top: 12 },   // 1 top
+  { left: 83, top: 26 },   // 2 top-right
+  { left: 83, top: 74 },   // 3 bottom-right
+  { left: 50, top: 88 },   // 4 bottom
+  { left: 17, top: 74 },   // 5 bottom-left
+  { left: 17, top: 26 },   // 6 top-left
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -578,7 +580,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
 .coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
-.coc-board-hex .coc-depot{position:absolute;width:31%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
+.coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
 .coc-black-center{left:50%;top:50%;box-sizing:border-box;padding:0!important;border:1px solid var(--gold)!important;background:#0c0809!important;border-radius:8px;min-height:0!important;z-index:1}
 .coc-blacklbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.08em;color:var(--gold);text-transform:uppercase}
@@ -849,33 +851,44 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px;align-items:start}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
-.coc-opp-sections{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
-/* Ring-SIDE depots (2/3/5/6) stack their two tiles VERTICALLY (goods wrap into a
-   mini-column beside the hexes via the max-height) so the ring's sides stay narrow
-   and nothing overflows the box. Top/bottom depots (1/4) keep the horizontal row.
+.coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
+/* Ring-SIDE depots (2/3/5/6): a narrow fixed-width box — the two tiles stack
+   VERTICALLY and any goods sit in small rows BELOW the tiles (no horizontal
+   growth, nothing overflows). 5/6 hug the board's LEFT edge (the same gutter the
+   turn-order track sits in) and 2/3 mirror on the right. Top/bottom depots (1/4)
+   keep the horizontal row (their goods flow inline via display:contents).
    Phones reflow the depots to a grid instead, so this is desktop/tablet only. */
+.coc-depot-goods{display:contents}
 @media (min-width:601px){
-  .coc-board-hex .coc-depot.coc-depot-side{width:24%}
-  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:wrap;align-content:center;max-height:176px}
+  .coc-board-hex .coc-depot.coc-depot-side{width:88px}
+  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center}
+  .coc-depot-side .coc-depot-goods{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%}
+  .coc-board-hex .coc-depot.coc-anchor-l{transform:translate(0,-50%)}
+  .coc-board-hex .coc-depot.coc-anchor-r{transform:translate(-100%,-50%)}
 }
-/* Fixed-size goods box — it must NOT grow/shrink with the goods you happen to hold —
-   plus the face-down pile of goods you've already sold, pinned to its right edge. */
-.coc-goods-row{width:300px;max-width:100%}
-.coc-goods-sold{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:6px}
+/* Fixed-size goods box — sized for exactly 3 goods types (the storage cap) + the
+   face-down pile of goods you've already sold, pinned to its right edge. It sits
+   BESIDE the storage row and must not grow/shrink with the goods you hold. */
+.coc-goods-row{width:260px;max-width:100%;gap:6px;padding:7px 8px}
+.coc-goods-sold{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:4px}
 .coc-goods-sold.none{opacity:.45}
 .coc-goods-back{width:30px;height:30px;border-radius:4px;background:linear-gradient(140deg,#5a4046 0%,#3a292e 55%,#2a1d21 100%);box-shadow:-2px 2px 0 -1px #241a1d,-4px 4px 0 -2px #191114,inset 0 0 0 1px rgba(255,255,255,.14)}
+/* your storage + goods, side by side (wraps only when the column is truly narrow) */
+.coc-stor-goods{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
 @media (min-width:880px){
   .coc-game-cols{grid-template-columns:1fr 1fr}
   .coc-col-board{grid-column:1/-1}
 }
 @media (min-width:1280px){
-  .coc-game-cols{grid-template-columns:minmax(390px,10fr) minmax(0,11fr) minmax(0,11fr)}
+  .coc-game-cols{grid-template-columns:minmax(360px,9fr) minmax(0,11.5fr) minmax(0,11.5fr)}
   .coc-col-board{grid-column:auto}
   /* Shrink the whole depot ring uniformly — its tiles / black-depot kite / mini-dice
-     are fixed px, so zoom the container and widen it by the inverse factor so the
-     VISUAL width still fills the (narrower) board column. getBoundingClientRect
-     returns post-zoom coords, so the tile-flyer animations stay aligned. */
-  .coc-col-board .coc-board-hex{zoom:.78;width:calc(100% / .78);max-width:none}
+     are fixed px, so zoom the container. NO width compensation: percentages inside a
+     zoomed element already resolve in zoomed units (100% of the column = column/.78
+     inner units), so width:100% fills the column exactly — a calc(100%/.78) here
+     DOUBLE-compensates and spills past the panel (the round-3 bug). Slightly taller
+     than the base 1/0.9 so the tall side depots (tiles + goods below) fit. */
+  .coc-col-board .coc-board-hex{zoom:.78;width:100%;max-width:none;aspect-ratio:1/1.02}
 }
 `;
 
@@ -2343,9 +2356,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               const depotPick = shipPickMine ? () => shipPick(d)
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               const isSide = d !== 1 && d !== 4;           // ring-side depots stack tiles vertically
+              // Side depots anchor to the board's edges (left for 5/6 — the same gutter
+              // as the turn-order track — right for 2/3) instead of centering on left%.
+              const anchor = isSide ? (pos.left < 50 ? " coc-anchor-l" : " coc-anchor-r") : "";
               return (
-                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : ""}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
-                  style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
+                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : ""}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                  style={{ left: isSide ? (pos.left < 50 ? 0 : "100%") : `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
@@ -2361,14 +2377,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                         title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
                       </div>
                     ))}
-                    {depot.goods.map((gt) => {
-                      const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
-                      return (
-                        <div key={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
-                          title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
-                          onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
-                      );
-                    })}
+                    <div className="coc-depot-goods">
+                      {depot.goods.map((gt) => {
+                        const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
+                        return (
+                          <div key={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
+                            title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
+                            onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               );
@@ -2450,8 +2468,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               </div>
 
-              {/* storage + goods */}
-              <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              {/* storage + goods, side by side */}
+              <div className="coc-stor-goods">
                 <div>
                   <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
                   <div className="coc-storage" data-storage="1">
