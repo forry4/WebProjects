@@ -416,11 +416,11 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
   { left: 50, top: 9 },    // 1 top
-  { left: 83, top: 33 },   // 2 top-right
-  { left: 83, top: 67 },   // 3 bottom-right
-  { left: 50, top: 85 },   // 4 bottom
-  { left: 17, top: 67 },   // 5 bottom-left
-  { left: 17, top: 33 },   // 6 top-left
+  { left: 83, top: 30 },   // 2 top-right
+  { left: 83, top: 70 },   // 3 bottom-right
+  { left: 50, top: 88 },   // 4 bottom
+  { left: 17, top: 70 },   // 5 bottom-left
+  { left: 17, top: 30 },   // 6 top-left
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -688,7 +688,11 @@ html,body{margin:0;padding:0;background:#120c0d}
    ::after carves the center back to the depot surface, leaving a colored rim. */
 .coc-tile-ghost{cursor:default;position:relative;opacity:.7}
 .coc-tile-ghost:hover{transform:none}
-.coc-tile-ghost::after{content:"";position:absolute;inset:3px;background:var(--surface2);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
+/* Uniform-thickness rim: a rectangular inset+same-hex leaves a THINNER rim on the
+   slanted edges than the vertical sides. Instead fill the whole tile with the color
+   and lay a hexagon shrunk by a true PERPENDICULAR ~3px (computed for the 70×81 tile)
+   on top — the gap between the two hexes is then a constant-width colored rim. */
+.coc-tile-ghost::after{content:"";position:absolute;inset:0;background:var(--surface2);clip-path:polygon(50% 4.3%,95.7% 27.1%,95.7% 72.9%,50% 95.7%,4.3% 72.9%,4.3% 27.1%)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
 .coc-whitedie .coc-die{width:30px;height:30px}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -834,7 +838,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-bonus-groups{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .coc-bonus-sec{display:inline-flex;align-items:center;gap:6px}
 .coc-bonuses-lead{color:var(--gold);margin-right:2px}
-.coc-bonus-spacer{min-width:0}
+.coc-bonus-spacer{min-width:0;display:flex;align-items:center;justify-content:flex-start;padding-left:14px}
 .coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
 .coc-regbonus-lbl{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim)}
 .coc-regbonus{font-size:.98rem;color:var(--gold-l);letter-spacing:.02em}
@@ -2293,7 +2297,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             {opp && <span className="v">{players[oppId]} <b>{over && fscore?.[oppId] != null ? fscore[oppId] : opp.vp}</b></span>}
             <span className="coc-vp-info">ⓘ</span>
           </div>
-          <span className="coc-bonus-spacer" />
+          <span className="coc-bonus-spacer">
+            {over && <span className="coc-turnbadge you coc-gameover-badge">Game over</span>}
+          </span>
         </div>
 
         {/* The table: shared board + your duchy + the opponent's duchy, all visible
@@ -2322,13 +2328,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   </span>
                 );
               })()}
-              <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
-                {over ? "Game over"
-                  : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
-                  : aiThinking ? "Bot is playing…"
-                  : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
-                  : `${players[game.turn] || "Opponent"}'s turn`}
-              </span>
+              {!over && (
+                <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
+                  {setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
+                    : aiThinking ? "Bot is playing…"
+                    : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
+                    : `${players[game.turn] || "Opponent"}'s turn`}
+                </span>
+              )}
             </div>
             <div className="coc-whitedie">
               <div className="coc-die white" title="White die — sets which depot gets goods this phase"><Pips n={game.white_die} /></div>
