@@ -581,10 +581,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-tile-pick{cursor:pointer;animation:coc-tilepick 1.1s ease-in-out infinite}
 @keyframes coc-tilepick{0%,100%{filter:brightness(1.05)}50%{filter:brightness(1.5)}}
 /* hexagon board layout */
-/* Match the duchy head's height (h3 + a sm-button row) so "The Board" sits at the
-   same height as "Your Duchy"; the small white die floats at the right edge. The
-   compact head + tighter track (below) frees vertical space for the depot ring. */
-.coc-board-head{display:flex;justify-content:space-between;align-items:center;min-height:32px;margin-bottom:8px}
+/* Top-align "The Board" (flex-start) so its gap below the panel edge matches the
+   duchy heads' in every state; the small white die floats at the right. min-height
+   matches the duchy heads so the row is the same height. The tight margin + track
+   (below) frees vertical space for the depot ring. */
+.coc-board-head{display:flex;justify-content:space-between;align-items:flex-start;min-height:30px;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
 .coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
 .coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
@@ -595,7 +596,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* turn-order track — a boxed block ABOVE the depot ring. It used to be absolutely
    pinned into the panel's left gutter, but the board now shares the screen with both
    duchies (no gutter), so it flows in the normal column like on mobile. */
-.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:6px 9px;margin:0 0 6px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:5px 9px;margin:0 0 4px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
 .coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
@@ -608,7 +609,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 
 /* duchy panel: controls stacked ABOVE the board (the panel lives in a grid column
    now that both duchies share the screen — no room for the old side-by-side split) */
-.coc-duchy-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+/* Top-align the h3 (flex-start) so "Your Duchy — X VP" sits at the same small gap
+   below the panel edge whether or not the action buttons are present — otherwise the
+   h3 jumps up at game-over (buttons gone) and no longer matches "The Board". */
+.coc-duchy-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;min-height:30px}
 .coc-duchy-head h3{margin-bottom:0}
 .coc-duchy-layout{display:flex;flex-direction:column;gap:14px}
 .coc-duchy-controls{display:flex;flex-direction:column;gap:14px}
@@ -2428,7 +2432,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         {/* Your area: dice/storage/goods controls, your duchy board below */}
         <div className="coc-panel">
           <div className="coc-duchy-head">
-            <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
+            {/* At game end show the FINAL score (leftover resources + monastery
+                end-game bonuses folded in) so it matches the top score bar. */}
+            <h3>Your Duchy — {over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)} VP</h3>
             {/* Always shown during play (not setup/over) so the panel keeps a stable
                 height across turns; each button just disables (fades) when it can't act,
                 including on the opponent's turn (!myTurnRaw). */}
@@ -2559,7 +2565,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         {opp && (
           <div className="coc-panel">
             <div className="coc-duchy-head">
-              <h3>{players[oppId] || "Opponent"} — {opp.vp ?? 0} VP</h3>
+              <h3>{players[oppId] || "Opponent"} — {over && fscore?.[oppId] != null ? fscore[oppId] : (opp.vp ?? 0)} VP</h3>
             </div>
             <div className="coc-oppbar coc-dicebar">
               {oppDice && (<>
