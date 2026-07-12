@@ -415,12 +415,12 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 11 },   // 1 top
-  { left: 83, top: 26 },   // 2 top-right
-  { left: 83, top: 74 },   // 3 bottom-right
-  { left: 50, top: 89 },   // 4 bottom
-  { left: 17, top: 74 },   // 5 bottom-left
-  { left: 17, top: 26 },   // 6 top-left
+  { left: 50, top: 9 },    // 1 top
+  { left: 83, top: 25 },   // 2 top-right
+  { left: 83, top: 75 },   // 3 bottom-right
+  { left: 50, top: 91 },   // 4 bottom
+  { left: 17, top: 75 },   // 5 bottom-left
+  { left: 17, top: 25 },   // 6 top-left
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -581,7 +581,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-tile-pick{cursor:pointer;animation:coc-tilepick 1.1s ease-in-out infinite}
 @keyframes coc-tilepick{0%,100%{filter:brightness(1.05)}50%{filter:brightness(1.5)}}
 /* hexagon board layout */
-.coc-board-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+/* Match the duchy head's height (h3 + a sm-button row) so "The Board" sits at the
+   same height as "Your Duchy"; the small white die floats at the right edge. The
+   compact head + tighter track (below) frees vertical space for the depot ring. */
+.coc-board-head{display:flex;justify-content:space-between;align-items:center;min-height:32px;margin-bottom:8px}
 .coc-board-head h3{margin-bottom:0}
 .coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
 .coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
@@ -592,7 +595,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* turn-order track — a boxed block ABOVE the depot ring. It used to be absolutely
    pinned into the panel's left gutter, but the board now shares the screen with both
    duchies (no gutter), so it flows in the normal column like on mobile. */
-.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:7px 9px;margin:0 0 8px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.coc-track-block{max-width:340px;background:var(--surface2);border:1px solid var(--gold);border-radius:8px;padding:6px 9px;margin:0 0 6px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
 .coc-track{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin:0}
 .coc-track-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;white-space:nowrap}
 .coc-track-spaces{display:flex;gap:3px;align-items:stretch}
@@ -679,7 +682,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-tile-ghost:hover{transform:none}
 .coc-tile-ghost::after{content:"";position:absolute;inset:3px;background:var(--surface2);clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-whitedie{display:flex;align-items:center;gap:6px;margin-left:auto}
-.coc-whitedie .lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase}
+.coc-whitedie .coc-die{width:30px;height:30px}
 .coc-dicebar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .coc-die{width:46px;height:46px;border-radius:8px;background:#f3ead8;color:#1a1010;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;position:relative}
 .coc-die.sel{border-color:var(--gold);box-shadow:0 0 8px rgba(201,168,76,.6)}
@@ -1035,9 +1038,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
   // Description shown when the face-down "sold goods" pile is clicked/hovered.
-  const soldGoodsDesc = (n, mine) =>
-    `${mine ? "You have" : "They have"} sold ${n} good${n === 1 ? "" : "s"} this game. `
-    + "Sold goods leave your storage but count toward certain monasteries' end-game VP bonuses.";
+  const soldGoodsDesc = (n) => `Sold ${n} good${n === 1 ? "" : "s"} this game.`;
 
   // ── derived ──
   const game = roomData?.game;
@@ -2315,8 +2316,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-board-head">
             <h3>The Board</h3>
             <div className="coc-whitedie">
-              <span className="lbl">White die</span>
-              <div className="coc-die white" title="white die (sets the goods depot)"><Pips n={game.white_die} /></div>
+              <div className="coc-die white" title="White die — sets which depot gets goods this phase"><Pips n={game.white_die} /></div>
             </div>
           </div>
 
@@ -2536,8 +2536,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       );
                     })}
                     <span className={`coc-goods-sold${(me?.sold_goods?.length || 0) ? "" : " none"}`}
-                      title={soldGoodsDesc(me?.sold_goods?.length || 0, true)}
-                      onClick={() => setToast(soldGoodsDesc(me?.sold_goods?.length || 0, true))}>
+                      title={soldGoodsDesc(me?.sold_goods?.length || 0)}
+                      onClick={() => setToast(soldGoodsDesc(me?.sold_goods?.length || 0))}>
                       <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
                     </span>
                   </div>
@@ -2600,8 +2600,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     </span>
                   ))}
                   <span className={`coc-goods-sold${(opp.sold_goods?.length || 0) ? "" : " none"}`}
-                    title={soldGoodsDesc(opp.sold_goods?.length || 0, false)}
-                    onClick={() => setToast(soldGoodsDesc(opp.sold_goods?.length || 0, false))}>
+                    title={soldGoodsDesc(opp.sold_goods?.length || 0)}
+                    onClick={() => setToast(soldGoodsDesc(opp.sold_goods?.length || 0))}>
                     <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}
                   </span>
                 </div>
