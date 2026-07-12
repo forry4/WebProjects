@@ -502,6 +502,11 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-top-lobby .coc-title{flex:0 0 auto;text-align:center}
 .coc-top-lobby .coc-user{flex:1 1 0;text-align:right}
 .coc-top-lobby + .coc-wrap{padding-top:18px}
+/* Game-screen top bar: back button left, title truly centered, empty right spacer. */
+.coc-top-game{display:flex;align-items:center;gap:12px}
+.coc-top-game .coc-top-left{flex:1 1 0;justify-content:flex-start}
+.coc-top-game .coc-title{flex:0 0 auto;text-align:center}
+.coc-top-game .coc-top-right{flex:1 1 0}
 .coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
 .coc-btn:disabled{opacity:.35;cursor:not-allowed}
 .coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
@@ -545,7 +550,6 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
 .coc-code{font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;letter-spacing:.3em;color:var(--gold);background:var(--surface2);border:1px dashed var(--border);border-radius:var(--radius);padding:12px;margin:14px 0;cursor:pointer}
 /* game */
-.coc-game{display:grid;grid-template-columns:1fr;gap:16px}
 .coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
@@ -846,8 +850,9 @@ html,body{margin:0;padding:0;background:#120c0d}
    equal-specificity ties against the base rules above. */
 .coc-wrap-game{max-width:1800px}
 /* grid items STRETCH (no align-items:start) so all three panels share the row's
-   height — the board panel then flex-fills its spare height with the depot ring */
-.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px}
+   height — the board panel then flex-fills its spare height with the depot ring.
+   The bottom margin is the buffer between the board/duchies and the move log. */
+.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:16px}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
 .coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
@@ -869,7 +874,7 @@ html,body{margin:0;padding:0;background:#120c0d}
    face-down pile of goods you've already sold, pinned to its right edge. It sits
    BESIDE the storage row and must not grow/shrink with the goods you hold. */
 .coc-goods-row{width:260px;max-width:100%;gap:6px;padding:7px 8px}
-.coc-goods-sold{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:4px}
+.coc-goods-sold{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);margin-left:auto;padding-left:4px;cursor:pointer}
 .coc-goods-sold.none{opacity:.45}
 .coc-goods-back{width:30px;height:30px;border-radius:4px;background:linear-gradient(140deg,#5a4046 0%,#3a292e 55%,#2a1d21 100%);box-shadow:-2px 2px 0 -1px #241a1d,-4px 4px 0 -2px #191114,inset 0 0 0 1px rgba(255,255,255,.14)}
 /* your storage + goods, side by side (wraps only when the column is truly narrow) */
@@ -1029,6 +1034,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const playerName = authUser?.name || "Player";
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
+  // Description shown when the face-down "sold goods" pile is clicked/hovered.
+  const soldGoodsDesc = (n, mine) =>
+    `${mine ? "You have" : "They have"} sold ${n} good${n === 1 ? "" : "s"} this game. `
+    + "Sold goods leave your storage but count toward certain monasteries' end-game VP bonuses.";
 
   // ── derived ──
   const game = roomData?.game;
@@ -2215,11 +2224,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   return (
     <div className="coc"><style>{css}</style>
       <div className="coc-wrap coc-wrap-game">
-        <div className="coc-top">
+        <div className="coc-top coc-top-game">
           <div className="coc-top-left">
             <button className="coc-btn ghost sm" onClick={over ? () => setReviewing(false) : leaveToLobby}>← {over ? "Results" : "Menu"}</button>
-            <span className="coc-title">Castles of Crimson</span>
           </div>
+          <span className="coc-title">Castles of Crimson</span>
+          <span className="coc-top-right" />
         </div>
 
         <div className="coc-statusbar">
@@ -2419,15 +2429,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-panel">
           <div className="coc-duchy-head">
             <h3>Your Duchy — {me?.vp ?? 0} VP</h3>
-            {game.turn === myId && !over && !setupPhase && (
+            {/* Always shown during play (not setup/over) so the panel keeps a stable
+                height across turns; each button just disables (fades) when it can't act,
+                including on the opponent's turn (!myTurnRaw). */}
+            {!over && !setupPhase && (
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="coc-btn ghost sm" disabled={!selStorage || pendingMine}
+                <button className="coc-btn ghost sm" disabled={!myTurnRaw || !selStorage || pendingMine}
                   title="Discard the selected storage tile (back to the box) — free, anytime on your turn"
                   onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
-                <button className="coc-btn ghost sm" disabled={!hasActed}
+                <button className="coc-btn ghost sm" disabled={!myTurnRaw || !hasActed}
                   title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
                   onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
-                <button className="coc-btn crimson sm" disabled={!bothDiceUsed || pendingMine}
+                <button className="coc-btn crimson sm" disabled={!myTurnRaw || !bothDiceUsed || pendingMine}
                   title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
                   onClick={() => mv({ type: "end_turn" })}>End Turn</button>
               </div>
@@ -2523,7 +2536,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       );
                     })}
                     <span className={`coc-goods-sold${(me?.sold_goods?.length || 0) ? "" : " none"}`}
-                      title={`Goods you've sold this game: ${me?.sold_goods?.length || 0}`}>
+                      title={soldGoodsDesc(me?.sold_goods?.length || 0, true)}
+                      onClick={() => setToast(soldGoodsDesc(me?.sold_goods?.length || 0, true))}>
                       <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
                     </span>
                   </div>
@@ -2547,22 +2561,22 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <div className="coc-duchy-head">
               <h3>{players[oppId] || "Opponent"} — {opp.vp ?? 0} VP</h3>
             </div>
-            <div className="coc-oppbar">
-              {oppDice && (
-                <div className="coc-dicebar">
-                  <span className="coc-pill">Dice</span>
-                  {[0, 1].map((i) => (
-                    <div key={i} className={`coc-die${oppDice.used?.[i] ? " used" : ""}`}
-                      style={{ width: 34, height: 34, cursor: "default" }}><Pips n={oppDice.values[i]} /></div>
-                  ))}
-                </div>
-              )}
-              <span className="coc-token-chip" title="Their workers">
-                <span className="coc-token worker" data-opp-workers="1" style={{ width: 34, height: 34, fontSize: "1rem" }}>⚒</span><b>{opp.workers ?? 0}</b>
-              </span>
-              <span className="coc-token-chip" title="Their silver">
-                <span className="coc-token silver" data-opp-silver="1" style={{ width: 34, height: 34, fontSize: "1rem" }}>⛃</span><b>{opp.silver ?? 0}</b>
-              </span>
+            <div className="coc-oppbar coc-dicebar">
+              {oppDice && (<>
+                <span className="coc-pill">Dice</span>
+                {[0, 1].map((i) => (
+                  <div key={i} className={`coc-die${oppDice.used?.[i] ? " used" : ""}`}
+                    style={{ cursor: "default" }}><Pips n={oppDice.values[i]} /></div>
+                ))}
+              </>)}
+              <div className="coc-resbar">
+                <span className="coc-token-chip" title="Their workers">
+                  <span className="coc-token worker" data-opp-workers="1">⚒</span><b>{opp.workers ?? 0}</b>
+                </span>
+                <span className="coc-token-chip" title="Their silver">
+                  <span className="coc-token silver" data-opp-silver="1">⛃</span><b>{opp.silver ?? 0}</b>
+                </span>
+              </div>
             </div>
             <div className="coc-opp-sections">
               <div>
@@ -2586,7 +2600,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     </span>
                   ))}
                   <span className={`coc-goods-sold${(opp.sold_goods?.length || 0) ? "" : " none"}`}
-                    title={`Goods they've sold this game: ${opp.sold_goods?.length || 0}`}>
+                    title={soldGoodsDesc(opp.sold_goods?.length || 0, false)}
+                    onClick={() => setToast(soldGoodsDesc(opp.sold_goods?.length || 0, false))}>
                     <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}
                   </span>
                 </div>
