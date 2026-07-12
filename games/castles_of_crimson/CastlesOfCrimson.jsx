@@ -416,11 +416,11 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
   { left: 50, top: 9 },    // 1 top
-  { left: 83, top: 25 },   // 2 top-right
-  { left: 83, top: 75 },   // 3 bottom-right
-  { left: 50, top: 91 },   // 4 bottom
-  { left: 17, top: 75 },   // 5 bottom-left
-  { left: 17, top: 25 },   // 6 top-left
+  { left: 83, top: 33 },   // 2 top-right
+  { left: 83, top: 67 },   // 3 bottom-right
+  { left: 50, top: 85 },   // 4 bottom
+  { left: 17, top: 67 },   // 5 bottom-left
+  { left: 17, top: 33 },   // 6 top-left
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -507,6 +507,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-top-game .coc-top-left{flex:1 1 0;justify-content:flex-start}
 .coc-top-game .coc-title{flex:0 0 auto;text-align:center}
 .coc-top-game .coc-top-right{flex:1 1 0}
+.coc-top-abandon{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 .coc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 16px;border-radius:var(--radius);border:none;cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;transition:all .15s;white-space:nowrap}
 .coc-btn:disabled{opacity:.35;cursor:not-allowed}
 .coc-btn.gold{background:var(--gold);color:#120c0d}.coc-btn.gold:hover:not(:disabled){background:var(--gold-l)}
@@ -585,8 +586,9 @@ html,body{margin:0;padding:0;background:#120c0d}
    duchy heads' in every state; the small white die floats at the right. min-height
    matches the duchy heads so the row is the same height. The tight margin + track
    (below) frees vertical space for the depot ring. */
-.coc-board-head{display:flex;justify-content:space-between;align-items:flex-start;min-height:30px;margin-bottom:4px}
+.coc-board-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;min-height:30px;margin-bottom:4px}
 .coc-board-head h3{margin-bottom:0}
+.coc-board-status{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
 .coc-board-hex{position:relative;width:100%;max-width:640px;margin:6px auto 0;aspect-ratio:1/0.9}
 .coc-board-hex .coc-depot{position:absolute;width:34%;min-height:96px;padding:6px;transform:translate(-50%,-50%);display:flex;flex-direction:column;justify-content:center}
 /* central black depot: a dark box holding the kite of tiles (positioned absolutely) */
@@ -656,7 +658,9 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc .coc-token{width:40px;height:40px;font-size:1.15rem}
   .coc .coc-token-chip{gap:5px}
   /* fit the "Color bonus" label + all 6 color chips on one phone row (down to ~360px) */
-  .coc .coc-bonusbar{gap:4px;padding:7px 6px}
+  .coc .coc-bonusbar{display:flex;flex-direction:column;align-items:center;gap:6px;padding:7px 6px}
+  .coc .coc-bonus-groups{justify-content:center;gap:4px}
+  .coc .coc-bonus-spacer{display:none}
   .coc .coc-bonusbar-lbl{letter-spacing:.05em}
   .coc .coc-bonuschip{gap:2px}
   .coc .coc-bonuschip b{font-size:.8rem}
@@ -825,8 +829,12 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-log div{padding:2px 0;border-bottom:1px solid rgba(62,42,46,.4)}
 .coc-log-t{display:inline-block;min-width:26px;margin-right:6px;color:var(--gold);opacity:.75;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;font-weight:700}
 .coc-log-phase{text-align:center;color:var(--gold);opacity:.85;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;padding:4px 0!important}
-/* Color-completion bonus strip (large = 1st to finish a color, small = 2nd). */
-.coc-bonusbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+/* Bonuses row: phase/size/color bonuses (left group) + centered score. */
+.coc-bonusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin:0 0 10px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+.coc-bonus-groups{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.coc-bonus-sec{display:inline-flex;align-items:center;gap:6px}
+.coc-bonuses-lead{color:var(--gold);margin-right:2px}
+.coc-bonus-spacer{min-width:0}
 .coc-bonusbar-lbl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
 .coc-regbonus-lbl{display:inline-flex;align-items:center;gap:6px;color:var(--text-dim)}
 .coc-regbonus{font-size:.98rem;color:var(--gold-l);letter-spacing:.02em}
@@ -2234,47 +2242,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <button className="coc-btn ghost sm" onClick={over ? () => setReviewing(false) : leaveToLobby}>← {over ? "Results" : "Menu"}</button>
           </div>
           <span className="coc-title">Castles of Crimson</span>
-          <span className="coc-top-right" />
-        </div>
-
-        <div className="coc-statusbar">
-          <div className="coc-status-left">
-            <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
-            <span className="coc-pill">Round <b>{game.round}/5</b></span>
-            {(() => {
-              // Goods still to be handed out THIS PHASE: the queued goods not yet placed
-              // on a depot, shown in deal order (leftmost = next). One is dealt at the
-              // start of each round, so this counts down 5 -> 0 across the phase.
-              const q = game.goods_queue || [];
-              return (
-                <span className="coc-pill coc-goods-left" title="Goods still to be handed out this phase (next first)">
-                  <span className="coc-goods-left-lbl">Goods left</span>
-                  {q.length === 0
-                    ? <span style={{ opacity: .6 }}>none</span>
-                    : q.map((g, i) => (
-                        <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
-                          style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
-                      ))}
-                </span>
-              );
-            })()}
-            <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
-              {over ? "Game over"
-                : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
-                : aiThinking ? "Bot is playing…"
-                : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
-                : `${players[game.turn] || "Opponent"}'s turn`}
-            </span>
-          </div>
-          <div className="coc-vp coc-vp-click" onClick={() => over ? setReviewing(false) : setShowScores(true)}
-            title={over ? "Final score (with end-of-game bonuses). Click for the full breakdown" : "Click for the full VP breakdown"}>
-            {/* At game end show the FINAL score (leftover resources + monastery bonuses
-                folded in); during play show the live placed-tile VP. */}
-            <span className="v">{me ? "You" : ""} <b>{over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)}</b></span>
-            {opp && <span className="v">{players[oppId]} <b>{over && fscore?.[oppId] != null ? fscore[oppId] : opp.vp}</b></span>}
-            <span className="coc-vp-info">ⓘ</span>
-          </div>
-          <div className="coc-status-right">
+          <div className="coc-top-right coc-top-abandon">
             {!over && (confirmAbandon
               ? <>
                   <span className="coc-card-meta">Abandon game?</span>
@@ -2285,31 +2253,47 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           </div>
         </div>
 
-        {/* Region-completion VP (phase bonus + size bonus) + color-completion bonuses
-            (which colors still award their large=1st / small=2nd VP bonus). */}
-        <div className="coc-bonusbar" title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a color">
-          <span className="coc-bonusbar-lbl coc-regbonus-lbl"
-            title="Complete any region THIS phase for this many bonus VP, on top of its size bonus. It shrinks each phase: A +10 → B +8 → C +6 → D +4 → E +2.">
-            Region phase bonus <b className="coc-regbonus">+{PHASE_BONUS[game.phase_letter] ?? 0}</b>
-          </span>
-          <span className="coc-bonus-div" />
-          <span className="coc-bonusbar-lbl coc-regbonus-lbl"
-            title="Fixed VP for completing a region, by its number of spaces (1–8). Added to the region phase bonus.">
-            Region size bonus <b className="coc-regbonus coc-regsize">{AREA_SCORE.join("/")}</b>
-          </span>
-          <span className="coc-bonus-div" />
-          <span className="coc-bonusbar-lbl">Color bonus</span>
-          {BOARD_COLORS.map((c) => {
-            const rem = game.bonus_tiles?.[c] || [];
-            const size = rem.length >= 2 ? "large" : rem.length === 1 ? "small" : null;
-            return (
-              <span key={c} className={`coc-bonuschip${size ? "" : " gone"}`}
-                title={`${colorLabel(c)}: ${size ? `${size} bonus available (+${rem[0]} VP)` : "both bonuses taken"}`}>
-                <span className="coc-bonus-sw" style={{ background: TILE_HEX[c] }} />
-                {size ? <b>+{rem[0]}</b> : <i>—</i>}
-              </span>
-            );
-          })}
+        {/* Bonuses row: region phase/size + color-completion bonuses on the left, with
+            the live score centered. (Replaces the old status box — phase/round/goods-left
+            moved onto the board header.) */}
+        <div className="coc-bonusbar">
+          <div className="coc-bonus-groups">
+            <span className="coc-bonusbar-lbl coc-bonuses-lead">Bonuses:</span>
+            <span className="coc-bonus-sec coc-regbonus-lbl"
+              title="Complete any region THIS phase for this many bonus VP, on top of its size bonus. It shrinks each phase: A +10 → B +8 → C +6 → D +4 → E +2.">
+              <span className="coc-bonusbar-lbl">Phase</span> <b className="coc-regbonus">+{PHASE_BONUS[game.phase_letter] ?? 0}</b>
+            </span>
+            <span className="coc-bonus-div" />
+            <span className="coc-bonus-sec coc-regbonus-lbl"
+              title="Fixed VP for completing a region, by its number of spaces (1–8). Added to the region phase bonus.">
+              <span className="coc-bonusbar-lbl">Size</span> <b className="coc-regbonus coc-regsize">{AREA_SCORE.join("/")}</b>
+            </span>
+            <span className="coc-bonus-div" />
+            <span className="coc-bonus-sec"
+              title="VP for being the 1st (large) / 2nd (small) player to fully complete every space of a color">
+              <span className="coc-bonusbar-lbl">Color</span>
+              {BOARD_COLORS.map((c) => {
+                const rem = game.bonus_tiles?.[c] || [];
+                const size = rem.length >= 2 ? "large" : rem.length === 1 ? "small" : null;
+                return (
+                  <span key={c} className={`coc-bonuschip${size ? "" : " gone"}`}
+                    title={`${colorLabel(c)}: ${size ? `${size} bonus available (+${rem[0]} VP)` : "both bonuses taken"}`}>
+                    <span className="coc-bonus-sw" style={{ background: TILE_HEX[c] }} />
+                    {size ? <b>+{rem[0]}</b> : <i>—</i>}
+                  </span>
+                );
+              })}
+            </span>
+          </div>
+          <div className="coc-vp coc-vp-click" onClick={() => over ? setReviewing(false) : setShowScores(true)}
+            title={over ? "Final score (with end-of-game bonuses). Click for the full breakdown" : "Click for the full VP breakdown"}>
+            {/* At game end show the FINAL score (leftover resources + monastery bonuses
+                folded in); during play show the live placed-tile VP. */}
+            <span className="v">{me ? "You" : ""} <b>{over && fscore?.[myId] != null ? fscore[myId] : (me?.vp ?? 0)}</b></span>
+            {opp && <span className="v">{players[oppId]} <b>{over && fscore?.[oppId] != null ? fscore[oppId] : opp.vp}</b></span>}
+            <span className="coc-vp-info">ⓘ</span>
+          </div>
+          <span className="coc-bonus-spacer" />
         </div>
 
         {/* The table: shared board + your duchy + the opponent's duchy, all visible
@@ -2318,7 +2302,34 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         {/* Shared board: 6 numbered depots arranged as a hexagon, black depot centered */}
         <div className="coc-panel coc-board-panel coc-col-board">
           <div className="coc-board-head">
-            <h3>The Board</h3>
+            <div className="coc-board-status">
+              <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
+              <span className="coc-pill">Round <b>{game.round}/5</b></span>
+              {(() => {
+                // Goods still to be handed out THIS PHASE: the queued goods not yet placed
+                // on a depot, shown in deal order (leftmost = next). One is dealt at the
+                // start of each round, so this counts down 5 -> 0 across the phase.
+                const q = game.goods_queue || [];
+                return (
+                  <span className="coc-pill coc-goods-left" title="Goods still to be handed out this phase (next first)">
+                    <span className="coc-goods-left-lbl">Goods left</span>
+                    {q.length === 0
+                      ? <span style={{ opacity: .6 }}>none</span>
+                      : q.map((g, i) => (
+                          <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
+                            style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
+                        ))}
+                  </span>
+                );
+              })()}
+              <span className={`coc-turnbadge ${myTurnRaw ? "you" : "them"}`}>
+                {over ? "Game over"
+                  : setupPhase ? (setupMine ? "Place your starting castle" : aiThinking ? "Bot is choosing…" : `${players[game.turn] || "Opponent"} is choosing…`)
+                  : aiThinking ? "Bot is playing…"
+                  : myTurnRaw ? (pendingMine ? "Your decision" : "Your turn")
+                  : `${players[game.turn] || "Opponent"}'s turn`}
+              </span>
+            </div>
             <div className="coc-whitedie">
               <div className="coc-die white" title="White die — sets which depot gets goods this phase"><Pips n={game.white_die} /></div>
             </div>
@@ -2333,7 +2344,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <div className="coc-track-spaces">
                 {(game.track || []).map((stack, s) => (
                   <div className="coc-track-space" key={s}>
-                    <span className="coc-track-snum">{s}</span>
                     <div className="coc-track-stack">
                       {[...stack].reverse().map((pid) => (
                         <div key={pid} className={`coc-track-token${pid === game.start_player ? " start" : ""}`}
@@ -2347,7 +2357,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 ))}
               </div>
             </div>
-            <div className="coc-track-cap">furthest right and furthest up goes first · each ship moves you 1 space right</div>
           </div>
 
           <div className="coc-board-hex">
