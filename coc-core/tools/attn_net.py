@@ -46,7 +46,12 @@ PLACE_A1 = torch.tensor([TIED[t][1] for t in sorted(TIED) if TIED[t][1] is not N
 
 
 class AttnNet(nn.Module):
-    def __init__(self):
+    """`aux_dim>0` adds a trunk-shared auxiliary regression head (terminal
+    score-decomposition targets — the +9.6pp MLP-distill lever, 2026-07-12)
+    that is EXCLUDED from export_json/import_json: exported jsons stay
+    shape-identical, so attn.rs / the sidecar / parity checks need no change."""
+
+    def __init__(self, aux_dim: int = 0):
         super().__init__()
         self.emb = nn.Linear(TOK_F, D)
         self.wq = nn.ModuleList(nn.Linear(D, D, bias=False) for _ in range(LAYERS))
@@ -62,6 +67,8 @@ class AttnNet(nn.Module):
         self.vh = nn.Linear(TRUNK, 1)
         self.pg = nn.Linear(TRUNK, len(GIDX))
         self.ptok = nn.Linear(D, 2)
+        self.ah = nn.Linear(TRUNK, aux_dim) if aux_dim > 0 else None
+        self.aux_dim = aux_dim
         # index tensors as (non-persistent) buffers so they live on the net's
         # device — indexing CUDA tensors with CPU indices does a host->device
         # copy per call, which is both slow and ILLEGAL inside CUDA-graph capture
@@ -71,9 +78,8 @@ class AttnNet(nn.Module):
         self.register_buffer("b_place_tok", PLACE_TOK.clone(), persistent=False)
         self.register_buffer("b_place_a1", PLACE_A1.clone(), persistent=False)
 
-    def forward(self, tokens, mask, state):
-        """tokens [B,TOK_N,TOK_F], mask [B,TOK_N] (0/1), state [B,TOK_STATE]
-        -> (value [B], policy [B,N_ACT] with -1e9 at masked/absent slots)."""
+    def _backbone(self, tokens, mask, state):
+        """Shared encoder -> (trunk hidden [B,TRUNK], token states x [B,T,D])."""
         b = tokens.shape[0]
         x = self.emb(tokens)                                  # [B,T,D]
         keep = (mask >= 0.5)[:, None, None, :]                # SDPA: True = attend
@@ -88,7 +94,10 @@ class AttnNet(nn.Module):
             x = self.ln2[l](x + self.f2[l](torch.relu(self.f1[l](x))))
         pool = (x * mask[:, :, None]).sum(1) / mask.sum(1, keepdim=True).clamp(min=1.0)
         cat = torch.cat([pool, self.se(state)], dim=1)
-        ht = torch.relu(self.trunk(cat))
+        return torch.relu(self.trunk(cat)), x
+
+    def _heads(self, ht, x, mask, tokens):
+        b = tokens.shape[0]
         val = torch.tanh(self.vh(ht)).squeeze(-1)
         pol = torch.full((b, N_ACT), NEG, device=tokens.device, dtype=tokens.dtype)
         pol[:, self.b_gidx] = self.pg(ht)
@@ -100,12 +109,31 @@ class AttnNet(nn.Module):
             mask[:, self.b_place_tok] >= 0.5, tl[:, self.b_place_tok, 1], neg)
         return val, pol
 
-    def forward_flat(self, rows):
-        """rows [B, 1024] in the tokfeats layout -> (value, policy)."""
+    def forward(self, tokens, mask, state):
+        """tokens [B,TOK_N,TOK_F], mask [B,TOK_N] (0/1), state [B,TOK_STATE]
+        -> (value [B], policy [B,N_ACT] with -1e9 at masked/absent slots)."""
+        ht, x = self._backbone(tokens, mask, state)
+        return self._heads(ht, x, mask, tokens)
+
+    def forward_with_aux(self, tokens, mask, state):
+        """forward + the aux head's regression output (training only)."""
+        ht, x = self._backbone(tokens, mask, state)
+        val, pol = self._heads(ht, x, mask, tokens)
+        return val, pol, self.ah(ht)
+
+    @staticmethod
+    def split_flat(rows):
         tokens = rows[:, : TOK_N * TOK_F].view(-1, TOK_N, TOK_F)
         mask = rows[:, TOK_N * TOK_F : TOK_N * TOK_F + TOK_N]
         state = rows[:, TOK_N * TOK_F + TOK_N :]
-        return self.forward(tokens, mask, state)
+        return tokens, mask, state
+
+    def forward_flat(self, rows):
+        """rows [B, 1024] in the tokfeats layout -> (value, policy)."""
+        return self.forward(*self.split_flat(rows))
+
+    def forward_with_aux_flat(self, rows):
+        return self.forward_with_aux(*self.split_flat(rows))
 
 
 def flat(t):
@@ -164,13 +192,14 @@ if __name__ == "__main__":
         print(__doc__)
 
 
-def import_json(path: str) -> "AttnNet":
+def import_json(path: str, aux_dim: int = 0) -> "AttnNet":
     """Inverse of export_json — load an exported net back into torch (warm starts,
-    and the sidecar's attention branch)."""
+    and the sidecar's attention branch). `aux_dim` attaches a FRESH-init aux
+    head (the exported json never carries one)."""
     with open(path, encoding="utf-8") as f:
         j = json.load(f)
     assert j["t"] == TOK_N and j["d"] == D and j["trunk"] == TRUNK, "shape mismatch"
-    net = AttnNet()
+    net = AttnNet(aux_dim=aux_dim)
     with torch.no_grad():
         def cp(param, vals):
             param.copy_(torch.tensor(vals, dtype=torch.float32).view_as(param))
