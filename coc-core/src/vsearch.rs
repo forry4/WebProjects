@@ -214,6 +214,59 @@ pub fn hybrid_netval_eval_steps<N: crate::valuenet::PvEval + ?Sized>(
     (p, v)
 }
 
+/// Staged-asset score for the STAGER sparring style (VP-ish units): convex
+/// credit for in-progress regions (near-complete big regions dominate — the
+/// human's phase-E avalanche pattern from the 2026-07-11 game mining), plus
+/// goods stock and mines. Completed regions are excluded (already realized VP).
+pub fn staged_assets(s: &State, seat: usize) -> f64 {
+    use crate::boards_gen::{N_REGIONS, REGION_MASK, REGION_SIZE};
+    use crate::tiles::AREA_SCORE;
+    let p = &s.players[seat];
+    let b = s.boards[seat] as usize;
+    let mut score = 0.0;
+    for r in 0..N_REGIONS[b] as usize {
+        let size = REGION_SIZE[b][r] as usize;
+        let filled = (p.filled & REGION_MASK[b][r]).count_ones() as usize;
+        if 0 < filled && filled < size {
+            let frac = filled as f64 / size as f64;
+            score += AREA_SCORE[size - 1] as f64 * frac * frac;
+        }
+    }
+    let goods: u32 = p.goods.iter().map(|&g| g as u32).sum();
+    score += goods as f64;
+    score += 3.0 * p.mines as f64;
+    score
+}
+
+/// Style-forcing value bias for the stager: rewards HOLDING staged assets
+/// (differential vs the opponent), faded by phases-left so phase E reverts to
+/// pure champion play (an incomplete region at game end is worth nothing — the
+/// stager must cash its stage, exactly the human pattern). w calibrates the
+/// forcing strength (gate `:stager@W` vs the plain champion to pick it).
+pub fn stager_bias(s: &State, seat: usize, w: f64) -> f64 {
+    let fade = (4.0 - s.phase as f64) / 4.0;
+    if fade <= 0.0 {
+        return 0.0;
+    }
+    let d = staged_assets(s, seat) - staged_assets(s, 1 - seat);
+    w * fade * (d / 12.0).tanh()
+}
+
+/// netval leaf + the stager style bias (the sparring opponent for league
+/// harvests that inject asymmetric staged-endgame games into training data).
+pub fn hybrid_netval_eval_stager<N: crate::valuenet::PvEval + ?Sized>(
+    net: &N,
+    s: &State,
+    actor: usize,
+    legal: &[usize],
+    rng: &mut Rng,
+    max_steps: usize,
+    w: f64,
+) -> (Vec<f64>, f64) {
+    let (p, v) = hybrid_netval_eval_steps(net, s, actor, legal, rng, max_steps);
+    (p, (v + stager_bias(s, actor, w)).clamp(-1.0, 1.0))
+}
+
 /// PV-net search: visits + root value (root actor's perspective).
 pub fn root_readout_pv<N: crate::valuenet::PvEval + ?Sized>(
     net: &N,

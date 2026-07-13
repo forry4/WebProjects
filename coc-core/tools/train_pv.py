@@ -5,11 +5,18 @@ Usage (run with the cu128 torch python; outputs land wherever --out points):
       --out C:/Users/Forrest/coc_run/pv_boot.json --epochs 4
 
 Columns (harvest_boot, no header):
-  0 game_id, 1..934 feats, 935 label, 936 margin, 937 root_value, 938 sparse policy
+  0 game_id, 1..934 feats, 935 label, 936 margin, 937 root_value,
+  [938..952 aux x14, only if --aux-dim is set — a harvest_boot build predating
+  the aux columns writes the old 939-field format; --aux-dim 0 (default)
+  parses that], last: sparse policy
 Value target: (1-BETA)*[(1-SHAPE_A)*(2*label-1) + SHAPE_A*tanh(margin/SCALE)]
               + BETA*root_value       (SHAPE_A=0.3, BETA=0.3; SCALE = harvest
               margin std, computed in the stats pass)
 Policy target: normalized sparse visit distribution; loss = MSE + CE.
+Aux target (--aux-dim>0, KataGo-style score-decomposition head; see pv_net.PVNet
+  — trunk-shared, EXCLUDED from export_json, so the exported net is shape-
+  identical to one trained without it): per-column z-scored (stats pass),
+  MSE averaged over columns, weighted by --aux-weight into the total loss.
 Holdout: GAME-split (game_id % 11 == 0 -> val). Early stop on val AUC + top1.
 Exports pv_net JSON + a check file (8 val rows + f32 outputs) for net_export_check.
 """
@@ -34,6 +41,7 @@ import pv_net  # noqa: E402
 from pv_net import N_ACT, PVNet, export_json, load_json  # noqa: E402
 
 IN_DIM = pv_net.IN_DIM  # reset by --in-dim before any parsing
+AUX_DIM = 0  # reset by --aux-dim; 0 = old CSV format (no aux columns)
 
 SHAPE_A = 0.3
 BETA = 0.3
@@ -47,8 +55,14 @@ def parse_row(line):
     label = float(parts[1 + IN_DIM])
     margin = float(parts[2 + IN_DIM])
     rootv = float(parts[3 + IN_DIM])
-    pol = parts[4 + IN_DIM]
-    return gid, feats, label, margin, rootv, pol
+    off = 4 + IN_DIM
+    if AUX_DIM:
+        aux = np.array(parts[off:off + AUX_DIM], dtype=np.float32)
+        pol = parts[off + AUX_DIM]
+    else:
+        aux = None
+        pol = parts[off]
+    return gid, feats, label, margin, rootv, aux, pol
 
 
 def policy_target(pol_str):
@@ -80,6 +94,7 @@ def stats_pass(files, sample_every=8):
     mu = np.zeros(IN_DIM, dtype=np.float64)
     m2 = np.zeros(IN_DIM, dtype=np.float64)
     margins = []
+    aux_rows = [] if AUX_DIM else None
     k = 0
     for path in files:
         with open(path, encoding="utf-8") as f:
@@ -87,19 +102,29 @@ def stats_pass(files, sample_every=8):
                 k += 1
                 if k % sample_every:
                     continue
-                _, feats, _, margin, _, _ = parse_row(line)
+                _, feats, _, margin, _, aux, _ = parse_row(line)
                 n += 1
                 d = feats - mu
                 mu += d / n
                 m2 += d * (feats - mu)
                 margins.append(margin)
+                if AUX_DIM:
+                    aux_rows.append(aux)
     sd = np.sqrt(m2 / max(n - 1, 1))
     sd[sd < 1e-6] = 1.0
     scale = float(np.std(margins)) or 12.0
-    return mu.astype(np.float32), sd.astype(np.float32), scale, k
+    if AUX_DIM:
+        am = np.stack(aux_rows)
+        aux_mu = am.mean(0).astype(np.float32)
+        aux_sd = am.std(0).astype(np.float32)
+        aux_sd[aux_sd < 1e-6] = 1.0
+    else:
+        aux_mu = aux_sd = None
+    return mu.astype(np.float32), sd.astype(np.float32), scale, k, aux_mu, aux_sd
 
 
-def batches(files, want_val, mu, sd, scale, batch, block=32768, shuffle=True, seed=0):
+def batches(files, want_val, mu, sd, scale, batch, aux_mu=None, aux_sd=None,
+            block=32768, shuffle=True, seed=0):
     rng = random.Random(seed)
     buf = []
 
@@ -112,13 +137,22 @@ def batches(files, want_val, mu, sd, scale, batch, block=32768, shuffle=True, se
             x = (x - mu) / sd
             y = np.array([c[1] for c in chunk], dtype=np.float32)
             p = np.stack([c[2] for c in chunk])
-            yield (torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(p))
+            if AUX_DIM:
+                a = np.stack([c[3] for c in chunk])
+                yield (torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(p),
+                       torch.from_numpy(a))
+            else:
+                yield (torch.from_numpy(x), torch.from_numpy(y), torch.from_numpy(p), None)
         buf.clear()
 
-    for gid, feats, label, margin, rootv, pol in stream_rows(files, want_val):
+    for gid, feats, label, margin, rootv, aux, pol in stream_rows(files, want_val):
         shaped = (1 - SHAPE_A) * (2 * label - 1) + SHAPE_A * math.tanh(margin / scale)
         target = (1 - BETA) * shaped + BETA * rootv
-        buf.append((feats, np.float32(target), policy_target(pol), label))
+        if AUX_DIM:
+            a_norm = ((aux - aux_mu) / aux_sd).astype(np.float32)
+            buf.append((feats, np.float32(target), policy_target(pol), a_norm))
+        else:
+            buf.append((feats, np.float32(target), policy_target(pol), None))
         if len(buf) >= block:
             yield from flush()
     yield from flush()
@@ -128,7 +162,7 @@ def evaluate(net, dev, files, mu, sd, scale, batch):
     net.eval()
     vs, labels, top1, n, n_pol = [], [], 0, 0, 0
     with torch.no_grad():
-        for gid, feats, label, margin, rootv, pol in stream_rows(files, True):
+        for gid, feats, label, margin, rootv, aux, pol in stream_rows(files, True):
             vs.append((feats, label, policy_target(pol)))
             if len(vs) >= batch:
                 x = np.stack([v[0] for v in vs])
@@ -168,35 +202,52 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--in-dim", type=int, default=pv_net.IN_DIM,
                     help="feature count in the harvest rows (934=v1, 1078=v2)")
+    ap.add_argument("--trunk", default=None,
+                    help="hidden layer sizes, comma-separated (default 512,256; "
+                         "the Rust loader is shape-generic — dims come from the json)")
+    ap.add_argument("--aux-dim", type=int, default=0,
+                    help="KataGo-style aux score-decomposition head width (0=off; "
+                         "harvest_boot's terminal-score columns give 14). Trunk-shared, "
+                         "EXCLUDED from export — gradient shaping only, zero Rust-side change")
+    ap.add_argument("--aux-weight", type=float, default=0.3,
+                    help="weight on the (per-column z-scored, mean-reduced) aux MSE")
     args = ap.parse_args()
-    global IN_DIM
+    global IN_DIM, AUX_DIM
     IN_DIM = args.in_dim
+    AUX_DIM = args.aux_dim
 
     files = sorted(set(sum((glob.glob(g) for g in args.data.split(";")), [])))
     assert files, f"no files match {args.data}"
     torch.manual_seed(args.seed)
     dev = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"device={dev}, files={len(files)}")
+    print(f"device={dev}, files={len(files)}, aux_dim={AUX_DIM}")
 
     print("stats pass...", flush=True)
-    mu, sd, scale, total_rows = stats_pass(files)
+    mu, sd, scale, total_rows, aux_mu, aux_sd = stats_pass(files)
     print(f"rows~{total_rows}, margin-scale={scale:.2f}")
+    aux_mu_t = torch.from_numpy(aux_mu).to(dev) if AUX_DIM else None
+    aux_sd_t = torch.from_numpy(aux_sd).to(dev) if AUX_DIM else None
 
     if args.warm:
-        net, wmu, wsd = load_json(args.warm)
+        net, wmu, wsd = load_json(args.warm, aux_dim=AUX_DIM)
         mu, sd = np.array(wmu, dtype=np.float32), np.array(wsd, dtype=np.float32)
         print(f"warm-start from {args.warm}")
+    elif args.trunk:
+        trunk = tuple(int(d) for d in args.trunk.split(","))
+        net = PVNet(in_dim=args.in_dim, trunk=trunk, aux_dim=AUX_DIM)
+        print(f"fresh net, trunk={trunk}")
     else:
-        net = PVNet(in_dim=args.in_dim)
+        net = PVNet(in_dim=args.in_dim, aux_dim=AUX_DIM)
     net.to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=args.lr)
 
     best = -1.0
     for ep in range(args.epochs):
         net.train()
-        steps, vloss_s, closs_s = 0, 0.0, 0.0
-        for x, y, p in batches(files, False, mu, sd, scale, args.batch,
-                               seed=args.seed * 100 + ep):
+        steps, vloss_s, closs_s, aloss_s = 0, 0.0, 0.0, 0.0
+        for x, y, p, a in batches(files, False, mu, sd, scale, args.batch,
+                                  aux_mu=aux_mu, aux_sd=aux_sd,
+                                  seed=args.seed * 100 + ep):
             x, y, p = x.to(dev), y.to(dev), p.to(dev)
             val, logits = net(x)
             vloss = torch.mean((val - y) ** 2)
@@ -206,6 +257,12 @@ def main():
             n_pol = (p.sum(1) > 0).sum().clamp(min=1)
             closs = ce_rows.sum() / n_pol
             loss = vloss + closs
+            if AUX_DIM:
+                a = a.to(dev)
+                aux_pred = net.forward_aux(x)
+                aloss = torch.mean((aux_pred - a) ** 2)
+                loss = loss + args.aux_weight * aloss
+                aloss_s += float(aloss)
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -214,8 +271,9 @@ def main():
             steps += 1
         auc, top1, nval = evaluate(net, dev, files, mu, sd, scale, args.batch)
         score = auc + top1
+        aux_str = f" aloss {aloss_s / max(steps,1):.4f}" if AUX_DIM else ""
         print(f"epoch {ep}: vloss {vloss_s / max(steps,1):.4f} closs "
-              f"{closs_s / max(steps,1):.4f} | val AUC {auc:.4f} top1 {top1:.4f} "
+              f"{closs_s / max(steps,1):.4f}{aux_str} | val AUC {auc:.4f} top1 {top1:.4f} "
               f"(n={nval}) {'*BEST*' if score > best else ''}", flush=True)
         if score > best:
             best = score

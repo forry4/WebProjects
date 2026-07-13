@@ -18,7 +18,13 @@
 //!
 //! Writes <out_prefix>.t<k>.csv per thread. Columns (no header):
 //!   game_id, f0..f933, label (1/0 mover won), margin (mover score diff),
-//!   value (searched root value, mover perspective), policy ("a:n a:n ..." sparse)
+//!   value (searched root value, mover perspective),
+//!   m_region,m_color,m_livestock,m_sold,m_mines,m_silver,m_mon_end (mover's
+//!     TERMINAL score decomposition — auxiliary training targets, KataGo-style;
+//!     read from engine.rs's shadow VP ledger + final holdings, backfilled from
+//!     the game's end onto every row like label/margin already are),
+//!   o_region,o_color,o_livestock,o_sold,o_mines,o_silver,o_mon_end (same, opponent),
+//!   policy ("a:n a:n ..." sparse)
 //! Forced (single-legal) decisions are applied without search and NOT recorded.
 //! Board pairs cycle uniformly over the 81 combinations; openings are
 //! visit-temperature-sampled for the first <temp_micro> searched decisions.
@@ -54,6 +60,7 @@ fn root_readout(
     seed: u64,
     mode: Mode,
     net: Option<&dyn PvEval>,
+    stager_w: Option<f64>,
 ) -> (Vec<i32>, f64) {
     match mode {
         Mode::Scaffold => vsearch::root_readout_heur(s, sims, vsearch::C_PUCT, seed),
@@ -76,8 +83,11 @@ fn root_readout(
             let net = net.unwrap();
             let mut search = Search::new(s.clone(), vsearch::C_PUCT);
             let mut rng = Rng::new(seed ^ 0x9E77);
-            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| {
-                vsearch::hybrid_netval_eval(net, st, actor, lg, r)
+            // league mode: the stager seat's decisions add the staged-asset
+            // value bias (style-forcing; see vsearch::stager_bias)
+            let eval = |st: &State, actor: usize, lg: &[usize], r: &mut Rng| match stager_w {
+                Some(w) => vsearch::hybrid_netval_eval_stager(net, st, actor, lg, r, 20, w),
+                None => vsearch::hybrid_netval_eval(net, st, actor, lg, r),
             };
             for _ in 0..sims {
                 search.sim(&mut rng, &eval);
@@ -100,16 +110,46 @@ fn run_thread(
     mode: Mode,
     net: Option<&dyn PvEval>,
     log_enc: feats::Enc,
+    stager: Option<f64>,
+    stager_both: bool,
+    pcr: Option<(u64, u32)>, // sequential-path PCR (mirrors the batched semantics)
+    // OPPONENT-league mode ("vs@path", 2026-07-12): seat (g%2) plays with the
+    // primary net and is the ONLY seat whose rows are recorded; the other seat
+    // plays with this net. The Spender league lesson applied to CoC's observed
+    // divergence (internal gates up, champion yardstick down): train on games
+    // vs the ACTUAL TARGET, learning to beat it — not imitate it (opponent
+    // rows are dropped; training on them would be a weak 300-sim distill).
+    opp: Option<&dyn PvEval>,
+    // shared work queue — see run_thread_batched; same bit-identical argument
+    // now that temp sampling uses a per-game rng (below)
+    queue: &std::sync::atomic::AtomicU64,
+    total_games: u64,
 ) {
+    use std::sync::atomic::Ordering;
     let path = format!("{out}.t{t}.csv");
     let mut w = BufWriter::new(File::create(&path).expect("create out"));
-    let mut rng = Rng::new(seed0 ^ 0xB007_0000 ^ (t as u64) << 32);
-    for g in 0..games {
-        let seed = seed0 + (t as u64) * games + g;
+    let mut done_games = 0u64;
+    loop {
+        let g = queue.fetch_add(1, Ordering::Relaxed);
+        if g >= total_games {
+            break;
+        }
+        let seed = seed0 + g;
         let pair = (seed % 81) as u8;
         let mut s = State::new_game([pair / 9, pair % 9], seed);
         let mut rows: Vec<Row> = Vec::with_capacity(200);
         let mut searched = 0usize;
+        // Seat (g % 2) is the TRAINING seat: the stager bias (league mode) and
+        // the vs@-opponent's other seat both key off it, and alternating it
+        // washes first-player advantage out of the outcome labels. stager_both
+        // (the TEACHER-corpus mode) biases BOTH seats — mirror self-play of
+        // the strongest agent, the r2 imitation-target pattern.
+        let train_seat = (g % 2) as usize;
+        // per-game rngs, same seeding as the batched path: trajectories are
+        // deterministic regardless of which thread pulls the game (the old
+        // thread-level temp rng was the one scheduling-dependent piece)
+        let mut rng = Rng::new(seed ^ 0x7E3A_1100);
+        let mut pcr_rng = Rng::new(seed ^ 0x9C41_0C41);
         while !s.is_over() {
             let legal = engine::legal_actions(&s);
             if legal.len() == 1 {
@@ -117,18 +157,34 @@ fn run_thread(
                 continue;
             }
             let actor = s.actor() as usize;
-            let (visits, value) =
-                root_readout(&s, sims, seed.wrapping_mul(977) + searched as u64, mode, net);
+            let is_train = actor == train_seat || opp.is_none();
+            let acting_net = if is_train { net } else { opp };
+            let sw = stager.filter(|_| stager_both || actor == train_seat);
+            // PCR: FULL cap -> policy+value row; CHEAP cap -> value-only row
+            let full = pcr.is_none_or(|(pm, _)| pcr_rng.next_u64() % 1000 < pm);
+            let cap = if full { sims } else { pcr.unwrap().1 };
+            let (visits, value) = root_readout(
+                &s,
+                cap,
+                seed.wrapping_mul(977) + searched as u64,
+                mode,
+                acting_net,
+                sw,
+            );
             let mut policy = String::new();
-            for &a in &legal {
-                if visits[a] > 0 {
-                    if !policy.is_empty() {
-                        policy.push(' ');
+            if full {
+                for &a in &legal {
+                    if visits[a] > 0 {
+                        if !policy.is_empty() {
+                            policy.push(' ');
+                        }
+                        policy.push_str(&format!("{}:{}", a, visits[a]));
                     }
-                    policy.push_str(&format!("{}:{}", a, visits[a]));
                 }
             }
-            let a = if searched < temp_micro {
+            // opening temperature applies to the TRAINING seat only — a vs@
+            // opponent plays straight (greedy), matching the Spender league
+            let a = if searched < temp_micro && is_train {
                 // temperature 1: sample proportional to visits
                 let total: i64 = legal.iter().map(|&a| visits[a] as i64).sum();
                 let mut pick = (rng.next_u64() % total.max(1) as u64) as i64;
@@ -144,7 +200,9 @@ fn run_thread(
             } else {
                 *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             };
-            rows.push(Row { actor, feats: feats::encode(log_enc, &s, actor), policy, value });
+            if is_train {
+                rows.push(Row { actor, feats: feats::encode(log_enc, &s, actor), policy, value });
+            }
             engine::apply(&mut s, a);
             searched += 1;
         }
@@ -157,13 +215,17 @@ fn run_thread(
             for &f in &r.feats {
                 line.push_str(&format!(",{}", trim_f(f)));
             }
-            line.push_str(&format!(",{label},{margin},{:.4},{}", r.value, r.policy));
+            line.push_str(&format!(",{label},{margin},{:.4}", r.value));
+            push_aux(&mut line, &s, r.actor);
+            line.push_str(&format!(",{}", r.policy));
             writeln!(w, "{line}").expect("write row");
         }
-        if (g + 1) % 100 == 0 {
-            eprintln!("[t{t}] {}/{games} games", g + 1);
+        done_games += 1;
+        if done_games % 100 == 0 {
+            eprintln!("[t{t}] {done_games} games (shared pool of {total_games})");
         }
     }
+    let _ = games; // per-thread quota superseded by the shared queue
     w.flush().expect("flush");
     eprintln!("[t{t}] done -> {path}");
 }
@@ -198,18 +260,26 @@ fn run_thread_batched(
     batch: usize,
     log_enc: feats::Enc,
     pcr: Option<(u64, u32)>, // (full-cap permille, cheap sims)
+    // SHARED work queue (straggler-tail fix, 2026-07-12): threads pull the next
+    // global game index instead of owning a static quota, so the small-batch
+    // drain-tail happens ONCE at the very end of the whole harvest instead of
+    // once per thread (~10-20% of harvest time under PCR). Game seeds derive
+    // from the GLOBAL index and every per-game rng keys off the seed, so the
+    // produced games are BIT-IDENTICAL to static assignment — only their
+    // distribution across the .t<k>.csv files changes.
+    queue: &std::sync::atomic::AtomicU64,
+    total_games: u64,
 ) {
     use coc_core::batch::{step_netval, SearchTask};
+    use std::sync::atomic::Ordering;
     let path = format!("{out}.t{t}.csv");
     let mut w = BufWriter::new(File::create(&path).expect("create out"));
-    let mut next_g = 0u64;
-    let mut mk_slot = |next_g: &mut u64| -> Option<GSlot> {
-        if *next_g >= games {
+    let mk_slot = |queue: &std::sync::atomic::AtomicU64| -> Option<GSlot> {
+        let g = queue.fetch_add(1, Ordering::Relaxed);
+        if g >= total_games {
             return None;
         }
-        let g = *next_g;
-        *next_g += 1;
-        let seed = seed0 + (t as u64) * games + g;
+        let seed = seed0 + g;
         let pair = (seed % 81) as u8;
         Some(GSlot {
             seed,
@@ -222,7 +292,7 @@ fn run_thread_batched(
             task_full: true,
         })
     };
-    let mut slots: Vec<Option<GSlot>> = (0..batch).map(|_| mk_slot(&mut next_g)).collect();
+    let mut slots: Vec<Option<GSlot>> = (0..batch).map(|_| mk_slot(queue)).collect();
     let mut done_games = 0u64;
     loop {
         for so in slots.iter_mut() {
@@ -237,14 +307,16 @@ fn run_thread_batched(
                         for &f in &r.feats {
                             line.push_str(&format!(",{}", trim_f(f)));
                         }
-                        line.push_str(&format!(",{label},{margin},{:.4},{}", r.value, r.policy));
+                        line.push_str(&format!(",{label},{margin},{:.4}", r.value));
+                        push_aux(&mut line, &sl.s, r.actor);
+                        line.push_str(&format!(",{}", r.policy));
                         writeln!(w, "{line}").expect("write row");
                     }
                     done_games += 1;
                     if done_games % 100 == 0 {
-                        eprintln!("[t{t}] {done_games}/{games} games");
+                        eprintln!("[t{t}] {done_games} games (shared pool of {total_games})");
                     }
-                    *so = mk_slot(&mut next_g);
+                    *so = mk_slot(queue);
                     continue 'adv;
                 }
                 if sl.task.is_some() {
@@ -328,6 +400,31 @@ fn run_thread_batched(
     eprintln!("[t{t}] done -> {path}");
 }
 
+/// Terminal-state score decomposition for one seat — auxiliary training
+/// targets (KataGo-style: predict FINAL score components, not just win/loss).
+/// Pure reads of engine.rs's shadow VP ledger (region_vp/color_vp/
+/// livestock_vp — additive telemetry, never used by game logic) + existing
+/// final-holdings fields. Caller backfills onto every row of the game, same
+/// as label/margin already are.
+fn aux_targets(s: &State, seat: usize) -> [f32; 7] {
+    let p = &s.players[seat];
+    [
+        p.region_vp as f32,
+        p.color_vp as f32,
+        p.livestock_vp as f32,
+        p.sold.iter().map(|&c| c as i32).sum::<i32>() as f32,
+        p.mines as f32,
+        p.silver as f32,
+        s.endgame_monastery_vp(seat) as f32,
+    ]
+}
+
+fn push_aux(line: &mut String, s: &State, actor: usize) {
+    for &v in aux_targets(s, actor).iter().chain(aux_targets(s, 1 - actor).iter()) {
+        line.push_str(&format!(",{}", trim_f(v)));
+    }
+}
+
 /// Compact float formatting (5 significant digits, strips zero noise).
 fn trim_f(f: f32) -> String {
     if f == 0.0 {
@@ -392,12 +489,55 @@ fn main() {
     // KataGo-style: value data is game-limited, policy data needs deep search —
     // cheap moves buy ~2-3x more games/hour at the same compute. Batched
     // netval path only. (@-delimited: MSYS mangles ':' args.)
-    let pcr: Option<(u64, u32)> = args.get(11).map(|s| {
-        let (pm, cheap) = s.split_once('@').expect("pcr spec is PERMILLE@CHEAP_SIMS");
-        (pm.parse().expect("pcr permille"), cheap.parse().expect("pcr cheap sims"))
+    // "stager@W" in any trailing slot = LEAGUE harvest: seat (game_idx % 2)
+    // plays with the staged-asset value bias (vsearch::stager_bias, weight W) —
+    // champion-vs-stager games inject asymmetric staged-endgame positions the
+    // mirror self-play distribution never contains (the 2026-07-11 human-games
+    // mining finding). "stagerboth@W" = TEACHER-corpus mode: BOTH seats biased
+    // (mirror self-play of the strongest agent — the imitation-target pattern).
+    // Sequential netval path only.
+    let stager_both = args.iter().skip(9).any(|s| s.starts_with("stagerboth@"));
+    let stager: Option<f64> = args.iter().skip(9).find_map(|s| {
+        s.strip_prefix("stagerboth@")
+            .or_else(|| s.strip_prefix("stager@"))
+            .map(|w| w.parse().expect("stager w"))
     });
+    if stager.is_some() {
+        assert!(
+            mode == Mode::Netval && batch == 1 && !gpu,
+            "stager league needs the sequential CPU netval path (batch 1, no gpu)"
+        );
+    }
+    // "vs@<model.json>" = OPPONENT league: the trailing net plays seat (1 - g%2)
+    // and only the primary net's rows are recorded (see run_thread). MLP f32,
+    // sequential CPU path only.
+    let opp_net: Option<Box<dyn PvEval>> = args.iter().skip(9).find_map(|s| {
+        s.strip_prefix("vs@").map(|p| {
+            let js = std::fs::read_to_string(p).expect("vs@ opponent model");
+            assert!(!js.contains("\"emb_w\""), "vs@ opponent must be an MLP json");
+            Box::new(coc_core::netio::pv_from_json(&js)) as Box<dyn PvEval>
+        })
+    });
+    if opp_net.is_some() {
+        assert!(
+            mode == Mode::Netval && batch == 1 && !gpu,
+            "vs@ league needs the sequential CPU netval path (batch 1, no gpu)"
+        );
+    }
+    // PCR spec "PERMILLE@CHEAP_SIMS": first trailing arg (slot 11+) with an
+    // '@' that is not a stager spec. Works on BOTH the batched netval path and
+    // (since 2026-07-12) the sequential path — same per-game rng seeding, so a
+    // stager teacher corpus can use the r2 PCR recipe.
+    let pcr: Option<(u64, u32)> = args
+        .iter()
+        .skip(11)
+        .find(|s| s.contains('@') && s.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .map(|s| {
+            let (pm, cheap) = s.split_once('@').expect("pcr spec is PERMILLE@CHEAP_SIMS");
+            (pm.parse().expect("pcr permille"), cheap.parse().expect("pcr cheap sims"))
+        });
     if pcr.is_some() {
-        assert!(mode == Mode::Netval && batch > 1, "pcr needs the batched netval path");
+        assert!(mode == Mode::Netval, "pcr needs a netval-mode harvest");
     }
     // arg 10: which encoder to LOG in the rows (v1|v2). Defaults to the playing
     // net's encoder (else v1) — override for a distill harvest where the v1
@@ -410,6 +550,10 @@ fn main() {
         Some(m) => panic!("bad logenc {m}"),
     };
     let per = games / threads as u64;
+    // shared work queue: total = per*threads (kept for arithmetic-compat with
+    // the old static split, so the same game-seed set is produced)
+    let total_games = per * threads as u64;
+    let queue = std::sync::atomic::AtomicU64::new(0);
     let qnet: Option<QuantPolicyValueNet> = if quantize {
         assert!(!is_attn, "netval8 is MLP-only");
         model_js.as_deref().map(|js| {
@@ -464,20 +608,25 @@ fn main() {
     } else {
         net.as_ref().map(|n| n.as_ref())
     };
+    let opp_ref: Option<&dyn PvEval> = opp_net.as_deref();
     std::thread::scope(|scope| {
         for t in 0..threads {
             let out = out.clone();
+            let queue = &queue;
             scope.spawn(move || {
                 if mode == Mode::Netval && batch > 1 {
                     run_thread_batched(
                         &out, t, per, sims, temp_micro, seed0, net_ref.unwrap(), batch, log_enc,
-                        pcr,
+                        pcr, queue, total_games,
                     );
                 } else {
-                    run_thread(&out, t, per, sims, temp_micro, seed0, mode, net_ref, log_enc);
+                    run_thread(
+                        &out, t, per, sims, temp_micro, seed0, mode, net_ref, log_enc, stager,
+                        stager_both, pcr, opp_ref, queue, total_games,
+                    );
                 }
             });
         }
     });
-    eprintln!("harvest complete: {} games total", per * threads as u64);
+    eprintln!("harvest complete: {total_games} games total");
 }

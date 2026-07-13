@@ -139,6 +139,16 @@ pub struct PlayerState {
     pub livestock_mask: u8,
     pub mon_mask: u32,
     pub town_bldg: [u8; MAX_REGIONS],
+    // ── shadow VP ledger (auxiliary training targets only) ──────────────────
+    // Mirrors a slice of `vp`'s accumulation, split by SOURCE, so a terminal
+    // read can recover "how much of my score came from region completions vs
+    // color bonuses vs livestock" without re-deriving it from the board. Pure
+    // telemetry: never read by any legality/scoring/win-condition logic, and
+    // NOT part of `proj.rs`'s canonical projection — adding/removing these
+    // fields cannot affect game correctness or the engine parity suite.
+    pub region_vp: i16,
+    pub color_vp: i16,
+    pub livestock_vp: i16,
 }
 
 impl PlayerState {
@@ -159,6 +169,9 @@ impl PlayerState {
             livestock_mask: 0,
             mon_mask: 0,
             town_bldg: [0; MAX_REGIONS],
+            region_vp: 0,
+            color_vp: 0,
+            livestock_vp: 0,
         }
     }
 
@@ -606,6 +619,7 @@ impl State {
             let size = REGION_SIZE[b][region] as usize;
             let vp = AREA_SCORE[size - 1] + PHASE_BONUS[self.phase as usize];
             self.players[seat].vp += vp;
+            self.players[seat].region_vp += vp;
         }
         let color = SPACE_COLOR[b][sid] as usize;
         let cmask = COLOR_MASK[b][color];
@@ -618,6 +632,7 @@ impl State {
             self.bonus_left[color] -= 1;
             self.players[seat].bonus_claimed += 1;
             self.players[seat].vp += val;
+            self.players[seat].color_vp += val;
         }
     }
 
@@ -645,6 +660,7 @@ impl State {
             gain += same_n;
         }
         self.players[seat].vp += gain;
+        self.players[seat].livestock_vp += gain;
         self.players[seat].livestock_mask |= 1 << animal;
     }
 

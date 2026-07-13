@@ -19,7 +19,7 @@ use coc_core::engine::{self, State};
 use coc_core::netio::pv_from_json;
 use coc_core::valuenet::{PolicyValueNet, PvEval, QuantPolicyValueNet};
 use coc_core::vsearch;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 /// Per-decision search budget: fixed sims ("200") or WALL-CLOCK ("1500ms").
@@ -66,6 +66,8 @@ enum Player {
     NetVal(Box<dyn PvEval>, usize, f64), // net prior + rollout(steps) + net-value; c_puct
                                          // (MLP or ATTENTION json - detected by content)
     NetVal8(QuantPolicyValueNet, usize, f64), // netval on the int8+VNNI quantized net
+    Stager(Box<dyn PvEval>, f64, usize, f64), // netval + staged-asset value bias (w, steps,
+                                              // cpuct) — the style-forced sparring opponent
 }
 
 /// Load an MLP or ATTENTION net by json content ("emb_w" = attention).
@@ -145,6 +147,20 @@ impl Player {
             );
             return Player::NetVal(Box::new(g), steps, cpuct);
         }
+        // stager: netval + staged-asset value bias — "path:stager@W",
+        // "path:stager@W@STEPS@CPUCT". The style-forced sparring opponent from
+        // the 2026-07-11 game mining (human phase-E staging edge).
+        if let Some(idx) = spec.find(":stager") {
+            let path = &spec[..idx];
+            let params: Vec<&str> = spec[idx + ":stager".len()..]
+                .split('@')
+                .filter(|s| !s.is_empty())
+                .collect();
+            let w = params.first().and_then(|s| s.parse().ok()).unwrap_or(0.4);
+            let steps = params.get(1).and_then(|s| s.parse().ok()).unwrap_or(20);
+            let cpuct = params.get(2).and_then(|s| s.parse().ok()).unwrap_or(vsearch::C_PUCT);
+            return Player::Stager(load_any(path), w, steps, cpuct);
+        }
         // netval, optionally parameterized: "path:netval", "path:netval@STEPS",
         // "path:netval@STEPS@CPUCT" (@-delimited so a Windows path's ':' is safe).
         if let Some(idx) = spec.find(":netval") {
@@ -202,6 +218,25 @@ impl Player {
             }
             Player::NetVal8(net, steps, cpuct) => {
                 choose_netval(net, s, budget, seed, *steps, *cpuct)
+            }
+            Player::Stager(net, w, steps, cpuct) => {
+                let legal = engine::legal_actions(s);
+                if legal.len() == 1 {
+                    return legal[0];
+                }
+                let mut search = coc_core::mcts::Search::new(s.clone(), *cpuct);
+                let mut rng = coc_core::rng::Rng::new(seed ^ 0x9E77);
+                let eval = |st: &State, actor: usize, lg: &[usize], r: &mut coc_core::rng::Rng| {
+                    vsearch::hybrid_netval_eval_stager(net.as_ref(), st, actor, lg, r, *steps, *w)
+                };
+                let t0 = Instant::now();
+                let mut n = 0u32;
+                while budget.more(n, t0) {
+                    search.sim(&mut rng, &eval);
+                    n += 1;
+                }
+                let visits = search.root_visits();
+                *legal.iter().max_by_key(|&&a| visits[a]).unwrap()
             }
         }
     }
@@ -284,9 +319,17 @@ fn run_batched(
     wins: &AtomicU64,
     margins: &AtomicU64,
     done: &AtomicU64,
+    games: &AtomicU64,
+    stopflag: &AtomicBool,
+    stop_bar: Option<f64>,
 ) {
     let mut qi = 0usize;
+    // early stop: quit REFILLING when the flag is set; in-flight games finish
+    // (their results still count — a cheap, unbiased-enough drain)
     let mut next_slot = |qi: &mut usize| -> Option<Slot> {
+        if stopflag.load(Ordering::Relaxed) {
+            return None;
+        }
         let &(g, a_seat) = queue.get(*qi)?;
         *qi += 1;
         let seed = seed0 + g;
@@ -304,6 +347,10 @@ fn run_batched(
                     let w = if sl.s.winner as usize == sl.a_seat { 1.0 } else { 0.0 };
                     wins.fetch_add((w * 1000.0) as u64, Ordering::Relaxed);
                     margins.fetch_add((m + 10000) as u64, Ordering::Relaxed);
+                    games.fetch_add(1, Ordering::Relaxed);
+                    if let Some(bar) = stop_bar {
+                        check_stop(wins, games, stopflag, bar);
+                    }
                     let d = done.fetch_add(1, Ordering::Relaxed) + 1;
                     if d % 50 == 0 {
                         eprintln!("{d}/{} games...", pairs * 2);
@@ -373,10 +420,27 @@ fn run_batched(
     }
 }
 
+/// Sequential early stop ("stop@BAR" trailing arg): once >=80 games are in,
+/// stop when a CONSERVATIVE bound (z=2.5, wider than the reported 1.96 to pay
+/// for the repeated looks) puts the running win rate entirely on one side of
+/// the decision bar. For promote/keep DECISION gates only — a measurement gate
+/// (yardstick) must run its full n, optional stopping biases the estimate.
+fn check_stop(wins_milli: &AtomicU64, games: &AtomicU64, stop: &AtomicBool, bar: f64) {
+    let n = games.load(Ordering::Relaxed) as f64;
+    if n < 80.0 {
+        return;
+    }
+    let wr = wins_milli.load(Ordering::Relaxed) as f64 / 1000.0 / n;
+    let hw = 2.5 * (wr * (1.0 - wr) / n).sqrt();
+    if wr + hw < bar || wr - hw > bar {
+        stop.store(true, Ordering::Relaxed);
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 8 {
-        eprintln!("usage: gate_coc <A> <B> <pairs> <sims_a|Nms> <sims_b|Nms> <seed0> <threads> [batch]");
+        eprintln!("usage: gate_coc <A> <B> <pairs> <sims_a|Nms> <sims_b|Nms> <seed0> <threads> [batch] [stop@BAR]");
         std::process::exit(2);
     }
     let (spec_a, spec_b) = (args[1].clone(), args[2].clone());
@@ -385,15 +449,26 @@ fn main() {
     let sims_b = Budget::parse(&args[5]);
     let seed0: u64 = args[6].parse().unwrap();
     let threads: usize = args[7].parse().unwrap();
-    let batch: usize = args.get(8).map(|s| s.parse().unwrap()).unwrap_or(8);
+    let batch: usize = args
+        .get(8)
+        .filter(|s| !s.starts_with("stop@"))
+        .map(|s| s.parse().unwrap())
+        .unwrap_or(8);
+    let stop_bar: Option<f64> = args
+        .iter()
+        .skip(8)
+        .find_map(|s| s.strip_prefix("stop@").map(|v| v.parse().expect("stop bar")));
 
     let wins_milli = AtomicU64::new(0); // wins * 1000 to stay integer
     let margin_sum = AtomicU64::new(0); // offset +10000 per game
     let done = AtomicU64::new(0);
+    let games = AtomicU64::new(0); // exact games completed (early stop + true n)
+    let stopflag = AtomicBool::new(false);
     std::thread::scope(|scope| {
         for t in 0..threads {
             let (spec_a, spec_b) = (spec_a.clone(), spec_b.clone());
             let (wins, margins, done) = (&wins_milli, &margin_sum, &done);
+            let (games, stopflag) = (&games, &stopflag);
             scope.spawn(move || {
                 let a = Player::parse(&spec_a, 0);
                 let b = Player::parse(&spec_b, 1);
@@ -403,7 +478,10 @@ fn main() {
                 let batchable = batch > 1
                     && bsa.is_some()
                     && bsb.is_some()
-                    && (a.netval().is_some() || b.netval().is_some());
+                    && (a.netval().is_some() || b.netval().is_some())
+                    // the stager's biased eval only exists on the sequential path
+                    && !matches!(a, Player::Stager(..))
+                    && !matches!(b, Player::Stager(..));
                 if batchable {
                     let mut queue: Vec<(u64, usize)> = Vec::new();
                     let mut g = t as u64;
@@ -414,17 +492,21 @@ fn main() {
                     }
                     run_batched(
                         &a, &b, &queue, bsa.unwrap(), bsb.unwrap(), seed0, batch, pairs, wins,
-                        margins, done,
+                        margins, done, games, stopflag, stop_bar,
                     );
                     return;
                 }
                 let mut g = t as u64;
-                while g < pairs {
+                while g < pairs && !stopflag.load(Ordering::Relaxed) {
                     let seed = seed0 + g;
                     for a_seat in 0..2 {
                         let (w, m) = play(&a, &b, seed, a_seat, sims_a, sims_b);
                         wins.fetch_add((w * 1000.0) as u64, Ordering::Relaxed);
                         margins.fetch_add((m + 10000) as u64, Ordering::Relaxed);
+                        games.fetch_add(1, Ordering::Relaxed);
+                        if let Some(bar) = stop_bar {
+                            check_stop(wins, games, stopflag, bar);
+                        }
                     }
                     let d = done.fetch_add(1, Ordering::Relaxed) + 1;
                     if d % 25 == 0 {
@@ -435,7 +517,9 @@ fn main() {
             });
         }
     });
-    let n = (pairs * 2) as f64;
+    // n from the exact games counter — with stop@ the run may end early; the
+    // sequential path counts per game too, so this equals pairs*2 on full runs
+    let n = (games.load(Ordering::Relaxed) as f64).max(1.0);
     let wr = wins_milli.load(Ordering::Relaxed) as f64 / 1000.0 / n;
     let avg_margin = margin_sum.load(Ordering::Relaxed) as f64 / n - 10000.0;
     let se = (wr * (1.0 - wr) / n).sqrt();

@@ -18,20 +18,35 @@ TRUNK = (512, 256)
 
 
 class PVNet(nn.Module):
-    def __init__(self, in_dim=IN_DIM, trunk=TRUNK, n_act=N_ACT):
+    """`aux_dim>0` adds a KataGo-style auxiliary regression head (predicts
+    terminal score-decomposition targets) sharing the same trunk as the
+    value/policy heads — pure gradient shaping. It is DELIBERATELY excluded
+    from `export_json`/`load_json` (they only ever touch trunk/vh/ph), so a
+    net trained with an aux head produces a byte-identical-shape JSON to one
+    trained without it: the Rust serving/search side needs zero changes."""
+
+    def __init__(self, in_dim=IN_DIM, trunk=TRUNK, n_act=N_ACT, aux_dim=0):
         super().__init__()
         dims = [in_dim, *trunk]
         self.trunk = nn.ModuleList(
             nn.Linear(dims[i], dims[i + 1]) for i in range(len(dims) - 1))
         self.vh = nn.Linear(dims[-1], 1)
         self.ph = nn.Linear(dims[-1], n_act)
-        self.in_dim, self.n_act = in_dim, n_act
+        self.ah = nn.Linear(dims[-1], aux_dim) if aux_dim > 0 else None
+        self.in_dim, self.n_act, self.aux_dim = in_dim, n_act, aux_dim
         self.tdims = dims
 
-    def forward(self, x):
+    def trunk_out(self, x):
         for lin in self.trunk:
             x = torch.relu(lin(x))
-        return torch.tanh(self.vh(x)).squeeze(-1), self.ph(x)
+        return x
+
+    def forward(self, x):
+        h = self.trunk_out(x)
+        return torch.tanh(self.vh(h)).squeeze(-1), self.ph(h)
+
+    def forward_aux(self, x):
+        return self.ah(self.trunk_out(x))
 
 
 def export_json(net: PVNet, mu, sd, path: str) -> None:
@@ -54,10 +69,11 @@ def export_json(net: PVNet, mu, sd, path: str) -> None:
         json.dump(out, f)
 
 
-def load_json(path: str) -> tuple[PVNet, list[float], list[float]]:
+def load_json(path: str, aux_dim: int = 0) -> tuple[PVNet, list[float], list[float]]:
     with open(path, encoding="utf-8") as f:
         j = json.load(f)
-    net = PVNet(in_dim=len(j["mu"]), trunk=tuple(j["tdims"][1:]), n_act=j["n_act"])
+    net = PVNet(in_dim=len(j["mu"]), trunk=tuple(j["tdims"][1:]), n_act=j["n_act"],
+                aux_dim=aux_dim)
     with torch.no_grad():
         for l, w, b in zip(net.trunk, j["tw"], j["tb"]):
             l.weight.copy_(torch.tensor(w).view_as(l.weight))
