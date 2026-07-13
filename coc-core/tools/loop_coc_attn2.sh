@@ -7,7 +7,7 @@
 #   * vs-CHAMPION league each iter (fixes the internal-up/yardstick-down
 #     divergence; only the training net's rows recorded)
 #   * aux score-decomposition gradient (--aux-dim 14, +9.6pp on MLP distills)
-#   * anchor tail = attn2_boot.t[0-1] (1200-sims seed-quality rows; the P4b
+#   * anchor tail = attn2_champ.t[0-2] (CHAMPION r2 @1200 sims — cross-dist; the P4b
 #     iter-3 anchor-cliff lesson — attention craters without a tail)
 #   * shared-queue harvests, stop@0.52 promote gates
 # Seed: the folded run's best (coc_run_attn/attn_best.json, ~0.44 vs champ).
@@ -134,8 +134,11 @@ for ((k = start; k < ITERS; k++)); do
 
     data="$RUNW/sp_$k.t*.csv;$RUNW/lg_$k.t*.csv"
     if [ "$k" -gt 0 ]; then data="$data;$RUNW/sp_$((k - 1)).t*.csv;$RUNW/lg_$((k - 1)).t*.csv"; fi
-    # permanent anchor TAIL (P4b anchor-cliff discipline): seed-quality 1200-sims rows
-    data="$data;$RUNW/attn2_boot.t[0-1].csv"
+    # permanent anchor TAIL (P4b anchor-cliff discipline): CHAMPION-quality
+    # cross-distribution rows (r2 @1200 sims). attn2_boot was the SEED's own
+    # mirror = same distribution as the corpus = functionally anchor-free →
+    # iter-0 crater (gate 0.29, val metrics blind). ~13% share, folded-run tested.
+    data="$data;$RUNW/attn2_champ.t[0-2].csv"
     echo "--- iter $k: train_attn (warm from best, lr 5e-4, aux_w=$AUX_W) ---" | tee -a "$LOG"
     CUDA_LAUNCH_BLOCKING=1 python "$TOOLS/train_attn.py" --data "$data" --out "$RUNW/attn2_cand_$k.json" \
         --warm "$BESTW" --lr 5e-4 --epochs 2 --aux-dim 14 --aux-weight "$AUX_W" 2>&1 | tee -a "$LOG" || {

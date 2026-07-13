@@ -237,6 +237,11 @@ def main():
                          "harvest columns; 0 parses the pre-aux CSV format). "
                          "Trunk-shared, EXCLUDED from export — json stays shape-identical")
     ap.add_argument("--aux-weight", type=float, default=0.3)
+    ap.add_argument("--snap-prefix", default=None,
+                    help="also export after EVERY epoch to <prefix>ep<k>.json "
+                         "(+.check). The netval leaf consumes value-head "
+                         "CALIBRATION that val AUC/top1 are blind to; gating "
+                         "the epoch trajectory is the only way to see it settle")
     args = ap.parse_args()
     global AUX_DIM
     AUX_DIM = args.aux_dim
@@ -289,15 +294,22 @@ def main():
         print(f"epoch {ep}: vloss {vloss_s / max(steps,1):.4f} closs "
               f"{closs_s / max(steps,1):.4f}{aux_str} | val AUC {auc:.4f} top1 {top1:.4f} "
               f"(n={nval}) {'*BEST*' if score > best else ''}", flush=True)
-        if score > best:
-            best = score
+        if score > best or args.snap_prefix:
             net_cpu = net.cpu().eval()
-            # atomic export: write tmp then rename, so a reader (or a second
-            # writer — the 2026-07-10 triple-loop race) never sees a torn file
-            export_json(net_cpu, args.out + ".tmp")
-            os.replace(args.out + ".tmp", args.out)
-            write_check(net_cpu, args.out + ".check.tmp")
-            os.replace(args.out + ".check.tmp", args.out + ".check")
+            if score > best:
+                best = score
+                # atomic export: write tmp then rename, so a reader (or a second
+                # writer — the 2026-07-10 triple-loop race) never sees a torn file
+                export_json(net_cpu, args.out + ".tmp")
+                os.replace(args.out + ".tmp", args.out)
+                write_check(net_cpu, args.out + ".check.tmp")
+                os.replace(args.out + ".check.tmp", args.out + ".check")
+            if args.snap_prefix:
+                snap = f"{args.snap_prefix}ep{ep}.json"
+                export_json(net_cpu, snap + ".tmp")
+                os.replace(snap + ".tmp", snap)
+                write_check(net_cpu, snap + ".check.tmp")
+                os.replace(snap + ".check.tmp", snap + ".check")
             net.to(dev)
     print(f"done; best val score {best:.4f} -> {args.out}")
 
