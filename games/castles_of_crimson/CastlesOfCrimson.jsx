@@ -636,7 +636,7 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
   /* zoom shrinks each depot card AND the black depot's inline-px diamond consistently,
      and (unlike transform) reduces the layout footprint so the board is more compact */
-  .coc-board-hex .coc-depot{zoom:.82}
+  .coc-board-hex .coc-depot{zoom:.9}
   .coc-board-hex .coc-depot:not(.coc-black-center){position:relative;left:auto!important;top:auto!important;transform:none!important;width:auto!important;min-height:0}
   .coc-board-hex .coc-minidie{position:static!important;left:auto!important;top:auto!important;transform:none!important;margin:0 auto 6px}
   .coc-board-hex .coc-black-center{position:relative;grid-column:1/-1;justify-self:center;left:auto!important;top:auto!important;transform:none!important}
