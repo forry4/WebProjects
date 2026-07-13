@@ -697,8 +697,9 @@ impl State {
     /// adjacent depot that holds goods.
     fn m5_adjacent_mask(&self, from: usize) -> u8 {
         let mut mask = 0u8;
-        for d in [from.wrapping_sub(1), from + 1] {
-            if d < 6 && self.depot_goods[d].iter().any(|&c| c > 0) {
+        // Depots form a ring, so 0 and 5 (depots 1 and 6) are adjacent (wrap).
+        for d in [(from + 5) % 6, (from + 1) % 6] {
+            if self.depot_goods[d].iter().any(|&c| c > 0) {
                 mask |= 1 << d;
             }
         }

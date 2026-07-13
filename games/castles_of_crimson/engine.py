@@ -707,8 +707,9 @@ def _offer_m5_adjacent(game: dict, pid: str, from_depot: int) -> None:
     """Monastery 5: after taking goods from `from_depot`, optionally take from one
     adjacent depot too. Offered only when an adjacent depot actually holds goods."""
     if 5 in game["players"][pid]["monastery_effects"]:
-        adj = [x for x in (from_depot - 1, from_depot + 1)
-               if 1 <= x <= 6 and game["depots"][str(x)]["goods"]]
+        # Depots form a ring, so 1 and 6 are adjacent (wrap), matching _allowed_values.
+        adj = [x for x in (from_depot % 6 + 1, (from_depot - 2) % 6 + 1)
+               if game["depots"][str(x)]["goods"]]
         if adj:
             _set_pending(game, pid, "ship_adjacent_depot", {"candidates": adj})
 

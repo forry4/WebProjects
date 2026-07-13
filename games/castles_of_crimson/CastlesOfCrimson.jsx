@@ -415,7 +415,7 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 9 },    // 1 top
+  { left: 50, top: 13 },   // 1 top (nudged down to clear the turn-order track; the die sits below it, so don't push further or the black depot covers it)
   { left: 83, top: 30 },   // 2 top-right
   { left: 83, top: 70 },   // 3 bottom-right
   { left: 50, top: 88 },   // 4 bottom
@@ -2374,7 +2374,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-board-hex">
             {[1, 2, 3, 4, 5, 6].map((d, idx) => {
               const depot = game.depots[String(d)];
-              const match = dice && !pendingMine && [0, 1].some((i) => !dice.used[i] && dice.values[i] === d);
+              // Highlight a depot only while a matching die is SELECTED (not just
+              // present). Monastery 12 lets you take from a depot adjacent to the die
+              // value (as a free worker shift), with 1<->6 wrapping — so highlight those too.
+              const selDieVal = (selDie != null && dice && !dice.used[selDie]) ? dice.values[selDie] : null;
+              const hasM12 = (me?.monastery_effects || []).includes(12);
+              const matchVals = selDieVal == null ? []
+                : (hasM12 ? [selDieVal, selDieVal === 6 ? 1 : selDieVal + 1, selDieVal === 1 ? 6 : selDieVal - 1] : [selDieVal]);
+              const match = !pendingMine && matchVals.includes(d);
               const pos = DEPOT_POS[idx];
               // Put the number JUST OUTSIDE the box edge that faces the central
               // black depot. Pick the dominant axis of the vector toward center,
