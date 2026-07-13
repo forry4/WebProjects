@@ -951,12 +951,79 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       content AFTER an armed byte offset. (Curio from forensics: iter-0's net emits ~1e8 logits
       on off-manifold random inputs while fully sane on-manifold — Adam with no weight decay
       leaves unconstrained directions; harmless so far, worth remembering.)
-    - Still open: whether to ESCALATE the attention line (sims 300→1200 + PCR, then the
-      int8-attention kernel if it moves) or FOLD it (the run verdict above: flat at ~0.44
-      equal-sims, 0.3083 equal-time, ~20pp short of ship) — user decision pending; a human
-      playtest of the NEW ladder (esp. Expert = the r2 net, now with the adaptive 1.5s budget +
-      tree reuse + int8 ≈ 3× the sims of the last playtested Expert, BELOW the 4-8k knee so it
-      should play meaningfully stronger — do this before more architecture work).
+    - The escalate-or-fold decision RESOLVED 2026-07-13: user chose ESCALATE — see the
+      "Session (2026-07-11..13) — aux-head arc" entry below (the escalation runs 1200-sims PCR
+      self-play + the vs-champion league + the aux gradient, three levers the folded run never
+      had). The human playtest of the NEW ladder (Expert = r2 net at ~3× the sims of the last
+      playtested Expert) is STILL outstanding.
+
+### Session (2026-07-11..13) — aux-head arc: the ONE confirmed training-signal lever; distill ceiling; goal = 0.60-vs-champion at equal sims (commit `e39c934` + follow-ups)
+The post-r2 strength campaign. Standing GOAL (user, revised down from 0.67): a SHIPPABLE bot that
+beats the r2 champion **≥0.60 at EQUAL sims**. Durable facts, verdicts, and infra — all gates are
+n=240 vs `coc_run_r2/pv_ship_r2.json` at 200v200 unless noted:
+- **AUX SCORE-DECOMPOSITION HEADS (KataGo-style) = the one causally-confirmed training-signal gain.**
+  `engine.rs` gained a **shadow VP ledger** (`region_vp`/`color_vp`/`livestock_vp` on PlayerState —
+  pure telemetry, OUTSIDE `proj.rs`'s canonical projection, parity suite untouched); `harvest_boot`
+  writes **14 terminal score-decomposition aux columns** per row (mover+opponent: region/color/
+  livestock VP, goods sold, mines, silver, endgame-monastery — `aux_targets()`); `train_pv`/`pv_net`
+  (and later `train_attn`/`attn_net`) gained `--aux-dim/--aux-weight`: z-scored aux MSE on a
+  trunk-shared head that is **EXCLUDED from export** (json stays shape-identical → ZERO Rust/wasm
+  change; the head re-inits on warm starts and reconverges in a fraction of an epoch). Paired
+  experiment (same corpus/seed/init, only the gradient differs — control = `--aux-weight 0`, NOT
+  `--aux-dim 0`, which would MIS-PARSE the new CSVs): control 0.3667 vs champ, aux 0.4625, **DIRECT
+  aux-vs-control 0.5750 ±0.063** (+9.6pp on the champ gates). **Aux-weight curve is an inverted-U
+  peaking at 0.3** (0.15→0.4250, 0.3→0.4792, 0.6→0.4208, 10k corpus). A league-mix arm gated
+  IDENTICAL to plain aux → the aux gradient extracts the staging economics from ordinary self-play.
+- **THE DISTILL CEILING (structural — do not relitigate): every distill from the champion caps
+  ~0.48-0.50.** Student≤teacher: the 6000-sim search amplification in the corpus is eaten by distill
+  fidelity loss (pv_big's 0.4958 tie = the ceiling, not a near-miss). Measured exhaustively: corpus
+  doubling 5k→10k = +1.7pp (wash); extended training (warm +4ep @5e-4) = +0.4-5.4pp (best net:
+  `pv_10k_best_ext.json` **0.4833**, margin +0.5); **capacity×aux INTERFERE** (big-trunk 1024,512 +
+  aux = 0.3917, worse than either alone). ALSO EXPOSED: the 07-11 "capacity +12.9pp" was
+  CORPUS-CONFOUNDED (pv_big trained on cap+league corpus, the controls on the aux corpus — the only
+  controlled lever ever measured is the aux gradient).
+- **CONSOLIDATION IS FLAT ON THE AUX LINE at every config (the past-champion mechanism is broken
+  here):** 300-sims, 1200-sims+PCR, and champion-warm loops all failed. Champion-warm actively
+  degrades (0.4958→0.4250 — a converged net RESISTS a fresh-head gradient; own-basin only).
+  Recurring signature: internal cand-vs-best gates rise while the champion yardstick sinks
+  (self-play basin divergence — the Spender league lesson replayed). **The vs-CHAMPION league FIXES
+  the divergence but not growth**: yardsticks 0.4917/0.4167/0.4833/0.4750 (stable around the seed's
+  0.4708) vs prior monotonic sinks. Note ALL champion-line loops (nv/hs/r2) ENDED in this same flat
+  state — the recipe family is at its plateau; approaching it from below doesn't reopen it.
+- **STAGER: dead as a ship lever.** Beats champ 0.58 at loop config (300 sims) but is a LOW-SIMS
+  phenomenon: equal-sims @2000v2000 = 0.4875 (w0.3) / 0.5000 (w0.6). The stager-teacher corpus idea
+  died with it (a 2000-cap stager teacher ≈ plain champion; the 6000-cap aux corpus is strictly
+  better). UNEQUAL-sims demo (the original /goal form): champ+stager@0.3 @3200 sims vs expert@200 =
+  **0.7250/0.6625** (fresh seeds) — a compute-edge bot, not shippable; re-confirms the sims ladder.
+- **HARVEST/GATE INFRA (permanent, commit `e39c934`):** `harvest_boot` — sequential-path **PCR**
+  (`PERMILLE@CHEAP` arg, must start with a digit — `vs@` specs also contain '@'); **shared work
+  queue** (global-index game seeds + per-game rngs → BIT-identical games under any scheduling; kills
+  the straggler tail; the sequential path's temp-sampling moved to a per-game rng); **`stagerboth@W`**
+  (mirror stager teacher); **`vs@<model.json>` OPPONENT LEAGUE** (seat g%2 = training net, ONLY its
+  rows recorded — learn to BEAT the target, not imitate its cheap-sims policy; opponent plays greedy).
+  `gate_coc` — **`stop@BAR` sequential early-stop** for DECISION gates (z=2.5 conservative bound,
+  80-game floor, exact-n reporting; measurement gates/yardsticks must NOT use it — optional stopping
+  biases estimates). Sidecar launches carry a **dev=cpu FATAL guard** (a transient CUDA error once
+  silently started a 3× slower CPU sidecar). **GATE-SERVER PORT-REUSE LESSON (cost 3 gates): never
+  reuse a port across model swaps in one script** — Windows double-binds, the OLD server keeps
+  answering, and gate_coc's per-side parity probe panics (correctly). One port per server + reap
+  between swaps.
+- **OPS:** disk hit 100% mid-train (retry armor + loop both died cleanly; resume markers held) →
+  `az_run` purged 92GB→356MB (CSVs/npz deleted, ALL weight jsons/pools kept — every Spender line
+  there is a closed verdict) + `coc_run_attn` CSVs (7.4GB, folded run, regenerable). Trainer val
+  metrics were AGAIN near-blind to gate differences (ties on AUC/top1 across arms that gate 6pp
+  apart) — gates are the only arbiter. A `Start-Process`-detached chain once died before its first
+  log write (unreproduced; the rerun as a harness-tracked task worked) — prefer harness-visible
+  launches for NEW chains, detach only proven-stable ones.
+- **ATTENTION ESCALATION (RUNNING as of 2026-07-13, user-approved):** the P4b fold is reopened with
+  the three levers that run never had — 1200-sims PCR self-play targets, the vs-champion league, and
+  the aux gradient (`attn_net.py`/`train_attn.py` extended: `_backbone`/`_heads` refactor +
+  `forward_with_aux`, aux head excluded from export, **parity re-verified 8.9e-7** post-refactor;
+  `import_json(aux_dim=)`). `tools/attn2_chain.sh` (anchor harvest: 1500g attn_best mirror @1200-PCR
+  → t[0-1] = the anchor tail, P4b anchor-cliff discipline) → `tools/loop_coc_attn2.sh` (6 iters,
+  RUN=coc_run_attn2, gates via `attn_export_check`). Baseline to beat: the folded line's FLAT ~0.44
+  yardstick; the goal path needs ~0.50+ and climbing. VERDICT PENDING — if flat again, the
+  architecture bet is closed at both sims regimes.
 
 ### Session (2026-07-12) — CoC game-screen 3-COLUMN REWORK (SHIPPED to prod)
 The CoC game screen was rebuilt so the shared board **and both players' duchies are all visible
