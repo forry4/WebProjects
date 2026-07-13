@@ -678,10 +678,13 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-top-lobby .coc-user{font-size:.64rem}
   /* Same fix for the in-GAME header (Menu | title | Abandon): the full-size 1.5rem
      Cinzel title is too wide for a phone, so it overlapped the Menu button and shoved
-     Abandon off-screen. Shrink it and let both side zones shrink so nothing overflows. */
+     Abandon off-screen. The title is centered between two button zones, so it must scale
+     with the viewport (a fixed size still overlapped Menu at ~320px / under display-zoom).
+     clamp() shrinks it on narrow screens; trimming the header buttons frees more room. */
   .coc-top.coc-top-game{gap:6px;margin-bottom:10px;padding-bottom:8px}
-  .coc-top-game .coc-title{font-size:1.05rem}
+  .coc-top-game .coc-title{font-size:clamp(.85rem, 3.6vw, 1.05rem)}
   .coc-top-game .coc-top-left,.coc-top-game .coc-top-right{min-width:0}
+  .coc-top-game .coc-btn.sm{padding:5px 9px}
 }
 .coc-tilewrap{display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
 .coc-animals{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1px;line-height:0}
