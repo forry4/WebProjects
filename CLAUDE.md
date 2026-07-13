@@ -958,6 +958,56 @@ deploys anything). Memory: [[coc-expert-ai-campaign-status]].
       tree reuse + int8 ≈ 3× the sims of the last playtested Expert, BELOW the 4-8k knee so it
       should play meaningfully stronger — do this before more architecture work).
 
+### Session (2026-07-12) — CoC game-screen 3-COLUMN REWORK (SHIPPED to prod)
+The CoC game screen was rebuilt so the shared board **and both players' duchies are all visible
+at once** (3 columns on wide screens), inspired by the physical Castles of Burgundy layout. Built in
+worktree `forrestm_projects-cocui` (branch `coc-ui-rework`), staged on `staging`, then merged to `main`.
+All frontend (`CastlesOfCrimson.jsx`), no engine/backend change. Durable, non-obvious facts:
+- **`.coc-game-cols` = the table**: CSS grid `minmax(360px,9fr) minmax(0,11.5fr) minmax(0,11.5fr)` at
+  ≥1280px (board | your duchy | opponent duchy), 2+1 medium, stacked on phones. Grid items STRETCH so
+  the three panels share height; the board ring (`.coc-board-hex`) is `flex:1 1 auto` to fill.
+- **The View Opponent modal + its reveal choreography are GONE** (the opponent's board is always on
+  screen). Opponent moves animate on their board via the EXISTING flyer diff (`popIn` covers the
+  starting castle). The old single-board + "View Opponent" peek + `botViewTimer`/`revealHoldRef`
+  dance described in earlier sessions no longer applies to the game screen.
+- **Top area is 3 rows, no status box.** (1) Title row: `← Menu` (left) · centered "Castles of
+  Crimson" · **Abandon** (right, `.coc-top-abandon`). (2) **Bonuses row** (`.coc-bonusbar`, grid
+  `1fr auto 1fr`): left group = `BONUSES:` + `PHASE`/`SIZE`/`COLOR` sections (`.coc-bonus-groups`);
+  CENTER = the live score (`.coc-vp`, You/Bot); RIGHT spacer (`.coc-bonus-spacer`) holds the **turn
+  badge** — "Your turn" / "Bot is playing…" / setup+decision variants, and **"Game over"** when over
+  (`over ? gameover : mineActive ? myBadge : oppBadge`). (3) The **board header** row
+  (`.coc-board-head` / `.coc-board-status`) REPLACED the "The Board" title: it now carries
+  Phase/Round/Goods-left, with the white die on the right. The old `.coc-statusbar` box
+  (phase/round/goods/score/turnbadge/abandon) was DELETED — its pieces were redistributed as above.
+  (An earlier iteration put the turn badge on the active player's own panel header, next to Discard;
+  that was reverted per the user — the badge lives in the bonuses-row spacer, right of the score.)
+- **Depots** (`DEPOT_POS`, `[{50,9},{83,30},{83,70},{50,88},{17,70},{17,30}]`): 2/3/5/6 are SIDE
+  depots (`coc-depot-side`, tiles stacked VERTICALLY, goods below, anchored to the board's left/right
+  EDGES via `coc-anchor-l`/`-r` + `left:0`/`100%` — NOT `left%`); 1/4 are top/bottom
+  (`coc-depot-tb`, horizontal tile row, `width:46%`). The pair positions (2/3 at 30/70, 5/6 at 30/70)
+  are tuned so each pair sits CLOSE without overlapping near the **zoom boundary (~1600px)** where the
+  boxes are tallest — and depot 4 at top:88 so its mini-die clears the central black depot. Turn-order
+  track: space NUMBERS and the "furthest right…" caption were removed.
+- **Uniform ghost (taken-tile) rim — DO NOT regress to a rectangular inset.** A `::after` with
+  `inset:3px` + the SAME hex clip-path leaves a THINNER rim on the slanted edges than the vertical
+  sides (a rectangular inset ≠ a perpendicular inset on a non-square hexagon). Fix: fill the tile with
+  the color, overlay an inner hex shrunk by a true ~3px PERPENDICULAR offset computed for the 70×81
+  tile — `clip-path:polygon(50% 4.3%,95.7% 27.1%,95.7% 72.9%,50% 95.7%,4.3% 72.9%,4.3% 27.1%)` — so the
+  gap is a constant-width rim. Correct only because tiles are a FIXED 70×81 (`HEX_W`), only ZOOMED
+  (uniform scale preserves the perpendicular width); if the tile aspect ever changes, recompute.
+- **Board-column `zoom` (recap — same footgun as the earlier session):** `.coc-col-board .coc-board-hex`
+  uses `zoom:.85` at ≥1280px, `zoom:1` at ≥1600px. Percentages inside a zoomed element already resolve
+  in zoomed units, so `width:100%` fills correctly — `width:calc(100%/zoom)` DOUBLE-compensates (spills
+  the ring past the panel). `getBoundingClientRect()` returns post-zoom (screen) px, so overlap
+  measurements are valid in real pixels.
+- **Local verify loop (gotchas):** backend `python -m uvicorn app:app --port 8000`; vite MUST be on
+  **5173** (`core/config.py` CORS allowlist only lists `localhost:5173`; on 5174 the browser fetch is
+  CORS-blocked → the app hangs on the "Waking up the server…" loader). MSYS mangles `VITE_BASE=/` into
+  `/Program Files/Git/` → use `MSYS_NO_PATHCONV=1` or just omit it (vite.config defaults base to `/`).
+  Playwright drives guest → CoC card → Create → **Easy** (server bot, no wasm) → place starting castle,
+  then measures panel/header/depot geometry + screenshots at 1500/1600/1710/1920 (the user runs display
+  scaling, so their effective viewport is ~1500–1600 — test there, not just 1920).
+
 ---
 
 ## Where Wolf? (third game)
