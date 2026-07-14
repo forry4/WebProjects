@@ -15,6 +15,7 @@ use coc_core::valuenet::PvEval;
 use coc_core::vsearch;
 
 const M6_BIT: u32 = 5; // monastery effect_id 6 -> mon_mask bit 5
+const M6_CODE: u16 = 27; // monastery effect_id 6 -> tile code (T_MONASTERY0=22 + 6 - 1)
 
 /// Most-visited pick with the PV leaf VALUE-BIASED by `w6` toward owning M6
 /// (w6=0 => normal champion). The bias reshapes the whole search — take, place
@@ -31,11 +32,22 @@ fn biased_pick(net: &dyn PvEval, s: &State, sims: u32, seed: u64, w6: f64) -> us
     }
     let mut search = Search::new(s.clone(), vsearch::C_PUCT);
     let mut rng = Rng::new(seed ^ 0x9E77);
+    // reward HAVING M6 (owned OR in storage) — storage is ~1-2 plies from the
+    // acquisition decision, so the reward is within the search horizon and
+    // actually pulls the search toward TAKING M6 (rewarding only the placed
+    // end-state was too far ahead to propagate).
+    let has_m6 = |pl: &coc_core::engine::PlayerState| -> bool {
+        (pl.mon_mask >> M6_BIT) & 1 == 1 || pl.storage.iter().any(|&c| c == M6_CODE)
+    };
     let eval = |st: &State, actor: usize, lg: &[usize], _r: &mut Rng| {
         let (p, v) = vsearch::pv_eval(net, st, actor, lg);
-        let own = (st.players[actor].mon_mask >> M6_BIT) & 1 == 1;
-        let opp = (st.players[1 - actor].mon_mask >> M6_BIT) & 1 == 1;
-        let vv = (v + if own { w6 } else { 0.0 } - if opp { w6 } else { 0.0 }).clamp(-1.0, 1.0);
+        // PHASE-SCALED: M6 is a compounding ability, worth ~(phases left) — so
+        // reward owning it EARLY, near-nothing LATE. phase 0=A -> 1.0, 4=E -> 0.2.
+        let pl = (5.0 - st.phase as f64) / 5.0;
+        let own = has_m6(&st.players[actor]);
+        let opp = has_m6(&st.players[1 - actor]);
+        let vv = (v + if own { w6 * pl } else { 0.0 } - if opp { w6 * pl } else { 0.0 })
+            .clamp(-1.0, 1.0);
         (p, vv)
     };
     for _ in 0..sims {
