@@ -1025,6 +1025,62 @@ n=240 vs `coc_run_r2/pv_ship_r2.json` at 200v200 unless noted:
   yardstick; the goal path needs ~0.50+ and climbing. VERDICT PENDING — if flat again, the
   architecture bet is closed at both sims regimes.
 
+### Session (2026-07-13..14) — attention escalation FOLDED, sims-warm + cold-distill + denial all ≤ r2: the SELF-PLAY CEILING (goal 0.60-vs-champion UNMET; awaiting user fork)
+The escalation + the two follow-on levers all landed at-or-below the champion. Durable, do-not-relitigate:
+- **ATTENTION ESCALATION (coc_run_attn2) — anchor-cliff CRATER, diagnosed + folded.** iter-0 gate
+  0.2914 / yardstick 0.3417 (margin −26) with HEALTHY val metrics (AUC 0.83, top1 0.57). Forensics
+  RULED OUT: aux (an `--aux-weight 0` control cratered IDENTICALLY 0.3371 → aux exonerated), corpus/
+  parse/targets (audited field-by-field clean — PCR fractions 25%/100%, root-value sign-agree ~0.75,
+  953-col layout), and epoch calibration (6-epoch trajectory gates flat 0.29-0.33). **ROOT CAUSE = the
+  P4b anchor cliff, reintroduced by my own error:** the disk-cleanup deleted the folded run's champion
+  anchor CSVs (regenerable — the deletion was safe, every NET was kept), and I regenerated `attn2_boot`
+  as the SEED's OWN mirror self-play = same distribution as the corpus = functionally anchor-FREE → the
+  high-capacity attention net collapsed onto its own manifold. **Fix = anchor on CHAMPION (r2 @1200)
+  cross-distribution rows (`attn2_champ`): gate 0.29→0.377 vs seed, yardstick 0.34→0.433 (folded ~0.44
+  baseline RESTORED).** Relaunched with the champion anchor → iter-0 cand landed 0.433 (= folded
+  baseline, a hair BELOW seed = warm-from-converged degradation). VERDICT: the escalated levers do NOT
+  lift attention above the folded ~0.44; folded. **Prior experiments UNAFFECTED — verified: the folded
+  run used the CORRECT champion anchor (its loop header documents `attn_boot` as "champion-quality
+  teacher rows"; its iters 0-2 gated 0.47-0.575 without cratering; the crater was ONLY the deliberate
+  anchor-FREE iter 3), and the MLP lines are cliff-immune.** Tooling: `train_attn.py --snap-prefix`
+  (per-epoch export for gating the calibration trajectory), `loop_coc_attn2.sh` anchor patched to
+  `attn2_champ`, forensic chains `ctl_aux0/epoch_traj/attn2_fix` (commits `95e464b` + `19ec0bc`).
+- **RUNG-3 high-sims warm continuation (`loop_coc_hs2.sh`, coc_run_hs2) — PARITY, sims-warm lever
+  TAPPED.** The clean ladder next rung: seed r2, SIMS=**4000** (PCR 250@1200, toward the 4-8k knee),
+  aux + vs-champion league + `aux_boot` (6000-sim champ) anchor, GPU sidecar. 3 iters pooled two-seed:
+  **0.483 → 0.500 → 0.508 — upward but DECELERATING (+1.7pp, +0.8pp), asymptoting at parity, never
+  crossing the 0.52 promote bar** (each gate ±0.06; the yardstick UNDERCUT the gate both iters:
+  it1 .508/.492, it2 .517/.500). STOPPED (resumable, progress=3). **Warm-continuing r2 at 4000 sims
+  gets a net to champion-LEVEL and plateaus — it does not climb toward 0.60.**
+- **FRESH cold-init train (`fresh_bootstrap.sh`) — 0.3958 vs champion, CONVERGED (not under-trained;
+  val AUC plateaued 0.805 by ep3, declining by ep6).** Same 4000-sim corpus, cold init (no `--warm`,
+  8 ep, aux). CONFIRMS the distill ceiling definitively: **training on champion self-play caps at ≤
+  champion — WARM inherits r2's weights → parity; COLD learns only the data → BELOW (distill loss).**
+- **DENIAL — NOT the lever (do not relitigate; bot-vs-bot, no user games).** `src/bin/denial_probe.rs`
+  (built, smoke-verified; one bug fixed — depots are COMPACT arrays, deny by remove-and-shift not
+  zero-in-place). Regret oracle = double shallow-search of the opponent's turn (END_TURN hands them the
+  board with their KNOWN dice — `_begin_round` rolls everyone at once, so denial is PERFECT-INFO),
+  toggling the tile. 60-game run: champion take-rate **SCALES with regret (0.13→0.28→0.46)** = it
+  already values regret-denial (a blind spot would be flat); and high-regret spots are **RARE**
+  (~0.33/game, ~2% of denial opportunities). Perfect-info ⇒ the search finds it; no league. The user's
+  regret model (denial value = opponent's best-response DROP, highest when they're dice-constrained) is
+  CORRECT as a tactic — the champion just isn't missing it. (Also corrected mid-investigation: first-
+  player denial priority is the dynamic TURN-TRACK order, not game-start seat — a game-level split can't
+  see it; and 22 completed games can't pin a win rate. USER DIRECTIVE: **do NOT analyze the user's CoC
+  games** — all evaluation is bot-vs-bot.)
+- **THE STRUCTURAL VERDICT (the point of the whole arc): r2 sits at CoC's SELF-PLAY CEILING.** Every
+  training method that learns from champion self-play caps at ≤ r2 (warm→parity, cold→below, distill/
+  consolidation/attention/capacity/stager all documented ≤ r2). To EXCEED r2 you need targets STRONGER
+  than r2, whose only source is deeper search — but the sims ladder proved CoC's search SATURATES
+  ~4-8k, and r2 trained near there. So self-play at any achievable sims can't generate better-than-r2
+  data to bootstrap from. **0.60-vs-r2 at equal sims is NOT reachable by more of the same recipe.** The
+  one remaining path WITH A MECHANISM = a FRESH higher-sim LADDER from a weaker seed (nv→hs→r2 re-run
+  with 4000-sim self-play throughout, so each rung plays at ~4000-sim-saturation ≈ 0.57 over r2's
+  2000-sim training level — NOT continuing r2, which is rung-3's capped basin). Odds moderate-LOW (cold
+  0.40 + rung-3 parity both warn the practical ceiling ≈ r2), cost = days. **Fork put to the user
+  2026-07-14; awaiting the call (fresh ladder vs grind rung-3 to a marginal ~0.52 vs reconsider a
+  dropped constraint). Champion r2 stays deployed; nothing shipped this arc.**
+
 ### Session (2026-07-12) — CoC game-screen 3-COLUMN REWORK (SHIPPED to prod)
 The CoC game screen was rebuilt so the shared board **and both players' duchies are all visible
 at once** (3 columns on wide screens), inspired by the physical Castles of Burgundy layout. Built in
