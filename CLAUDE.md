@@ -1081,6 +1081,47 @@ The escalation + the two follow-on levers all landed at-or-below the champion. D
   2026-07-14; awaiting the call (fresh ladder vs grind rung-3 to a marginal ~0.52 vs reconsider a
   dropped constraint). Champion r2 stays deployed; nothing shipped this arc.**
 
+### Session (2026-07-14) — TACTICAL BLIND-SPOT investigation: the user's hypotheses tested bot-vs-bot; ALL FOUR refuted/wash (do not relitigate)
+After the self-play ceiling verdict, the user (a strong CoC player) proposed the plateau is a
+VALUE-HEAD BLIND-SPOT problem — self-play never learns to value tactics the shared net never plays,
+so r2 could be below the GAME ceiling for a fixable reason. A genuinely new lever if true (inject the
+missing experience). Tested each specific claim bot-vs-bot (NO user games — user directive; all via
+new probe/arena bins gating vs `pv_ship_r2.json`). Every one came back the bot ALREADY handles it —
+the same lesson as Spender ("a strong search prices the tactics a strong human describes"):
+- **AUDIT first (tile_audit.rs, pv 100g + DEPLOYED-netval 80g):** the champion is NOT ignoring
+  anything. Monastery-6 acquired **0.62/0.65 of available games** (user thought "never"); goods-VP
+  monasteries #15/#25 the MOST-acquired (0.86-0.94); ~4 ships/player/game; ~11 black-depot buys/game;
+  banks ~1.7 silver + ~2.8 workers as first player at phase starts (the user's ideal). The
+  netval-leaf audit REFUTES a serving-leaf-drag hypothesis (deployed 0.65 ≈ pure-net 0.62). "Never
+  buys M6" was a salience/sample gap (M6 in ~29% of games).
+- **DENIAL (denial_probe.rs):** regret oracle = double shallow-search of the opponent's turn (their
+  dice are PUBLIC — `_begin_round` rolls everyone at once — so denial is PERFECT-INFO) toggling a
+  tile. Champion take-rate SCALES with regret (0.13→0.28→0.46) = it already values regret-denial
+  (a blind spot would be flat); high-regret spots RARE (~0.33/game). Perfect-info ⇒ the search finds
+  it. NOT a lever.
+- **M6 "should be 100%" (m6_arena.rs):** value-bias a champion copy toward owning M6 (storage-or-owned,
+  so the reward is within the search horizon), gate vs normal, CRN. Uniform bias **0.46**; the user's
+  refinement (M6 compounds EARLY → phase-scaled `(5-phase)/5` reward) **0.4625** — every config ≤0.50.
+  Driving M6 32%→42% never helped. The champion's ~65% is CORRECT (the 35% skipped aren't worth the
+  die/2-workers/space). w6=0 is an exact-0.5000 CRN mirror.
+- **FIRST-PLAYER (firstplayer_audit.rs + firstplayer_arena.rs):** (A) correlational — first-in-more-
+  phases wins **0.6333, DOSE-DEPENDENT** (margin 1/3/5 → 0.60/0.64/0.69), so the advantage is REAL.
+  (B) causal — bias toward turn-track lead: secured MORE first-player (2.50→2.69 phases) but win rate
+  **0.5125 (margin −1.5) = WASH.** So the 0.63 was largely REVERSE causation (a winning position
+  controls the track); forcing the cause doesn't create wins. Bot already weights first-player right.
+- **SHIP-TIMING "hold ships till the last round for next-phase first-player" (ship_timing_arena.rs):**
+  placing a ship is the ONLY track-advance (`place_ship_effect`→`advance_track(seat,1)`), so forced the
+  biased bot to prune ship-placement in rounds 1-4. Mechanism worked (round-5 ship-advances 0.917) but
+  win rate **0.40 (margin −4.9) — HURTS.** Blunt hold-all-ships clogs storage + delays goods/track more
+  than the locked first-player is worth. Natural timing was better.
+- **VERDICT: no exploitable tactical blind spot found in the four most-promising candidates.** The
+  champion's tactical valuations are SOUND; ~50/50 vs the user is genuine strength. HONEST HEDGE (do
+  not overstate): these are BLUNT forcings of NUANCED human judgment ("hold all ships" ≠ "hold a ship
+  when it matters"), so a subtle micro-edge isn't ruled out — only that there's no big FORCEABLE lever.
+  Combined with the self-play ceiling, BOTH angles (how it's trained + what it might misvalue) are now
+  exhausted. Reusable tooling (all bot-vs-bot, no user games): the six bins above, each a value-bias-
+  or-forced arena vs the champion with a mechanism check + CRN mirror sanity.
+
 ### Session (2026-07-12) — CoC game-screen 3-COLUMN REWORK (SHIPPED to prod)
 The CoC game screen was rebuilt so the shared board **and both players' duchies are all visible
 at once** (3 columns on wide screens), inspired by the physical Castles of Burgundy layout. Built in
