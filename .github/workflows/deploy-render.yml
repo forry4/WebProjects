@@ -19,6 +19,7 @@ on:
       - 'games/spender/puzzle/puzzles/*.json'   # the puzzle bank — served as static content by serve.py
       - 'games/castles_of_crimson/**/*.py'
       - 'games/wherewolf/**/*.py'
+      - 'games/spender_duel/**/*.py'
   workflow_dispatch:
 
 jobs:
@@ -39,7 +40,7 @@ jobs:
           pip install -r games/spender/requirements.txt
       - name: Run tests
         run: |
-          python -m pytest core/tests/ games/spender/tests/ books/tests/ games/castles_of_crimson/tests/ games/wherewolf/tests/ wwsd/tests/ -q
+          python -m pytest core/tests/ games/spender/tests/ books/tests/ games/castles_of_crimson/tests/ games/wherewolf/tests/ games/spender_duel/tests/ wwsd/tests/ -q
 
   deploy:
     needs: test

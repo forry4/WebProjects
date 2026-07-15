@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
 import WhereWolf from "../wherewolf/WhereWolf.jsx";
+import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
 
@@ -17,6 +18,7 @@ const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
 	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
 	{ id: "wherewolf", name: "Where Wolf?", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf" },
+	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel" },
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -2586,6 +2588,11 @@ export default function SpenderApp() {
 	// Where Wolf? — self-contained social-deduction game component.
 	if (screen === "werewolf") {
 		return <WhereWolf myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+	}
+
+	// Spender Duel — self-contained 2-player game component.
+	if (screen === "duel") {
+		return <SpenderDuel myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
 	}
 
 	// Puzzle picker — pick a scripted endgame puzzle to solve vs S.

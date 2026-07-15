@@ -22,6 +22,7 @@ on:
       - 'games/spender/**'
       - 'games/castles_of_crimson/**'
       - 'games/wherewolf/**'
+      - 'games/spender_duel/**'
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

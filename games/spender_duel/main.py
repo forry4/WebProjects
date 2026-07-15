@@ -1,0 +1,647 @@
+"""FastAPI sub-application for Spender Duel.
+
+Exposes ``duel_app`` which the composition-root ``app.py`` mounts under
+``/duel``. WebSocket lives at ``/duel/ws/{room}/{player}`` and REST under
+``/duel/...``.
+
+Thin layer over the pure ``engine``: rooms, sockets, persistence, WS protocol,
+and the bot scheduler. Mirrors the proven Castles-of-Crimson patterns
+(in-memory ``ROOMS`` under one asyncio.Lock, the dedicated single-thread DB
+write executor, the stale-socket disconnect guard).
+
+ONE structural difference from CoC: Spender Duel has hidden information
+(secret reserves, the bag, the decks), so room state is built PER RECIPIENT
+via ``engine.player_view`` — see ``broadcast_state`` — instead of one shared
+snapshot. Persistence stores the FULL game; redaction happens on send.
+"""
+from __future__ import annotations
+
+import asyncio
+import concurrent.futures
+import json
+import logging
+import random
+import time
+from typing import Any
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Header, Query
+from fastapi.middleware.cors import CORSMiddleware
+
+from . import engine
+from . import bot
+from . import cards
+
+from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
+from core.auth import (
+    gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
+)
+from core.config import cors_allowed_origins
+
+LOG = logging.getLogger("games.spender_duel")
+
+# Pause between the bot's individual moves so the client animates each one.
+_BOT_MOVE_DELAY = 0.9
+
+duel_app = FastAPI(title="Spender Duel API")
+duel_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_allowed_origins(),
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# ── In-memory room state ──────────────────────────────────────────────────────
+ROOMS: dict[str, dict] = {}
+ROOM_LOCK = asyncio.Lock()
+AI_PID = "bot"
+
+
+def _db():
+    return get_db_conn()
+
+
+def _gen_token(n: int = 12) -> str:
+    return gen_token(n)
+
+
+def normalize_room(rid: str) -> str:
+    return (rid or "").upper()
+
+
+def duel_init_db() -> None:
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS duel_games (
+        id TEXT PRIMARY KEY,
+        status TEXT,
+        player1_id TEXT, player1_name TEXT,
+        player2_id TEXT, player2_name TEXT,
+        host_id TEXT,
+        state_json TEXT,
+        created_at INTEGER, updated_at INTEGER)""")
+    conn.commit()
+    conn.close()
+
+
+duel_init_db()
+# Retention: same policy as Spender/CoC (guest 24h / registered 30d, by last activity).
+cleanup_stale_games("duel_games")
+
+
+# ── Persistence (single-thread write executor with a reused connection) ──────
+_DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="duel-db-write")
+_save_conn = None  # only ever touched by the _DB_WRITE_EXEC thread
+
+
+def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, now, created_at) -> None:
+    global _save_conn
+    try:
+        if _save_conn is None:
+            _save_conn = _db()
+        cur = _save_conn.cursor()
+        cur.execute("SELECT id FROM duel_games WHERE id=?", (room_id,))
+        if cur.fetchone() is not None:
+            cur.execute("""UPDATE duel_games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
+                           WHERE id=?""",
+                        (status, p2id, p2name, state_json, now, room_id))
+        else:
+            cur.execute("""INSERT INTO duel_games
+                           (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
+        _save_conn.commit()
+    except Exception:  # noqa: BLE001 — a save must never crash; reconnect next time
+        LOG.warning("duel save_game write failed for %s; dropping connection", room_id, exc_info=True)
+        try:
+            if _save_conn is not None:
+                _save_conn.close()
+        except Exception:
+            pass
+        _save_conn = None
+
+
+def save_game(room_id: str) -> None:
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    pids = list(room.get("players", {}).keys())
+    names = list(room.get("players", {}).values())
+    state = {
+        "players": room.get("players", {}),
+        "host": room.get("host"),
+        "status": room.get("status", "open"),
+        "game": room.get("game"),
+        "meta": room.get("meta", {}),
+        "vs_ai": room.get("vs_ai", False),
+        "ai_player": room.get("ai_player"),
+    }
+    now = int(time.time())
+    _DB_WRITE_EXEC.submit(
+        _persist_row, room_id, room.get("status", "open"),
+        pids[0] if pids else None, names[0] if names else None,
+        pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
+        room.get("host"), json.dumps(state), now, now,
+    )
+
+
+def load_game_state(room_id: str) -> dict | None:
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("SELECT state_json FROM duel_games WHERE id=?", (room_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row or not row["state_json"]:
+        return None
+    try:
+        return json.loads(row["state_json"])
+    except Exception:
+        return None
+
+
+def load_game_to_memory(room_id: str) -> bool:
+    state = load_game_state(room_id)
+    if not state:
+        return False
+    ROOMS[room_id] = {
+        "players": state.get("players", {}),
+        "host": state.get("host"),
+        "status": state.get("status", "open"),
+        "game": state.get("game"),
+        "meta": state.get("meta", {}),
+        "vs_ai": state.get("vs_ai", False),
+        "ai_player": state.get("ai_player"),
+        "sockets": {},
+    }
+    return True
+
+
+def list_open_games() -> list[dict]:
+    maybe_cleanup_games("duel_games")
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, player1_id, player1_name, created_at FROM duel_games
+                   WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
+    rows = cur.fetchall()
+    conn.close()
+    return [{"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+             "created_at": r["created_at"]} for r in rows]
+
+
+def list_user_games(user_id: str) -> list[dict]:
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
+                          state_json, created_at, updated_at
+                   FROM duel_games
+                   WHERE (player1_id=? OR player2_id=?) AND status != 'over'
+                   ORDER BY updated_at DESC""", (user_id, user_id))
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            state = json.loads(r["state_json"] or "{}")
+        except Exception:
+            state = {}
+        g = state.get("game") or {}
+        your_turn = isinstance(g, dict) and (g.get("pending_pid") or g.get("turn")) == user_id
+        out.append({
+            "id": r["id"], "status": r["status"],
+            "player1_name": r["player1_name"], "player2_name": r["player2_name"],
+            "you_are_p1": r["player1_id"] == user_id, "your_turn": your_turn,
+            "created_at": r["created_at"], "updated_at": r["updated_at"],
+        })
+    return out
+
+
+def list_user_history(user_id: str) -> list[dict]:
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
+                          state_json, updated_at
+                   FROM duel_games
+                   WHERE (player1_id=? OR player2_id=?) AND status='over'
+                   ORDER BY updated_at DESC LIMIT 30""", (user_id, user_id))
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        try:
+            g = (json.loads(r["state_json"] or "{}").get("game") or {})
+        except Exception:
+            g = {}
+        if not isinstance(g, dict) or not g.get("players"):
+            continue
+        is_p1 = r["player1_id"] == user_id
+        opp_id = r["player2_id"] if is_p1 else r["player1_id"]
+        opp_name = (r["player2_name"] if is_p1 else r["player1_name"]) or "Opponent"
+        try:
+            your_score = engine.points_of(g["players"][user_id]) if user_id in g["players"] else None
+            opp_score = engine.points_of(g["players"][opp_id]) if opp_id in g["players"] else None
+        except Exception:
+            your_score = opp_score = None
+        out.append({
+            "id": r["id"], "opp_name": opp_name,
+            "your_score": your_score, "opp_score": opp_score,
+            "you_won": g.get("winner") == user_id,
+            "win_condition": g.get("win_condition"),
+            "updated_at": r["updated_at"],
+        })
+    return out
+
+
+def delete_open_game(game_id: str, user_id: str) -> bool:
+    """SELECT-then-DELETE (never cursor.rowcount — the libsql wrapper lacks it)."""
+    conn = _db()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM duel_games WHERE id=? AND player1_id=? AND status='open'",
+                (game_id, user_id))
+    existed = cur.fetchone() is not None
+    if existed:
+        conn.execute("DELETE FROM duel_games WHERE id=? AND player1_id=? AND status='open'",
+                     (game_id, user_id))
+        conn.commit()
+    conn.close()
+    return existed
+
+
+# ── Room state / broadcast (PER-RECIPIENT redaction) ─────────────────────────
+def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
+    """Room snapshot AS SEEN BY viewer_pid: the game passes through
+    engine.player_view so the bag, deck order, and the opponent's reserved-card
+    identities never reach the wire. viewer_pid=None -> spectator redaction."""
+    room = ROOMS.get(room_id, {})
+    g = room.get("game")
+    return {
+        "room_id": room_id,
+        "players": room.get("players", {}),
+        "host": room.get("host"),
+        "status": room.get("status", "open"),
+        "game": engine.player_view(g, viewer_pid) if g else None,
+        "vs_ai": room.get("vs_ai", False),
+        "ai_player": room.get("ai_player"),
+        "reconnect_tokens": (
+            {viewer_pid: room.get("meta", {}).get(viewer_pid, {}).get("token")}
+            if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
+        ),
+    }
+
+
+async def broadcast_state(room_id: str, mtype: str = "room_update") -> None:
+    """Send each connected socket ITS OWN redacted view of the room."""
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    for pid, ws in list(room.get("sockets", {}).items()):
+        try:
+            await ws.send_text(json.dumps({"type": mtype, "room": mk_room_state(room_id, viewer_pid=pid)}))
+        except Exception:
+            pass
+
+
+def _sync_status_from_game(room: dict) -> None:
+    g = room.get("game")
+    if g and engine.is_over(g):
+        room["status"] = "over"
+
+
+def _bot_should_act(room: dict) -> bool:
+    game = room.get("game")
+    ai = room.get("ai_player")
+    return bool(game and ai and not engine.is_over(game)
+                and (game.get("pending_pid") or game.get("turn")) == ai)
+
+
+# ── Bot turn scheduler ────────────────────────────────────────────────────────
+async def _schedule_bot_turn(room_id: str) -> None:
+    """Drive the bot's turn one move at a time with pacing so the client
+    animates each move. The bot is cheap (tiered random-legal), so moves are
+    chosen inline under the lock — no thread pool needed at v1."""
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room or room.get("_bot_running") or not _bot_should_act(room):
+            return
+        room["_bot_running"] = True
+    try:
+        rng = random.Random()
+        for _ in range(80):  # guard: a turn (incl. AGAIN chains) is well under this
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room or not _bot_should_act(room):
+                    return
+                game = room["game"]
+                mv = bot.choose(game, AI_PID, rng)
+                if mv is None:
+                    return
+                ok, err = engine.apply_move(game, AI_PID, mv)
+                if not ok:
+                    LOG.warning("duel bot move rejected (%s): %s", room_id, err)
+                    return
+                _sync_status_from_game(room)
+                more = _bot_should_act(room)
+            await broadcast_state(room_id)
+            save_game(room_id)
+            if not more:
+                return
+            await asyncio.sleep(_BOT_MOVE_DELAY)
+    finally:
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            if r:
+                r["_bot_running"] = False
+
+
+# ── WebSocket protocol ────────────────────────────────────────────────────────
+@duel_app.websocket("/ws/{room}/{player}")
+async def ws_room_player(websocket: WebSocket, room: str, player: str):
+    await websocket.accept()
+    room_id = normalize_room(room)
+    pid = player
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except Exception:
+                await websocket.send_text(json.dumps({"type": "error", "message": "bad message"}))
+                continue
+            action = msg.get("action")
+
+            if action == "create":
+                await _handle_create(websocket, room_id, pid, msg)
+            elif action == "join":
+                await _handle_join(websocket, room_id, pid, msg)
+            elif action == "start":
+                await _handle_start(websocket, room_id, pid)
+            elif action == "move":
+                await _handle_move(websocket, room_id, pid, msg)
+            elif action == "reconnect":
+                await _handle_reconnect(websocket, room_id, pid, msg)
+            elif action == "auth_reconnect":
+                await _handle_auth_reconnect(websocket, room_id, pid, msg)
+            elif action == "abandon":
+                await _handle_abandon(websocket, room_id, pid)
+            else:
+                await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        # Stale-socket guard: only remove if THIS socket is still registered.
+        room = ROOMS.get(room_id)
+        if room and room.get("sockets", {}).get(pid) is websocket:
+            room["sockets"].pop(pid, None)
+            if not room["sockets"] and room.get("status") == "open" and room.get("game") is None:
+                ROOMS.pop(room_id, None)
+
+
+def _ensure_room_loaded(room_id: str) -> dict | None:
+    if room_id not in ROOMS:
+        load_game_to_memory(room_id)
+    return ROOMS.get(room_id)
+
+
+async def _send(ws: WebSocket, payload: dict) -> None:
+    await ws.send_text(json.dumps(payload))
+
+
+async def _handle_create(ws, room_id, pid, msg):
+    name = (msg.get("name") or "Player").strip()[:24] or "Player"
+    vs_ai = bool(msg.get("vs_ai"))
+    async with ROOM_LOCK:
+        if room_id in ROOMS or _ensure_room_loaded(room_id):
+            await _send(ws, {"type": "error", "message": "room already exists"})
+            return
+        room = {
+            "players": {pid: name},
+            "sockets": {pid: ws},
+            "status": "open",
+            "host": pid,
+            "game": None,
+            "meta": {pid: {"token": _gen_token()}},
+            "vs_ai": vs_ai,
+            "ai_player": None,
+        }
+        ROOMS[room_id] = room
+        if vs_ai:
+            room["players"][AI_PID] = "Bot"
+            room["ai_player"] = AI_PID
+            room["status"] = "playing"
+            seats = [pid, AI_PID]
+            random.shuffle(seats)  # randomize the first player (seat 1 gets the setup privilege)
+            room["game"] = engine.new_game(seats, names={pid: name, AI_PID: "Bot"},
+                                           seed=random.randrange(2**31))
+        save_game(room_id)
+        bot_turn = vs_ai and _bot_should_act(room)
+    await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_join(ws, room_id, pid, msg):
+    name = (msg.get("name") or "Player").strip()[:24] or "Player"
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room:
+            await _send(ws, {"type": "error", "message": "no such room"})
+            return
+        if pid not in room["players"]:
+            if room.get("status") != "open" or len(room["players"]) >= 2:
+                await _send(ws, {"type": "error", "message": "room is full"})
+                return
+            room["players"][pid] = name
+            room.setdefault("meta", {})[pid] = {"token": _gen_token()}
+        room["sockets"][pid] = ws
+        save_game(room_id)
+    await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
+    await broadcast_state(room_id)
+
+
+async def _handle_start(ws, room_id, pid):
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room:
+            await _send(ws, {"type": "error", "message": "no such room"})
+            return
+        if room.get("host") != pid:
+            await _send(ws, {"type": "error", "message": "only the host can start"})
+            return
+        humans = list(room["players"])
+        if len(humans) != 2:
+            await _send(ws, {"type": "error", "message": "need two players"})
+            return
+        if room.get("status") != "open":
+            await _send(ws, {"type": "error", "message": "already started"})
+            return
+        room["status"] = "playing"
+        random.shuffle(humans)  # random first player
+        room["game"] = engine.new_game(humans, names=dict(room["players"]),
+                                       seed=random.randrange(2**31))
+        save_game(room_id)
+    await broadcast_state(room_id)
+
+
+async def _handle_move(ws, room_id, pid, msg):
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or not room.get("game"):
+            await _send(ws, {"type": "error", "message": "game not started"})
+            return
+        game = room["game"]
+        ok, err = engine.apply_move(game, pid, msg.get("move") or {})
+        if not ok:
+            await _send(ws, {"type": "error", "message": err or "illegal move"})
+            return
+        _sync_status_from_game(room)
+        bot_turn = _bot_should_act(room)
+    await broadcast_state(room_id)
+    save_game(room_id)
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_reconnect(ws, room_id, pid, msg):
+    token = msg.get("token")
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            await _send(ws, {"type": "error", "message": "invalid token"})
+            return
+        if room.get("meta", {}).get(pid, {}).get("token") != token:
+            await _send(ws, {"type": "error", "message": "invalid token"})
+            return
+        room["sockets"][pid] = ws
+        bot_turn = _bot_should_act(room)
+    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_auth_reconnect(ws, room_id, pid, msg):
+    token = msg.get("token")
+    info = validate_reconnect_token(token)
+    if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
+        await _send(ws, {"type": "error", "message": "invalid token"})
+        return
+    mark_reconnect_token_used(token)
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            await _send(ws, {"type": "error", "message": "no such room"})
+            return
+        room["sockets"][pid] = ws
+        room.setdefault("meta", {}).setdefault(pid, {})["token"] = _gen_token()
+        save_game(room_id)
+        bot_turn = _bot_should_act(room)
+    await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_abandon(ws, room_id, pid):
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room:
+            return
+        game = room.get("game")
+        room["status"] = "over"
+        if game:
+            others = [p for p in room["players"] if p != pid]
+            game["phase"] = "over"
+            game["winner"] = others[0] if others else None
+        save_game(room_id)
+    await broadcast_state(room_id)
+
+
+# ── REST ──────────────────────────────────────────────────────────────────────
+@duel_app.get("/health")
+async def health():
+    return {"status": "ok", "service": "spender_duel", "version": "1.0"}
+
+
+@duel_app.get("/catalog")
+async def catalog():
+    """Static card/royal catalog + board constants (single source for the frontend)."""
+    return {
+        "ok": True,
+        "cards": cards.CARDS,
+        "royals": cards.ROYALS,
+        "colors": cards.COLORS,
+        "spiral": cards.SPIRAL_ORDER,
+        "pyramid_sizes": cards.PYRAMID_SIZES,
+    }
+
+
+@duel_app.get("/games")
+async def games_open():
+    return {"ok": True, "games": list_open_games()}
+
+
+def _bearer_token(authorization: str | None = Header(default=None),
+                  token: str | None = Query(default=None)) -> str | None:
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            return value.strip()
+    return token
+
+
+@duel_app.get("/games/mine")
+async def games_mine(token: str | None = Depends(_bearer_token)):
+    user = get_user_by_session(token) if token else None
+    if not user:
+        return {"ok": False, "games": [], "message": "unauthenticated"}
+    return {"ok": True, "games": list_user_games(user["id"])}
+
+
+@duel_app.get("/games/history")
+async def games_history(token: str | None = Depends(_bearer_token)):
+    user = get_user_by_session(token) if token else None
+    if not user:
+        return {"ok": False, "games": [], "message": "unauthenticated"}
+    return {"ok": True, "games": list_user_history(user["id"])}
+
+
+@duel_app.get("/games/{game_id}/review")
+async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None):
+    """Read-only review of a FINISHED game, restricted to a participant."""
+    game_id = normalize_room(game_id)
+    room = ROOMS.get(game_id)
+    if room and room.get("game"):
+        g, players = room["game"], room.get("players", {})
+    else:
+        state = load_game_state(game_id)
+        if not state:
+            return {"ok": False, "message": "not found"}
+        g, players = state.get("game"), state.get("players", {})
+    if not isinstance(g, dict) or not g.get("players") or g.get("phase") != "over":
+        return {"ok": False, "message": "game not finished"}
+    user = get_user_by_session(token) if token else None
+    requester = (user or {}).get("id") or player_id
+    if not requester or requester not in players:
+        return {"ok": False, "message": "not your game"}
+    return {
+        "ok": True, "game": engine.player_view(g, requester), "players": players,
+        "winner": g.get("winner"), "win_condition": g.get("win_condition"),
+        "scores": {pid: engine.points_of(p) for pid, p in g["players"].items()},
+    }
+
+
+@duel_app.post("/games/{game_id}/cancel")
+async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None):
+    game_id = normalize_room(game_id)
+    owner = None
+    user = get_user_by_session(token) if token else None
+    if user:
+        owner = user["id"]
+    elif player_id:
+        owner = player_id
+    if not owner:
+        return {"ok": False, "message": "unauthenticated"}
+    deleted = delete_open_game(game_id, owner)
+    if deleted:
+        async with ROOM_LOCK:
+            ROOMS.pop(game_id, None)
+    return {"ok": deleted, "message": None if deleted else "not your open game"}

@@ -112,3 +112,12 @@ try:
     LOG.info("mounted Where Wolf? at /werewolf")
 except Exception as _ww_err:  # pragma: no cover - optional package
     LOG.warning("Where Wolf? not mounted: %s", _ww_err)
+
+# Spender Duel — its self-contained sub-app mounted under /duel. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.spender_duel.main import duel_app
+    app.mount("/duel", duel_app)
+    LOG.info("mounted Spender Duel at /duel")
+except Exception as _duel_err:  # pragma: no cover - optional package
+    LOG.warning("Spender Duel not mounted: %s", _duel_err)
