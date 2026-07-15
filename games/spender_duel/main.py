@@ -30,6 +30,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import engine
 from . import bot
 from . import cards
+# `ai` is used as a local name for the bot pid in places, so alias the module
+# (the same collision CoC hit — see its `coc_ai` import).
+from . import ai as duel_ai
 
 from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
@@ -41,6 +44,16 @@ LOG = logging.getLogger("games.spender_duel")
 
 # Pause between the bot's individual moves so the client animates each one.
 _BOT_MOVE_DELAY = 0.9
+
+# Opponent tiers. "easy" = the trivial tiered random-legal bot (no search);
+# "normal"/"hard" = determinized MCTS (ai.DIFFICULTY), planned in a thread pool.
+AI_DIFFICULTIES = ("easy", "normal", "hard")
+DEFAULT_DIFFICULTY = "hard"
+
+
+def _valid_difficulty(value) -> str:
+    """Coerce a client-supplied difficulty to a real tier (default on anything bad)."""
+    return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 duel_app = FastAPI(title="Spender Duel API")
 duel_app.add_middleware(
@@ -134,6 +147,7 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
     }
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
@@ -170,6 +184,10 @@ def load_game_to_memory(room_id: str) -> bool:
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
+        # Persisted so a vs-bot game reconnected after a redeploy (which wipes the
+        # in-memory ROOMS) keeps the tier it was created with, instead of silently
+        # falling back to the default — the bug Spender hit with ai_variant.
+        "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
         "sockets": {},
     }
     return True
@@ -280,6 +298,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "game": engine.player_view(g, viewer_pid) if g else None,
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
+        "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "reconnect_tokens": (
             {viewer_pid: room.get("meta", {}).get(viewer_pid, {}).get("token")}
             if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
@@ -314,26 +333,67 @@ def _bot_should_act(room: dict) -> bool:
 
 # ── Bot turn scheduler ────────────────────────────────────────────────────────
 async def _schedule_bot_turn(room_id: str) -> None:
-    """Drive the bot's turn one move at a time with pacing so the client
-    animates each move. The bot is cheap (tiered random-legal), so moves are
-    chosen inline under the lock — no thread pool needed at v1."""
+    """Drive the bot's whole turn, one move at a time with pacing so the client
+    animates each move.
+
+    The MCTS tiers are HEAVY (seconds per turn), so the search runs on a snapshot
+    in a THREAD POOL and the planned sequence is applied back under the lock — the
+    lock is never held across a search. (Running heavy engine work under ROOM_LOCK
+    on the event-loop thread is what once took the CoC backend down; don't inline
+    it here.) A trivial-bot finisher guarantees the turn always ends, so a failed
+    or stale plan can never deadlock the game.
+    """
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room or room.get("_bot_running") or not _bot_should_act(room):
             return
         room["_bot_running"] = True
+        difficulty = _valid_difficulty(room.get("ai_difficulty"))
+        snapshot = duel_ai._clone_game(room["game"]) if difficulty != "easy" else None
     try:
         rng = random.Random()
-        for _ in range(80):  # guard: a turn (incl. AGAIN chains) is well under this
+        seq = []
+        if snapshot is not None:
+            loop = asyncio.get_event_loop()
+            try:
+                seq = await loop.run_in_executor(
+                    None,
+                    lambda: duel_ai.play_turn_plan(snapshot, AI_PID, difficulty=difficulty,
+                                                   rng=random.Random()),
+                )
+            except Exception:
+                LOG.exception("duel AI planning failed; finishing with the trivial bot")
+                seq = []
+
+        # Apply the plan move-by-move, re-validating each against the LIVE game (it
+        # may have drifted — e.g. a reconnect re-triggered the scheduler).
+        for mv in seq:
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
                 if not room or not _bot_should_act(room):
                     return
-                game = room["game"]
-                mv = bot.choose(game, AI_PID, rng)
+                ok, err = engine.apply_move(room["game"], AI_PID, mv)
+                if not ok:
+                    LOG.info("duel planned move no longer legal (%s): %s", room_id, err)
+                    break
+                _sync_status_from_game(room)
+                more = _bot_should_act(room)
+            await broadcast_state(room_id)
+            save_game(room_id)
+            if not more:
+                return
+            await asyncio.sleep(_BOT_MOVE_DELAY)
+
+        # Finisher: guarantee the turn ends (empty/failed plan, drift, or "easy").
+        for _ in range(80):
+            async with ROOM_LOCK:
+                room = ROOMS.get(room_id)
+                if not room or not _bot_should_act(room):
+                    return
+                mv = bot.choose(room["game"], AI_PID, rng)
                 if mv is None:
                     return
-                ok, err = engine.apply_move(game, AI_PID, mv)
+                ok, err = engine.apply_move(room["game"], AI_PID, mv)
                 if not ok:
                     LOG.warning("duel bot move rejected (%s): %s", room_id, err)
                     return
@@ -408,6 +468,7 @@ async def _send(ws: WebSocket, payload: dict) -> None:
 async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
+    difficulty = _valid_difficulty(msg.get("ai_difficulty"))
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -421,6 +482,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "meta": {pid: {"token": _gen_token()}},
             "vs_ai": vs_ai,
             "ai_player": None,
+            "ai_difficulty": difficulty,
         }
         ROOMS[room_id] = room
         if vs_ai:

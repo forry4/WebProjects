@@ -242,6 +242,12 @@ def new_game(player_ids: list, names: dict | None = None, seed=None) -> dict:
                 "tokens": empty_tokens(),
                 "privileges": 0,
                 "reserved": [],
+                # Which of `reserved` were BLIND deck draws (vs taken face-up off the
+                # pyramid, which the opponent watched). The log can't answer this — it
+                # deliberately omits card_id for blind reserves — so the AI needs the
+                # flag here to determinize the opponent's hand instead of reading it.
+                # A list of card ids; REDACTED in player_view (it would leak identities).
+                "reserved_from_deck": [],
                 "purchased": [],
                 "royals": [],
                 "royals_claimed": 0,
@@ -446,6 +452,7 @@ def _h_reserve(game: dict, pid: str, move: dict):
             return False, "that deck is empty"
         cid = game["decks"][lvl].pop()
         p["reserved"].append(cid)
+        p["reserved_from_deck"].append(cid)
         # Blind draw: the log must NOT carry the card id.
         _log(game, pid, "reserve", level=int(lvl), from_deck=True, gold_cell=gold_cell)
     else:
@@ -500,6 +507,8 @@ def _h_buy(game: dict, pid: str, move: dict):
         game["pyramid"][lvl][slot] = game["decks"][lvl].pop() if game["decks"][lvl] else None
     else:
         p["reserved"].remove(cid)
+        if cid in p["reserved_from_deck"]:
+            p["reserved_from_deck"].remove(cid)
     p["purchased"].append({"id": cid, "as_color": as_color})
     _log(game, pid, "buy", card_id=cid, frm=frm, as_color=as_color,
          points=card["points"] or None, crowns=card["crowns"] or None)
@@ -754,6 +763,11 @@ def player_view(game: dict, pid: str | None) -> dict:
     g.pop("decks")
     g.pop("rng_state", None)
     g.pop("seed", None)
+    # `reserved_from_deck` is a list of card IDS — it must never reach an opponent (it
+    # would reveal the very identities `reserved` redacts). No client needs it, so it
+    # comes off every seat's view.
+    for p in g["players"].values():
+        p.pop("reserved_from_deck", None)
     if not is_over(game):
         for opid, p in g["players"].items():
             if opid == pid:

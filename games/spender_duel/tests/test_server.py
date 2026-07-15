@@ -28,6 +28,12 @@ class _FakeWS:
 
 
 def _isolate(monkeypatch, rid):
+    """No DB reads/writes; fast pacing; a clean room slate.
+
+    Any NEW pacing constant must be zeroed here too — the CoC lesson: a real
+    per-move sleep left in a test loop overflows the driver on CI's fine timers
+    while passing locally on Windows' coarse ones.
+    """
     m.ROOMS.pop(rid, None)
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_state", lambda room_id: None)
@@ -36,12 +42,15 @@ def _isolate(monkeypatch, rid):
 
 
 def test_vs_ai_full_game_and_wire_redaction(monkeypatch):
+    """A whole vs-bot game through the WS handlers. Uses the "easy" tier: this
+    test is about the room/redaction/scheduler wiring, not search strength, and
+    the MCTS tiers would spend seconds per decision on CI."""
     rid, pid = "DUEL01", "human1"
     _isolate(monkeypatch, rid)
 
     async def run():
         ws = _FakeWS()
-        await m._handle_create(ws, rid, pid, {"name": "H", "vs_ai": True})
+        await m._handle_create(ws, rid, pid, {"name": "H", "vs_ai": True, "ai_difficulty": "easy"})
         created = ws.last("created")
         assert created and created["room"]["status"] == "playing"
         g_wire = created["room"]["game"]
@@ -113,13 +122,81 @@ def test_join_capped_at_two_and_reconnect(monkeypatch):
     m.ROOMS.pop(rid, None)
 
 
+def test_mcts_tier_plans_and_applies(monkeypatch):
+    """The MCTS tier drives real turns through the scheduler (tiny budget so this
+    stays a wiring test, not a strength test), and the search runs OFF the event
+    loop — never under ROOM_LOCK."""
+    rid, pid = "DUEL04", "human1"
+    _isolate(monkeypatch, rid)
+    monkeypatch.setitem(m.duel_ai.DIFFICULTY, "hard",
+                        {"time_limit": 0.05, "max_iters": 12, "temperature": 0.0,
+                         "rollout_steps": 2})
+
+    async def run():
+        ws = _FakeWS()
+        await m._handle_create(ws, rid, pid, {"name": "H", "vs_ai": True, "ai_difficulty": "hard"})
+        room = m.ROOMS[rid]
+        assert room["ai_difficulty"] == "hard"
+        rng = random.Random(5)
+        bot_moves_before = 0
+        for _ in range(400):
+            await asyncio.sleep(0.005)
+            g = room.get("game")
+            if g is None or engine.is_over(g):
+                break
+            actor = g.get("pending_pid") or g.get("turn")
+            if actor == pid and not room.get("_bot_running"):
+                await m._handle_move(ws, rid, pid, {"move": rng.choice(engine.legal_moves(g, pid))})
+                bot_moves_before = sum(1 for e in g["log"] if e["pid"] == m.AI_PID)
+        g = room["game"]
+        # the bot actually took turns via the planner (not just the finisher)
+        assert sum(1 for e in g["log"] if e["pid"] == m.AI_PID) > 3
+        assert room.get("_bot_running") is False
+
+    asyncio.run(run())
+    m.ROOMS.pop(rid, None)
+
+
+def test_bogus_difficulty_falls_back_to_default(monkeypatch):
+    rid = "DUEL05"
+    _isolate(monkeypatch, rid)
+
+    async def run():
+        await m._handle_create(_FakeWS(), rid, "p1",
+                               {"name": "One", "vs_ai": True, "ai_difficulty": "TOTALLY-BOGUS"})
+        assert m.ROOMS[rid]["ai_difficulty"] == m.DEFAULT_DIFFICULTY
+
+    asyncio.run(run())
+    m.ROOMS.pop(rid, None)
+
+
+def test_difficulty_survives_a_reload(monkeypatch):
+    """A vs-bot room reloaded from the DB (e.g. after a redeploy wipes ROOMS) keeps
+    its tier — the Spender `ai_variant` bug was exactly this silently defaulting."""
+    rid = "DUEL06"
+    m.ROOMS.pop(rid, None)
+    game = engine.new_game(["p1", m.AI_PID], seed=1)
+    state = {"players": {"p1": "One", m.AI_PID: "Bot"}, "host": "p1", "status": "playing",
+             "game": game, "meta": {}, "vs_ai": True, "ai_player": m.AI_PID,
+             "ai_difficulty": "normal"}
+    monkeypatch.setattr(m, "load_game_state", lambda room_id: state)
+    assert m.load_game_to_memory(rid)
+    assert m.ROOMS[rid]["ai_difficulty"] == "normal"
+    # a legacy row with no tier recorded loads as the default, not as None
+    state.pop("ai_difficulty")
+    m.ROOMS.pop(rid)
+    assert m.load_game_to_memory(rid)
+    assert m.ROOMS[rid]["ai_difficulty"] == m.DEFAULT_DIFFICULTY
+    m.ROOMS.pop(rid, None)
+
+
 def test_abandon_ends_game(monkeypatch):
     rid = "DUEL03"
     _isolate(monkeypatch, rid)
 
     async def run():
         ws = _FakeWS()
-        await m._handle_create(ws, rid, "p1", {"name": "One", "vs_ai": True})
+        await m._handle_create(ws, rid, "p1", {"name": "One", "vs_ai": True, "ai_difficulty": "easy"})
         await m._handle_abandon(ws, rid, "p1")
         room = m.ROOMS[rid]
         assert room["status"] == "over"

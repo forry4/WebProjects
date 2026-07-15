@@ -1434,12 +1434,98 @@ games/spender_duel/
                   #   totals locked by tests: 28 crowns/92 pts/9 wilds/5 double-bonus L2/29 pearl costs)
                   #   + 4 royals + TOKEN_BAG (25) + SPIRAL_ORDER (5x5 center-out) + PYRAMID_SIZES
   engine.py       # PURE rules: new_game/legal_moves/apply_move/is_over/winner + player_view
-  bot.py          # tiered random-legal bot (buy > 3-take > take > reserve > replenish > privilege)
+  bot.py          # tiered random-legal bot ("easy" tier + the scheduler's guaranteed finisher)
+  ai.py           # STRONG opponent: determinized MCTS + heuristic leaf (Normal / Hard)
+  ai_selfplay.py  # offline arena (agent specs, CRN seat-swapped pairs, Wilson CIs) — no server/DB
   main.py         # duel_app mounted at /duel; ROOMS/ROOM_LOCK; own duel_games table; bot scheduler
   SpenderDuel.jsx # lobby + 5x5 board line-selection + pyramid + modals; localStorage duel_*
-  tests/          # 54 tests: card invariants, all rules edges, redaction, server layer,
+  tests/          # card invariants, all rules edges, redaction, server layer + MCTS wiring,
                   #   bot-vs-bot soak with an exact 25-token conservation invariant
 ```
+
+### AI (`ai.py`) — determinized MCTS, tiers Easy / Normal / Hard
+**Measured ladder** (`ai_selfplay arena`, CRN seat-swapped pairs, n=10, mirror verified at EXACTLY
+0.5000): **hard-vs-random 1.000 · hard-vs-normal 0.900 · normal-vs-random 0.700** — monotonic, so the
+lobby's three tiers are real (`easy` = the trivial `bot.py` = the "random" column).
+- **The ARENA HARNESS must give each SEAT its own rng** (`random.Random((seed<<8)|seat)`), not one
+  shared stream. With per-seat rngs a seat-swapped pair replays the identical game both ways, so a
+  MIRROR scores exactly 0.5000 by construction; a shared stream interleaves the two searches' draws,
+  the paired games diverge, and the mirror drifted to 0.625 — quietly biasing every A/B run through it.
+  Check the mirror reads 0.5000 before believing any number from this harness.
+- **Determinization is a correctness requirement, not a strength knob.** The AI runs SERVER-side
+  holding the real game dict, so it could trivially read the opponent's secret reserves. `_determinize`
+  resamples everything it may not see — bag contents, deck order, and the opponent's BLIND reserves —
+  canonicalizing (sorting) each pool before reshuffling so the search provably can't depend on the true
+  hidden order. **Blind reserves resample PER LEVEL**: which deck you drew from is public, only the
+  identity is secret. Enabling this needed a new state field `players[pid]["reserved_from_deck"]` — the
+  log CANNOT answer "was this reserve blind?" because it deliberately omits `card_id` for blind draws.
+  That field is a list of card ids, so `player_view` strips it from every view (it would leak the very
+  identities `reserved` redacts).
+- **NO uniform PUCT prior in `_select` — this is deliberate and MEASURED (do not "fix").** `U =
+  C_PUCT*sqrt(N)/(1+n)`, no `1/branches` scaling. CRN-paired equal-sims A/Bs (mirror verified exactly
+  0.5000): `prior@c100 vs no-prior@c1.5 = 0.5000` (100/76 ~= 1.3 ~= 1.5 — **a flat prior is just a
+  constant rescale of C_PUCT**, carrying no information); `no-prior@c0.4 vs c1.5 = 0.5000` (broad
+  plateau ~0.4-1.5); `prior@c1.5 vs no-prior@c1.5 = 0.2500` (effective c ~= 0.02 — the cliff: it commits
+  to whatever the first couple of NOISY rollouts liked, and the leaf is ~+-0.3). So exploration LEVEL is
+  the knob, not the prior. A LEARNED prior would carry real information — revisit only then.
+  **Selection and the final pick are a PAIR:** near-uniform visits are only sound because the pick breaks
+  visit ties by VALUE; never change one without re-measuring the other.
+  Diagnostic that cracked this: aggregate root visits AND mean-Q BY MOVE TYPE. It showed `use_privilege`
+  holding the best Q (+0.26) while losing the pick — the search knew the answer and the selection rule
+  discarded it. **If a search "knows" the right move but won't play it, print visits-and-Q by move type
+  before touching the eval.** (My first two theories here were both wrong and the A/B refuted both —
+  trust the paired arena, not the reasoning.)
+- **THE TIE-BREAK IS LOAD-BEARING (do not regress).** Branching is ~76; with sims thin relative to that,
+  many root moves tie at 1 visit and a plain `max(n)` returns the FIRST index — which is whatever
+  `legal_moves` enumerates first (a token take). Symptom: the bot took tokens forever, bought nothing,
+  scored 0, and **the game never ended** — Splendor Duel has NO turn limit, so two non-buyers play
+  literally forever. Fix: break visit ties by mean value (`(n, w/n)`). This one line took a
+  0-point/4000-move non-terminating bot to winning 21-16. The arena therefore scores a stalled game as a
+  draw and REPORTS the count rather than asserting — a rising `stalled` is the tell that an agent stopped
+  developing.
+- **Search-legality prunes (`_legal`), both safe:** drop `skip_pending` (skipping a free ability is never
+  better than using it), and dedupe reserve `gold_cell`s — gold is fungible and vacating a cell can never
+  open a line (the empty cell breaks contiguity exactly as the gold did), so 3 golds x 15 sources
+  collapses 45 branches to 15. Residual: spiral REFILL order on a later replenish — a deliberate, tiny
+  approximation. `_legal` never returns empty when `legal_moves` isn't (the CoC lesson: a prune that
+  strands the search plays worse).
+- **Eval `_value`:** `tanh((standing(me) - standing(opp))/scale)` — scoring BOTH seats with the same
+  function and subtracting makes denial fall out of the search for free (no contested-card knob, the
+  Spender `v_state` lesson). `_standing`'s dominant term is CONVEX progress toward the NEAREST of the
+  three win conditions (`max(pts/20, crowns/10, best_color/10) ** 2`) — Duel's three win routes make
+  "closest win" the right currency. Verified directly that buying RAISES the static eval (+0.01..+0.48
+  vs +0.05 for a take), i.e. no buy-nothing bias.
+- **A RESOURCE MUST NOT OUT-SCORE WHAT IT CONVERTS INTO.** `privilege` was 0.55 while the token it cashes
+  1:1 into scored 0.16 — so holding always beat using, and the bot sat on privileges all game. Now 0.13,
+  just UNDER `token`: conversion is mildly positive and the SEARCH judges the timing. Same failure shape
+  as the documented AZ "buy-nothing" collapse — check any convertible resource (privileges, gold,
+  reserves) against its sink before blaming the search.
+- **The "normal" tier samples a softmax over mean Q — NOT over visit counts (do not regress).** The
+  AlphaZero convention (sample proportional to visits) is WRONG for this search and was measured so:
+  because selection is exploration-heavy, visits come out near-uniform over ~76 branches (quality lives
+  in Q, not in the visit distribution), so visit-temperature collapsed to a uniform random move and
+  **normal LOST to the trivial random-legal bot, 0.200**. Switching to `softmax(Q/T)`, T=0.08 (Q spreads
+  are ~0.1-0.3) took the same tier to **0.700 vs random** with hard still beating it 0.900. This is a
+  direct consequence of the `_select` finding above — the two are coupled.
+- **Small-value decisions are NOISE-BOUND by construction.** With `scale=9` a privilege-for-token swap is
+  a ~0.003 value delta against rollout noise ~±0.3 — no realistic sim count resolves it, so the bot is
+  genuinely indifferent there. Not an eval bug to hack around; it's the leaf's noise floor. (Holding all
+  3 privileges also BLANKS the opponent's privilege triggers, so indifference isn't clearly wrong.)
+- **Perf (measured):** ~1,758 sims/s, ~3,900 sims per hard decision; the ROLLOUT is ~97% of sim cost
+  (0.48ms vs 0.011ms for the static eval), so the leaf is the lever. Leaf choice is MEASURED, not
+  assumed — the repo has opposite precedents (Spender: static leaf beats rollout; CoC: rollout needed
+  for delayed payoffs). `ai_selfplay probe` A/Bs them at equal TIME (the ship criterion — static gets
+  ~16x the sims in the same budget) AND equal SIMS (the diagnostic), plus a mirror sanity that must
+  read ~0.5.
+- **Arena agent specs** (`ai_selfplay._agent`): `random` | `hard` | `hard@STEPS` | `hard@STEPS/ITERS` |
+  `hard@STEPS/ITERS/TIME`. Overrides are PER-AGENT on purpose — flipping a module global would change
+  both players and measure nothing (my first probe did exactly that and was worthless).
+- **Serving:** `main._schedule_bot_turn` plans the whole turn via `ai.play_turn_plan` in a THREAD POOL
+  (`run_in_executor`) on a snapshot, then applies the sequence move-by-move under the lock, re-validating
+  each against the live game; a `bot.play_turn` finisher guarantees the turn ends. **Never run the search
+  under `ROOM_LOCK`** — heavy synchronous engine work on the event-loop thread is what took the CoC
+  backend down. Room carries `ai_difficulty` (`_valid_difficulty`, persisted + restored on reload so a
+  redeploy can't silently downgrade the tier — the Spender `ai_variant` bug).
 
 Non-obvious engine facts (do not regress):
 - **Hidden info is first-class.** `player_view(game, pid)` strips `bag` (→ `bag_count`), `decks`

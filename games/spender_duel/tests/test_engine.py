@@ -278,6 +278,35 @@ def test_reserve_deck_blind_no_card_id_in_log():
     assert ok
     assert g["players"][A]["reserved"] == [top]
     assert "card_id" not in g["log"][-1] and g["log"][-1]["from_deck"] is True
+    # blindness is tracked in state (the log can't say — it omits the id on purpose)
+    assert g["players"][A]["reserved_from_deck"] == [top]
+
+
+def test_blind_flag_tracks_source_and_clears_on_buy():
+    g = fresh()
+    gold_at(g, 12)
+    put(g, 7, "gold")
+    faceup = g["pyramid"]["1"][0]
+    assert engine.apply_move(g, A, {"type": "reserve", "gold_cell": 12,
+                                    "source": {"kind": "pyramid", "level": 1, "slot": 0}})[0]
+    p = g["players"][A]
+    assert p["reserved"] == [faceup]
+    assert p["reserved_from_deck"] == []          # face-up reserve is NOT blind
+    g["turn"] = A                                  # take another turn (test scaffolding)
+    blind = g["decks"]["1"][-1]
+    assert engine.apply_move(g, A, {"type": "reserve", "gold_cell": 7,
+                                    "source": {"kind": "deck", "level": 1}})[0]
+    assert p["reserved_from_deck"] == [blind]
+    # buying the blind card clears its flag
+    g["turn"] = A
+    afford(g, A, blind)
+    kw = {}
+    if C.CARDS[blind]["bonus"] == "wild":
+        grant_purchase(g, A, find_card(bonus="red", level=1)["id"])
+        kw["as_color"] = "red"
+    assert engine.apply_move(g, A, {"type": "buy", "card_id": blind, "from": "reserve", **kw})[0]
+    assert p["reserved_from_deck"] == []
+    assert p["reserved"] == [faceup]
 
 def test_reserve_requires_gold_and_free_slot():
     g = fresh()
@@ -693,6 +722,10 @@ def test_player_view_redaction():
     assert isinstance(va["bag_count"], int) and va["deck_counts"]["1"] >= 0
     assert va["players"][A]["reserved"] == g["players"][A]["reserved"]     # own: full
     assert vb["players"][A]["reserved"] == [{"level": 2, "facedown": True}]  # opponent: level only
+    # the blind-source list is a list of card IDS — it must never reach ANY client view
+    for v in (va, vb):
+        for p in v["players"].values():
+            assert "reserved_from_deck" not in p
     vs = engine.player_view(g, None)
     assert vs["players"][A]["reserved"][0]["facedown"] is True
 

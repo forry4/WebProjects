@@ -28,6 +28,14 @@ const WIN_DESC = {
   crowns: "10 crowns",
   color: "10 points in one color",
 };
+// Bot tiers (wire ids match main.AI_DIFFICULTIES). Easy = the trivial random-legal
+// bot; Normal/Hard = determinized MCTS at different budgets.
+const BOT_TIERS = [
+  { id: "easy", name: "Easy", desc: "Plays legally, barely plans" },
+  { id: "normal", name: "Normal", desc: "Thinks a little, makes mistakes" },
+  { id: "hard", name: "Hard", desc: "Searches properly — a real fight" },
+];
+const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard" };
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
@@ -227,6 +235,12 @@ const css = `
 .duel-gamecard{border:1px solid var(--line,#3a332a);border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;background:var(--surface,#1b1712)}
 .duel-gamecard .grow{flex:1;min-width:0}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
+/* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
+   an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
+.duel-pick-wrap{position:relative}
+.duel-picker{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:60;background:#241d13;border:1px solid #6b5836;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.duel-picker button{white-space:nowrap;text-align:left}
+.duel-picker .sub{display:block;font-size:.72rem;opacity:.6}
 .duel-turnbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#3f5f33;color:#dfeecf;white-space:nowrap}
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
@@ -397,6 +411,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [showRules, setShowRules] = useState(false);
+  const [showBotPicker, setShowBotPicker] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
 
@@ -575,11 +590,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   // ── actions ──
   const mv = (move) => send({ action: "move", move });
 
-  const createGame = (vsAi) => {
+  const createGame = (vsAi, difficulty) => {
     const rid = roomCode();
     setRoomId(rid);
     setRoomData(null);
-    connect(`${DUEL_WS}/${rid}/${myId}`, { action: "create", name: playerName, vs_ai: vsAi });
+    setShowBotPicker(false);
+    const msg = { action: "create", name: playerName, vs_ai: vsAi };
+    if (vsAi) msg.ai_difficulty = difficulty || "hard";
+    connect(`${DUEL_WS}/${rid}/${myId}`, msg);
   };
   const joinGame = (rid) => {
     rid = (rid || "").toUpperCase().trim();
@@ -718,7 +736,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     return (
       <div className={`duel-panel duel-player${active ? " active" : ""}`} key={pid}>
         <div className="hd">
-          <span className="nm">{names[pid] || pid}{isMe ? " (you)" : ""}</span>
+          <span className="nm">
+            {names[pid] || pid}{isMe ? " (you)" : ""}
+            {!isMe && roomData?.vs_ai && pid === roomData?.ai_player && roomData?.ai_difficulty && (
+              <span className="duel-muted" style={{ fontSize: ".8rem", marginLeft: 6 }}>
+                ({TIER_NAME[roomData.ai_difficulty] || roomData.ai_difficulty})
+              </span>
+            )}
+          </span>
           {active && <span className="duel-turnbadge">{isMe ? "Your turn" : roomData?.vs_ai && pid === roomData?.ai_player ? "Bot is playing…" : "Their turn"}</span>}
           <span className="duel-stat">
             <span title="Prestige points">★ {pts}</span>
@@ -994,7 +1019,18 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         </div>
         <div className="duel-create-row">
           <button className="btn btn-gold" onClick={() => createGame(false)}>+ Create Game</button>
-          <button className="btn btn-gold" onClick={() => createGame(true)}>Play vs Bot</button>
+          <div className="duel-pick-wrap">
+            <button className="btn btn-gold" onClick={() => setShowBotPicker((v) => !v)}>Play vs Bot ▾</button>
+            {showBotPicker && (
+              <div className="duel-picker">
+                {BOT_TIERS.map((t) => (
+                  <button key={t.id} className="btn btn-outline" onClick={() => createGame(true, t.id)}>
+                    {t.name}<span className="sub">{t.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button className="btn btn-outline" onClick={fetchGames}>{loadingGames ? "…" : "↻"}</button>
         </div>
         <div className="duel-lobby-cols">
