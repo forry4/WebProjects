@@ -1421,6 +1421,50 @@ as CoC. How it was launched (and the lessons, DO NOT regress):
 
 ---
 
+## Spender Duel (fourth game)
+
+`Spender Duel` is the **fourth game** — a faithful digital port of **Splendor Duel** (strictly
+2-player). Shipped to prod 2026-07-15 (`e0722ef`): home card `status:"ready"`, backend at `/duel`,
+simple bot at v1 (a CoC-style MCTS `ai.py` is the intended follow-up). Same architecture as CoC:
+pure `engine.py` + thin `main.py` sub-app + self-contained `SpenderDuel.jsx` (screen `"duel"`).
+
+```
+games/spender_duel/
+  cards.py        # REAL 67-card deck (transcribed, 5-source cross-checked; per-color symmetric —
+                  #   totals locked by tests: 28 crowns/92 pts/9 wilds/5 double-bonus L2/29 pearl costs)
+                  #   + 4 royals + TOKEN_BAG (25) + SPIRAL_ORDER (5x5 center-out) + PYRAMID_SIZES
+  engine.py       # PURE rules: new_game/legal_moves/apply_move/is_over/winner + player_view
+  bot.py          # tiered random-legal bot (buy > 3-take > take > reserve > replenish > privilege)
+  main.py         # duel_app mounted at /duel; ROOMS/ROOM_LOCK; own duel_games table; bot scheduler
+  SpenderDuel.jsx # lobby + 5x5 board line-selection + pyramid + modals; localStorage duel_*
+  tests/          # 54 tests: card invariants, all rules edges, redaction, server layer,
+                  #   bot-vs-bot soak with an exact 25-token conservation invariant
+```
+
+Non-obvious engine facts (do not regress):
+- **Hidden info is first-class.** `player_view(game, pid)` strips `bag` (→ `bag_count`), `decks`
+  (→ `deck_counts`), rng, and the OPPONENT's reserve identities (→ `{level, facedown}`); reveals all
+  at game over. `main.py` broadcasts **per-recipient views** (`broadcast_state`) — the one structural
+  difference from CoC's shared snapshot. Blind deck reserves log level only; face-up pyramid reserves
+  keep the card id in the log (public when performed).
+- **Cell choices are strategic, not cosmetic:** take-same resolution, privilege takes, and the
+  reserve's gold token all carry a board CELL index — removing a specific token changes line-take
+  geometry. Don't "simplify" these to color choices.
+- **Turn pipeline:** one mandatory action → `_after_action` recheck loop (royal entitlement
+  `(crowns>=3)+(crowns>=6)` vs `royals_claimed` — handles jumped/double-crossed thresholds; then
+  discard-to-10) → `_finish_turn` (victory check **pre-empts** the AGAIN extra turn). A skipped royal
+  counts as claimed (forfeit) so the pending can't loop. Discard has NO skip (mandatory, terminates).
+- **Forced replenish is emergent** — with no legal mandatory action, `legal_moves` offers only
+  optionals; deadlock is provably unreachable (≤20 tokens held + ≤3 gold of 25 ⇒ an empty bag implies
+  a takeable gem); a defensive `pass` exists but is unreachable. Optional order is enforced:
+  `use_privilege` is illegal after `replenish` in the same turn (`turn_flags.replenished`).
+- **Payments return to the BAG** (not a bank) — replenish reshuffles them back into play; token
+  conservation (exact 25-multiset across board+bag+hands) is soak-tested after every move.
+- **Future MCTS determinization surface** (bot.py docstring): shuffle bag + deck remainders + deal
+  the opponent's blind reserves from the unseen pool.
+
+---
+
 ## Books (site feature — not a game)
 
 A standalone site page for ranking favorite books + collecting reading suggestions
