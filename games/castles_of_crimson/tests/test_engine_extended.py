@@ -54,32 +54,29 @@ def test_buy_black_once_per_turn_then_resets_next_turn():
     assert ok, err
 
 
-def test_monastery6_requires_effect_workers_room_and_once_per_turn():
+def test_monastery6_requires_effect_and_silver_unlimited():
+    # New rule: spend 1 silver -> gain 2 workers, no once-per-turn limit.
     g = _playing(3)
     p = g["players"]["p1"]
-    tile = tiles._hex_tile("building", "beige", building="market")
-    g["depots"]["1"]["hexes"] = [tile]
     _controlled_turn(g)
     # without the monastery effect the action is illegal
-    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": tile["id"]})
+    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take"})
     assert not ok and "monastery" in err
-    # with the effect but too few workers
+    # with the effect but no silver
     p["monastery_effects"] = [6]
-    p["workers"] = 1
-    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": tile["id"]})
-    assert not ok and "workers" in err
-    # enough workers -> succeeds, spends exactly 2, takes the tile
-    p["workers"] = 2
-    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": tile["id"]})
+    p["silver"] = 0
+    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take"})
+    assert not ok and "silver" in err
+    # enough silver -> succeeds, spends 1 silver, gains 2 workers
+    p["silver"] = 2
+    w0 = p["workers"]
+    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take"})
     assert ok, err
-    assert p["workers"] == 0 and any(t["id"] == tile["id"] for t in p["storage"])
-    assert g["m6_used_this_turn"] is True
-    # once per turn: even with plenty of workers, a second use is rejected
-    tile2 = tiles._hex_tile("building", "beige", building="bank")
-    g["depots"]["1"]["hexes"] = [tile2]
-    p["workers"] = 5
-    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": tile2["id"]})
-    assert not ok and "this turn" in err
+    assert p["silver"] == 1 and p["workers"] == w0 + 2
+    # unlimited: a second use in the same turn succeeds
+    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take"})
+    assert ok, err
+    assert p["silver"] == 0 and p["workers"] == w0 + 4
 
 
 # ── Goods cap + ship goods intake ─────────────────────────────────────────────

@@ -334,6 +334,17 @@ const ICON = {
     <circle cx="10.5" cy="12.3" r="0.8" fill="#33312e" />
     <circle cx="13.5" cy="12.3" r="0.8" fill="#33312e" />
   </>),
+  chicken: () => (<>
+    <path d="M4.2 12 Q1.4 13 3 16.3 Q5.2 15 6.8 13.8 Z" fill="#c9a24a" />{/* tail */}
+    <ellipse cx="10.6" cy="14.6" rx="6.7" ry="5.5" fill="#f1ede1" />{/* body */}
+    <circle cx="16" cy="9.6" r="3.4" fill="#f1ede1" />{/* head */}
+    <path d="M14.5 5.2 Q15.3 3.5 16.1 5 Q16.9 3.5 17.5 5.2 Q17.1 6.5 16 6.7 Q14.8 6.5 14.5 5.2 Z" fill="#c0392b" />{/* comb */}
+    <path d="M18.9 10 L22 9.2 L18.9 11.2 Z" fill="#e0a526" />{/* beak */}
+    <path d="M16.3 12.3 Q16.4 13.6 15.3 13.5 Q16 12.7 15.8 12.1 Z" fill="#c0392b" />{/* wattle */}
+    <circle cx="16.6" cy="9.1" r="0.75" fill="#15100a" />{/* eye */}
+    <rect x="9" y="19.6" width="0.9" height="2.6" fill="#e0a526" />
+    <rect x="12.3" y="19.6" width="0.9" height="2.6" fill="#e0a526" />
+  </>),
 };
 
 function Icon({ kind, color, size }) {
@@ -496,10 +507,7 @@ const MONASTERY_ICON = {
   3: () => (<>{mBarrel(5.4, 13, 0.82)}{mArrowR(9.2, 13, 0.66)}{mCoin(15.0, 13, 0.82)}{mCoin(18.2, 13, 0.82)}</>), // sell goods -> 2 silver
   4: () => (<>{mBarrel(7, 13, 0.92)}{mArrowR(11.5, 13, 0.82)}{mPawn(16.6, 13, 1.05)}</>),          // sell goods -> worker
   5: () => (<>{mBarrel(3.8, 12.5, 0.72)}{mIcon("ship", 12, 11, 12)}{mBarrel(20.2, 12.5, 0.72)}</>), // ship also takes goods on either side
-  // #6 depicts the CURRENTLY-LIVE rule (spend 2 workers -> take a building tile to storage).
-  // When the mon6 backend change ships (silver -> 2 workers), flip this to:
-  //   mCoin(6.4,13,1.0) + mArrowR(10.6,13,0.78) + mPawn(15,13,1.0) + mPawn(18.6,13,1.0)
-  6: () => (<>{mPawn(5.8, 13, 0.98)}{mPawn(9.1, 13, 0.98)}{mArrowR(13, 13, 0.72, M_INK)}{mHouse(18, 13.2, 1.55, "#6b4a2a")}</>), // 2 workers -> a building tile (live rule)
+  6: () => (<>{mCoin(6.4, 13, 1.0)}{mArrowR(10.6, 13, 0.78)}{mPawn(15, 13, 1.0)}{mPawn(18.6, 13, 1.0)}</>), // 1 silver -> 2 workers
   7: () => (<>{mIcon("cow", 8.8, 13.2, 12)}<g transform="rotate(-35 15.8 11.5)">{mArrowR(15.8, 11.5, 0.7, M_INK)}</g>{mStar(18.2, 6.4, 3)}</>), // livestock scored -> +1 VP
   8: () => (<>{mDie(5.0, 13, 1.1, [[0, 0]])}{mShift(12, 13, 0.76)}{mDie(19.0, 13, 1.1, [[-0.62, -0.62], [0, 0], [0.62, 0.62]])}</>), // adjust die by 2 (1 <-> 3)
   // 9-11: die + a colored hex swatch of the tile type(s) the free shift applies to
@@ -1248,7 +1256,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // interaction state
   const [selDie, setSelDie] = useState(null);
   const [selStorage, setSelStorage] = useState(null);
-  const [m6Armed, setM6Armed] = useState(false);        // Monastery #6: armed via the workers token
   const [silverArmed, setSilverArmed] = useState(false);  // black-depot buy: armed via the silver token
   const [actedThisTurn, setActedThisTurn] = useState(false);  // did I take any action this turn? (gates Undo)
   const [extraValue, setExtraValue] = useState(null);
@@ -1289,14 +1296,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // dice are rolled. `setupMine` = it's my turn to choose.
   const setupPhase = !!game && game.phase === "setup";
   const setupMine = setupPhase && !over && game.turn === myId;
-  // Monastery #6: on your turn, spend 2 workers to take a building tile from a depot.
-  // Usable when you own the effect, haven't used it this turn, have >=2 workers + a free
-  // storage slot, and a building tile is actually sitting in a depot. Mirrors the engine
-  // gate in legal_moves so the workers token only invites a click when it'll work.
+  // Monastery #6: on your turn, spend 1 silver to gain 2 workers (unlimited uses).
+  // Atomic — click the workers token to do it (no target). Mirrors the engine gate.
   const canUseM6 = !!me && myTurnRaw && !pendingMine
     && (me.monastery_effects || []).includes(6)
-    && !game.m6_used_this_turn && (me.workers || 0) >= 2 && (me.storage?.length || 0) < 3
-    && [1, 2, 3, 4, 5, 6].some((d) => (game.depots?.[String(d)]?.hexes || []).some((t) => t.type === "building"));
+    && (me.silver || 0) >= 1;
   // Black-depot buy: on your turn, spend 2 silver to take a tile from the central depot.
   // Usable once/turn, needs >=2 silver + a free storage slot + a tile in the black depot.
   const canBuyBlack = !!me && myTurnRaw && !pendingMine
@@ -1452,7 +1456,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // clear selection at the start of a fresh decision
   useEffect(() => { setSelDie(null); setSelStorage(null); setExtraValue(null); }, [game?.turn, game?.round, game?.pending_kind]);
   // Disarm Monastery #6 the moment it's no longer usable (turn ended, used, storage full…).
-  useEffect(() => { if (!canUseM6) setM6Armed(false); }, [canUseM6]);
   // Same for the silver / black-depot buy.
   useEffect(() => { if (!canBuyBlack) setSilverArmed(false); }, [canBuyBlack]);
   // "acted this turn" resets only when the turn itself changes (NOT on pending
@@ -1966,12 +1969,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // so this mirrors the PC title-tooltip — see also clickBlackTile).
   const clickDepotTile = (depot, tile, e) => {
     if (shipPickMine) return;   // clicking anywhere in a depot picks it (handled on the depot div)
-    // Monastery #6 armed: click a BUILDING tile to take it for 2 workers.
-    if (m6Armed) {
-      if (tile.type === "building") { if (e) e.stopPropagation(); mv({ type: "monastery6_take", tile_id: tile.id }); setM6Armed(false); }
-      else setToast(tileDesc(tile, board));
-      return;
-    }
     if (buildingPickMine) {
       // Take this exact tile if it's a candidate (disambiguates a 2-candidate depot);
       // stop the click from also hitting the depot's own pick handler.
@@ -2633,8 +2630,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
                     {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
-                      <div key={slot.tile.id} className={`coc-tile${(buildingPickMine && buildingCands.includes(slot.tile.id)) || (m6Armed && slot.tile.type === "building") ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
-                        title={m6Armed && slot.tile.type === "building" ? `Take ${tileName(slot.tile)} for 2 workers (Monastery #6)` : tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
+                      <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
+                        title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
                         <TileArt tile={slot.tile} px={HEX_W} />
                       </div>
                     ) : (
@@ -2728,11 +2725,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 <div className="coc-resbar">
                   <span className="coc-token-chip"
                     title={canTakeWorkers ? "Take 2 workers with the selected die"
-                      : canUseM6 ? (m6Armed ? "Monastery #6 armed — click a building tile in a depot (2 workers). Click again to cancel." : "Monastery #6: click, then a building tile in a depot to take it for 2 workers")
+                      : canUseM6 ? "Monastery #6: spend 1 silver to gain 2 workers (unlimited)"
                       : "Workers — spent to adjust dice. Select a die, then click here to take 2 workers."}>
-                    <span className={`coc-token worker${(canTakeWorkers || canUseM6) ? " coc-arm" : ""}${m6Armed ? " coc-on" : ""}`} data-workers="1"
+                    <span className={`coc-token worker${(canTakeWorkers || canUseM6) ? " coc-arm" : ""}`} data-workers="1"
                       onClick={canTakeWorkers ? () => mv({ type: "take_workers", die_index: selDie })
-                        : canUseM6 ? () => setM6Armed((a) => !a) : undefined}>⚒</span><b>{me?.workers ?? 0}</b>
+                        : canUseM6 ? () => mv({ type: "monastery6_take" }) : undefined}>⚒</span><b>{me?.workers ?? 0}</b>
                   </span>
                   <span className="coc-token-chip"
                     title={canBuyBlack ? (silverArmed ? "Buy armed — click a tile in the central black depot (2 silver). Click again to cancel." : "Click, then a tile in the central black depot to buy it for 2 silver") : "Silver — spent to buy black-depot tiles"}>
