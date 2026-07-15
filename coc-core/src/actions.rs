@@ -57,10 +57,7 @@ pub fn chain_to_compact(s0: &State, chain: &[usize]) -> String {
         }
         Pending::None => match a0 {
             A_END_TURN => r#"{"t":"end"}"#.to_string(),
-            A_M6 => {
-                let k = chain[1] - A_TAKE_HEX0;
-                format!(r#"{{"t":"m6","depot":{},"slot":{}}}"#, k / 2, k % 2)
-            }
+            A_M6 => r#"{"t":"m6"}"#.to_string(), // atomic: spend 1 silver -> 2 workers
             a if (A_ADJUST0..A_ADJUST0 + 12).contains(&a) => {
                 let k = a - A_ADJUST0;
                 format!(r#"{{"t":"adjust","die":{},"to":{}}}"#, k / 6, k % 6 + 1)

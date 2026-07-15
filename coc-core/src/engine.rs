@@ -995,22 +995,14 @@ impl State {
         if !self.black_used && p.silver >= 2 && p.free_storage() && self.black_depot[0] != 0 {
             return true;
         }
-        if p.has_effect(6) && !self.m6_used && p.workers >= 2 && p.free_storage() {
-            let any = self
-                .depot_hex
-                .iter()
-                .flatten()
-                .any(|&t| t != 0 && type_of(t) == TileType::Building);
-            if any {
-                return true;
-            }
-        }
+        // Monastery 6 (silver -> 2 workers) is a resource conversion like take_workers,
+        // so it does NOT count as a "productive" action for turn-end pruning.
         false
     }
 }
 
 const T_LIVESTOCK_LO: u16 = tiles::T_LIVESTOCK0;
-const T_LIVESTOCK_HI: u16 = tiles::T_LIVESTOCK0 + 8;
+const T_LIVESTOCK_HI: u16 = tiles::T_LIVESTOCK0 + (tiles::N_ANIMALS as u16 * 3 - 1);
 
 // ── legal actions ─────────────────────────────────────────────────────────────
 /// Exactly mirrors engine.py `legal_moves` (through the micro-decomposition) — the
@@ -1171,15 +1163,9 @@ pub fn legal_actions_full(s: &State) -> Vec<usize> {
                         out.push(A_DISCARD0 + slot);
                     }
                 }
-                if p.has_effect(6) && !s.m6_used && p.workers >= 2 && p.free_storage() {
-                    let any = s
-                        .depot_hex
-                        .iter()
-                        .flatten()
-                        .any(|&t| t != 0 && type_of(t) == TileType::Building);
-                    if any {
-                        out.push(A_M6);
-                    }
+                // Monastery 6: spend 1 silver to gain 2 workers (unlimited uses per turn).
+                if p.has_effect(6) && p.silver >= 1 {
+                    out.push(A_M6);
                 }
             }
         },
@@ -1433,7 +1419,12 @@ pub fn apply(s: &mut State, a: usize) {
                     let slot = a - A_DISCARD0;
                     arr_remove(&mut s.players[seat].storage, slot);
                 }
-                A_M6 => s.micro = Micro::M6,
+                A_M6 => {
+                    // Monastery 6 (new rule): atomic spend 1 silver -> gain 2 workers.
+                    let p = &mut s.players[seat];
+                    p.silver -= 1;
+                    p.workers += 2;
+                }
                 _ => unreachable!("illegal main action {a}"),
             },
         },

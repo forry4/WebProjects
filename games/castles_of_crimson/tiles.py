@@ -83,7 +83,7 @@ MONASTERY_META = {
     3:  {"timing": "continuous", "desc": "Gain 2 silver instead of 1 whenever you sell goods."},
     4:  {"timing": "continuous", "desc": "Gain a worker whenever you sell goods."},
     5:  {"timing": "continuous", "desc": "When placing a ship, also take goods from an adjacent depot."},
-    6:  {"timing": "continuous", "desc": "Once per turn, spend 2 workers to take a building tile to storage."},
+    6:  {"timing": "continuous", "desc": "You may spend 1 silver to gain 2 workers (no limit)."},
     7:  {"timing": "continuous", "desc": "Livestock placement scores +1 VP per livestock tile that scores."},
     8:  {"timing": "continuous", "desc": "Workers adjust a die by 2 instead of 1."},
     9:  {"timing": "continuous", "desc": "May shift the die by 1 (free) when placing a building."},
@@ -116,8 +116,8 @@ MONASTERY_BUILDING_SCORING = {
 }
 
 # ── Livestock kinds ─────────────────────────────────────────────────────────
-ANIMALS = ["cow", "sheep", "pig"]
-LIVESTOCK_KINDS = [(a, c) for a in ANIMALS for c in (2, 3, 4)]  # 9 kinds
+ANIMALS = ["cow", "sheep", "pig", "chicken"]
+LIVESTOCK_KINDS = [(a, c) for a in ANIMALS for c in (2, 3, 4)]  # 12 kinds
 
 # ── Depot fill (2-player board) ─────────────────────────────────────────────
 # Each numbered depot is refilled at the START OF EVERY PHASE with exactly the
@@ -176,12 +176,14 @@ def build_supply() -> tuple[list[dict], list[dict]]:
         for _ in range(2):
             black.append(_hex_tile("building", "beige", building=bt, black=True))
 
-    # Livestock: 20 green, 8 black.
-    green_plan = (LIVESTOCK_KINDS * 2) + [("cow", 2), ("sheep", 3)]   # 20
-    for animal, count in green_plan:
-        non_black.append(_hex_tile("livestock", "green", animal=animal, count=count))
-    for animal, count in LIVESTOCK_KINDS[:8]:                          # 8
-        black.append(_hex_tile("livestock", "green", animal=animal, count=count, black=True))
+    # Livestock: 4 animals x 7 tiles = 28 (20 green + 8 black). Per animal:
+    # colored = 2x count-2, 2x count-3, 1x count-4 (5); black = 1x count-3, 1x count-4 (2).
+    for animal in ANIMALS:
+        for count, n in ((2, 2), (3, 2), (4, 1)):
+            for _ in range(n):
+                non_black.append(_hex_tile("livestock", "green", animal=animal, count=count))
+        for count in (3, 4):
+            black.append(_hex_tile("livestock", "green", animal=animal, count=count, black=True))
 
     # Mines: 10 gray, 2 black.
     for _ in range(10):

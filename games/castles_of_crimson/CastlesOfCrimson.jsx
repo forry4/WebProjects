@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef, useCallback } from "react";
+import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -347,6 +347,196 @@ function Icon({ kind, color, size }) {
   );
 }
 
+// ── Monastery benefit icons ─────────────────────────────────────────────────
+// Each of the 26 unique monasteries gets a small pictogram of the power it grants,
+// so players read the tile at a glance. Everything is drawn in a 24x24 box (like
+// ICON) as dark-on-yellow art with a few accent colors; a shared `MonasteryArt`
+// composes the pictogram + a tiny corner id (kept for identity + "Monastery #N"
+// log/tooltip references). Reused by BOTH render paths (HTML depot/storage tiles
+// and the SVG board), since the fragment is pure SVG children.
+const M_INK = "#2a1e0a";        // dark ink readable on the yellow tile
+const M_WORK = "#5a3d22";       // worker (brown pawn)
+const M_COIN = "#dfe3ea";       // silver coin face
+const M_COINR = "#8b8f99";      // coin rim
+const M_GREEN = "#2e7d32";      // "free / allowed" (die-shift) arrows
+const M_VP = "#356340";         // victory-point star (watchtower green)
+// worker pawn, ~6.5 tall, centered at (cx,cy)
+const mPawn = (cx, cy, k = 1, c = M_WORK) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <circle cx="0" cy="-2.6" r="1.9" fill={c} />
+    <path d="M-2.7 3.4 Q-2.7 -0.7 0 -0.7 Q2.7 -0.7 2.7 3.4 Z" fill={c} />
+  </g>
+);
+// silver coin, radius ~3.4
+const mCoin = (cx, cy, k = 1) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <circle r="3.4" fill={M_COIN} stroke={M_COINR} strokeWidth="0.8" />
+    <circle r="1.6" fill="none" stroke={M_COINR} strokeWidth="0.7" />
+  </g>
+);
+// die face (7x7) with pips at [x,y] in roughly -1..1
+const mDie = (cx, cy, k = 1, pips = [[0, 0]]) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <rect x="-3.5" y="-3.5" width="7" height="7" rx="1.4" fill="#f5eede" stroke={M_INK} strokeWidth="0.8" />
+    {pips.map(([px, py], i) => <circle key={i} cx={(px * 2).toFixed(2)} cy={(py * 2).toFixed(2)} r="0.72" fill={M_INK} />)}
+  </g>
+);
+// 5-point star (VP), outer radius r centered at (cx,cy)
+const mStar = (cx, cy, r = 3.2, c = M_VP) => {
+  const pts = Array.from({ length: 10 }, (_, i) => {
+    const ang = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.42 : r;
+    return `${(cx + rr * Math.cos(ang)).toFixed(2)},${(cy + rr * Math.sin(ang)).toFixed(2)}`;
+  }).join(" ");
+  return <polygon points={pts} fill={c} />;
+};
+// double-headed shift arrow (horizontal) — used ONLY for two-way die adjustment
+const mShift = (cx, cy, k = 1, c = M_INK) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M-4 0 L-1.7 -1.9 L-1.7 -0.7 L1.7 -0.7 L1.7 -1.9 L4 0 L1.7 1.9 L1.7 0.7 L-1.7 0.7 L-1.7 1.9 Z" fill={c} />
+  </g>
+);
+// single right-pointing arrow — for one-way transformations (spend X -> gain Y)
+const mArrowR = (cx, cy, k = 1, c = M_INK) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M-3.6 -1 H1 V-2.4 L4.2 0 L1 2.4 V1 H-3.6 Z" fill={c} />
+  </g>
+);
+// filled colored hexagon (a tile-type swatch), thin ink rim for contrast on yellow
+const mHexFill = (cx, cy, k = 1, c = "#888") => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M0 -3.4 L2.95 -1.7 L2.95 1.7 L0 3.4 L-2.95 1.7 L-2.95 -1.7 Z"
+      fill={c} stroke="#2a1e0a" strokeWidth="0.7" />
+  </g>
+);
+// vertical arrow — dir=1 points DOWN (placing onto the board), dir=-1 points UP (taking from it)
+const mArrowV = (cx, cy, k = 1, dir = 1, c = M_GREEN) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k} ${k * dir})`}>
+    <path d="M-1.2 -3.6 H1.2 V0.9 H2.7 L0 4.2 L-2.7 0.9 H-1.2 Z" fill={c} />
+  </g>
+);
+// a hexagon striped with the given tile-type colors (one solid color = a plain fill).
+// Uses a per-instance clip id so many striped hexes can co-exist in one document.
+const _HEX_D = "M0 -3.9 L3.35 -1.95 L3.35 1.95 L0 3.9 L-3.35 1.95 L-3.35 -1.95 Z";
+function HexStriped({ cx, cy, k = 1, colors = ["#888"] }) {
+  const cid = "hx" + useId().replace(/[^a-zA-Z0-9]/g, "");
+  const n = colors.length, x0 = -3.35, sw = 6.7 / n;
+  return (
+    <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+      <clipPath id={cid}><path d={_HEX_D} /></clipPath>
+      <g clipPath={`url(#${cid})`}>
+        {colors.map((c, i) => (
+          <rect key={i} x={(x0 + i * sw - 0.02).toFixed(3)} y="-4.2" width={(sw + 0.04).toFixed(3)} height="8.4" fill={c} />
+        ))}
+      </g>
+      <path d={_HEX_D} fill="none" stroke="#2a1e0a" strokeWidth="0.8" />
+    </g>
+  );
+}
+// goods barrel, ~6.8 tall
+const mBarrel = (cx, cy, k = 1, c = "#8a5a2a") => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <rect x="-3" y="-3.4" width="6" height="6.8" rx="1.2" fill={c} />
+    <rect x="-3.2" y="-1.9" width="6.4" height="0.9" fill="rgba(0,0,0,.22)" />
+    <rect x="-3.2" y="1" width="6.4" height="0.9" fill="rgba(0,0,0,.22)" />
+  </g>
+);
+// simple house (duplicate-building marker), ~7 tall
+const mHouse = (cx, cy, k = 1, c = "#6b4a2a") => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M-3.2 4 V-0.5 L0 -3.5 L3.2 -0.5 V4 Z" fill={c} />
+    <rect x="-1" y="1" width="2" height="3" fill="#f5eede" />
+  </g>
+);
+// hexagon outline (take-a-hex marker)
+const mHex = (cx, cy, k = 1, c = M_INK) => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M0 -3.6 L3.1 -1.8 L3.1 1.8 L0 3.6 L-3.1 1.8 L-3.1 -1.8 Z" fill="none" stroke={c} strokeWidth="1.2" />
+  </g>
+);
+// small numeral/glyph accent
+const mNum = (cx, cy, s, txt, c = M_INK) => (
+  <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
+    fontFamily="'Cinzel',serif" fontWeight="700" fontSize={s} fill={c}>{txt}</text>
+);
+// embed an existing ICON kind, scaled into an `s`-sized box centered at (cx,cy)
+const mIcon = (kind, cx, cy, s, color = M_INK) => (
+  <g transform={`translate(${(cx - s / 2).toFixed(2)} ${(cy - s / 2).toFixed(2)}) scale(${(s / 24).toFixed(4)})`}>
+    {ICON[kind](color)}
+  </g>
+);
+// shared base for the four "free die shift when placing X" monasteries (9-12)
+const mDieShift = () => (<>
+  {mDie(9, 13.5, 1.5, [[-0.55, -0.55], [0.55, 0.55]])}
+  {mShift(16.4, 13.5, 1.15, M_GREEN)}
+</>);
+// the BONUS-TILE emblem — a color-tintable hex medallion with a white star. Used
+// both in monastery #26 and (via `BonusTileBadge`) as the in-game color-bonus chip.
+const mBonusTile = (cx, cy, k = 1, c = "#e0a526") => (
+  <g transform={`translate(${cx} ${cy}) scale(${k})`}>
+    <path d="M0 -3.9 L3.35 -1.95 L3.35 1.95 L0 3.9 L-3.35 1.95 L-3.35 -1.95 Z"
+      fill={c} stroke="#2a1e0a" strokeWidth="0.8" />
+    {mStar(0, 0.15, 2.5, "#2a1e0a")}
+    {mStar(0, 0, 2.0, "#fff")}
+  </g>
+);
+// the same emblem as a standalone badge (fills a 24-box svg), for the bonus bar.
+function BonusTileBadge({ color, className, style }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className}
+      style={{ borderRadius: 0, boxShadow: "none", overflow: "visible", ...style }}>
+      {mBonusTile(12, 12, 2.7, color)}
+    </svg>
+  );
+}
+
+const MONASTERY_ICON = {
+  // ── continuous powers ──
+  1: () => (<>{mHouse(8.4, 13, 1.2, "#8a6a3a")}{mHouse(15.2, 13, 1.2, "#6b4a2a")}</>),           // any # of same building/town
+  2: () => (<>{mIcon("mine", 8, 11.6, 11)}{mNum(12.8, 6.7, 4.4, "+")}{mPawn(16.8, 11.9, 1.1)}{mNum(12.2, 19.6, 3.9, "A-E")}</>), // worker per mine, each phase (A-E)
+  3: () => (<>{mBarrel(5.4, 13, 0.82)}{mArrowR(9.2, 13, 0.66)}{mCoin(15.0, 13, 0.82)}{mCoin(18.2, 13, 0.82)}</>), // sell goods -> 2 silver
+  4: () => (<>{mBarrel(7, 13, 0.92)}{mArrowR(11.5, 13, 0.82)}{mPawn(16.6, 13, 1.05)}</>),          // sell goods -> worker
+  5: () => (<>{mBarrel(3.8, 12.5, 0.72)}{mIcon("ship", 12, 11, 12)}{mBarrel(20.2, 12.5, 0.72)}</>), // ship also takes goods on either side
+  // #6 depicts the CURRENTLY-LIVE rule (spend 2 workers -> take a building tile to storage).
+  // When the mon6 backend change ships (silver -> 2 workers), flip this to:
+  //   mCoin(6.4,13,1.0) + mArrowR(10.6,13,0.78) + mPawn(15,13,1.0) + mPawn(18.6,13,1.0)
+  6: () => (<>{mPawn(5.8, 13, 0.98)}{mPawn(9.1, 13, 0.98)}{mArrowR(13, 13, 0.72, M_INK)}{mHouse(18, 13.2, 1.55, "#6b4a2a")}</>), // 2 workers -> a building tile (live rule)
+  7: () => (<>{mIcon("cow", 8.8, 13.2, 12)}<g transform="rotate(-35 15.8 11.5)">{mArrowR(15.8, 11.5, 0.7, M_INK)}</g>{mStar(18.2, 6.4, 3)}</>), // livestock scored -> +1 VP
+  8: () => (<>{mDie(5.0, 13, 1.1, [[0, 0]])}{mShift(12, 13, 0.76)}{mDie(19.0, 13, 1.1, [[-0.62, -0.62], [0, 0], [0.62, 0.62]])}</>), // adjust die by 2 (1 <-> 3)
+  // 9-11: die + a colored hex swatch of the tile type(s) the free shift applies to
+  // 9-11 (PLACING): striped tile (left) + a worker above a right-pointing arrow (~70% size)
+  9: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.beige]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
+  10: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.blue, TILE_HEX.green]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
+  11: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.burgundy, TILE_HEX.gray, TILE_HEX.yellow]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
+  // 12 (TAKING): striped tile (top, nudged down) + a worker LEFT of a down-pointing arrow (~70% size)
+  12: () => (<><HexStriped cx={12} cy={10.2} k={1.16} colors={[TILE_HEX.burgundy, TILE_HEX.blue, TILE_HEX.gray, TILE_HEX.green, TILE_HEX.beige, TILE_HEX.yellow]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  13: () => (<>{mPawn(7.4, 13, 1.05)}{mPawn(10.9, 13, 1.05)}{mNum(14, 7.4, 4.2, "+")}{mCoin(17.2, 13, 1.08)}</>), // 2-workers action + 1 silver
+  14: () => (<>{mPawn(5.6, 13, 0.92)}{mPawn(8.7, 13, 0.92)}{mNum(11.8, 7.4, 4.2, "+")}{mPawn(14.9, 13, 0.92)}{mPawn(18.0, 13, 0.92)}</>), // 2-workers action -> 4 (2 + 2)
+  // ── end-game scoring ──
+  15: () => (<>{mBarrel(7.2, 14, 0.82, GOODS_HEX.amber)}{mBarrel(12, 14, 0.82, GOODS_HEX.rose)}{mBarrel(16.8, 14, 0.82, GOODS_HEX.jade)}{mStar(18.4, 6.2, 2.7)}</>), // 2VP/goods type sold (goods #1/#2/#3 colors)
+  16: () => (<>{mIcon("market", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  17: () => (<>{mIcon("watchtower", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  18: () => (<>{mIcon("carpenter", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  19: () => (<>{mIcon("church", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  20: () => (<>{mIcon("warehouse", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  21: () => (<>{mIcon("boarding", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  22: () => (<>{mIcon("bank", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  23: () => (<>{mIcon("townhall", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  24: () => (<>{mIcon("cow", 8.2, 12.6, 11)}{mIcon("pig", 15.4, 13.4, 10)}{mStar(18.2, 6.2, 2.7)}</>), // 4VP/livestock type
+  25: () => (<>{mBarrel(11, 13.4, 1.15, "#8a5a2a")}{mStar(17.8, 6.8, 3)}</>),                        // 1VP/goods sold
+  26: () => (<>{mBonusTile(9.6, 12.6, 1.25, "#e0a526")}{mBonusTile(16.8, 15.6, 0.82, "#c56b8a")}{mStar(17.8, 6.6, 3)}</>), // 3VP per bonus tile owned
+};
+
+// A monastery tile's art: the benefit pictogram + a tiny corner id. Pure SVG
+// children, so it drops into either a nested <svg> (HTML tiles) or a <g> (board).
+function MonasteryArt({ id }) {
+  const draw = MONASTERY_ICON[id];
+  return (<>
+    {draw ? draw() : mNum(12, 13, 9, String(id))}
+    <text x="4.8" y="6.6" fontFamily="'Cinzel',serif" fontWeight="700" fontSize="5"
+      fill={M_INK} fillOpacity="0.72">{id}</text>
+  </>);
+}
+
 // What to draw inside a hex tile: an icon for ship/castle/mine, `count`-many animal
 // icons for livestock, or the text glyph for monastery (#) / building (code). `px`
 // is the hex's pixel size so the icon/glyph scale to the depot, storage, and board.
@@ -368,6 +558,12 @@ function TileArt({ tile, px = 70 }) {
       </div>
     );
   }
+  if (t.type === "monastery") return (
+    <svg viewBox="0 0 24 24" width={px * 0.9} height={px * 0.9}
+      style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(0,0,0,.4))" }}>
+      <MonasteryArt id={t.effect_id} />
+    </svg>
+  );
   const g = tileGlyph(t);
   return g ? <span className="coc-glyph" style={{ fontSize: px * 0.27 }}>{g}</span> : null;
 }
@@ -400,6 +596,15 @@ function TileArtSvg({ tile, cx, cy, box }) {
     }[n];
     const e = box * L.s;
     return <g style={_ART_SHADOW}>{L.pos.map(([ox, oy], i) => _artIcon(t.animal, "#15100a", cx + ox * e, cy + oy * e, e, i))}</g>;
+  }
+  if (t.type === "monastery") {
+    const s = box * 0.9;
+    return (
+      <g style={_ART_SHADOW}
+        transform={`translate(${(cx - s / 2).toFixed(2)} ${(cy - s / 2).toFixed(2)}) scale(${(s / 24).toFixed(4)})`}>
+        <MonasteryArt id={t.effect_id} />
+      </g>
+    );
   }
   const g = tileGlyph(t);
   return g ? <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central"
@@ -692,7 +897,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-fo{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
 .coc-tile{width:70px;height:81px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-family:'Cinzel','Cinzel Fallback',serif;color:#15100a;font-weight:700;transition:transform .1s;line-height:1;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
 .coc-tile:hover{transform:scale(1.1)}
-.coc-tile.goods{width:34px;height:34px;border-radius:4px;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.coc-tile.goods{width:34px;height:34px;border-radius:24%/20%;clip-path:none;color:#fff;font-size:.82rem;text-shadow:0 1px 2px rgba(0,0,0,.7);overflow:hidden}
+/* barrel hoops (two dark bands) painted UNDER the sell number, matching the monastery goods icons */
+.coc-tile.goods::before,.coc-flyer.goods::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;background:linear-gradient(to bottom,transparent 0 22%,rgba(0,0,0,.28) 22% 30%,transparent 30% 70%,rgba(0,0,0,.28) 70% 78%,transparent 78% 100%)}
 /* Ghost: a taken tile leaves a colored hex OUTLINE (its type color) so the fixed
    per-phase depot layout stays memorable. The element is a full-color hex; the
    ::after carves the center back to the depot surface, leaving a colored rim. */
@@ -744,7 +951,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:140}
 .coc-flyer{position:fixed;display:flex;align-items:center;justify-content:center;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);filter:drop-shadow(0 2px 4px rgba(0,0,0,.6));will-change:transform;animation:coc-fly .35s cubic-bezier(.4,.05,.25,1) forwards}
 .coc-flyer::after{content:"";position:absolute;inset:0;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);background:linear-gradient(150deg,rgba(255,255,255,.62) 0%,rgba(255,255,255,.16) 16%,rgba(255,255,255,0) 34%,rgba(0,0,0,.06) 56%,rgba(0,0,0,.32) 84%,rgba(0,0,0,.6) 100%);pointer-events:none}
-.coc-flyer.goods{clip-path:none;border-radius:4px;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.coc-flyer.goods{clip-path:none;border-radius:24%/20%;color:#fff;font-weight:700;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;text-shadow:0 1px 2px rgba(0,0,0,.7);overflow:hidden}
 .coc-flyer.goods::after{display:none}
 @keyframes coc-fly{from{transform:translate(0,0) scale(var(--s0,1))}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,1))}}
 /* Worker / silver token flyers: pop OUT of the counter when spent, IN when gained. */
@@ -2300,7 +2507,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 return (
                   <span key={c} className={`coc-bonuschip${size ? "" : " gone"}`}
                     title={`${colorLabel(c)}: ${size ? `${size} bonus available (+${rem[0]} VP)` : "both bonuses taken"}`}>
-                    <span className="coc-bonus-sw" style={{ background: TILE_HEX[c] }} />
+                    <BonusTileBadge className="coc-bonus-sw" color={TILE_HEX[c]} />
                     {size ? <b>+{rem[0]}</b> : <i>—</i>}
                   </span>
                 );
@@ -2933,3 +3140,12 @@ function Modal({ title, desc, children, interactive }) {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+

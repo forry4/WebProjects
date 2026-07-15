@@ -42,7 +42,7 @@ fn compact_to_actions(c: &Value) -> Vec<usize> {
         "adjust" => vec![A_ADJUST0 + g("die") * 6 + (g("to") - 1)],
         "black" => vec![A_BUY_BLACK0 + g("slot")],
         "discard" => vec![A_DISCARD0 + g("slot")],
-        "m6" => vec![A_M6, A_TAKE_HEX0 + g("depot") * 2 + g("slot")],
+        "m6" => vec![A_M6], // atomic: spend 1 silver -> 2 workers
         "btake" => vec![A_TAKE_HEX0 + g("depot") * 2 + g("slot")],
         "castle" => vec![A_SPACE0 + g("space")],
         "ship" | "ship_adj" => vec![A_SHIP_DEPOT0 + g("depot")],

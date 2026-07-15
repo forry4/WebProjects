@@ -8,21 +8,22 @@
 //!   2            castle
 //!   3            mine
 //!   4            ship
-//!   5..=13       livestock: 5 + animal*3 + (count-2)   (animal: 0=cow 1=sheep 2=pig; count 2..4)
-//!   14..=21      building:  14 + building_type          (BUILDING_TYPES order)
-//!   22..=47      monastery: 22 + (effect_id - 1)        (effect ids 1..26)
+//!   5..=16       livestock: 5 + animal*3 + (count-2)   (animal: 0=cow 1=sheep 2=pig 3=chicken; count 2..4)
+//!   17..=24      building:  17 + building_type          (BUILDING_TYPES order)
+//!   25..=50      monastery: 25 + (effect_id - 1)        (effect ids 1..26)
 
 use crate::boards_gen::N_COLORS;
 
+pub const N_ANIMALS: usize = 4; // cow, sheep, pig, chicken (CoB 2019 edition)
 pub const T_EMPTY: u16 = 0;
 pub const T_START_CASTLE: u16 = 1;
 pub const T_CASTLE: u16 = 2;
 pub const T_MINE: u16 = 3;
 pub const T_SHIP: u16 = 4;
-pub const T_LIVESTOCK0: u16 = 5; // ..=13
-pub const T_BUILDING0: u16 = 14; // ..=21
-pub const T_MONASTERY0: u16 = 22; // ..=47
-pub const N_TILE_CODES: usize = 48;
+pub const T_LIVESTOCK0: u16 = 5; // ..=16 (4 animals x 3 counts)
+pub const T_BUILDING0: u16 = 17; // ..=24
+pub const T_MONASTERY0: u16 = 25; // ..=50
+pub const N_TILE_CODES: usize = 51;
 
 /// Tile type, with discriminants equal to the COLOR index of the space it goes on
 /// (board.py COLORS order: burgundy, blue, gray, green, beige, yellow).
@@ -43,9 +44,9 @@ pub fn type_of(code: u16) -> TileType {
         T_START_CASTLE | T_CASTLE => TileType::Castle,
         T_MINE => TileType::Mine,
         T_SHIP => TileType::Ship,
-        5..=13 => TileType::Livestock,
-        14..=21 => TileType::Building,
-        22..=47 => TileType::Monastery,
+        5..=16 => TileType::Livestock,
+        17..=24 => TileType::Building,
+        25..=50 => TileType::Monastery,
         _ => panic!("type_of on empty/invalid tile code {code}"),
     }
 }
@@ -59,14 +60,14 @@ pub fn color_of(code: u16) -> u8 {
 /// Building type index (BUILDING_TYPES order) for a building tile.
 #[inline]
 pub fn building_type(code: u16) -> u8 {
-    debug_assert!((T_BUILDING0..=21).contains(&code));
+    debug_assert!((T_BUILDING0..=24).contains(&code));
     (code - T_BUILDING0) as u8
 }
 
-/// (animal 0..2, count 2..4) for a livestock tile.
+/// (animal 0..3, count 2..4) for a livestock tile.
 #[inline]
 pub fn livestock_of(code: u16) -> (u8, u8) {
-    debug_assert!((T_LIVESTOCK0..=13).contains(&code));
+    debug_assert!((T_LIVESTOCK0..=16).contains(&code));
     let k = code - T_LIVESTOCK0;
     ((k / 3) as u8, (k % 3 + 2) as u8)
 }
@@ -74,7 +75,7 @@ pub fn livestock_of(code: u16) -> (u8, u8) {
 /// Monastery effect id (1..26) for a monastery tile.
 #[inline]
 pub fn monastery_effect(code: u16) -> u8 {
-    debug_assert!((T_MONASTERY0..=47).contains(&code));
+    debug_assert!((T_MONASTERY0..=50).contains(&code));
     (code - T_MONASTERY0 + 1) as u8
 }
 
@@ -149,24 +150,20 @@ pub fn build_supply() -> ([u16; SUPPLY_LEN], [u16; BLACK_SUPPLY_LEN]) {
             bi += 1;
         }
     }
-    // Livestock: 20 green (9 kinds x2 + cow2 + sheep3), 8 black (first 8 kinds).
+    // Livestock: 4 animals x 7 = 28 (20 green + 8 black). Per animal (mirrors tiles.py order):
+    //   colored = 2x count-2, 2x count-3, 1x count-4 (5);  black = 1x count-3, 1x count-4 (2).
     let kind = |animal: u16, count: u16| T_LIVESTOCK0 + animal * 3 + (count - 2);
-    for rep in 0..2 {
-        let _ = rep;
-        for a in 0..3 {
-            for c in 2..=4 {
-                non_black[ni] = kind(a, c);
+    for a in 0..N_ANIMALS as u16 {
+        for &(count, n) in &[(2u16, 2usize), (3, 2), (4, 1)] {
+            for _ in 0..n {
+                non_black[ni] = kind(a, count);
                 ni += 1;
             }
         }
-    }
-    non_black[ni] = kind(0, 2); // cow 2
-    ni += 1;
-    non_black[ni] = kind(1, 3); // sheep 3
-    ni += 1;
-    for k in 0..8u16 {
-        black[bi] = T_LIVESTOCK0 + k;
-        bi += 1;
+        for &count in &[3u16, 4] {
+            black[bi] = kind(a, count);
+            bi += 1;
+        }
     }
     // Mines: 10 gray, 2 black.
     for _ in 0..10 {
@@ -239,14 +236,14 @@ mod tests {
         assert_eq!(counts[T_CASTLE as usize], 16);
         assert_eq!(counts[T_MINE as usize], 12);
         assert_eq!(counts[T_SHIP as usize], 26);
-        let livestock: usize = (5..=13).map(|c| counts[c]).sum();
+        let livestock: usize = (5..=16).map(|c| counts[c]).sum();
         assert_eq!(livestock, 28);
-        let buildings: usize = (14..=21).map(|c| counts[c]).sum();
+        let buildings: usize = (17..=24).map(|c| counts[c]).sum();
         assert_eq!(buildings, 56);
-        for bt in 14..=21 {
+        for bt in 17..=24 {
             assert_eq!(counts[bt], 7); // 5 colored + 2 black
         }
-        for eid in 22..=47 {
+        for eid in 25..=50 {
             assert_eq!(counts[eid], 1); // each monastery unique
         }
     }
