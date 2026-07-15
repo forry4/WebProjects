@@ -1068,7 +1068,10 @@ The escalation + the two follow-on levers all landed at-or-below the champion. D
   player denial priority is the dynamic TURN-TRACK order, not game-start seat — a game-level split can't
   see it; and 22 completed games can't pin a win rate. USER DIRECTIVE: **do NOT analyze the user's CoC
   games** — all evaluation is bot-vs-bot.)
-- **THE STRUCTURAL VERDICT (the point of the whole arc): r2 sits at CoC's SELF-PLAY CEILING.** Every
+- **THE STRUCTURAL VERDICT (the point of the whole arc): r2 sits at CoC's SELF-PLAY CEILING — for the
+  CURRENT recipe + net. NOT a permanent law** (see the 2026-07-15 framing note: every "ceiling /
+  exhausted" verdict here is conditional on r2 + its frozen 934-dim encoder; a materially different net
+  or encoder invalidates these and every probe should be re-run). Every
   training method that learns from champion self-play caps at ≤ r2 (warm→parity, cold→below, distill/
   consolidation/attention/capacity/stager all documented ≤ r2). To EXCEED r2 you need targets STRONGER
   than r2, whose only source is deeper search — but the sims ladder proved CoC's search SATURATES
@@ -1118,9 +1121,91 @@ the same lesson as Spender ("a strong search prices the tactics a strong human d
   champion's tactical valuations are SOUND; ~50/50 vs the user is genuine strength. HONEST HEDGE (do
   not overstate): these are BLUNT forcings of NUANCED human judgment ("hold all ships" ≠ "hold a ship
   when it matters"), so a subtle micro-edge isn't ruled out — only that there's no big FORCEABLE lever.
-  Combined with the self-play ceiling, BOTH angles (how it's trained + what it might misvalue) are now
-  exhausted. Reusable tooling (all bot-vs-bot, no user games): the six bins above, each a value-bias-
+  Combined with the self-play ceiling, BOTH angles (how it's trained + what it might misvalue) are
+  exhausted **FOR THIS NET'S CURRENT STATE — NOT permanently** (see the 2026-07-15 framing note: these
+  verdicts are conditional on r2 + its frozen encoder; re-run every probe if the net materially changes).
+  ALSO NOTE: a value-bias/forcing arena can only prove "forcing X doesn't help" — it CANNOT prove correct
+  pricing. The instrument for "the net UNDER-VALUES X" is CALIBRATION (`firstplayer_calib.rs`, 07-15).
+  Reusable tooling (all bot-vs-bot, no user games): the six bins above, each a value-bias-
   or-forced arena vs the champion with a mechanism check + CRN mirror sanity.
+
+### Session (2026-07-15) — feature-screen + calibration campaign: every axis CLEAN **for r2's CURRENT state** (CONDITIONAL — NOT permanent; re-run if the net changes)
+**READ THIS FRAMING FIRST — it scopes this section AND the two "exhausted" sessions above.** Every
+"exhausted / already-priced / do-not-relitigate" verdict in the CoC-N campaign is **conditional on the
+CURRENT net** (`coc_run_r2/pv_ship_r2.json`) and its **FROZEN 934-dim encoder**. They mean *"this net
+already prices X"* — NOT *"X is unimportant"* and NOT *"no net could ever benefit from X."* **Nothing is
+permanently exhausted.** If the net changes materially (new encoder/architecture, a stronger seed, a new
+training distribution, a fresh ladder), **RE-RUN these probes** — a different net will have different
+blind spots and the same features/biases can light up. The tooling below is built to make that cheap.
+- **THE MECHANISM THAT EXPLAINS THE WHOLE CAMPAIGN (why r2 got strong fast with "few features", and why
+  enrichment keeps washing): Group E (`feats.rs:213-219`) hands the net the hand-tuned heuristic's ENTIRE
+  positional read for BOTH seats** as 4 scalars (V(me), V(opp), margin, score-margin). `heuristic::value`
+  computes region-completion proximity (`frac²×(AREA_SCORE+PHASE_BONUS)`), color-bonus proximity
+  (`frac²×bonus`), mine future income (`mines×phases_remaining`), endgame-monastery VP, continuous-
+  monastery value, storage, empties penalty. So the cross-reference work Spender's `net_ext_19` had to
+  LEARN feature-by-feature was **front-loaded into CoC's encoder from day 1**. CoC's encoder is NOT
+  feature-poor like Spender's was. **The one thing `heuristic::value` does NOT compute is denial /
+  contention / track-tempo** (it's two independent single-player values subtracted) — and the screen says
+  the net infers that from raw opp-dice + depot masks anyway.
+- **FEATURE-SCREEN PIPELINE (new, reusable — the cheap NEGATIVE filter): `harvest_featscreen.rs`** (r2
+  self-play → CSV `seed, feats::features[934], candidate[K], win-label`) + a Python leave-one-out AUC
+  ablation (game-split holdout, multi-split; `coc_run_fs*/ablate*.py`). **3 rounds, 5 candidate groups,
+  ALL WASH:** R1 P1 my per-color completion **−0.0018**, P2 per-placement marginal VP incl. color-trigger
+  **+0.0003**; R2 P3a opp per-color completion **+0.0163 (looked like a WIN)**, P3b dice-constraint denial
+  proxy **+0.0022**; R3 (DECISIVE, same-data, 4 splits) G1 my vs G2 opp vs G3 opp-THREAT → **G1 ≈ G2 ≈
+  +0.001 (opp == my == ZERO), G3 ~+0.003 (noise floor)**.
+- **METHODOLOGY LESSON (do not regress): NEVER compare ablation deltas ACROSS harvests.** The R2
+  "+0.0163" was a **cross-run artifact** — base AUC swings **0.76-0.80** between harvests/splits, which is
+  BIGGER than any candidate signal. Candidates must be screened on **IDENTICAL data + multiple splits**;
+  the same-data replication killed the false positive and saved a multi-day retrain (same class as the
+  documented Spender v4 wash: flat-MLP screen passes → play washes). **Screen noise floor ≈ ±0.015 → it
+  only reliably catches BIG (≥+0.02) gaps**; small real gaps are below its resolution.
+- **FIRST-PLAYER CALIBRATION — the RIGHT instrument for "the net UNDER-VALUES X" (`firstplayer_calib.rs`).**
+  The prior tests were **FORCINGS** (bias arena 0.5125 wash; force-hold-ships 0.40 hurt), which can wash
+  even if a narrow mispricing exists — **a forcing test cannot prove correct pricing.** Calibration can:
+  at each phase-start (round 1, clean turn-start, actor = `round_order[0]`) record the search root value +
+  the eventual outcome, compare predicted `P(win)=(V+1)/2` to the ACTUAL first-player win rate, against a
+  **MID-phase (round 3) control**. **RESULT (2400 games @200 sims, n=9600): phase-start predicted 0.5881
+  vs actual 0.5905 → delta +0.0024 ±0.0098; MID control +0.0077. Phase-start is NOT worse than mid ⇒ NO
+  phase-start-specific under-valuation.** Non-forcing + immune to the reverse-causation that inflated the
+  raw 0.6333 audit correlation. **The first-player advantage IS real and LARGE (actual win rate 0.549 at
+  phase B → 0.640 at E) — the user's strategic read is CORRECT; r2 just already prices it.**
+- **STORAGE-CARRYOVER (`storage_arena.rs`):** CoB literature says "never carry tiles between phases" and
+  `heuristic::value` has a **POSITIVE `W_STORAGE`** (rewards holding storage) → a real candidate mispricing
+  inherited via Group E. Penalize end-phase storage (round 5 full / round 4 half, symmetric): **0.4917
+  ±0.089 @w=0.3**; mirror w=0 = **EXACTLY 0.5000**; mechanism confirmed (round-5 storage 39→33/game).
+  **WASH** — 5th converging value-bias-arena wash. (The net is outcome-trained and corrects a mis-signed
+  baseline term, which is WHY these keep washing.)
+- **ENDGAME search-side (own ideas): the LEAF-SPEED TRAP (`endgame_arena.rs`).** Net-greedy-to-terminal
+  leaf in phase E = **0.540 equal-sims (n=200, real +4pp)** but **0.4167 @300ms EQUAL-TIME** — a per-SIM
+  cost multiplier can win at equal sims and STILL lose at equal wall-clock. **The ship criterion for any
+  serving change is EQUAL-TIME, never equal-sims.** The bounded O(1) root-verify variant
+  (`endgame_verify_arena.rs`, net-greedy re-rank of top-M endgame moves; cost per-DECISION not per-sim, so
+  it dodges the trap) = **0.4625 equal-sims** — fails even before the time test: a handful of shallow
+  net-argmax rollouts is WORSE-informed than the 200-sim search it overrides.
+- **WEB STRATEGY MINED (CoB literature; CoC is a faithful clone — worth re-reading if the net changes):**
+  turn-order/first-player-into-phase is the #1 theme everywhere ("being first to act at the start of a new
+  round with freshly deployed tiles is a huge advantage"); ships = strongest tile AND the turn-order lever
+  (often under-prioritized); only round-1 mines pay back their 2-dice cost; finish small regions early
+  (size-1 in round 1 ≈ 11 pts / 5.5 per die vs 4 avg); "never start a region you won't finish"; 2p denial
+  ≈ "every point denied is a point gained"; never carry storage between phases; late-phase take workers
+  over tiles; monasteries early = engine, late = VP; central black depot has the best ones. **Every
+  testable one came back already-priced by r2** (first-player calib, denial ablation, storage arena,
+  M6/ship arenas; mine/region timing is valued via Group E's `mines×phases_remaining` + region-proximity ×
+  decaying phase bonus). Sources: thethoughtfulgamer.com "8 Strategy Tips", boardgamechamps.com "Hex by
+  Hex", BGG "How to Dominate CoB".
+- **NET VERDICT (CONDITIONAL ON r2's CURRENT STATE): features / calibration / search-at-fixed-weights are
+  exhausted FOR THIS NET.** The only remaining path with a mechanism is a **fresh higher-sims ladder from
+  a weak seed** — predicted to cap ≈ r2 by rung-3's warm-r2@4000 = parity (the 4000-sim self-play fixed
+  point ≈ r2) ⇒ days of GPU at LOW odds. **REVISIT TRIGGER (the point of this whole section): if the net
+  materially changes, re-run the feature screen + the calibration probes before assuming these verdicts
+  still hold.** Also still open + unrelated to r2's strength: the **Easy tier (server MCTS bot) is far
+  weaker than r2** — there's room to lift the DEFAULT experience without beating r2 at all.
+- **Reusable tooling (all bot-vs-bot, no user games):** `harvest_featscreen.rs` + `coc_run_fs*/ablate*.py`
+  (feature screen), `firstplayer_calib.rs` (value-head calibration — the instrument for any "the net
+  under-values X" claim), `storage_arena.rs`, `endgame_arena.rs` (+ `<T>ms` equal-time mode),
+  `endgame_verify_arena.rs`. Every arena has a **CRN mirror sanity (w=0 ⇒ exactly 0.5000)** + a mechanism
+  check — keep both when adding one.
 
 ### Session (2026-07-12) — CoC game-screen 3-COLUMN REWORK (SHIPPED to prod)
 The CoC game screen was rebuilt so the shared board **and both players' duchies are all visible
