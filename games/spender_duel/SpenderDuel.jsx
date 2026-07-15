@@ -332,6 +332,14 @@ const css = `
 .duel-log{max-height:340px;overflow-y:auto;scrollbar-gutter:stable;font-size:.88rem}
 .duel-log-entry{padding:4px 2px;opacity:.9}
 .duel-log-entry+.duel-log-entry{border-top:1px solid #2c261e}
+.duel-log-entry.clickable{cursor:pointer}
+.duel-log-entry.clickable:hover{background:#2c2418;color:#f5c842}
+.duel-log-entry.future{opacity:.35}
+
+/* review / replay */
+.duel-replaybar{display:flex;align-items:center;gap:10px;justify-content:center;flex-wrap:wrap;background:var(--surface,#1b1712);border:1px solid #6b5836;border-radius:10px;padding:8px 12px;margin:0 0 12px}
+.duel-replay-label{font-size:.92rem;opacity:.85;min-width:260px;text-align:center}
+.duel-review-badge{font-size:.78rem;padding:2px 9px;border-radius:999px;background:#3a2c45;color:#d9c8f0;border:1px solid #6b5a80}
 
 /* modals */
 .duel-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:150}
@@ -413,6 +421,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [showBotPicker, setShowBotPicker] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  // review mode: an HTTP-loaded finished game (no WebSocket). replaySnapshots is the
+  // per-move board list from /review; replayTurn is which one is on screen.
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [replaySnapshots, setReplaySnapshots] = useState(null);
+  const [replayTurn, setReplayTurn] = useState(null);
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
 
   // interaction state
@@ -430,17 +443,27 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const playerName = authUser?.name || "Player";
 
   // ── derived (keep ABOVE all effects — TDZ rule) ──
-  const game = roomData?.game;
+  // `liveGame` is the authoritative game; `game` is what the BOARD shows — the rewound
+  // snapshot while reviewing, else the live state. The move LOG always renders from
+  // liveGame so every row stays visible/clickable no matter how far back you rewind.
+  const liveGame = roomData?.game;
+  const reviewing = replayTurn != null && Array.isArray(replaySnapshots) && !!replaySnapshots[replayTurn];
+  const game = reviewing ? replaySnapshots[replayTurn].game : liveGame;
   const names = roomData?.players || {};
   const oppId = game ? game.order.find((p) => p !== myId) : Object.keys(names).find((p) => p !== myId);
   const me = game?.players?.[myId];
   const opp = oppId ? game?.players?.[oppId] : null;
-  const over = game?.phase === "over";
+  // `over` follows the LIVE game, not the rewound board: a historical "playing"
+  // snapshot must not resurrect the in-game chrome of a finished game.
+  const over = liveGame?.phase === "over";
   const cardsById = catalog?.cards || {};
   const royals = catalog?.royals || {};
-  const pendingMine = !!game && game.pending_pid === myId;
-  const myTurn = !!game && !over && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
-  const botThinking = !!game && roomData?.vs_ai && !over && (game.pending_pid || game.turn) === roomData?.ai_player;
+  // Read-only while reviewing: no pendings, no turn, no interaction (below).
+  const pendingMine = !reviewing && !!game && game.pending_pid === myId;
+  const myTurn = !reviewing && !!game && !over
+    && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
+  const botThinking = !reviewing && !!game && roomData?.vs_ai && !over
+    && (game.pending_pid || game.turn) === roomData?.ai_player;
   const replenished = !!game?.turn_flags?.replenished;
   const myBonuses = useMemo(() => bonusesOf(me, cardsById), [me, cardsById]);
   const boardHasEmpty = !!game && game.board.some((t) => t === null);
@@ -507,7 +530,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // auto-reconnect while in a live game (load-bearing for vs-bot: the bot's turn is
   // re-driven on reconnect — the CoC "hung for minutes" lesson)
-  const inLiveGame = !!roomId && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
+  // A review is HTTP-loaded and has no socket — never try to reconnect one.
+  const inLiveGame = !!roomId && !reviewOnly
+    && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   const attemptReconnect = useCallback(() => {
     if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
     const rs = socketReady();
@@ -550,7 +575,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // ── flyer animations: driven by NEW log entries (each carries pid + cells/colors) ──
   useEffect(() => {
-    const log = game?.log;
+    if (reviewing || reviewOnly) return;   // rewinding isn't a move: never animate history
+    const log = liveGame?.log;
     if (!log) { prevLogLen.current = 0; return; }
     const prev = prevLogLen.current;
     prevLogLen.current = log.length;
@@ -575,7 +601,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
       } else if (e.type === "reserve" && e.gold_cell != null) {
         mkTok("gold", rect(`[data-cell="${e.gold_cell}"]`), panel);
       } else if (e.type === "steal") {
-        const other = (game.order || []).find((p) => p !== e.pid);
+        const other = (liveGame.order || []).find((p) => p !== e.pid);
         mkTok(e.color, rect(`[data-tokens="${other}"]`), panel);
       } else if (e.type === "buy") {
         mkTok(null, rect("[data-pyramid]"), panel, 44);
@@ -585,7 +611,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     setFlyers((f) => [...f, ...add]);
     const ids = new Set(add.map((a) => a.id));
     setTimeout(() => setFlyers((f) => f.filter((x) => !ids.has(x.id))), 620);
-  }, [game?.log?.length]); // eslint-disable-line
+  }, [liveGame?.log?.length]); // eslint-disable-line
 
   // ── actions ──
   const mv = (move) => send({ action: "move", move });
@@ -624,11 +650,43 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         fetchGames();
       }).catch(() => setToast("Could not cancel"));
   };
+  // Load a FINISHED game read-only over HTTP (no WebSocket) and open it for review.
+  // Also used by the end-of-game "Review game" button, which already has a live socket
+  // — there we keep it and only attach the snapshots.
+  const enterReview = (id, keepLive = false) => {
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    fetch(`${DUEL_HTTP}/games/${id}/review?player_id=${encodeURIComponent(myId)}`, { headers })
+      .then((r) => r.json()).then((d) => {
+        if (!d.ok) { setToast(d.message || "Could not load review"); return; }
+        if (!keepLive) {
+          disconnect();
+          setRoomData({
+            game: d.game, players: d.players || {}, host: null, status: "over",
+            vs_ai: false, ai_player: null,
+          });
+          setRoomId(id);
+          setReviewOnly(true);
+          setScreen("game");
+        }
+        setReplaySnapshots(d.snapshots || null);
+        // Land on the FINAL board; the nav bar rewinds from there.
+        setReplayTurn(d.snapshots ? d.snapshots.length - 1 : null);
+        if (!d.snapshots) setToast("This game can't be replayed turn-by-turn");
+      }).catch(() => setToast("Could not load review"));
+  };
+  const goToTurn = (idx) => {
+    if (!replaySnapshots) return;
+    setReplayTurn(Math.max(0, Math.min(replaySnapshots.length - 1, idx)));
+  };
+  const exitReview = () => { setReplaySnapshots(null); setReplayTurn(null); };
+
   const leaveToLobby = () => {
     disconnect();
     setScreen("lobby");
     setRoomData(null);
     setRoomId("");
+    setReviewOnly(false);
+    exitReview();
   };
   const abandonGame = () => {
     send({ action: "abandon" });
@@ -772,15 +830,21 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           </div>
         )}
         <div className="duel-reserved-row">
-          {isMe
-            ? (p.reserved || []).map((cid) => (
-                <DuelCard key={cid} small card={cardsById[cid]}
-                  selected={selCard?.id === cid}
-                  affordable={canAffordCard(cardsById[cid], p, cardsById)}
-                  needsGold={goldNeeded(cardsById[cid]?.cost || {}, p.tokens, bon) > 0}
-                  onClick={() => reservedCardClick(cid)} />
-              ))
-            : (p.reserved || []).map((r, i) => <CardBack key={i} level={r.level} />)}
+          {/* Render by SHAPE, not by whose seat it is: a card id (string) is a card we
+              may see — our own, or ANY reserve once the game is over / in review, which
+              player_view reveals. A {level, facedown} object is redacted, so show a back.
+              (Keying off `isMe` instead would hide the revealed hand in a review — and
+              read `r.level` off a string, printing the wrong level on the back.) */}
+          {(p.reserved || []).map((r, i) =>
+            typeof r === "string" ? (
+              <DuelCard key={r} small card={cardsById[r]}
+                selected={!reviewing && selCard?.id === r}
+                affordable={isMe && !reviewing && canAffordCard(cardsById[r], p, cardsById)}
+                needsGold={isMe && goldNeeded(cardsById[r]?.cost || {}, p.tokens, bon) > 0}
+                onClick={isMe && !reviewing ? () => reservedCardClick(r) : undefined} />
+            ) : (
+              <CardBack key={i} level={r.level} />
+            ))}
         </div>
       </div>
     );
@@ -878,16 +942,64 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     </div>
   );
 
-  const renderLog = () => (
-    <div className="duel-panel">
-      <h3 style={{ margin: "0 0 8px" }}>Moves</h3>
-      <div className="duel-log">
-        {[...(game.log || [])].reverse().slice(0, 80).map((e, i) => (
-          <div className="duel-log-entry" key={i}>{fmtLog(e, names, cardsById, royals)}</div>
-        ))}
+  // The log always renders from the LIVE game (so every row stays visible however far
+  // back you rewind). With snapshots loaded, a row jumps the board to just after it —
+  // snapshot.log_len is the log length at that board, so the first snapshot with
+  // log_len > r is the board produced by row r.
+  const snapForLogIndex = (r) =>
+    replaySnapshots ? replaySnapshots.findIndex((s) => s.log_len > r) : -1;
+
+  const renderLog = () => {
+    const log = liveGame?.log || [];
+    const shownLen = reviewing ? replaySnapshots[replayTurn].log_len : log.length;
+    return (
+      <div className="duel-panel">
+        <h3 style={{ margin: "0 0 8px" }}>Moves</h3>
+        <div className="duel-log">
+          {log.map((e, r) => ({ e, r })).reverse().slice(0, 120).map(({ e, r }) => {
+            const target = snapForLogIndex(r);
+            const clickable = target >= 0;
+            // dim the moves that hadn't happened yet on the board being shown
+            const future = r >= shownLen;
+            return (
+              <div key={r}
+                className={`duel-log-entry${clickable ? " clickable" : ""}${future ? " future" : ""}`}
+                onClick={clickable ? () => goToTurn(target) : undefined}
+                title={clickable ? "Jump to this move" : undefined}>
+                {fmtLog(e, names, cardsById, royals)}
+              </div>
+            );
+          })}
+          {replaySnapshots && (
+            <div className="duel-log-entry clickable" onClick={() => goToTurn(0)}
+              title="Jump to the starting board">▶ Game started</div>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  // Describes the move that PRODUCED the board on screen (snapshot k came from move k).
+  const renderReplayBar = () => {
+    if (!replaySnapshots) return null;
+    const n = replaySnapshots.length - 1;
+    const s = replaySnapshots[replayTurn];
+    const label = replayTurn === 0
+      ? "Game start"
+      : `Move ${replayTurn} / ${n} · ${names[s.pid] || s.pid} · ${fmtLog(
+          liveGame.log[s.log_len - 1] || {}, names, cardsById, royals).replace(/^\S+\s/, "")}`;
+    return (
+      <div className="duel-replaybar">
+        <button className="btn btn-outline" onClick={() => goToTurn(replayTurn - 1)}
+          disabled={replayTurn <= 0}>‹ Prev</button>
+        <span className="duel-replay-label">{label}</span>
+        <button className="btn btn-outline" onClick={() => goToTurn(replayTurn + 1)}
+          disabled={replayTurn >= n}>Next ›</button>
+        <button className="btn btn-outline" onClick={() => goToTurn(n)}
+          disabled={replayTurn >= n}>Final</button>
+      </div>
+    );
+  };
 
   // ── modals ──
   const renderModals = () => (
@@ -965,14 +1077,19 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           </div>
         </div>
       )}
-      {over && !gameOverDismissed && (
+      {/* The result popup is for a game you just FINISHED — not for one you opened
+          from History (you already know how it ended; you came to inspect it). */}
+      {over && !gameOverDismissed && !reviewOnly && (
         <div className="duel-backdrop">
           <div className="duel-modal" style={{ textAlign: "center" }}>
-            <h3>{"♛"} {names[game.winner] || game.winner} wins!</h3>
-            <div className="duel-gameover-badge">{WIN_DESC[game.win_condition] || ""}{game.win_color ? ` (${game.win_color})` : ""}</div>
-            <p className="duel-muted">Final score {pointsOf(game.players[game.order[0]], cardsById, royals)} – {pointsOf(game.players[game.order[1]], cardsById, royals)} ({names[game.order[0]]} vs {names[game.order[1]]})</p>
+            <h3>{"♛"} {names[liveGame.winner] || liveGame.winner} wins!</h3>
+            <div className="duel-gameover-badge">{WIN_DESC[liveGame.win_condition] || ""}{liveGame.win_color ? ` (${liveGame.win_color})` : ""}</div>
+            <p className="duel-muted">Final score {pointsOf(liveGame.players[liveGame.order[0]], cardsById, royals)} – {pointsOf(liveGame.players[liveGame.order[1]], cardsById, royals)} ({names[liveGame.order[0]]} vs {names[liveGame.order[1]]})</p>
             <div className="duel-modal-row">
               <button className="btn btn-outline" onClick={() => setGameOverDismissed(true)}>View board</button>
+              <button className="btn btn-outline" onClick={() => { setGameOverDismissed(true); enterReview(roomId, true); }}>
+                Review game
+              </button>
               <button className="btn btn-gold" onClick={() => {
                 try {
                   if (localStorage.getItem("duel_roomId") === roomId) localStorage.removeItem("duel_roomId");
@@ -1084,6 +1201,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                   <div>{g.you_won ? "Won" : "Lost"} vs {g.opp_name}</div>
                   <div className="duel-muted">{g.your_score ?? "?"}–{g.opp_score ?? "?"} · {WIN_DESC[g.win_condition] || ""} · {timeAgo(g.updated_at)}</div>
                 </div>
+                <button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button>
               </div>
             ))}
           </div>
@@ -1129,15 +1247,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   return (
     <div className="app duel">
       <style>{baseCss + css}</style>
-      {reconnecting && !connected && <div className="duel-reconnbar">Reconnecting…</div>}
+      {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
         <button className="btn btn-outline" onClick={leaveToLobby}>{"←"} Menu</button>
         <div className="spacer" />
         <h1 className="duel-title">Spender Duel</h1>
+        {replaySnapshots && <span className="duel-review-badge">Review</span>}
         <div className="spacer" />
         <button className="btn btn-outline" onClick={() => setShowRules(true)}>Rules</button>
-        {!over && <button className="btn btn-outline" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
+        {/* Abandon only exists for a LIVE game you're still playing. */}
+        {!over && !reviewOnly && !replaySnapshots && (
+          <button className="btn btn-outline" onClick={() => setConfirmAbandon(true)}>Abandon</button>
+        )}
+        {replaySnapshots && !reviewOnly && (
+          <button className="btn btn-outline" onClick={exitReview}>Exit review</button>
+        )}
       </div>
+      {renderReplayBar()}
       <div className="duel-cols">
         <div>{renderPyramid()}</div>
         <div>{renderBoard()}</div>

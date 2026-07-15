@@ -1437,11 +1437,42 @@ games/spender_duel/
   bot.py          # tiered random-legal bot ("easy" tier + the scheduler's guaranteed finisher)
   ai.py           # STRONG opponent: determinized MCTS + heuristic leaf (Normal / Hard)
   ai_selfplay.py  # offline arena (agent specs, CRN seat-swapped pairs, Wilson CIs) — no server/DB
+  replay.py       # reconstruct a finished game from seed + log -> per-move snapshots (review)
   main.py         # duel_app mounted at /duel; ROOMS/ROOM_LOCK; own duel_games table; bot scheduler
   SpenderDuel.jsx # lobby + 5x5 board line-selection + pyramid + modals; localStorage duel_*
   tests/          # card invariants, all rules edges, redaction, server layer + MCTS wiring,
                   #   bot-vs-bot soak with an exact 25-token conservation invariant
 ```
+
+### Game review + turn-by-turn rewind (`replay.py`) — Spender-parity
+- **Reconstruction is EXACT from the persisted seed + move log** — no `setup` snapshot needed (Spender
+  had to retrofit one because its deck was shuffled with no seed saved; Duel's `new_game` is seeded and
+  `game["seed"]` persists). `reconstruct(game)` re-deals with the seed and re-applies the logged moves;
+  a differential test (`test_replay.py`, 8 seeds) compares EVERY intermediate board to a live engine
+  stepped in parallel, so a review can't show a plausible fiction.
+- **THE LOG IS NOT A MOVE LIST (the load-bearing subtlety).** It interleaves player moves with records
+  the engine writes itself (auto-resolved abilities, `again`, `privilege_gain`, `extra_turn`,
+  `game_over`) — and an AUTO-resolved `take_same`/`steal` is byte-identical to the player-chosen one, so
+  records CANNOT be classified by shape. `_replay` instead lets the engine disambiguate: after applying
+  a move, count how many records the sim's log GREW by and consume exactly that many from the source.
+  Robust to any future ability that logs extra records, with no per-type table to maintain. An
+  unknown record type raises rather than being skipped (skipping would silently desync the board).
+- `review_payload` returns None instead of raising, so a pre-seed save / log drift still shows its final
+  board — just without the rewind. `_strip_hidden` drops bag/decks/rng/seed/`reserved_from_deck` but
+  REVEALS reserves (the game is over; seeing the opponent's hand is the point) and mirrors
+  `player_view`'s shape (`bag_count`/`deck_counts`) so snapshots render exactly like live state.
+- **Frontend (`SpenderDuel.jsx`) — the same rules as Spender's review:** `liveGame` is authoritative,
+  `game` is the rewound snapshot; the LOG always renders from `liveGame` (so every row stays clickable
+  however far back you rewind) with future rows dimmed; `over` reads the LIVE phase (a historical
+  "playing" snapshot must not resurrect in-game chrome); `myTurn`/`pendingMine`/`botThinking` are all
+  gated on `!reviewing` and the flyer effect early-returns (rewinding is not a move — never animate
+  history). `snapshot.log_len` maps a clicked log row r to the first snapshot with `log_len > r`.
+- **Reserved cards render BY SHAPE, not by seat** (`typeof r === "string"` = a revealed card id ->
+  face-up; `{level, facedown}` = redacted -> a back). Keying off `isMe` hid the revealed hand in review
+  AND read `r.level` off a string, printing the wrong level on the back.
+- **Testing gotcha:** an e2e "human" that only ever TAKES tokens produces a pathological game that never
+  finishes (it hoards the board, the bag empties, the bot stalls ~15 pts — verified in sim). A review
+  e2e must BUY when it can to reach a real game-over.
 
 ### AI (`ai.py`) — determinized MCTS, tiers Easy / Normal / Hard
 **Measured ladder** (`ai_selfplay arena`, CRN seat-swapped pairs, n=10, mirror verified at EXACTLY

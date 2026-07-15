@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import engine
 from . import bot
 from . import cards
+from . import replay
 # `ai` is used as a local name for the bot pid in places, so alias the module
 # (the same collision CoC hit — see its `coc_ai` import).
 from . import ai as duel_ai
@@ -667,7 +668,12 @@ async def games_history(token: str | None = Depends(_bearer_token)):
 @duel_app.get("/games/{game_id}/review")
 async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None):
-    """Read-only review of a FINISHED game, restricted to a participant."""
+    """Read-only review of a FINISHED game, restricted to a participant.
+
+    Returns the final board plus `snapshots` — one rebuilt board per move, for
+    turn-by-turn rewind (replay.reconstruct, exact from the persisted seed + log).
+    `snapshots` is None when a game can't be reconstructed (a pre-seed save, or log
+    drift): the review still shows the final board, just without the rewind."""
     game_id = normalize_room(game_id)
     room = ROOMS.get(game_id)
     if room and room.get("game"):
@@ -686,7 +692,9 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
     return {
         "ok": True, "game": engine.player_view(g, requester), "players": players,
         "winner": g.get("winner"), "win_condition": g.get("win_condition"),
+        "win_color": g.get("win_color"),
         "scores": {pid: engine.points_of(p) for pid, p in g["players"].items()},
+        "snapshots": replay.review_payload(g),
     }
 
 

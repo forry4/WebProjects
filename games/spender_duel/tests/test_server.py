@@ -190,6 +190,46 @@ def test_difficulty_survives_a_reload(monkeypatch):
     m.ROOMS.pop(rid, None)
 
 
+def test_review_endpoint_gates_and_ships_snapshots(monkeypatch):
+    """/review: participants only, finished games only, and it carries the
+    turn-by-turn snapshots the rewind UI needs."""
+    import asyncio as _a
+    from games.spender_duel import bot as _bot
+    rid = "DUEL07"
+    m.ROOMS.pop(rid, None)
+    g = engine.new_game(["p1", "p2"], names={"p1": "One", "p2": "Two"}, seed=3)
+    rng = random.Random(3)
+    for _ in range(4000):
+        if engine.is_over(g):
+            break
+        actor = g.get("pending_pid") or g["turn"]
+        engine.apply_move(g, actor, _bot.choose(g, actor, rng))
+    assert engine.is_over(g)
+    m.ROOMS[rid] = {"players": {"p1": "One", "p2": "Two"}, "host": "p1", "status": "over",
+                    "game": g, "meta": {}, "vs_ai": False, "ai_player": None, "sockets": {}}
+
+    r = _a.run(m.games_review(rid, token=None, player_id="p1"))
+    assert r["ok"] and r["winner"] == g["winner"]
+    snaps = r["snapshots"]
+    assert snaps and len(snaps) > 5
+    assert snaps[0]["move"] is None                       # the initial deal
+    assert snaps[-1]["game"]["phase"] == "over"
+    for s in snaps:                                       # piles stay off the wire
+        assert "bag" not in s["game"] and "decks" not in s["game"]
+
+    # a non-participant is refused
+    assert _a.run(m.games_review(rid, token=None, player_id="stranger"))["ok"] is False
+    assert _a.run(m.games_review(rid, token=None, player_id=None))["ok"] is False
+
+    # an in-progress game is not reviewable
+    rid2 = "DUEL08"
+    m.ROOMS[rid2] = {"players": {"p1": "One"}, "host": "p1", "status": "playing",
+                     "game": engine.new_game(["p1", "p2"], seed=1), "meta": {},
+                     "vs_ai": False, "ai_player": None, "sockets": {}}
+    assert _a.run(m.games_review(rid2, token=None, player_id="p1"))["ok"] is False
+    m.ROOMS.pop(rid, None); m.ROOMS.pop(rid2, None)
+
+
 def test_abandon_ends_game(monkeypatch):
     rid = "DUEL03"
     _isolate(monkeypatch, rid)
