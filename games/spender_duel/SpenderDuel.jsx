@@ -118,12 +118,16 @@ function canAffordCard(card, player, cardsById) {
 }
 
 // ─── Small components ───────────────────────────────────────────────────────
-function Token({ color, size = 40, onClick, className = "", dataCell, title }) {
+// `size` omitted => the token is sized by CSS instead of inline styles. The board
+// needs that: inline width/height would beat the stylesheet and freeze the tokens
+// while their cells scale with the column.
+function Token({ color, size, onClick, className = "", dataCell, title }) {
   const dark = color === "white" || color === "gold" || color === "pearl";
+  const style = { background: GEM_HEX[color], color: dark ? "#333" : "#fff" };
+  if (size) { style.width = size; style.height = size; style.fontSize = size * 0.42; }
   return (
     <div className={`duel-token ${className}`} data-cell={dataCell} title={title || GEM_LABELS[color]}
-      onClick={onClick}
-      style={{ background: GEM_HEX[color], width: size, height: size, color: dark ? "#333" : "#fff", fontSize: size * 0.42 }}>
+      onClick={onClick} style={style}>
       {color === "gold" ? "★" : color === "pearl" ? "●" : color[0].toUpperCase()}
     </div>
   );
@@ -156,13 +160,27 @@ function DuelCard({ card, asColor, selected, affordable, needsGold, dim, onClick
       {card.ability && (
         <div className="duel-card-abil" title={ABILITY_DESC[card.ability]}>{ABILITY_GLYPH[card.ability]}</div>
       )}
+      {/* Cost is TWO explicit columns: gems stack in the first, the pearl always sits
+          in the second. (It used to be one wrapping column, so the pearl only landed
+          in column 2 when 3+ gems happened to overflow it — its position moved from
+          card to card.) */}
       <div className="duel-card-cost">
-        {Object.entries(card.cost).map(([c, n]) => n > 0 && (
-          <div key={c} className="duel-cost-row">
-            <div className="duel-cost-gem" style={{ background: GEM_HEX[c], borderRadius: c === "pearl" ? "50%" : "3px" }} />
-            <span>{n}</span>
+        <div className="duel-cost-col">
+          {Object.entries(card.cost).map(([c, n]) => c !== "pearl" && n > 0 && (
+            <div key={c} className="duel-cost-row">
+              <div className="duel-cost-gem" style={{ background: GEM_HEX[c] }} />
+              <span>{n}</span>
+            </div>
+          ))}
+        </div>
+        {card.cost.pearl > 0 && (
+          <div className="duel-cost-col">
+            <div className="duel-cost-row">
+              <div className="duel-cost-gem pearl" style={{ background: GEM_HEX.pearl }} />
+              <span>{card.cost.pearl}</span>
+            </div>
           </div>
-        ))}
+        )}
       </div>
     </div>
   );
@@ -220,7 +238,9 @@ function useSocket(onMessage) {
 // ─── Styles ─────────────────────────────────────────────────────────────────
 // NOTE: no backticks anywhere inside this string (documented smoke-test footgun).
 const css = `
-.duel{max-width:1500px;margin:0 auto;padding:0 14px 24px;font-family:'Crimson Pro','Crimson Fallback',serif}
+/* Full-bleed: no max-width cap — the game fills the browser, with only a small gutter.
+   (A 1500px cap left big dead margins on a wide monitor.) */
+.duel{margin:0 auto;padding:0 14px 24px;font-family:'Crimson Pro','Crimson Fallback',serif}
 .duel h1,.duel h2,.duel h3{font-family:'Cinzel','Cinzel Fallback',serif}
 .duel-topbar{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line,#3a332a);margin-bottom:14px}
 .duel-topbar .spacer{flex:1}
@@ -244,11 +264,16 @@ const css = `
 .duel-turnbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#3f5f33;color:#dfeecf;white-space:nowrap}
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
-/* game columns */
-.duel-cols{display:grid;grid-template-columns:minmax(330px,430px) minmax(320px,430px) minmax(300px,1fr);gap:18px;align-items:start}
+/* game columns: the CARDS column is the only 1fr, so all spare width goes to it —
+   the board is a fixed 5x5 grid and the player/moves rail is capped, neither needs
+   the room. (Previously the rail was the 1fr and swallowed everything.) */
+.duel-cols{display:grid;grid-template-columns:minmax(420px,1.5fr) minmax(360px,1fr) minmax(260px,380px);gap:18px;align-items:start}
 .duel-panel{background:var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px}
 
 /* pyramid */
+/* Left-aligned, NOT centered: the rows hold different card counts (5/4/3), so centering
+   staggers the deck stubs instead of keeping them in one tidy column. The cards scale to
+   fill the box anyway, so there's little slack left to distribute. */
 .duel-pyr-row{display:flex;gap:6px;margin-bottom:8px;align-items:stretch}
 .duel-deck{width:64px;min-height:92px;border:2px dashed #57493a;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#a08d6e;flex:0 0 auto}
 .duel-deck.clickable{cursor:pointer;border-color:#f5c842}
@@ -257,6 +282,28 @@ const css = `
 .duel-deck .cnt{font-size:.8rem;opacity:.8}
 
 /* cards */
+/* Pyramid cards GROW into the cards column's spare width. The column is a container,
+   so each card sizes off the real column width: subtract the deck (64) + the 5 flex
+   gaps (30) + the panel padding (24) = 118, then split across the widest row's 5
+   cards. All three rows therefore share ONE card size (sizing per-row with flex:1
+   would make L3's 3 cards wider than L1's 5). Inner text scales off --dcw with the
+   ratios measured from the 66px baseline, so a bigger card isn't just empty space. */
+.duel-col-cards{container-type:inline-size}
+.duel-col-cards .duel-card{
+  /* Floor 44, not 58: on a ~390px phone the widest row (deck + 5 cards + gaps) must
+     still fit, and a 58 floor forced a horizontal overflow of the whole page. */
+  --dcw:clamp(44px, calc((100cqw - 118px) / 5), 200px);
+  width:var(--dcw);height:calc(var(--dcw) * 1.424);      /* the 66x94 aspect */
+  padding:calc(var(--dcw) * 0.076);
+}
+.duel-col-cards .duel-card-pts{font-size:calc(var(--dcw) * 0.279)}
+.duel-col-cards .duel-card-crowns{font-size:calc(var(--dcw) * 0.174)}
+.duel-col-cards .duel-bonus{width:calc(var(--dcw) * 0.212);height:calc(var(--dcw) * 0.212)}
+.duel-col-cards .duel-card-abil{font-size:calc(var(--dcw) * 0.174);top:calc(var(--dcw) * 0.39);right:calc(var(--dcw) * 0.076)}
+.duel-col-cards .duel-card-cost{bottom:calc(var(--dcw) * 0.076);left:calc(var(--dcw) * 0.076)}
+.duel-col-cards .duel-cost-row{font-size:calc(var(--dcw) * 0.179)}
+.duel-col-cards .duel-cost-gem{width:calc(var(--dcw) * 0.167);height:calc(var(--dcw) * 0.167)}
+.duel-col-cards .duel-deck{min-height:calc(var(--dcw, 66px) * 1.424)}
 .duel-card{position:relative;width:66px;height:94px;background:linear-gradient(160deg,#2e2417,#241c12);border:1px solid #57493a;border-radius:8px;padding:5px;cursor:pointer;flex:0 0 auto;transition:transform .12s, box-shadow .12s}
 .duel-card:hover{transform:translateY(-2px)}
 .duel-card.small{width:58px;height:82px}
@@ -280,14 +327,25 @@ const css = `
 .duel-bonus.dbl{margin-left:0}
 .duel-bonus.wild{border-style:dashed}
 .duel-card-abil{position:absolute;top:26px;right:5px;font-size:.72rem;color:#e8d9b8;background:#4a3b26;border-radius:4px;padding:0 3px;line-height:1.35}
-.duel-card-cost{position:absolute;bottom:5px;left:5px;display:flex;flex-direction:column-reverse;flex-wrap:wrap;gap:1px 6px;max-height:56px}
+/* Two fixed columns bottom-left: gems | pearl. Column 2 exists only when the card
+   costs a pearl, and the pearl is ALWAYS there — never mixed into the gem stack. */
+.duel-card-cost{position:absolute;bottom:5px;left:5px;right:5px;display:flex;flex-direction:row;align-items:flex-end;gap:6px}
+.duel-cost-col{display:flex;flex-direction:column-reverse;gap:1px}
 .duel-cost-row{display:flex;align-items:center;gap:3px;font-size:.74rem;color:#efe6d2}
-.duel-cost-gem{width:11px;height:11px;border:1px solid rgba(255,255,255,.3)}
+.duel-cost-gem{width:11px;height:11px;border:1px solid rgba(255,255,255,.3);border-radius:3px;flex:0 0 auto}
+.duel-cost-gem.pearl{border-radius:50%}
 
 /* board */
+/* The board is the other place spare width should go (it's the focal point), so its
+   cells + tokens scale with the column: cqw minus the board padding (24), the panel
+   padding (24) and the 4 gaps (28), split 5 ways. Tokens are CSS-sized here — see
+   the note on Token — and sit at ~79% of their cell, matching the original 46/58. */
+.duel-col-board{container-type:inline-size}
+.duel-col-board .duel-board{--dcell:clamp(50px, calc((100cqw - 76px) / 5), 104px)}
 .duel-board-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
-.duel-board{display:grid;grid-template-columns:repeat(5,58px);grid-auto-rows:58px;gap:7px;padding:12px;background:#241d13;border:1px solid #57493a;border-radius:14px}
+.duel-board{--dcell:58px;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:7px;padding:12px;background:#241d13;border:1px solid #57493a;border-radius:14px}
 .duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227}
+.duel-cell .duel-token{width:calc(var(--dcell) * 0.79);height:calc(var(--dcell) * 0.79);font-size:calc(var(--dcell) * 0.33)}
 .duel-cell .duel-token{cursor:pointer;transition:transform .1s, box-shadow .1s}
 .duel-cell .duel-token:hover{transform:scale(1.08)}
 .duel-cell .duel-token.sel{box-shadow:0 0 0 3px #f5c842}
@@ -366,8 +424,16 @@ const css = `
 }
 @media(max-width:720px){
   .duel-cols{grid-template-columns:1fr}
-  .duel .duel-board{grid-template-columns:repeat(5,48px);grid-auto-rows:48px;gap:5px}
-  .duel .duel-card{width:56px;height:82px}
+  /* Menu + title + Rules + Abandon can't share one row on a phone — they used to run
+     ~95px past the viewport and give the whole page a horizontal scrollbar. Wrap them
+     and drop the flex spacers (which only exist to center the title on wide screens). */
+  .duel-topbar{flex-wrap:wrap;justify-content:center;gap:8px}
+  .duel-topbar .spacer{display:none}
+  .duel-title{flex:1 0 100%;text-align:center;font-size:1.25rem}
+  /* Cards + board cells size themselves from their column (container queries above),
+     so phones need no explicit sizes — only a tighter board gap and a smaller deck
+     stub. Hard-coding widths here would fight those clamps, not help them. */
+  .duel .duel-board{gap:5px}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 `;
@@ -890,7 +956,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             : sel ? "sel" : isMatch ? "matchable" : "";
           return (
             <div key={i} className="duel-cell">
-              {tok && <Token color={tok} size={46} dataCell={i} className={cls} onClick={() => cellClick(i)} />}
+              {/* no `size`: the board's tokens scale with their cells via CSS */}
+              {tok && <Token color={tok} dataCell={i} className={cls} onClick={() => cellClick(i)} />}
               {!tok && <div data-cell={i} style={{ width: 1, height: 1 }} />}
             </div>
           );
@@ -1265,8 +1332,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
       </div>
       {renderReplayBar()}
       <div className="duel-cols">
-        <div>{renderPyramid()}</div>
-        <div>{renderBoard()}</div>
+        <div className="duel-col-cards">{renderPyramid()}</div>
+        <div className="duel-col-board">{renderBoard()}</div>
         <div className="duel-col-side">
           {oppId && renderPlayer(oppId, false)}
           {me && renderPlayer(myId, true)}
