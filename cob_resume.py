@@ -28,6 +28,7 @@ Usage: python cob_resume.py [delay_sec] [max_downloads]
 import json, os, random, sys, time, urllib.error
 from datetime import datetime
 import cob_collect as cc
+import cob_session as cs
 
 CORP = "C:/Users/Forrest/CoB_corpus"
 MANIFEST, LOGS = CORP + "/manifest.json", CORP + "/logs"
@@ -50,18 +51,22 @@ def log(msg):
 
 
 class AuthDead(Exception):
-    """Session cookie expired — stop immediately, retrying can't help."""
+    """The persistent TICKET is dead — a human must re-export. Retrying cannot help.
+
+    NOT raised for a stale PHPSESSID: that self-heals (cob_session mints a fresh one
+    from tkt on the next request), so it never reaches this path.
+    """
 
 
-def api_retry(url, cookie, token):
-    """cc.api with backoff on TRANSIENT errors. Raises AuthDead on a dead session."""
+def api_retry(sess, url):
+    """sess.api with backoff on TRANSIENT errors. Raises AuthDead only on a dead ticket."""
     last = None
     for attempt in range(RETRIES):
         try:
-            return cc.api(url, cookie, token)
+            return sess.api(url)
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                raise AuthDead(f"HTTP {e.code} — session likely expired")
+                raise AuthDead(f"HTTP {e.code} — persistent ticket rejected")
             last = e
         except Exception as e:
             last = e
@@ -72,21 +77,21 @@ def api_retry(url, cookie, token):
     raise last
 
 
-def fetch_logs(cookie, token, tid):
+def fetch_logs(sess, tid):
     """-> (logs|None, quota_hit: bool). The logs endpoint is the quota oracle."""
-    d = api_retry(f"https://boardgamearena.com/archive/archive/logs.html"
-                  f"?table={tid}&translated=true", cookie, token)
+    d = api_retry(sess, f"https://boardgamearena.com/archive/archive/logs.html"
+                        f"?table={tid}&translated=true")
     if d.get("status") == 1 and d.get("data", {}).get("logs"):
         return d["data"]["logs"], False
     err = str(d.get("error", ""))
-    if "must be logged" in err.lower() or "not logged" in err.lower():
+    if cs.is_auth_error(err):
         raise AuthDead(err[:120])
     return None, QUOTA_MSG in err
 
 
-def get_one(cookie, token, tid, path, delay):
+def get_one(sess, tid, path, delay):
     """-> 'ok' | 'built' | 'fail' | 'quota'."""
-    logs, quota = fetch_logs(cookie, token, tid)
+    logs, quota = fetch_logs(sess, tid)
     if logs:
         json.dump(logs, open(path, "w"))
         return "ok"
@@ -94,22 +99,21 @@ def get_one(cookie, token, tid, path, delay):
         return "quota"
     # Archive not built yet -> trigger a replay build, wait, retry once.
     try:
-        ti = api_retry(f"https://boardgamearena.com/table/table/tableinfos.html?id={tid}",
-                       cookie, token)
+        ti = api_retry(sess, f"https://boardgamearena.com/table/table/tableinfos.html?id={tid}")
         data = ti.get("data", {})
         gv = data.get("gameversion")
         p0 = (data.get("result", {}).get("player") or [{}])[0].get("player_id", "")
         if not gv:
             return "fail"
-        cc.raw_get(f"https://boardgamearena.com/archive/replay/{gv}/"
-                   f"?table={tid}&player={p0}&comments=", cookie, token)
+        sess.raw_get(f"https://boardgamearena.com/archive/replay/{gv}/"
+                     f"?table={tid}&player={p0}&comments=")
     except AuthDead:
         raise
     except Exception as e:
         log(f"    build trigger failed: {type(e).__name__}")
         return "fail"
     time.sleep(delay + random.uniform(0, 3))
-    logs, quota = fetch_logs(cookie, token, tid)
+    logs, quota = fetch_logs(sess, tid)
     if logs:
         json.dump(logs, open(path, "w"))
         return "built"
@@ -121,10 +125,14 @@ def main():
     max_dl = int(sys.argv[2]) if len(sys.argv) > 2 else 100
 
     try:
-        cookie, token = cc.load_cookie()
+        sess = cs.Session()
     except Exception as e:
-        log(f"FATAL: cannot read session cookie: {type(e).__name__}")
+        log(f"FATAL: cannot read session file: {type(e).__name__}")
         return 1
+    if not sess.has_ticket():
+        log("FATAL: no TournoiEnLignetkt in the session file — re-export from the "
+            "browser (see REFRESHING THE SESSION in cob_session.py). Stopping.")
+        return 2
     manifest = json.load(open(MANIFEST))
     os.makedirs(LOGS, exist_ok=True)
 
@@ -137,9 +145,10 @@ def main():
 
     # PREFLIGHT: one probe. If the cap is already spent, every further call is waste.
     try:
-        _, quota = fetch_logs(cookie, token, pending[0])
+        _, quota = fetch_logs(sess, pending[0])
     except AuthDead as e:
-        log(f"FATAL: session dead ({e}) — re-export the BGA cookie. Stopping.")
+        log(f"FATAL: persistent ticket rejected ({e}) — re-export the BGA cookie "
+            "(see REFRESHING THE SESSION in cob_session.py). Stopping.")
         return 2
     except Exception as e:
         log(f"preflight failed ({type(e).__name__}) — BGA may be down. Stopping.")
@@ -156,9 +165,10 @@ def main():
             log(f"reached max_downloads={max_dl}, stopping.")
             break
         try:
-            res = get_one(cookie, token, tid, f"{LOGS}/{tid}.json", delay)
+            res = get_one(sess, tid, f"{LOGS}/{tid}.json", delay)
         except AuthDead as e:
-            log(f"FATAL: session died mid-run ({e}) — re-export the cookie. Stopping.")
+            log(f"FATAL: ticket died mid-run ({e}) — re-export the cookie "
+                "(see REFRESHING THE SESSION in cob_session.py). Stopping.")
             break
         except Exception as e:
             res, _ = "fail", log(f"  {tid}: {type(e).__name__}")
