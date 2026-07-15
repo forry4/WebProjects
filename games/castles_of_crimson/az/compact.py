@@ -10,8 +10,8 @@ must never drift independently.
 
 Tile codes (mirror of coc-core/src/tiles.rs):
   0 empty | 1 starting castle | 2 castle | 3 mine | 4 ship |
-  5..13 livestock (5 + animal*3 + count-2) | 14..21 building (+bt index) |
-  22..47 monastery (+effect_id-1)
+  5..16 livestock (5 + animal*3 + count-2, 4 animals) | 17..24 building (+bt index) |
+  25..50 monastery (+effect_id-1)
 """
 from __future__ import annotations
 
@@ -50,9 +50,13 @@ def tile_code(tile: dict | None) -> int:
     if t == "livestock":
         return 5 + ANIMALS.index(tile["animal"]) * 3 + (tile["count"] - 2)
     if t == "building":
-        return 14 + BUILDINGS.index(tile["building"])
+        return 17 + BUILDINGS.index(tile["building"])
     if t == "monastery":
-        return 22 + tile["effect_id"] - 1
+        # Some BGA-replay depot monasteries have an UNDECODED effect (never taken, so
+        # the log never revealed it) -> effect_id None. Map to a benign placeholder so
+        # the projection succeeds (corpus-analysis approximation; real games always set it).
+        eid = tile["effect_id"]
+        return 25 + (eid if eid is not None else 1) - 1
     raise ValueError(f"unknown tile type {t!r}")
 
 

@@ -136,19 +136,21 @@ def test_m5_no_pending_when_no_adjacent_goods():
     assert g["players"]["p1"]["goods"].get("rose") == 1
 
 
-def test_m6_spend_workers_for_building():
+def test_m6_spend_silver_for_workers():
+    # New rule: spend 1 silver -> gain 2 workers, UNLIMITED uses per turn.
     g = fresh(effects=[6])
-    g["players"]["p1"]["workers"] = 2
-    g["depots"]["2"]["hexes"] = [hext("building", "beige", "bb", building="bank")]
-    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": "bb"})
+    g["players"]["p1"]["silver"] = 2
+    g["players"]["p1"]["workers"] = 0
+    ok, err = engine.apply_move(g, "p1", {"type": "monastery6_take"})
     assert ok, err
-    assert any(t["id"] == "bb" for t in g["players"]["p1"]["storage"])
-    assert g["players"]["p1"]["workers"] == 0
-    # once per turn
-    g["depots"]["2"]["hexes"] = [hext("building", "beige", "bb2", building="bank")]
-    g["players"]["p1"]["workers"] = 2
-    ok2, _ = engine.apply_move(g, "p1", {"type": "monastery6_take", "tile_id": "bb2"})
-    assert not ok2
+    assert g["players"]["p1"]["silver"] == 1 and g["players"]["p1"]["workers"] == 2
+    # again (no once-per-turn limit)
+    ok2, err2 = engine.apply_move(g, "p1", {"type": "monastery6_take"})
+    assert ok2, err2
+    assert g["players"]["p1"]["silver"] == 0 and g["players"]["p1"]["workers"] == 4
+    # not without silver
+    ok3, _ = engine.apply_move(g, "p1", {"type": "monastery6_take"})
+    assert not ok3
 
 
 def test_m7_livestock_bonus():

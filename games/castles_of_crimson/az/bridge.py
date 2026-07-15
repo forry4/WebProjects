@@ -14,7 +14,7 @@ Compact schema ("t" field):
   {"t":"sell","die":i} | {"t":"workers","die":i}
   {"t":"adjust","die":i,"to":v}
   {"t":"black","slot":s} | {"t":"discard","slot":s}
-  {"t":"m6","depot":d0,"slot":s} | {"t":"btake","depot":d0,"slot":s}
+  {"t":"m6"} | {"t":"btake","depot":d0,"slot":s}
   {"t":"castle","space":idx}
   {"t":"extra","value":v,"sub":{compact sub without "die"}}
   {"t":"ship","depot":d0} | {"t":"ship_adj","depot":d0}
@@ -84,8 +84,7 @@ def move_to_compact(game: dict, pid: str, move: dict) -> dict:
     if mt == "discard_storage":
         return {"t": "discard", "slot": _storage_slot(p, move["tile_id"])}
     if mt == "monastery6_take":
-        d0, slot = _depot_slot(game, move["tile_id"])
-        return {"t": "m6", "depot": d0, "slot": slot}
+        return {"t": "m6"}  # atomic: spend 1 silver -> 2 workers
     if mt == "building_take_choice":
         d0, slot = _depot_slot(game, move["tile_id"])
         return {"t": "btake", "depot": d0, "slot": slot}
@@ -153,8 +152,7 @@ def compact_to_move(game: dict, pid: str, c: dict) -> dict:
     if t == "discard":
         return {"type": "discard_storage", "tile_id": p["storage"][c["slot"]]["id"]}
     if t == "m6":
-        tile = game["depots"][str(c["depot"] + 1)]["hexes"][c["slot"]]
-        return {"type": "monastery6_take", "tile_id": tile["id"]}
+        return {"type": "monastery6_take"}  # atomic: spend 1 silver -> 2 workers
     if t == "btake":
         tile = game["depots"][str(c["depot"] + 1)]["hexes"][c["slot"]]
         return {"type": "building_take_choice", "tile_id": tile["id"]}

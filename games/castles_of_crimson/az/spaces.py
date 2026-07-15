@@ -55,7 +55,7 @@ MAX_REGIONS = 21
 # (region order: color order, then min canonical space index — matches boards_gen.rs)
 REGION_INDEX = [
     {'burgundy-2': 0, 'burgundy-1': 1, 'blue-1': 2, 'blue-2': 3, 'gray-1': 4, 'green-1': 5, 'green-2': 6, 'beige-4': 7, 'beige-2': 8, 'beige-1': 9, 'beige-3': 10, 'yellow-2': 11, 'yellow-1': 12},
-    {'burgundy-3': 0, 'burgundy-4': 1, 'burgundy-1': 2, 'burgundy-2': 3, 'blue-2': 4, 'blue-3': 5, 'blue-1': 6, 'gray-1': 7, 'gray-2': 8, 'green-2': 9, 'green-1': 10, 'beige-1': 11, 'beige-3': 12, 'beige-2': 13, 'yellow-3': 14, 'yellow-1': 15, 'yellow-2': 16},
+    {'burgundy-4': 0, 'burgundy-1': 1, 'burgundy-2': 2, 'burgundy-3': 3, 'blue-2': 4, 'blue-3': 5, 'blue-1': 6, 'gray-3': 7, 'gray-1': 8, 'gray-2': 9, 'green-2': 10, 'green-1': 11, 'beige-1': 12, 'beige-4': 13, 'beige-2': 14, 'beige-3': 15, 'yellow-2': 16, 'yellow-3': 17, 'yellow-1': 18},
     {'burgundy-3': 0, 'burgundy-2': 1, 'burgundy-1': 2, 'burgundy-4': 3, 'blue-1': 4, 'blue-3': 5, 'blue-2': 6, 'gray-1': 7, 'gray-2': 8, 'green-2': 9, 'green-1': 10, 'beige-1': 11, 'beige-4': 12, 'beige-2': 13, 'beige-3': 14, 'yellow-1': 15},
     {'burgundy-2': 0, 'burgundy-4': 1, 'burgundy-1': 2, 'burgundy-3': 3, 'blue-2': 4, 'blue-3': 5, 'blue-1': 6, 'gray-2': 7, 'gray-1': 8, 'green-1': 9, 'green-2': 10, 'beige-1': 11, 'beige-3': 12, 'beige-2': 13, 'yellow-1': 14, 'yellow-2': 15},
     {'burgundy-1': 0, 'burgundy-4': 1, 'burgundy-2': 2, 'burgundy-3': 3, 'blue-3': 4, 'blue-1': 5, 'blue-2': 6, 'gray-2': 7, 'gray-1': 8, 'green-1': 9, 'green-2': 10, 'beige-4': 11, 'beige-2': 12, 'beige-5': 13, 'beige-3': 14, 'beige-1': 15, 'yellow-3': 16, 'yellow-2': 17, 'yellow-1': 18},

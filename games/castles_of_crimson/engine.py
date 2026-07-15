@@ -864,28 +864,16 @@ def _h_buy_black(game, pid, move):
 
 
 def _h_monastery6_take(game, pid, move):
-    """Monastery 6: once per turn, spend 2 workers to take a building tile to storage."""
+    """Monastery 6: spend 1 silver to gain 2 workers (no limit on uses per turn)."""
     p = game["players"][pid]
     if 6 not in p["monastery_effects"]:
         return False, "no monastery for this action"
-    if game["m6_used_this_turn"]:
-        return False, "already used this turn"
-    if p["workers"] < 2:
-        return False, "need 2 workers"
-    if not _free_storage(p):
-        return False, "storage full"
-    tid = move.get("tile_id")
-    for d in range(1, 7):
-        depot = game["depots"][str(d)]
-        t = next((x for x in depot["hexes"] if x["id"] == tid and x["type"] == "building"), None)
-        if t is not None:
-            depot["hexes"].remove(t)
-            p["storage"].append(t)
-            p["workers"] -= 2
-            game["m6_used_this_turn"] = True
-            _log(game, pid, "monastery6_take", tile=t, via="monastery:6")
-            return True, None
-    return False, "no such building tile in a depot"
+    if p["silver"] < 1:
+        return False, "need 1 silver"
+    p["silver"] -= 1
+    p["workers"] += 2
+    _log(game, pid, "monastery6_take", via="monastery:6")
+    return True, None
 
 
 def _h_adjust_die(game, pid, move):
@@ -1309,11 +1297,8 @@ def legal_moves(game: dict, pid: str) -> list[dict]:
         for t in p["storage"]:
             moves.append({"type": "discard_storage", "tile_id": t["id"]})
 
-    # Monastery 6: spend 2 workers to take a building tile (once per turn).
-    if 6 in p["monastery_effects"] and not game["m6_used_this_turn"] and p["workers"] >= 2 and _free_storage(p):
-        for d in range(1, 7):
-            for t in game["depots"][str(d)]["hexes"]:
-                if t["type"] == "building":
-                    moves.append({"type": "monastery6_take", "tile_id": t["id"]})
+    # Monastery 6: spend 1 silver to gain 2 workers (unlimited uses).
+    if 6 in p["monastery_effects"] and p["silver"] >= 1:
+        moves.append({"type": "monastery6_take"})
 
     return moves

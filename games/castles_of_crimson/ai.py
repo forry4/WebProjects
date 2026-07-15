@@ -248,7 +248,7 @@ def _value(game, pid, w=WEIGHTS):
             val += bval * frac * frac * w["color_prox"]
 
     val += len(p["storage"]) * w["storage"]
-    val += sum(1 for e in p["monastery_effects"] if e <= 14) * remaining * w["mon_cont"]
+    val += sum(1 for e in p["monastery_effects"] if e is not None and e <= 14) * remaining * w["mon_cont"]
     val -= sum(1 for t in duchy.values() if t is None) * w["empty_pen"]
     return val
 

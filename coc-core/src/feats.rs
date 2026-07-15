@@ -34,9 +34,9 @@ use crate::tiles::{
     PHASE_BONUS,
 };
 
-pub const N_FEATS: usize = 934;
+pub const N_FEATS: usize = 936; // was 934 (3 animals); +2 for the 4th animal's mask bit (me+opp)
 
-/// Encoder version. A net declares its encoder by its INPUT DIM (934 -> V1,
+/// Encoder version. A net declares its encoder by its INPUT DIM (936 -> V1,
 /// N_FEATS_V2 -> V2 — inferred at model load), so v1 and v2 nets can face each
 /// other in the same gate and the serving wasm picks the right encoder from
 /// whatever model blob it fetched.
@@ -192,7 +192,7 @@ pub fn features(s: &State, seat: usize) -> Vec<f32> {
         for bt in 0..8 {
             out.push(p.buildings[bt] as f32 / 7.0);
         }
-        for a in 0..3 {
+        for a in 0..crate::tiles::N_ANIMALS {
             out.push((p.livestock_mask >> a & 1) as f32);
         }
         for e in 0..26 {
