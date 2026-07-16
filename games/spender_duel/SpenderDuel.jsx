@@ -30,6 +30,15 @@ const WIN_DESC = {
   crowns: "10 crowns",
   color: "10 points in one color",
 };
+// Board geometry in CELL units — mirrors the CSS (gap 0.12, padding 0.2 of a cell), so
+// the refill path lands on cell centres at any board size.
+const CELL_GAP = 0.12, CELL_PAD = 0.2;
+const BOARD_SPAN = 5 + 4 * CELL_GAP + 2 * CELL_PAD;     // 5.88
+const cellCentre = (i) => [
+  CELL_PAD + (i % 5) * (1 + CELL_GAP) + 0.5,
+  CELL_PAD + Math.floor(i / 5) * (1 + CELL_GAP) + 0.5,
+];
+
 // Bot tiers (wire ids match main.AI_DIFFICULTIES). Easy = the trivial random-legal
 // bot; Normal/Hard = determinized MCTS at different budgets.
 const BOT_TIERS = [
@@ -245,6 +254,8 @@ const css = `
 .duel-col-cards .level-row .card-header{margin-bottom:calc(var(--card-h) * 0.043)}
 .duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147)}
 .duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
+/* a double bonus overlaps by 40% of the (scaled) disc: 0.157 * 0.4 */
+.duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.063)}
 .duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.082)}
 .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
 .duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.081);height:calc(var(--card-h) * 0.081)}
@@ -261,10 +272,23 @@ const css = `
    padding (24) and the 4 gaps (28), split 5 ways. Tokens are CSS-sized here — see
    the note on Token — and sit at ~79% of their cell, matching the original 46/58. */
 .duel-col-board{container-type:inline-size}
-.duel-col-board .duel-board{--dcell:clamp(50px, calc((100cqw - 76px) / 5), 104px)}
+/* The gap and padding scale WITH the cell (0.12 / 0.2 of it), so the board's geometry is
+   proportional at every size: total span = 5 + 4*0.12 + 2*0.2 = 5.88 cells. That is what
+   lets the refill path below be a fixed viewBox of cell units and still land exactly on
+   every cell centre — with fixed 7px/12px, the ratios drift as the cell scales. */
+.duel-col-board .duel-board{--dcell:clamp(50px, calc((100cqw - 24px) / 5.88), 104px)}
 .duel-board-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
-.duel-board{--dcell:58px;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:7px;padding:12px;background:#241d13;border:1px solid #57493a;border-radius:14px}
-.duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227}
+.duel-board{--dcell:58px;--dgap:calc(var(--dcell) * 0.12);position:relative;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:var(--dgap);padding:calc(var(--dcell) * 0.2);background:#241d13;border:1px solid #57493a;border-radius:14px}
+.duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227;position:relative;z-index:1}
+
+/* The REFILL PATH: replenish fills empty spaces from the centre outward along a fixed
+   spiral (cards.SPIRAL_ORDER, served in /duel/catalog), so tracing it tells you which
+   spaces come back first — worth knowing before you take. Drawn under the tokens,
+   inert, in cell units (see the proportional geometry above). */
+.duel-spiral{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+.duel-spiral .path{fill:none;stroke:var(--gold);stroke-opacity:.30;stroke-width:.055;stroke-dasharray:.17 .13;stroke-linecap:round;stroke-linejoin:round}
+.duel-spiral .start{fill:var(--gold);fill-opacity:.55}
+.duel-spiral .head{fill:var(--gold);fill-opacity:.45}
 /* Board tokens are SPENDER's .gem-token (shared) — Duel only adds the board-specific
    states + the scaling, since the shared token is a fixed 42px by default. */
 .duel-cell .gem-token{width:calc(var(--dcell) * 0.79);height:calc(var(--dcell) * 0.79);font-size:calc(var(--dcell) * 0.30);cursor:pointer;transition:transform .1s, box-shadow .1s}
@@ -327,9 +351,10 @@ const css = `
   width:calc(var(--pill-anchor) * 0.078)!important;
   height:calc(var(--pill-anchor) * 0.078)!important;flex:0 0 auto;
 }
-/* A bonus pill carries more glyphs than a token pill ("+3 B" plus Duel's "★3"), so its
-   TEXT is nudged down to stay inside the same capsule. The box stays Spender-shaped. */
-.duel-player .bonus-pill{font-size:calc(var(--pill-anchor) * 0.066);letter-spacing:-.02em}
+/* Dropping the redundant color letter ("+3★3", not "+3 R★3" — the pill is already
+   color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
+   identical to the token pill. */
+.duel-player .bonus-pill{letter-spacing:-.02em}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
@@ -379,10 +404,11 @@ const css = `
   .duel-topbar{flex-wrap:wrap;justify-content:center;gap:8px}
   .duel-topbar .spacer{display:none}
   .duel-title{flex:1 0 100%;text-align:center;font-size:1.25rem}
-  /* Cards + board cells size themselves from their column (container queries above),
-     so phones need no explicit sizes — only a tighter board gap and a smaller deck
-     stub. Hard-coding widths here would fight those clamps, not help them. */
-  .duel .duel-board{gap:5px}
+  /* Cards + board cells size themselves from their column (container queries above), so
+     phones need no explicit sizes — hard-coding widths here would fight those clamps.
+     The board gap must NOT be overridden either: it scales with the cell to keep the
+     board's geometry proportional, which is what the refill path relies on (a fixed
+     5px here pushed the path ~6px off the cell centres at this width). */
   .duel .duel-deck{width:52px;min-height:80px}
 }
 `;
@@ -490,6 +516,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     && (game.pending_pid || game.turn) === roomData?.ai_player;
   const replenished = !!game?.turn_flags?.replenished;
   const myBonuses = useMemo(() => bonusesOf(me, cardsById), [me, cardsById]);
+  // The replenish spiral, as cell-centre points (the backend serves the real order).
+  const spiralPts = useMemo(
+    () => (catalog?.spiral || []).map(cellCentre), [catalog]);
   const boardHasEmpty = !!game && game.board.some((t) => t === null);
   const canReplenish = myTurn && !pendingMine && (game?.bag_count || 0) > 0 && boardHasEmpty && !replenished;
   const canUsePrivilege = myTurn && !pendingMine && (me?.privileges || 0) > 0 && !replenished
@@ -847,7 +876,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             the color's prestige, since 10 points in ONE color is a win condition. */}
         <div className="player-bonuses">
           {COLORS.map((c) => (bon[c] > 0 || cpts[c] > 0) && (
-            <BonusPill key={c} color={c} count={bon[c]}
+            <BonusPill key={c} color={c} count={bon[c]} letter={false}
               extra={cpts[c] > 0 ? `★${cpts[c]}` : null}
               title={`${bon[c]} ${c} bonus${bon[c] === 1 ? "" : "es"} from cards · ${cpts[c]} prestige in ${c} (10 wins)`} />
           ))}
@@ -923,6 +952,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         </span>
       </div>
       <div className="duel-board">
+        {/* Refill order: centre -> outward along the printed spiral */}
+        {spiralPts.length > 1 && (
+          <svg className="duel-spiral" viewBox={`0 0 ${BOARD_SPAN} ${BOARD_SPAN}`} aria-hidden="true">
+            <polyline className="path" points={spiralPts.map((p) => p.join(",")).join(" ")} />
+            <circle className="start" cx={spiralPts[0][0]} cy={spiralPts[0][1]} r=".11" />
+            <circle className="head" cx={spiralPts[spiralPts.length - 1][0]}
+              cy={spiralPts[spiralPts.length - 1][1]} r=".07" />
+          </svg>
+        )}
         {game.board.map((tok, i) => {
           const sel = selCells.includes(i);
           const isMatch = pendingMine && pendKind === "take_same" && tok === pendCtx.color && (pendCtx.cells || []).includes(i);
@@ -1032,10 +1070,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     if (!replaySnapshots) return null;
     const n = replaySnapshots.length - 1;
     const s = replaySnapshots[replayTurn];
+    // fmtLog returns {name, action} (Spender's log shape) — destructure it. It used to
+    // return a formatted STRING, and this line still called .replace() on it, which
+    // crashed the whole app the moment a review opened.
+    const { name, action } = fmtLog(liveGame.log[s.log_len - 1] || {}, names, cardsById, royals);
     const label = replayTurn === 0
       ? "Game start"
-      : `Move ${replayTurn} / ${n} · ${names[s.pid] || s.pid} · ${fmtLog(
-          liveGame.log[s.log_len - 1] || {}, names, cardsById, royals).replace(/^\S+\s/, "")}`;
+      : `Move ${replayTurn} / ${n} · ${name || s.pid} · ${action}`;
     return (
       <div className="duel-replaybar">
         <button className="btn btn-outline" onClick={() => goToTurn(replayTurn - 1)}

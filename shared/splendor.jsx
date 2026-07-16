@@ -80,9 +80,19 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
           </span>
         )}
         {card.bonus && (
-          <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}${card.bonus_count === 2 ? " card-bonus-double" : ""}`}
-            style={{ background: bonusBg }}
-            title={isWild ? (asColor ? `Wild bonus (as ${asColor})` : "Wild bonus — attaches to one of your colors") : undefined} />
+          // A double bonus is TWO gems, drawn as two overlapping discs (a stack you can
+          // count) rather than one disc with a ring around it — concentric circles read
+          // as a single gem sitting on top of another.
+          card.bonus_count === 2 ? (
+            <div className="card-bonus-pair" title="Gives 2 of this bonus">
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
+            </div>
+          ) : (
+            <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`}
+              style={{ background: bonusBg }}
+              title={isWild ? (asColor ? `Wild bonus (as ${asColor})` : "Wild bonus — attaches to one of your colors") : undefined} />
+          )
         )}
       </div>
       {card.ability && abilityGlyph && (
@@ -145,14 +155,16 @@ export function TokenPill({ color, count, dataToken }) {
 
 /* A BOUGHT-CARD pill: "+N W" in that color — Spender's indicator for the cards you own.
  * `extra` appends a game-specific suffix, unspaced so it stays inside a narrow pill
- * (Duel shows the color's prestige as "★N", since 10 points in one color wins). */
-export function BonusPill({ color, count, extra, title }) {
+ * (Duel shows the color's prestige as "★N", since 10 points in one color wins).
+ * `letter={false}` drops the color initial: the pill is already color-coded, so the
+ * letter is redundant, and dropping it buys room for `extra` in a narrow pill. */
+export function BonusPill({ color, count, extra, title, letter = true }) {
   const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
   return (
     <span data-bonus={color} className="bonus-pill" title={title}
       style={{ background: GEM_HEX[color] + "55", borderColor: rim,
         color: color === "black" ? "#a8a8a8" : GEM_HEX[color] }}>
-      +{count} {color[0].toUpperCase()}{extra}
+      +{count}{letter ? " " + color[0].toUpperCase() : ""}{extra}
     </span>
   );
 }
@@ -245,13 +257,24 @@ export const splendorCardExtraCss = `
 .card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
 .card-bonus-wild{border-style:dashed}
-.card-bonus-double{box-shadow:0 0 0 1.5px var(--surface2),0 0 0 3px rgba(255,255,255,.25)}
+/* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
+   at a glance. The trailing disc sits on top; the leading one keeps its rim visible
+   through the overlap. (Was a single disc ringed by a box-shadow, which just looked
+   like one gem directly on top of another.) */
+.card-bonus-pair{display:flex;align-items:center;margin-left:auto;flex:0 0 auto}
+.card-bonus-pair .card-bonus{margin-left:0}
+/* Overlap = 40% of the DISC's width. A % margin would resolve against the container's
+   width (which is shrink-to-fit here), so each size context sets the px itself; this is
+   the 20px base. Spender never renders a pair (no bonus_count on its cards), so only
+   Duel's contexts override it. */
+.card-bonus-pair .card-bonus+.card-bonus{margin-left:-8px}
 .card-ability{position:absolute;top:32px;right:6px;font-size:.7rem;color:var(--text);background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:4px;padding:0 3px;line-height:1.35;pointer-events:none}
 .card-cost .cost-col{display:flex;flex-direction:column;gap:3px}
 .card-cost.card-cost-2col{flex-direction:row;align-items:flex-end;gap:8px}
 .card.card-small{width:var(--card-w-small,62px);min-height:var(--card-h-small,86px);padding:5px 4px 4px}
 .card.card-small .card-points{font-size:.9rem}
 .card.card-small .card-bonus{width:14px;height:14px}
+.card.card-small .card-bonus-pair .card-bonus+.card-bonus{margin-left:-5.6px}
 .card.card-small .card-back-level{font-size:1rem}
 `;
 
