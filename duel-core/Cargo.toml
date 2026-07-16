@@ -45,6 +45,12 @@ required-features = ["bridge"]
 name = "harvest_value"
 required-features = ["bridge"]
 
+# Self-play harvest for the learned POLICY+value net (Phase 3): features + softmax-over-Q policy
+# target over the 320-action space (`actions.rs`) + outcome. Native-only, like the other tools.
+[[bin]]
+name = "harvest_pv"
+required-features = ["bridge"]
+
 # Leaf-cost profiler (heuristic vs encoder vs MLP) — decides whether int8+SIMD is the
 # right lever for the net-leaf wall-clock handicap.
 [[bin]]

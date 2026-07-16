@@ -19,6 +19,7 @@
 //! games and comparing state after EVERY move. If the two ever disagree, the Rust is
 //! wrong by definition.
 
+pub mod actions;
 pub mod cards;
 pub mod clock;
 pub mod engine;
