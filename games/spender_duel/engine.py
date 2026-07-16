@@ -833,8 +833,21 @@ def winner(game: dict):
 # ── Hidden-information boundary ──────────────────────────────────────────────
 def player_view(game: dict, pid: str | None) -> dict:
     """Per-recipient redaction: the bag's contents, the decks' order, and the
-    OPPONENT's reserved-card identities are hidden. Reveal everything at game
-    over. ``pid=None`` = spectator (both hands redacted)."""
+    OPPONENT's BLIND (deck-drawn) reserved cards are hidden. Reveal everything at game
+    over. ``pid=None`` = spectator (both hands' blind reserves redacted).
+
+    ONLY DECK-TOP RESERVES ARE SECRET — the Spender model, and the only one that was ever
+    coherent here. Reserving a face-up pyramid card is a PUBLIC act: your opponent watched
+    that exact card leave the pyramid, and `_h_reserve` accordingly puts its `card_id`
+    straight into the move log ("public when performed"), which is broadcast to everyone.
+    So hiding it here was pure theatre — the opponent could already read the id out of the
+    log. A blind deck draw is different: nobody saw it, and its id is deliberately kept out
+    of the log, so it stays redacted until game over.
+
+    This also removes the one thing that made client-side AI leak: the browser must be
+    handed the bot's own view to search with, and now that view contains no secret the
+    log hasn't already published — except its blind draws, which stay hidden.
+    """
     g = copy.deepcopy(game)
     g["bag_count"] = len(g.pop("bag"))
     g["deck_counts"] = {lvl: len(d) for lvl, d in g["decks"].items()}
@@ -854,6 +867,8 @@ def player_view(game: dict, pid: str | None) -> dict:
         for opid, p in g["players"].items():
             if opid == pid:
                 continue
+            blind = set(game["players"][opid]["reserved_from_deck"])
             p["reserved"] = [{"level": _card(cid)["level"], "facedown": True}
+                             if cid in blind else cid
                              for cid in p["reserved"]]
     return g

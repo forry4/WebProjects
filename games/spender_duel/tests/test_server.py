@@ -72,16 +72,31 @@ def test_vs_ai_full_game_and_wire_redaction(monkeypatch):
         g = room["game"]
         assert engine.is_over(g), "game did not finish"
         assert g["winner"] in (pid, m.AI_PID)
-        # every room_update sent to the human redacted the bot's reserves pre-over
+        # Every room_update sent to the human redacted the bot's BLIND reserves pre-over.
+        # Face-up (pyramid) reserves are deliberately NOT redacted: the human watched that
+        # card leave the pyramid and its id is already in the broadcast log, so hiding it
+        # on the wire would be theatre. Blind deck draws stay hidden until game over.
+        blind_seen = faceup_seen = 0
         for raw in ws.sent:
             msg = json.loads(raw)
             gm = (msg.get("room") or {}).get("game")
             if not gm or gm.get("phase") == "over":
                 continue
             for opid, p in gm["players"].items():
-                if opid != pid:
-                    assert all(isinstance(x, dict) and "id" not in x for x in p["reserved"])
+                if opid == pid:
+                    continue
+                for x in p["reserved"]:
+                    if isinstance(x, dict):
+                        assert set(x) == {"level", "facedown"}, "blind reserve leaks its id"
+                        blind_seen += 1
+                    else:
+                        assert isinstance(x, str)          # a public, already-logged id
+                        faceup_seen += 1
             assert "bag" not in gm and "decks" not in gm
+            # the blind-source list is card IDS — it must never reach any client
+            for p in gm["players"].values():
+                assert "reserved_from_deck" not in p
+        assert blind_seen or faceup_seen, "the game never exercised a bot reserve"
 
     asyncio.run(run())
     m.ROOMS.pop(rid, None)

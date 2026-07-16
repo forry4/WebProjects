@@ -837,6 +837,33 @@ def test_player_view_redaction():
     vs = engine.player_view(g, None)
     assert vs["players"][A]["reserved"][0]["facedown"] is True
 
+def test_only_blind_reserves_are_hidden_from_the_opponent():
+    """The Spender model: a face-up pyramid reserve is PUBLIC (the opponent watched the
+    card leave the pyramid, and `_h_reserve` puts its id in the broadcast log), so
+    redacting it on the wire would be theatre. A blind deck draw was seen by nobody and
+    its id is deliberately kept OUT of the log — so that one stays hidden.
+    """
+    g = fresh()
+    clear_board(g)
+    put(g, 12, "gold"); put(g, 13, "gold")
+    faceup = g["pyramid"]["1"][0]
+    assert engine.apply_move(g, A, {"type": "reserve", "gold_cell": 12,
+                                    "source": {"kind": "pyramid", "level": 1, "slot": 0}})[0]
+    g["turn"] = A                                  # take a second reserve this test
+    g["turn_flags"]["replenished"] = False
+    blind = g["decks"]["3"][-1]
+    assert engine.apply_move(g, A, {"type": "reserve", "gold_cell": 13,
+                                    "source": {"kind": "deck", "level": 3}})[0]
+
+    vb = engine.player_view(g, B)["players"][A]["reserved"]
+    assert faceup in vb, "a pyramid reserve is public — its id is already in the log"
+    assert blind not in vb, "a blind deck draw must NOT leak"
+    assert {"level": 3, "facedown": True} in vb
+    # ...and the owner still sees both, in full
+    va = engine.player_view(g, A)["players"][A]["reserved"]
+    assert faceup in va and blind in va
+
+
 def test_player_view_reveals_at_game_over():
     g = fresh()
     gold_at(g)
