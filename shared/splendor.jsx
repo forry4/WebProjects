@@ -254,7 +254,10 @@ export const splendorCardCss = `
 .card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:1.5px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:1.2px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 1px rgba(0,0,0,.3)}
+/* Cost pips are tiny (~10-16px): a matte gradient just washes the hue and reads muddy at
+   that size, so use the SOLID true colour with a thin same-hue dark rim — crisp + vivid,
+   still in the "ringed" family as the larger matte gems. */
+.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--gc);border:1px solid color-mix(in srgb,var(--gc) 52%,#000);box-shadow:0 1px 1px rgba(0,0,0,.3)}
 .cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
 `;
 
