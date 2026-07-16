@@ -628,14 +628,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
     return (
-      <div className="ww"><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
         <LobbyHeader
-          left={<>
-            <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
-            <button className="ww-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-          </>}
+          onBack={onExit}
           title="Where Wolf?"
-          right={<span className="lby-head-name">{playerName}</span>}
+          onRules={() => setShowRules(true)}
+          user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="ww-wrap">
           <div className="ww-hero">

@@ -2497,14 +2497,12 @@ export default function SpenderApp() {
 	if (screen === "browser") return (
 		<>
 			<style>{css}</style>
-			<div className="app">
+			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
 				<LobbyHeader
-					left={<>
-						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
-						<button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-					</>}
+					onBack={() => setScreen("home")}
 					title="Spender"
-					right={<>
+					onRules={() => setShowRules(true)}
+					user={<>
 						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
 						<span className="lby-head-name">{authUser?.name}</span>
 					</>}

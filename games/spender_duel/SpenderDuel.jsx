@@ -1378,12 +1378,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const savedTok = (() => { try { return savedRid ? localStorage.getItem(`duel_token_${savedRid}_${myId}`) : null; } catch { return null; } })();
     const savedListed = savedRid && (openGames.some((g) => g.id === savedRid) || myGames.some((g) => g.id === savedRid));
     return (
-      <div className="app duel">
+      <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
         <style>{duelStyles}</style>
         <LobbyHeader
-          left={<button className="btn btn-outline" onClick={onExit}>{"←"} Back</button>}
+          onBack={onExit}
           title="Spender Duel"
-          right={<button className="btn btn-outline" onClick={() => setShowRules(true)}>How to Play</button>}
+          onRules={() => setShowRules(true)}
+          rulesLabel="How to Play"
+          user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
         />
         <div className="duel-create-row">
           <button className="btn btn-gold" onClick={() => createGame(false)}>+ Create Game</button>

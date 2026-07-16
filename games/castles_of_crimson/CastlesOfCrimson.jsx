@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -703,6 +703,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc{--bg:#120c0d;--surface:#1d1416;--surface2:#281a1d;--border:#3e2a2e;--crimson:#a3263a;--crimson-l:#c8455a;
   --gold:#c9a84c;--gold-l:#e8c96a;--text:#ecdfd6;--text-dim:#9c8780;--radius:8px;--radius-lg:14px;
   font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;color:var(--text);background:var(--bg);min-height:100vh}
+/* The LOBBY runs the neutral site palette (the game board keeps crimson); crimson is the
+   lobby's --lby-accent, matching the home card. .coc already sets background:var(--bg) +
+   min-height:100vh, so overriding --bg here neutralizes the lobby backdrop too. */
+.coc.coc-neutral{--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;--text:#e8dfc8;--text-dim:#8a7d6a;--lby-accent:#d6454b}
 .coc-wrap{max-width:1100px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px 48px}
 .coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
@@ -2056,20 +2060,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   };
 
   if (!board) {
-    return (<div className="coc"><style>{css}</style><div className="coc-wrap"><p className="coc-empty">Loading…</p></div></div>);
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
   }
 
   // ─── Lobby ───────────────────────────────────────────────────────────────
   if (screen === "lobby") {
     return (
-      <div className="coc"><style>{css}</style>
+      <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
         <LobbyHeader
-          left={<>
-            <button className="coc-btn ghost sm" onClick={onExit}>← Back</button>
-            <button className="coc-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-          </>}
+          onBack={onExit}
           title="Castles of Crimson"
-          right={<span className="lby-head-name">{playerName}</span>}
+          onRules={() => setShowRules(true)}
+          user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="coc-wrap">
           <div className="coc-board-pick">
