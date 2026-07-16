@@ -79,6 +79,9 @@ C_PUCT = 1.5
 _MAX_TREE_DEPTH = 14      # in-tree plies before truncating to a rollout
 _ROLLOUT_STEPS = 12       # engine moves played out before the heuristic leaf
 
+# Set per-decision by choose_move (never poke it directly — see that docstring).
+_TAKE_DOMINANCE = True
+
 
 # ── Fast cloning ─────────────────────────────────────────────────────────────
 def _clone_game(g: dict) -> dict:
@@ -215,12 +218,26 @@ def _value(game: dict, pid: str, w: dict = WEIGHTS) -> float:
 
 
 # ── Search-legality pruning ──────────────────────────────────────────────────
+def _take_gifts_privilege(board: list, cells: list) -> bool:
+    """Does this take hand the OPPONENT a Privilege? (3 of a colour, or 2+ pearls)
+
+    Fast-pathed and called per-take inside `_legal`, which runs at every node: a
+    1-cell take can be neither, and that's most of the enumeration.
+    """
+    if len(cells) < 2:
+        return False
+    colors = [board[i] for i in cells]
+    if len(colors) == 3 and colors[0] == colors[1] == colors[2]:
+        return True
+    return colors.count("pearl") >= 2
+
+
 def _legal(game: dict, pid: str) -> list:
     """legal_moves minus redundant/dominated branches, to spend sims where they
     matter. Never returns empty when legal_moves is non-empty (the CoC lesson: a
     prune that can strand the search makes it play worse, not better).
 
-    Two prunes:
+    Three prunes:
       * `skip_pending` — skipping an ability is never better than using it
         (take_same/steal are free gains; a royal is free points). Discard has no skip.
       * duplicate reserve `gold_cell`s — WHICH gold you take is very nearly
@@ -229,10 +246,54 @@ def _legal(game: dict, pid: str) -> list:
         the 3 gold cells x 15 sources = 45 branches collapse to 15. The one residual
         effect is spiral REFILL order on a later replenish — a deliberate, tiny
         approximation bought for a ~3x branching cut on this move class.
+      * takes that are a strict SUBSET of another legal take — taking {white} when
+        {white, pearl} is on offer is free value left on the board (reported from a
+        real game). This one is a real BLUNDER FIX, not just a speed prune: one extra
+        token is worth ~0.018 to `_value`, which is at or BELOW rollout noise, so the
+        search genuinely could not tell the two apart and the tie-break picked
+        near-arbitrarily — measured, it left the free token behind in 32/60 positions,
+        a coin flip. With the prune: 0/60, because the blunder is never enumerated.
+        It also cuts branching ~2.8x on a full board (159 -> 56 moves), so every
+        surviving move gets ~2.8x the sims. That dominates the scan's cost — A/B vs
+        `hard+nodom`, CRN-paired, mirror verified at exactly 0.5000:
+            equal-SIMS (400 iters)   -> 0.675 [0.520,0.799] n=40
+            equal-TIME (0.5s/decide) -> 0.700 [0.546,0.819] n=40
+        i.e. the edge GROWS once the prune has to pay for itself in wall-clock.
+        Dominance is exact, not heuristic. A superset take is never worse:
+          - it grants strictly more tokens, and a token carries no per-token cost;
+          - the 10-cap can't punish it either: discard the extra straight back and you
+            hold exactly the subset's hand. (Not literally identical — the discard
+            sends that token to the BAG rather than leaving it on the board — but that
+            direction only ever denies the opponent, so the >= still holds.)
+          - the one real cost is handing the opponent a Privilege (3-of-a-colour or
+            2+ pearls), so a superset that newly triggers that does NOT dominate.
+            That exception is why "just always take the most" would be a rules bug.
     """
     moves = engine.legal_moves(game, pid)
     if len(moves) <= 1:
         return moves
+    board = game["board"]
+
+    # Takes are only ever 1-3 cells, so dominance resolves with two lookup sets
+    # instead of an O(takes^2) subset scan — worth the care, since _legal runs at
+    # every node AND every rollout step (the scan cost 7x legal_moves itself).
+    #   * a 1-take never gifts, so it is dominated iff its cell sits in ANY
+    #     non-gifting take of size >= 2  -> `covered`.
+    #   * a 2-take is dominated iff some 3-take contains it that doesn't newly gift.
+    #   * a 3-take is maximal: nothing can dominate it.
+    covered, dom_pairs, dom_pairs_gift = set(), set(), set()
+    for m in moves if _TAKE_DOMINANCE else ():
+        if m["type"] != "take":
+            continue
+        cells = m["cells"]
+        gift = _take_gifts_privilege(board, cells)
+        if len(cells) >= 2 and not gift:
+            covered.update(cells)
+        if len(cells) == 3:
+            a, b, c = cells
+            tgt = dom_pairs_gift if gift else dom_pairs
+            tgt.add(frozenset((a, b))); tgt.add(frozenset((b, c))); tgt.add(frozenset((a, c)))
+
     pruned, seen_reserve = [], set()
     for m in moves:
         if m["type"] == "skip_pending":
@@ -243,6 +304,16 @@ def _legal(game: dict, pid: str) -> list:
             if key in seen_reserve:
                 continue
             seen_reserve.add(key)
+        if m["type"] == "take":
+            cells = m["cells"]
+            if len(cells) == 1:
+                if cells[0] in covered:
+                    continue
+            elif len(cells) == 2:
+                pair = frozenset(cells)
+                if pair in dom_pairs or (pair in dom_pairs_gift
+                                         and _take_gifts_privilege(board, cells)):
+                    continue
         pruned.append(m)
     return pruned or moves
 
@@ -364,8 +435,17 @@ def _simulate(game: dict, node: _Node, root_pid: str, rng: random.Random, depth:
 def choose_move(game: dict, pid: str, *, difficulty: str = DEFAULT_DIFFICULTY,
                 rng: random.Random | None = None,
                 time_limit: float | None = None, max_iters: int | None = None,
-                temperature: float | None = None, rollout_steps: int | None = None):
-    """Pick a move for `pid`'s current decision via determinized MCTS."""
+                temperature: float | None = None, rollout_steps: int | None = None,
+                take_dominance: bool | None = None):
+    """Pick a move for `pid`'s current decision via determinized MCTS.
+
+    `take_dominance=False` disables the dominated-take prune for THIS decision — the
+    A/B hook for `ai_selfplay`'s "hard+nodom" spec. Set per-call rather than by
+    flipping the module global directly, so an arena can vary ONE side (the same
+    reason `rollout_steps` is a parameter).
+    """
+    global _TAKE_DOMINANCE
+    _TAKE_DOMINANCE = True if take_dominance is None else take_dominance
     cfg = DIFFICULTY.get(difficulty, DIFFICULTY[DEFAULT_DIFFICULTY])
     time_limit = cfg["time_limit"] if time_limit is None else time_limit
     max_iters = cfg["max_iters"] if max_iters is None else max_iters

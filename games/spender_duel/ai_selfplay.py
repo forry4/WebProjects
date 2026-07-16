@@ -41,10 +41,16 @@ def _agent(spec: str):
                       both players and measure nothing.
     "hard@N/I"        ...and max_iters=I   (equal-SIMS comparisons)
     "hard@N/I/T"      ...and time_limit=T  (equal-TIME comparisons — the ship test)
+    "hard+nodom"      ...with the dominated-take prune OFF (any of the above may be
+                      combined: "hard+nodom@12/600"). Per-agent, so an A/B varies
+                      exactly one side.
     """
     if spec == "random":
         return lambda g, pid, rng: bot.choose(g, pid, rng)
     kind, _, rest = spec.partition("@")
+    nodom = kind.endswith("+nodom")
+    if nodom:
+        kind = kind[: -len("+nodom")]
     steps = iters = tl = None
     if rest:
         parts = rest.split("/")
@@ -55,7 +61,7 @@ def _agent(spec: str):
             tl = float(parts[2])
     return lambda g, pid, rng: ai.choose_move(
         g, pid, difficulty=kind, rng=rng, rollout_steps=steps,
-        max_iters=iters, time_limit=tl)
+        max_iters=iters, time_limit=tl, take_dominance=not nodom)
 
 
 def play_game(a_kind: str, b_kind: str, seed: int, a_seat: int, rng=None) -> dict:
