@@ -373,7 +373,7 @@ const css = `
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
-.duel-stat{font-size:.92rem;margin-left:auto;display:flex;gap:10px;align-items:center}
+.duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
