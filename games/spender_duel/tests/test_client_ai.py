@@ -12,7 +12,10 @@ cover the bot), the PROTOCOL is. The client stands in for it by picking a legal 
 """
 import asyncio
 import json
+import os
 import random
+
+_SEED = int(os.environ.get('DUEL_TEST_SEED', 20260716))
 
 import pytest
 
@@ -48,6 +51,11 @@ def _isolate(monkeypatch, rid):
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
     monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.0)
+    # Pin every source of game entropy (deck seed, first player, bot moves). Without this
+    # each run gets a different deal, so a test can only HOPE the bot is to move when it
+    # asserts a client move lands — which is why this suite passed 20/20 locally and then
+    # failed on CI. A deploy gate must not depend on the draw.
+    monkeypatch.setattr(m, "_new_rng", lambda: random.Random(_SEED))
 
 
 async def _create_hard(rid, pid, difficulty="hard"):
@@ -148,7 +156,15 @@ def test_client_moves_arrive_as_json_strings_too(monkeypatch):
                     "decision": pend["decision"],
                     "move": json.dumps(_client_reply(pend, g, rng)),   # a STRING
                 })
-                await asyncio.sleep(0)
+                # Poll rather than yield ONCE: applying a client move hands off through
+                # the scheduler, so a single `sleep(0)` only happens to be enough under
+                # one interpreter's task ordering — it passed 45/45 locally on 3.14 and
+                # failed on CI's 3.11. Waiting for the condition tests the same thing
+                # without depending on the event loop's scheduling.
+                for _ in range(400):
+                    if len(room["game"]["log"]) > before:
+                        break
+                    await asyncio.sleep(0.005)
                 assert len(room["game"]["log"]) > before, "a string-encoded move was dropped"
                 return
             actor = g.get("pending_pid") or g["turn"]
