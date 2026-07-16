@@ -4,8 +4,9 @@ import { baseCss } from "../../shared/theme.js";
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
 import {
-  GemToken, CardView, LogEntry, GEM_COLORS, GEM_HEX,
-  splendorCardCss, splendorCardExtraCss, splendorLogCss,
+  GemToken, CardView, LogEntry, TokenPill, BonusPill, GEM_COLORS, GEM_HEX,
+  splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
+  splendorLogCss,
 } from "../../shared/splendor.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -295,14 +296,7 @@ const css = `
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
 .duel-player.active{outline:2px solid #7a5f33;outline-offset:2px;border-radius:12px}
 .duel-stat{font-size:.92rem;margin-left:auto;display:flex;gap:10px;align-items:center}
-.duel-tokrow{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0;min-height:34px}
-.duel-tok{position:relative}
-.duel-tok .n{position:absolute;bottom:-4px;right:-4px;background:#111;border:1px solid #555;color:#eee;border-radius:999px;font-size:.62rem;min-width:15px;height:15px;display:flex;align-items:center;justify-content:center;padding:0 2px}
-.duel-bonusrow{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0}
-.duel-bonchip{display:flex;align-items:center;gap:4px;border:1px solid #3a332a;border-radius:6px;padding:2px 6px;font-size:.78rem}
-.duel-bonchip .sw{width:11px;height:11px;border-radius:3px}
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
-.duel-minis{display:flex;gap:4px;flex-wrap:wrap}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
    review vocabulary (clickable / log-selected / log-win / log-start). Duel only
@@ -355,7 +349,8 @@ const css = `
 `;
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
-const duelStyles = baseCss + splendorCardCss + splendorCardExtraCss + splendorLogCss + css;
+const duelStyles = baseCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
+  + splendorPillCss + splendorLogCss + css;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -762,17 +757,21 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   };
 
   // ── renders ──
-  const renderTokens = (p, pid) => (
-    <div className="duel-tokrow" data-tokens={pid}>
-      {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
-        <div key={t} className="duel-tok">
-          <GemToken color={t} size={30} />
-          <span className="n">{p.tokens[t]}</span>
+  // Gems in hand: Spender's .token-pill row + its "N gems" total (was a bespoke
+  // disc-and-badge). The row keeps its data-tokens anchor for the flyer animations.
+  const renderTokens = (p, pid) => {
+    const total = TOKENS.reduce((a, t) => a + (p?.tokens?.[t] || 0), 0);
+    return (
+      <>
+        <div className="player-tokens" data-tokens={pid}>
+          {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
+            <TokenPill key={t} color={t} count={p.tokens[t]} />
+          ))}
         </div>
-      ))}
-      {TOKENS.every((t) => !(p?.tokens?.[t])) && <span className="duel-muted">no tokens</span>}
-    </div>
-  );
+        <div className="gem-total">{total} {total === 1 ? "token" : "tokens"}</div>
+      </>
+    );
+  };
 
   const renderPlayer = (pid, isMe) => {
     const p = game.players[pid];
@@ -805,20 +804,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             ? (canUsePrivilege ? "Use a Privilege: click here, then click a gem or pearl on the board" : `${p.privileges} Privilege${p.privileges === 1 ? "" : "s"}`)
             : `${p.privileges} Privilege${p.privileges === 1 ? "" : "s"}`} />
         {renderTokens(p, pid)}
-        <div className="duel-bonusrow">
+        {/* The cards you've BOUGHT: Spender's .bonus-pill row ("+2 W"). Duel appends
+            the color's prestige, since 10 points in ONE color is a win condition. */}
+        <div className="player-bonuses">
           {COLORS.map((c) => (bon[c] > 0 || cpts[c] > 0) && (
-            <div key={c} className="duel-bonchip" title={`${bon[c]} ${c} bonus${bon[c] === 1 ? "" : "es"} · ${cpts[c]} pts in ${c} (win at 10)`}>
-              <span className="sw" style={{ background: GEM_HEX[c] }} />
-              <span>{bon[c]}</span>
-              {cpts[c] > 0 && <span style={{ opacity: .7 }}>{"★"}{cpts[c]}</span>}
-            </div>
+            <BonusPill key={c} color={c} count={bon[c]}
+              extra={cpts[c] > 0 ? `★${cpts[c]}` : null}
+              title={`${bon[c]} ${c} bonus${bon[c] === 1 ? "" : "es"} from cards · ${cpts[c]} prestige in ${c} (10 wins)`} />
+          ))}
+          {/* Royals ride in the same row, as Spender's nobles do */}
+          {(p.royals || []).map((rid) => (
+            <span key={rid} className="bonus-pill"
+              title={royals[rid]?.ability ? ABILITY_DESC[royals[rid].ability] : "Royal card"}
+              style={{ borderColor: "var(--gold)", color: "var(--gold)" }}>
+              ♛★{royals[rid]?.points ?? "?"}
+            </span>
           ))}
         </div>
-        {(p.royals || []).length > 0 && (
-          <div className="duel-minis">
-            {p.royals.map((rid) => <RoyalCard key={rid} royal={royals[rid] || { points: "?" }} />)}
-          </div>
-        )}
         <div className="duel-reserved-row">
           {/* Render by SHAPE, not by whose seat it is: a card id (string) is a card we
               may see — our own, or ANY reserve once the game is over / in review, which
@@ -950,14 +952,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const snapForLogIndex = (r) =>
     replaySnapshots ? replaySnapshots.findIndex((s) => s.log_len > r) : -1;
 
+  // Spender's log panel: a .panel-title "Log" over its .move-log — same rows
+  // (turn | name | action) and the same review vocabulary (clickable / log-selected /
+  // log-win / log-start).
   const renderLog = () => {
     const log = liveGame?.log || [];
     const shownLen = reviewing ? replaySnapshots[replayTurn].log_len : log.length;
     return (
-      <div className="duel-panel">
-        <h3 style={{ margin: "0 0 8px" }}>Moves</h3>
-        {/* Spender's move log, from shared/splendor.jsx: turn | name | action rows,
-            with its review vocabulary (clickable / log-selected / log-win / start). */}
+      <div className="duel-panel log-panel">
+        <div className="panel-title">Log</div>
         <div className="move-log">
           {over && (
             <LogEntry kind="win"

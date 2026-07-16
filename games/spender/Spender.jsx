@@ -5,7 +5,8 @@ import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
-	splendorCardCss, splendorCardExtraCss, splendorLogCss } from "../../shared/splendor.jsx";
+	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
+	splendorLogCss } from "../../shared/splendor.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -305,8 +306,8 @@ const css = baseCss + `
   .board-actions-btns:empty{display:none}
   .board-actions .btn{padding:9px 14px}
 }
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
-.panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+`
+	+ splendorPanelCss + `
 
 /* ─── Bank ──────────────────────────────────────────────────────────────── */
 .bank-gems{display:flex;gap:8px;flex-wrap:wrap}
@@ -361,13 +362,8 @@ const css = baseCss + `
 .active-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .player-score{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;font-weight:700;color:var(--gold)}
-.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
-.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
-.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
-.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
-.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
-.reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+`
+	+ splendorPillCss + `
 /* Compact mobile player summary + log caret — hidden on desktop (shown only in
    the max-width:600px block below), so the laptop layout is unchanged. */
 .player-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px}

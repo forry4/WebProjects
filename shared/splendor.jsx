@@ -127,6 +127,36 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
   );
 }
 
+/* A gem-in-hand pill (Spender's player panel). Works for any token incl. Duel's pearl. */
+export function TokenPill({ color, count, dataToken }) {
+  const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
+  return (
+    <span data-token={dataToken ?? color} className="token-pill"
+      title={`${count} ${GEM_LABELS[color] || color}`}
+      style={{ background: GEM_HEX[color] + "55", border: `1px solid ${rim}` }}>
+      {/* light rim so the near-black onyx stays visible on the warm "your turn" panel */}
+      <span style={{ width: 10, height: 10, borderRadius: "50%", background: GEM_HEX[color],
+        border: color === "black" ? "1px solid rgba(255,255,255,.4)" : "1px solid rgba(255,255,255,.25)",
+        display: "inline-block" }} />
+      {count}
+    </span>
+  );
+}
+
+/* A BOUGHT-CARD pill: "+N W" in that color — Spender's indicator for the cards you own.
+ * `extra` appends a game-specific suffix (Duel shows the color's prestige, since 10
+ * points in one color wins). */
+export function BonusPill({ color, count, extra, title }) {
+  const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
+  return (
+    <span data-bonus={color} className="bonus-pill" title={title}
+      style={{ background: GEM_HEX[color] + "55", borderColor: rim,
+        color: color === "black" ? "#a8a8a8" : GEM_HEX[color] }}>
+      +{count} {color[0].toUpperCase()}{extra ? " " + extra : ""}
+    </span>
+  );
+}
+
 /* One move-log row, in Spender's structure: turn | name | action. `win`/`start` are
  * the review anchors ("X won the game" / "Game started"). */
 export function LogEntry({ turn, name, action, clickable, selected, kind, future, onClick }) {
@@ -250,4 +280,22 @@ export const splendorLogCss = `
 .replay-move{color:var(--text-muted)}
 .log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
 .log-action{flex:1}
+`;
+
+/* The panel shell — extracted VERBATIM from Spender.jsx. */
+export const splendorPanelCss = `
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
+`;
+
+/* Player pills (gems held + BOUGHT-CARD bonuses) — extracted VERBATIM from Spender.jsx.
+   .bonus-pill is the "what cards you own" indicator; .token-pill the gems in hand. */
+export const splendorPillCss = `
+.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
+.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
+.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
+.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
+.reserved-row{display:flex;gap:4px;flex-wrap:wrap}
+.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
 `;
