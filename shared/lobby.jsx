@@ -102,3 +102,18 @@ export function LobbyLoading({ label = "Loading…" }) {
 export function TurnBadge({ mine, children }) {
 	return <span className={`lby-badge ${mine ? "lby-badge-turn" : "lby-badge-wait"}`}>{children}</span>;
 }
+
+// Stale-while-revalidate cache for the lobby lists — render the last-known lists INSTANTLY
+// on a repeat open, then let the fetch refresh them. localStorage + JSON, namespaced by
+// game (ns) + user/guest id (scope) + list key, so different accounts on one device never
+// see each other's lists (history is user-specific). All best-effort — any failure is a
+// no-op fallback, never a throw.
+export function readLobbyCache(ns, scope, key, fallback) {
+	try {
+		const v = localStorage.getItem(`lbyc.${ns}.${scope}.${key}`);
+		return v ? JSON.parse(v) : fallback;
+	} catch { return fallback; }
+}
+export function writeLobbyCache(ns, scope, key, val) {
+	try { localStorage.setItem(`lbyc.${ns}.${scope}.${key}`, JSON.stringify(val)); } catch {}
+}

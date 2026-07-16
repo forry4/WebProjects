@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1233,9 +1233,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [roomData, setRoomData] = useState(null);
   const optimisticRef = useRef(false);          // a move preview is showing (awaiting the server's truth)
   const preOptimisticRoomRef = useRef(null);    // last authoritative room, to revert to if the previewed move errors
-  const [openGames, setOpenGames] = useState([]);
-  const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
-  const [history, setHistory] = useState([]);           // your finished games (lobby History column)
+  const [openGames, setOpenGames] = useState(() => readLobbyCache("coc", myId, "open", []));
+  const [activeGames, setActiveGames] = useState(() => readLobbyCache("coc", myId, "active", []));   // ALL in-progress games (yours + others')
+  const [history, setHistory] = useState(() => readLobbyCache("coc", myId, "history", []));           // your finished games (lobby History column)
   const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   const [loadingGames, setLoadingGames] = useState(false);
   const [joinCode, setJoinCode] = useState("");
@@ -1347,19 +1347,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   const fetchGames = useCallback(() => {
     setLoadingGames(true);
-    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || []))
+    fetch(`${COC_HTTP}/games`).then((r) => r.json()).then((d) => { const g = d.games || []; setOpenGames(g); writeLobbyCache("coc", myId, "open", g); })
       .catch(() => {}).finally(() => setLoadingGames(false));
     // Active Games is PUBLIC: all in-progress games (yours + others', vs-bot or not).
     // The frontend pins yours to the top via myId. No auth needed.
-    fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => setActiveGames(d.games || [])).catch(() => {});
+    fetch(`${COC_HTTP}/games/active`).then((r) => r.json()).then((d) => { const g = d.games || []; setActiveGames(g); writeLobbyCache("coc", myId, "active", g); }).catch(() => {});
     // History = your finished games (session-gated). Guests have none.
     if (authUser?.session_token) {
       fetch(`${COC_HTTP}/games/history`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
-        .then((r) => r.json()).then((d) => setHistory(d.games || [])).catch(() => {});
+        .then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("coc", myId, "history", g); }).catch(() => {});
     } else {
-      setHistory([]);
+      setHistory([]); writeLobbyCache("coc", myId, "history", []);
     }
-  }, [authUser]);
+  }, [authUser, myId]);
 
   // Load + show a finished game's board + results, read-only over HTTP (no WebSocket).
   const enterCocReview = (id) => {

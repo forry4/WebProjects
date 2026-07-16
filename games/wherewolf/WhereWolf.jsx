@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -344,8 +344,8 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [screen, setScreen] = useState("lobby");      // lobby | waiting | game
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
-  const [openGames, setOpenGames] = useState([]);
-  const [myGames, setMyGames] = useState([]);
+  const [openGames, setOpenGames] = useState(() => readLobbyCache("ww", myId, "open", []));
+  const [myGames, setMyGames] = useState(() => readLobbyCache("ww", myId, "mine", []));
   const [joinCode, setJoinCode] = useState("");
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
   const [toast, setToast] = useState("");
@@ -449,12 +449,12 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const { connected, connect, send, disconnect } = useSocket(handleMessage);
 
   const fetchGames = useCallback(() => {
-    fetch(`${WW_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || [])).catch(() => {});
+    fetch(`${WW_HTTP}/games`).then((r) => r.json()).then((d) => { const g = d.games || []; setOpenGames(g); writeLobbyCache("ww", myId, "open", g); }).catch(() => {});
     if (authUser && !authUser.guest && authUser.session_token) {
       fetch(`${WW_HTTP}/games/mine`, { headers: { Authorization: `Bearer ${authUser.session_token}` } })
-        .then((r) => r.json()).then((d) => setMyGames(d.games || [])).catch(() => {});
+        .then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("ww", myId, "mine", g); }).catch(() => {});
     }
-  }, [authUser]);
+  }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 

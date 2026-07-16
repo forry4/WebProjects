@@ -4,7 +4,7 @@ import WhereWolf from "../wherewolf/WhereWolf.jsx";
 import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -969,9 +969,9 @@ export default function SpenderApp() {
 	const [authLoading, setAuthLoading] = useState(false);
 
 	// ── Browser state ──────────────────────────────────────────────────────
-	const [openGames, setOpenGames] = useState([]);
-	const [activeGames, setActiveGames] = useState([]);   // ALL in-progress games (yours + others')
-	const [historyGames, setHistoryGames] = useState([]); // your FINISHED games (vs AI or humans)
+	const [openGames, setOpenGames] = useState(() => readLobbyCache("spender", myId, "open", []));
+	const [activeGames, setActiveGames] = useState(() => readLobbyCache("spender", myId, "active", []));   // ALL in-progress games (yours + others')
+	const [historyGames, setHistoryGames] = useState(() => readLobbyCache("spender", myId, "history", [])); // your FINISHED games (vs AI or humans)
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showCreateMenu, setShowCreateMenu] = useState(false);
 	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
@@ -994,14 +994,16 @@ export default function SpenderApp() {
 					.then(r => r.json()).catch(() => ({ games: [] }))
 				: Promise.resolve({ games: [] });
 			const [open, active, hist] = await Promise.all([openP, activeP, histP]);
-			setOpenGames(open.games || []);
-			setActiveGames(active.games || []);
-			setHistoryGames(hist.games || []);
+			const og = open.games || [], ag = active.games || [], hg = hist.games || [];
+			setOpenGames(og); setActiveGames(ag); setHistoryGames(hg);
+			writeLobbyCache("spender", myId, "open", og);
+			writeLobbyCache("spender", myId, "active", ag);
+			writeLobbyCache("spender", myId, "history", hg);
 		} catch {
 			setOpenGames([]); setActiveGames([]); setHistoryGames([]);
 		}
 		setBrowserLoading(false);
-	}, []);
+	}, [myId]);
 
 	// ── handleMessage ──────────────────────────────────────────────────────
 	const handleMessage = useCallback((msg) => {

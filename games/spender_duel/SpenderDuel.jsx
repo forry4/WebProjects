@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -471,9 +471,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
   const [catalog, setCatalog] = useState(null);      // {cards, royals, colors}
-  const [openGames, setOpenGames] = useState([]);
-  const [myGames, setMyGames] = useState([]);
-  const [history, setHistory] = useState([]);
+  const [openGames, setOpenGames] = useState(() => readLobbyCache("duel", myId, "open", []));
+  const [myGames, setMyGames] = useState(() => readLobbyCache("duel", myId, "mine", []));
+  const [history, setHistory] = useState(() => readLobbyCache("duel", myId, "history", []));
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
@@ -575,14 +575,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   const fetchGames = useCallback(() => {
     setLoadingGames(true);
-    fetch(`${DUEL_HTTP}/games`).then((r) => r.json()).then((d) => setOpenGames(d.games || []))
+    fetch(`${DUEL_HTTP}/games`).then((r) => r.json()).then((d) => { const g = d.games || []; setOpenGames(g); writeLobbyCache("duel", myId, "open", g); })
       .catch(() => {}).finally(() => setLoadingGames(false));
     if (authUser?.session_token) {
       const headers = { Authorization: `Bearer ${authUser.session_token}` };
-      fetch(`${DUEL_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((d) => setMyGames(d.games || [])).catch(() => {});
-      fetch(`${DUEL_HTTP}/games/history`, { headers }).then((r) => r.json()).then((d) => setHistory(d.games || [])).catch(() => {});
-    } else { setMyGames([]); setHistory([]); }
-  }, [authUser]);
+      fetch(`${DUEL_HTTP}/games/mine`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setMyGames(g); writeLobbyCache("duel", myId, "mine", g); }).catch(() => {});
+      fetch(`${DUEL_HTTP}/games/history`, { headers }).then((r) => r.json()).then((d) => { const g = d.games || []; setHistory(g); writeLobbyCache("duel", myId, "history", g); }).catch(() => {});
+    } else { setMyGames([]); setHistory([]); writeLobbyCache("duel", myId, "mine", []); writeLobbyCache("duel", myId, "history", []); }
+  }, [authUser, myId]);
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
