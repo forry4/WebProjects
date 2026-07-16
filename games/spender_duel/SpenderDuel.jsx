@@ -255,6 +255,11 @@ const css = `
   --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
   margin-bottom:8px;
 }
+/* --card-w is container-query-derived, so it settles a frame AFTER the game data lays out.
+   The shared .card / .deck-pile use transition:all, which ANIMATES that width change into a
+   jarring shrink on load. Transition only the hover/state props here (never width/height/
+   padding) so the cards land at their final size instantly. Spender's .card is untouched. */
+.duel-col-cards .level-row .card,.duel-col-cards .level-row .deck-pile{transition:border-color .15s,transform .15s,box-shadow .15s,opacity .15s}
 /* Scale the card internals off --card-h using the SAME ratios as Spender's desktop
    rules (its .level-row .card-* block) — so a Duel card is a Spender card at another
    size, not a different card. Those ratios live inside Spender's own min-width:901px
