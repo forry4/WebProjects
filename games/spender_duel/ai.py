@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 import random
+import threading
 import time
 
 from . import cards as C
@@ -80,7 +81,18 @@ _MAX_TREE_DEPTH = 14      # in-tree plies before truncating to a rollout
 _ROLLOUT_STEPS = 12       # engine moves played out before the heuristic leaf
 
 # Set per-decision by choose_move (never poke it directly — see that docstring).
-_TAKE_DOMINANCE = True
+#
+# THREAD-LOCAL, not a plain global: the server runs the search in a thread pool
+# (`main._schedule_bot_turn` -> run_in_executor -> play_turn_plan -> choose_move), so a
+# module global would be written concurrently by every in-flight game. That is benign
+# only by luck today — serving always writes the same value (True) — and would start
+# corrupting decisions the moment two values coexist in one process (e.g. an in-process
+# arena, or a per-room config). Defaults to True for any thread that never set it.
+_local = threading.local()
+
+
+def _take_dominance() -> bool:
+    return getattr(_local, "take_dominance", True)
 
 
 # ── Fast cloning ─────────────────────────────────────────────────────────────
@@ -325,7 +337,7 @@ def _legal(game: dict, pid: str) -> list:
     #   * a 2-take is dominated iff some 3-take contains it that doesn't newly gift.
     #   * a 3-take is maximal: nothing can dominate it.
     covered, dom_pairs, dom_pairs_gift = _take_dominance_sets(
-        board, moves if _TAKE_DOMINANCE else ())
+        board, moves if _take_dominance() else ())
 
     pruned, seen_reserve = [], set()
     for m in moves:
@@ -373,7 +385,7 @@ def _rollout_top_tier(game: dict, pid: str) -> list:
 
     takes = engine._line_moves(board)                                # tier 1
     if takes:
-        if _TAKE_DOMINANCE:
+        if _take_dominance():
             sets = _take_dominance_sets(board, takes)
             takes = [m for m in takes if _keep_take(board, m["cells"], *sets)] or takes
         return takes
@@ -523,11 +535,11 @@ def choose_move(game: dict, pid: str, *, difficulty: str = DEFAULT_DIFFICULTY,
 
     `take_dominance=False` disables the dominated-take prune for THIS decision — the
     A/B hook for `ai_selfplay`'s "hard+nodom" spec. Set per-call rather than by
-    flipping the module global directly, so an arena can vary ONE side (the same
-    reason `rollout_steps` is a parameter).
+    flipping a module global directly, so an arena can vary ONE side (the same reason
+    `rollout_steps` is a parameter), and stored THREAD-LOCALLY so concurrent searches
+    in the server's thread pool can't clobber each other.
     """
-    global _TAKE_DOMINANCE
-    _TAKE_DOMINANCE = True if take_dominance is None else take_dominance
+    _local.take_dominance = True if take_dominance is None else take_dominance
     cfg = DIFFICULTY.get(difficulty, DIFFICULTY[DEFAULT_DIFFICULTY])
     time_limit = cfg["time_limit"] if time_limit is None else time_limit
     max_iters = cfg["max_iters"] if max_iters is None else max_iters

@@ -85,24 +85,50 @@ def test_take_dominance_is_switchable_for_ab_measurement():
     arena comparing them measures nothing.
     """
     g = board(c12="white", c13="pearl")
-    ai._TAKE_DOMINANCE = False
+    ai._local.take_dominance = False
     try:
         assert takes(g) == [(12,), (12, 13), (13,)]
     finally:
-        ai._TAKE_DOMINANCE = True
-    assert takes(g) == [(12, 13)]
+        del ai._local.take_dominance
+    assert takes(g) == [(12, 13)], "must default back to pruned"
 
 
-def test_choose_move_resets_the_flag_per_decision():
-    """The flag is a module global; choose_move owns it. If a `take_dominance=False`
-    decision leaked, every later search would silently run unpruned.
+def test_choose_move_sets_the_flag_per_decision():
+    """choose_move owns the flag. If a `take_dominance=False` decision leaked, every
+    later search in that thread would silently run unpruned.
     """
     g = board(c12="white", c13="pearl")
     ai.choose_move(g, A, difficulty="normal", max_iters=8, time_limit=0.05,
                    take_dominance=False)
-    assert ai._TAKE_DOMINANCE is False
+    assert ai._take_dominance() is False
     ai.choose_move(g, A, difficulty="normal", max_iters=8, time_limit=0.05)
-    assert ai._TAKE_DOMINANCE is True
+    assert ai._take_dominance() is True
+
+
+def test_the_prune_flag_does_not_leak_across_threads():
+    """The server searches in a thread pool (run_in_executor), so one game's setting must
+    never reach another's. A plain module global made this a live corruption risk the
+    moment two values coexist; thread-local scoping is what rules it out.
+    """
+    import threading
+    g = board(c12="white", c13="pearl")
+    seen = {}
+
+    def worker(name, dominance, barrier):
+        ai.choose_move(g, A, difficulty="normal", max_iters=8, time_limit=0.05,
+                       take_dominance=dominance)
+        barrier.wait()                       # both threads have now set their value
+        seen[name] = ai._take_dominance()    # ...each must still read its OWN
+
+    barrier = threading.Barrier(2)
+    ts = [threading.Thread(target=worker, args=(n, d, barrier))
+          for n, d in (("on", True), ("off", False))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert seen == {"on": True, "off": False}
+    assert ai._take_dominance() is True      # the main thread was never touched
 
 
 def test_the_bot_actually_takes_the_free_token():
