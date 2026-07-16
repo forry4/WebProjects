@@ -148,10 +148,21 @@ def effective_cost(cost: dict, bonuses: dict) -> dict:
 
 
 def can_afford(cost: dict, tokens: dict, bonuses: dict) -> bool:
-    gold_needed = 0
-    for col, need in effective_cost(cost, bonuses).items():
-        gold_needed += max(0, need - tokens.get(col, 0))
-    return gold_needed <= tokens.get("gold", 0)
+    """Same answer as `effective_cost` + a shortfall sum, without building the dict.
+
+    Inlined deliberately: the MCTS asks this for every pyramid card + reserve at every
+    rollout step (~12 calls per step, 240k per search), and the intermediate dict made
+    it ~22% of total search time. Kept byte-identical — `max(0, n-b) > 0` is exactly
+    `n-b > 0`, so the filter and the shortfall sum are unchanged.
+    """
+    gold = 0
+    for col, n in cost.items():
+        need = n - bonuses[col] if col in bonuses else n
+        if need > 0:
+            short = need - tokens.get(col, 0)
+            if short > 0:
+                gold += short
+    return gold <= tokens.get("gold", 0)
 
 
 def calc_spend(cost: dict, tokens: dict, bonuses: dict) -> dict:
@@ -688,10 +699,9 @@ def _line_moves(board: list) -> list:
     return moves
 
 
-def _mandatory_moves(game: dict, pid: str) -> list:
+def _reserve_moves(game: dict, pid: str) -> list:
     p = game["players"][pid]
-    moves = _line_moves(game["board"])
-    # Gold + reserve
+    moves = []
     if len(p["reserved"]) < MAX_RESERVED:
         gold_cells = [i for i, t in enumerate(game["board"]) if t == "gold"]
         for g in gold_cells:
@@ -703,7 +713,12 @@ def _mandatory_moves(game: dict, pid: str) -> list:
                 if game["decks"][lvl]:
                     moves.append({"type": "reserve", "gold_cell": g,
                                   "source": {"kind": "deck", "level": int(lvl)}})
-    # Purchases
+    return moves
+
+
+def _buy_moves(game: dict, pid: str) -> list:
+    p = game["players"][pid]
+    moves = []
     bonuses = bonuses_of(p)
     eligible_wild = [c for c, n in bonuses.items() if n > 0]
     sources = [("pyramid", cid) for row in game["pyramid"].values()
@@ -719,6 +734,17 @@ def _mandatory_moves(game: dict, pid: str) -> list:
         else:
             moves.append({"type": "buy", "card_id": cid, "from": frm})
     return moves
+
+
+def _mandatory_moves(game: dict, pid: str) -> list:
+    """Takes, then reserves, then buys — the ORDER is load-bearing.
+
+    `ai._rollout_move` reproduces one priority tier of this list without building the
+    rest, and relies on generating it in exactly this order so its `rng.choice` lands
+    on the same move. Split into per-tier helpers so it can call them directly; the
+    concatenation here must stay takes -> reserves -> buys.
+    """
+    return _line_moves(game["board"]) + _reserve_moves(game, pid) + _buy_moves(game, pid)
 
 
 def legal_moves(game: dict, pid: str) -> list:

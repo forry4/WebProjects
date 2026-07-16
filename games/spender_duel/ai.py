@@ -232,6 +232,49 @@ def _take_gifts_privilege(board: list, cells: list) -> bool:
     return colors.count("pearl") >= 2
 
 
+def _take_dominance_sets(board: list, moves) -> tuple:
+    """Lookup sets for the dominated-take prune (see `_legal`). Shared by `_legal` and
+    the rollout's lazy tier generator so the two can never disagree on what's pruned.
+
+    Pairs are keyed by a sorted 2-tuple rather than a frozenset — same membership
+    semantics, but this runs per rollout step and frozenset construction is several
+    times the cost of a tuple compare.
+    """
+    covered, dom_pairs, dom_pairs_gift = set(), set(), set()
+    for m in moves:
+        if m["type"] != "take":
+            continue
+        cells = m["cells"]
+        n = len(cells)
+        if n == 1:
+            continue                      # a 1-take can neither gift nor dominate
+        gift = _take_gifts_privilege(board, cells)
+        if not gift:
+            covered.update(cells)
+        if n == 3:
+            a, b, c = cells
+            tgt = dom_pairs_gift if gift else dom_pairs
+            tgt.add(_pair(a, b)); tgt.add(_pair(b, c)); tgt.add(_pair(a, c))
+    return covered, dom_pairs, dom_pairs_gift
+
+
+def _pair(a: int, b: int) -> tuple:
+    return (a, b) if a < b else (b, a)
+
+
+def _keep_take(board: list, cells: list, covered: set, dom_pairs: set,
+               dom_pairs_gift: set) -> bool:
+    if len(cells) == 1:
+        return cells[0] not in covered
+    if len(cells) == 2:
+        pair = _pair(cells[0], cells[1])
+        if pair in dom_pairs:
+            return False
+        if pair in dom_pairs_gift and _take_gifts_privilege(board, cells):
+            return False
+    return True
+
+
 def _legal(game: dict, pid: str) -> list:
     """legal_moves minus redundant/dominated branches, to spend sims where they
     matter. Never returns empty when legal_moves is non-empty (the CoC lesson: a
@@ -281,18 +324,8 @@ def _legal(game: dict, pid: str) -> list:
     #     non-gifting take of size >= 2  -> `covered`.
     #   * a 2-take is dominated iff some 3-take contains it that doesn't newly gift.
     #   * a 3-take is maximal: nothing can dominate it.
-    covered, dom_pairs, dom_pairs_gift = set(), set(), set()
-    for m in moves if _TAKE_DOMINANCE else ():
-        if m["type"] != "take":
-            continue
-        cells = m["cells"]
-        gift = _take_gifts_privilege(board, cells)
-        if len(cells) >= 2 and not gift:
-            covered.update(cells)
-        if len(cells) == 3:
-            a, b, c = cells
-            tgt = dom_pairs_gift if gift else dom_pairs
-            tgt.add(frozenset((a, b))); tgt.add(frozenset((b, c))); tgt.add(frozenset((a, c)))
+    covered, dom_pairs, dom_pairs_gift = _take_dominance_sets(
+        board, moves if _TAKE_DOMINANCE else ())
 
     pruned, seen_reserve = [], set()
     for m in moves:
@@ -304,16 +337,9 @@ def _legal(game: dict, pid: str) -> list:
             if key in seen_reserve:
                 continue
             seen_reserve.add(key)
-        if m["type"] == "take":
-            cells = m["cells"]
-            if len(cells) == 1:
-                if cells[0] in covered:
-                    continue
-            elif len(cells) == 2:
-                pair = frozenset(cells)
-                if pair in dom_pairs or (pair in dom_pairs_gift
-                                         and _take_gifts_privilege(board, cells)):
-                    continue
+        if m["type"] == "take" and not _keep_take(board, m["cells"], covered, dom_pairs,
+                                                  dom_pairs_gift):
+            continue
         pruned.append(m)
     return pruned or moves
 
@@ -322,15 +348,71 @@ def _legal(game: dict, pid: str) -> list:
 _ROLLOUT_PRIORITY = {"buy": 0, "take": 1, "reserve": 2, "replenish": 3, "use_privilege": 4}
 
 
+def _rollout_top_tier(game: dict, pid: str) -> list:
+    """The rollout's chosen tier, built WITHOUT enumerating the tiers it will discard.
+
+    The policy only ever plays the best-priority tier, so the old
+    `_legal()` -> min tier -> filter was ~61% wasted work — and it ran 12x per sim,
+    making it the single hottest path in the search (66% of total time).
+
+    BYTE-IDENTICAL to that code, and the reason is delicate enough to spell out:
+    `_rollout_move` picked with `rng.choice(top)`, where `top` was the surviving moves
+    of one tier IN `legal_moves` ORDER. `rng.choice` indexes by position, so the same
+    move comes back iff this rebuilds each tier in exactly that order. Hence
+    `_mandatory_moves` is split into per-tier helpers (takes -> reserves -> buys) and
+    the tiers below are tried in _ROLLOUT_PRIORITY order, each applying the same prunes
+    `_legal` would have. Changing either order silently changes play.
+    """
+    p = game["players"][pid]
+    board = game["board"]
+    replenished = game["turn_flags"]["replenished"]
+
+    buys = engine._buy_moves(game, pid)                              # tier 0
+    if buys:
+        return buys
+
+    takes = engine._line_moves(board)                                # tier 1
+    if takes:
+        if _TAKE_DOMINANCE:
+            sets = _take_dominance_sets(board, takes)
+            takes = [m for m in takes if _keep_take(board, m["cells"], *sets)] or takes
+        return takes
+
+    reserves, seen = [], set()                                       # tier 2
+    for m in engine._reserve_moves(game, pid):
+        src = m["source"]
+        key = (src["kind"], src["level"], src.get("slot"))
+        if key not in seen:
+            seen.add(key)
+            reserves.append(m)
+    if reserves:
+        return reserves
+
+    if game["bag"] and not replenished and any(t is None for t in board):   # tier 3
+        return [{"type": "replenish"}]
+
+    if p["privileges"] > 0 and not replenished:                      # tier 4
+        privs = [{"type": "use_privilege", "cell": i}
+                 for i, t in enumerate(board) if engine._is_gem_or_pearl(t)]
+        if privs:
+            return privs
+
+    return [{"type": "pass"}]     # legal_moves' defensive fallback (unreachable)
+
+
 def _rollout_move(game: dict, pid: str, rng: random.Random):
-    moves = _legal(game, pid)
-    if not moves:
+    if engine.is_over(game):
         return None
-    if game.get("pending_pid") == pid:
-        return rng.choice(moves)
-    best = min(_ROLLOUT_PRIORITY.get(m["type"], 9) for m in moves)
-    top = [m for m in moves if _ROLLOUT_PRIORITY.get(m["type"], 9) == best]
-    return rng.choice(top)
+    if game["pending_pid"] is not None:
+        # Pendings are already tiny (<=7 resolvers) and are chosen uniformly, not by
+        # tier — enumerate them normally.
+        if game["pending_pid"] != pid:
+            return None
+        moves = _legal(game, pid)
+        return rng.choice(moves) if moves else None
+    if pid != game["turn"]:
+        return None
+    return rng.choice(_rollout_top_tier(game, pid))
 
 
 def _rollout(game: dict, pid: str, rng: random.Random, steps: int = _ROLLOUT_STEPS) -> float:
