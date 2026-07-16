@@ -91,6 +91,9 @@ out = [
     "",
 ]
 dst = os.path.join(HERE, "..", "src", "cards.rs")
-with open(dst, "w") as f:
+# encoding= is REQUIRED, not cosmetic: Python's default codec on Windows is cp1252, so
+# the em-dash above landed as byte 0x97 and rustc rejected the file outright ("stream
+# did not contain valid UTF-8") — the crate could not compile at all.
+with open(dst, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(out))
 print(f"wrote {os.path.normpath(dst)}: {len(IDS)} cards, {len(C.ROYALS)} royals")

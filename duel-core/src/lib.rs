@@ -20,3 +20,4 @@
 //! wrong by definition.
 
 pub mod cards;
+pub mod engine;
