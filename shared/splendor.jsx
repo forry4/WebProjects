@@ -27,12 +27,13 @@ export const GEM_HEX = {
 // Light chips need a dark glyph.
 const DARK_TEXT = new Set(["white", "gold", "pearl"]);
 // An UNATTACHED wild bonus can become any gem colour you already own a card for, so it
-// reads as a rainbow rather than a blank disc: a smooth diagonal spectrum plus a gloss
+// reads as a multi-colour disc rather than a blank one: a DESATURATED diagonal spectrum
+// (muted to sit calmly beside the matte gems, not a garish rainbow) plus a soft gloss
 // highlight, so it looks like a polished gem. (A conic wheel of the five GEM colours was
 // the obvious idea and looked bad — it put a black wedge in the "rainbow".)
 export const WILD_RAINBOW = [
-  "radial-gradient(circle at 30% 24%, rgba(255,255,255,.85) 0%, rgba(255,255,255,.32) 15%, rgba(255,255,255,0) 46%)",
-  "linear-gradient(135deg, #ff3b30 0%, #ff9500 17%, #ffe600 33%, #4cd964 50%, #34d8e8 67%, #3b6dff 83%, #c04cff 100%)",
+  "radial-gradient(circle at 32% 24%, rgba(255,255,255,.55) 0%, rgba(255,255,255,.12) 20%, rgba(255,255,255,0) 48%)",
+  "linear-gradient(135deg, #c98a86 0%, #ccb079 20%, #c3c583 38%, #8ec08f 56%, #83bcc7 72%, #8f9ed0 88%, #bd97cf 100%)",
 ].join(", ");
 // Gems show their initial; the wilds show a symbol.
 const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].toUpperCase());
@@ -264,7 +265,7 @@ export const splendorCardCss = `
 export const splendorCardExtraCss = `
 .card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
-.card-bonus-wild{border-style:dashed;border-color:rgba(255,255,255,.45)}
+.card-bonus-wild{border:1.5px solid rgba(255,255,255,.3)}
 /* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
    at a glance. The trailing disc sits on top; the leading one keeps its rim visible
    through the overlap. (Was a single disc ringed by a box-shadow, which just looked
