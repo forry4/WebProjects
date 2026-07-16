@@ -144,15 +144,15 @@ export function TokenPill({ color, count, dataToken }) {
 }
 
 /* A BOUGHT-CARD pill: "+N W" in that color — Spender's indicator for the cards you own.
- * `extra` appends a game-specific suffix (Duel shows the color's prestige, since 10
- * points in one color wins). */
+ * `extra` appends a game-specific suffix, unspaced so it stays inside a narrow pill
+ * (Duel shows the color's prestige as "★N", since 10 points in one color wins). */
 export function BonusPill({ color, count, extra, title }) {
   const rim = color === "black" ? "rgba(255,255,255,.4)" : GEM_HEX[color];
   return (
     <span data-bonus={color} className="bonus-pill" title={title}
       style={{ background: GEM_HEX[color] + "55", borderColor: rim,
         color: color === "black" ? "#a8a8a8" : GEM_HEX[color] }}>
-      +{count} {color[0].toUpperCase()}{extra ? " " + extra : ""}
+      +{count} {color[0].toUpperCase()}{extra}
     </span>
   );
 }

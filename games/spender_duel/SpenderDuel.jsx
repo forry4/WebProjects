@@ -291,6 +291,23 @@ const css = `
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
+/* Pills fill exactly ONE row of 7 — Duel has 7 token types (5 gems + pearl + gold), and
+   the bonus row tops out at 7 too (5 colors + 2 royals). Same shape as Spender's desktop
+   rule, which does this for its 6. The rows use gap:4px, so 7 items leave 6 gaps = 24px;
+   nowrap + min-width:0 + overflow:hidden lets a pill shrink into its share instead of
+   wrapping or pushing the row wide. */
+.duel-player .player-tokens,.duel-player .player-bonuses{flex-wrap:nowrap;min-width:0}
+.duel-player .token-pill,.duel-player .bonus-pill{
+  flex:0 1 calc((100% - 24px) / 7);
+  min-width:0;justify-content:center;overflow:hidden;white-space:nowrap;
+  padding:2px 3px;gap:2px;
+}
+/* A bonus pill carries more text than a token pill ("+3 B" plus Duel's "★3"), so it
+   gets a smaller face to stay inside its 1/7 share rather than clipping. */
+.duel-player .bonus-pill{font-size:.6rem;letter-spacing:-.01em}
+.duel-player .token-pill{font-size:.64rem}
+/* keep Spender's 10px dot (it fits the 1/7 share); just stop it shrinking */
+.duel-player .token-pill>span{flex:0 0 auto}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
