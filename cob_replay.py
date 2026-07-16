@@ -85,14 +85,28 @@ SPRITE_COUNT = {}   # filled by decode_counts()
 
 def decode_counts(events, raw):
     """Animal placement immediately scores sum-of-counts of same animal in region.
-    Track per-player region membership to solve each tile's count."""
-    b9 = board.get_board("9")
-    canon = sorted(b9.SPACES, key=lambda s:(b9.SPACES[s]["r"], b9.SPACES[s]["q"]))
-    def region_of(idx):
-        sid = canon[idx]
-        for rid, r in b9.REGIONS.items():
-            if sid in r["spaces"]: return rid
-        return None
+    Track per-player region membership to solve each tile's count.
+
+    The region grouping MUST use each player's OWN board. This hardcoded board 9 for
+    everyone, and regions differ on 34/37 spaces between boards -- so for any player not
+    on board 9 the `same` subtraction used the wrong pasture, every derived animal count
+    came out wrong, and the error compounded through every livestock score (one game
+    over-credited a player 40 VP). Games on board 9 were exact, which is the tell.
+    """
+    # pid -> the player's actual board (falls back to the default if unmatched)
+    pboards = {}
+    for mid, d in events:
+        if d["type"] == "playerEstate":
+            bid = match_board(d["args"]["plEstSpaces"])
+            pboards[str(d["args"]["plId"])] = board.get_board(bid or board.DEFAULT_BOARD_ID)
+
+    _canon = {}
+    def region_of(pid, idx):
+        b = pboards.get(pid) or board.get_board(board.DEFAULT_BOARD_ID)
+        if b.id not in _canon:
+            _canon[b.id] = sorted(b.SPACES, key=lambda s: (b.SPACES[s]["r"], b.SPACES[s]["q"]))
+        sid = _canon[b.id][idx]
+        return b.region_of(sid)
     placed = {}   # pid -> {region -> [(animal,count?)]}
     pending_place = None
     counts = {}
@@ -103,7 +117,7 @@ def decode_counts(events, raw):
             pending_place = (str(a["plId"]), int(a["spaceId"]), a["tileId"], raw[a["tileId"]])
         elif t == "pointsForAnimals" and pending_place:
             pid, sp, tid, (typ, sub, sprite) = pending_place
-            reg = region_of(sp)
+            reg = region_of(pid, sp)
             prior = placed.setdefault(pid, {}).setdefault(reg, [])
             same = sum(c for an,c in prior if an==sub)
             cnt = int(a["pointsForAnimals"]) - same
