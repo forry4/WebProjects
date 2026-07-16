@@ -27,8 +27,13 @@ export const GEM_HEX = {
 // Light chips need a dark glyph.
 const DARK_TEXT = new Set(["white", "gold", "pearl"]);
 // An UNATTACHED wild bonus can become any gem colour you already own a card for, so it
-// reads as a wheel of the five gems — a silver disc just looked like a blank gem.
-export const WILD_RAINBOW = `conic-gradient(from 200deg, ${GEM_HEX.white}, ${GEM_HEX.blue}, ${GEM_HEX.green}, ${GEM_HEX.red}, ${GEM_HEX.black}, ${GEM_HEX.white})`;
+// reads as a rainbow rather than a blank disc: a smooth diagonal spectrum plus a gloss
+// highlight, so it looks like a polished gem. (A conic wheel of the five GEM colours was
+// the obvious idea and looked bad — it put a black wedge in the "rainbow".)
+export const WILD_RAINBOW = [
+  "radial-gradient(circle at 30% 24%, rgba(255,255,255,.85) 0%, rgba(255,255,255,.32) 15%, rgba(255,255,255,0) 46%)",
+  "linear-gradient(135deg, #ff3b30 0%, #ff9500 17%, #ffe600 33%, #4cd964 50%, #34d8e8 67%, #3b6dff 83%, #c04cff 100%)",
+].join(", ");
 // Gems show their initial; the wilds show a symbol.
 const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].toUpperCase());
 

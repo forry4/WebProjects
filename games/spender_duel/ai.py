@@ -103,6 +103,10 @@ def _clone_game(g: dict) -> dict:
         }
     pend = g.get("pending")
     return {
+        # Search clones never undo, so switch the per-turn snapshot OFF: it is a full
+        # deepcopy of the game on EVERY turn and would dominate simulation cost (the
+        # documented CoC lesson). Note this also means a clone carries no `turn_undo`.
+        "_skip_undo": True,
         "game": g["game"],
         "phase": g["phase"],
         "winner": g["winner"],

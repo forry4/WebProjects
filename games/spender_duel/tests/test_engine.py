@@ -19,6 +19,17 @@ def clear_board(g):
     g["board"] = [None] * 25
 
 
+def arm(g):
+    """Re-take the turn's undo snapshot.
+
+    Only tests need this: they hand-craft state AFTER new_game (which already
+    snapshotted), so the snapshot would otherwise restore the pristine deal instead of
+    the position under test. Real play snapshots at every turn start, always in sync.
+    """
+    engine._snapshot_turn(g)
+    return g
+
+
 def put(g, cell, tok):
     g["board"][cell] = tok
 
@@ -710,6 +721,103 @@ def test_victory_preempts_again():
 
 
 # ── redaction ────────────────────────────────────────────────────────────────
+
+def test_undo_takes_back_a_used_privilege():
+    """The case that motivated undo: a Privilege is a real server move, so no amount of
+    client-side deselecting can take it back."""
+    g = fresh()
+    g["players"][A]["privileges"] = 1
+    clear_board(g)
+    put(g, 5, "blue")
+    arm(g)
+    assert engine.apply_move(g, A, {"type": "use_privilege", "cell": 5})[0]
+    assert g["players"][A]["tokens"]["blue"] == 1 and g["players"][A]["privileges"] == 0
+    assert g["board"][5] is None
+
+    ok, err = engine.apply_move(g, A, {"type": "undo_turn"})
+    assert ok, err
+    assert g["players"][A]["tokens"]["blue"] == 0     # token returned
+    assert g["players"][A]["privileges"] == 1         # scroll back in hand
+    assert g["board"][5] == "blue"                    # back on the board
+    assert g["privileges_board"] == 2                 # pool restored
+    assert g["turn"] == A                             # still your turn
+
+
+def test_undo_works_at_any_point_in_a_turn():
+    """Optional action, mandatory action, and mid-pending must all be undoable."""
+    # after an optional replenish
+    g = fresh()
+    clear_board(g)
+    g["bag"] = ["white", "blue"]
+    arm(g)
+    assert engine.apply_move(g, A, {"type": "replenish"})[0]
+    assert engine.apply_move(g, A, {"type": "undo_turn"})[0]
+    assert len(g["bag"]) == 2 and all(t is None for t in g["board"])
+    assert g["turn_flags"]["replenished"] is False
+
+    # once the mandatory action has passed the turn on, it is no longer yours to undo
+    g2 = fresh()
+    clear_board(g2)
+    put(g2, 12, "red")
+    arm(g2)
+    assert engine.apply_move(g2, A, {"type": "take", "cells": [12]})[0]
+    assert g2["turn"] == B
+    ok, err = engine.apply_move(g2, A, {"type": "undo_turn"})
+    assert not ok and "your turn" in err
+
+    # mid-pending (an ability's sub-decision) is undoable
+    g3 = fresh()
+    clear_board(g3)
+    put(g3, 3, "white"); put(g3, 9, "white")
+    cid = find_card(level=1, ability="take_same", bonus="white")["id"]
+    stage_pyramid(g3, cid)
+    afford(g3, A, cid)
+    arm(g3)
+    assert buy(g3, A, cid)[0]
+    assert g3["pending_kind"] == "take_same"
+    assert engine.apply_move(g3, A, {"type": "undo_turn"})[0]
+    assert g3["pending_pid"] is None
+    assert g3["players"][A]["purchased"] == []        # the buy is gone too
+    assert g3["board"][3] == "white" and g3["board"][9] == "white"
+
+
+def test_undo_leaves_no_trace_in_the_log():
+    """Load-bearing for the review: replay.py rebuilds a game by re-applying its log, so
+    the log must only contain moves that actually stood."""
+    g = fresh()
+    g["players"][A]["privileges"] = 1
+    clear_board(g)
+    put(g, 5, "blue")
+    arm(g)
+    before = len(g["log"])
+    assert engine.apply_move(g, A, {"type": "use_privilege", "cell": 5})[0]
+    assert len(g["log"]) == before + 1                  # the action was logged...
+    assert engine.apply_move(g, A, {"type": "undo_turn"})[0]
+    assert len(g["log"]) == before                      # ...and the undo removed it
+    assert not any(e["type"] == "undo_turn" for e in g["log"])
+
+
+def test_undo_snapshot_never_reaches_a_client():
+    """turn_undo is a FULL copy of the game (bag, decks, both hands) — it must not ship."""
+    g = fresh()
+    assert "turn_undo" in g and "bag" in g["turn_undo"]
+    for viewer in (A, B, None):
+        v = engine.player_view(g, viewer)
+        assert "turn_undo" not in v and "_skip_undo" not in v
+        assert json.dumps(v).find('"bag"') == -1
+
+
+def test_search_clones_skip_the_undo_snapshot():
+    """A full deepcopy per simulated turn would dominate MCTS cost (the CoC lesson)."""
+    from games.spender_duel import ai
+    g = fresh()
+    c = ai._clone_game(g)
+    assert c["_skip_undo"] is True and "turn_undo" not in c
+    clear_board(c)
+    put(c, 12, "red")
+    assert engine.apply_move(c, c["turn"], {"type": "take", "cells": [12]})[0]
+    assert "turn_undo" not in c                        # no snapshot was ever taken
+
 
 def test_player_view_redaction():
     g = fresh()

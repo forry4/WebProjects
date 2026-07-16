@@ -112,6 +112,24 @@ def _royal_entitlement(p: dict) -> int:
     return sum(1 for t in CROWN_THRESHOLDS if crowns >= t)
 
 
+# ── Turn undo ────────────────────────────────────────────────────────────────
+def _snapshot_turn(game: dict) -> None:
+    """Snapshot the whole game at the START of a turn, so it can be taken back.
+
+    Everything a turn does is undoable this way — including moves already sent to the
+    server, like spending a Privilege, which no amount of client-side "deselect" can
+    reverse.
+
+    PERF (the CoC lesson — do not remove): this is a full deepcopy on every turn, which
+    is the dominant cost inside an MCTS simulation. Search clones set ``_skip_undo`` and
+    pay nothing (they never undo).
+    """
+    if game.get("_skip_undo"):
+        return
+    game.pop("turn_undo", None)          # never nest a snapshot inside a snapshot
+    game["turn_undo"] = copy.deepcopy(game)
+
+
 def _log(game: dict, pid, mtype: str, **fields) -> None:
     entry = {"t": game["turn_number"], "pid": pid, "type": mtype}
     entry.update({k: v for k, v in fields.items() if v is not None})
@@ -265,6 +283,7 @@ def new_game(player_ids: list, names: dict | None = None, seed=None) -> dict:
     _save_rng(game, rng)
     # Setup rule: the opponent of the first player starts with 1 privilege.
     _grant_privilege(game, player_ids[1])
+    _snapshot_turn(game)                 # arm undo for the first turn
     return game
 
 
@@ -369,6 +388,8 @@ def _finish_turn(game: dict, pid: str) -> None:
         _log(game, pid, "extra_turn")
     else:
         game["turn"] = _opponent(game, pid)
+    # Re-arm undo for whoever now has the turn (an AGAIN turn is its own undoable turn).
+    _snapshot_turn(game)
 
 
 # ── Optional-action handlers (turn continues afterwards) ─────────────────────
@@ -726,10 +747,41 @@ def legal_moves(game: dict, pid: str) -> list:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+def _undo_turn(game: dict, pid: str) -> tuple:
+    """Take back everything done so far this turn, back to the turn's start.
+
+    Restores the snapshot WHOLESALE — including the move log, so the undone actions
+    leave no trace. That is deliberate and load-bearing for the review: `replay.py`
+    reconstructs a game by re-applying its log, so the log must only ever contain moves
+    that actually stood. (Logging the undo instead would put an unreplayable record in
+    the log and break turn-by-turn review.) The rng_state is restored too, so a redone
+    draw plays out identically and the game stays reproducible from seed + log.
+
+    KNOWN TRADE-OFF (same one CoC's undo accepts): a player can blind-reserve, see the
+    card, and undo — learning that deck's top card. Re-shuffling on undo would close
+    that, but the reshuffle is a random event that ISN'T in the log, so replay would
+    diverge from what was played. A friendly-game undo is worth more than the exploit.
+    """
+    if game.get("turn") != pid:
+        return False, "you can only undo on your turn"
+    snap = game.get("turn_undo")
+    if not snap:
+        return False, "nothing to undo"
+    restored = copy.deepcopy(snap)
+    game.clear()
+    game.update(restored)
+    _snapshot_turn(game)                 # the restored turn is itself undoable again
+    return True, None
+
+
 def apply_move(game: dict, pid: str, move: dict) -> tuple:
     if is_over(game):
         return False, "game is over"
     mt = move.get("type")
+    # Undo is checked BEFORE the pending gate: a turn must be takeable back from any
+    # point, including part-way through an ability's sub-decision.
+    if mt == "undo_turn":
+        return _undo_turn(game, pid)
     if game["pending_pid"] is not None:
         if pid != game["pending_pid"]:
             return False, "not your decision"
@@ -763,6 +815,10 @@ def player_view(game: dict, pid: str | None) -> dict:
     g.pop("decks")
     g.pop("rng_state", None)
     g.pop("seed", None)
+    # The undo snapshot is a FULL copy of the game — bag, decks, both hands. Shipping it
+    # would hand the client every hidden card while the visible state stays redacted.
+    g.pop("turn_undo", None)
+    g.pop("_skip_undo", None)
     # `reserved_from_deck` is a list of card IDS — it must never reach an opponent (it
     # would reveal the very identities `reserved` redacts). No client needs it, so it
     # comes off every seat's view.

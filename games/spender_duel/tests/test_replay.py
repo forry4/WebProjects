@@ -119,6 +119,36 @@ def test_auto_resolved_abilities_are_not_replayed_as_moves():
     assert found, "no game exercised an ability-generated log record"
 
 
+def test_a_game_containing_undos_still_replays():
+    """Undo restores the turn's snapshot WHOLESALE, log included, so undone actions leave
+    no trace — which is exactly what keeps this replay valid. If undo ever started
+    logging (or half-restoring), the reconstruction would desync here."""
+    g = engine.new_game([A, B], names={A: "Alice", B: "Bob"}, seed=11)
+    rng = random.Random(11)
+    undos = 0
+    for step in range(4000):
+        if engine.is_over(g):
+            break
+        actor = g.get("pending_pid") or g["turn"]
+        mv = bot.choose(g, actor, rng)
+        if mv is None:
+            break
+        ok, _ = engine.apply_move(g, actor, mv)
+        assert ok
+        # every so often, take the whole turn back and play it again
+        if step % 7 == 3 and not engine.is_over(g):
+            turn_owner = g["turn"]
+            if engine.apply_move(g, turn_owner, {"type": "undo_turn"})[0]:
+                undos += 1
+    assert engine.is_over(g)
+    assert undos > 3, f"the undo path was barely exercised ({undos})"
+    assert not any(e["type"] == "undo_turn" for e in g["log"]), "undo must not be logged"
+
+    snaps = replay.reconstruct(g)          # would raise/desync if the log kept undone moves
+    assert _key(snaps[-1]["game"]) == _key(g)
+    assert snaps[-1]["game"]["winner"] == g["winner"]
+
+
 def test_unreplayable_games_degrade_instead_of_crashing():
     g, _ = _play(9)
     noseed = copy.deepcopy(g)

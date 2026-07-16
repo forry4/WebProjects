@@ -534,6 +534,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     && !!game && game.board.some((t) => t && t !== "gold");
   const pendKind = game?.pending_kind;
   const pendCtx = game?.pending?.ctx || {};
+  // Have I done anything this turn? Derived from the log (entries carry the turn number)
+  // rather than a local flag, so it survives a reconnect and can't drift from the server.
+  const actedThisTurn = !!game && (game.log || []).some((e) => e.t === game.turn_number);
+  const canUndo = myTurn && actedThisTurn;
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -784,6 +788,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     });
   };
 
+  // Take the whole turn back (server-side; the engine restores its turn-start snapshot).
+  // Clear any local arming too, so the UI doesn't keep pointing at a move that's gone.
+  const undoTurn = () => {
+    setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null); setWildPick(false);
+    mv({ type: "undo_turn" });
+  };
+
   const submitTake = () => {
     if (selCells.length && lineOk(selCells, game.board)) {
       mv({ type: "take", cells: selCells });
@@ -1018,6 +1029,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         {pendingMine && pendKind === "take_same" && (
           <span className="duel-muted">Ability: take a {pendCtx.color} token — click one on the board (or <a href="#" onClick={(ev) => { ev.preventDefault(); mv({ type: "skip_pending" }); }}>skip</a>)</span>
         )}
+        {/* Undo sits OUTSIDE the not-pending block: a turn must be takeable back from any
+            point in it, including part-way through an ability. Actions like spending a
+            Privilege are real server moves — clearing the local selection can't undo them. */}
+        {canUndo && (
+          <button className="btn btn-outline" onClick={undoTurn}
+            title="Take back everything you've done this turn">↩ Undo turn</button>
+        )}
       </div>
       <div className="duel-royals-row">
         {Object.values(royals).map((r) => {
@@ -1114,7 +1132,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 </div>
               ))}
             </div>
-            <div className="duel-overlay-note"><button className="btn btn-outline" onClick={() => mv({ type: "skip_pending" })}>Skip</button></div>
+            <div className="duel-overlay-note">
+              <button className="btn btn-outline" onClick={() => mv({ type: "skip_pending" })}>Skip</button>
+              {canUndo && <button className="btn btn-outline" onClick={undoTurn}>↩ Undo turn</button>}
+            </div>
           </div>
         </div>
       )}
@@ -1128,6 +1149,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 <RoyalCard key={rid} royal={royals[rid]} selected onClick={() => mv({ type: "choose_royal", royal_id: rid })} />
               ))}
             </div>
+            {canUndo && (
+              <div className="duel-overlay-note">
+                <button className="btn btn-outline" onClick={undoTurn}>↩ Undo turn</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1138,12 +1164,19 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <p>You may keep at most 10 tokens — discard {pendCtx.excess || 1} (returned to the bag):</p>
             <div className="duel-modal-row">
               {TOKENS.map((t) => (me?.tokens?.[t] || 0) > 0 && (
-                <div key={t} className="duel-tok" style={{ cursor: "pointer" }} onClick={() => mv({ type: "discard", color: t })}>
+                <div key={t} style={{ cursor: "pointer", textAlign: "center" }} onClick={() => mv({ type: "discard", color: t })}>
                   <GemToken color={t} size={44} />
-                  <span className="n">{me.tokens[t]}</span>
+                  <div className="duel-muted">{me.tokens[t]}</div>
                 </div>
               ))}
             </div>
+            {/* This pending has no Skip (discarding is mandatory), so undo is the only
+                way out — e.g. you took a line you didn't mean to and are now over 10. */}
+            {canUndo && (
+              <div className="duel-overlay-note">
+                <button className="btn btn-outline" onClick={undoTurn}>↩ Undo the whole turn instead</button>
+              </div>
+            )}
           </div>
         </div>
       )}
