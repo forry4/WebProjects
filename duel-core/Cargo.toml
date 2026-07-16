@@ -25,6 +25,14 @@ bridge = ["dep:serde", "dep:serde_json"]
 name = "parity"
 required-features = ["bridge"]
 
+[[bin]]
+name = "ai_parity"
+required-features = ["bridge"]
+
+[[bin]]
+name = "move_server"
+required-features = ["bridge"]
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

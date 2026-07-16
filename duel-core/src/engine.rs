@@ -187,12 +187,12 @@ pub struct State {
 }
 
 #[inline]
-fn is_gem_or_pearl(tok: i8) -> bool {
+pub(crate) fn is_gem_or_pearl(tok: i8) -> bool {
     tok != EMPTY && tok != GOLD as i8
 }
 
 #[inline]
-fn opponent(pid: usize) -> usize {
+pub(crate) fn opponent(pid: usize) -> usize {
     1 - pid
 }
 
@@ -834,7 +834,11 @@ impl State {
 
     /// Every straight line of 1-3 gems/pearls. Each line is emitted from its
     /// lowest-index cell scanning E/S/SE/SW, so no line is generated twice.
-    fn line_moves(&self) -> Vec<Move> {
+    ///
+    /// `pub(crate)` for the rollout's lazy tier generator (`mcts::rollout_top_tier`),
+    /// which rebuilds ONE tier of `mandatory_moves` and depends on getting it in exactly
+    /// this order — see that function.
+    pub(crate) fn line_moves(&self) -> Vec<Move> {
         let mut moves = Vec::new();
         for i in 0..N_CELLS {
             if !is_gem_or_pearl(self.board[i]) {
@@ -864,7 +868,7 @@ impl State {
         moves
     }
 
-    fn reserve_moves(&self, pid: usize) -> Vec<Move> {
+    pub(crate) fn reserve_moves(&self, pid: usize) -> Vec<Move> {
         let mut moves = Vec::new();
         if self.players[pid].reserved.len() < MAX_RESERVED {
             let gold_cells: Vec<usize> =
@@ -891,7 +895,7 @@ impl State {
         moves
     }
 
-    fn buy_moves(&self, pid: usize) -> Vec<Move> {
+    pub(crate) fn buy_moves(&self, pid: usize) -> Vec<Move> {
         let p = &self.players[pid];
         let bonuses = bonuses_of(p);
         let eligible_wild: Vec<i8> =
