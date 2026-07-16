@@ -48,7 +48,16 @@ def load_events(path):
         if d["type"] == "undoTurn":
             for m in d["args"].get("movesToCancel", []):
                 cancel.add(int(m))
-    return [(mid, d) for mid, d in ev if d["type"] != "undoTurn" and mid not in cancel], log
+    # An undoTurn's movesToCancel names the move_id of the packet holding the undone
+    # actions -- but BGA puts the ROUND BOOKKEEPING (turnPlayed/newRound/newPhase) in that
+    # same packet, alongside plToIgnore echoes of the real actions. Dropping the whole
+    # move_id therefore threw away the round transition, so sync_round never ran, the dice
+    # never refreshed, and every later action in that round died with "die already used".
+    # The undone ACTIONS are the plToIgnore echoes (already filtered above), so cancelling
+    # was only ever meant to drop those. Keep the bookkeeping.
+    KEEP = {"newRound", "turnPlayed", "newPhase"}
+    return [(mid, d) for mid, d in ev
+            if d["type"] != "undoTurn" and (mid not in cancel or d["type"] in KEEP)], log
 
 def build_catalog(events):
     """tileId -> CoC tile dict template (id/type/color + extras). Monastery effect
@@ -439,7 +448,15 @@ def main(path, verbose=True, on_move=None):
                 else:
                     raise RuntimeError(f"ship goods: neither order legal for depots={deps}")
             elif g.get("pending_kind") == "ship_adjacent_depot":
-                AP(pid, {"type":"ship_adjacent_take","depot":deps[0]}, "ship_adj")
+                # We arrive here when the m5 pending armed LATE -- a ship take that overflows
+                # opens a goods_pick first, so the pending only becomes ship_adjacent_depot
+                # after the picks resolve, and the follow-up rides in a DUPLICATE record (BGA
+                # logs some m5 takes twice, neither copy flagged plToIgnore). That record
+                # still reads '(6,1)' = (source, adjacent), so deps[0] is the SOURCE and would
+                # be rejected. Take the entry that's an actual candidate.
+                cands = g["pending"]["ctx"].get("candidates", [])
+                d2 = next((x for x in deps if x in cands), deps[0])
+                AP(pid, {"type":"ship_adjacent_take","depot":d2}, "ship_adj")
             # resolve a goods_pick overflow using the colours the log kept (from goodsTilesToMove)
             kept = [tiles.goods_color_for_die(goods_type[str(gt["id"])])
                     for gt in a.get("goodsTilesToMove", []) if str(gt["id"]) in goods_type]
