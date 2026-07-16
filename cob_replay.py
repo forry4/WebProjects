@@ -83,9 +83,16 @@ def build_catalog(events):
 # sprite_pos -> livestock count, decoded from BGA sprite sheet ordering (probed).
 SPRITE_COUNT = {}   # filled by decode_counts()
 
-def decode_counts(events, raw):
+def decode_counts(events, raw, mon=None):
     """Animal placement immediately scores sum-of-counts of same animal in region.
     Track per-player region membership to solve each tile's count.
+
+    MONASTERY 7 ("+1 VP per livestock tile that scores") is part of the awarded points,
+    so it MUST be subtracted before attributing the rest to the tile's animal count --
+    otherwise the bonus is silently baked into the count and inflates every later score
+    that re-counts that tile. The tell is a decoded count outside the legal 2..4 range
+    (only mon-7 owners produced them). mon7 is continuous from the moment the monastery
+    is PLACED, so it's tracked in event order.
 
     The region grouping MUST use each player's OWN board. This hardcoded board 9 for
     everyone, and regions differ on 34/37 spaces between boards -- so for any player not
@@ -110,17 +117,24 @@ def decode_counts(events, raw):
     placed = {}   # pid -> {region -> [(animal,count?)]}
     pending_place = None
     counts = {}
-    it = iter(events)
+    has7 = set()  # pids who have PLACED monastery 7 (continuous from that moment on)
     for mid, d in events:
         t = d["type"]; a = d.get("args", {})
-        if t == "tileAddedToEstate" and a.get("tileId") in raw and raw[a["tileId"]][0]=="animal":
-            pending_place = (str(a["plId"]), int(a["spaceId"]), a["tileId"], raw[a["tileId"]])
+        if t == "tileAddedToEstate":
+            tid = a.get("tileId")
+            if tid in raw and raw[tid][0] == "knowledge" and (mon or {}).get(tid) == 7:
+                has7.add(str(a["plId"]))
+            if tid in raw and raw[tid][0] == "animal":
+                pending_place = (str(a["plId"]), int(a["spaceId"]), tid, raw[tid])
         elif t == "pointsForAnimals" and pending_place:
             pid, sp, tid, (typ, sub, sprite) = pending_place
             reg = region_of(pid, sp)
             prior = placed.setdefault(pid, {}).setdefault(reg, [])
-            same = sum(c for an,c in prior if an==sub)
-            cnt = int(a["pointsForAnimals"]) - same
+            same = sum(c for an, c in prior if an == sub)
+            # mon7 pays +1 per SCORING tile = the same-animal tiles in this pasture,
+            # including the one just placed.
+            bonus = (sum(1 for an, _ in prior if an == sub) + 1) if pid in has7 else 0
+            cnt = int(a["pointsForAnimals"]) - same - bonus
             counts[sprite] = cnt
             prior.append((sub, cnt))
             pending_place = None
@@ -143,7 +157,7 @@ def main(path, verbose=True, on_move=None):
     _pr = print if verbose else (lambda *a, **k: None)
     events, log = load_events(path)
     raw, loc, mon = build_catalog(events)
-    counts = decode_counts(events, raw)
+    counts = decode_counts(events, raw, mon)
     goods_type = {}   # goods id -> type (1..6)
     for mid, d in events:
         if d["type"] == "newPhase":
