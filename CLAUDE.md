@@ -1663,6 +1663,35 @@ shared/
   Edit→Save to backfill**; new adds bake in on the next save. (Inline data URIs are ideal for a
   shelf of dozens; at hundreds, a cacheable backend image endpoint would scale better.)
 
+### Shared Splendor assets (`shared/splendor.jsx`) — Spender + Spender Duel
+**The two Splendor-family games SHARE their gems, jewel cards and move log. Never
+re-implement them per game.** `shared/splendor.jsx` exports `GEM_COLORS`/`GEM_LABELS`/
+`GEM_HEX`, `GemToken`, `CardView`, `LogEntry`, and the CSS (`splendorCardCss` +
+`splendorCardExtraCss` + `splendorLogCss`), all lifted VERBATIM out of Spender.jsx.
+- **WHY it exists (the mistake to not repeat):** Spender.jsx exports ONLY its app
+  component, so a new game can't import its internals — Spender Duel was therefore built
+  with LOOKALIKES and drifted (square bonus/cost swatches vs round, its own palette and
+  card body, its own font stack that silently dropped Georgia, a text-blob log). If a
+  second game needs a Spender visual, EXTRACT it here; don't approximate it.
+  (`shared/theme.js` was already this precedent — Spender + Books both import `baseCss`.)
+- **Spender's sheet is spliced, not moved:** `css = baseCss + <before> + splendorCardCss
+  + splendorCardExtraCss + <mid> + splendorLogCss + <after>` — the shared blocks sit at
+  their ORIGINAL positions, so rule order is preserved. Verified **rule-for-rule
+  identical (662 rules)**; re-run that check if you touch the splice.
+  `splendorCardExtraCss` holds only what Spender never emits (crowns, wild bonus,
+  ability glyph, the pearl's 2nd cost column, a `card-small` variant).
+- **CardView is game-rule-free:** Duel's extras are optional props (`asColor`,
+  `abilityGlyph`, `abilityTitle`, `small`; `crowns`/`cost.pearl`/`bonus:"wild"` come off
+  the card data). Spender passes none and renders exactly as before.
+- **Sizing is Spender's mechanism, reused:** `.card` is `width:var(--card-w)` /
+  `min-height:var(--card-h)` and `.level-row>*{flex:1 1 0;max-width:var(--card-w)}`
+  already fits "deck + N cards" — so a consumer only SETS those two vars (Duel does it
+  per column width via a container query) and the row scales itself. Card internals
+  scale off `--card-h` with Spender's ratios (`.level-row .card-bonus` etc. — those live
+  inside Spender's own `min-width:901px` query and are mirrored, not moved).
+- Duel's board tokens are `.gem-token` with `size={null}` (CSS-sized so they scale with
+  the cells; an inline width/height would freeze them) plus Duel-only state classes.
+
 ### Shared theme (`shared/theme.js`)
 - `baseCss` is the **single source of truth** for the site design: Cinzel/Crimson Pro
   font `@import`, `:root` color tokens, base `body`/`.app`, and `.btn`/`.input`
