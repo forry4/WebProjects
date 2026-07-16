@@ -26,6 +26,9 @@ export const GEM_HEX = {
 };
 // Light chips need a dark glyph.
 const DARK_TEXT = new Set(["white", "gold", "pearl"]);
+// An UNATTACHED wild bonus can become any gem colour you already own a card for, so it
+// reads as a wheel of the five gems — a silver disc just looked like a blank gem.
+export const WILD_RAINBOW = `conic-gradient(from 200deg, ${GEM_HEX.white}, ${GEM_HEX.blue}, ${GEM_HEX.green}, ${GEM_HEX.red}, ${GEM_HEX.black}, ${GEM_HEX.white})`;
 // Gems show their initial; the wilds show a symbol.
 const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].toUpperCase());
 
@@ -62,9 +65,9 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
     );
   }
   const isWild = card.bonus === "wild";
-  const bonusBg = isWild
-    ? (asColor ? GEM_HEX[asColor] : "linear-gradient(135deg,#8d8579 0%,#d9d2c4 50%,#8d8579 100%)")
-    : GEM_HEX[card.bonus];
+  // Unattached => the rainbow (it can still become any colour you own); once attached it
+  // simply IS that colour.
+  const bonusBg = isWild ? (asColor ? GEM_HEX[asColor] : WILD_RAINBOW) : GEM_HEX[card.bonus];
   const gems = Object.entries(card.cost || {}).filter(([c, n]) => c !== "pearl" && n > 0);
   const pearl = (card.cost || {}).pearl || 0;
   return (
@@ -268,7 +271,10 @@ export const splendorCardExtraCss = `
    the 20px base. Spender never renders a pair (no bonus_count on its cards), so only
    Duel's contexts override it. */
 .card-bonus-pair .card-bonus+.card-bonus{margin-left:-8px}
-.card-ability{position:absolute;top:32px;right:6px;font-size:.7rem;color:var(--text);background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:4px;padding:0 3px;line-height:1.35;pointer-events:none}
+.card-ability{position:absolute;top:32px;right:6px;font-size:.7rem;color:var(--text);background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:4px;padding:0 3px;line-height:1.35;pointer-events:none;display:flex;align-items:center;gap:1px}
+/* The take-a-gem ability's target, as a real gem CIRCLE in that gem's colour (em-sized,
+   so it tracks the ability font as the card scales). */
+.card-ability-gem{display:inline-block;width:.82em;height:.82em;border-radius:50%;border:1px solid rgba(255,255,255,.35);flex:0 0 auto}
 .card-cost .cost-col{display:flex;flex-direction:column;gap:3px}
 .card-cost.card-cost-2col{flex-direction:row;align-items:flex-end;gap:8px}
 .card.card-small{width:var(--card-w-small,62px);min-height:var(--card-h-small,86px);padding:5px 4px 4px}

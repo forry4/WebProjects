@@ -18,7 +18,16 @@ const DUEL_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/duel");
 // gems here are literally Spender's gems.
 const COLORS = GEM_COLORS;
 const TOKENS = [...COLORS, "pearl", "gold"];
-const ABILITY_GLYPH = { again: "↻", take_same: "+◆", privilege: "⚜", steal: "✋" };
+// take_same has no text glyph: it's drawn as a CIRCLE in the colour of the gem you may
+// take (which is the card's own bonus colour — cards.py guarantees take_same cards carry
+// a concrete colour), so the ability tells you WHICH gem at a glance. See abilityGlyph().
+const ABILITY_GLYPH = { again: "↻", privilege: "⚜", steal: "✋" };
+const abilityGlyph = (card) =>
+  card.ability === "take_same" ? (
+    <>+<span className="card-ability-gem" style={{ background: GEM_HEX[card.bonus] }} /></>
+  ) : (
+    ABILITY_GLYPH[card.ability]
+  );
 const ABILITY_DESC = {
   again: "Take another turn after this one.",
   take_same: "Take 1 token of this card's color from the board.",
@@ -140,7 +149,7 @@ function DuelCard({ card, asColor, selected, affordable, needsGold, dim, onClick
   return (
     <CardView card={card} asColor={asColor} selected={selected} affordable={affordable}
       needsGold={needsGold} disabled={dim} onClick={onClick} small={small}
-      abilityGlyph={ABILITY_GLYPH[card.ability]} abilityTitle={ABILITY_DESC[card.ability]} />
+      abilityGlyph={abilityGlyph(card)} abilityTitle={ABILITY_DESC[card.ability]} />
   );
 }
 
@@ -286,7 +295,7 @@ const css = `
    spaces come back first — worth knowing before you take. Drawn under the tokens,
    inert, in cell units (see the proportional geometry above). */
 .duel-spiral{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
-.duel-spiral .path{fill:none;stroke:var(--gold);stroke-opacity:.30;stroke-width:.055;stroke-dasharray:.17 .13;stroke-linecap:round;stroke-linejoin:round}
+.duel-spiral .path{fill:none;stroke:var(--gold);stroke-opacity:.30;stroke-width:.055;stroke-linecap:round;stroke-linejoin:round}
 .duel-spiral .start{fill:var(--gold);fill-opacity:.55}
 .duel-spiral .head{fill:var(--gold);fill-opacity:.45}
 /* Board tokens are SPENDER's .gem-token (shared) — Duel only adds the board-specific
@@ -1198,7 +1207,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <p>• <b>Take up to 3 tokens</b> in an unbroken straight line (any direction, no gold). Taking 3 of a color or 2 pearls hands your opponent a Privilege.<br />
               • <b>Take 1 gold + reserve a card</b> (click a gold token, then a face-up card or a deck). Reserves are secret; max 3.<br />
               • <b>Purchase a card</b> from the pyramid or your reserve. Gold is a wild. Spent tokens go back in the bag.</p>
-            <p><b>Cards</b> give permanent bonuses (discounts), points, crowns, and abilities: {ABILITY_GLYPH.again} another turn, {ABILITY_GLYPH.take_same} take a matching token, {ABILITY_GLYPH.privilege} take a Privilege, {ABILITY_GLYPH.steal} steal a token. Grey (wild) cards attach to a color you own.</p>
+            <p><b>Cards</b> give permanent bonuses (discounts), points, crowns, and abilities: {ABILITY_GLYPH.again} another turn,{" "}
+              {/* take_same has no text glyph — it's a circle in the takeable gem's color */}
+              <span className="card-ability" style={{ position: "static", display: "inline-flex" }}>
+                +<span className="card-ability-gem" style={{ background: GEM_HEX.green }} />
+              </span>{" "}
+              take a token of that card's color, {ABILITY_GLYPH.privilege} take a Privilege, {ABILITY_GLYPH.steal} steal a token.
+              Rainbow (wild) cards attach to a color you already own and count as it from then on.</p>
             <p><b>Crowns:</b> at 3 and again at 6 crowns, claim a Royal card. <b>Hand limit:</b> 10 tokens at end of turn.</p>
             <div className="duel-modal-row"><button className="btn btn-gold" onClick={() => setShowRules(false)}>Close</button></div>
           </div>
