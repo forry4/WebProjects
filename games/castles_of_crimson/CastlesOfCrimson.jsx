@@ -686,7 +686,10 @@ function Pips({ n }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
-const css = lobbyCss + `
+// lobbyCss is appended AFTER CoC's own styles (see the close of this template) so the
+// shared .lby-* rules win the specificity TIE against CoC's `.coc *{margin:0;padding:0}`
+// reset (both are one class) — otherwise the reset strips the kit's padding/margins.
+const css = `
 /* Self-hosted fonts (CoC is mounted bare without baseCss, so it carries its own copy;
    the browser dedupes identical @font-face by src url). Metric-matched fallbacks keep
    the layout stable if the real font isn't loaded yet. */
@@ -1135,7 +1138,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (min-width:1600px){
   .coc-col-board .coc-board-hex{zoom:1}
 }
-`;
+` + lobbyCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
