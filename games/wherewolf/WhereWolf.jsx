@@ -199,9 +199,9 @@ function useIsMobile() {
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
 const css = baseCss + lobbyCss + `
-.ww{min-height:100vh;background:radial-gradient(120% 90% at 50% -10%,#241a2e 0%,#0d0b12 60%);color:var(--text)}
+.ww{min-height:100vh;background:var(--bg);color:var(--text)}
 .ww *,.ww *::before,.ww *::after{box-sizing:border-box}
-.ww-wrap{max-width:1000px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:14px}
+.ww-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 48px;display:flex;flex-direction:column;gap:16px}
 .ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
 .ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
@@ -218,8 +218,9 @@ const css = baseCss + lobbyCss + `
 .ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
   color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
 .ww-hero{text-align:center;padding:8px 0 4px}
-.ww-hero h1{font-family:Cinzel,serif;font-size:30px;color:var(--gold-light)}
-.ww-hero p{color:var(--text-dim)}
+.ww-lobby-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;align-items:start;margin-top:2px}
+.ww-lobby-col{min-width:0}
+@media(max-width:700px){.ww-lobby-grid{grid-template-columns:1fr;gap:0}}
 .ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
 .ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
 .ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
@@ -631,16 +632,11 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
         <LobbyHeader
           onBack={onExit}
-          title="Where Wolf?"
+          title="Where Wolf"
           onRules={() => setShowRules(true)}
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="ww-wrap">
-          <div className="ww-hero">
-            <p>A night of deception. One of you is not who they seem.</p>
-            <p className="ww-card-meta">3–10 players · one device each</p>
-          </div>
-
           <div className="ww-row">
             <button className="ww-btn gold" onClick={startCreate}>+ New Game</button>
             <input className="ww-input" placeholder="CODE" value={joinCode} maxLength={4}
@@ -650,35 +646,18 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           </div>
 
           {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
-            <>
-              <LobbySectionHd title="Resume" />
-              <div className="lby-card">
-                <div className="lby-card-info"><div className="lby-card-title">Game in progress</div><div className="lby-card-meta">{savedId}</div></div>
-                <div className="lby-card-actions"><button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button></div>
-              </div>
-            </>
+            <div className="lby-card">
+              <div className="lby-card-info"><div className="lby-card-title">Game in progress</div><div className="lby-card-meta">{savedId} · resume to rejoin</div></div>
+              <div className="lby-card-actions"><button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button></div>
+            </div>
           )}
 
-          {myGames.length > 0 && (
-            <>
-              <LobbySectionHd title="Your Games" />
-              {myGames.map((g) => (
-                <div className="lby-card" key={g.id}>
-                  <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
-                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
-                  <div className="lby-card-actions">
-                    <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
-                    {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-
-          {openGames.length > 0 && (
-            <>
-              <LobbySectionHd title="Open Games" />
-              {openGames.map((g) => (
+          <div className="ww-lobby-grid">
+            <div className="ww-lobby-col">
+              <LobbySectionHd title="Open Games" note={openGames.length ? `${openGames.length} waiting` : "3–10 players"} />
+              {openGames.length === 0 ? (
+                <div className="lby-empty">No open games. Start one!</div>
+              ) : openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info"><div className="lby-card-title">{g.host_name || "Game"}</div>
                     <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
@@ -689,13 +668,28 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   </div>
                 </div>
               ))}
-            </>
-          )}
+            </div>
+            <div className="ww-lobby-col">
+              <LobbySectionHd title="Your Games" note={myGames.length ? `${myGames.length} active` : null} />
+              {myGames.length === 0 ? (
+                <div className="lby-empty">No games yet — create or join one.</div>
+              ) : myGames.map((g) => (
+                <div className="lby-card" key={g.id}>
+                  <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
+                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
+                  <div className="lby-card-actions">
+                    <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
+                    {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         {showRules && (
           <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
             <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>📖 How to Play — Where Wolf?</h3>
+              <h3>📖 How to Play — Where Wolf</h3>
               <div className="ww-rules-body">
                 <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
                 <h4>Setup</h4>
@@ -752,7 +746,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         <div className="ww-wrap">
           <div className="ww-top">
             <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
-              <span className="ww-title">Where Wolf?</span></div>
+              <span className="ww-title">Where Wolf</span></div>
             <div className="ww-row" style={{ gap: 8 }}>
               {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
               <span className="ww-user">{playerName}</span>
@@ -909,7 +903,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       <div className="ww-wrap">
         <div className="ww-top">
           <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
-            <span className="ww-title">Where Wolf?</span></div>
+            <span className="ww-title">Where Wolf</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
             {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
             <button className="ww-btn ghost sm" title="Narration voice" onClick={toggleNarrate}>{effNarrate ? "🔊" : "🔇"}</button>
