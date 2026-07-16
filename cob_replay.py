@@ -328,16 +328,25 @@ def main(path, verbose=True, on_move=None):
         return min(d, 6 - d)
 
     def do_die_action(pid, di, want, move, tag, shift=True):
-        # try as-is first (free shift / already-right die), else adjust to `want` or, when a
-        # ±1 free shift applies (monastery 9/10/11 place, 12 take), the cheaper neighbor.
+        # Adjust the die to `want` (or, when a +/-1 free shift applies -- monastery 9/10/11
+        # place, 12 take -- the cheaper acceptable neighbour), then apply.
+        #
+        # Try as-is ONLY when the die already shows an acceptable value. It used to try
+        # UNCONDITIONALLY, which is safe for place_tile (the space's number must match the
+        # die, so a wrong die just fails) but WRONG for sell_goods: there ANY die value is
+        # legal -- it simply sells whichever colour that die names -- so the optimistic try
+        # always succeeded and silently sold the WRONG goods, ignoring `want`. Seen in
+        # 876837514: BGA sold cobalt x2, we sold plum x1 while holding the cobalt.
+        cands = {want, want % 6 + 1, (want - 2) % 6 + 1} if shift else {want}
         if on_move is not None:
             try: on_move(g, pid, move, tag)
             except Exception: pass
-        ok, err = engine.apply_move(g, pid, move)
-        if ok:
-            stats["applied"] += 1; stats["last"] = tag; return
+        err = None
+        if g["dice"][pid]["values"][di] in cands:
+            ok, err = engine.apply_move(g, pid, move)
+            if ok:
+                stats["applied"] += 1; stats["last"] = tag; return
         orig = g["dice"][pid]["orig"][di]
-        cands = {want, want % 6 + 1, (want - 2) % 6 + 1} if shift else {want}
         for t in sorted(cands, key=lambda t: _wrap(orig, t)):
             if g["dice"][pid]["values"][di] != t:
                 ao, ae = engine.apply_move(g, pid, {"type": "adjust_die", "die_index": di, "to": t})
