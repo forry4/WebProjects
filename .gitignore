@@ -60,3 +60,7 @@ build/
 # redirected to engine_stk_*.out/.err) — scratch, regenerated per run
 /engine_stk_*.out
 /engine_stk_*.err
+
+# duel-core: build output + generated parity fixtures
+duel-core/target/
+duel-core/fixtures/
