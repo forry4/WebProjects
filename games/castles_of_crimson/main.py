@@ -120,8 +120,13 @@ AI_PID = "bot"
 
 
 def _valid_board(board_id) -> str:
-    """Coerce a client-supplied board id to a real one (default on anything bad)."""
-    if isinstance(board_id, str) and board_id in board.BOARDS:
+    """Coerce a client-supplied board id to a real one (default on anything bad).
+
+    Gates on PLAYABLE_BOARDS, not BOARDS: the engine knows boards the client-side Expert
+    wasm has no table for (see board.PLAYABLE_BOARDS). Serving one would index past
+    `N_BOARDS` in boards_gen.rs.
+    """
+    if isinstance(board_id, str) and board_id in board.PLAYABLE_BOARDS:
         return board_id
     return board.DEFAULT_BOARD_ID
 

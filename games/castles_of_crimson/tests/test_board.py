@@ -2,7 +2,8 @@
 
 A wrong board silently breaks every downstream scoring test, so these lock each
 layout's correctness before any engine logic depends on it. The invariants run
-over all 9 boards in the registry (parametrized by board id).
+over every board in the registry (parametrized by board id) -- including board 10,
+which the engine knows (for replaying BGA games) but the server does not serve.
 """
 import pytest
 
@@ -17,10 +18,33 @@ def b(request):
     return request.param
 
 
-def test_registry_has_nine_boards():
-    assert len(board.BOARDS) == 9
-    assert BOARD_IDS == [str(i) for i in range(1, 10)]
+def test_registry_has_the_expected_boards():
+    # 9 original CoB boards + board 10 (BGA 2019-only; engine-known, not served).
+    assert len(board.BOARDS) == 10
+    assert sorted(BOARD_IDS, key=int) == [str(i) for i in range(1, 11)]
     assert all(bd.name for bd in ALL_BOARDS)
+
+
+def test_playable_boards_stay_in_sync_with_the_rust_tables():
+    """PLAYABLE_BOARDS must match `N_BOARDS` in coc-core/src/boards_gen.rs.
+
+    The Expert tier searches client-side in wasm built from those FIXED-SIZE tables
+    (`[[u8; N_SPACES]; N_BOARDS]`). Serving a board the wasm has no table for indexes
+    past the end, and the net never trained on it. So a board only becomes playable
+    after gen_board_tables.py + a wasm rebuild. This test is the tripwire: if you add
+    a board to PLAYABLE_BOARDS without regenerating, it fails here rather than in
+    someone's game.
+    """
+    import pathlib, re
+    gen = pathlib.Path(__file__).resolve().parents[3] / "coc-core" / "src" / "boards_gen.rs"
+    if not gen.exists():
+        pytest.skip("coc-core checkout not present")
+    m = re.search(r"pub const N_BOARDS:\s*usize\s*=\s*(\d+)", gen.read_text())
+    assert m, "could not read N_BOARDS from boards_gen.rs"
+    assert len(board.PLAYABLE_BOARDS) == int(m.group(1)), (
+        f"PLAYABLE_BOARDS={len(board.PLAYABLE_BOARDS)} but boards_gen.rs N_BOARDS={m.group(1)}; "
+        "regenerate the Rust tables + rebuild the wasm before serving a new board")
+    assert "10" not in board.PLAYABLE_BOARDS, "board 10 has no Rust table yet"
 
 
 def test_space_count(b):

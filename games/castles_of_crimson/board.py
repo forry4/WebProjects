@@ -258,6 +258,18 @@ _BOARD_ROWS: dict[str, tuple[str, list[list[tuple[str, int]]]]] = {
         [("Y", 6), ("B", 1), ("B", 2), ("B", 5), ("L", 6)],
         [("M", 3), ("C", 4), ("B", 1), ("B", 3)],
     ]),
+    # Board 10 exists in the BGA 2019 edition but not in the original 9. Layout extracted
+    # verbatim from BGA `playerEstate.plEstSpaces` (board_nb=10), which lists spaces in the
+    # same (r,q) canonical order this table uses -- see tools/gen_board_tables.py.
+    "10": ("BGA 10", [
+        [("S", 6), ("B", 5), ("L", 4), ("C", 3)],
+        [("L", 2), ("S", 1), ("B", 6), ("L", 5), ("B", 4)],
+        [("L", 5), ("L", 4), ("L", 3), ("B", 1), ("Y", 2), ("B", 3)],
+        [("B", 6), ("B", 1), ("B", 2), ("B", 6), ("B", 5), ("Y", 4), ("C", 1)],
+        [("Y", 2), ("Y", 5), ("M", 4), ("Y", 3), ("M", 1), ("S", 2)],
+        [("B", 6), ("B", 1), ("M", 2), ("Y", 5), ("S", 6)],
+        [("C", 3), ("S", 4), ("S", 1), ("C", 3)],
+    ]),
 }
 
 _LAYOUTS: dict[str, tuple[str, dict[tuple[int, int], tuple[str, int]]]] = {
@@ -265,6 +277,21 @@ _LAYOUTS: dict[str, tuple[str, dict[tuple[int, int], tuple[str, int]]]] = {
 }
 
 BOARDS: dict[str, Board] = {bid: Board(bid, name, layout) for bid, (name, layout) in _LAYOUTS.items()}
+
+# ── Boards the SERVER may hand out ────────────────────────────────────────────────
+# `BOARDS` is the full set the pure-Python engine can play (used by offline tooling such
+# as the BGA replayer, which must reproduce any board a real game used). PLAYABLE_BOARDS
+# is the subset safe to SERVE.
+#
+# Why they differ: the Rust `coc-core` mirror generates fixed-size tables from this file
+# (`boards_gen.rs`: `pub const N_BOARDS: usize = 9;` with `[[u8; N_SPACES]; N_BOARDS]`
+# arrays), and the Expert tier searches CLIENT-SIDE in that wasm. Handing a player a board
+# the wasm has no table for would index past the end, and the Expert net has never trained
+# on it either. So a board is only playable once BOTH are regenerated:
+#   1. python coc-core/tools/gen_board_tables.py   (rebuilds boards_gen.rs + az/spaces.py)
+#   2. rebuild + commit the wasm (webapp/public/wasm/), then re-gate the net
+# Until then, keep new boards OUT of this set. `main._valid_board` gates on it.
+PLAYABLE_BOARDS: dict[str, Board] = {bid: b for bid, b in BOARDS.items() if bid != "10"}
 
 DEFAULT_BOARD_ID = "1"
 
