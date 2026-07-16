@@ -1,21 +1,22 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
+// The gems, jewel cards and move log are SHARED with Spender (same game family, so
+// they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
+// crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
+import {
+  GemToken, CardView, LogEntry, GEM_COLORS, GEM_HEX,
+  splendorCardCss, splendorCardExtraCss, splendorLogCss,
+} from "../../shared/splendor.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DUEL_WS = WS_RAW.replace(/\/ws$/, "/duel/ws");
 const DUEL_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/duel");
 
-const COLORS = ["white", "blue", "green", "red", "black"];
+// Palette + labels come from shared/splendor.jsx — one source for both games, so the
+// gems here are literally Spender's gems.
+const COLORS = GEM_COLORS;
 const TOKENS = [...COLORS, "pearl", "gold"];
-const GEM_HEX = {
-  white: "#ddd4be", blue: "#4257ff", green: "#3f9c2e", red: "#dc4040",
-  black: "#15151a", pearl: "#e8c0d4", gold: "#f5c842",
-};
-const GEM_LABELS = {
-  white: "Diamond", blue: "Sapphire", green: "Emerald", red: "Ruby",
-  black: "Onyx", pearl: "Pearl", gold: "Gold",
-};
 const ABILITY_GLYPH = { again: "↻", take_same: "+◆", privilege: "⚜", steal: "✋" };
 const ABILITY_DESC = {
   again: "Take another turn after this one.",
@@ -118,81 +119,24 @@ function canAffordCard(card, player, cardsById) {
 }
 
 // ─── Small components ───────────────────────────────────────────────────────
-// `size` omitted => the token is sized by CSS instead of inline styles. The board
-// needs that: inline width/height would beat the stylesheet and freeze the tokens
-// while their cells scale with the column.
-function Token({ color, size, onClick, className = "", dataCell, title }) {
-  const dark = color === "white" || color === "gold" || color === "pearl";
-  const style = { background: GEM_HEX[color], color: dark ? "#333" : "#fff" };
-  if (size) { style.width = size; style.height = size; style.fontSize = size * 0.42; }
-  return (
-    <div className={`duel-token ${className}`} data-cell={dataCell} title={title || GEM_LABELS[color]}
-      onClick={onClick} style={style}>
-      {color === "gold" ? "★" : color === "pearl" ? "●" : color[0].toUpperCase()}
-    </div>
-  );
-}
+// GemToken / CardView / LogEntry come from shared/splendor.jsx — Spender's ACTUAL
+// gems, jewel cards and log. Only what Splendor Duel adds on top lives here.
 
-function BonusSwatch({ card, asColor }) {
-  if (card.bonus === "wild") {
-    const bg = asColor ? GEM_HEX[asColor] : "linear-gradient(135deg,#999 0%,#ddd 50%,#888 100%)";
-    return <div className="duel-bonus wild" style={{ background: bg }} title={asColor ? `Wild bonus (as ${asColor})` : "Wild bonus — attaches to one of your colors"} />;
-  }
-  if (!card.bonus) return null;
-  return (
-    <div className="duel-bonus-wrap" title={`+${card.bonus_count} ${card.bonus} bonus`}>
-      <div className="duel-bonus" style={{ background: GEM_HEX[card.bonus] }} />
-      {card.bonus_count === 2 && <div className="duel-bonus dbl" style={{ background: GEM_HEX[card.bonus] }} />}
-    </div>
-  );
-}
-
+// A Duel card = Spender's CardView with the extras Duel needs passed in (crowns and
+// pearl costs live on the card data; the ability glyph/tooltip are supplied here so
+// the shared component stays free of game rules).
 function DuelCard({ card, asColor, selected, affordable, needsGold, dim, onClick, small }) {
-  if (!card) return <div className={`duel-card empty${small ? " small" : ""}`} />;
+  if (!card) return <div className="card card-empty" />;
   return (
-    <div className={`duel-card${small ? " small" : ""}${selected ? " selected" : ""}${affordable ? (needsGold ? " affordable-gold" : " affordable") : ""}${dim ? " dim" : ""}`}
-      onClick={onClick}>
-      <div className="duel-card-top">
-        <span className={`duel-card-pts${card.points ? "" : " zero"}`}>{card.points || ""}</span>
-        {card.crowns > 0 && <span className="duel-card-crowns" title={`${card.crowns} crown${card.crowns > 1 ? "s" : ""}`}>{"♛".repeat(card.crowns)}</span>}
-        <BonusSwatch card={card} asColor={asColor} />
-      </div>
-      {card.ability && (
-        <div className="duel-card-abil" title={ABILITY_DESC[card.ability]}>{ABILITY_GLYPH[card.ability]}</div>
-      )}
-      {/* Cost is TWO explicit columns: gems stack in the first, the pearl always sits
-          in the second. (It used to be one wrapping column, so the pearl only landed
-          in column 2 when 3+ gems happened to overflow it — its position moved from
-          card to card.) */}
-      <div className="duel-card-cost">
-        <div className="duel-cost-col">
-          {Object.entries(card.cost).map(([c, n]) => c !== "pearl" && n > 0 && (
-            <div key={c} className="duel-cost-row">
-              <div className="duel-cost-gem" style={{ background: GEM_HEX[c] }} />
-              <span>{n}</span>
-            </div>
-          ))}
-        </div>
-        {card.cost.pearl > 0 && (
-          <div className="duel-cost-col">
-            <div className="duel-cost-row">
-              <div className="duel-cost-gem pearl" style={{ background: GEM_HEX.pearl }} />
-              <span>{card.cost.pearl}</span>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    <CardView card={card} asColor={asColor} selected={selected} affordable={affordable}
+      needsGold={needsGold} disabled={dim} onClick={onClick} small={small}
+      abilityGlyph={ABILITY_GLYPH[card.ability]} abilityTitle={ABILITY_DESC[card.ability]} />
   );
 }
 
+// An opponent's face-down reserve — Spender's card back, via the shared CardView.
 function CardBack({ level }) {
-  return (
-    <div className="duel-card small back">
-      <span className="duel-back-lvl">{["I", "II", "III"][(level || 1) - 1]}</span>
-      <span className="duel-back-label">Reserved</span>
-    </div>
-  );
+  return <CardView card={{ hidden: true, level }} small />;
 }
 
 function RoyalCard({ royal, dim, onClick, selected }) {
@@ -240,7 +184,10 @@ function useSocket(onMessage) {
 const css = `
 /* Full-bleed: no max-width cap — the game fills the browser, with only a small gutter.
    (A 1500px cap left big dead margins on a wide monitor.) */
-.duel{margin:0 auto;padding:0 14px 24px;font-family:'Crimson Pro','Crimson Fallback',serif}
+/* No font-family here: baseCss's body already sets the site stack (and this override
+   was silently dropping Georgia from the fallback, so the log rendered differently
+   from Spender's). */
+.duel{margin:0 auto;padding:0 14px 24px}
 .duel h1,.duel h2,.duel h3{font-family:'Cinzel','Cinzel Fallback',serif}
 .duel-topbar{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line,#3a332a);margin-bottom:14px}
 .duel-topbar .spacer{flex:1}
@@ -274,66 +221,38 @@ const css = `
 /* Left-aligned, NOT centered: the rows hold different card counts (5/4/3), so centering
    staggers the deck stubs instead of keeping them in one tidy column. The cards scale to
    fill the box anyway, so there's little slack left to distribute. */
-.duel-pyr-row{display:flex;gap:6px;margin-bottom:8px;align-items:stretch}
-.duel-deck{width:64px;min-height:92px;border:2px dashed #57493a;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#a08d6e;flex:0 0 auto}
-.duel-deck.clickable{cursor:pointer;border-color:#f5c842}
-.duel-deck.clickable:hover{background:#2a2318}
-.duel-deck .lvl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem}
-.duel-deck .cnt{font-size:.8rem;opacity:.8}
+/* (pyramid + deck styling now come from Spender via .level-row / .deck-pile) */
 
-/* cards */
-/* Pyramid cards GROW into the cards column's spare width. The column is a container,
-   so each card sizes off the real column width: subtract the deck (64) + the 5 flex
-   gaps (30) + the panel padding (24) = 118, then split across the widest row's 5
-   cards. All three rows therefore share ONE card size (sizing per-row with flex:1
-   would make L3's 3 cards wider than L1's 5). Inner text scales off --dcw with the
-   ratios measured from the 66px baseline, so a bigger card isn't just empty space. */
+/* cards + pyramid: SPENDER's .level-row / .deck-pile / .card (shared/splendor.jsx).
+   Spender's card is width:var(--card-w)/min-height:var(--card-h) and its level-row
+   already fits "deck + N cards" via flex:1 1 0 + max-width:var(--card-w) — so Duel
+   only has to SET those two vars per column width and the whole row scales itself.
+   (This replaces a hand-rolled container-query card that had drifted into square
+   swatches and its own palette.) */
 .duel-col-cards{container-type:inline-size}
-.duel-col-cards .duel-card{
-  /* Floor 44, not 58: on a ~390px phone the widest row (deck + 5 cards + gaps) must
-     still fit, and a 58 floor forced a horizontal overflow of the whole page. */
-  --dcw:clamp(44px, calc((100cqw - 118px) / 5), 200px);
-  width:var(--dcw);height:calc(var(--dcw) * 1.424);      /* the 66x94 aspect */
-  padding:calc(var(--dcw) * 0.076);
+.duel-col-cards .level-row{
+  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding */
+  --card-w:clamp(52px, calc((100cqw - 80px) / 6), 190px);
+  --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
+  margin-bottom:8px;
 }
-.duel-col-cards .duel-card-pts{font-size:calc(var(--dcw) * 0.279)}
-.duel-col-cards .duel-card-crowns{font-size:calc(var(--dcw) * 0.174)}
-.duel-col-cards .duel-bonus{width:calc(var(--dcw) * 0.212);height:calc(var(--dcw) * 0.212)}
-.duel-col-cards .duel-card-abil{font-size:calc(var(--dcw) * 0.174);top:calc(var(--dcw) * 0.39);right:calc(var(--dcw) * 0.076)}
-.duel-col-cards .duel-card-cost{bottom:calc(var(--dcw) * 0.076);left:calc(var(--dcw) * 0.076)}
-.duel-col-cards .duel-cost-row{font-size:calc(var(--dcw) * 0.179)}
-.duel-col-cards .duel-cost-gem{width:calc(var(--dcw) * 0.167);height:calc(var(--dcw) * 0.167)}
-.duel-col-cards .duel-deck{min-height:calc(var(--dcw, 66px) * 1.424)}
-.duel-card{position:relative;width:66px;height:94px;background:linear-gradient(160deg,#2e2417,#241c12);border:1px solid #57493a;border-radius:8px;padding:5px;cursor:pointer;flex:0 0 auto;transition:transform .12s, box-shadow .12s}
-.duel-card:hover{transform:translateY(-2px)}
-.duel-card.small{width:58px;height:82px}
-.duel-card.empty{background:none;border:2px dashed #3a3128;cursor:default}
-.duel-card.empty:hover{transform:none}
-.duel-card.dim{opacity:.45;cursor:default}
-.duel-card.selected{box-shadow:0 0 0 2px #f5c842, 0 4px 14px rgba(245,200,66,.35)}
-.duel-card.affordable{box-shadow:0 0 0 1px #7dc36b}
-.duel-card.affordable-gold{box-shadow:0 0 0 1px #c9a53f}
-.duel-card.selected.affordable,.duel-card.selected.affordable-gold{box-shadow:0 0 0 2px #f5c842, 0 4px 14px rgba(245,200,66,.35)}
-.duel-card.back{background:repeating-linear-gradient(45deg,#31261a,#31261a 6px,#2a2016 6px,#2a2016 12px);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:default}
-.duel-card.back:hover{transform:none}
-.duel-back-lvl{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.1rem;color:#c9b088}
-.duel-back-label{font-size:.6rem;opacity:.6;letter-spacing:.08em;text-transform:uppercase}
-.duel-card-top{display:flex;align-items:flex-start;gap:3px}
-.duel-card-pts{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.15rem;color:#f4e9d4;line-height:1}
-.duel-card-pts.zero{visibility:hidden}
-.duel-card-crowns{color:#f5c842;font-size:.72rem;letter-spacing:-2px;margin-top:1px}
-.duel-bonus-wrap{margin-left:auto;display:flex;gap:2px}
-.duel-bonus{width:14px;height:14px;border-radius:4px;border:1px solid rgba(255,255,255,.35);margin-left:auto}
-.duel-bonus.dbl{margin-left:0}
-.duel-bonus.wild{border-style:dashed}
-.duel-card-abil{position:absolute;top:26px;right:5px;font-size:.72rem;color:#e8d9b8;background:#4a3b26;border-radius:4px;padding:0 3px;line-height:1.35}
-/* Two fixed columns bottom-left: gems | pearl. Column 2 exists only when the card
-   costs a pearl, and the pearl is ALWAYS there — never mixed into the gem stack. */
-.duel-card-cost{position:absolute;bottom:5px;left:5px;right:5px;display:flex;flex-direction:row;align-items:flex-end;gap:6px}
-.duel-cost-col{display:flex;flex-direction:column-reverse;gap:1px}
-.duel-cost-row{display:flex;align-items:center;gap:3px;font-size:.74rem;color:#efe6d2}
-.duel-cost-gem{width:11px;height:11px;border:1px solid rgba(255,255,255,.3);border-radius:3px;flex:0 0 auto}
-.duel-cost-gem.pearl{border-radius:50%}
+/* Scale the card internals off --card-h using the SAME ratios as Spender's desktop
+   rules (its .level-row .card-* block) — so a Duel card is a Spender card at another
+   size, not a different card. Those ratios live inside Spender's own min-width:901px
+   query, which we deliberately did not move; these mirror them for Duel's sizes. */
+.duel-col-cards .level-row .card{padding:calc(var(--card-h) * 0.049) calc(var(--card-h) * 0.043) calc(var(--card-h) * 0.043);justify-content:space-between}
+.duel-col-cards .level-row .card-header{margin-bottom:calc(var(--card-h) * 0.043)}
+.duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147)}
+.duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
+.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.082)}
+.duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
+.duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.081);height:calc(var(--card-h) * 0.081)}
+.duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.08)}
+.duel-col-cards .level-row .card-cost{gap:calc(var(--card-h) * 0.027)}
+.duel-col-cards .level-row .card-cost .cost-col{gap:calc(var(--card-h) * 0.027)}
+.duel-col-cards .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
+.duel-col-cards .level-row .deck-remaining{font-size:calc(var(--card-h) * 0.147)}
+.card-empty{visibility:hidden}
 
 /* board */
 /* The board is the other place spare width should go (it's the focal point), so its
@@ -345,16 +264,15 @@ const css = `
 .duel-board-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
 .duel-board{--dcell:58px;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:7px;padding:12px;background:#241d13;border:1px solid #57493a;border-radius:14px}
 .duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227}
-.duel-cell .duel-token{width:calc(var(--dcell) * 0.79);height:calc(var(--dcell) * 0.79);font-size:calc(var(--dcell) * 0.33)}
-.duel-cell .duel-token{cursor:pointer;transition:transform .1s, box-shadow .1s}
-.duel-cell .duel-token:hover{transform:scale(1.08)}
-.duel-cell .duel-token.sel{box-shadow:0 0 0 3px #f5c842}
-.duel-cell .duel-token.goldarm{box-shadow:0 0 0 3px #f5c842;animation:duelPulse 1.1s infinite}
-.duel-cell .duel-token.matchable{box-shadow:0 0 0 3px #7dc36b;animation:duelPulse 1.1s infinite}
-.duel-cell .duel-token.inert{cursor:default}
+/* Board tokens are SPENDER's .gem-token (shared) — Duel only adds the board-specific
+   states + the scaling, since the shared token is a fixed 42px by default. */
+.duel-cell .gem-token{width:calc(var(--dcell) * 0.79);height:calc(var(--dcell) * 0.79);font-size:calc(var(--dcell) * 0.30);cursor:pointer;transition:transform .1s, box-shadow .1s}
+.duel-cell .gem-token:hover{transform:scale(1.08)}
+.duel-cell .gem-token.sel{box-shadow:0 0 0 3px var(--gold-light)}
+.duel-cell .gem-token.goldarm{box-shadow:0 0 0 3px var(--gold-light);animation:duelPulse 1.1s infinite}
+.duel-cell .gem-token.matchable{box-shadow:0 0 0 3px var(--green-gem);animation:duelPulse 1.1s infinite}
+.duel-cell .gem-token.inert{cursor:default}
 @keyframes duelPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
-.duel-token{display:flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700;border:2px solid rgba(255,255,255,.25);box-shadow:inset 0 -3px 6px rgba(0,0,0,.35);user-select:none}
-.duel-token.pearl-shape{border-radius:50%}
 .duel-board-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
 .duel-royals-row{display:flex;gap:10px;justify-content:center}
@@ -386,13 +304,11 @@ const css = `
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 .duel-minis{display:flex;gap:4px;flex-wrap:wrap}
 
-/* log */
-.duel-log{max-height:340px;overflow-y:auto;scrollbar-gutter:stable;font-size:.88rem}
-.duel-log-entry{padding:4px 2px;opacity:.9}
-.duel-log-entry+.duel-log-entry{border-top:1px solid #2c261e}
-.duel-log-entry.clickable{cursor:pointer}
-.duel-log-entry.clickable:hover{background:#2c2418;color:#f5c842}
-.duel-log-entry.future{opacity:.35}
+/* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
+   review vocabulary (clickable / log-selected / log-win / log-start). Duel only
+   raises the height cap, since its rail has the room. */
+.duel-panel .move-log{max-height:min(46vh,420px)}
+.log-entry.future{opacity:.35}
 
 /* review / replay */
 .duel-replaybar{display:flex;align-items:center;gap:10px;justify-content:center;flex-wrap:wrap;background:var(--surface,#1b1712);border:1px solid #6b5836;border-radius:10px;padding:8px 12px;margin:0 0 12px}
@@ -438,38 +354,46 @@ const css = `
 }
 `;
 
+// Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
+const duelStyles = baseCss + splendorCardCss + splendorCardExtraCss + splendorLogCss + css;
+
 // ─── Log formatting ─────────────────────────────────────────────────────────
+// One log record -> {name, action}, matching Spender's formatLogMove shape so the
+// shared LogEntry renders both games' logs identically (turn | name | action).
 function fmtLog(e, names, cardsById, royals) {
-  const who = names[e.pid] || e.pid || "";
+  const name = e.pid ? (names[e.pid] || e.pid) : "";
   const card = e.card_id ? cardsById[e.card_id] : null;
   const cardName = card
     ? `a level-${card.level}${card.bonus && card.bonus !== "wild" ? " " + card.bonus : card.bonus === "wild" ? " wild" : ""} card${card.points ? ` (${card.points} pts)` : ""}`
     : "a card";
-  switch (e.type) {
-    case "take": {
-      const counts = {};
-      (e.colors || []).forEach((c) => { counts[c] = (counts[c] || 0) + 1; });
-      const s = Object.entries(counts).map(([c, n]) => (n > 1 ? `${n} ${c}` : c)).join(", ");
-      return `${who} took ${s}${e.opp_privilege ? " (opponent gains a Privilege)" : ""}`;
+  const act = (() => {
+    switch (e.type) {
+      case "take": {
+        const counts = {};
+        (e.colors || []).forEach((c) => { counts[c] = (counts[c] || 0) + 1; });
+        const s = Object.entries(counts).map(([c, n]) => (n > 1 ? `${n} ${c}` : c)).join(", ");
+        return `took ${s}${e.opp_privilege ? " (opponent gains a Privilege)" : ""}`;
+      }
+      case "use_privilege": return `spent a Privilege for a ${e.color} token`;
+      case "replenish": return `replenished the board (${e.count})${e.opp_privilege ? " — opponent gains a Privilege" : ""}`;
+      case "reserve": return e.from_deck
+        ? `took gold and reserved from the level-${e.level} deck`
+        : `took gold and reserved ${cardName}`;
+      case "buy": return `purchased ${cardName}${e.as_color ? ` (wild as ${e.as_color})` : ""}`;
+      case "take_same": return `took a bonus ${e.color} token`;
+      case "steal": return `stole a ${e.color} token`;
+      case "privilege_gain": return "gained a Privilege";
+      case "again": return "earns another turn";
+      case "extra_turn": return "takes an extra turn";
+      case "royal": return `claimed a Royal (${e.points} pts)`;
+      case "discard": return `discarded a ${e.color} token`;
+      case "skip_pending": return `skipped (${e.kind})`;
+      case "pass": return "passed";
+      case "game_over": return `wins — ${WIN_DESC[e.condition] || e.condition}${e.color ? ` (${e.color})` : ""}`;
+      default: return e.type;
     }
-    case "use_privilege": return `${who} spent a Privilege for a ${e.color} token`;
-    case "replenish": return `${who} replenished the board (${e.count})${e.opp_privilege ? " — opponent gains a Privilege" : ""}`;
-    case "reserve": return e.from_deck
-      ? `${who} took gold and reserved from the level-${e.level} deck`
-      : `${who} took gold and reserved ${cardName}`;
-    case "buy": return `${who} purchased ${cardName}${e.as_color ? ` (wild as ${e.as_color})` : ""}`;
-    case "take_same": return `${who} took a bonus ${e.color} token`;
-    case "steal": return `${who} stole a ${e.color} token`;
-    case "privilege_gain": return `${who} gained a Privilege`;
-    case "again": return `${who} earns another turn`;
-    case "extra_turn": return `${who} takes an extra turn`;
-    case "royal": return `${who} claimed a Royal (${e.points} pts)`;
-    case "discard": return `${who} discarded a ${e.color} token`;
-    case "skip_pending": return `${who} skipped (${e.kind})`;
-    case "pass": return `${who} passed`;
-    case "game_over": return `♛ ${who} wins — ${WIN_DESC[e.condition] || e.condition}${e.color ? ` (${e.color})` : ""}`;
-    default: return `${who} ${e.type}`;
-  }
+  })();
+  return { name, action: act, card };
 }
 
 // ─── Main component ─────────────────────────────────────────────────────────
@@ -842,7 +766,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     <div className="duel-tokrow" data-tokens={pid}>
       {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
         <div key={t} className="duel-tok">
-          <Token color={t} size={30} />
+          <GemToken color={t} size={30} />
           <span className="n">{p.tokens[t]}</span>
         </div>
       ))}
@@ -916,25 +840,35 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     );
   };
 
+  // The pyramid uses SPENDER's level-row + deck-pile + card (shared/splendor.jsx), so
+  // the rows fit and scale by the same proven mechanism Spender's board uses.
   const renderPyramid = () => (
     <div className="duel-panel" data-pyramid>
-      {[3, 2, 1].map((lvl) => (
-        <div className="duel-pyr-row" key={lvl}>
-          <div className={`duel-deck${goldCell != null && (game.deck_counts?.[String(lvl)] || 0) > 0 ? " clickable" : ""}`}
-            onClick={() => deckClick(lvl)}
-            title={goldCell != null ? "Reserve the top card of this deck (blind)" : `${game.deck_counts?.[String(lvl)] || 0} cards left`}>
-            <span className="lvl">{["I", "II", "III"][lvl - 1]}</span>
-            <span className="cnt">{game.deck_counts?.[String(lvl)] || 0}</span>
+      {[3, 2, 1].map((lvl) => {
+        const left = game.deck_counts?.[String(lvl)] || 0;
+        const canDraw = goldCell != null && left > 0;
+        return (
+          <div className="level-row" key={lvl}>
+            <div className={`deck-pile${canDraw ? "" : " disabled"}`}
+              onClick={() => deckClick(lvl)}
+              title={goldCell != null ? "Reserve the top card of this deck (blind)" : `${left} cards left`}>
+              <span>{["I", "II", "III"][lvl - 1]}</span>
+              <span className="deck-remaining">{left}</span>
+            </div>
+            {game.pyramid[String(lvl)].map((cid, slot) => (
+              cid ? (
+                <DuelCard key={slot} card={cardsById[cid]}
+                  selected={selCard?.id === cid}
+                  affordable={canAffordCard(cardsById[cid], me, cardsById)}
+                  needsGold={goldNeeded(cardsById[cid]?.cost || {}, me?.tokens, myBonuses) > 0}
+                  onClick={() => pyramidCardClick(cid, lvl, slot)} />
+              ) : (
+                <div key={slot} className="card-slot" />
+              )
+            ))}
           </div>
-          {game.pyramid[String(lvl)].map((cid, slot) => (
-            <DuelCard key={slot} card={cid ? cardsById[cid] : null}
-              selected={!!cid && selCard?.id === cid}
-              affordable={!!cid && canAffordCard(cardsById[cid], me, cardsById)}
-              needsGold={!!cid && goldNeeded(cardsById[cid]?.cost || {}, me?.tokens, myBonuses) > 0}
-              onClick={cid ? () => pyramidCardClick(cid, lvl, slot) : undefined} />
-          ))}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 
@@ -957,7 +891,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           return (
             <div key={i} className="duel-cell">
               {/* no `size`: the board's tokens scale with their cells via CSS */}
-              {tok && <Token color={tok} dataCell={i} className={cls} onClick={() => cellClick(i)} />}
+              {tok && <GemToken color={tok} size={null} dataCell={i} className={cls} onClick={() => cellClick(i)} />}
               {!tok && <div data-cell={i} style={{ width: 1, height: 1 }} />}
             </div>
           );
@@ -1022,25 +956,30 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     return (
       <div className="duel-panel">
         <h3 style={{ margin: "0 0 8px" }}>Moves</h3>
-        <div className="duel-log">
-          {log.map((e, r) => ({ e, r })).reverse().slice(0, 120).map(({ e, r }) => {
+        {/* Spender's move log, from shared/splendor.jsx: turn | name | action rows,
+            with its review vocabulary (clickable / log-selected / log-win / start). */}
+        <div className="move-log">
+          {over && (
+            <LogEntry kind="win"
+              action={`🏆 ${names[liveGame.winner] || liveGame.winner} won the game`} />
+          )}
+          {log.map((e, r) => ({ e, r })).reverse().slice(0, 150).map(({ e, r }) => {
             const target = snapForLogIndex(r);
             const clickable = target >= 0;
-            // dim the moves that hadn't happened yet on the board being shown
-            const future = r >= shownLen;
+            const { name, action } = fmtLog(e, names, cardsById, royals);
             return (
-              <div key={r}
-                className={`duel-log-entry${clickable ? " clickable" : ""}${future ? " future" : ""}`}
-                onClick={clickable ? () => goToTurn(target) : undefined}
-                title={clickable ? "Jump to this move" : undefined}>
-                {fmtLog(e, names, cardsById, royals)}
-              </div>
+              <LogEntry key={r} turn={e.t} name={name} action={action}
+                clickable={clickable}
+                selected={reviewing && target === replayTurn}
+                future={r >= shownLen}   /* moves after the board being shown, dimmed */
+                onClick={clickable ? () => goToTurn(target) : undefined} />
             );
           })}
           {replaySnapshots && (
-            <div className="duel-log-entry clickable" onClick={() => goToTurn(0)}
-              title="Jump to the starting board">▶ Game started</div>
+            <LogEntry kind="start" action="▶ Game started" clickable
+              onClick={() => goToTurn(0)} />
           )}
+          {!log.length && <div className="log-empty">No moves yet.</div>}
         </div>
       </div>
     );
@@ -1079,7 +1018,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <div className="duel-modal-row">
               {(pendCtx.colors || []).map((c) => (
                 <div key={c} style={{ cursor: "pointer" }} onClick={() => mv({ type: "steal", color: c })}>
-                  <Token color={c} size={44} />
+                  <GemToken color={c} size={44} />
                 </div>
               ))}
             </div>
@@ -1108,7 +1047,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <div className="duel-modal-row">
               {TOKENS.map((t) => (me?.tokens?.[t] || 0) > 0 && (
                 <div key={t} className="duel-tok" style={{ cursor: "pointer" }} onClick={() => mv({ type: "discard", color: t })}>
-                  <Token color={t} size={44} />
+                  <GemToken color={t} size={44} />
                   <span className="n">{me.tokens[t]}</span>
                 </div>
               ))}
@@ -1124,7 +1063,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <div className="duel-modal-row">
               {wildEligible.map((c) => (
                 <div key={c} style={{ cursor: "pointer", textAlign: "center" }} onClick={() => submitBuy(c)}>
-                  <Token color={c} size={44} />
+                  <GemToken color={c} size={44} />
                   <div className="duel-muted">{myBonuses[c]} bonus{myBonuses[c] === 1 ? "" : "es"}</div>
                 </div>
               ))}
@@ -1193,7 +1132,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const savedListed = savedRid && (openGames.some((g) => g.id === savedRid) || myGames.some((g) => g.id === savedRid));
     return (
       <div className="app duel">
-        <style>{baseCss + css}</style>
+        <style>{duelStyles}</style>
         <div className="duel-topbar">
           <button className="btn btn-outline" onClick={onExit}>{"←"} Back</button>
           <div className="spacer" />
@@ -1284,7 +1223,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const nPlayers = Object.keys(names).length;
     return (
       <div className="app duel">
-        <style>{baseCss + css}</style>
+        <style>{duelStyles}</style>
         <div className="duel-waiting">
           <h1 className="duel-title">Spender Duel</h1>
           <p>Share this code with a friend:</p>
@@ -1305,7 +1244,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   if (!game || !catalog) {
     return (
       <div className="app duel">
-        <style>{baseCss + css}</style>
+        <style>{duelStyles}</style>
         <div className="duel-waiting"><p className="duel-muted">Loading game…</p></div>
       </div>
     );
@@ -1313,7 +1252,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   return (
     <div className="app duel">
-      <style>{baseCss + css}</style>
+      <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
         <button className="btn btn-outline" onClick={leaveToLobby}>{"←"} Menu</button>
@@ -1345,8 +1284,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           <div key={f.id} className="duel-flyer"
             style={{ left: f.left, top: f.top, "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": 0.55 }}>
             {f.color
-              ? <Token color={f.color} size={f.size} />
-              : <div className="duel-card small" style={{ cursor: "default" }} />}
+              ? <GemToken color={f.color} size={f.size} />
+              : <div className="card card-small" style={{ cursor: "default" }} />}
           </div>
         ))}
       </div>
