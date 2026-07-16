@@ -1666,18 +1666,29 @@ shared/
 ### Shared Splendor assets (`shared/splendor.jsx`) — Spender + Spender Duel
 **The two Splendor-family games SHARE their gems, jewel cards and move log. Never
 re-implement them per game.** `shared/splendor.jsx` exports `GEM_COLORS`/`GEM_LABELS`/
-`GEM_HEX`, `GemToken`, `CardView`, `LogEntry`, and the CSS (`splendorCardCss` +
-`splendorCardExtraCss` + `splendorLogCss`), all lifted VERBATIM out of Spender.jsx.
+`GEM_HEX`, the components `GemToken` / `CardView` / `TokenPill` / `BonusPill` / `LogEntry`,
+and the CSS (`splendorPanelCss` + `splendorCardCss` + `splendorCardExtraCss` +
+`splendorPillCss` + `splendorLogCss`), all lifted VERBATIM out of Spender.jsx.
+- **The player pills ARE the "what have I bought" indicator:** `.bonus-pill` ("+2 W") per
+  color, `.token-pill` for gems in hand, `.gem-total` for the count. Duel appends the
+  color's prestige (★N) to each bonus pill (10 in one color wins) and puts royals in the
+  same row Spender uses for nobles. The log panel is `.panel-title` titled **"Log"** over
+  `.move-log` — same structured `turn | name | action` rows in both games.
 - **WHY it exists (the mistake to not repeat):** Spender.jsx exports ONLY its app
   component, so a new game can't import its internals — Spender Duel was therefore built
   with LOOKALIKES and drifted (square bonus/cost swatches vs round, its own palette and
   card body, its own font stack that silently dropped Georgia, a text-blob log). If a
   second game needs a Spender visual, EXTRACT it here; don't approximate it.
   (`shared/theme.js` was already this precedent — Spender + Books both import `baseCss`.)
-- **Spender's sheet is spliced, not moved:** `css = baseCss + <before> + splendorCardCss
-  + splendorCardExtraCss + <mid> + splendorLogCss + <after>` — the shared blocks sit at
-  their ORIGINAL positions, so rule order is preserved. Verified **rule-for-rule
-  identical (662 rules)**; re-run that check if you touch the splice.
+- **Spender's sheet is spliced, not moved:** each shared block sits at its ORIGINAL
+  position in `const css = baseCss + <before> + splendorXCss + <mid> + ... + <after>`, so
+  rule order is preserved. Verified **rule-for-rule identical (662 rules) against the
+  PRISTINE pre-refactor commit `dc1b005`** — always verify against that commit, NOT a
+  `.bak` (a second extraction overwrites the .bak and the check silently compares the
+  wrong baseline). Re-run it if you touch the splice.
+  **Gotcha the bundler hides:** a splice that references `splendorXCss` without adding it
+  to Spender's import still BUILDS (vite resolves the module) and only dies at runtime —
+  check the import line when adding a block.
   `splendorCardExtraCss` holds only what Spender never emits (crowns, wild bonus,
   ability glyph, the pearl's 2nd cost column, a `card-small` variant).
 - **CardView is game-rule-free:** Duel's extras are optional props (`asColor`,
