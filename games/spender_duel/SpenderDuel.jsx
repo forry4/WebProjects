@@ -292,22 +292,44 @@ const css = `
 
 /* player panels */
 /* Pills fill exactly ONE row of 7 — Duel has 7 token types (5 gems + pearl + gold), and
-   the bonus row tops out at 7 too (5 colors + 2 royals). Same shape as Spender's desktop
-   rule, which does this for its 6. The rows use gap:4px, so 7 items leave 6 gaps = 24px;
-   nowrap + min-width:0 + overflow:hidden lets a pill shrink into its share instead of
-   wrapping or pushing the row wide. */
-.duel-player .player-tokens,.duel-player .player-bonuses{flex-wrap:nowrap;min-width:0}
+   the bonus row tops out at 7 too (5 colors + 2 royals). The rows use gap:4px, so 7 items
+   leave 6 gaps = 24px; nowrap + min-width:0 + overflow:hidden lets a pill take exactly
+   its share instead of wrapping or pushing the row wide.
+
+   SHAPE comes from Spender: it derives every pill dimension from --card-h (font x0.082,
+   padding x0.018/x0.006, gap x0.014, dot x0.078, radius 999px), giving a 1.82 w:h
+   capsule. Duel's rail has no card to anchor to, so we rebuild that anchor from the
+   pill's OWN width and reuse Spender's formulas verbatim — a Duel pill is a Spender pill
+   scaled, not a flattened one. (Measured: Spender's pill is 61.6 wide at --card-h 218.5,
+   hence the 3.547 factor. Sizing the width alone gave a 2.48-ratio flat pill.) */
+.duel-player{container-type:inline-size}
+.duel-player .player-tokens,.duel-player .player-bonuses{
+  flex-wrap:nowrap;min-width:0;
+  /* 100cqw is the panel's CONTENT box (padding already excluded), so the row only loses
+     its 6 gaps x 4px. Subtracting the padding again here under-sized the anchor and left
+     the pill at a 2.0 ratio instead of Spender's 1.82. */
+  --pill-anchor:calc(((100cqw - 24px) / 7) * 3.547);
+}
 .duel-player .token-pill,.duel-player .bonus-pill{
   flex:0 1 calc((100% - 24px) / 7);
   min-width:0;justify-content:center;overflow:hidden;white-space:nowrap;
-  padding:2px 3px;gap:2px;
+  font-size:calc(var(--pill-anchor) * 0.082);
+  padding:calc(var(--pill-anchor) * 0.018) calc(var(--pill-anchor) * 0.006);
+  gap:calc(var(--pill-anchor) * 0.014);
+  border-radius:999px;
+  /* Pin the HEIGHT to Spender's (its pill is 33.8 tall at --card-h 218.5 => 0.1547), so
+     both pills are the same capsule regardless of their text size — otherwise the
+     bonus pill's smaller font shrinks its box and the two rows stop matching. */
+  min-height:calc(var(--pill-anchor) * 0.1547);
+  box-sizing:border-box;
 }
-/* A bonus pill carries more text than a token pill ("+3 B" plus Duel's "★3"), so it
-   gets a smaller face to stay inside its 1/7 share rather than clipping. */
-.duel-player .bonus-pill{font-size:.6rem;letter-spacing:-.01em}
-.duel-player .token-pill{font-size:.64rem}
-/* keep Spender's 10px dot (it fits the 1/7 share); just stop it shrinking */
-.duel-player .token-pill>span{flex:0 0 auto}
+.duel-player .player-tokens .token-pill>span{
+  width:calc(var(--pill-anchor) * 0.078)!important;
+  height:calc(var(--pill-anchor) * 0.078)!important;flex:0 0 auto;
+}
+/* A bonus pill carries more glyphs than a token pill ("+3 B" plus Duel's "★3"), so its
+   TEXT is nudged down to stay inside the same capsule. The box stays Spender-shaped. */
+.duel-player .bonus-pill{font-size:calc(var(--pill-anchor) * 0.066);letter-spacing:-.02em}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
