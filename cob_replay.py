@@ -357,8 +357,14 @@ def main(path, verbose=True, on_move=None):
                 if in_black and img.startswith("silver"):
                     AP(pid, {"type":"buy_black","tile_id":tobj}, f"buy {tid}")   # normal black-depot buy
                 else:
-                    # 2019 monastery-6 buy (numbered depot, or paid with workers) — a mechanic
-                    # CoC deliberately lacks; this game can't be faithfully replayed -> filter it.
+                    # BGA's monastery 6 = "spend 2 silver OR 2 workers to take a tile from ANY
+                    # depot". CoC has no equivalent, so a game where it's used can't be replayed
+                    # faithfully -> filter the whole game. This guard is exactly right: the only
+                    # buy everyone has is black-depot-with-silver, so anything else IS mon6.
+                    # Measured over the corpus: 450 black/silver (normal) vs 37 numbered/silver
+                    # + 7 numbered/workers + 7 black/workers (= 51 mon6 uses). Not a bug, not a
+                    # missing purchase rule, not a LOC_TO_DEPOT problem -- all three were checked
+                    # and refuted. Do not re-investigate.
                     raise RuntimeError("mon6_buy_mechanic")
             elif pk == "building_take_choice":
                 AP(pid, {"type":"building_take_choice","tile_id":"b"+str(tid)}, f"btake {tid}")
@@ -408,11 +414,20 @@ def main(path, verbose=True, on_move=None):
                 AP(pid, {"type":"take_workers","die_index":di}, "workers")
         elif t == "goodsTaken":
             pid = str(a["plId"])
-            dep = int(re.search(r"\d+", a.get("depots","")).group())   # "(3)" -> 3
+            # `depots` names EVERY depot drained by this one action: "(3)" -> [3], and for
+            # monastery 5 "(6,1)" -> [6, 1] = the ship depot AND the adjacent one, in ONE
+            # record (there is no second goodsTaken for the m5 follow-up). Parsing only the
+            # first number left the m5 pending armed, and a LATER ship's goodsTaken then got
+            # eaten by that stale pending -> "not an adjacent depot with goods". Consume all.
+            deps = [int(x) for x in re.findall(r"\d+", a.get("depots", ""))]
             if g.get("pending_kind") == "ship_choose_depot":
-                AP(pid, {"type":"ship_take_goods","depot":dep}, "ship_goods")
+                AP(pid, {"type":"ship_take_goods","depot":deps[0]}, "ship_goods")
+                # m5 follow-up rides in the SAME record -> resolve it now, never leave it armed.
+                for d2 in deps[1:]:
+                    if g.get("pending_kind") == "ship_adjacent_depot":
+                        AP(pid, {"type":"ship_adjacent_take","depot":d2}, "ship_adj")
             elif g.get("pending_kind") == "ship_adjacent_depot":
-                AP(pid, {"type":"ship_adjacent_take","depot":dep}, "ship_adj")
+                AP(pid, {"type":"ship_adjacent_take","depot":deps[0]}, "ship_adj")
             # resolve a goods_pick overflow using the colours the log kept (from goodsTilesToMove)
             kept = [tiles.goods_color_for_die(goods_type[str(gt["id"])])
                     for gt in a.get("goodsTilesToMove", []) if str(gt["id"]) in goods_type]
