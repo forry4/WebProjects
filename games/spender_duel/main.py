@@ -11,7 +11,7 @@ write executor, the stale-socket disconnect guard).
 
 ONE structural difference from CoC: Spender Duel has hidden information
 (secret reserves, the bag, the decks), so room state is built PER RECIPIENT
-via ``engine.player_view`` — see ``broadcast_state`` — instead of one shared
+via ``engine.player_view`` â€” see ``broadcast_state`` â€” instead of one shared
 snapshot. Persistence stores the FULL game; redaction happens on send.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ from . import bot
 from . import cards
 from . import replay
 # `ai` is used as a local name for the bot pid in places, so alias the module
-# (the same collision CoC hit — see its `coc_ai` import).
+# (the same collision CoC hit â€” see its `coc_ai` import).
 from . import ai as duel_ai
 
 from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
@@ -64,7 +64,7 @@ duel_app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# ── In-memory room state ──────────────────────────────────────────────────────
+# â”€â”€ In-memory room state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 AI_PID = "bot"
@@ -102,7 +102,7 @@ duel_init_db()
 cleanup_stale_games("duel_games")
 
 
-# ── Persistence (single-thread write executor with a reused connection) ──────
+# â”€â”€ Persistence (single-thread write executor with a reused connection) â”€â”€â”€â”€â”€â”€
 _DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="duel-db-write")
 _save_conn = None  # only ever touched by the _DB_WRITE_EXEC thread
 
@@ -124,7 +124,7 @@ def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, 
                            VALUES (?,?,?,?,?,?,?,?,?,?)""",
                         (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
         _save_conn.commit()
-    except Exception:  # noqa: BLE001 — a save must never crash; reconnect next time
+    except Exception:  # noqa: BLE001 â€” a save must never crash; reconnect next time
         LOG.warning("duel save_game write failed for %s; dropping connection", room_id, exc_info=True)
         try:
             if _save_conn is not None:
@@ -187,7 +187,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "ai_player": state.get("ai_player"),
         # Persisted so a vs-bot game reconnected after a redeploy (which wipes the
         # in-memory ROOMS) keeps the tier it was created with, instead of silently
-        # falling back to the default — the bug Spender hit with ai_variant.
+        # falling back to the default â€” the bug Spender hit with ai_variant.
         "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
         "sockets": {},
     }
@@ -270,7 +270,7 @@ def list_user_history(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    """SELECT-then-DELETE (never cursor.rowcount — the libsql wrapper lacks it)."""
+    """SELECT-then-DELETE (never cursor.rowcount â€” the libsql wrapper lacks it)."""
     conn = _db()
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM duel_games WHERE id=? AND player1_id=? AND status='open'",
@@ -284,7 +284,7 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
     return existed
 
 
-# ── Room state / broadcast (PER-RECIPIENT redaction) ─────────────────────────
+# â”€â”€ Room state / broadcast (PER-RECIPIENT redaction) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     """Room snapshot AS SEEN BY viewer_pid: the game passes through
     engine.player_view so the bag, deck order, and the opponent's reserved-card
@@ -332,13 +332,26 @@ def _bot_should_act(room: dict) -> bool:
                 and (game.get("pending_pid") or game.get("turn")) == ai)
 
 
-# ── Bot turn scheduler ────────────────────────────────────────────────────────
+# â”€â”€ Bot turn scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _new_rng() -> random.Random:
+    """Fresh entropy in production; a seam tests pin for DETERMINISTIC games.
+
+    EVERY source of game entropy goes through here — the deck seed, the first-player
+    shuffle, and the bot's move choices — because a test can otherwise only HOPE the game
+    exercises the path it asserts on. That is exactly how the vs-AI wire-redaction test
+    became flaky (~1/14: some deals simply never had the bot reserve, so its "a reserve
+    actually happened" check failed on luck alone). A deploy gate must not be a coin flip.
+    Production passes no seed, so play stays properly random.
+    """
+    return random.Random()
+
+
 async def _schedule_bot_turn(room_id: str) -> None:
     """Drive the bot's whole turn, one move at a time with pacing so the client
     animates each move.
 
     The MCTS tiers are HEAVY (seconds per turn), so the search runs on a snapshot
-    in a THREAD POOL and the planned sequence is applied back under the lock — the
+    in a THREAD POOL and the planned sequence is applied back under the lock â€” the
     lock is never held across a search. (Running heavy engine work under ROOM_LOCK
     on the event-loop thread is what once took the CoC backend down; don't inline
     it here.) A trivial-bot finisher guarantees the turn always ends, so a failed
@@ -352,7 +365,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
         snapshot = duel_ai._clone_game(room["game"]) if difficulty != "easy" else None
     try:
-        rng = random.Random()
+        rng = _new_rng()
         seq = []
         if snapshot is not None:
             loop = asyncio.get_event_loop()
@@ -360,14 +373,14 @@ async def _schedule_bot_turn(room_id: str) -> None:
                 seq = await loop.run_in_executor(
                     None,
                     lambda: duel_ai.play_turn_plan(snapshot, AI_PID, difficulty=difficulty,
-                                                   rng=random.Random()),
+                                                   rng=_new_rng()),
                 )
             except Exception:
                 LOG.exception("duel AI planning failed; finishing with the trivial bot")
                 seq = []
 
         # Apply the plan move-by-move, re-validating each against the LIVE game (it
-        # may have drifted — e.g. a reconnect re-triggered the scheduler).
+        # may have drifted â€” e.g. a reconnect re-triggered the scheduler).
         for mv in seq:
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
@@ -412,7 +425,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
                 r["_bot_running"] = False
 
 
-# ── WebSocket protocol ────────────────────────────────────────────────────────
+# â”€â”€ WebSocket protocol â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @duel_app.websocket("/ws/{room}/{player}")
 async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
@@ -491,9 +504,10 @@ async def _handle_create(ws, room_id, pid, msg):
             room["ai_player"] = AI_PID
             room["status"] = "playing"
             seats = [pid, AI_PID]
-            random.shuffle(seats)  # randomize the first player (seat 1 gets the setup privilege)
+            _r = _new_rng()
+            _r.shuffle(seats)  # randomize the first player (seat 1 gets the setup privilege)
             room["game"] = engine.new_game(seats, names={pid: name, AI_PID: "Bot"},
-                                           seed=random.randrange(2**31))
+                                           seed=_r.randrange(2**31))
         save_game(room_id)
         bot_turn = vs_ai and _bot_should_act(room)
     await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
@@ -537,9 +551,10 @@ async def _handle_start(ws, room_id, pid):
             await _send(ws, {"type": "error", "message": "already started"})
             return
         room["status"] = "playing"
-        random.shuffle(humans)  # random first player
+        _r = _new_rng()
+        _r.shuffle(humans)  # random first player
         room["game"] = engine.new_game(humans, names=dict(room["players"]),
-                                       seed=random.randrange(2**31))
+                                       seed=_r.randrange(2**31))
         save_game(room_id)
     await broadcast_state(room_id)
 
@@ -616,7 +631,7 @@ async def _handle_abandon(ws, room_id, pid):
     await broadcast_state(room_id)
 
 
-# ── REST ──────────────────────────────────────────────────────────────────────
+# â”€â”€ REST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @duel_app.get("/health")
 async def health():
     return {"status": "ok", "service": "spender_duel", "version": "1.0"}
@@ -670,7 +685,7 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None):
     """Read-only review of a FINISHED game, restricted to a participant.
 
-    Returns the final board plus `snapshots` — one rebuilt board per move, for
+    Returns the final board plus `snapshots` â€” one rebuilt board per move, for
     turn-by-turn rewind (replay.reconstruct, exact from the persisted seed + log).
     `snapshots` is None when a game can't be reconstructed (a pre-seed save, or log
     drift): the review still shows the final board, just without the rewind."""
