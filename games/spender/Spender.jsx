@@ -4,6 +4,7 @@ import WhereWolf from "../wherewolf/WhereWolf.jsx";
 import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
+import { lobbyCss, LobbyHeader } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -108,7 +109,7 @@ function totalPoints(purchased, nobles) {
 }
 
 // ─── Styles ────────────────────────────────────────────────────────────────
-const css = baseCss + `
+const css = baseCss + lobbyCss + `
 
 /* ─── Loading ───────────────────────────────────────────────────────────── */
 .loading-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:32px;text-align:center}
@@ -162,13 +163,8 @@ const css = baseCss + `
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:1400px;margin:0 auto;padding:28px 20px 48px}
-/* Full-width top banner (flush to the screen edges) — lives OUTSIDE the centered
-   .browser content so its bottom border spans the whole screen. Three sections:
-   back button far left, game name centered, user far right (left/right flex:1 so the
-   title is truly centered). */
-.browser-header{display:flex;align-items:center;gap:12px;padding:12px 24px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);border-bottom:1px solid var(--border);background:var(--surface)}
-.browser-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0}
-.browser-title{flex:0 0 auto;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:2rem;font-weight:700;color:var(--gold);letter-spacing:.04em}
+/* The lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). The
+   .browser-user* rail classes below are still used by the Home menu header. */
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
@@ -640,8 +636,7 @@ const css = baseCss + `
 
 @media(max-width:600px){
   .browser{padding:20px 14px 40px}
-  .browser-title{font-size:1.4rem}
-  .browser-header{padding-left:14px;padding-right:14px}
+  .lby-header{padding-left:14px;padding-right:14px}
   /* Compact the toggle + Create Game so the pair fits side by side on phones. */
   .create-controls{gap:8px}
   .create-controls .len-btn{padding:8px 10px;font-size:.74rem}
@@ -2503,21 +2498,17 @@ export default function SpenderApp() {
 		<>
 			<style>{css}</style>
 			<div className="app">
-				<div className="browser-header">
-					<div className="browser-head-left">
-						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>
-							← Back
-						</button>
-						<button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>
-							📖 Rules
-						</button>
-					</div>
-					<div className="browser-title">Spender</div>
-					<div className="browser-user">
-						{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
-						<span className="browser-username">{authUser?.name}</span>
-					</div>
-				</div>
+				<LobbyHeader
+					left={<>
+						<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
+						<button className="btn btn-ghost btn-sm" onClick={() => setShowRules(true)}>📖 Rules</button>
+					</>}
+					title="Spender"
+					right={<>
+						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
+						<span className="lby-head-name">{authUser?.name}</span>
+					</>}
+				/>
 				<div className="browser">
 					<div className="browser-create">
 						<div className="create-controls">

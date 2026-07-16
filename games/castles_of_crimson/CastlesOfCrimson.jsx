@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -685,7 +686,7 @@ function Pips({ n }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────-
-const css = `
+const css = lobbyCss + `
 /* Self-hosted fonts (CoC is mounted bare without baseCss, so it carries its own copy;
    the browser dedupes identical @font-face by src url). Metric-matched fallbacks keep
    the layout stable if the real font isn't loaded yet. */
@@ -707,14 +708,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
 .coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
 .coc-user{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.78rem;color:var(--text-dim);letter-spacing:.05em}
-/* Lobby banner: full-width (flush to screen edges — lives OUTSIDE the centered .coc-wrap),
-   back button far left, game name centered (left/right flex:1 so it's truly centered),
-   user far right. */
-.coc-top.coc-top-lobby{margin-bottom:0;padding:12px 20px;padding-top:calc(env(safe-area-inset-top,0px) + 12px);background:var(--surface);border-bottom:1px solid var(--border)}
-.coc-top-lobby .coc-top-left{flex:1 1 0;justify-content:flex-start}
-.coc-top-lobby .coc-title{flex:0 0 auto;text-align:center}
-.coc-top-lobby .coc-user{flex:1 1 0;text-align:right}
-.coc-top-lobby + .coc-wrap{padding-top:18px}
+/* Lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). */
+.lby-header + .coc-wrap{padding-top:18px}
 /* Game-screen top bar: back button left, title truly centered, empty right spacer. */
 .coc-top-game{display:flex;align-items:center;gap:12px}
 .coc-top-game .coc-top-left{flex:1 1 0;justify-content:flex-start}
@@ -753,12 +748,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.85rem}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
 .coc-empty{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
-.coc-section-hd{display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.coc-section-hd .coc-section-title{margin:0;border:none;padding:0}
-.coc-muted{font-size:.74rem;color:var(--text-dim)}
 .coc-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.coc-turn-badge{background:var(--gold);color:#120c0d;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.coc-their-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
 .coc-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:coc-spin .7s linear infinite;vertical-align:middle;margin-right:6px}
 @keyframes coc-spin{to{transform:rotate(360deg)}}
 .coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
@@ -883,12 +873,7 @@ html,body{margin:0;padding:0;background:#120c0d}
      full-width zero-height break) so the 6 chips never split depending on how the region
      labels above happen to wrap at a given width */
   .coc .coc-bonus-div ~ .coc-bonus-div{flex-basis:100%;width:auto;height:0;margin:0;background:none}
-  /* lobby header: the big centered title overlapped the ← Back button on phones, making
-     it un-tappable. Shrink the title and trim the header padding so Back stays clickable
-     and the header isn't so tall. */
-  .coc-top.coc-top-lobby{padding:9px 12px;padding-top:calc(env(safe-area-inset-top,0px) + 9px);gap:8px}
-  .coc-top-lobby .coc-title{font-size:1.05rem}
-  .coc-top-lobby .coc-user{font-size:.64rem}
+  /* (lobby header is now the shared .lby-header — its own mobile padding lives in lobbyCss) */
   /* Same fix for the in-GAME header (Menu | title | Abandon): the full-size 1.5rem
      Cinzel title is too wide for a phone, so it overlapped the Menu button and shoved
      Abandon off-screen. The title is centered between two button zones, so it must scale
@@ -2078,14 +2063,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   if (screen === "lobby") {
     return (
       <div className="coc"><style>{css}</style>
-        <div className="coc-top coc-top-lobby">
-          <div className="coc-top-left">
+        <LobbyHeader
+          left={<>
             <button className="coc-btn ghost sm" onClick={onExit}>← Back</button>
             <button className="coc-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-          </div>
-          <span className="coc-title">Castles of Crimson</span>
-          <span className="coc-user">{playerName}</span>
-        </div>
+          </>}
+          title="Castles of Crimson"
+          right={<span className="lby-head-name">{playerName}</span>}
+        />
         <div className="coc-wrap">
           <div className="coc-board-pick">
             <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
@@ -2144,22 +2129,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
           <div className="coc-lobby-grid">
             <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Open Games</div>
-                <span className="coc-muted">waiting for a second player</span>
-              </div>
+              <LobbySectionHd title="Open Games" note="waiting for a second player" />
               {loadingGames && openGames.length === 0 ? (
-                <div className="coc-empty"><span className="coc-spinner" />Loading…</div>
+                <div className="lby-empty"><span className="coc-spinner" />Loading…</div>
               ) : openGames.length === 0 ? (
-                <div className="coc-empty">No open games. Create one!</div>
+                <div className="lby-empty">No open games. Create one!</div>
               ) : (
                 openGames.map((g) => (
-                  <div className="coc-card" key={g.id}>
-                    <div className="coc-card-info">
-                      <div className="coc-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
-                      <div className="coc-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+                  <div className="lby-card" key={g.id}>
+                    <div className="lby-card-info">
+                      <div className="lby-card-title">{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}</div>
+                      <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                     </div>
-                    <div className="coc-card-actions">
+                    <div className="lby-card-actions">
                       {g.host_id === myId
                         ? <>
                             <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
@@ -2173,12 +2155,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
 
             <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">Active Games</div>
-                <span className="coc-muted">{activeGames.length} in progress</span>
-              </div>
+              <LobbySectionHd title="Active Games" note={`${activeGames.length} in progress`} />
               {activeGames.length === 0 ? (
-                <div className="coc-empty">No games in progress.</div>
+                <div className="lby-empty">No games in progress.</div>
               ) : (() => {
                 // All in-progress games (yours + others'). Yours pinned to the top;
                 // each sub-list is already updated_at-desc from the backend.
@@ -2191,25 +2170,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   const turnName = g.turn === g.player1_id ? g.player1_name
                     : (g.turn === g.player2_id ? g.player2_name : null);
                   return (
-                    <div className="coc-card" key={g.id}>
-                      <div className="coc-card-info">
-                        <div className="coc-card-title">
+                    <div className="lby-card" key={g.id}>
+                      <div className="lby-card-info">
+                        <div className="lby-card-title">
                           {isMine
                             ? <>{youP1 ? `${g.player1_name} (you)` : g.player1_name}{" vs "}{g.player2_name ? (youP1 ? g.player2_name : `${g.player2_name} (you)`) : "waiting…"}</>
                             : <>{g.player1_name} vs {g.player2_name || "waiting…"}</>}
                         </div>
-                        <div className="coc-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+                        <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
                       </div>
-                      <div className="coc-card-actions">
+                      <div className="lby-card-actions">
                         {isMine ? (
                           <>
                             {g.turn === myId
-                              ? <span className="coc-turn-badge">Your Turn</span>
-                              : <span className="coc-their-badge">Their Turn</span>}
+                              ? <TurnBadge mine>Your Turn</TurnBadge>
+                              : <TurnBadge>Their Turn</TurnBadge>}
                             <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Resume</button>
                           </>
                         ) : (
-                          <span className="coc-their-badge">{turnName ? `${turnName}'s turn` : "In progress"}</span>
+                          <TurnBadge>{turnName ? `${turnName}'s turn` : "In progress"}</TurnBadge>
                         )}
                       </div>
                     </div>
@@ -2219,27 +2198,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
 
             <div className="coc-lobby-col">
-              <div className="coc-section-hd">
-                <div className="coc-section-title">History</div>
-                <span className="coc-muted">{history.length ? `${history.length} finished` : ""}</span>
-              </div>
+              <LobbySectionHd title="History" note={history.length ? `${history.length} finished` : null} />
               {!authUser ? (
-                <div className="coc-empty">Log in to see your finished games.</div>
+                <div className="lby-empty">Log in to see your finished games.</div>
               ) : history.length === 0 ? (
-                <div className="coc-empty">No finished games yet.</div>
+                <div className="lby-empty">No finished games yet.</div>
               ) : (
                 history.map((g) => (
-                  <div className="coc-card" key={g.id}>
-                    <div className="coc-card-info">
-                      <div className="coc-card-title">
+                  <div className="lby-card" key={g.id}>
+                    <div className="lby-card-info">
+                      <div className="lby-card-title">
                         <span className={g.tie ? "" : (g.you_won ? "coc-won" : "coc-lost")}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
                         {" vs "}{g.opp_name}
                       </div>
-                      <div className="coc-card-meta">
+                      <div className="lby-card-meta">
                         {g.your_score != null && g.opp_score != null ? `${g.your_score}–${g.opp_score} · ` : ""}{timeAgo(g.updated_at)}
                       </div>
                     </div>
-                    <div className="coc-card-actions">
+                    <div className="lby-card-actions">
                       <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
                     </div>
                   </div>

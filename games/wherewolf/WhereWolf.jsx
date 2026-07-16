@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
+import { lobbyCss, LobbyHeader, LobbySectionHd } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -197,7 +198,7 @@ function useIsMobile() {
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
-const css = baseCss + `
+const css = baseCss + lobbyCss + `
 .ww{min-height:100vh;background:radial-gradient(120% 90% at 50% -10%,#241a2e 0%,#0d0b12 60%);color:var(--text)}
 .ww *,.ww *::before,.ww *::after{box-sizing:border-box}
 .ww-wrap{max-width:1000px;margin:0 auto;padding:14px 14px 40px;display:flex;flex-direction:column;gap:14px}
@@ -628,17 +629,16 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
     return (
       <div className="ww"><style>{css}</style>
+        <LobbyHeader
+          left={<>
+            <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
+            <button className="ww-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
+          </>}
+          title="Where Wolf?"
+          right={<span className="lby-head-name">{playerName}</span>}
+        />
         <div className="ww-wrap">
-          <div className="ww-top">
-            <div className="ww-top-left">
-              <button className="ww-btn ghost sm" onClick={onExit}>← Back</button>
-              <button className="ww-btn ghost sm" onClick={() => setShowRules(true)}>📖 Rules</button>
-              <span className="ww-title">Where Wolf?</span>
-            </div>
-            <span className="ww-user">{playerName}</span>
-          </div>
           <div className="ww-hero">
-            <h1>Where Wolf?</h1>
             <p>A night of deception. One of you is not who they seem.</p>
             <p className="ww-card-meta">3–10 players · one device each</p>
           </div>
@@ -653,22 +653,22 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
           {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
             <>
-              <div className="ww-section">Resume</div>
-              <div className="ww-card">
-                <div><div className="ww-card-title">Game in progress</div><div className="ww-card-meta">{savedId}</div></div>
-                <button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button>
+              <LobbySectionHd title="Resume" />
+              <div className="lby-card">
+                <div className="lby-card-info"><div className="lby-card-title">Game in progress</div><div className="lby-card-meta">{savedId}</div></div>
+                <div className="lby-card-actions"><button className="ww-btn gold sm" onClick={() => resume(savedId)}>Resume</button></div>
               </div>
             </>
           )}
 
           {myGames.length > 0 && (
             <>
-              <div className="ww-section">Your Games</div>
+              <LobbySectionHd title="Your Games" />
               {myGames.map((g) => (
-                <div className="ww-card" key={g.id}>
-                  <div><div className="ww-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
-                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
-                  <div className="ww-row" style={{ gap: 6 }}>
+                <div className="lby-card" key={g.id}>
+                  <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
+                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
+                  <div className="lby-card-actions">
                     <button className="ww-btn gold sm" onClick={() => resume(g.id)}>Rejoin</button>
                     {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
                   </div>
@@ -679,14 +679,16 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
           {openGames.length > 0 && (
             <>
-              <div className="ww-section">Open Games</div>
+              <LobbySectionHd title="Open Games" />
               {openGames.map((g) => (
-                <div className="ww-card" key={g.id}>
-                  <div><div className="ww-card-title">{g.host_name || "Game"}</div>
-                    <div className="ww-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
-                  {g.host_id === myId
-                    ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
-                    : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
+                <div className="lby-card" key={g.id}>
+                  <div className="lby-card-info"><div className="lby-card-title">{g.host_name || "Game"}</div>
+                    <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
+                  <div className="lby-card-actions">
+                    {g.host_id === myId
+                      ? <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
+                      : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
+                  </div>
                 </div>
               ))}
             </>

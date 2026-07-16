@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -215,11 +216,10 @@ const css = `
 .duel-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#2b2117;color:#f4e9d4;border:1px solid #6b5836;padding:10px 18px;border-radius:8px;z-index:200;box-shadow:0 6px 18px rgba(0,0,0,.5)}
 .duel-reconnbar{position:fixed;top:0;left:0;right:0;background:#6b3320;color:#ffe;text-align:center;padding:5px;z-index:210;font-size:.9rem}
 
-/* lobby */
+/* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
+/* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
+.duel > .lby-header{margin:0 -14px 18px}
 .duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 320px;gap:18px;align-items:start}
-.duel-section h3{margin:4px 0 10px;font-size:1.05rem;opacity:.9}
-.duel-gamecard{border:1px solid var(--line,#3a332a);border-radius:10px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;background:var(--surface,#1b1712)}
-.duel-gamecard .grow{flex:1;min-width:0}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
 /* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
    an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
@@ -423,7 +423,7 @@ const css = `
 `;
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
-const duelStyles = baseCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
+const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
   + splendorPillCss + splendorLogCss + css;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
@@ -1380,13 +1380,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     return (
       <div className="app duel">
         <style>{duelStyles}</style>
-        <div className="duel-topbar">
-          <button className="btn btn-outline" onClick={onExit}>{"←"} Back</button>
-          <div className="spacer" />
-          <h1 className="duel-title">Spender Duel</h1>
-          <div className="spacer" />
-          <button className="btn btn-outline" onClick={() => setShowRules(true)}>How to Play</button>
-        </div>
+        <LobbyHeader
+          left={<button className="btn btn-outline" onClick={onExit}>{"←"} Back</button>}
+          title="Spender Duel"
+          right={<button className="btn btn-outline" onClick={() => setShowRules(true)}>How to Play</button>}
+        />
         <div className="duel-create-row">
           <button className="btn btn-gold" onClick={() => createGame(false)}>+ Create Game</button>
           <div className="duel-pick-wrap">
@@ -1405,56 +1403,60 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         </div>
         <div className="duel-lobby-cols">
           <div className="duel-section">
-            <h3>Open Games</h3>
-            {openGames.length === 0 && <div className="duel-muted">No open games. Create one!</div>}
+            <LobbySectionHd title="Open Games" />
+            {openGames.length === 0 && <div className="lby-empty">No open games. Create one!</div>}
             {openGames.map((g) => (
-              <div className="duel-gamecard" key={g.id}>
-                <div className="grow">
-                  <div>{g.host_name || "Player"}'s game</div>
-                  <div className="duel-muted">{g.id} · {timeAgo(g.created_at)}</div>
+              <div className="lby-card" key={g.id}>
+                <div className="lby-card-info">
+                  <div className="lby-card-title">{g.host_name || "Player"}'s game</div>
+                  <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
                 </div>
-                {g.host_id === myId
-                  ? (<>
-                      <button className="btn btn-outline" onClick={() => resumeGame(g.id)}>Return</button>
-                      <button className="btn btn-outline" onClick={() => cancelGame(g.id)}>Cancel</button>
-                    </>)
-                  : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
+                <div className="lby-card-actions">
+                  {g.host_id === myId
+                    ? (<>
+                        <button className="btn btn-outline" onClick={() => resumeGame(g.id)}>Return</button>
+                        <button className="btn btn-outline" onClick={() => cancelGame(g.id)}>Cancel</button>
+                      </>)
+                    : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
+                </div>
               </div>
             ))}
           </div>
           <div className="duel-section">
-            <h3>Active Games</h3>
+            <LobbySectionHd title="Active Games" />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
-              <div className="duel-gamecard">
-                <div className="grow">
-                  <div>Game {savedRid}</div>
-                  <div className="duel-muted">saved on this device</div>
+              <div className="lby-card">
+                <div className="lby-card-info">
+                  <div className="lby-card-title">Game {savedRid}</div>
+                  <div className="lby-card-meta">saved on this device</div>
                 </div>
-                <button className="btn btn-gold" onClick={() => resumeGame(savedRid)}>Resume</button>
+                <div className="lby-card-actions"><button className="btn btn-gold" onClick={() => resumeGame(savedRid)}>Resume</button></div>
               </div>
             )}
-            {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <div className="duel-muted">No games in progress.</div>}
+            {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <div className="lby-empty">No games in progress.</div>}
             {activeMine.map((g) => (
-              <div className="duel-gamecard" key={g.id}>
-                <div className="grow">
-                  <div>{g.player1_name || "?"} vs {g.player2_name || "?"}</div>
-                  <div className="duel-muted">{timeAgo(g.updated_at)}</div>
+              <div className="lby-card" key={g.id}>
+                <div className="lby-card-info">
+                  <div className="lby-card-title">{g.player1_name || "?"} vs {g.player2_name || "?"}</div>
+                  <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                 </div>
-                {g.your_turn ? <span className="duel-turnbadge">Your turn</span> : <span className="duel-theirbadge">Their turn</span>}
-                <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Resume</button>
+                <div className="lby-card-actions">
+                  {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
+                  <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Resume</button>
+                </div>
               </div>
             ))}
           </div>
           <div className="duel-section">
-            <h3>History</h3>
-            {history.length === 0 && <div className="duel-muted">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
+            <LobbySectionHd title="History" />
+            {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
             {history.map((g) => (
-              <div className="duel-gamecard" key={g.id}>
-                <div className="grow">
-                  <div>{g.you_won ? "Won" : "Lost"} vs {g.opp_name}</div>
-                  <div className="duel-muted">{g.your_score ?? "?"}–{g.opp_score ?? "?"} · {WIN_DESC[g.win_condition] || ""} · {timeAgo(g.updated_at)}</div>
+              <div className="lby-card" key={g.id}>
+                <div className="lby-card-info">
+                  <div className="lby-card-title">{g.you_won ? "Won" : "Lost"} vs {g.opp_name}</div>
+                  <div className="lby-card-meta">{g.your_score ?? "?"}–{g.opp_score ?? "?"} · {WIN_DESC[g.win_condition] || ""} · {timeAgo(g.updated_at)}</div>
                 </div>
-                <button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button>
+                <div className="lby-card-actions"><button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button></div>
               </div>
             ))}
           </div>
