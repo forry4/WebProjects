@@ -31,9 +31,31 @@ from core.ratelimit import SlidingWindowLimiter
 router = APIRouter()
 
 
+def _db_ping() -> bool:
+    """Run a trivial query so the keep-alive cron's /health ping keeps the DB CONNECT
+    path warm (DNS/TLS/Turso handshake), not just the web process — otherwise the first
+    game-list query after an idle spell pays the reconnect. Doubles as a real DB health
+    signal. Opens + closes a fresh connection (get_db_conn is not pooled)."""
+    conn = get_db_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        return True
+    finally:
+        conn.close()
+
+
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "spender", "version": "1.0"}
+    # Warm the DB path too, off the event loop; a DB hiccup must never fail the health
+    # check (it gates the keep-alive + the frontend's reachability probe).
+    db_ok = False
+    try:
+        db_ok = await asyncio.to_thread(_db_ping)
+    except Exception:
+        pass
+    return {"status": "ok", "service": "spender", "version": "1.0", "db": db_ok}
 
 
 # ─── Types ─────────────────────────────────────────────────────────────────
