@@ -233,7 +233,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("werewolf_games")   # throttled (<=1/h)
+    maybe_cleanup_games("werewolf_games", background=True)   # throttled (<=1/h), non-blocking
     conn = _db()
     cur = conn.cursor()
     cur.execute("""SELECT id, host_id, host_name, player_ids, created_at FROM werewolf_games

@@ -55,7 +55,7 @@ async def health():
         db_ok = await asyncio.to_thread(_db_ping)
     except Exception:
         pass
-    return {"status": "ok", "service": "spender", "version": "1.0", "db": db_ok}
+    return {"status": "ok", "service": "spender", "version": "1.1", "db": db_ok}
 
 
 # ─── Types ─────────────────────────────────────────────────────────────────
@@ -369,7 +369,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("games")  # throttled (<=1/h): prune stale games during long-awake periods
+    maybe_cleanup_games("games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
     conn = get_db_conn()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM games

@@ -18,6 +18,7 @@ table, Castles of Crimson's ``coc_games``, and the Books tables.
 import logging
 import os
 import sqlite3
+import threading
 import time
 
 LOG = logging.getLogger("core.db")
@@ -256,13 +257,30 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
         conn.close()
 
 
-def maybe_cleanup_games(table: str, **kwargs) -> int:
-    """Throttled `cleanup_stale_games` — a no-op unless at least an hour has passed
-    since this process last cleaned `table`. Safe to call on every lobby fetch."""
+def _cleanup_worker(table: str, kwargs: dict) -> None:
+    try:
+        cleanup_stale_games(table, **kwargs)
+    except Exception as e:  # noqa: BLE001 - cleanup must never break a lobby request
+        LOG.warning("cleanup_stale_games(%s) failed: %s", table, e)
+
+
+def maybe_cleanup_games(table: str, background: bool = False, **kwargs) -> int:
+    """Throttled `cleanup_stale_games` — a no-op unless at least an hour has passed since
+    this process last cleaned `table`.
+
+    With ``background=True`` (the lobby routes) the delete runs in a daemon THREAD so it
+    never blocks the request — the stale-game DELETE's `NOT IN (SELECT id FROM users)`
+    scans were adding ~1-2s to the FIRST open-games fetch each hour. The throttle slot is
+    claimed synchronously first, so only ONE thread is spawned per window; returns 0
+    immediately. ``background=False`` (default) keeps the old synchronous behavior +
+    row-count return (used by tests and the module-import warm cleanup)."""
     now = int(time.time())
     if now - _last_cleanup.get(table, 0) < _CLEANUP_MIN_INTERVAL:
         return 0
     _last_cleanup[table] = now
+    if background:
+        threading.Thread(target=_cleanup_worker, args=(table, kwargs), daemon=True).start()
+        return 0
     try:
         return cleanup_stale_games(table, **kwargs)
     except Exception as e:  # noqa: BLE001 - cleanup must never break a lobby request

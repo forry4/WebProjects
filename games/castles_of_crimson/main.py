@@ -273,7 +273,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 
 def list_open_games() -> list[dict]:
-    maybe_cleanup_games("coc_games")  # throttled (<=1/h): prune stale games during long-awake periods
+    maybe_cleanup_games("coc_games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
     conn = _db()
     cur = conn.cursor()
     cur.execute("""SELECT id, player1_id, player1_name, created_at FROM coc_games
