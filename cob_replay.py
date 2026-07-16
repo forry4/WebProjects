@@ -222,9 +222,17 @@ def main(path, verbose=True, on_move=None):
     _pr("reconstructed starting goods:", {names.get(p,p): dict(startp[p]) for p in pids})
 
     def ensure_goods(pid, gtype, n=1):
+        """Force the stack to EXACTLY n before a sell -- BGA's log states precisely how many
+        tiles were sold (len(soldGoods), which equals nbPoints/2 in all 399 corpus sells), so
+        it is ground truth and our engine sells the whole stack of a colour.
+
+        This used to only top UP. A surplus therefore survived and got sold, over-awarding:
+        878883482 mid=181, BGA sold rust x1 while we held rust x2 -> +2 VP. Trimming also
+        pins any upstream goods-intake drift (depot contents / goods_pick choices we
+        approximate) at the sell, rather than letting it leak into the score.
+        """
         col = tiles.goods_color_for_die(gtype)
-        if g["players"][pid]["goods"].get(col, 0) < n:
-            g["players"][pid]["goods"][col] = n
+        g["players"][pid]["goods"][col] = n
 
     # precompute per-round turn order from the log (turnPlayed sequence between newRounds)
     round_orders = []          # one entry per newRound, aligned 1:1 (the turnPlayeds that follow it)
