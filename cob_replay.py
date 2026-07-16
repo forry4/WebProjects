@@ -153,7 +153,30 @@ def coc_tile(tid, raw, mon, counts):
         t["count"] = counts.get(sprite, 3)
     return t
 
-def main(path, verbose=True, on_move=None):
+def mon6_draw_phase(events, raw, mon):
+    """0-based index of the phase in which a monastery-6 tile is first DRAWN, else None.
+
+    BGA's monastery 6 ("spend 2 silver OR 2 workers to take a tile from ANY depot") has no
+    CoC equivalent, so such a game can't be replayed to the end. But every phase BEFORE the
+    tile is even dealt is untainted -- nobody could see it, so no decision accounts for it.
+    Those phases replay exactly like any other game and are safe to harvest.
+    """
+    m6 = {t for t, v in raw.items() if v[0] == "knowledge" and mon.get(t) == 6}
+    if not m6:
+        return None
+    ph = -1
+    for mid, d in events:
+        if d["type"] == "newPhase":
+            ph += 1
+            for t in d["args"].get("drawnTiles", []):
+                if str(t["id"]) in m6:
+                    return ph
+    return None
+
+
+def main(path, verbose=True, on_move=None, max_phase=None):
+    """Replay a BGA game. `max_phase` (0-based, inclusive) stops cleanly at the END of that
+    phase -- used to salvage the untainted prefix of an otherwise-unreplayable game."""
     _pr = print if verbose else (lambda *a, **k: None)
     events, log = load_events(path)
     raw, loc, mon = build_catalog(events)
@@ -381,6 +404,7 @@ def main(path, verbose=True, on_move=None):
 
     # ---- drive the log ----
     stopped = None
+    truncated = False
     try:
      for mid, d in events:
         t = d["type"]; a = d.get("args", {})
@@ -399,6 +423,10 @@ def main(path, verbose=True, on_move=None):
             continue
         elif t == "newPhase":
             phase_idx += 1
+            # Stop at the phase boundary: everything up to here is untainted.
+            if max_phase is not None and phase_idx > max_phase:
+                truncated = True
+                break
             inject_phase(phase_idx)
         elif t == "newRound":
             sync_round(d)
@@ -567,7 +595,12 @@ def main(path, verbose=True, on_move=None):
     over = engine.is_over(g)
     result = {"path": path, "completed": stopped is None and over, "stopped": stopped,
               "applied": stats["applied"], "over": over, "worker_ok": stats["wdiv"] is None,
-              "winner_match": False}
+              "winner_match": False,
+              # A truncated run is a VERIFIED PREFIX, not a failure: it replayed clean to the
+              # phase boundary and simply stopped. `game` is the live state there so callers
+              # can harvest positions; `phases_kept` says how many phases are trusted.
+              "truncated": truncated, "phases_kept": (max_phase + 1) if truncated else None,
+              "game": g if truncated and stopped is None else None}
     if over:
         fs = engine.final_scores(g)
         cw = max(pids, key=lambda q: fs[q])
