@@ -18,11 +18,21 @@ const SITE_NAME = "Forrest Games";
 // routes to its own `screen`. `status: "ready"` is playable; "soon" shows a
 // Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
 const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc" },
-	{ id: "wherewolf", name: "Where Wolf?", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf" },
-	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel" },
+	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser", accent: "#d4a84c", players: "1–4 · vs AI" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#d6454b", players: "2 · vs Bot" },
+	{ id: "wherewolf", name: "Where Wolf?", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#6f86d6", players: "3–10 players" },
+	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#bf6fd0", players: "2 · vs AI" },
 ];
+
+// Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
+// raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
+// the game: cut gem / castle gate / crescent moon / crown.
+const GAME_EMBLEM = {
+	spender: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M7 5H17L20 9L12 20L4 9Z" /><path d="M4 9H20M7 5L9 9M17 5L15 9M9 9L12 20M15 9L12 20M9 9H15" /></svg>),
+	coc: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 20V10H7V7H10V10H14V7H17V10H20V20Z" /><path d="M10 20V15H14V20" /></svg>),
+	wherewolf: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M20 15A8 8 0 1 1 11 4A6.5 6.5 0 0 0 20 15Z" /><circle cx="17.5" cy="6" r=".9" fill="currentColor" stroke="none" /></svg>),
+	duel: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 9L7 16H17L20 9L15.5 12.5L12 6L8.5 12.5Z" /><path d="M7.5 19H16.5" /></svg>),
+};
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 // GEM_COLORS / GEM_LABELS / GEM_HEX now come from shared/splendor.jsx (imported
@@ -134,14 +144,21 @@ const css = baseCss + `
 .home-logo{font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(2.4rem,8vw,3.6rem);font-weight:700;color:var(--gold);letter-spacing:.06em;line-height:1.1}
 .home-tagline{color:var(--text-dim);font-style:italic;font-size:1.1rem;margin-top:10px}
 .home-games{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px}
-.home-game-card{position:relative;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:26px 22px 24px;cursor:pointer;transition:border-color .15s,transform .15s,background .15s}
-.home-game-card:hover{border-color:var(--gold);transform:translateY(-2px);background:var(--surface2)}
+/* Each card carries its game's --accent (set inline from GAMES): tints the emblem,
+   title, left spine, and hover glow so the four games read as distinct. */
+.home-game-card{--accent:var(--gold);position:relative;display:flex;gap:16px;align-items:flex-start;text-align:left;font-family:inherit;color:inherit;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:22px 22px 22px 21px;cursor:pointer;overflow:hidden;transition:border-color .18s,transform .18s,background .18s,box-shadow .18s}
+.home-game-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.5;transition:opacity .18s}
+.home-game-card:hover{border-color:var(--accent);transform:translateY(-3px);background:var(--surface2);box-shadow:0 12px 28px -14px color-mix(in srgb,var(--accent) 70%,transparent)}
+.home-game-card:hover::before{opacity:1}
+.home-game-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .home-game-card.soon{opacity:.9}
-.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--gold);letter-spacing:.03em;margin-bottom:8px}
-.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic}
-.home-game-badge{position:absolute;top:14px;right:14px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:10px}
-.home-game-badge.ready{color:var(--green-gem);border:1px solid rgba(84,194,61,.5)}
-.home-game-badge.soon{color:var(--text-muted);border:1px solid var(--border)}
+.home-game-emblem{flex:0 0 auto;width:42px;height:42px;margin-top:2px;color:var(--accent);opacity:.92}
+.home-game-emblem svg{width:100%;height:100%;display:block}
+.home-game-text{min-width:0;flex:1}
+.home-game-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.32rem;font-weight:600;color:var(--accent);letter-spacing:.03em;margin-bottom:7px;line-height:1.15}
+.home-game-desc{color:var(--text-dim);font-size:.95rem;line-height:1.45;font-style:italic;margin-bottom:13px}
+.home-game-players{display:inline-flex;align-items:center;gap:6px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim);border:1px solid var(--border);padding:3px 9px;border-radius:10px;background:var(--surface2)}
+.home-game-players::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85;flex:0 0 auto}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
 .browser{max-width:1400px;margin:0 auto;padding:28px 20px 48px}
@@ -2416,12 +2433,14 @@ export default function SpenderApp() {
 					<div className="home-games">
 						{GAMES.map(gm => (
 							<button key={gm.id} className={`home-game-card ${gm.status}`}
+								style={{ "--accent": gm.accent }}
 								onClick={() => setScreen(gm.screen)}>
-								<span className={`home-game-badge ${gm.status}`}>
-									{gm.status === "ready" ? "Play" : "Soon"}
-								</span>
-								<div className="home-game-name">{gm.name}</div>
-								<div className="home-game-desc">{gm.tagline}</div>
+								<span className="home-game-emblem" aria-hidden="true">{GAME_EMBLEM[gm.id]}</span>
+								<div className="home-game-text">
+									<div className="home-game-name">{gm.name}</div>
+									<div className="home-game-desc">{gm.tagline}</div>
+									<span className="home-game-players">{gm.players}</span>
+								</div>
 							</button>
 						))}
 					</div>
