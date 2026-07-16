@@ -41,7 +41,7 @@ const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].t
  * let CSS size it instead — Duel's board scales its tokens with the column, and an
  * inline width/height would beat the stylesheet and freeze them. */
 export function GemToken({ color, size = 42, className = "", onClick, title, dataCell }) {
-  const style = { background: GEM_HEX[color], color: DARK_TEXT.has(color) ? "#333" : "#fff" };
+  const style = { "--gc": GEM_HEX[color], color: DARK_TEXT.has(color) ? "#333" : "#fff" };
   if (size) { style.width = size; style.height = size; }
   return (
     <div className={`gem-token ${className}`.trim()} style={style} onClick={onClick}
@@ -93,12 +93,12 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
           // as a single gem sitting on top of another.
           card.bonus_count === 2 ? (
             <div className="card-bonus-pair" title="Gives 2 of this bonus">
-              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
-              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={isWild ? { background: bonusBg } : { "--gc": bonusBg }} />
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={isWild ? { background: bonusBg } : { "--gc": bonusBg }} />
             </div>
           ) : (
             <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`}
-              style={{ background: bonusBg }}
+              style={isWild ? { background: bonusBg } : { "--gc": bonusBg }}
               title={isWild ? (asColor ? `Wild bonus (as ${asColor})` : "Wild bonus — attaches to one of your colors") : undefined} />
           )
         )}
@@ -113,7 +113,7 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
         <div className="cost-col">
           {gems.map(([c, n]) => (
             <div key={c} className="cost-row">
-              <div className="cost-gem" style={{ background: GEM_HEX[c] }} />
+              <div className="cost-gem" style={{ "--gc": GEM_HEX[c] }} />
               <span className="cost-num">{n}</span>
             </div>
           ))}
@@ -121,7 +121,7 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
         {pearl > 0 && (
           <div className="cost-col">
             <div className="cost-row">
-              <div className="cost-gem" style={{ background: GEM_HEX.pearl }} />
+              <div className="cost-gem" style={{ "--gc": GEM_HEX.pearl }} />
               <span className="cost-num">{pearl}</span>
             </div>
           </div>
@@ -200,7 +200,7 @@ export const splendorCardCss = `
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
 .gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
 @keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.14);box-shadow:inset 0 3px 5px rgba(255,255,255,.32),inset 0 -5px 8px rgba(0,0,0,.32),0 1px 3px rgba(0,0,0,.35);transition:all .12s}
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:2px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 4px rgba(0,0,0,.4);transition:all .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
@@ -250,10 +250,10 @@ export const splendorCardCss = `
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
 .card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.3);box-shadow:inset 0 2px 2px rgba(255,255,255,.4),inset 0 -2px 3px rgba(0,0,0,.3)}
+.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:1.5px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.3);box-shadow:inset 0 1px 1px rgba(255,255,255,.4),inset 0 -1px 1.5px rgba(0,0,0,.28)}
+.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:1.2px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 1px rgba(0,0,0,.3)}
 .cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
 `;
 
@@ -264,7 +264,7 @@ export const splendorCardCss = `
 export const splendorCardExtraCss = `
 .card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
-.card-bonus-wild{border-style:dashed}
+.card-bonus-wild{border-style:dashed;border-color:rgba(255,255,255,.45)}
 /* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
    at a glance. The trailing disc sits on top; the leading one keeps its rim visible
    through the overlap. (Was a single disc ringed by a box-shadow, which just looked
