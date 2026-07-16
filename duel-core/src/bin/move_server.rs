@@ -21,7 +21,8 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
-use duel_core::engine::{BuySrc, Move, ReserveSrc, ScriptedFills, State, EMPTY, N_CELLS};
+use duel_core::encmove::{decode_move, enc_move, EncMove};
+use duel_core::engine::{ScriptedFills, State, EMPTY, N_CELLS};
 use duel_core::mcts::{choose_move, Opts};
 use duel_core::rng::Rng;
 use serde::Deserialize;
@@ -36,31 +37,6 @@ struct Setup {
     privileges_board: i32,
     royals: Vec<usize>,
     privs: Vec<i32>,
-}
-
-#[derive(Deserialize)]
-struct EncMove {
-    t: String,
-    #[serde(default)]
-    cells: Option<Vec<usize>>,
-    #[serde(default)]
-    cell: Option<usize>,
-    #[serde(default)]
-    kind: Option<u8>,
-    #[serde(default)]
-    level: Option<usize>,
-    #[serde(default)]
-    slot: Option<i32>,
-    #[serde(default)]
-    card: Option<usize>,
-    #[serde(default, rename = "from")]
-    from: Option<u8>,
-    #[serde(default)]
-    as_color: Option<i8>,
-    #[serde(default)]
-    color: Option<usize>,
-    #[serde(default)]
-    royal: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -94,64 +70,6 @@ struct Req {
     rollout_steps: Option<usize>,
     #[serde(default)]
     take_dominance: Option<bool>,
-}
-
-fn decode_move(e: &EncMove) -> Move {
-    match e.t.as_str() {
-        "take" => Move::Take { cells: e.cells.clone().expect("take without cells") },
-        "use_privilege" => Move::UsePrivilege { cell: e.cell.expect("use_privilege without cell") },
-        "replenish" => Move::Replenish,
-        "reserve" => {
-            let level = e.level.expect("reserve without level") - 1;
-            let src = match e.kind.expect("reserve without kind") {
-                0 => ReserveSrc::Pyramid { level, slot: e.slot.expect("pyramid reserve without slot") as usize },
-                _ => ReserveSrc::Deck { level },
-            };
-            Move::Reserve { gold_cell: e.cell.expect("reserve without gold cell"), src }
-        }
-        "buy" => Move::Buy {
-            card: e.card.expect("buy without card"),
-            from: if e.from.expect("buy without source") == 0 { BuySrc::Pyramid } else { BuySrc::Reserve },
-            as_color: e.as_color.unwrap_or(-1),
-        },
-        "pass" => Move::Pass,
-        "take_same" => Move::TakeSame { cell: e.cell.expect("take_same without cell") },
-        "steal" => Move::Steal { color: e.color.expect("steal without color") },
-        "choose_royal" => Move::ChooseRoyal { royal: e.royal.expect("choose_royal without royal") },
-        "discard" => Move::Discard { color: e.color.expect("discard without color") },
-        "skip_pending" => Move::SkipPending,
-        other => panic!("unknown move type: {}", other),
-    }
-}
-
-/// The inverse of `gen_engine_fixtures.enc_move`, so the Python harness can feed our answer
-/// straight back into its own engine.
-fn enc_move(mv: &Move) -> serde_json::Value {
-    match mv {
-        Move::Take { cells } => json!({"t": "take", "cells": cells}),
-        Move::UsePrivilege { cell } => json!({"t": "use_privilege", "cell": cell}),
-        Move::Replenish => json!({"t": "replenish"}),
-        Move::Reserve { gold_cell, src } => match src {
-            // `slot` is -1 for a deck source, matching Python's `src.get("slot", -1)`.
-            ReserveSrc::Pyramid { level, slot } => {
-                json!({"t": "reserve", "cell": gold_cell, "kind": 0, "level": level + 1, "slot": slot})
-            }
-            ReserveSrc::Deck { level } => {
-                json!({"t": "reserve", "cell": gold_cell, "kind": 1, "level": level + 1, "slot": -1})
-            }
-        },
-        Move::Buy { card, from, as_color } => json!({
-            "t": "buy", "card": card,
-            "from": if *from == BuySrc::Pyramid { 0 } else { 1 },
-            "as_color": as_color,
-        }),
-        Move::Pass => json!({"t": "pass"}),
-        Move::TakeSame { cell } => json!({"t": "take_same", "cell": cell}),
-        Move::Steal { color } => json!({"t": "steal", "color": color}),
-        Move::ChooseRoyal { royal } => json!({"t": "choose_royal", "royal": royal}),
-        Move::Discard { color } => json!({"t": "discard", "color": color}),
-        Move::SkipPending => json!({"t": "skip_pending"}),
-    }
 }
 
 fn build_state(s: &Setup) -> State {

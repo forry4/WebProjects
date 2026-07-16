@@ -11,7 +11,7 @@ write executor, the stale-socket disconnect guard).
 
 ONE structural difference from CoC: Spender Duel has hidden information
 (secret reserves, the bag, the decks), so room state is built PER RECIPIENT
-via ``engine.player_view`` â€” see ``broadcast_state`` â€” instead of one shared
+via ``engine.player_view`` — see ``broadcast_state`` — instead of one shared
 snapshot. Persistence stores the FULL game; redaction happens on send.
 """
 from __future__ import annotations
@@ -30,9 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import engine
 from . import bot
 from . import cards
+from . import compact
 from . import replay
 # `ai` is used as a local name for the bot pid in places, so alias the module
-# (the same collision CoC hit â€” see its `coc_ai` import).
+# (the same collision CoC hit — see its `coc_ai` import).
 from . import ai as duel_ai
 
 from core.db import get_db_conn, cleanup_stale_games, maybe_cleanup_games
@@ -51,6 +52,29 @@ _BOT_MOVE_DELAY = 0.9
 AI_DIFFICULTIES = ("easy", "normal", "hard")
 DEFAULT_DIFFICULTY = "hard"
 
+# ── Client-side (WASM) search ────────────────────────────────────────────────
+# The bot's search runs in the player's browser (duel-core -> wasm) instead of on
+# Render's free tier, where it gets ~410 sims across ~76 root moves — about 5 sims per
+# move, barely above random. Same bot, same leaf, same rules: only the sim count changes.
+#
+# "hard" ONLY, deliberately. "easy" has no search to move. "normal" is CALIBRATED to be
+# beatable (small budget + temperature sampling, measured hard >> normal >> easy), so
+# handing it ~100x the sims would quietly break the ladder — that is a strength change,
+# and this is a serving change.
+CLIENT_AI_TIERS = ("hard",)
+# The whole degradation story: no valid client move inside this and the SERVER plays the
+# move itself with the existing Python bot. Per-decision, so a flaky client costs sims,
+# never a stuck game.
+CLIENT_AI_TIMEOUT = 8.0
+# Per-DECISION wall-clock budget, and the AGGREGATE sim cap across the whole worker pool
+# (the client splits it evenly and SUMS the workers' root statistics). Measured in Node
+# on the built wasm: ~90k sims/s/core and ~0.64KB per sim of tree, so 60k aggregate is
+# ~170ms and ~14MB on a fast 4-core box, while a slow device stops at the clock instead.
+# Either way it is ~150x what the Render server manages, and ~15x a local Python `hard`
+# decision (~3,900 sims) — the cap is here to bound tab memory and latency, not strength.
+_CLIENT_AI_BUDGET_MS = 600
+_CLIENT_AI_MAX_SIMS = 60000
+
 
 def _valid_difficulty(value) -> str:
     """Coerce a client-supplied difficulty to a real tier (default on anything bad)."""
@@ -64,7 +88,7 @@ duel_app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# â”€â”€ In-memory room state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── In-memory room state ──────────────────────────────────────────────────────
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 AI_PID = "bot"
@@ -102,7 +126,7 @@ duel_init_db()
 cleanup_stale_games("duel_games")
 
 
-# â”€â”€ Persistence (single-thread write executor with a reused connection) â”€â”€â”€â”€â”€â”€
+# ── Persistence (single-thread write executor with a reused connection) ──────
 _DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="duel-db-write")
 _save_conn = None  # only ever touched by the _DB_WRITE_EXEC thread
 
@@ -124,7 +148,7 @@ def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, 
                            VALUES (?,?,?,?,?,?,?,?,?,?)""",
                         (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
         _save_conn.commit()
-    except Exception:  # noqa: BLE001 â€” a save must never crash; reconnect next time
+    except Exception:  # noqa: BLE001 — a save must never crash; reconnect next time
         LOG.warning("duel save_game write failed for %s; dropping connection", room_id, exc_info=True)
         try:
             if _save_conn is not None:
@@ -187,7 +211,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "ai_player": state.get("ai_player"),
         # Persisted so a vs-bot game reconnected after a redeploy (which wipes the
         # in-memory ROOMS) keeps the tier it was created with, instead of silently
-        # falling back to the default â€” the bug Spender hit with ai_variant.
+        # falling back to the default — the bug Spender hit with ai_variant.
         "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
         "sockets": {},
     }
@@ -270,7 +294,7 @@ def list_user_history(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    """SELECT-then-DELETE (never cursor.rowcount â€” the libsql wrapper lacks it)."""
+    """SELECT-then-DELETE (never cursor.rowcount — the libsql wrapper lacks it)."""
     conn = _db()
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM duel_games WHERE id=? AND player1_id=? AND status='open'",
@@ -284,14 +308,14 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
     return existed
 
 
-# â”€â”€ Room state / broadcast (PER-RECIPIENT redaction) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Room state / broadcast (PER-RECIPIENT redaction) ─────────────────────────
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     """Room snapshot AS SEEN BY viewer_pid: the game passes through
     engine.player_view so the bag, deck order, and the opponent's reserved-card
     identities never reach the wire. viewer_pid=None -> spectator redaction."""
     room = ROOMS.get(room_id, {})
     g = room.get("game")
-    return {
+    state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -305,6 +329,14 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
             if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
         ),
     }
+    # The bot decision currently awaiting the client's WASM search. It lives in ROOM
+    # STATE rather than a one-shot message so every re-broadcast and reconnect re-ships
+    # it — the same durability rule the engine's pending sub-decisions follow. Only ever
+    # set on a vs-AI room (see _handle_client_ai_ready), which is what keeps the bot's
+    # own view from reaching a human OPPONENT.
+    if room.get("_ai_search"):
+        state["ai_search"] = room["_ai_search"]
+    return state
 
 
 async def broadcast_state(room_id: str, mtype: str = "room_update") -> None:
@@ -332,7 +364,96 @@ def _bot_should_act(room: dict) -> bool:
                 and (game.get("pending_pid") or game.get("turn")) == ai)
 
 
-# â”€â”€ Bot turn scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Bot turn scheduler ────────────────────────────────────────────────────────
+async def _client_bot_turn(room_id: str) -> None:
+    """Play the bot's turn one DECISION at a time through the human's browser.
+
+    A Duel turn is several decisions (optional privilege/replenish -> the mandatory
+    action -> ability pendings -> an AGAIN chain), so this loops: ship `ai_search`,
+    wait for the client's `ai_move`, apply it, pace, repeat — until the turn passes.
+    Unlike CoC there is no prefix protocol, because `engine.legal_moves` already hands
+    back whole engine moves.
+
+    Returns as soon as anything is off — turn over, timeout, drift, an unarmed client —
+    and the caller's server path picks up from wherever we got to. So degradation is
+    per-DECISION and a deadlock is impossible: the trivial-bot finisher still guarantees
+    the turn ends.
+    """
+    for _ in range(60):                      # decision guard (a turn is a handful of moves)
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return                       # turn over — done
+            if not room.get("client_ai"):
+                return                       # no armed client — server path
+            game = room["game"]
+            legal = engine.legal_moves(game, AI_PID)
+            if not legal:
+                return                       # engine contract violation — server path
+            if len(legal) == 1:
+                # Nothing to decide: applying it here saves a pointless round-trip and
+                # a full search budget, and it is trivially the move the search returns.
+                forced, evt = legal[0], None
+            else:
+                forced = None
+                seq = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
+                room["_ai_search"] = {
+                    # The staleness key. A monotonic per-room counter rather than `ply`
+                    # (= len(log)): every move type happens to log exactly one record
+                    # today, so ply would work, but nothing ENFORCES that — a future
+                    # silent handler would make two decisions share a key and a stale
+                    # reply indistinguishable from a fresh one. `ply` rides along for the
+                    # client's dispatch guard and logs.
+                    "decision": seq,
+                    "ply": len(game.get("log", [])),
+                    "seat": game["order"].index(AI_PID),
+                    "budget_ms": _CLIENT_AI_BUDGET_MS,
+                    "max_sims": _CLIENT_AI_MAX_SIMS,
+                    "state": compact.project(game, AI_PID),
+                }
+                room["_ai_pending_move"] = None
+                evt = room["_ai_move_evt"] = asyncio.Event()
+
+        if evt is None:
+            move = forced
+        else:
+            await broadcast_state(room_id)   # ship the request
+            try:
+                await asyncio.wait_for(evt.wait(), CLIENT_AI_TIMEOUT)
+            except asyncio.TimeoutError:
+                async with ROOM_LOCK:
+                    r = ROOMS.get(room_id)
+                    if r:
+                        r["_ai_search"] = None       # a late reply is ignored (stale decision)
+                        r["_ai_pending_move"] = None
+                LOG.info("duel client AI timed out; server finishes the turn (room %s)", room_id)
+                return
+            async with ROOM_LOCK:
+                r = ROOMS.get(room_id)
+                move = r.pop("_ai_pending_move", None) if r else None
+            if move is None:
+                return                       # stale/invalid submit — server finishes the turn
+
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return
+            ok, err = engine.apply_move(room["game"], AI_PID, move)
+            if not ok:
+                # Validated legal moments ago under this same lock, so this is drift, not
+                # a bad client. Hand back to the server path rather than retry.
+                LOG.info("duel client move no longer legal (%s): %s", room_id, err)
+                return
+            room["_ai_search"] = None
+            _sync_status_from_game(room)
+            more = _bot_should_act(room)
+        await broadcast_state(room_id)
+        save_game(room_id)
+        if not more:
+            return                           # turn over — no trailing pause
+        await asyncio.sleep(_BOT_MOVE_DELAY)
+
+
 def _new_rng() -> random.Random:
     """Fresh entropy in production; a seam tests pin for DETERMINISTIC games.
 
@@ -350,8 +471,11 @@ async def _schedule_bot_turn(room_id: str) -> None:
     """Drive the bot's whole turn, one move at a time with pacing so the client
     animates each move.
 
+    A "hard" room with an armed WASM client tries the per-decision client path first
+    (`_client_bot_turn`); any shortfall falls through to the server path below.
+
     The MCTS tiers are HEAVY (seconds per turn), so the search runs on a snapshot
-    in a THREAD POOL and the planned sequence is applied back under the lock â€” the
+    in a THREAD POOL and the planned sequence is applied back under the lock — the
     lock is never held across a search. (Running heavy engine work under ROOM_LOCK
     on the event-loop thread is what once took the CoC backend down; don't inline
     it here.) A trivial-bot finisher guarantees the turn always ends, so a failed
@@ -363,9 +487,20 @@ async def _schedule_bot_turn(room_id: str) -> None:
             return
         room["_bot_running"] = True
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
-        snapshot = duel_ai._clone_game(room["game"]) if difficulty != "easy" else None
+        use_client = difficulty in CLIENT_AI_TIERS and bool(room.get("client_ai"))
     try:
         rng = _new_rng()
+        if use_client:
+            await _client_bot_turn(room_id)
+
+        # Server path (easy/normal, and the client tiers' fallback). Snapshot AFTER the
+        # client attempt — it may have played part of the turn already.
+        async with ROOM_LOCK:
+            room = ROOMS.get(room_id)
+            if not room or not _bot_should_act(room):
+                return
+            snapshot = duel_ai._clone_game(room["game"]) if difficulty != "easy" else None
+
         seq = []
         if snapshot is not None:
             loop = asyncio.get_event_loop()
@@ -380,7 +515,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
                 seq = []
 
         # Apply the plan move-by-move, re-validating each against the LIVE game (it
-        # may have drifted â€” e.g. a reconnect re-triggered the scheduler).
+        # may have drifted — e.g. a reconnect re-triggered the scheduler).
         for mv in seq:
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
@@ -423,9 +558,11 @@ async def _schedule_bot_turn(room_id: str) -> None:
             r = ROOMS.get(room_id)
             if r:
                 r["_bot_running"] = False
+                r["_ai_search"] = None       # never leave a stale client decision armed
+                r["_ai_pending_move"] = None  # nor a buffered move the turn never applied
 
 
-# â”€â”€ WebSocket protocol â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── WebSocket protocol ────────────────────────────────────────────────────────
 @duel_app.websocket("/ws/{room}/{player}")
 async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
@@ -456,6 +593,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 await _handle_auth_reconnect(websocket, room_id, pid, msg)
             elif action == "abandon":
                 await _handle_abandon(websocket, room_id, pid)
+            elif action == "client_ai_ready":
+                await _handle_client_ai_ready(websocket, room_id, pid, msg)
+            elif action == "ai_move":
+                await _handle_ai_move(websocket, room_id, pid, msg)
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
     except WebSocketDisconnect:
@@ -465,6 +606,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         room = ROOMS.get(room_id)
         if room and room.get("sockets", {}).get(pid) is websocket:
             room["sockets"].pop(pid, None)
+            # Disarm the client AI when its tab goes away, so the bot's next decisions go
+            # straight to the server path instead of waiting out the per-decision
+            # watchdog. A reconnecting client re-arms itself.
+            room["client_ai"] = False
             if not room["sockets"] and room.get("status") == "open" and room.get("game") is None:
                 ROOMS.pop(room_id, None)
 
@@ -578,6 +723,72 @@ async def _handle_move(ws, room_id, pid, msg):
         asyncio.create_task(_schedule_bot_turn(room_id))
 
 
+async def _handle_client_ai_ready(ws, room_id, pid, msg):
+    """The client's WASM worker pool is up — arm the room for client-side search. Kicks
+    the scheduler in case the bot is already waiting on a decision.
+
+    vs-AI ROOMS ONLY, and that is a security boundary, not a tidiness one: `ai_search`
+    carries the BOT's view, including the bot's own blind reserves (the search can buy
+    them, so they cannot be redacted). Between two humans that would be handing one
+    player the other's face-down cards. Against the bot it is cheating at solitaire.
+    """
+    bot_turn = False
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            return
+        if not room.get("ai_player"):
+            return
+        room["client_ai"] = True
+        bot_turn = _bot_should_act(room) and not room.get("_bot_running")
+    if bot_turn:
+        asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_ai_move(ws, room_id, pid, msg):
+    """Validate the client's searched bot move and BUFFER it for `_client_bot_turn`.
+
+    THE SERVER STAYS AUTHORITATIVE: the move is decoded from the wire encoding and then
+    validated by MEMBERSHIP in `engine.legal_moves`, so a tampered client can only ever
+    play a move the bot was entitled to play — i.e. weaken its own opponent.
+
+    A stale or illegal submission is LOGGED and DROPPED, never errored back to the user:
+    a late reply is a normal race (the watchdog already covered it), not the player's
+    fault — the Spender "not the AI's turn" toast lesson. Note an illegal move
+    deliberately does NOT consume `_ai_search`, so the decision stays armed for the
+    watchdog rather than falling through on a garbage submit.
+    """
+    async with ROOM_LOCK:
+        room = _ensure_room_loaded(room_id)
+        if not room or pid not in room.get("players", {}):
+            return
+        game = room.get("game")
+        pend = room.get("_ai_search")
+        if not (game and room.get("ai_player") and pend):
+            LOG.info("duel: unexpected ai_move with no decision armed (room %s)", room_id)
+            return
+        if msg.get("decision") != pend.get("decision"):
+            LOG.info("duel: stale ai_move ignored (room %s)", room_id)
+            return
+        if not _bot_should_act(room):
+            return
+        raw = msg.get("move")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = None
+        mv = compact.decode_move(raw)
+        if mv is None or mv not in engine.legal_moves(game, AI_PID):
+            LOG.warning("duel: client ai_move not legal; leaving it to the watchdog (room %s)", room_id)
+            return
+        room["_ai_pending_move"] = mv
+        room["_ai_search"] = None
+        evt = room.get("_ai_move_evt")
+    if evt:
+        evt.set()                            # wake the waiting _client_bot_turn
+
+
 async def _handle_reconnect(ws, room_id, pid, msg):
     token = msg.get("token")
     async with ROOM_LOCK:
@@ -631,7 +842,7 @@ async def _handle_abandon(ws, room_id, pid):
     await broadcast_state(room_id)
 
 
-# â”€â”€ REST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── REST ──────────────────────────────────────────────────────────────────────
 @duel_app.get("/health")
 async def health():
     return {"status": "ok", "service": "spender_duel", "version": "1.0"}
@@ -685,7 +896,7 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None):
     """Read-only review of a FINISHED game, restricted to a participant.
 
-    Returns the final board plus `snapshots` â€” one rebuilt board per move, for
+    Returns the final board plus `snapshots` — one rebuilt board per move, for
     turn-by-turn rewind (replay.reconstruct, exact from the persisted seed + log).
     `snapshots` is None when a game can't be reconstructed (a pre-seed save, or log
     drift): the review still shows the final board, just without the rewind."""

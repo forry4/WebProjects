@@ -20,7 +20,18 @@
 //! wrong by definition.
 
 pub mod cards;
+pub mod clock;
 pub mod engine;
 pub mod mcts;
 pub mod rng;
 pub mod value;
+
+// Cross-language surfaces. Native builds only pull serde in for the bridge (fixtures +
+// the arena's move server); the wasm build always needs it to talk to the browser.
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod compact;
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod encmove;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;

@@ -498,6 +498,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const prevLogLen = useRef(0);
   const reconnTimer = useRef(null);
   const reconnTries = useRef(0);
+  // client-side (WASM) bot search — see the effects below
+  const wasmPoolRef = useRef(null);          // [{ ready, request, terminate }] — RPC-wrapped workers
+  const [wasmReady, setWasmReady] = useState(false);
+  const clientAiArmedRef = useRef(null);     // room we've announced capability for (cleared on disconnect)
+  const aiDispatchRef = useRef(null);        // "room:decision" we have already dispatched a search for
 
   const playerName = authUser?.name || "Player";
 
@@ -678,6 +683,117 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const ids = new Set(add.map((a) => a.id));
     setTimeout(() => setFlyers((f) => f.filter((x) => !ids.has(x.id))), 620);
   }, [liveGame?.log?.length]); // eslint-disable-line
+
+  // ── client-side (WASM) bot search ───────────────────────────────────────────
+  // The bot's search runs HERE, on the player's CPU, instead of on Render's free tier
+  // where it gets ~5 sims per root move. Same bot (duel-core is a parity-gated port of
+  // ai.py) — only the sim count changes.
+  //
+  // Root-parallel: each worker searches the SAME decision with its own seed and returns
+  // ROOT STATISTICS; we SUM them by move index (the index space is a pure function of
+  // the state, so every worker agrees) and hand the totals back to the wasm to pick.
+  // The pick rule is NOT reimplemented here — see duel-worker.js.
+  //
+  // Every failure path is a no-op that leaves the server to play the move: no workers,
+  // no wasm, a search error, a slow device. We only ever announce `client_ai_ready`
+  // once at least one worker is alive.
+  useEffect(() => {
+    if (!roomData?.vs_ai || roomData?.ai_difficulty !== "hard"
+      || wasmPoolRef.current || typeof Worker === "undefined") return;
+    const url = `${import.meta.env.BASE_URL}wasm/duel-worker.js`;
+    const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+    const makeWorker = () => {
+      let w;
+      try { w = new Worker(url, { type: "module" }); } catch { return null; }
+      const pending = new Map();
+      let resolveReady, nextId = 1;
+      const ready = new Promise((res) => (resolveReady = res));
+      w.onmessage = (e) => {
+        const d = e.data || {};
+        if (d.ready !== undefined) { resolveReady(!!d.ready); return; }
+        if (d.id != null && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+      };
+      w.onerror = () => resolveReady(false);
+      return {
+        ready,
+        request(payload) {
+          const id = nextId++;
+          return new Promise((res) => { pending.set(id, res); w.postMessage({ ...payload, id }); });
+        },
+        terminate() { try { w.terminate(); } catch {} },
+      };
+    };
+    const pool = Array.from({ length: cores }, makeWorker).filter(Boolean);
+    wasmPoolRef.current = pool;
+    Promise.all(pool.map((wk) => wk.ready)).then((flags) => {
+      const live = pool.filter((_, i) => flags[i]);
+      if (live.length > 0) {
+        wasmPoolRef.current = live;
+        setWasmReady(true);
+        console.info(`[duel client-AI] ${live.length}/${cores} WASM search workers ready`);
+      } else {
+        console.warn("[duel client-AI] no WASM workers loaded -> server AI");
+      }
+    });
+    return () => { pool.forEach((wk) => wk.terminate()); wasmPoolRef.current = null; setWasmReady(false); };
+  }, [roomData?.vs_ai, roomData?.ai_difficulty]);
+
+  // The server disarms the client when its socket drops, so a reconnect MUST re-announce
+  // or the room silently serves the server bot for the rest of the game.
+  useEffect(() => { if (!connected) clientAiArmedRef.current = null; }, [connected]);
+
+  // Announce capability once per room/socket -> the server then ships `ai_search` on the
+  // bot's decisions.
+  useEffect(() => {
+    if (wasmReady && connected && roomData?.room_id
+      && clientAiArmedRef.current !== roomData.room_id) {
+      clientAiArmedRef.current = roomData.room_id;
+      send({ action: "client_ai_ready" });
+    }
+  }, [wasmReady, connected, roomData?.room_id, send]);
+
+  // The server ships `ai_search` on each of the bot's decisions -> search it and answer.
+  useEffect(() => {
+    const as = roomData?.ai_search;
+    const pool = wasmPoolRef.current;
+    if (!as || !wasmReady || !pool || pool.length === 0) return;
+    // One dispatch per decision. Keyed by ROOM too: the counter restarts at 1 in a new
+    // room, so a bare decision number could collide with the last one we dispatched in
+    // the previous game and silently skip the bot's first decision.
+    const key = `${roomData.room_id}:${as.decision}`;
+    if (aiDispatchRef.current === key) return;
+    aiDispatchRef.current = key;
+    const state = JSON.stringify(as.state);
+    const t0 = performance.now();
+    // The server's cap is an AGGREGATE across the pool (visits are summed), so split it.
+    const perWorker = Math.max(1, Math.ceil((as.max_sims || 0) / pool.length));
+    (async () => {
+      try {
+        const parts = await Promise.all(pool.map((wk, i) => wk.request({
+          kind: "search", state, budget: as.budget_ms, maxSims: perWorker,
+          seed: ((as.decision * 2654435761) ^ (i * 40503 + 1)) >>> 0,
+        }).catch(() => null)));
+        const good = parts.filter((p) => p && p.visits && p.wins);
+        if (!good.length) return;                 // every worker failed -> server fallback
+        const k = good[0].visits.length;
+        const visits = new Array(k).fill(0);
+        const wins = new Array(k).fill(0);
+        let sims = 0;
+        for (const p of good) {
+          // Same state in => same root move list, so a length mismatch means a stale
+          // worker. Pooling it would add up DIFFERENT moves' stats — drop it instead.
+          if (p.visits.length !== k || p.wins.length !== k) continue;
+          for (let a = 0; a < k; a++) { visits[a] += p.visits[a]; wins[a] += p.wins[a]; sims += p.visits[a]; }
+        }
+        const res = await pool[0].request({ kind: "pick", state, visits, wins });
+        const move = res?.move && JSON.parse(res.move);
+        if (!move || move.error) return;
+        console.info(`[duel client-AI] ${good.length} workers, ${sims} sims in `
+          + `${Math.round(performance.now() - t0)}ms ->`, move);
+        send({ action: "ai_move", decision: as.decision, move });
+      } catch {}
+    })();
+  }, [roomData, wasmReady, send]);
 
   // ── actions ──
   const mv = (move) => send({ action: "move", move });

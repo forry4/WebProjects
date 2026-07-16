@@ -25,9 +25,8 @@
 //!      follows either way. Card pools DO sort identically (`d{lvl}_{idx:02}` is
 //!      zero-padded, so within a level string order == index order).
 
-use std::time::{Duration, Instant};
-
 use crate::cards::{LEVEL_OF, PEARL};
+use crate::clock::{Clock, Deadline};
 use crate::engine::{is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
 use crate::rng::Rng;
 use crate::value::value;
@@ -538,11 +537,81 @@ impl Search<'_> {
     }
 }
 
-/// Pick a move for `pid`'s current decision via determinized MCTS.
+/// The root move list for a decision — the INDEX SPACE every root statistic is reported
+/// in.
+///
+/// Exposed because root-parallel serving pools statistics BY INDEX across workers that
+/// each ran their own search: they agree only because this is a pure function of the
+/// state, and every worker ingests the identical projection. Any consumer of
+/// `root_search`'s arrays MUST index them with this exact list (in particular it is the
+/// PRUNED search-legality list, not `engine::legal_moves` — see `legal`).
+pub fn root_moves(st: &State, pid: usize, take_dominance: bool) -> Vec<Move> {
+    legal(st, pid, take_dominance)
+}
+
+/// The root's raw statistics, before any pick is applied.
+pub struct RootStats {
+    pub moves: Vec<Move>,
+    /// Visit count per root move.
+    pub n: Vec<i32>,
+    /// SUMMED value per root move (`w[i]/n[i]` is the mean Q). Summed rather than
+    /// averaged so N independent searches pool by plain addition: `n` and `w` are both
+    /// additive, hence so is the pooled mean.
+    pub w: Vec<f64>,
+}
+
+/// Run the determinized MCTS for `pid`'s current decision and return the root statistics.
+///
+/// Split out of `choose_move` so client-side serving can fan this to N workers and pick
+/// on the POOLED counts — the pick is a pure function of `(n, w)`, so pooling then
+/// picking is exactly what one search of the combined sim count would do.
 ///
 /// `opts.take_dominance = Some(false)` disables the dominated-take prune for THIS decision
 /// — the A/B hook for `ai_selfplay`'s "hard+nodom" spec. Per-call rather than global, so an
 /// arena can vary ONE side (the same reason `rollout_steps` is a parameter).
+///
+/// A single legal move is returned UNSEARCHED (`n = [0]`), mirroring `choose_move`'s
+/// original short-circuit: there is nothing to decide, and the picks below both resolve
+/// an all-zero root to index 0.
+pub fn root_search(st: &State, pid: usize, diff: &str, opts: &Opts, rng: &mut Rng) -> Option<RootStats> {
+    let take_dominance = opts.take_dominance.unwrap_or(true);
+    let cfg = difficulty(diff);
+    let time_limit = opts.time_limit.unwrap_or(cfg.time_limit);
+    let max_iters = opts.max_iters.unwrap_or(cfg.max_iters);
+    let steps = opts.rollout_steps.unwrap_or(cfg.rollout_steps);
+
+    let moves = root_moves(st, pid, take_dominance);
+    if moves.is_empty() {
+        return None;
+    }
+    if moves.len() == 1 {
+        return Some(RootStats { moves, n: vec![0], w: vec![0.0] });
+    }
+
+    let mut root = Node::new(pid, moves);
+    let deadline = Deadline::new(time_limit);
+    let mut s = Search { rng, take_dominance, steps };
+    let mut iters: u64 = 0;
+    while iters < max_iters && !deadline.expired() {
+        iters += 1;
+        let mut sim = s.determinize(st, pid);
+        s.simulate(&mut sim, &mut root, pid, 0);
+    }
+    Some(RootStats { moves: root.moves, n: root.n, w: root.w })
+}
+
+/// Apply the tier's pick rule to root statistics. Pure in `(n, w)` — which is what lets
+/// serving pool several searches and call this once on the sum.
+pub fn pick(stats: &RootStats, temperature: f64, rng: &mut Rng) -> usize {
+    if temperature > 0.0 {
+        if let Some(i) = pick_temperature(stats, temperature, rng) {
+            return i;
+        }
+    }
+    pick_greedy(stats)
+}
+
+/// Pick a move for `pid`'s current decision via determinized MCTS.
 pub fn choose_move(
     st: &State,
     pid: usize,
@@ -550,44 +619,10 @@ pub fn choose_move(
     opts: &Opts,
     rng: &mut Rng,
 ) -> Option<Move> {
-    let take_dominance = opts.take_dominance.unwrap_or(true);
-    let cfg = difficulty(diff);
-    let time_limit = opts.time_limit.unwrap_or(cfg.time_limit);
-    let max_iters = opts.max_iters.unwrap_or(cfg.max_iters);
-    let temperature = opts.temperature.unwrap_or(cfg.temperature);
-    let steps = opts.rollout_steps.unwrap_or(cfg.rollout_steps);
-
-    let root_moves = legal(st, pid, take_dominance);
-    if root_moves.is_empty() {
-        return None;
-    }
-    if root_moves.len() == 1 {
-        return root_moves.into_iter().next();
-    }
-
-    let mut root = Node::new(pid, root_moves);
-    let start = Instant::now();
-    // A non-finite limit means "iterations only" (the move server's fixed-sims mode);
-    // Duration cannot represent it, so it becomes an absent deadline rather than a panic.
-    let budget = if time_limit.is_finite() {
-        Some(Duration::from_secs_f64(time_limit.max(0.0)))
-    } else {
-        None
-    };
-    let mut s = Search { rng, take_dominance, steps };
-    let mut iters: u64 = 0;
-    while iters < max_iters && budget.map_or(true, |b| start.elapsed() < b) {
-        iters += 1;
-        let mut sim = s.determinize(st, pid);
-        s.simulate(&mut sim, &mut root, pid, 0);
-    }
-
-    if temperature > 0.0 {
-        if let Some(i) = pick_temperature(&root, temperature, s.rng) {
-            return Some(root.moves[i].clone());
-        }
-    }
-    Some(root.moves[pick_greedy(&root)].clone())
+    let temperature = opts.temperature.unwrap_or(difficulty(diff).temperature);
+    let stats = root_search(st, pid, diff, opts, rng)?;
+    let i = pick(&stats, temperature, rng);
+    Some(stats.moves[i].clone())
 }
 
 /// Sample by VALUE (softmax over mean Q), NOT by visit count.
@@ -599,8 +634,9 @@ pub fn choose_move(
 /// the "normal" tier LOST to the trivial random-legal bot 0.20. Softmax over Q gives a real
 /// "understands but errs" opponent instead.
 ///
-/// `None` when nothing was visited at all (the caller falls back to the greedy pick).
-fn pick_temperature(root: &Node, temperature: f64, rng: &mut Rng) -> Option<usize> {
+/// `None` when nothing was visited at all (the caller falls back to the greedy pick) —
+/// which is also how an unsearched single-move root resolves without drawing from the rng.
+fn pick_temperature(root: &RootStats, temperature: f64, rng: &mut Rng) -> Option<usize> {
     let scored: Vec<(usize, f64)> = (0..root.moves.len())
         .filter(|&i| root.n[i] != 0)
         .map(|i| (i, root.w[i] / root.n[i] as f64))
@@ -620,7 +656,11 @@ fn pick_temperature(root: &Node, temperature: f64, rng: &mut Rng) -> Option<usiz
 /// (a token take) — a badly under-sampled search then "always takes tokens", never buys, and
 /// the game literally never ends (Duel has no turn limit). That is the deployed regime, not
 /// a corner case: the Python bot gets ~5 sims per root move on Render.
-fn pick_greedy(root: &Node) -> usize {
+///
+/// `webapp/public/wasm/duel-worker.js` does NOT reimplement this — the main thread pools
+/// the workers' `(n, w)` and hands them back to `duel_pick_move`, so this stays the only
+/// copy of the rule.
+fn pick_greedy(root: &RootStats) -> usize {
     let key = |i: usize| -> (i32, f64) {
         (root.n[i], if root.n[i] != 0 { root.w[i] / root.n[i] as f64 } else { -2.0 })
     };
@@ -659,7 +699,7 @@ pub fn play_turn_plan(
     let turn_budget = turn_budget.unwrap_or(cfg.turn_budget);
     let mut sim = st.clone();
     let mut seq: Vec<Move> = Vec::new();
-    let start = Instant::now();
+    let start = Clock::start();
     for _ in 0..max_moves {
         if sim.is_over() {
             break;
@@ -668,7 +708,7 @@ pub fn play_turn_plan(
         if actor != pid {
             break;
         }
-        let left = turn_budget - start.elapsed().as_secs_f64();
+        let left = turn_budget - start.elapsed_secs();
         let budget = cfg.time_limit.min(left).max(0.05); // floor: always decide, never stall
         let opts = Opts { time_limit: Some(budget), ..Default::default() };
         let mv = match choose_move(&sim, pid, diff, &opts, rng) {
@@ -785,12 +825,21 @@ mod tests {
         assert_eq!(d.decks[2].len(), 3, "deck sizes are public");
     }
 
+    fn moves_for(k: usize) -> Vec<Move> {
+        (0..k).map(|i| Move::Take { cells: vec![i] }).collect()
+    }
+
     fn node_with(n: Vec<i32>, w: Vec<f64>) -> Node {
-        let moves: Vec<Move> = (0..n.len()).map(|i| Move::Take { cells: vec![i] }).collect();
-        let mut node = Node::new(0, moves);
+        let mut node = Node::new(0, moves_for(n.len()));
         node.n = n;
         node.w = w;
         node
+    }
+
+    /// The picks read only `(moves, n, w)` — which is exactly what lets root-parallel
+    /// serving pool several searches and pick once on the sum.
+    fn stats_with(n: Vec<i32>, w: Vec<f64>) -> RootStats {
+        RootStats { moves: moves_for(n.len()), n, w }
     }
 
     /// THE load-bearing tie-break (ai.py: without it the bot "always takes tokens, never
@@ -799,25 +848,25 @@ mod tests {
     #[test]
     fn greedy_pick_breaks_visit_ties_by_mean_value() {
         // All tied at 1 visit; index 2 is the best move. A plain `max(n)` returns index 0.
-        let node = node_with(vec![1, 1, 1, 1], vec![-0.5, 0.0, 0.9, 0.2]);
-        assert_eq!(pick_greedy(&node), 2, "a visit tie must resolve by value, not by index");
+        let root = stats_with(vec![1, 1, 1, 1], vec![-0.5, 0.0, 0.9, 0.2]);
+        assert_eq!(pick_greedy(&root), 2, "a visit tie must resolve by value, not by index");
     }
 
     /// ...but visits still come FIRST: the tie-break is a tie-break, not a re-ranking.
     #[test]
     fn greedy_pick_prefers_visits_over_value() {
-        let node = node_with(vec![5, 1], vec![0.5, 0.9]); // q = 0.1 vs 0.9
-        assert_eq!(pick_greedy(&node), 0, "more visits wins even with a worse mean");
+        let root = stats_with(vec![5, 1], vec![0.5, 0.9]); // q = 0.1 vs 0.9
+        assert_eq!(pick_greedy(&root), 0, "more visits wins even with a worse mean");
     }
 
     /// An unvisited move scores -2.0, below any real q in [-1, 1], so it can never win a
     /// tie-break — and must not divide by zero.
     #[test]
     fn greedy_pick_never_prefers_an_unvisited_move() {
-        let node = node_with(vec![0, 0], vec![0.0, 0.0]);
-        assert_eq!(pick_greedy(&node), 0, "all-unvisited falls back to the first index");
-        let node = node_with(vec![0, 1], vec![0.0, -1.0]);
-        assert_eq!(pick_greedy(&node), 1, "even a losing visited move beats an unvisited one");
+        let root = stats_with(vec![0, 0], vec![0.0, 0.0]);
+        assert_eq!(pick_greedy(&root), 0, "all-unvisited falls back to the first index");
+        let root = stats_with(vec![0, 1], vec![0.0, -1.0]);
+        assert_eq!(pick_greedy(&root), 1, "even a losing visited move beats an unvisited one");
     }
 
     /// The "normal" tier samples a softmax over mean Q, NOT over visit counts — sampling
@@ -827,10 +876,10 @@ mod tests {
     /// by Q. Sampling Q must pick move 1 essentially always (weight ratio ~2.5e-8).
     #[test]
     fn temperature_samples_value_not_visit_count() {
-        let node = node_with(vec![50, 1], vec![-25.0, 0.9]); // q = -0.5 vs 0.9
+        let root = stats_with(vec![50, 1], vec![-25.0, 0.9]); // q = -0.5 vs 0.9
         let mut rng = Rng::new(42);
         for _ in 0..200 {
-            let i = pick_temperature(&node, 0.08, &mut rng).expect("something was visited");
+            let i = pick_temperature(&root, 0.08, &mut rng).expect("something was visited");
             assert_eq!(i, 1, "temperature must follow Q, not the visit count");
         }
     }
