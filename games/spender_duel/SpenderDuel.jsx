@@ -234,7 +234,7 @@ const css = `
    the board is a fixed 5x5 grid and the player/moves rail is capped, neither needs
    the room. (Previously the rail was the 1fr and swallowed everything.) */
 .duel-cols{display:grid;grid-template-columns:minmax(420px,1.5fr) minmax(360px,1fr) minmax(260px,380px);gap:18px;align-items:start}
-.duel-panel{background:var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px}
+.duel-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5)}
 
 /* pyramid */
 /* Left-aligned, NOT centered: the rows hold different card counts (5/4/3), so centering
@@ -292,7 +292,7 @@ const css = `
    every cell centre — with fixed 7px/12px, the ratios drift as the cell scales. */
 .duel-col-board .duel-board{--dcell:clamp(50px, calc((100cqw - 24px) / 5.88), 104px)}
 .duel-board-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
-.duel-board{--dcell:58px;--dgap:calc(var(--dcell) * 0.12);position:relative;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:var(--dgap);padding:calc(var(--dcell) * 0.2);background:#241d13;border:1px solid #57493a;border-radius:14px}
+.duel-board{--dcell:58px;--dgap:calc(var(--dcell) * 0.12);position:relative;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:var(--dgap);padding:calc(var(--dcell) * 0.2);background:linear-gradient(180deg,#1d160e,#2a2216);border:1px solid #5f4f3a;border-radius:14px;box-shadow:inset 0 3px 14px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.02),0 2px 6px -2px rgba(0,0,0,.4)}
 .duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227;position:relative;z-index:1}
 
 /* The REFILL PATH: replenish fills empty spaces from the centre outward along a fixed
@@ -372,7 +372,7 @@ const css = `
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
-.duel-player.active{outline:2px solid #7a5f33;outline-offset:2px;border-radius:12px}
+.duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
 .duel-stat{font-size:.92rem;margin-left:auto;display:flex;gap:10px;align-items:center}
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 
