@@ -586,16 +586,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
-  // auto-resume a saved room on mount
+  // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
+  // on load (jarring). Resume is EXPLICIT via the lobby's Resume button. Keep only the
+  // disconnect cleanup so an explicit connection tears down on unmount.
   useEffect(() => {
-    try {
-      const rid = localStorage.getItem("duel_roomId");
-      const tok = rid ? localStorage.getItem(`duel_token_${rid}_${myId}`) : null;
-      if (rid && tok) {
-        setRoomId(rid);
-        connect(`${DUEL_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
-      }
-    } catch {}
     return () => disconnect();
   }, []); // eslint-disable-line
 

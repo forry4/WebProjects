@@ -458,17 +458,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
 
-  // auto-resume a saved room on mount
+  // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
+  // on load (jarring). Resume is EXPLICIT via the lobby's Rejoin button. Keep only the
+  // disconnect cleanup so an explicit connection tears down on unmount.
   useEffect(() => {
-    try {
-      const rid = localStorage.getItem("werewolf_roomId");
-      const tok = rid ? localStorage.getItem(`werewolf_token_${rid}_${myId}`) : null;
-      if (rid && tok) {
-        setRoomId(rid);
-        attemptRef.current = { kind: "auto", rid, retried: true };   // silent on failure
-        connect(`${WW_WS}/${rid}/${myId}`, { action: "reconnect", token: tok });
-      }
-    } catch {}
     return () => disconnect();
   }, []); // eslint-disable-line
 

@@ -1077,16 +1077,13 @@ export default function SpenderApp() {
 		onClose: () => {},
 	});
 
-	// ── Mount: auto-reconnect to saved room ────────────────────────────────
+	// ── Mount: do NOT auto-resume a saved game ─────────────────────────────
+	// Auto-reconnecting on load snapped you from the home/lobby straight into the game
+	// (the async "reconnected"/"room_update" forced setScreen("game")) — jarring. Resume
+	// is now EXPLICIT via the lobby's Resume/Continue buttons (handleContinue connects +
+	// enters). Keep only the disconnect cleanup so an explicit connection tears down on
+	// unmount.
 	useEffect(() => {
-		try {
-			const savedRoomId = localStorage.getItem("spender_roomId");
-			const savedToken = savedRoomId ? localStorage.getItem(`spender_token_${savedRoomId}_${myId}`) : null;
-			if (savedRoomId && savedToken) {
-				setRoomId(savedRoomId);
-				connect(`${WS_BASE}/${savedRoomId}/${myId}`);
-			}
-		} catch {}
 		return () => disconnect();
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
