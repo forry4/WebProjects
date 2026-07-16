@@ -22,9 +22,13 @@
 pub mod cards;
 pub mod clock;
 pub mod engine;
+pub mod feats;
 pub mod mcts;
 pub mod rng;
 pub mod value;
+// Always compiled (pure Rust struct + forward pass); only its JSON loader is serde-gated, so
+// `mcts` can reference the net-leaf type on every target. See `valuenet.rs`.
+pub mod valuenet;
 
 // Cross-language surfaces. Native builds only pull serde in for the bridge (fixtures +
 // the arena's move server); the wasm build always needs it to talk to the browser.

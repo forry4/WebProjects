@@ -110,3 +110,54 @@ pub fn duel_pick_move(state_json: &str, visits_json: &str, wins_json: &str) -> S
     let i = pick(&stats, 0.0, &mut rng);
     enc_move(&stats.moves[i]).to_string()
 }
+
+// ─── Value-net forward micro-bench (Node/browser; not a serving entry) ───────────
+// The one number the int8 rewrite is really FOR: wasm has no f32 FMA but HAS an integer dot
+// (`i32x4_dot_i16x8`), so int8 is the path that changes the BROWSER forward economics. These
+// two entries time the f32 vs int8 forward IN THE WASM VM so the deployment-relevant ratio can
+// be read from Node — on a RANDOM-weight net (forward speed is weight-independent, so no need
+// to embed the 3MB trained JSON in the serving wasm). Build with `+simd128` (per the wasm-pack
+// invocation) to exercise `qdot`'s i32x4_dot arm; without it int8 falls to the scalar loop.
+//
+// The input is perturbed each iteration so the (pure) forward can't be hoisted out of the loop
+// (which would collapse the bench to one call). Returns `{"ms":...,"checksum":...,"sps":...}`.
+
+fn bench_raw() -> Vec<f32> {
+    let mut rng = Rng::new(0xD0E1);
+    (0..275).map(|_| (rng.next_f64() as f32 - 0.5) * 2.0).collect()
+}
+
+/// Time `iters` f32 forwards (chunked `dot`, no-alloc) on a random net; report ms + sims/s.
+#[wasm_bindgen]
+pub fn duel_bench_forward_f32(iters: u32, seed: f64) -> String {
+    let net = crate::valuenet::ValueNet::random(seed.max(0.0) as u64);
+    let mut raw = bench_raw();
+    let rn = raw.len();
+    let t0 = js_sys::Date::now();
+    let mut sink = 0.0f64;
+    for k in 0..iters as usize {
+        raw[k % rn] += 1e-6; // defeat loop-invariant hoisting
+        sink += net.forward(&raw);
+    }
+    let ms = js_sys::Date::now() - t0;
+    let sps = if ms > 0.0 { iters as f64 / (ms / 1000.0) } else { f64::INFINITY };
+    format!("{{\"ms\":{},\"checksum\":{},\"sps\":{}}}", ms, sink, sps)
+}
+
+/// Time `iters` int8 forwards (quantized trunk, `qdot` i32x4_dot arm) on a random net.
+#[wasm_bindgen]
+pub fn duel_bench_forward_i8(iters: u32, seed: f64) -> String {
+    let net = crate::valuenet::ValueNet::random(seed.max(0.0) as u64);
+    let q = crate::valuenet::QuantValueNet::from_f32(&net);
+    let mut raw = bench_raw();
+    let rn = raw.len();
+    let t0 = js_sys::Date::now();
+    let mut sink = 0.0f64;
+    for k in 0..iters as usize {
+        raw[k % rn] += 1e-6;
+        sink += q.forward(&raw);
+    }
+    let ms = js_sys::Date::now() - t0;
+    let sps = if ms > 0.0 { iters as f64 / (ms / 1000.0) } else { f64::INFINITY };
+    format!("{{\"ms\":{},\"checksum\":{},\"sps\":{}}}", ms, sink, sps)
+}

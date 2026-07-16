@@ -30,6 +30,7 @@ use crate::clock::{Clock, Deadline};
 use crate::engine::{is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
 use crate::rng::Rng;
 use crate::value::value;
+use crate::valuenet::{QuantValueNet, ValueNet};
 
 pub const C_PUCT: f64 = 1.5;
 pub const MAX_TREE_DEPTH: usize = 14; // in-tree plies before truncating to a rollout
@@ -89,6 +90,24 @@ pub struct Opts {
     pub temperature: Option<f64>,
     pub rollout_steps: Option<usize>,
     pub take_dominance: Option<bool>,
+}
+
+/// Which evaluator the search truncates to at a leaf.
+///
+/// `Heuristic` is the deployed bot: a short rollout then `value::value` (the existing
+/// behaviour — do NOT change it, the parity gates depend on it). `Net` is Phase 2: a DIRECT
+/// 0-step learned value at the leaf (no rollout), which is how an outcome-trained net is
+/// meant to be used. Copy so `leaf_eval` can read it out without fighting the `&mut self`
+/// the rollout needs. The two are threaded via the `*_with_leaf` entry points below; the
+/// plain `choose_move`/`root_search` keep their signatures and default to `Heuristic`, so
+/// every existing caller (move server, harvest, wasm, play_turn_plan) is untouched.
+#[derive(Clone, Copy)]
+pub enum Leaf<'a> {
+    Heuristic,
+    Net(&'a ValueNet),
+    // The int8-trunk net (opt-in `:net8` arm). Same leaf semantics as `Net`; only the forward
+    // arithmetic differs (quantized), gated by the strength A/B vs `Net`, not float parity.
+    Net8(&'a QuantValueNet),
 }
 
 /// Feeds the engine's bag shuffle from the search's rng (Python does this by persisting
@@ -384,13 +403,38 @@ fn select(node: &Node, total: i32) -> usize {
     best_i
 }
 
-struct Search<'a> {
-    rng: &'a mut Rng,
+struct Search<'r, 'n> {
+    rng: &'r mut Rng,
     take_dominance: bool,
     steps: usize,
+    leaf: Leaf<'n>,
 }
 
-impl Search<'_> {
+impl Search<'_, '_> {
+    /// The leaf truncation value from ROOT_PID's perspective. `Heuristic` runs the rollout
+    /// (byte-identical to the deployed bot); `Net` returns a 0-step learned value — except at
+    /// a terminal, which is a FACT, not a prediction, so it is scored ±1 exactly (the net's
+    /// features assume a live position and must never be handed a finished game).
+    fn leaf_eval(&mut self, st: &mut State, root_pid: usize) -> f64 {
+        match self.leaf {
+            Leaf::Heuristic => self.rollout(st, root_pid),
+            Leaf::Net(net) => {
+                if st.is_over() {
+                    return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
+                }
+                net.eval(st, root_pid)
+            }
+            Leaf::Net8(net) => {
+                // Terminal is a FACT, not a prediction — score ±1 exactly (the net's features
+                // assume a live position), identical to the `Net` arm above.
+                if st.is_over() {
+                    return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
+                }
+                net.eval(st, root_pid)
+            }
+        }
+    }
+
     /// Resample everything `pid` cannot legitimately see.
     ///
     /// Hidden: the bag's CONTENTS (its count is public), each deck's ORDER, and the
@@ -502,7 +546,7 @@ impl Search<'_> {
     /// by the ACTING player's identity, not by parity.
     fn simulate(&mut self, st: &mut State, node: &mut Node, root_pid: usize, depth: usize) -> f64 {
         if st.is_over() || depth >= MAX_TREE_DEPTH {
-            return self.rollout(st, root_pid);
+            return self.leaf_eval(st, root_pid);
         }
         let total: i32 = node.n.iter().sum();
         let i = select(node, total);
@@ -521,7 +565,7 @@ impl Search<'_> {
                 let actor = if st.pending_pid != -1 { st.pending_pid as usize } else { st.turn };
                 let moves = legal(st, actor, self.take_dominance);
                 node.children[i] = Some(Box::new(Node::new(actor, moves)));
-                self.rollout(st, root_pid)
+                self.leaf_eval(st, root_pid)
             };
             node.n[i] += 1;
             node.w[i] += v;
@@ -574,6 +618,20 @@ pub struct RootStats {
 /// original short-circuit: there is nothing to decide, and the picks below both resolve
 /// an all-zero root to index 0.
 pub fn root_search(st: &State, pid: usize, diff: &str, opts: &Opts, rng: &mut Rng) -> Option<RootStats> {
+    root_search_with_leaf(st, pid, diff, opts, Leaf::Heuristic, rng)
+}
+
+/// `root_search` with an explicit leaf evaluator. The Phase-2 entry point: pass
+/// `Leaf::Net(&net)` to search with the learned value at the truncation. `Leaf::Heuristic`
+/// reproduces `root_search` exactly (that is what `root_search` calls).
+pub fn root_search_with_leaf(
+    st: &State,
+    pid: usize,
+    diff: &str,
+    opts: &Opts,
+    leaf: Leaf,
+    rng: &mut Rng,
+) -> Option<RootStats> {
     let take_dominance = opts.take_dominance.unwrap_or(true);
     let cfg = difficulty(diff);
     let time_limit = opts.time_limit.unwrap_or(cfg.time_limit);
@@ -590,7 +648,7 @@ pub fn root_search(st: &State, pid: usize, diff: &str, opts: &Opts, rng: &mut Rn
 
     let mut root = Node::new(pid, moves);
     let deadline = Deadline::new(time_limit);
-    let mut s = Search { rng, take_dominance, steps };
+    let mut s = Search { rng, take_dominance, steps, leaf };
     let mut iters: u64 = 0;
     while iters < max_iters && !deadline.expired() {
         iters += 1;
@@ -611,7 +669,7 @@ pub fn pick(stats: &RootStats, temperature: f64, rng: &mut Rng) -> usize {
     pick_greedy(stats)
 }
 
-/// Pick a move for `pid`'s current decision via determinized MCTS.
+/// Pick a move for `pid`'s current decision via determinized MCTS (heuristic leaf).
 pub fn choose_move(
     st: &State,
     pid: usize,
@@ -619,8 +677,21 @@ pub fn choose_move(
     opts: &Opts,
     rng: &mut Rng,
 ) -> Option<Move> {
+    choose_move_with_leaf(st, pid, diff, opts, Leaf::Heuristic, rng)
+}
+
+/// `choose_move` with an explicit leaf evaluator — the Phase-2 net-leaf entry point. Pure
+/// delegation to `root_search_with_leaf` + `pick`, so `Leaf::Heuristic` == `choose_move`.
+pub fn choose_move_with_leaf(
+    st: &State,
+    pid: usize,
+    diff: &str,
+    opts: &Opts,
+    leaf: Leaf,
+    rng: &mut Rng,
+) -> Option<Move> {
     let temperature = opts.temperature.unwrap_or(difficulty(diff).temperature);
-    let stats = root_search(st, pid, diff, opts, rng)?;
+    let stats = root_search_with_leaf(st, pid, diff, opts, leaf, rng)?;
     let i = pick(&stats, temperature, rng);
     Some(stats.moves[i].clone())
 }
@@ -799,11 +870,11 @@ mod tests {
         b.decks[0] = vec![4, 2, 0, 3, 1]; // same multiset, different order
         let da = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12 }.determinize(&a, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&a, 0)
         };
         let db = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12 }.determinize(&b, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&b, 0)
         };
         assert_eq!(da.decks[0], db.decks[0], "the sort must erase the true order");
     }
@@ -817,7 +888,7 @@ mod tests {
         st.players[1].reserved = vec![10, 60]; // 10 = face-up L1, 60 = blind L3
         st.players[1].reserved_from_deck = vec![60];
         let mut rng = Rng::new(3);
-        let d = Search { rng: &mut rng, take_dominance: true, steps: 12 }.determinize(&st, 0);
+        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&st, 0);
         assert_eq!(d.players[1].reserved_from_deck.len(), 1);
         let got = d.players[1].reserved_from_deck[0];
         assert!([54, 55, 56, 60].contains(&got), "redealt from the L3 pool, got {}", got);

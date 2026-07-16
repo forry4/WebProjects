@@ -21,10 +21,12 @@
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
+use duel_core::clock::Clock;
 use duel_core::encmove::{decode_move, enc_move, EncMove};
 use duel_core::engine::{ScriptedFills, State, EMPTY, N_CELLS};
-use duel_core::mcts::{choose_move, Opts};
+use duel_core::mcts::{difficulty, pick, root_search_with_leaf, Leaf, Opts};
 use duel_core::rng::Rng;
+use duel_core::valuenet::{QuantValueNet, ValueNet};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -70,6 +72,16 @@ struct Req {
     rollout_steps: Option<usize>,
     #[serde(default)]
     take_dominance: Option<bool>,
+    // Phase-2 net-leaf hooks (additive; absent => the original heuristic/sims behaviour).
+    // `leaf: "net"` = the f32 learned value leaf, `leaf: "net8"` = the int8-quantized leaf
+    // (the strength-neutrality A/B arm); anything else (or absent) is the heuristic.
+    #[serde(default)]
+    leaf: Option<String>,
+    // A per-decision WALL-CLOCK budget in ms. When set it OVERRIDES `sims`: iterations run
+    // uncapped and the clock bounds the search — the equal-time gate arm, where the slower
+    // net leaf honestly gets fewer sims. Absent => bound by `sims`, clock free.
+    #[serde(default)]
+    budget_ms: Option<f64>,
 }
 
 fn build_state(s: &Setup) -> State {
@@ -88,7 +100,7 @@ fn build_state(s: &Setup) -> State {
     )
 }
 
-fn handle(req: &Req) -> Result<serde_json::Value, String> {
+fn handle(req: &Req, net: &ValueNet, net8: &QuantValueNet) -> Result<serde_json::Value, String> {
     let mut st = build_state(&req.setup);
     for (i, rm) in req.moves.iter().enumerate() {
         let mv = decode_move(&rm.mv);
@@ -97,23 +109,62 @@ fn handle(req: &Req) -> Result<serde_json::Value, String> {
             .map_err(|e| format!("replay move {} ({}) rejected: {}", i, rm.mv.t, e))?;
     }
     let diff = req.difficulty.clone().unwrap_or_else(|| "hard".to_string());
-    let opts = Opts {
-        // `sims` is the arena's currency: bound the search by ITERATIONS and let the clock
-        // run free, so a busy box can't silently make one side weaker.
-        max_iters: req.sims,
-        time_limit: Some(req.time_limit.unwrap_or(f64::INFINITY)),
-        temperature: req.temperature,
-        rollout_steps: req.rollout_steps,
-        take_dominance: req.take_dominance,
+    let opts = if let Some(ms) = req.budget_ms {
+        // Equal-time arm: uncapped iters, wall-clock bound (the honest comparison — the net
+        // leaf is slower, so it simply completes fewer sims in the same ms).
+        Opts {
+            max_iters: Some(u64::MAX),
+            time_limit: Some(ms / 1000.0),
+            temperature: req.temperature,
+            rollout_steps: req.rollout_steps,
+            take_dominance: req.take_dominance,
+        }
+    } else {
+        // Sims arm (the existing arena currency): bound by ITERATIONS, clock free, so a busy
+        // box can't silently make one side weaker.
+        Opts {
+            max_iters: req.sims,
+            time_limit: Some(req.time_limit.unwrap_or(f64::INFINITY)),
+            temperature: req.temperature,
+            rollout_steps: req.rollout_steps,
+            take_dominance: req.take_dominance,
+        }
     };
+    let leaf = match req.leaf.as_deref() {
+        Some("net") => Leaf::Net(net),
+        Some("net8") => Leaf::Net8(net8),
+        _ => Leaf::Heuristic,
+    };
+
     let mut rng = Rng::new(req.seed);
-    Ok(match choose_move(&st, req.seat, &diff, &opts, &mut rng) {
-        Some(mv) => json!({ "mv": enc_move(&mv) }),
-        None => json!({ "mv": serde_json::Value::Null }),
+    // `root_search_with_leaf` + `pick` reproduces `choose_move_with_leaf` EXACTLY (that is
+    // all `choose_move` is), but exposes the sim count + search time so the gate can measure
+    // each leaf's sims/s and quantify the equal-time handicap. The Clock wraps ONLY the
+    // search (not the move replay above).
+    let clock = Clock::start();
+    let stats = root_search_with_leaf(&st, req.seat, &diff, &opts, leaf, &mut rng);
+    let elapsed_ms = clock.elapsed_secs() * 1000.0;
+    Ok(match stats {
+        Some(s) => {
+            let temp = req.temperature.unwrap_or(difficulty(&diff).temperature);
+            let i = pick(&s, temp, &mut rng);
+            let sims: i64 = s.n.iter().map(|&x| x as i64).sum();
+            json!({ "mv": enc_move(&s.moves[i]), "sims": sims, "elapsed_ms": elapsed_ms })
+        }
+        None => json!({ "mv": serde_json::Value::Null, "sims": 0, "elapsed_ms": elapsed_ms }),
     })
 }
 
 fn main() {
+    // Load the value net ONCE at startup (embedded, so no cwd/path dependency). The heuristic
+    // arena tools (rust_arena.py / sims_ladder.py) never send `leaf:"net"`, so they eat only
+    // this one-time parse and are otherwise unaffected.
+    let net = ValueNet::from_json_str(include_str!("../value_net.json"))
+        .expect("load embedded value_net.json");
+    // The int8-quantized trunk of the SAME net (opt-in `leaf:"net8"`). Built once from the f32
+    // net at load — no separate file. The heuristic arena tools never send `leaf`, so this
+    // one-time quantization is otherwise invisible to them.
+    let net8 = QuantValueNet::from_f32(&net);
     let stdin = io::stdin();
     let mut out = io::stdout();
     for line in stdin.lock().lines() {
@@ -125,7 +176,7 @@ fn main() {
             continue;
         }
         let resp = match serde_json::from_str::<Req>(&line) {
-            Ok(req) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(&req))) {
+            Ok(req) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(&req, &net, &net8))) {
                 Ok(Ok(v)) => v,
                 Ok(Err(e)) => json!({ "error": e }),
                 Err(_) => json!({ "error": "panic while searching" }),
