@@ -2,7 +2,7 @@
 check legality + final-score parity. Run from the worktree root:
     python cob_replay.py CoB_BGA/bga_880137656.json.txt
 """
-import json, sys, re, collections
+import json, sys, re, copy, collections
 from games.castles_of_crimson import engine, tiles, board
 from games.castles_of_crimson.az import spaces
 
@@ -421,11 +421,23 @@ def main(path, verbose=True, on_move=None):
             # eaten by that stale pending -> "not an adjacent depot with goods". Consume all.
             deps = [int(x) for x in re.findall(r"\d+", a.get("depots", ""))]
             if g.get("pending_kind") == "ship_choose_depot":
-                AP(pid, {"type":"ship_take_goods","depot":deps[0]}, "ship_goods")
-                # m5 follow-up rides in the SAME record -> resolve it now, never leave it armed.
-                for d2 in deps[1:]:
-                    if g.get("pending_kind") == "ship_adjacent_depot":
-                        AP(pid, {"type":"ship_adjacent_take","depot":d2}, "ship_adj")
+                # For a monastery-5 pair, BGA does NOT guarantee source-first order: '(2,1)'
+                # can mean source=1/adjacent=2. Both orders are ring-adjacent so the text alone
+                # can't disambiguate -- but only ONE is legal (the source must hold goods, and
+                # the engine only offers adjacent depots that do). So try deps[0] as source and
+                # fall back to the reverse, letting the engine arbitrate.
+                for src, adj in ([ (deps[0], deps[1]), (deps[1], deps[0]) ] if len(deps) > 1
+                                 else [ (deps[0], None) ]):
+                    snap = copy.deepcopy(g)
+                    try:
+                        AP(pid, {"type":"ship_take_goods","depot":src}, "ship_goods")
+                        if adj is not None and g.get("pending_kind") == "ship_adjacent_depot":
+                            AP(pid, {"type":"ship_adjacent_take","depot":adj}, "ship_adj")
+                        break
+                    except RuntimeError:
+                        g.clear(); g.update(snap)   # restore and try the other orientation
+                else:
+                    raise RuntimeError(f"ship goods: neither order legal for depots={deps}")
             elif g.get("pending_kind") == "ship_adjacent_depot":
                 AP(pid, {"type":"ship_adjacent_take","depot":deps[0]}, "ship_adj")
             # resolve a goods_pick overflow using the colours the log kept (from goodsTilesToMove)
