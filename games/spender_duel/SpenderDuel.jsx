@@ -450,11 +450,10 @@ const css = `
      --card-w is capped at the narrow level-I fit (that row is deck + 5 cards = 6 columns).
      Short card => the content, which scales off --card-h, was unreadable. Fix = keep the
      base UNIFORM --card-w (so every card is the SAME size and the shorter top rows just
-     end early — the pyramid — NOT stretched to fill), but make the card TALLER: ratio 1.82
-     gives ~0.55 w:h, matching Spender's mobile card aspect, so the content scales back up
-     to Spender-legible. (Only --card-h is overridden; --card-w falls through to the base
-     clamp above.) */
-  .duel-col-cards .level-row{--card-h:calc(var(--card-w) * 1.82)}
+     end early — the pyramid — NOT stretched to fill), but make the card TALLER: ratio 1.71
+     (~0.58 w:h) gives a compact card whose content is still legible. (Only --card-h is
+     overridden; --card-w falls through to the base clamp above.) */
+  .duel-col-cards .level-row{--card-h:calc(var(--card-w) * 1.71)}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 `;
