@@ -768,7 +768,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
 .coc-goods-left{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
-.coc-goods-left-lbl{text-transform:uppercase;opacity:.7}
+/* an already-handed-out good: a faded, numberless barrel slot at the same size as a live
+   good, so the row reads as this-phase's-5-goods with the used ones dimmed left-to-right.
+   .coc-tile.goods.coc-goods-used (0,3,0) beats the base .coc-tile.goods (0,2,0) size. */
+.coc-tile.goods.coc-goods-used{width:22px;height:22px;background:var(--surface2);opacity:.32;box-shadow:inset 0 0 0 1px var(--border)}
 .coc-goods-mini{display:inline-flex;align-items:center;gap:3px}
 .coc-pill b{color:var(--text)}
 .coc-vp{display:flex;gap:14px;justify-self:center}
@@ -2544,19 +2547,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
               <span className="coc-pill">Round <b>{game.round}/5</b></span>
               {(() => {
-                // Goods still to be handed out THIS PHASE: the queued goods not yet placed
-                // on a depot, shown in deal order (leftmost = next). One is dealt at the
-                // start of each round, so this counts down 5 -> 0 across the phase.
+                // This phase's 5 goods, one handed out at the start of each round. The queue
+                // holds the not-yet-dealt goods (deal order, leftmost = next); the already-dealt
+                // ones show as faded slots so the round-by-round progression is visible
+                // (round 1 uses slot 1, round 2 slot 2, ...). No "Goods left" label — the row
+                // speaks for itself.
                 const q = game.goods_queue || [];
+                const TOTAL = 5;                             // GOODS_PER_PHASE
+                const used = Math.max(0, TOTAL - q.length);  // dealt so far this phase
                 return (
-                  <span className="coc-pill coc-goods-left" title="Goods still to be handed out this phase (next first)">
-                    <span className="coc-goods-left-lbl">Goods left</span>
-                    {q.length === 0
-                      ? <span style={{ opacity: .6 }}>none</span>
-                      : q.map((g, i) => (
-                          <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
-                            style={{ width: 15, height: 15, fontSize: ".52rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
-                        ))}
+                  <span className="coc-pill coc-goods-left" title="This phase's goods — one is handed out each round; faded = already used">
+                    {Array.from({ length: used }).map((_, i) => (
+                      <span key={"u" + i} className="coc-tile goods coc-goods-used"
+                        title={"Round " + (i + 1) + " goods — already handed out"} aria-hidden="true"></span>
+                    ))}
+                    {q.map((g, i) => (
+                      <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
+                        style={{ width: 22, height: 22, fontSize: ".7rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
+                    ))}
                   </span>
                 );
               })()}
