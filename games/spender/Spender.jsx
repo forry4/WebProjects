@@ -4,7 +4,7 @@ import WhereWolf from "../wherewolf/WhereWolf.jsx";
 import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -729,7 +729,7 @@ const css = baseCss + lobbyCss + `
   .diff-easy{color:#7fc08a;border-color:#3f6a48}
   .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
   .diff-hard{color:#e0696b;border-color:#6a3536}
-`;
+` + gameMenuCss;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
 
@@ -2008,6 +2008,41 @@ export default function SpenderApp() {
 		setConfirmAbandon(false);
 	};
 
+	// Rules modal — defined once and rendered in BOTH the lobby and the in-game screen
+	// (reached from the options menu), so "How to Play" is available anywhere.
+	const rulesModalEl = showRules && (
+		<div className="modal-backdrop" onClick={() => setShowRules(false)}>
+			<div className="modal rules-modal" onClick={e => e.stopPropagation()}>
+				<h3 style={{ marginTop: 0 }}>📖 How to Play — Spender</h3>
+				<div className="rules-body">
+					<p className="rules-lead">Build an engine of gem-producing cards to earn <b>prestige points</b>. The first player to reach the target — <b>15</b> in Classic, <b>21</b> in Long — triggers the final round; then the most prestige wins (fewest cards breaks a tie).</p>
+					<h4>On your turn, do exactly one</h4>
+					<ul>
+						<li><b>Take 3 gems</b> of three different colors.</li>
+						<li><b>Take 2 gems</b> of one color — only if at least 4 of that color remain.</li>
+						<li><b>Buy a card</b> from the board or your reserve by paying its gem cost.</li>
+						<li><b>Reserve a card</b> into your hand (max 3) and take 1 gold. Gold is a wild that stands in for any color.</li>
+					</ul>
+					<h4>Cards &amp; bonuses</h4>
+					<ul>
+						<li>Every card you buy gives a permanent <b>bonus gem</b> of its color that discounts all future purchases.</li>
+						<li>Higher-level cards cost more but are worth more prestige — build up cheap cards first to afford them.</li>
+					</ul>
+					<h4>Nobles</h4>
+					<ul>
+						<li>At the end of your turn, if your card bonuses meet a noble's requirement, that noble visits for extra prestige (you choose if more than one qualifies). Nobles are never taken on purpose — they come to you.</li>
+					</ul>
+					<h4>Gem limit</h4>
+					<ul>
+						<li>You may hold at most <b>10 gems</b> (gold included). If a take puts you over, discard down to 10.</li>
+					</ul>
+					<p className="rules-note">Play 2 players against an AI opponent, or 2–4 players against friends.</p>
+				</div>
+				<button className="btn btn-gold" style={{ width: "100%", marginTop: 4 }} onClick={() => setShowRules(false)}>Got it</button>
+			</div>
+		</div>
+	);
+
 	const handleStart = () => send({ action: "start" });
 
 	const sendMove = (move) => {
@@ -2695,38 +2730,7 @@ export default function SpenderApp() {
 					})()}
 					</div>
 				</div>
-				{showRules && (
-					<div className="modal-backdrop" onClick={() => setShowRules(false)}>
-						<div className="modal rules-modal" onClick={e => e.stopPropagation()}>
-							<h3 style={{ marginTop: 0 }}>📖 How to Play — Spender</h3>
-							<div className="rules-body">
-								<p className="rules-lead">Build an engine of gem-producing cards to earn <b>prestige points</b>. The first player to reach the target — <b>15</b> in Classic, <b>21</b> in Long — triggers the final round; then the most prestige wins (fewest cards breaks a tie).</p>
-								<h4>On your turn, do exactly one</h4>
-								<ul>
-									<li><b>Take 3 gems</b> of three different colors.</li>
-									<li><b>Take 2 gems</b> of one color — only if at least 4 of that color remain.</li>
-									<li><b>Buy a card</b> from the board or your reserve by paying its gem cost.</li>
-									<li><b>Reserve a card</b> into your hand (max 3) and take 1 gold. Gold is a wild that stands in for any color.</li>
-								</ul>
-								<h4>Cards &amp; bonuses</h4>
-								<ul>
-									<li>Every card you buy gives a permanent <b>bonus gem</b> of its color that discounts all future purchases.</li>
-									<li>Higher-level cards cost more but are worth more prestige — build up cheap cards first to afford them.</li>
-								</ul>
-								<h4>Nobles</h4>
-								<ul>
-									<li>At the end of your turn, if your card bonuses meet a noble's requirement, that noble visits for extra prestige (you choose if more than one qualifies). Nobles are never taken on purpose — they come to you.</li>
-								</ul>
-								<h4>Gem limit</h4>
-								<ul>
-									<li>You may hold at most <b>10 gems</b> (gold included). If a take puts you over, discard down to 10.</li>
-								</ul>
-								<p className="rules-note">Play 2 players against an AI opponent, or 2–4 players against friends.</p>
-							</div>
-							<button className="btn btn-gold" style={{ width: "100%", marginTop: 4 }} onClick={() => setShowRules(false)}>Got it</button>
-						</div>
-					</div>
-				)}
+				{rulesModalEl}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
@@ -2834,7 +2838,11 @@ export default function SpenderApp() {
 						? <button className="btn btn-ghost btn-sm" onClick={exitPuzzle}>← Puzzles</button>
 						: reviewChrome
 						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
-						: <button className="btn btn-ghost btn-sm" onClick={goToMenu}>← Menu</button>}
+						: <GameMenu items={[
+								{ label: "Return to menu", icon: "←", onClick: goToMenu },
+								{ label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+								{ label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
+							]} />}
 					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
 					{puzzling
 						? <div className="puzzle-nav-aids">
@@ -2846,7 +2854,7 @@ export default function SpenderApp() {
 							</div>
 						: reviewChrome
 						? <span style={{ width: 64 }} />
-						: <button className="btn btn-danger btn-sm" onClick={() => setConfirmAbandon(true)}>Abandon</button>}
+						: <span style={{ width: 40 }} />}
 				</div>
 				<div className="game-nav-spacer" />
 				<div className="game">
@@ -3219,6 +3227,7 @@ export default function SpenderApp() {
 					</div>
 				)}
 
+				{rulesModalEl}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>

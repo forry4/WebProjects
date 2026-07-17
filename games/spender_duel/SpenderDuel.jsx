@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -429,7 +429,7 @@ const css = `
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
-  + splendorPillCss + splendorLogCss + css;
+  + splendorPillCss + splendorLogCss + css + gameMenuCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -1501,23 +1501,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   }
 
   return (
-    <div className="app duel">
+    <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
-        <button className="btn btn-outline" onClick={leaveToLobby}>{"←"} Menu</button>
+        <GameMenu items={[
+          { label: "Return to menu", icon: "←", onClick: leaveToLobby },
+          { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+          // Abandon only exists for a LIVE game you're still playing.
+          (!over && !reviewOnly && !replaySnapshots) && { label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
+        ]} />
         <div className="spacer" />
         <h1 className="duel-title">Spender Duel</h1>
         {replaySnapshots && <span className="duel-review-badge">Review</span>}
         <div className="spacer" />
-        <button className="btn btn-outline" onClick={() => setShowRules(true)}>Rules</button>
-        {/* Abandon only exists for a LIVE game you're still playing. */}
-        {!over && !reviewOnly && !replaySnapshots && (
-          <button className="btn btn-outline" onClick={() => setConfirmAbandon(true)}>Abandon</button>
-        )}
-        {replaySnapshots && !reviewOnly && (
-          <button className="btn btn-outline" onClick={exitReview}>Exit review</button>
-        )}
+        {replaySnapshots && !reviewOnly
+          ? <button className="btn btn-outline" onClick={exitReview}>Exit review</button>
+          : <div style={{ width: 40 }} />}
       </div>
       {renderReplayBar()}
       <div className="duel-cols">
