@@ -1514,6 +1514,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
         : spec.kind === "mygoods" ? "[data-mygoods]"
         : spec.kind === "goodsleft" ? "[data-goodsleft]"
+        : spec.kind === "depotgood" ? `[data-depotgood="${spec.id}"]`
         : spec.kind === "goodchip" ? `[data-goodchip="${spec.c}"]`
         : spec.kind === "oppgoodchip" ? `[data-oppgoodchip="${spec.c}"]`
         : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
@@ -1615,9 +1616,13 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       const src = rectOf({ kind: "goodsleft" });
       if (src) for (const g of depotGoods) {
         if (prevGoodIds.has(g.id)) continue;
-        const d = rectOf({ kind: "depot", d: g.d });
+        // Land on the exact goods element that just rendered in the depot (already in the DOM
+        // when this post-render effect runs), sized to its real rect — so it doesn't snap from
+        // the depot center to the goods sub-row at the end. getBoundingClientRect is post-zoom,
+        // so the size/position are correct under the board's zoom.
+        const d = rectOf({ kind: "depotgood", id: g.id });
         if (!d) continue;
-        const W = 30, H = 30;
+        const W = d.width, H = d.height;
         const scx = src.left + src.width / 2, scy = src.top + src.height / 2;
         const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
         add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color,
@@ -2681,7 +2686,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       {depot.goods.map((gt) => {
                         const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
                         return (
-                          <div key={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
+                          <div key={gt.id} data-depotgood={gt.id} className={`coc-tile goods${canPickGood ? " coc-tile-pick" : ""}`} style={{ background: GOODS_HEX[gt.color] }}
                             title={canPickGood ? `Take all #${goodsSellNum(gt.color)} goods` : tileDesc(gt, board)}
                             onClick={(e) => { if (canPickGood) { e.stopPropagation(); goodsPick(gt.color); } else if (!shipPickMine) setToast(tileDesc(gt, board)); }}>{goodsSellNum(gt.color)}</div>
                         );
