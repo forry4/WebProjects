@@ -369,8 +369,10 @@ const css = `
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
    identical to the token pill. */
 .duel-player .bonus-pill{letter-spacing:-.02em}
-/* Buffer between the privilege/token cluster above and the bought-card indicators. */
-.duel-player .player-bonuses{margin-top:8px}
+/* Buffer between the privilege scrolls (⚜) and the token pills directly beneath them,
+   plus a smaller one before the bought-card indicators. */
+.duel-player .player-tokens{margin-top:13px}
+.duel-player .player-bonuses{margin-top:9px}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
