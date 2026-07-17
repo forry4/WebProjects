@@ -219,7 +219,7 @@ const css = `
 /* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
 /* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
 .duel > .lby-header{margin:0 -14px 18px}
-.duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 352px;gap:18px;align-items:start}
+.duel-lobby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:18px;align-items:start}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
 /* Mobile Open/Active/History tab bar (mirrors Spender's .lobby-tabs). Hidden on wide
    screens; shown (and made to hide the other two sections) in the max-width:720 block. */
