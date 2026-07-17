@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -228,7 +228,6 @@ const css = `
 /* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
 .duel > .lby-header{margin:0 -14px 18px}
 .duel-lobby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:18px;align-items:start}
-.duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
 /* Mobile Open/Active/History tab bar (mirrors Spender's .lobby-tabs). Hidden on wide
    screens; shown (and made to hide the other two sections) in the max-width:720 block. */
 .duel-lobby-tabs{display:none;gap:6px;margin-bottom:16px;background:var(--surface2,#241d16);border:1px solid var(--line,#3a332a);border-radius:12px;padding:4px}
@@ -503,7 +502,7 @@ const css = `
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
-  + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss;
+  + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss + lobbyCreateRowCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -1533,11 +1532,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           title="Spender Duel"
           user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
         />
-        <div className="duel-create-row">
-          <button className="btn btn-gold" title="Create a game — play a friend or the bot"
-            onClick={() => setShowCreateModal(true)}>+ Create Game</button>
-          <button className="btn btn-outline" onClick={fetchGames}>{loadingGames ? "…" : "↻"}</button>
-        </div>
+        <LobbyCreateRow
+          onCreate={() => setShowCreateModal(true)}
+          onJoin={(code) => joinGame(code)}
+          onRefresh={fetchGames}
+          refreshing={loadingGames} />
 
         {showCreateModal && (
           <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>

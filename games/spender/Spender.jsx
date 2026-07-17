@@ -5,7 +5,7 @@ import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-	createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
+	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -178,16 +178,6 @@ const css = baseCss + lobbyCss + `
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
-.browser-create{margin-bottom:36px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
-/* Keep the length toggle and the Create Game button on the same line (they never
-   wrap apart); the refresh button may wrap below them on narrow phones. */
-.create-controls{display:inline-flex;align-items:center;gap:10px;flex-wrap:nowrap;max-width:100%}
-/* game-length toggle: selected state changes ONLY background+color (fixed border/padding)
-   so selecting never changes the element's size / shifts the layout */
-.length-toggle{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0}
-.len-btn{padding:9px 14px;background:transparent;border:none;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;letter-spacing:.03em;cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
-.len-btn+.len-btn{border-left:1px solid var(--border)}
-.len-btn.sel{background:var(--gold);color:#1c1710}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
@@ -277,9 +267,6 @@ const css = baseCss + lobbyCss + `
 /* Fixed square size + centered content so swapping the ↻ glyph for the spinner
    (which carries a margin for its 'Loading…' use) doesn't resize the button and
    shift the centered button row. */
-.refresh-btn{background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:.9rem;padding:0;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;transition:color .15s;flex-shrink:0}
-.refresh-btn:hover{color:var(--gold)}
-.refresh-btn .spinner{margin:0}
 
 /* ─── Waiting ───────────────────────────────────────────────────────────── */
 .waiting-screen{max-width:480px;margin:0 auto;padding:48px 20px 24px;text-align:center}
@@ -642,10 +629,6 @@ const css = baseCss + lobbyCss + `
 @media(max-width:600px){
   .browser{padding:20px 14px 40px}
   .lby-header{padding-left:14px;padding-right:14px}
-  /* Compact the toggle + Create Game so the pair fits side by side on phones. */
-  .create-controls{gap:8px}
-  .create-controls .len-btn{padding:8px 10px;font-size:.74rem}
-  .create-controls>.btn{padding:10px 14px;font-size:.82rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
 
@@ -734,7 +717,7 @@ const css = baseCss + lobbyCss + `
   .diff-easy{color:#7fc08a;border-color:#3f6a48}
   .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
   .diff-hard{color:#e0696b;border-color:#6a3536}
-` + gameMenuCss + createModalCss;
+` + gameMenuCss + createModalCss + lobbyCreateRowCss;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
 
@@ -2707,23 +2690,11 @@ export default function SpenderApp() {
 					</>}
 				/>
 				<div className="browser">
-					<div className="browser-create">
-						<div className="create-controls">
-						<div className="length-toggle" title="Filter the lists by game length (Classic = race to 15, Long = race to 21)">
-							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
-								<button key={wp} type="button" className={`len-btn${winPoints === wp ? " sel" : ""}`}
-									onClick={() => setWinPoints(wp)}>{label}</button>
-							))}
-						</div>
-						<button className="btn btn-gold" title="Create a game — play a friend or one of the AI opponents"
-							onClick={() => setShowCreateModal(true)}>
-							+ Create Game
-						</button>
-						</div>
-						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
-							{browserLoading ? <span className="spinner" /> : "↻"}
-						</button>
-					</div>
+						<LobbyCreateRow
+							onCreate={() => setShowCreateModal(true)}
+							onJoin={(code) => handleJoinGame(code)}
+							onRefresh={() => fetchGames(authUser)}
+							refreshing={browserLoading} />
 
 					{showCreateModal && (
 						<CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
@@ -2774,9 +2745,9 @@ export default function SpenderApp() {
 					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
 					<div className="lobby-tabs" role="tablist">
 						{[
-							["open", "Open", openGames.filter(g => (g.win_points || 15) === winPoints).length],
-							["active", "Active", activeGames.filter(g => (g.win_points || 15) === winPoints).length],
-							["history", "History", historyGames.filter(g => (g.win_points || 15) === winPoints).length],
+							["open", "Open", openGames.length],
+							["active", "Active", activeGames.length],
+							["history", "History", historyGames.length],
 						].map(([key, label, count]) => (
 							<button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
 								className={`lobby-tab${lobbyTab === key ? " sel" : ""}`}
@@ -2790,15 +2761,15 @@ export default function SpenderApp() {
 					<div className="browser-section open-section">
 						<div className="section-hd">
 							<span className="section-title">Open Games</span>
-							<span className="small-muted">{winPoints === 21 ? "Long (21)" : "Classic (15)"} - waiting for players (2-4)</span>
+							<span className="small-muted">waiting for players (2-4)</span>
 						</div>
 						{browserLoading && openGames.length === 0 ? (
 							<div className="empty-state"><span className="spinner" />Loading…</div>
-						) : openGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
-							<div className="empty-state">No open {winPoints === 21 ? "Long (21)" : "Classic (15)"} games right now. Create one!</div>
+						) : openGames.length === 0 ? (
+							<div className="empty-state">No open games right now. Create one!</div>
 						) : (
 							<div className="game-cards">
-								{openGames.filter(g => (g.win_points || 15) === winPoints).map(g => (
+								{openGames.map(g => (
 									<div key={g.id} className="game-card">
 										<div className="game-card-info">
 											<div className="game-card-title">
@@ -2833,11 +2804,11 @@ export default function SpenderApp() {
 						</div>
 						{(!authUser || authUser.guest) ? (
 							<div className="empty-state">Log in to see your game history.</div>
-						) : historyGames.filter(g => (g.win_points || 15) === winPoints).length === 0 ? (
-							<div className="empty-state">No finished {winPoints === 21 ? "Long (21)" : "Classic (15)"} games yet.</div>
+						) : historyGames.length === 0 ? (
+							<div className="empty-state">No finished games yet.</div>
 						) : (
 							<div className="game-cards">
-								{historyGames.filter(g => (g.win_points || 15) === winPoints).map(g => {
+								{historyGames.map(g => {
 									// History is always YOUR games, so drop the repeated "you" —
 									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
 									const me = g.players.find(p => p.is_you);
@@ -2868,7 +2839,7 @@ export default function SpenderApp() {
 						// All in-progress games (yours + others'). Yours pinned to the top;
 						// each sub-list is already updated_at-desc from the backend.
 						const hasMe = g => [g.player1_id, g.player2_id, g.player3_id, g.player4_id].includes(myId);
-						const lenGames = activeGames.filter(g => (g.win_points || 15) === winPoints);
+						const lenGames = activeGames;
 						const mine = lenGames.filter(hasMe);
 						const others = lenGames.filter(g => !hasMe(g));
 						const ordered = [...mine, ...others];

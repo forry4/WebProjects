@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -750,7 +750,6 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
 /* Lobby create row — the "+ Create Game" button (opens the shared CreateModal with
    opponent/difficulty/board options), Join code, and refresh, centered. */
-.coc-create{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
 /* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
 .coc-lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
 .coc-lobby-col{min-width:0}
@@ -758,9 +757,6 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
 .coc-won{color:#7ec87e;font-weight:700}
 .coc-lost{color:#d98a8a;font-weight:700}
-.coc-join{display:flex;gap:8px}
-.coc-input{padding:9px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;outline:none;width:130px;text-transform:uppercase}
-.coc-input:focus{border-color:var(--gold)}
 .coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
 .coc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
 .coc-card-info{flex:1;min-width:0}
@@ -880,7 +876,6 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-status-left{width:100%;justify-content:center}
   .coc-status-right{justify-content:center}
   /* lobby create row: let the dropdown + join controls wrap cleanly on phones */
-  .coc-create{gap:8px}
   /* In-game "Your Duchy" controls sit in a narrow panel (viewport - wrap 32 - panel 28).
      Only MODESTLY reduce the dice + worker/silver tokens (42/40, vs the 46/44 desktop size)
      and tighten the row gaps, so the Dice row (dice + workers/silver) and the action buttons
@@ -1187,7 +1182,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (min-width:1600px){
   .coc-col-board .coc-board-hex{zoom:1}
 }
-` + lobbyCss + gameMenuCss + createModalCss;
+` + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
@@ -1296,7 +1291,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [history, setHistory] = useState(() => readLobbyCache("coc", myId, "history", []));           // your finished games (lobby History column)
   const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   const [loadingGames, setLoadingGames] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
@@ -2322,18 +2316,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="coc-wrap">
-          <div className="coc-create">
-            <button className="coc-btn gold" title="Create a game — play a friend or the bot"
-              onClick={() => setShowCreateModal(true)}>
-              + Create Game
-            </button>
-            <div className="coc-join">
-              <input className="coc-input" placeholder="CODE" value={joinCode} maxLength={6}
-                onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && joinCode && setJoinBoardFor(joinCode)} />
-              <button className="coc-btn outline" onClick={() => joinCode && setJoinBoardFor(joinCode)}>Join</button>
-            </div>
-            <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
-          </div>
+          <LobbyCreateRow
+            onCreate={() => setShowCreateModal(true)}
+            onJoin={(code) => setJoinBoardFor(code)}
+            onRefresh={fetchGames} />
 
           {showCreateModal && (
             <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>

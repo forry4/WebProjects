@@ -172,6 +172,46 @@ export const createModalCss = `
 .cm-create:disabled{opacity:.4;cursor:not-allowed}
 `;
 
+// The lobby create/join/refresh row — one shared control bar across all four games:
+//   [ + Create Game (gold) ]  [ CODE ] [ Join ]  [ ↻ ]
+// The create button is ALWAYS gold (not the per-game accent), matching CoC. `onJoin`
+// receives the trimmed, upper-cased code; `codeMaxLength` is 6 everywhere except Where
+// Wolf (4). Token-driven with hard fallbacks so it renders in CoC's bare mount too.
+export const lobbyCreateRowCss = `
+.lby-create-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
+.lby-cta,.lby-join-btn,.lby-refresh{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius,8px);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:background .15s,color .15s,border-color .15s}
+.lby-cta{padding:9px 16px;border:none;background:var(--gold,#c9a84c);color:#120c0d}
+.lby-cta:hover{background:var(--gold-light,#e8c96a)}
+.lby-join{display:flex;gap:8px}
+.lby-code{padding:9px 12px;width:130px;background:var(--surface2,#241d16);border:1px solid var(--border,#3a3226);border-radius:var(--radius,8px);color:var(--text,#e8dfce);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.12em;text-transform:uppercase;outline:none}
+.lby-code:focus{border-color:var(--gold,#c9a84c)}
+.lby-join-btn{padding:9px 16px;background:transparent;color:var(--gold,#c9a84c);border:1px solid var(--gold,#c9a84c)}
+.lby-join-btn:hover{background:var(--gold,#c9a84c);color:#120c0d}
+.lby-refresh{width:38px;height:38px;padding:0;font-size:1rem;background:transparent;color:var(--text-dim,#b8ab90);border:1px solid var(--border,#3a3226)}
+.lby-refresh:hover{color:var(--text,#e8dfce);border-color:var(--text-dim,#b8ab90)}
+.lby-refresh .lby-spinner{width:15px;height:15px;border-width:2px}
+`;
+
+export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false,
+	createLabel = "+ Create Game", codeMaxLength = 6 }) {
+	const [code, setCode] = useState("");
+	const submit = () => { const c = code.trim().toUpperCase(); if (c) onJoin(c); };
+	return (
+		<div className="lby-create-row">
+			<button type="button" className="lby-cta" onClick={onCreate}>{createLabel}</button>
+			<div className="lby-join">
+				<input className="lby-code" placeholder="CODE" value={code} maxLength={codeMaxLength}
+					onChange={(e) => setCode(e.target.value)}
+					onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+				<button type="button" className="lby-join-btn" onClick={submit}>Join</button>
+			</div>
+			<button type="button" className="lby-refresh" aria-label="Refresh" onClick={onRefresh}>
+				{refreshing ? <span className="lby-spinner" /> : "↻"}
+			</button>
+		</div>
+	);
+}
+
 // Backdrop + panel + titled header with a ✕. Backdrop click and Escape both close.
 export function CreateModal({ title, onClose, children }) {
 	useEffect(() => {

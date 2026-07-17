@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -339,7 +339,7 @@ const css = baseCss + lobbyCss + `
   .ww-seat .seat-name{font-size:10px;max-width:64px}
   .ww-actions{min-height:38px;gap:8px}
 }
-` + gameMenuCss + createModalCss;
+` + gameMenuCss + createModalCss + lobbyCreateRowCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
@@ -348,7 +348,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [roomData, setRoomData] = useState(null);
   const [openGames, setOpenGames] = useState(() => readLobbyCache("ww", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("ww", myId, "mine", []));
-  const [joinCode, setJoinCode] = useState("");
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
   const [showCreateModal, setShowCreateModal] = useState(false);  // New Game confirm modal
   const [toast, setToast] = useState("");
@@ -716,13 +715,11 @@ export default function WhereWolf({ myId, authUser, onExit }) {
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="ww-wrap">
-          <div className="ww-row">
-            <button className="ww-btn gold" onClick={() => setShowCreateModal(true)}>+ New Game</button>
-            <input className="ww-input" placeholder="CODE" value={joinCode} maxLength={4}
-              onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
-            <button className="ww-btn" onClick={() => startJoin(joinCode)}>Join</button>
-            <button className="ww-btn ghost sm" onClick={fetchGames}>↻</button>
-          </div>
+          <LobbyCreateRow
+            onCreate={() => setShowCreateModal(true)}
+            onJoin={(code) => startJoin(code)}
+            onRefresh={fetchGames}
+            codeMaxLength={4} />
 
           {showCreateModal && (
             <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
