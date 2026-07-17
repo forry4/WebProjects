@@ -1007,6 +1007,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* claimed color-bonus tiles, shown under the goods so a player can track what they've earned */
 .coc-claimed-row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px}
 .coc-claimed-badge{display:inline-flex;width:26px;height:26px}
+/* The first (large, +5) color bonus renders slightly bigger than the second (small, +2)
+   so you can tell a 5-pt reward from a 2-pt one at a glance (the badges carry no number). */
+.coc-claimed-badge.large{width:32px;height:32px}
+.coc-claimed-badge.small{width:24px;height:24px}
 .coc-claimed-badge svg{width:100%;height:100%}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 /* A goods chip you can click to sell during a Warehouse pending — pulses like the pick depots. */
@@ -2893,8 +2897,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   {me?.claimed_bonus?.length > 0 && (
                     <div className="coc-claimed-row" data-myclaimed="1" title="Color-bonus tiles you've claimed">
                       {me.claimed_bonus.map((bt, i) => (
-                        <span key={i} className="coc-claimed-badge"
-                          title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP`}>
+                        <span key={i} className={`coc-claimed-badge${bt.vp > (game.num_players || 2) ? " large" : " small"}`}
+                          title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP (${bt.vp > (game.num_players || 2) ? "large / first" : "small / second"})`}>
                           <BonusTileBadge color={TILE_HEX[bt.color]} />
                         </span>
                       ))}
@@ -2964,8 +2968,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 {opp?.claimed_bonus?.length > 0 && (
                   <div className="coc-claimed-row" data-oppclaimed="1" title="Color-bonus tiles they've claimed">
                     {opp.claimed_bonus.map((bt, i) => (
-                      <span key={i} className="coc-claimed-badge"
-                        title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP`}>
+                      <span key={i} className={`coc-claimed-badge${bt.vp > (game.num_players || 2) ? " large" : " small"}`}
+                        title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP (${bt.vp > (game.num_players || 2) ? "large / first" : "small / second"})`}>
                         <BonusTileBadge color={TILE_HEX[bt.color]} />
                       </span>
                     ))}
