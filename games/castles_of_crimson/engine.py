@@ -63,20 +63,28 @@ def _draw_type(pool: list[dict], ttype: str) -> dict | None:
 def _replenish_depots(game: dict) -> None:
     """Discard leftover hex tiles and refill each depot per the fixed DEPOT_PLAN.
 
-    Each numbered depot gets exactly the two hex types listed for it in
-    ``tiles.DEPOT_PLAN`` (drawn from the shuffled supply so the specific
-    building/monastery/animal varies by seed). Goods already sitting on depots are
-    NOT removed (they persist across phases).
+    Each numbered depot fills its first ``num_players`` spaces (2/3/4 for 2/3/4
+    players) with the hex types listed in ``tiles.DEPOT_PLAN`` (drawn from the
+    shuffled supply so the specific building/monastery/animal varies by seed). The
+    central black depot fills 2 x num_players tiles. Goods already sitting on depots
+    are NOT removed (they persist across phases).
+
+    3-player exception (per the rulebook): depot 6's 3rd space (a castle) is
+    replenished with a MINE instead in phases B and D.
     """
+    n = game["num_players"]
+    phase = game.get("phase_letter")
     for i in range(1, 7):
         d = game["depots"][str(i)]
         hexes = []
-        for ttype in tiles.DEPOT_PLAN[i]:
+        for si, ttype in enumerate(tiles.DEPOT_PLAN[i][:n]):
+            if i == 6 and si == 2 and n == 3 and phase in ("B", "D"):
+                ttype = "mine"                     # 3-player depot-6 castle→mine in B/D
             t = _draw_type(game["supply"], ttype)
             if t is not None:
                 hexes.append(t)
         d["hexes"] = hexes
-    game["black_depot"] = _draw(game["black_supply"], tiles.BLACK_FILL_2P)
+    game["black_depot"] = _draw(game["black_supply"], tiles.black_fill(n))
 
 
 def _refill_goods_queue(game: dict) -> None:

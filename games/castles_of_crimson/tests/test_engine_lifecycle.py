@@ -55,10 +55,38 @@ def test_depots_filled_to_2p_count():
 
 
 def test_depots_follow_fixed_plan():
+    # A 2-player game fills the first 2 spaces of each depot's 4-space plan.
     g = engine.new_game(["p1", "p2"], seed=7)
     for i in range(1, 7):
         types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
-        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
+        assert types == sorted(tiles.DEPOT_PLAN[i][:2]), (i, types)
+
+
+def test_depots_fill_num_players_spaces():
+    # 2/3/4-player games fill 2/3/4 depot spaces (first N of the 4-space plan) and
+    # 4/6/8 black-depot tiles.
+    for n in (2, 3, 4):
+        g = engine.new_game([f"p{k}" for k in range(n)], seed=7)
+        for i in range(1, 7):
+            hexes = g["depots"][str(i)]["hexes"]
+            assert len(hexes) == n, (n, i, len(hexes))
+            assert sorted(t["type"] for t in hexes) == sorted(tiles.DEPOT_PLAN[i][:n])
+        assert len(g["black_depot"]) == tiles.black_fill(n) == 2 * n
+
+
+def test_three_player_depot6_castle_becomes_mine_in_bd():
+    # 3-player exception: depot 6's 3rd space is a castle in phases A/C/E, a mine in B/D.
+    for phase, want in [("A", "castle"), ("B", "mine"), ("C", "castle"), ("D", "mine"), ("E", "castle")]:
+        g = engine.new_game(["p1", "p2", "p3"], seed=11)
+        g["phase_letter"] = phase
+        engine._replenish_depots(g)
+        assert g["depots"]["6"]["hexes"][2]["type"] == want, (phase, want)
+    # 4-player: always castle (the exception is 3-player only).
+    for phase in ("A", "B", "C", "D", "E"):
+        g = engine.new_game(["p1", "p2", "p3", "p4"], seed=11)
+        g["phase_letter"] = phase
+        engine._replenish_depots(g)
+        assert g["depots"]["6"]["hexes"][2]["type"] == "castle", phase
 
 
 def test_supply_is_exactly_164_tiles():
@@ -171,7 +199,7 @@ def test_depots_refilled_each_phase():
     assert g["phase_letter"] == "B"
     for i in range(1, 7):
         types = sorted(t["type"] for t in g["depots"][str(i)]["hexes"])
-        assert types == sorted(tiles.DEPOT_PLAN[i]), (i, types)
+        assert types == sorted(tiles.DEPOT_PLAN[i][:2]), (i, types)
 
 
 def test_track_initial_order_and_advance():

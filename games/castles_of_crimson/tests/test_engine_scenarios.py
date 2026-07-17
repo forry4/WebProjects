@@ -168,11 +168,11 @@ def test_starting_workers_are_seat_dependent_for_all_counts():
 
 
 def test_three_player_bank_scales_by_area_score_only_not_bonus():
-    # sanity: a 3-player game deals the depots + goods the same way (fixed plan / counts).
+    # A 3-player game fills 3 spaces per depot and 6 black tiles (2/3/4 & 4/6/8 scale).
     g = engine.new_game(["p1", "p2", "p3"], seed=3)
     for i in range(1, 7):
-        assert len(g["depots"][str(i)]["hexes"]) == tiles.DEPOT_FILL_2P
-    assert len(g["black_depot"]) == tiles.BLACK_FILL_2P
+        assert len(g["depots"][str(i)]["hexes"]) == 3
+    assert len(g["black_depot"]) == tiles.black_fill(3) == 6
     assert g["num_players"] == 3
 
 
