@@ -279,14 +279,20 @@ const css = `
    query, which we deliberately did not move; these mirror them for Duel's sizes. */
 .duel-col-cards .level-row .card{padding:calc(var(--card-h) * 0.049) calc(var(--card-h) * 0.043) calc(var(--card-h) * 0.043);justify-content:space-between}
 .duel-col-cards .level-row .card-header{margin-bottom:calc(var(--card-h) * 0.043)}
-.duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147)}
-.duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
-/* a double bonus overlaps by 40% of the (scaled) disc: 0.157 * 0.4 */
-.duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.063)}
-.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.097)}
+/* min-width:0 (the shared base pins points to 16px): on a narrow Duel card the fixed 16px
+   left the points + crowns + bonus too wide for the header, pushing the gem-type disc off
+   the card's right edge. Zeroing it (points are 1-2 chars anyway) keeps the header inside. */
+.duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147);min-width:0}
+.duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.14);height:calc(var(--card-h) * 0.14)}
+/* a double bonus overlaps by 40% of the (scaled) disc: 0.14 * 0.4 */
+.duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.056)}
+.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.12);margin-left:auto;margin-right:calc(var(--card-h) * 0.025)}
+.duel-col-cards .level-row .card-header .card-crowns+.card-bonus{margin-left:calc(var(--card-h) * 0.03)}
 .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
 .duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.096);height:calc(var(--card-h) * 0.096)}
 .duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.095)}
+/* pip -> number gap: tighter so the count sits right next to its gem (was the base 4px). */
+.duel-col-cards .level-row .cost-row{gap:calc(var(--card-h) * 0.02)}
 .duel-col-cards .level-row .card-cost{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .card-cost .cost-col{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
@@ -448,6 +454,11 @@ const css = `
 }
 @media(max-width:720px){
   .duel-cols{grid-template-columns:1fr}
+  /* Trim the side buffer on phones so the board + cards get more width (matched header
+     margin keeps the full-bleed header exactly at the screen edge — a wider -14px here
+     would push it past an 8px padding and cause a horizontal scrollbar). */
+  .duel{padding-left:8px;padding-right:8px}
+  .duel > .lby-header{margin-left:-8px;margin-right:-8px}
   /* Lobby: show the Open/Active/History tab bar and let the selected tab pick which of
      the (now single-column) sections is visible — the others are hidden. */
   .duel-lobby-tabs{display:flex}
@@ -475,6 +486,14 @@ const css = `
      overridden; --card-w falls through to the base clamp above.) */
   .duel-col-cards .level-row{--card-h:calc(var(--card-w) * 1.71)}
   .duel .duel-deck{width:52px;min-height:80px}
+}
+@media(max-width:600px){
+  /* Lobby cards on phones: the shared .btn is big (11px 20px), so an Open card's
+     Return + Cancel (two Cinzel buttons) ran past the right edge. Shrink the card buttons
+     and let the actions WRAP below the info as a safety net, so nothing is ever clipped. */
+  .duel .lby-card{flex-wrap:wrap;row-gap:10px}
+  .duel .lby-card .btn{padding:8px 12px;font-size:.78rem}
+  .duel .lby-card-actions{margin-left:auto}
 }
 `;
 
