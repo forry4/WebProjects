@@ -2692,7 +2692,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   onClick={() => { mv({ type: "discard_storage", tile_id: selStorage }); setSelStorage(null); }}>Discard</button>
                 <button className="coc-btn ghost sm" disabled={!myTurnRaw || !hasActed}
                   title={hasActed ? "Undo everything you've done this turn" : "Nothing to undo yet"}
-                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo Turn</button>
+                  onClick={() => { setSelDie(null); setSelStorage(null); setExtraValue(null); setActedThisTurn(false); mv({ type: "undo_turn" }); }}>↩ Undo</button>
                 <button className="coc-btn crimson sm" disabled={!myTurnRaw || !bothDiceUsed || pendingMine}
                   title={pendingMine ? "Resolve the pending decision first" : bothDiceUsed ? "End your turn" : "Use both dice before ending your turn"}
                   onClick={() => mv({ type: "end_turn" })}>End Turn</button>
