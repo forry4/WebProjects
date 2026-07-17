@@ -521,11 +521,11 @@ const MONASTERY_ICON = {
   14: () => (<>{mPawn(5.6, 13, 0.92)}{mPawn(8.7, 13, 0.92)}{mNum(11.8, 7.4, 4.2, "+")}{mPawn(14.9, 13, 0.92)}{mPawn(18.0, 13, 0.92)}</>), // 2-workers action -> 4 (2 + 2)
   // ── end-game scoring ──
   15: () => (<>{mBarrel(7.2, 14, 0.82, GOODS_HEX.amber)}{mBarrel(12, 14, 0.82, GOODS_HEX.rose)}{mBarrel(16.8, 14, 0.82, GOODS_HEX.jade)}{mStar(18.4, 6.2, 2.7)}</>), // 2VP/goods type sold (goods #1/#2/#3 colors)
-  16: () => (<>{mIcon("market", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  16: () => (<>{mIcon("warehouse", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   17: () => (<>{mIcon("watchtower", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   18: () => (<>{mIcon("carpenter", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   19: () => (<>{mIcon("church", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
-  20: () => (<>{mIcon("warehouse", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
+  20: () => (<>{mIcon("market", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   21: () => (<>{mIcon("boarding", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   22: () => (<>{mIcon("bank", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),
   23: () => (<>{mIcon("townhall", 9.4, 12.4, 13)}{mStar(17.8, 6.8, 3)}</>),

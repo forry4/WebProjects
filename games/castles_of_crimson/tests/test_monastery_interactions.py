@@ -121,7 +121,7 @@ def test_all_endgame_monasteries_sum_together():
     g = _fresh(effects=[15, 16, 17, 24, 25, 26])
     p = g["players"]["p1"]
     p["sold_goods"] = ["amber", "rose"]              # 15: 2 types -> 4 ; 25: 2 tiles -> 2
-    p["buildings_placed"]["market"] = 1              # 16: 4
+    p["buildings_placed"]["warehouse"] = 1           # 16: 4 (per warehouse)
     p["buildings_placed"]["watchtower"] = 2          # 17: 8
     p["livestock_types"] = ["cow", "pig"]            # 24: 2 types -> 8
     p["claimed_bonus"] = [{"color": "gray", "vp": 5}]  # 26: 1 tile -> 3

@@ -554,14 +554,14 @@ impl State {
             total += 2 * p.sold.iter().filter(|&&c| c > 0).count() as i16;
         }
         // effects 16..=23 map to building types (MONASTERY_BUILDING_SCORING):
-        // 16=market 17=watchtower 18=carpenter 19=church 20=warehouse 21=boarding
+        // 16=warehouse 17=watchtower 18=carpenter 19=church 20=market 21=boarding
         // 22=bank 23=townhall
         const EFF_BT: [(u8, usize); 8] = [
-            (16, tiles::B_MARKET as usize),
+            (16, tiles::B_WAREHOUSE as usize),
             (17, tiles::B_WATCHTOWER as usize),
             (18, tiles::B_CARPENTER as usize),
             (19, tiles::B_CHURCH as usize),
-            (20, tiles::B_WAREHOUSE as usize),
+            (20, tiles::B_MARKET as usize),
             (21, tiles::B_BOARDING as usize),
             (22, tiles::B_BANK as usize),
             (23, tiles::B_TOWNHALL as usize),

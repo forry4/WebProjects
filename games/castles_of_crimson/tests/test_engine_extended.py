@@ -392,8 +392,8 @@ def test_endgame_monastery_effects_stack():
 def test_endgame_monastery_building_scoring():
     g = _playing(20)
     p = g["players"]["p1"]
-    p["monastery_effects"] = [16, 22]                  # 16: 4/market, 22: 4/bank
-    p["buildings_placed"]["market"] = 2
+    p["monastery_effects"] = [16, 22]                  # 16: 4/warehouse, 22: 4/bank
+    p["buildings_placed"]["warehouse"] = 2
     p["buildings_placed"]["bank"] = 1
     assert engine._endgame_monastery_vp(g, "p1") == 4 * 2 + 4 * 1
 

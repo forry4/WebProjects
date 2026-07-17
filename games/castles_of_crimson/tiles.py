@@ -93,11 +93,11 @@ MONASTERY_META = {
     13: {"timing": "continuous", "desc": "Gain 1 silver in addition when taking the 2-workers action."},
     14: {"timing": "continuous", "desc": "The 2-workers action gives 4 workers instead of 2."},
     15: {"timing": "endgame",    "desc": "Score 2 VP per different goods type in your sold pile."},
-    16: {"timing": "endgame",    "desc": "Score 4 VP per market building placed."},
+    16: {"timing": "endgame",    "desc": "Score 4 VP per warehouse building placed."},
     17: {"timing": "endgame",    "desc": "Score 4 VP per watchtower building placed."},
     18: {"timing": "endgame",    "desc": "Score 4 VP per carpenter building placed."},
     19: {"timing": "endgame",    "desc": "Score 4 VP per church building placed."},
-    20: {"timing": "endgame",    "desc": "Score 4 VP per warehouse building placed."},
+    20: {"timing": "endgame",    "desc": "Score 4 VP per market building placed."},
     21: {"timing": "endgame",    "desc": "Score 4 VP per boarding house placed."},
     22: {"timing": "endgame",    "desc": "Score 4 VP per bank placed."},
     23: {"timing": "endgame",    "desc": "Score 4 VP per town hall placed."},
@@ -111,8 +111,8 @@ BLACK_MONASTERY_IDS = {21, 22, 23, 24, 25, 26}
 
 # Each end-game "4 VP per building of type X" monastery maps to its building.
 MONASTERY_BUILDING_SCORING = {
-    16: "market", 17: "watchtower", 18: "carpenter", 19: "church",
-    20: "warehouse", 21: "boarding", 22: "bank", 23: "townhall",
+    16: "warehouse", 17: "watchtower", 18: "carpenter", 19: "church",
+    20: "market", 21: "boarding", 22: "bank", 23: "townhall",
 }
 
 # ── Livestock kinds ─────────────────────────────────────────────────────────
