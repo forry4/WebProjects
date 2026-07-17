@@ -1485,7 +1485,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <div className="duel-gameover-badge">{WIN_DESC[liveGame.win_condition] || ""}{liveGame.win_color ? ` (${liveGame.win_color})` : ""}</div>
             <p className="duel-muted">Final score {pointsOf(liveGame.players[liveGame.order[0]], cardsById, royals)} – {pointsOf(liveGame.players[liveGame.order[1]], cardsById, royals)} ({names[liveGame.order[0]]} vs {names[liveGame.order[1]]})</p>
             <div className="duel-modal-row">
-              <button className="btn btn-outline" onClick={() => setGameOverDismissed(true)}>View board</button>
               <button className="btn btn-outline" onClick={() => { setGameOverDismissed(true); enterReview(roomId, true); }}>
                 Review game
               </button>

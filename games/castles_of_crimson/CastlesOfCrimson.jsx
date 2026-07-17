@@ -2519,8 +2519,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             <VpReview order={order} players={players} myId={myId} scores={scores}
               breakdowns={breakdowns} winnerPid={w} projected={false} />
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 18 }}>
-              <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review Board</button>
-              <button className="coc-btn gold" onClick={leaveToLobby}>Back to Lobby</button>
+              <button className="coc-btn outline" onClick={() => setReviewing(true)}>Review game</button>
+              <button className="coc-btn gold" onClick={leaveToLobby}>Back to lobby</button>
             </div>
           </div>
         </div>

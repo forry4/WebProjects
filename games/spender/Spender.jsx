@@ -2975,7 +2975,7 @@ export default function SpenderApp() {
 						</div>
 						<div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
 							<button className="btn btn-gold" onClick={() => enterReview(roomId)}>
-								Review Board & Log
+								Review game
 							</button>
 							<button className="btn btn-outline" onClick={() => {
 								try { localStorage.removeItem("spender_roomId"); } catch {}
@@ -2985,7 +2985,7 @@ export default function SpenderApp() {
 								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
 								fetchGames(authUser);
 							}}>
-								Back to Browser
+								Back to lobby
 							</button>
 						</div>
 					</div>
