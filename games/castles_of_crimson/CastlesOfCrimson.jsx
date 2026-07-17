@@ -641,12 +641,12 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 12.3 },  // 1 top (raised ~4px so the black depot doesn't cover its die when goods pile up)
-  { left: 83, top: 29.1 },  // 2 top-right (raised ~5px)
-  { left: 83, top: 70.9 },  // 3 bottom-right (lowered ~5px)
+  { left: 50, top: 12.1 },  // 1 top (raised ~5px so the black depot doesn't cover its die when goods pile up)
+  { left: 83, top: 28.1 },  // 2 top-right (raised ~11px)
+  { left: 83, top: 71.9 },  // 3 bottom-right (lowered ~11px)
   { left: 50, top: 88 },    // 4 bottom
-  { left: 17, top: 70.9 },  // 5 bottom-left (lowered ~5px)
-  { left: 17, top: 29.1 },  // 6 top-left (raised ~5px)
+  { left: 17, top: 71.9 },  // 5 bottom-left (lowered ~11px)
+  { left: 17, top: 28.1 },  // 6 top-left (raised ~11px)
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
