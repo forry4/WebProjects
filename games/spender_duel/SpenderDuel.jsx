@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -235,12 +236,6 @@ const css = `
 .duel-lobby-tab.sel{background:var(--lby-accent,#bf6fd0);color:#160f18;font-weight:700}
 .duel-lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.22);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
 .duel-lobby-tab:not(.sel) .duel-lobby-tab-count{background:var(--surface,#1b1712);color:var(--text-dim,#a89a82)}
-/* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
-   an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
-.duel-pick-wrap{position:relative}
-.duel-picker{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:60;background:#241d13;border:1px solid #6b5836;border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:4px;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
-.duel-picker button{white-space:nowrap;text-align:left}
-.duel-picker .sub{display:block;font-size:.72rem;opacity:.6}
 .duel-turnbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#3f5f33;color:#dfeecf;white-space:nowrap}
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
@@ -508,7 +503,7 @@ const css = `
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
-  + splendorPillCss + splendorLogCss + css + gameMenuCss;
+  + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -563,7 +558,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
   const [showRules, setShowRules] = useState(false);
-  const [showBotPicker, setShowBotPicker] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
+  const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
+  const [createDiff, setCreateDiff] = useState("hard");           // AI difficulty (easy|normal|hard)
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // review mode: an HTTP-loaded finished game (no WebSocket). replaySnapshots is the
   // per-move board list from /review; replayTurn is which one is on screen.
@@ -953,7 +950,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const rid = roomCode();
     setRoomId(rid);
     setRoomData(null);
-    setShowBotPicker(false);
+    setShowCreateModal(false);
     const msg = { action: "create", name: playerName, vs_ai: vsAi };
     if (vsAi) msg.ai_difficulty = difficulty || "hard";
     connect(`${DUEL_WS}/${rid}/${myId}`, msg);
@@ -1537,21 +1534,39 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
         />
         <div className="duel-create-row">
-          <button className="btn btn-gold" onClick={() => createGame(false)}>+ Create Game</button>
-          <div className="duel-pick-wrap">
-            <button className="btn btn-gold" onClick={() => setShowBotPicker((v) => !v)}>Play vs Bot ▾</button>
-            {showBotPicker && (
-              <div className="duel-picker">
-                {BOT_TIERS.map((t) => (
-                  <button key={t.id} className="btn btn-outline" onClick={() => createGame(true, t.id)}>
-                    {t.name}<span className="sub">{t.desc}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <button className="btn btn-gold" title="Create a game — play a friend or the bot"
+            onClick={() => setShowCreateModal(true)}>+ Create Game</button>
           <button className="btn btn-outline" onClick={fetchGames}>{loadingGames ? "…" : "↻"}</button>
         </div>
+
+        {showCreateModal && (
+          <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+            <CmRow label="Opponent">
+              <CmSeg value={createOpp} onChange={setCreateOpp} options={[
+                { value: "friend", label: "VS Friend", title: "Head-to-head — one friend joins from the lobby (or your room code)" },
+                { value: "ai", label: "VS AI", title: "Starts instantly against the bot" },
+              ]} />
+            </CmRow>
+            {createOpp === "ai" ? (
+              <CmRow label="AI Difficulty">
+                <CmSeg value={createDiff} onChange={setCreateDiff}
+                  options={BOT_TIERS.map((t) => ({ value: t.id, label: t.name, title: t.desc }))} />
+                <span className="cm-hint">{BOT_TIERS.find((t) => t.id === createDiff)?.desc}</span>
+              </CmRow>
+            ) : (
+              <span className="cm-hint">Duel is head-to-head — one friend joins from the lobby.</span>
+            )}
+            <div className="cm-footer">
+              <span className="cm-summary">
+                Creating: <b>{createOpp === "ai" ? `${TIER_NAME[createDiff] || createDiff} bot` : "vs Friend"}</b>
+              </span>
+              <button type="button" className="cm-create"
+                onClick={() => createGame(createOpp === "ai", createDiff)}>
+                Create Game
+              </button>
+            </div>
+          </CreateModal>
+        )}
         {/* Mobile-only tab bar (mirrors Spender): the three columns can't fit side by side
             on a phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
         <div className="duel-lobby-tabs" role="tablist">

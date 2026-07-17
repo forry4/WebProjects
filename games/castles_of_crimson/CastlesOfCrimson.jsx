@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -747,14 +748,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-btn.tool{background:var(--surface2);color:var(--gold-l);border:1px solid var(--gold)}.coc-btn.tool:hover:not(:disabled){background:#3a2a18;color:var(--gold-l)}
 .coc-btn.outline{background:transparent;color:var(--gold);border:1px solid var(--gold)}.coc-btn.outline:hover:not(:disabled){background:var(--gold);color:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
-/* Lobby create row — a single "+ Create Game ▾" dropdown (vs Friend / vs Bot),
-   Join code, and refresh, centered (mirrors Spender's browser-create). */
+/* Lobby create row — the "+ Create Game" button (opens the shared CreateModal with
+   opponent/difficulty/board options), Join code, and refresh, centered. */
 .coc-create{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin:6px 0 26px}
-.coc-ai-picker-wrap{position:relative;display:inline-flex}
-.coc-ai-picker-wrap>.coc-btn.active{background:var(--gold-l)}
-.coc-ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:180px;max-width:min(92vw,280px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.coc-ai-picker .coc-btn{white-space:nowrap}
-.coc-ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
 /* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
 .coc-lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
 .coc-lobby-col{min-width:0}
@@ -1105,8 +1101,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-turnbadge{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;padding:4px 10px;border-radius:12px;letter-spacing:.05em}
 .coc-turnbadge.you{background:var(--gold);color:#120c0d}
 .coc-turnbadge.them{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.coc-board-pick{margin:4px 0 8px}
-.coc-board-pick .coc-section-title{display:flex;align-items:center;gap:8px}
+/* Board strips now live inside the create/join modals (not the lobby). */
 .coc-board-grid{display:flex;gap:8px;overflow-x:auto;padding:6px 2px 8px}
 .coc-bthumb{flex:0 0 auto;width:86px;background:var(--surface2);border:2px solid var(--border);border-radius:10px;padding:5px 5px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:border-color .15s,transform .1s}
 .coc-bthumb:hover{transform:translateY(-2px)}
@@ -1192,7 +1187,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 @media (min-width:1600px){
   .coc-col-board .coc-board-hex{zoom:1}
 }
-` + lobbyCss + gameMenuCss;
+` + lobbyCss + gameMenuCss + createModalCss;
 
 // ─── Hex geometry ─────────────────────────────────────────────────────────────
 const HEX_S = 26;
@@ -1305,7 +1300,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
-  const [showCreateMenu, setShowCreateMenu] = useState(false);  // + Create Game dropdown (vs Friend / vs Bot)
+  const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
+  const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
+  const [createDiff, setCreateDiff] = useState("expert");         // AI difficulty (easy|hard|expert)
+  const [joinBoardFor, setJoinBoardFor] = useState(null);         // room id pending a board pick before join
   const [showRules, setShowRules] = useState(false);            // lobby "How to Play" modal
 
   // interaction state
@@ -2302,6 +2300,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
   }
   if (screen === "lobby") {
+    // Board pickers live in the create/join modals (not the lobby), so the lobby
+    // paints instantly and the layouts fetch resolves in the background.
+    const boardStrip = (sel, onPick) => board ? (
+      <div className="coc-board-grid">
+        {(board.boards || []).map((b) => (
+          <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+            selected={sel === b.id} onClick={() => onPick(b.id)} />
+        ))}
+      </div>
+    ) : (
+      <div className="lby-empty"><span className="coc-spinner" /> Loading boards…</div>
+    );
+    const boardName = (id) => board?.byId?.[id]?.name || `Board ${id}`;
+    const diffLabel = (d) => d.charAt(0).toUpperCase() + d.slice(1);
     return (
       <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
         <LobbyHeader
@@ -2310,64 +2322,65 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="coc-wrap">
-          <div className="coc-board-pick">
-            {board ? (<>
-              <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
-              <div className="coc-board-grid">
-                {(board.boards || []).map((b) => (
-                  <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                    selected={myBoard === b.id} onClick={() => setMyBoard(b.id)} />
-                ))}
-              </div>
-              <div className="coc-section-title">Bot's Board <span className="coc-card-meta">— {board.byId?.[oppBoard]?.name} (Play vs Bot only)</span></div>
-              <div className="coc-board-grid">
-                {(board.boards || []).map((b) => (
-                  <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                    selected={oppBoard === b.id} onClick={() => setOppBoard(b.id)} />
-                ))}
-              </div>
-            </>) : (
-              <div className="lby-empty"><span className="coc-spinner" /> Loading boards…</div>
-            )}
-          </div>
-
           <div className="coc-create">
-            <div className="coc-ai-picker-wrap">
-              <button className={`coc-btn gold${showCreateMenu ? " active" : ""}`}
-                title="Create a game — play a friend or the bot"
-                onClick={() => setShowCreateMenu((v) => !v)}>
-                + Create Game {showCreateMenu ? "▴" : "▾"}
-              </button>
-              {showCreateMenu && (
-                <div className="coc-ai-picker">
-                  <button className="coc-btn gold sm"
-                    title="Create a game a friend can join from Open Games (or your room code)"
-                    onClick={() => { setShowCreateMenu(false); startCreate(false); }}>
-                    vs Friend
-                  </button>
-                  <span className="coc-ai-picker-label">vs Bot</span>
-                  <button className="coc-btn outline sm" title="A capable search opponent — a solid game without neural-net strength"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "easy"); }}>
-                    Easy
-                  </button>
-                  <button className="coc-btn outline sm" title="The first-generation neural net, searched in your browser — a real challenge"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "hard"); }}>
-                    Hard
-                  </button>
-                  <button className="coc-btn outline sm" title="The strongest neural net, searched in your browser"
-                    onClick={() => { setShowCreateMenu(false); startCreate(true, "expert"); }}>
-                    Expert
-                  </button>
-                </div>
-              )}
-            </div>
+            <button className="coc-btn gold" title="Create a game — play a friend or the bot"
+              onClick={() => setShowCreateModal(true)}>
+              + Create Game
+            </button>
             <div className="coc-join">
               <input className="coc-input" placeholder="CODE" value={joinCode} maxLength={6}
-                onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
-              <button className="coc-btn outline" onClick={() => startJoin(joinCode)}>Join</button>
+                onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && joinCode && setJoinBoardFor(joinCode)} />
+              <button className="coc-btn outline" onClick={() => joinCode && setJoinBoardFor(joinCode)}>Join</button>
             </div>
             <button className="coc-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
+
+          {showCreateModal && (
+            <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+              <CmRow label="Opponent">
+                <CmSeg value={createOpp} onChange={setCreateOpp} options={[
+                  { value: "friend", label: "VS Friend", title: "Create a game a friend can join from Open Games (or your room code)" },
+                  { value: "ai", label: "VS AI", title: "Starts instantly against the bot" },
+                ]} />
+              </CmRow>
+              {createOpp === "ai" && (
+                <CmRow label="AI Difficulty">
+                  <CmSeg value={createDiff} onChange={setCreateDiff} options={[
+                    { value: "easy", label: "Easy", title: "A capable search opponent — a solid game without neural-net strength" },
+                    { value: "hard", label: "Hard", title: "The first-generation neural net, searched in your browser — a real challenge" },
+                    { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
+                  ]} />
+                </CmRow>
+              )}
+              <CmRow label="Your Board">{boardStrip(myBoard, setMyBoard)}</CmRow>
+              {createOpp === "ai"
+                ? <CmRow label="Bot's Board">{boardStrip(oppBoard, setOppBoard)}</CmRow>
+                : <span className="cm-hint">Your friend picks their own board when they join.</span>}
+              <div className="cm-footer">
+                <span className="cm-summary">
+                  Creating: <b>{createOpp === "ai" ? `${diffLabel(createDiff)} bot` : "vs Friend"}</b> · <b>{boardName(myBoard)}</b>
+                  {createOpp === "ai" && <> · bot on <b>{boardName(oppBoard)}</b></>}
+                </span>
+                <button type="button" className="cm-create"
+                  onClick={() => { setShowCreateModal(false); startCreate(createOpp === "ai", createDiff); }}>
+                  Create Game
+                </button>
+              </div>
+            </CreateModal>
+          )}
+
+          {joinBoardFor && (
+            <CreateModal title="Join Game" onClose={() => setJoinBoardFor(null)}>
+              <CmRow label="Your Board">{boardStrip(myBoard, setMyBoard)}</CmRow>
+              <div className="cm-footer">
+                <span className="cm-summary">Joining <b>{joinBoardFor.toUpperCase()}</b> on <b>{boardName(myBoard)}</b></span>
+                <button type="button" className="cm-create"
+                  onClick={() => { const rid = joinBoardFor; setJoinBoardFor(null); startJoin(rid); }}>
+                  Join Game
+                </button>
+              </div>
+            </CreateModal>
+          )}
 
           <div className="coc-lobby-grid">
             <div className="coc-lobby-col">
@@ -2389,7 +2402,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                             <button className="coc-btn outline sm" onClick={() => resume(g.id)}>Return</button>
                             <button className="coc-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>
                           </>
-                        : <button className="coc-btn gold sm" onClick={() => startJoin(g.id)}>Join</button>}
+                        : <button className="coc-btn gold sm" onClick={() => setJoinBoardFor(g.id)}>Join</button>}
                     </div>
                   </div>
                 ))

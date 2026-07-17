@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+  createModalCss, CreateModal } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
@@ -338,7 +339,7 @@ const css = baseCss + lobbyCss + `
   .ww-seat .seat-name{font-size:10px;max-width:64px}
   .ww-actions{min-height:38px;gap:8px}
 }
-` + gameMenuCss;
+` + gameMenuCss + createModalCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
@@ -349,6 +350,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [myGames, setMyGames] = useState(() => readLobbyCache("ww", myId, "mine", []));
   const [joinCode, setJoinCode] = useState("");
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
+  const [showCreateModal, setShowCreateModal] = useState(false);  // New Game confirm modal
   const [toast, setToast] = useState("");
 
   // narration
@@ -715,12 +717,28 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         />
         <div className="ww-wrap">
           <div className="ww-row">
-            <button className="ww-btn gold" onClick={startCreate}>+ New Game</button>
+            <button className="ww-btn gold" onClick={() => setShowCreateModal(true)}>+ New Game</button>
             <input className="ww-input" placeholder="CODE" value={joinCode} maxLength={4}
               onChange={(e) => setJoinCode(e.target.value)} onKeyDown={(e) => e.key === "Enter" && startJoin(joinCode)} />
             <button className="ww-btn" onClick={() => startJoin(joinCode)}>Join</button>
             <button className="ww-btn ghost sm" onClick={fetchGames}>↻</button>
           </div>
+
+          {showCreateModal && (
+            <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+              <div className="cm-info">
+                <span className="cm-info-line">3–10 players, one device each</span>
+                <span className="cm-info-line">Friends join from the lobby or your room code</span>
+                <span className="cm-info-line">You'll pick the roles together in the waiting room once everyone's in</span>
+              </div>
+              <div className="cm-footer">
+                <button type="button" className="cm-create"
+                  onClick={() => { setShowCreateModal(false); startCreate(); }}>
+                  Create Room
+                </button>
+              </div>
+            </CreateModal>
+          )}
 
           {savedId && savedTok && !myGames.some((g) => g.id === savedId) && (
             <div className="lby-card">

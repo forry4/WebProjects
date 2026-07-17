@@ -322,6 +322,7 @@ def save_game(room_id: str) -> None:
         "meta": room.get("meta", {}),
         "ai_variant": room.get("ai_variant"),  # persist so a reconnect/redeploy keeps the
                                                 # right bot AND the admin value overlay
+        "max_players": room.get("max_players"),  # host-chosen seat cap (create modal)
     }
     now = int(time.time())
     seat = lambda lst, i: lst[i] if len(lst) > i else None   # seat value or None (2-4 players)
@@ -362,6 +363,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "game": game,
         "meta": state.get("meta", {}),
         "ai_variant": ai_variant,
+        "max_players": state.get("max_players"),
         "sockets": {},
     }
     LOG.info("loaded game %s from DB", room_id)
@@ -387,8 +389,13 @@ def list_open_games() -> list[dict]:
         except Exception:
             wp = 15
         player_count = len(state.get("players") or {}) or 1  # players who've joined the lobby
+        try:
+            mp = int(state.get("max_players") or 0)
+        except (TypeError, ValueError):
+            mp = 0
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-                    "win_points": wp, "player_count": player_count, "max_players": MAX_PLAYERS,
+                    "win_points": wp, "player_count": player_count,
+                    "max_players": mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS,
                     "created_at": r["created_at"]})
     return out
 
@@ -2666,11 +2673,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 if vs_ai and not _ai_variant_valid(ai_variant):
                     ai_variant = "A"
                 win_points = 21 if msg.get("win_points") == 21 else 15   # Classic 15 / Long 21
+                try:  # host-chosen seat cap for friend lobbies (2-4; default = the global max)
+                    mp = int(msg.get("max_players") or 0)
+                except (TypeError, ValueError):
+                    mp = 0
+                max_players = mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
                     r["players"][pid] = name
                     r["host"] = pid
                     r["status"] = "open"
+                    r["max_players"] = max_players
                     bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
                     r["game"] = {
                         "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
@@ -2738,7 +2751,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         if r.get("status") != "open":
                             await websocket.send_text(json.dumps({"type": "error", "message": "game already started"}))
                             continue
-                        if len(r["players"]) >= MAX_PLAYERS:
+                        if len(r["players"]) >= int(r.get("max_players") or MAX_PLAYERS):
                             await websocket.send_text(json.dumps({"type": "error", "message": "room full"}))
                             continue
                     r["players"][pid] = name

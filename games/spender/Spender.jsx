@@ -4,7 +4,8 @@ import WhereWolf from "../wherewolf/WhereWolf.jsx";
 import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
 import Books from "../../books/Books.jsx";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+	createModalCss, CreateModal, CmRow, CmSeg } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -50,6 +51,7 @@ const GAME_EMBLEM = {
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
 const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
+const aiTierLabel = (v) => (AI_TIERS[v] || "").replace(/^./, (c) => c.toUpperCase());  // "expert" -> "Expert"
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
 	const m = typeof name === "string" && name.match(/^AI \((.+)\)$/);
 	return m ? aiPersona(m[1]) + " (AI)" : name;                // tag AI names so a same-named human isn't confused for the bot
@@ -187,11 +189,6 @@ const css = baseCss + lobbyCss + `
 .len-btn+.len-btn{border-left:1px solid var(--border)}
 .len-btn.sel{background:var(--gold);color:#1c1710}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
-.ai-picker-wrap{position:relative;display:inline-flex}
-/* Create-game dropdown: vs Friend on top, then the AI opponents, stacked as a menu. */
-.ai-picker{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:200px;max-width:min(92vw,300px);padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:0 10px 28px rgba(0,0,0,.5)}
-.ai-picker .btn{white-space:nowrap}
-.ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
 .browser-section{margin-bottom:32px}
 .section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
@@ -648,7 +645,7 @@ const css = baseCss + lobbyCss + `
   /* Compact the toggle + Create Game so the pair fits side by side on phones. */
   .create-controls{gap:8px}
   .create-controls .len-btn{padding:8px 10px;font-size:.74rem}
-  .create-controls .ai-picker-wrap>.btn{padding:10px 14px;font-size:.82rem}
+  .create-controls>.btn{padding:10px 14px;font-size:.82rem}
   .game{padding:6px}
   .game-card{padding:10px 12px}
 
@@ -737,7 +734,7 @@ const css = baseCss + lobbyCss + `
   .diff-easy{color:#7fc08a;border-color:#3f6a48}
   .diff-tricky{color:#d8b25a;border-color:#6a5a2f}
   .diff-hard{color:#e0696b;border-color:#6a3536}
-` + gameMenuCss;
+` + gameMenuCss + createModalCss;
 
 // ─── Sub-components ───────────────────────────────────────────────────────
 
@@ -985,7 +982,10 @@ export default function SpenderApp() {
 	const [activeGames, setActiveGames] = useState(() => readLobbyCache("spender", myId, "active", []));   // ALL in-progress games (yours + others')
 	const [historyGames, setHistoryGames] = useState(() => readLobbyCache("spender", myId, "history", [])); // your FINISHED games (vs AI or humans)
 	const [browserLoading, setBrowserLoading] = useState(false);
-	const [showCreateMenu, setShowCreateMenu] = useState(false);
+	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
+	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
+	const [createVariant, setCreateVariant] = useState("N"); // AI difficulty (wire code)
+	const [createSeats, setCreateSeats] = useState(2);       // friend-lobby seat cap (2-4)
 	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
 	const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only: which lobby section is shown (open|active|history)
@@ -1723,13 +1723,13 @@ export default function SpenderApp() {
 	};
 
 	// ── Room / game actions ────────────────────────────────────────────────
-	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15) => {
+	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15, maxPlayers = 4) => {
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
 		pendingActionRef.current = vsAI
 			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant, win_points: wp }
-			: { action: "create", name: playerName, win_points: wp };
+			: { action: "create", name: playerName, win_points: wp, max_players: maxPlayers };
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
 
@@ -2709,40 +2709,67 @@ export default function SpenderApp() {
 				<div className="browser">
 					<div className="browser-create">
 						<div className="create-controls">
-						<div className="length-toggle" title="Game length (Classic = race to 15, Long = race to 21) — also filters the open games below">
+						<div className="length-toggle" title="Filter the lists by game length (Classic = race to 15, Long = race to 21)">
 							{[[15, "Classic 15"], [21, "Long 21"]].map(([wp, label]) => (
 								<button key={wp} type="button" className={`len-btn${winPoints === wp ? " sel" : ""}`}
 									onClick={() => setWinPoints(wp)}>{label}</button>
 							))}
 						</div>
-						<div className="ai-picker-wrap">
-							<button className={`btn btn-gold${showCreateMenu ? " active" : ""}`}
-								title="Create a game — play a friend or one of the AI opponents"
-								onClick={() => setShowCreateMenu(v => !v)}>
-								+ Create Game {showCreateMenu ? "▴" : "▾"}
-							</button>
-							{showCreateMenu && (
-								<div className="ai-picker">
-									<button className="btn btn-gold btn-sm"
-										title="Create a game for 2-4 players — friends join from Open Games (or your room code)"
-										onClick={() => { setShowCreateMenu(false); handleCreate(false, "A", winPoints); }}>
-										vs Friend
-									</button>
-									<span className="ai-picker-label">vs AI</span>
-									{["H2", "H3", "S", "N"].map(v => (
-										<button key={v} className="btn btn-outline btn-sm"
-											onClick={() => { setShowCreateMenu(false); handleCreate(true, v, winPoints); }}>
-											{aiPersona(v)} ({AI_TIERS[v]})
-										</button>
-									))}
-								</div>
-							)}
-						</div>
+						<button className="btn btn-gold" title="Create a game — play a friend or one of the AI opponents"
+							onClick={() => setShowCreateModal(true)}>
+							+ Create Game
+						</button>
 						</div>
 						<button className="refresh-btn" title="Refresh" onClick={() => fetchGames(authUser)}>
 							{browserLoading ? <span className="spinner" /> : "↻"}
 						</button>
 					</div>
+
+					{showCreateModal && (
+						<CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
+							<CmRow label="Opponent">
+								<CmSeg value={createOpp} onChange={setCreateOpp} options={[
+									{ value: "friend", label: "VS Friend", title: "An open game friends join from Open Games (or your room code)" },
+									{ value: "ai", label: "VS AI", title: "Starts instantly against one of the AI opponents" },
+								]} />
+							</CmRow>
+							{createOpp === "ai" ? (
+								<CmRow label="AI Difficulty">
+									<div className="cm-pills">
+										{["H2", "H3", "S", "N"].map(v => (
+											<button key={v} type="button" className={`cm-pill${createVariant === v ? " sel" : ""}`}
+												onClick={() => setCreateVariant(v)}>
+												<span className="cm-pill-name">{aiPersona(v)}</span>
+												<span className="cm-pill-sub">{aiTierLabel(v)}</span>
+											</button>
+										))}
+									</div>
+								</CmRow>
+							) : (
+								<CmRow label="Players">
+									<CmSeg value={createSeats} onChange={setCreateSeats}
+										options={[2, 3, 4].map(n => ({ value: n, label: String(n) }))} />
+									<span className="cm-hint">Friends join from Open Games — or send your room code.</span>
+								</CmRow>
+							)}
+							<CmRow label="Length">
+								<CmSeg value={winPoints} onChange={setWinPoints} options={[
+									{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+								]} />
+							</CmRow>
+							<div className="cm-footer">
+								<span className="cm-summary">
+									Creating: <b>{createOpp === "ai"
+										? `${aiPersona(createVariant)} (${aiTierLabel(createVariant)})`
+										: `vs Friend · up to ${createSeats} players`}</b> · <b>{winPoints === 21 ? "Long 21" : "Classic 15"}</b>
+								</span>
+								<button type="button" className="cm-create"
+									onClick={() => { setShowCreateModal(false); handleCreate(createOpp === "ai", createVariant, winPoints, createSeats); }}>
+									Create Game
+								</button>
+							</div>
+						</CreateModal>
+					)}
 
 					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
 					<div className="lobby-tabs" role="tablist">
