@@ -1253,6 +1253,12 @@ function BoardThumb({ spaces, name, selected, onClick }) {
 export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [board, setBoard] = useState(null);            // {spaces, colors, castle, ...}
   const [screen, setScreen] = useState("lobby");        // lobby | waiting | game
+  // Instant feedback while the WS connects + the first room state arrives (~1 RTT +
+  // a DB load): the screen otherwise stays frozen on the lobby, so clicking Resume/
+  // Join/Create feels like a dead half-second. Set true on click, cleared the moment
+  // authoritative state (or an error) lands; a timeout drops it so it can't hang.
+  const [connecting, setConnecting] = useState(false);
+  const connectTimer = useRef(null);
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
   const optimisticRef = useRef(false);          // a move preview is showing (awaiting the server's truth)
@@ -1334,10 +1340,12 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       // Revert an optimistic preview the server rejected, so a bad guess doesn't linger.
       if (optimisticRef.current && preOptimisticRoomRef.current) setRoomData(preOptimisticRoomRef.current);
       optimisticRef.current = false;
+      setConnecting(false);                                 // a connect that errored drops back to the lobby
       setToast(msg.message || "error"); return;
     }
     const room = msg.room;
     if (!room) return;
+    setConnecting(false);                                   // authoritative state arrived — hide the connect loader
     optimisticRef.current = false;                        // authoritative state arrived — reconcile below
     const tok = room.reconnect_tokens?.[myId];
     const rid = room.room_id || roomId;
@@ -1362,6 +1370,18 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       setBoard({ ...d, byId });
     }).catch(() => {});
   }, []);
+
+  // Safety: never leave the connect loader spinning forever — if the first room state
+  // hasn't arrived within the window (dead socket / cold-start that never wakes), drop
+  // back to the lobby with a hint. handleMessage clears `connecting` on success/error.
+  useEffect(() => {
+    if (!connecting) { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } return; }
+    connectTimer.current = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting… the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => { if (connectTimer.current) { clearTimeout(connectTimer.current); connectTimer.current = null; } };
+  }, [connecting]);
 
   // Resolve the hex layout for a given board id (falls back to the default board).
   const boardSpaces = useCallback((boardId) => {
@@ -1874,6 +1894,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const startCreate = (vsAi, difficulty = "hard") => {
     const rid = roomCode();
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
     connect(`${COC_WS}/${rid}/${myId}`, {
       action: "create", name: playerName, vs_ai: vsAi,
@@ -1885,16 +1906,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     rid = (rid || "").toUpperCase();
     if (!rid) return;
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
     connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`coc_token_${rid}_${myId}`);
     setRoomId(rid);
+    setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
     connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
   };
   const leaveToLobby = () => {
+    setConnecting(false);
     disconnect();
     // A read-only HTTP review has no WS and must NOT clear the resume pointer of a
     // real in-progress game the player also has.
@@ -2169,6 +2193,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // The lobby renders IMMEDIATELY (like the other games) rather than blocking the whole
   // screen on the board-layout fetch — only the board-picker below shows a spinner until
   // the layouts arrive. The game/waiting screens still need `board` (guarded after this).
+  // Instant feedback the moment a game is clicked, while the WS + first state land.
+  if (connecting && screen === "lobby") {
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
+  }
   if (screen === "lobby") {
     return (
       <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
