@@ -446,14 +446,15 @@ const css = `
      must NOT be overridden either: it scales with the cell to keep the board's geometry
      proportional, which is what the refill path relies on (a fixed 5px pushed the path
      ~6px off the cell centres at this width). */
-  /* CARDS: on phones they were TINY because --card-h was tied to the narrow --card-w (the
-     level-I row is deck + 5 cards = 6 columns, so both width AND height shrank and the
-     content — which scales off --card-h — became unreadable). Fix mirrors how Spender
-     stays legible on mobile: DECOUPLE them. A tall --card-h scales the content back up,
-     and a high --card-w CAP lets each row's cards FILL it (instead of all rows capping at
-     the narrow level-I width) — so the shorter top rows get bigger cards, a natural
-     pyramid, with no wasted trailing space. */
-  .duel-col-cards .level-row{--card-w:120px;--card-h:clamp(112px, 29vw, 150px)}
+  /* CARDS: on phones they were TINY because --card-h was --card-w * 1.364 (short), and
+     --card-w is capped at the narrow level-I fit (that row is deck + 5 cards = 6 columns).
+     Short card => the content, which scales off --card-h, was unreadable. Fix = keep the
+     base UNIFORM --card-w (so every card is the SAME size and the shorter top rows just
+     end early — the pyramid — NOT stretched to fill), but make the card TALLER: ratio 1.82
+     gives ~0.55 w:h, matching Spender's mobile card aspect, so the content scales back up
+     to Spender-legible. (Only --card-h is overridden; --card-w falls through to the base
+     clamp above.) */
+  .duel-col-cards .level-row{--card-h:calc(var(--card-w) * 1.82)}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 `;
