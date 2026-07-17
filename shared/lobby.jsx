@@ -42,6 +42,13 @@ export const lobbyCss = `
 .lby-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;letter-spacing:.03em;margin-bottom:4px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lby-card-meta{font-size:.78rem;color:var(--text-dim)}
 .lby-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* History rows (shared): a Won/Lost/Tie badge on the left + the final scores with YOUR
+   number bold — matching Spender's history look. Put both inside a .lby-card-title. */
+.hist-result{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
+.hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
+.hist-result.lost,.hist-result.tie{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
+.hist-score-num{color:var(--text);font-weight:600}
 
 /* Empty state (dashed placeholder). */
 .lby-empty{text-align:center;padding:26px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}

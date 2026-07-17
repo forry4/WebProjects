@@ -162,7 +162,7 @@ const css = baseCss + lobbyCss + `
 .home-game-players::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.85;flex:0 0 auto}
 
 /* ─── Browser ───────────────────────────────────────────────────────────── */
-.browser{max-width:1400px;margin:0 auto;padding:28px 20px 48px}
+.browser{max-width:none;margin:0;padding:28px 24px 48px}
 /* The lobby header bar is the shared LobbyHeader (.lby-header, shared/lobby.jsx). The
    .browser-user* rail classes below are still used by the Home menu header. */
 .browser-user{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}

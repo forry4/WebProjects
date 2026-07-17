@@ -711,6 +711,9 @@ html,body{margin:0;padding:0;background:#120c0d}
    min-height:100vh, so overriding --bg here neutralizes the lobby backdrop too. */
 .coc.coc-neutral{--bg:#0f0e0c;--surface:#1a1814;--surface2:#242018;--border:#3a342a;--text:#e8dfc8;--text-dim:#8a7d6a;--lby-accent:#d6454b}
 .coc-wrap{max-width:1100px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 18px) 16px 48px}
+/* The LOBBY is full-bleed (flush to the edges, no wasted side space) like Duel; the in-game
+   wrap (.coc-wrap-game) keeps its capped width. */
+.coc-wrap:not(.coc-wrap-game){max-width:none;margin:0;padding-left:22px;padding-right:22px}
 .coc-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border)}
 .coc-top-left{display:flex;align-items:center;gap:12px;min-width:0}
 .coc-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.5rem;font-weight:700;color:var(--crimson-l);letter-spacing:.03em;white-space:nowrap}
@@ -2117,11 +2120,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     </div>
   );
 
-  if (!board) {
-    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
-  }
-
   // ─── Lobby ───────────────────────────────────────────────────────────────
+  // The lobby renders IMMEDIATELY (like the other games) rather than blocking the whole
+  // screen on the board-layout fetch — only the board-picker below shows a spinner until
+  // the layouts arrive. The game/waiting screens still need `board` (guarded after this).
   if (screen === "lobby") {
     return (
       <div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style>
@@ -2132,20 +2134,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         />
         <div className="coc-wrap">
           <div className="coc-board-pick">
-            <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
-            <div className="coc-board-grid">
-              {(board.boards || []).map((b) => (
-                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                  selected={myBoard === b.id} onClick={() => setMyBoard(b.id)} />
-              ))}
-            </div>
-            <div className="coc-section-title">Bot's Board <span className="coc-card-meta">— {board.byId?.[oppBoard]?.name} (Play vs Bot only)</span></div>
-            <div className="coc-board-grid">
-              {(board.boards || []).map((b) => (
-                <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
-                  selected={oppBoard === b.id} onClick={() => setOppBoard(b.id)} />
-              ))}
-            </div>
+            {board ? (<>
+              <div className="coc-section-title">Your Board <span className="coc-card-meta">— {board.byId?.[myBoard]?.name}</span></div>
+              <div className="coc-board-grid">
+                {(board.boards || []).map((b) => (
+                  <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+                    selected={myBoard === b.id} onClick={() => setMyBoard(b.id)} />
+                ))}
+              </div>
+              <div className="coc-section-title">Bot's Board <span className="coc-card-meta">— {board.byId?.[oppBoard]?.name} (Play vs Bot only)</span></div>
+              <div className="coc-board-grid">
+                {(board.boards || []).map((b) => (
+                  <BoardThumb key={b.id} spaces={b.spaces} name={b.name}
+                    selected={oppBoard === b.id} onClick={() => setOppBoard(b.id)} />
+                ))}
+              </div>
+            </>) : (
+              <div className="lby-empty"><span className="coc-spinner" /> Loading boards…</div>
+            )}
           </div>
 
           <div className="coc-create">
@@ -2267,12 +2273,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   <div className="lby-card" key={g.id}>
                     <div className="lby-card-info">
                       <div className="lby-card-title">
-                        <span className={g.tie ? "" : (g.you_won ? "coc-won" : "coc-lost")}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
-                        {" vs "}{g.opp_name}
+                        <span className={`hist-result ${g.tie ? "tie" : (g.you_won ? "won" : "lost")}`}>{g.tie ? "Tie" : (g.you_won ? "Won" : "Lost")}</span>
+                        <span className="hist-scores"> vs {g.opp_name}{g.your_score != null && g.opp_score != null ? <> <span className="hist-score-num">{g.your_score}-{g.opp_score}</span></> : null}</span>
                       </div>
-                      <div className="lby-card-meta">
-                        {g.your_score != null && g.opp_score != null ? `${g.your_score}–${g.opp_score} · ` : ""}{timeAgo(g.updated_at)}
-                      </div>
+                      <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                     </div>
                     <div className="lby-card-actions">
                       <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
@@ -2287,6 +2291,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         {toast && <div className="coc-toast">{toast}</div>}
       </div>
     );
+  }
+
+  // The waiting/game screens render the board, so they still wait for the layout fetch.
+  if (!board) {
+    return (<div className="coc coc-neutral" style={{ "--lby-accent": "#d6454b" }}><style>{css}</style><LobbyLoading /></div>);
   }
 
   // ─── Waiting ─────────────────────────────────────────────────────────────

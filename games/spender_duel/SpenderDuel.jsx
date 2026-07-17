@@ -219,7 +219,7 @@ const css = `
 /* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
 /* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
 .duel > .lby-header{margin:0 -14px 18px}
-.duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 320px;gap:18px;align-items:start}
+.duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 352px;gap:18px;align-items:start}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
 /* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
    an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
@@ -369,6 +369,8 @@ const css = `
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
    identical to the token pill. */
 .duel-player .bonus-pill{letter-spacing:-.02em}
+/* Buffer between the privilege/token cluster above and the bought-card indicators. */
+.duel-player .player-bonuses{margin-top:8px}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
@@ -1452,8 +1454,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             {history.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.you_won ? "Won" : "Lost"} vs {g.opp_name}</div>
-                  <div className="lby-card-meta">{g.your_score ?? "?"}–{g.opp_score ?? "?"} · {WIN_DESC[g.win_condition] || ""} · {timeAgo(g.updated_at)}</div>
+                  <div className="lby-card-title">
+                    <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
+                    <span className="hist-scores"> vs {g.opp_name} <span className="hist-score-num">{g.your_score ?? "?"}-{g.opp_score ?? "?"}</span></span>
+                  </div>
+                  <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}</div>
                 </div>
                 <div className="lby-card-actions"><button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button></div>
               </div>
