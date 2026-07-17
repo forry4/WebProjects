@@ -852,6 +852,8 @@ html,body{margin:0;padding:0;background:#120c0d}
      (NO backticks in this comment — it lives inside the css template literal.) */
   .coc .coc-wrap-game{padding-left:8px;padding-right:8px}
   .coc .coc-board-panel{padding:8px}
+  /* lobby content buffer: 22px each side is too much on phones -> 10px */
+  .coc .coc-wrap:not(.coc-wrap-game){padding-left:10px;padding-right:10px}
   /* the track is a static block above the board at every width now; just tighten it */
   .coc-track-block{max-width:none;padding:6px 7px}
   /* shrink the 7 turn-order spaces so 0-6 fit on one row */

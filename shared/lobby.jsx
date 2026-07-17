@@ -63,7 +63,15 @@ export const lobbyCss = `
 .lby-badge-turn{background:var(--lby-accent,var(--gold));color:var(--bg);font-weight:700}
 .lby-badge-wait{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
 
-@media(max-width:600px){.lby-header{padding-left:14px;padding-right:14px;gap:8px}}
+@media(max-width:600px){
+	.lby-header{padding-left:10px;padding-right:10px;gap:7px}
+	/* the 3-part header (Back | title | user) overflows on phones with a long game title
+	   (Castles of Crimson) — the title is nowrap+non-shrinking and pushed into the username.
+	   Shrink the title + Back so all three fit; shorter titles just render a touch smaller. */
+	.lby-title{font-size:clamp(.82rem,3.2vw,1.1rem);letter-spacing:.03em}
+	.lby-back,.lby-headbtn{padding:5px 9px;font-size:.66rem;gap:4px}
+	.lby-head-name{max-width:104px;font-size:.72rem}
+}
 `;
 
 // Full-width flush top bar. Renders its own back + rules buttons (uniform across games);
