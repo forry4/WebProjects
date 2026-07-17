@@ -127,6 +127,16 @@ def _valid_board(board_id) -> str:
     return board.DEFAULT_BOARD_ID
 
 
+def _valid_max_players(value) -> int:
+    """Host-chosen seat cap for a VS-Friend game, clamped to 2..MAX_PLAYERS. A missing/invalid
+    value defaults to MAX_PLAYERS (permissive) so a client that doesn't send it isn't capped at 2."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return MAX_PLAYERS
+    return n if 2 <= n <= MAX_PLAYERS else MAX_PLAYERS
+
+
 # ── Shared-identity / DB helpers (thin aliases over the shared core package) ──
 def _db():
     return get_db_conn()
@@ -240,6 +250,7 @@ def save_game(room_id: str) -> None:
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": room.get("max_players"),
         "boards": room.get("boards", {}),
     }
     now = int(time.time())
@@ -286,6 +297,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "vs_ai": state.get("vs_ai", False),
         "ai_player": state.get("ai_player"),
         "ai_difficulty": state.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": state.get("max_players"),
         "boards": state.get("boards", {}),
         "sockets": {},
     }
@@ -321,9 +333,11 @@ def list_open_games() -> list[dict]:
     conn.close()
     out = []
     for r in rows:
-        players = _ordered_players(_parse_state(r))
+        state = _parse_state(r)
+        players = _ordered_players(state)
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-                    "player_count": len(players) or 1, "max_players": MAX_PLAYERS,
+                    "player_count": len(players) or 1,
+                    "max_players": _valid_max_players(state.get("max_players")),
                     "created_at": r["created_at"]})
     return out
 
@@ -481,6 +495,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "max_players": room.get("max_players") or MAX_PLAYERS,
         "boards": room.get("boards", {}),
         # Only the recipient's OWN reconnect token. Direct replies pass viewer_pid=pid;
         # broadcast_room injects each recipient's token per socket. (Was: every seat's
@@ -838,6 +853,7 @@ async def _handle_create(ws, room_id, pid, msg):
     my_board = _valid_board(msg.get("board_id"))
     opp_board = _valid_board(msg.get("opp_board_id"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
+    max_players = _valid_max_players(msg.get("max_players"))   # host-chosen seat cap (2-4; vs-AI is 2)
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -852,6 +868,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "vs_ai": vs_ai,
             "ai_player": None,
             "ai_difficulty": difficulty,
+            "max_players": 2 if vs_ai else max_players,
             "boards": {pid: my_board},
         }
         ROOMS[room_id] = room
@@ -879,8 +896,9 @@ async def _handle_join(ws, room_id, pid, msg):
             await _send(ws, {"type": "error", "message": "no such room"})
             return
         if pid not in room["players"]:
+            cap = int(room.get("max_players") or MAX_PLAYERS)
             if room.get("vs_ai") or room.get("status") != "open" \
-                    or len([p for p in room["players"] if p != AI_PID]) >= MAX_PLAYERS:
+                    or len([p for p in room["players"] if p != AI_PID]) >= cap:
                 await _send(ws, {"type": "error", "message": "room is full"})
                 return
             room["players"][pid] = name
