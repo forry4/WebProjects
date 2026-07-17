@@ -842,6 +842,12 @@ html,body{margin:0;padding:0;background:#120c0d}
    the black depot centered below. !important beats the inline left/top/transform. */
 @media (max-width:600px){
   .coc-board-hex{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
+  /* Reclaim horizontal buffer on phones: the game wrap was 16px each side + the board
+     panel another 14px = 30px of dead margin. Tighten so the board uses the width. The
+     `.coc `-prefix is REQUIRED — this @media block sits BEFORE the base rules, so a bare
+     single-class selector would lose to the later base .coc-wrap/.coc-panel padding. */
+  .coc .coc-wrap-game{padding-left:8px;padding-right:8px}
+  .coc .coc-board-panel{padding:8px}
   /* the track is a static block above the board at every width now; just tighten it */
   .coc-track-block{max-width:none;padding:6px 7px}
   /* shrink the 7 turn-order spaces so 0-6 fit on one row */
