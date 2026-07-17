@@ -841,7 +841,7 @@ html,body{margin:0;padding:0;background:#120c0d}
    shared board into a stack — turn order on top, the 6 numbered depots in a 2-col grid,
    the black depot centered below. !important beats the inline left/top/transform. */
 @media (max-width:600px){
-  .coc-board-hex{display:grid;grid-template-columns:1fr 1fr;gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
+  .coc-board-hex{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;justify-items:center;aspect-ratio:auto;max-width:none;margin-top:6px}
   /* the track is a static block above the board at every width now; just tighten it */
   .coc-track-block{max-width:none;padding:6px 7px}
   /* shrink the 7 turn-order spaces so 0-6 fit on one row */
@@ -1091,7 +1091,13 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* grid items STRETCH (no align-items:start) so all three panels share the row's
    height — the board panel then flex-fills its spare height with the depot ring.
    The bottom margin is the buffer between the board/duchies and the move log. */
-.coc-game-cols{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:16px}
+/* minmax(0,1fr), NOT 1fr: the board column min-content is set by the FIXED 70px depot
+   tiles, and a plain 1fr (= minmax(auto,1fr)) cannot shrink below that, so the whole
+   cols-grid was forced wider than the viewport and overflowed right — while the header +
+   bonusbar (siblings, not inside this grid) stayed at container width. minmax(0,...) lets
+   the track shrink so the board reflows instead of spilling (the documented grid
+   min-content footgun). NOTE: no backticks in this comment — it lives in the css string. */
+.coc-game-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:16px}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
 .coc-opp-sections{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:12px}
