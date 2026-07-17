@@ -768,10 +768,9 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
 .coc-goods-left{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
-/* an already-handed-out good: a faded, numberless barrel slot at the same size as a live
-   good, so the row reads as this-phase's-5-goods with the used ones dimmed left-to-right.
-   .coc-tile.goods.coc-goods-used (0,3,0) beats the base .coc-tile.goods (0,2,0) size. */
-.coc-tile.goods.coc-goods-used{width:22px;height:22px;background:var(--surface2);opacity:.32;box-shadow:inset 0 0 0 1px var(--border)}
+/* an already-handed-out good: a faded, numberless barrel slot at the FULL goods size (34px,
+   inherited from .coc-tile.goods) so the row matches every other goods tile in the game. */
+.coc-tile.goods.coc-goods-used{background:var(--surface2);opacity:.32;box-shadow:inset 0 0 0 1px var(--border)}
 .coc-goods-mini{display:inline-flex;align-items:center;gap:3px}
 .coc-pill b{color:var(--text)}
 .coc-vp{display:flex;gap:14px;justify-self:center}
@@ -2565,7 +2564,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     ))}
                     {q.map((g, i) => (
                       <span key={g.id || i} className="coc-tile goods" title={tileDesc({ kind: "goods", color: g.color }, board)}
-                        style={{ width: 22, height: 22, fontSize: ".7rem", background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
+                        style={{ background: GOODS_HEX[g.color] }}>{goodsSellNum(g.color)}</span>
                     ))}
                   </span>
                 );
