@@ -271,7 +271,7 @@ export const splendorCardCss = `
 export const splendorCardExtraCss = `
 .card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
-.card-bonus-wild{border:1.5px solid rgba(255,255,255,.3)}
+.card-bonus-wild{border:none}
 /* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
    at a glance. The trailing disc sits on top; the leading one keeps its rim visible
    through the overlap. (Was a single disc ringed by a box-shadow, which just looked
