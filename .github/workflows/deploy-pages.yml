@@ -71,6 +71,15 @@ jobs:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
         run: npm run build
 
+      # SPA deep-link fallback: GitHub Pages has no rewrite rules, so an unknown path
+      # (/duel, /spender/ABCD12) serves 404.html — make that a copy of the built app
+      # (AFTER build, so it carries the same hashed asset tags). Pages returns it with
+      # HTTP status 404, which browsers render fine (known crawler caveat, accepted).
+      # The Cloudflare staging worker doesn't need this (single-page-application mode).
+      - name: SPA deep-link fallback (404.html)
+        working-directory: webapp
+        run: cp dist/index.html dist/404.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

@@ -97,19 +97,11 @@ async function launchBrowser() {
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }
 
-let code = 1;
-let preview;
-try {
-	// Build with the default base (/); preview serves it at the root. The JS is
-	// identical across bases, so a render crash is caught regardless.
-	checkCssBackticks();   // source-level guard for the stray-css-backtick blank-page bug
-	await run("npx", ["vite", "build"], {});
-	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
-		{ cwd: webappDir, stdio: "ignore", shell: true });
-
-	if (!(await waitForServer())) throw new Error("preview server did not start");
-
-	const browser = await launchBrowser();
+// Load one path and return its health. checkCls only applies on "/" (the deep-link
+// paths may legitimately transition screens when a local backend is running, and their
+// point is the ROUTER: render + no crash + the URL survives — pathPrefix catches both a
+// router parse crash and an accidental normalize-to-"/").
+async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = null } = {}) {
 	const page = await browser.newPage();
 	const pageErrors = [];
 	page.on("pageerror", (e) => pageErrors.push(e.message));
@@ -123,20 +115,52 @@ try {
 			}).observe({ type: "layout-shift", buffered: true });
 		} catch {}
 	});
-	await page.goto(url, { waitUntil: "load", timeout: 30000 });
+	await page.goto(`http://localhost:${PORT}${pagePath}`, { waitUntil: "load", timeout: 30000 });
 	await sleep(3000); // let React mount, fonts load, and the first real screen settle
 	const rootLen = await page.evaluate(() => document.getElementById("root")?.innerHTML.length ?? 0);
 	const cls = await page.evaluate(() => Math.round((window.__cls || 0) * 1000) / 1000);
+	const pathname = await page.evaluate(() => window.location.pathname);
+	await page.close();
+
+	if (pageErrors.length) return `uncaught page error(s):\n` + pageErrors.join("\n").slice(0, 1000);
+	if (rootLen < 100) return `#root did not render (innerHTML length ${rootLen}); app is blank.`;
+	if (checkCls && cls > CLS_BUDGET) return `layout shifted on load (CLS ${cls} > ${CLS_BUDGET}); something resizes/reflows after first paint.`;
+	if (pathPrefix && !pathname.startsWith(pathPrefix)) return `URL not preserved (pathname ${pathname}, expected ${pathPrefix}...); the router normalized/crashed.`;
+	console.log(`  ${pagePath} OK — #root length ${rootLen}, CLS ${cls}, pathname ${pathname}`);
+	return null;
+}
+
+let code = 1;
+let preview;
+try {
+	// Build with the default base (/); preview serves it at the root. The JS is
+	// identical across bases, so a render crash is caught regardless. Note vite preview
+	// serves index.html for unknown paths (SPA-style), so the deep-link checks exercise
+	// the ROUTER, not the Pages 404.html fallback (that's prod-only; see deploy-pages.yml).
+	checkCssBackticks();   // source-level guard for the stray-css-backtick blank-page bug
+	await run("npx", ["vite", "build"], {});
+	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
+		{ cwd: webappDir, stdio: "ignore", shell: true });
+
+	if (!(await waitForServer())) throw new Error("preview server did not start");
+
+	const browser = await launchBrowser();
+	const checks = [
+		["/", { checkCls: true }],                        // the original blank-page + CLS gate
+		["/duel", { pathPrefix: "/duel" }],               // mode deep link survives + renders
+		["/spender/ABCDEF", { pathPrefix: "/spender" }],  // room-segment parse (Layer B may normalize to /spender)
+	];
+	const failures = [];
+	for (const [p, opts] of checks) {
+		const err = await checkPage(browser, p, opts);
+		if (err) failures.push(`${p}: ${err}`);
+	}
 	await browser.close();
 
-	if (pageErrors.length) {
-		console.error("SMOKE FAIL — uncaught page error(s):\n" + pageErrors.join("\n").slice(0, 1000));
-	} else if (rootLen < 100) {
-		console.error(`SMOKE FAIL — #root did not render (innerHTML length ${rootLen}); app is blank.`);
-	} else if (cls > CLS_BUDGET) {
-		console.error(`SMOKE FAIL — layout shifted on load (CLS ${cls} > ${CLS_BUDGET}); something resizes/reflows after first paint.`);
+	if (failures.length) {
+		console.error("SMOKE FAIL —\n" + failures.join("\n"));
 	} else {
-		console.log(`SMOKE PASS — app rendered (#root length ${rootLen}), CLS ${cls} <= ${CLS_BUDGET}, no uncaught page errors.`);
+		console.log(`SMOKE PASS — all ${checks.length} paths rendered, CLS within ${CLS_BUDGET}, no uncaught page errors.`);
 		code = 0;
 	}
 } catch (e) {

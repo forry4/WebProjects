@@ -8,6 +8,7 @@ import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobb
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -24,6 +25,13 @@ const GAMES = [
 	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#6f86d6", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#bf6fd0", players: "1–2 players" },
 ];
+
+// URL path segment 1 ↔ shell screen (shared/router.js). Always translate through these
+// tables — GAMES[].id ≠ path for wherewolf, and Spender's lobby screen is "browser".
+// The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
+// "waiting"/"game" screens map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
+const SCREEN_FOR_MODE = { spender: "browser", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
+const MODE_FOR_SCREEN = { home: "home", browser: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -1100,6 +1108,20 @@ export default function SpenderApp() {
 	// server reply replaces roomData and wipes the puzzle board.
 	const puzzlingRef = useRef(puzzling);
 	puzzlingRef.current = puzzling;
+
+	// ── URL routing (shared/router.js) ─────────────────────────────────────
+	// Segment 1 (game mode) is owned HERE; each sub-game owns its own segment 2 (room id).
+	const initialRouteRef = useRef(parsePath());   // parsed once at first render; landAt consumes it
+	const pendingRouteRef = useRef(null);          // deep link stashed across the auth screen
+	const applyPopRouteRef = useRef(() => {});     // fresh-closure mirror for the mount-once popstate effect
+	useEffect(() => subscribe((route) => {
+		// Back/Forward. While still booting, just retarget the landing; while on auth,
+		// retarget the post-login destination. Otherwise apply the route now.
+		if (screenRef.current === "loading") { initialRouteRef.current = route; return; }
+		if (screenRef.current === "auth") { pendingRouteRef.current = route.game && route.game !== "home" ? route : null; return; }
+		applyPopRouteRef.current(route);
+	}), []); // eslint-disable-line react-hooks/exhaustive-deps
+
 	useEffect(() => {
 		const handleVisibility = () => {
 			// Only auto-reconnect when actively on the game screen — otherwise tabbing
@@ -1387,7 +1409,7 @@ export default function SpenderApp() {
 							setLoadingProgress(1);
 							const dest = await resolveDest();
 							await waitFonts();
-							setTimeout(() => { if (!cancelled) setScreen(dest); }, 350);
+							setTimeout(() => { if (!cancelled) landAt(dest); }, 350);
 							return;
 						}
 					} catch {}
@@ -1423,7 +1445,7 @@ export default function SpenderApp() {
 				const t = setTimeout(() => ctrl.abort(), 250);
 				const res = await fetch(`${HTTP_BASE}/games`, { signal: ctrl.signal });
 				clearTimeout(t);
-				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) setScreen(dest); return; }
+				if (res.ok && !cancelled) { const dest = await resolveDest(); await waitFonts(); if (!cancelled) landAt(dest); return; }
 			} catch {}
 			if (!cancelled) { setShowLoading(true); startPolling(); }
 		})();
@@ -1636,7 +1658,7 @@ export default function SpenderApp() {
 				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
 				setAuthUser(user);
 				setMyId(user.id);
-				setScreen("home");
+				consumePendingRoute();
 			} else {
 				setAuthError(data.message || "Something went wrong");
 			}
@@ -1650,7 +1672,7 @@ export default function SpenderApp() {
 		const name = guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
 		const user = { id: myId, name, guest: true };
 		setAuthUser(user);
-		setScreen("home");
+		consumePendingRoute();
 	};
 
 	const handleLogout = () => {
@@ -1662,6 +1684,7 @@ export default function SpenderApp() {
 		setMyId(newId);
 		try { localStorage.setItem("spender_myId", newId); } catch {}
 		setAuthUser(null);
+		replacePath(buildPath("home"));
 		setScreen("auth");
 		setRoomData(null);
 		setRoomId("");
@@ -1967,11 +1990,18 @@ export default function SpenderApp() {
 		showPuzzleAt(puzzle, puzHeroPid, 0);
 	};
 
-	const exitPuzzle = () => {
+	// State-only puzzle teardown — shared by exitPuzzle (user action, pushes the URL) and
+	// the popstate handler (Back/Forward, which must NEVER write the URL).
+	const resetPuzzleState = () => {
 		setPuzzling(false); setPuzzle(null); setPuzSolved(false); setPuzWrong(false); setPuzFailed(false);
 		setPuzFeedback(""); setRoomData(null); setRoomId("");
 		setPuzHintOpen(false); setPuzAnswerOpen(false);
 		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+	};
+
+	const exitPuzzle = () => {
+		resetPuzzleState();
+		pushPath(buildPath("home"));
 		setScreen("home");
 	};
 
@@ -1990,9 +2020,10 @@ export default function SpenderApp() {
 		startPuzzle(id);
 	};
 
-	const goToMenu = () => {
+	// State-only exit from a Spender room/review — shared by goToMenu (user action) and
+	// the popstate handler (which must never write the URL itself).
+	const leaveSpenderRoomState = () => {
 		disconnect();
-		setScreen("browser");
 		setRoomData(null);
 		setSelectedGems([]);
 		setSelectedCard(null);
@@ -2000,8 +2031,74 @@ export default function SpenderApp() {
 		setReviewing(false);
 		setReplaySnapshots(null);
 		setReplayTurn(null);
+	};
+
+	const goToMenu = () => {
+		leaveSpenderRoomState();
+		setScreen("browser");
 		fetchGames(authUser);
 	};
+
+	// ── URL routing helpers (see shared/router.js for the contract) ─────────
+	// nav(): user-initiated navigation — write the URL FIRST, then the screen, so a mode
+	// component always mounts with its URL already correct (sub-games read it at mount).
+	const nav = (screenName) => {
+		pushPath(buildPath(MODE_FOR_SCREEN[screenName] || "home"));
+		setScreen(screenName);
+	};
+
+	// enterRoute(): state-only navigation to a parsed route — used by boot, the post-auth
+	// consume, and popstate. NEVER pushes (the URL is already what it should be); only an
+	// unknown path is normalized (replace, not push).
+	const enterRoute = (route) => {
+		const g = route?.game;
+		if (!g || g === "home") {
+			if (!g) replacePath(buildPath("home"));   // unknown path → "/"
+			setScreen("home");
+			return;
+		}
+		if (g === "puzzles") { enterPuzzles(); return; }   // needs the fetch+pick, not just the screen
+		setScreen(SCREEN_FOR_MODE[g]);   // spender→browser; coc/werewolf/duel/books mount and read their own segment 2
+	};
+
+	// landAt(): boot injection — resolveDest still decides auth-vs-in, the initial URL
+	// decides WHERE. A deep link seen while logged out is stashed across the auth screen
+	// (URL left untouched so it survives in the address bar) and consumed after login/guest.
+	const landAt = (dest) => {
+		if (dest === "auth") {
+			const r = initialRouteRef.current;
+			pendingRouteRef.current = r && r.game && r.game !== "home" ? r : null;
+			setScreen("auth");
+			return;
+		}
+		enterRoute(initialRouteRef.current || { game: "home", room: null });
+	};
+
+	const consumePendingRoute = () => {
+		const route = pendingRouteRef.current;
+		pendingRouteRef.current = null;
+		if (route) { enterRoute(route); return; }
+		replacePath(buildPath("home"));
+		setScreen("home");
+	};
+
+	// applyPopRoute(): Back/Forward while on a real screen. Mode-level only — a same-mode
+	// pop belongs to whoever owns segment 2 (the mounted sub-game's own subscription).
+	// Mirrored into applyPopRouteRef every render so the mount-once popstate effect never
+	// runs a stale closure.
+	const applyPopRoute = (route) => {
+		const s = screenRef.current;
+		const curMode = (s === "waiting" || s === "game")
+			? (puzzlingRef.current ? "puzzles" : "spender")
+			: (MODE_FOR_SCREEN[s] || "home");
+		const target = route.game === null ? "home" : route.game;
+		if (target === curMode) return;   // segment-2 changes are the sub-game's (or Layer B's) business
+		// Leaving the current mode: state-only cleanup, then land on the target.
+		if (puzzlingRef.current) resetPuzzleState();
+		else if (s === "waiting" || s === "game") leaveSpenderRoomState();
+		enterRoute(route);
+	};
+	applyPopRouteRef.current = applyPopRoute;
 
 	const handleAbandon = () => {
 		send({ action: "abandon" });
@@ -2463,7 +2560,7 @@ export default function SpenderApp() {
 						{GAMES.map(gm => (
 							<button key={gm.id} className={`home-game-card ${gm.status}`}
 								style={{ "--accent": gm.accent }}
-								onClick={() => setScreen(gm.screen)}>
+								onClick={() => nav(gm.screen)}>
 								<span className="home-game-emblem" aria-hidden="true">{GAME_EMBLEM[gm.id]}</span>
 								<div className="home-game-text">
 									<div className="home-game-name">{gm.name}</div>
@@ -2475,10 +2572,10 @@ export default function SpenderApp() {
 					</div>
 
 					<div style={{ textAlign: "center", marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-						<button type="button" className="btn btn-ghost" onClick={enterPuzzles}>
+						<button type="button" className="btn btn-ghost" onClick={() => { pushPath(buildPath("puzzles")); enterPuzzles(); }}>
 							🧩 Spender Puzzles
 						</button>
-						<button type="button" className="btn btn-ghost" onClick={() => setScreen("books")}>
+						<button type="button" className="btn btn-ghost" onClick={() => nav("books")}>
 							📚 Books
 						</button>
 					</div>
@@ -2490,22 +2587,22 @@ export default function SpenderApp() {
 
 	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
-		<Books authUser={authUser} onExit={() => setScreen("home")} />
+		<Books authUser={authUser} onExit={() => nav("home")} />
 	);
 
 	// Castles of Crimson — self-contained game component, mounted by the shell.
 	if (screen === "coc") {
-		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => nav("home")} />;
 	}
 
 	// Where Wolf? — self-contained social-deduction game component.
 	if (screen === "werewolf") {
-		return <WhereWolf myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+		return <WhereWolf myId={myId} authUser={authUser} onExit={() => nav("home")} />;
 	}
 
 	// Spender Duel — self-contained 2-player game component.
 	if (screen === "duel") {
-		return <SpenderDuel myId={myId} authUser={authUser} onExit={() => setScreen("home")} />;
+		return <SpenderDuel myId={myId} authUser={authUser} onExit={() => nav("home")} />;
 	}
 
 	// Puzzle picker — pick a scripted endgame puzzle to solve vs S.
@@ -2514,7 +2611,7 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app">
 				<div className="puzzle-top">
-					<button className="btn btn-ghost btn-sm" onClick={() => setScreen("home")}>← Back</button>
+					<button className="btn btn-ghost btn-sm" onClick={() => nav("home")}>← Back</button>
 					<span className="puzzle-top-title">Spender Puzzles</span>
 					<span style={{ width: 56 }} />
 				</div>
@@ -2533,7 +2630,7 @@ export default function SpenderApp() {
 			<style>{css}</style>
 			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
 				<LobbyHeader
-					onBack={() => setScreen("home")}
+					onBack={() => nav("home")}
 					title="Spender"
 					user={<>
 						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
