@@ -321,10 +321,24 @@ const css = `
 .duel-royal-crown{color:#f5c842;font-size:.85rem}
 .duel-royal-pts{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#f4e9d4}
 .duel-royal-abil{font-size:.8rem;color:#d9c8f0}
-.duel-scrolls{display:inline-flex;gap:3px}
-.duel-scroll{opacity:.22;font-size:1.15rem;color:#e8c86a}
-.duel-scroll.full{opacity:1}
+/* Privilege tokens read as PRESSABLE coins, not flat glyphs: a full privilege is a
+   raised gold chip (rim + inner highlight + drop shadow); an empty slot is a recessed
+   socket; when it's yours to spend (.clickable) the coins lift + gain a gold ring on
+   hover and push down on :active — the "press me" affordance. */
+.duel-scrolls{display:inline-flex;gap:5px}
+.duel-scroll{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:25px;height:25px;border-radius:50%;
+  font-size:.92rem;line-height:1;color:#6e5220;
+  background:radial-gradient(circle at 38% 30%,#f2dea0,#d9b458 60%,#b58e3a);
+  border:1px solid #806134;
+  box-shadow:inset 0 1px 1.5px rgba(255,255,255,.55),inset 0 -2px 3px rgba(120,80,20,.35),0 1.5px 2.5px rgba(0,0,0,.45);
+  transition:transform .1s ease,box-shadow .1s ease,filter .1s ease;
+}
+.duel-scroll:not(.full){background:#201a12;border:1px solid #372e22;color:#443a28;box-shadow:inset 0 1px 3px rgba(0,0,0,.55)}
 .duel-scrolls.clickable{cursor:pointer}
+.duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);box-shadow:inset 0 1px 1.5px rgba(255,255,255,.6),0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.06)}
+.duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);box-shadow:inset 0 2px 4px rgba(90,60,15,.5),0 1px 1px rgba(0,0,0,.3);filter:brightness(.98)}
 .duel-scrolls.armed .duel-scroll.full{animation:duelPulse 1.1s infinite}
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
