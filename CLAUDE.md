@@ -4213,6 +4213,56 @@ being whack-a-mole):
   styles at render; a static `<link>` stylesheet would make them render-blocking/earlier, but
   it conflicts with the self-contained single-`.jsx` game pattern, so it was deferred.
 
+### URL routing (`shared/router.js`) — LIVE on prod (2026-07-17; do not regress)
+Every game mode has a path and every room a sub-path, so reload/reconnect lands on the right page,
+Back/Forward work, and **room URLs double as invite links**. Shipped in two increments (Layer A =
+mode paths + `c5c5ed7`, Layer B = room paths + `594e86f`, both on main). Memory [[url-routing-shipped]].
+- **Paths:** `/` = home (or auth if not logged in) · `/spender /coc /duel /werewolf /books /puzzles`
+  (mode) · `/spender/ABC123 /coc/RID /duel/RID /werewolf/RID` (room). Reviews + puzzles have NO room
+  URL (v1 scope). Path↔screen is a TABLE, not `GAMES[].id` (wherewolf's id ≠ `/werewolf`; Spender's
+  lobby screen is `browser`): `SCREEN_FOR_MODE`/`MODE_FOR_SCREEN` in `Spender.jsx`.
+- **`shared/router.js`** (dependency-free, no JSX): `parsePath` (`{game,room}`; unknown first segment →
+  `game:null` = caller normalizes to `/`; room `[A-Za-z0-9_-]{1,24}` uppercased), `buildPath` (honors
+  `import.meta.env.BASE_URL`), `pushPath`/`replacePath`, `subscribe` (popstate). **THE LOAD-BEARING
+  CONTRACT:** `pushPath`/`replacePath` are **NO-OPS when the path is already current** — this dedup lets
+  ONE leave/menu function serve both a user click (URL differs → push) AND a popstate-driven call (URL
+  already there → no-op), zero duplicate history entries. `subscribe` fires on **popstate ONLY** —
+  programmatic push/replace never notify, so a URL-write + state-write at a call site can't echo-loop.
+- **Ownership split:** the SHELL owns segment 1 (which game / home). `nav(screen)` writes the URL FIRST
+  then sets the screen (**URL-before-mount invariant** — a sub-game reads `parsePath()` at mount, so its
+  URL must already be correct). Each SUB-GAME owns its own segment 2 (its room id) via a `parsePath()` at
+  mount + a `subscribe()` popstate handler, both routed through a per-render `popHandlerRef`/`applyPopRouteRef`
+  ref so the mount-once effect never runs a stale closure. Spender rooms live IN the shell (state
+  `deepRoom` + a `[deepRoom, screen]` effect calling the existing `handleContinue`).
+- **Boot + auth:** `resolveDest()` still decides auth-vs-in; the initial URL decides WHERE. `landAt(dest)`
+  is the boot injection (both `setScreen(dest)` sites became `landAt`). A deep link seen while logged out
+  is stashed in `pendingRouteRef` (URL left untouched so it survives in the address bar) and consumed by
+  `consumePendingRoute()` after login/guest. Guests are NOT persisted (existing behavior) → every reload
+  re-auths first, then continues to the deep-link destination.
+- **Room entry/exit:** the room URL is pushed at **server-confirmed success** (`created`/`joined`/
+  `reconnected` in each `handleMessage`), NEVER at click time (a failed join never pollutes history).
+  waiting + game SHARE one room URL (status picks the internal screen; nothing on `room_update`). Leaving
+  (menu / back-to-lobby / game-over back) pushes the mode path back.
+- **Deep link / invite link:** entering a room by URL runs the EXISTING resume semantics — saved token →
+  `reconnect`, else `join` (so a room URL is a shareable invite). A stale token retries ONCE as a plain
+  join; a terminal failure (room gone/full/started) → toast + fall back to the lobby + `replacePath` strips
+  the dead room URL so a reload doesn't re-attempt it. Tracked via `urlAttemptRef` ({rid,retried}); plain
+  `/spender` etc. never sets it, preserving the deliberate **no-auto-resume-on-mount** design.
+- **THE RACE (caught by e2e, fixed — do not regress):** Back pressed DURING a join round-trip must ALSO
+  abort a still-connecting attempt (`urlAttemptRef`/WW's `attemptRef`), else the late `reconnected`/`joined`
+  pushes the room URL right back. Every pop-out branch guards on `roomId || urlAttemptRef.current` (WW:
+  `attemptRef.current.kind`) and calls the leave path (which disconnects the in-flight socket).
+- **Deploy — `dist/404.html` is REQUIRED (GitHub Pages has no rewrite rules):** `deploy-pages.yml` copies
+  `index.html`→`404.html` AFTER build (so it carries the hashed asset tags). Pages serves it with HTTP
+  **404 status** (browsers render it fine — known crawler caveat, accepted). **The Cloudflare staging
+  worker SPA-routes natively (`not_found_handling`), so STAGING GREEN NEVER VALIDATES PROD DEEP LINKS** —
+  always cold-load a prod deep link (`https://forry4.github.io/duel`) after shipping.
+- **Smoke** (`webapp/test/smoke.mjs`) now checks `/`, `/duel`, `/spender/ABCDEF` (render + no errors + the
+  URL is preserved — catches a router crash or an accidental normalize-to-`/`). `vite preview` SPA-serves
+  unknown paths, so the deep-link smoke exercises the ROUTER, not the Pages 404 (prod-only).
+- **WW quirk:** `leaveToLobby` KEEPS `roomId` (WW leave keeps room membership), so its pop handler treats
+  "same id while sitting in the lobby" as "re-enter", not "already there".
+
 ## Spender Puzzle mode (`games/spender/puzzle/`) — LIVE on prod (July 2026)
 
 A **"Spender Puzzles"** feature: the player is dropped straight into a single position and must find
