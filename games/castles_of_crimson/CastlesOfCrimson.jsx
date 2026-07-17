@@ -991,6 +991,10 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-token.coc-on{cursor:pointer;animation:coc-goodspick 1.1s ease-in-out infinite}
 /* Goods are shown in their own bordered box (empty box when you hold none — no "none" text). */
 .coc-goods-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:44px;padding:7px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius)}
+/* claimed color-bonus tiles, shown under the goods so a player can track what they've earned */
+.coc-claimed-row{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.coc-claimed-badge{display:inline-flex;width:26px;height:26px}
+.coc-claimed-badge svg{width:100%;height:100%}
 .coc-goods-chip{display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--text-dim);cursor:pointer}
 /* A goods chip you can click to sell during a Warehouse pending — pulses like the pick depots. */
 .coc-goods-pick{color:var(--text);border-radius:6px;padding:1px 5px;margin:-1px -1px;animation:coc-goodspick 1.1s ease-in-out infinite}
@@ -2546,7 +2550,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-board-head">
             <div className="coc-board-status">
               <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
-              <span className="coc-pill">Round <b>{game.round}/5</b></span>
+              <span className="coc-pill">Round <b>{game.round}</b></span>
               {(() => {
                 // This phase's 5 goods, one handed out at the start of each round. The queue
                 // holds the not-yet-dealt goods (deal order, leftmost = next); the already-dealt
@@ -2720,7 +2724,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               )}
               {/* dice + resources */}
               <div className="coc-dicebar">
-                <span className="coc-pill">Dice</span>
                 {dice && [0, 1].map((i) => (
                   <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <div className={`coc-die${selDie === i ? " sel" : ""}${dice.used[i] ? " used" : ""}`}
@@ -2757,7 +2760,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               {/* storage + goods, side by side */}
               <div className="coc-stor-goods">
                 <div>
-                  <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
                   <div className="coc-storage" data-storage="1">
                     {[0, 1, 2].map((i) => {
                       const t = me?.storage?.[i];
@@ -2785,7 +2787,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                   </div>
                 </div>
                 <div>
-                  <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                   <div className="coc-goods-row" data-mygoods="1">
                     {me && Object.entries(me.goods).map(([c, n]) => {
                       const sellable = canSellGood(c);
@@ -2803,6 +2804,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       <span className="coc-goods-back" />×{me?.sold_goods?.length || 0}
                     </span>
                   </div>
+                  {me?.claimed_bonus?.length > 0 && (
+                    <div className="coc-claimed-row" data-myclaimed="1" title="Color-bonus tiles you've claimed">
+                      {me.claimed_bonus.map((bt, i) => (
+                        <span key={i} className="coc-claimed-badge"
+                          title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP`}>
+                          <BonusTileBadge color={TILE_HEX[bt.color]} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2825,7 +2836,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
             <div className="coc-oppbar coc-dicebar">
               {oppDice && (<>
-                <span className="coc-pill">Dice</span>
                 {[0, 1].map((i) => (
                   <div key={i} className={`coc-die${oppDice.used?.[i] ? " used" : ""}`}
                     style={{ cursor: "default" }}><Pips n={oppDice.values[i]} /></div>
@@ -2842,7 +2852,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             </div>
             <div className="coc-opp-sections">
               <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Storage</div>
                 <div className="coc-storage">
                   {[0, 1, 2].map((i) => {
                     const t = opp.storage?.[i];
@@ -2853,7 +2862,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 </div>
               </div>
               <div>
-                <div className="coc-pill" style={{ marginBottom: 4 }}>Goods</div>
                 <div className="coc-goods-row" data-oppgoods="1">
                   {Object.entries(opp.goods || {}).map(([c, n]) => (
                     <span key={c} data-oppgoodchip={c} className="coc-goods-chip" title={tileDesc({ kind: "goods", color: c }, board)}
@@ -2867,6 +2875,16 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                     <span className="coc-goods-back" />×{opp.sold_goods?.length || 0}
                   </span>
                 </div>
+                {opp?.claimed_bonus?.length > 0 && (
+                  <div className="coc-claimed-row" data-oppclaimed="1" title="Color-bonus tiles they've claimed">
+                    {opp.claimed_bonus.map((bt, i) => (
+                      <span key={i} className="coc-claimed-badge"
+                        title={`${colorLabel(bt.color)} color bonus — ${bt.vp} VP`}>
+                        <BonusTileBadge color={TILE_HEX[bt.color]} />
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="coc-duchy-board">
