@@ -1138,11 +1138,14 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-depot-goods{display:contents}
 @media (min-width:601px){
   .coc-board-hex .coc-depot.coc-depot-side{width:88px}
-  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center}
-  .coc-depot-side .coc-depot-goods{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%}
-  /* Top-half side depots (2/6): goods ABOVE the tiles so the pile grows UP into empty
-     board space instead of down toward the depot below (3/5), which keep goods below. */
-  .coc-depot-topside .coc-tilewrap .coc-depot-goods{order:-1}
+  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center;position:relative}
+  /* Goods float ABSOLUTELY off the tile stack (out of flow) so they can never grow the depot
+     box or shift the tiles — the tile stack stays pinned at the depot's anchor. Top depots
+     (2/6) stack goods ABOVE the tiles (grow up), bottom depots (3/5) BELOW (grow down); both
+     grow into empty board space, so the two depots on an edge can never overlap. */
+  .coc-depot-side .coc-depot-goods{position:absolute;left:0;right:0;display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
+  .coc-depot-topside .coc-depot-goods{bottom:100%;margin-bottom:6px}
+  .coc-depot-side:not(.coc-depot-topside) .coc-depot-goods{top:100%;margin-top:6px}
   .coc-board-hex .coc-depot.coc-anchor-l{transform:translate(0,-50%)}
   .coc-board-hex .coc-depot.coc-anchor-r{transform:translate(-100%,-50%)}
 }
