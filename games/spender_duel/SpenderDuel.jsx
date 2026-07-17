@@ -321,24 +321,30 @@ const css = `
 .duel-royal-crown{color:#f5c842;font-size:.85rem}
 .duel-royal-pts{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#f4e9d4}
 .duel-royal-abil{font-size:.8rem;color:#d9c8f0}
-/* Privilege tokens = PRESSABLE dark coins with a big gold fleur (flat, high-contrast so
-   the fleur reads at ~26px). A held privilege is a filled coin; an empty slot is a
-   darker recessed socket; when it's yours to spend (.clickable) the coins lift + gain a
-   gold ring on hover and push down on :active — the "press me" affordance. */
+/* Privilege tokens = dark coins with a big gold fleur (flat, high-contrast so the fleur
+   reads at ~26px). HELD = a filled coin; EMPTY = a hollow dashed ring (no fleur) so you
+   can see at a glance how many you own. When it's yours to spend (.clickable) the coins
+   get a soft gold ring — a tap cue that works on TOUCH, where there's no hover. Tapping
+   ARMS privilege mode (.armed) → a bright, persistent gold ring + glow + pulse, so
+   "selected — now pick a gem" is unmistakable. Hover-lift is DESKTOP-ONLY: a stray
+   tap-:hover otherwise stuck a ring on one coin on mobile (the reported confusion). */
 .duel-scrolls{display:inline-flex;gap:5px}
 .duel-scroll{
   display:inline-flex;align-items:center;justify-content:center;
   width:26px;height:26px;border-radius:50%;
   font-size:1.45rem;line-height:1;color:#e6c260;
-  background:#241d14;border:1px solid #4a3d28;
+  background:#241d14;border:1px solid #5a4a2c;
   box-shadow:0 1px 2px rgba(0,0,0,.4);
   transition:transform .1s ease,box-shadow .1s ease,border-color .1s ease,filter .1s ease;
 }
-.duel-scroll:not(.full){color:#3c3322;background:#191309;border:1px solid #322a1c;box-shadow:inset 0 1px 2px rgba(0,0,0,.5)}
+.duel-scroll:not(.full){color:transparent;background:transparent;border:1.5px dashed #4a4030;box-shadow:none}
 .duel-scrolls.clickable{cursor:pointer}
-.duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
-.duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);box-shadow:inset 0 2px 3px rgba(0,0,0,.5),0 1px 1px rgba(0,0,0,.3);filter:brightness(1)}
-.duel-scrolls.armed .duel-scroll.full{animation:duelPulse 1.1s infinite}
+.duel-scrolls.clickable .duel-scroll.full{border-color:#7a6330;box-shadow:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(232,201,106,.28)}
+@media (hover:hover){
+  .duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
+}
+.duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);filter:brightness(1)}
+.duel-scrolls.armed .duel-scroll.full{border-color:#e6c260;box-shadow:0 0 0 2px rgba(232,201,106,.6),0 0 9px rgba(232,201,106,.45);animation:duelPulse 1.1s infinite}
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
