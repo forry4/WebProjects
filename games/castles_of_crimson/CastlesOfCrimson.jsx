@@ -2550,7 +2550,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-board-head">
             <div className="coc-board-status">
               <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
-              <span className="coc-pill">Round <b>{game.round}</b></span>
               {(() => {
                 // This phase's 5 goods, one handed out at the start of each round. The queue
                 // holds the not-yet-dealt goods (deal order, leftmost = next); the already-dealt
