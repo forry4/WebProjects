@@ -1325,6 +1325,19 @@ export default function SpenderApp() {
 		return () => { document.removeEventListener("visibilitychange", evaluate); stop(); };
 	}, [humanGame, myTurn, pinged]);
 
+	// ── Turn chime ──────────────────────────────────────────────────────────
+	const prevMyTurnRef = useRef(false);
+	// Play a short sound the moment it becomes your turn in a human-vs-human game
+	// (focused or not). Fires only on the not-your-turn → your-turn transition, so
+	// it never repeats while you're already on the clock. Never for vs-AI, puzzles,
+	// or review (humanGame gates those out). The AudioContext is already unlocked by
+	// your own in-game clicks; best-effort otherwise (playPing swallows failures).
+	useEffect(() => {
+		const wasMyTurn = prevMyTurnRef.current;
+		prevMyTurnRef.current = myTurn;
+		if (humanGame && myTurn && !wasMyTurn) playPing();
+	}, [humanGame, myTurn]);
+
 	useEffect(() => {
 		if (screen === "browser" && authUser) fetchGames(authUser);
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
