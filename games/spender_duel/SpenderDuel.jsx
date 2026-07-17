@@ -441,11 +441,19 @@ const css = `
   .duel-topbar{flex-wrap:wrap;justify-content:center;gap:8px}
   .duel-topbar .spacer{display:none}
   .duel-title{flex:1 0 100%;text-align:center;font-size:1.25rem}
-  /* Cards + board cells size themselves from their column (container queries above), so
-     phones need no explicit sizes — hard-coding widths here would fight those clamps.
-     The board gap must NOT be overridden either: it scales with the cell to keep the
-     board's geometry proportional, which is what the refill path relies on (a fixed
-     5px here pushed the path ~6px off the cell centres at this width). */
+  /* Board cells size themselves from their column (container query above), so the board
+     needs no explicit sizes — hard-coding widths would fight those clamps. The board gap
+     must NOT be overridden either: it scales with the cell to keep the board's geometry
+     proportional, which is what the refill path relies on (a fixed 5px pushed the path
+     ~6px off the cell centres at this width). */
+  /* CARDS: on phones they were TINY because --card-h was tied to the narrow --card-w (the
+     level-I row is deck + 5 cards = 6 columns, so both width AND height shrank and the
+     content — which scales off --card-h — became unreadable). Fix mirrors how Spender
+     stays legible on mobile: DECOUPLE them. A tall --card-h scales the content back up,
+     and a high --card-w CAP lets each row's cards FILL it (instead of all rows capping at
+     the narrow level-I width) — so the shorter top rows get bigger cards, a natural
+     pyramid, with no wasted trailing space. */
+  .duel-col-cards .level-row{--card-w:120px;--card-h:clamp(112px, 29vw, 150px)}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 `;
