@@ -641,12 +641,12 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // board's LEFT edge (same gutter as the turn-order track) and 2/3 mirror on the
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
-  { left: 50, top: 13 },   // 1 top (nudged down to clear the turn-order track; the die sits below it, so don't push further or the black depot covers it)
-  { left: 83, top: 30 },   // 2 top-right
-  { left: 83, top: 70 },   // 3 bottom-right
-  { left: 50, top: 88 },   // 4 bottom
-  { left: 17, top: 70 },   // 5 bottom-left
-  { left: 17, top: 30 },   // 6 top-left
+  { left: 50, top: 12.3 },  // 1 top (raised ~4px so the black depot doesn't cover its die when goods pile up)
+  { left: 83, top: 29.1 },  // 2 top-right (raised ~5px)
+  { left: 83, top: 70.9 },  // 3 bottom-right (lowered ~5px)
+  { left: 50, top: 88 },    // 4 bottom
+  { left: 17, top: 70.9 },  // 5 bottom-left (lowered ~5px)
+  { left: 17, top: 29.1 },  // 6 top-left (raised ~5px)
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -779,6 +779,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-statusbar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px}
 .coc-status-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-width:0}
 .coc-pill{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.06em;color:var(--text-dim)}
+.coc-pill-phase{font-size:.9rem}
 .coc-goods-left{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
 /* an already-handed-out good: a faded, numberless barrel slot at the FULL goods size (34px,
    inherited from .coc-tile.goods) so the row matches every other goods tile in the game. */
@@ -2617,7 +2618,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <div className="coc-panel coc-board-panel coc-col-board">
           <div className="coc-board-head">
             <div className="coc-board-status">
-              <span className="coc-pill">Phase <b>{game.phase_letter}</b></span>
+              <span className="coc-pill coc-pill-phase">Phase <b>{game.phase_letter}</b></span>
               {(() => {
                 // This phase's 5 goods, one handed out at the start of each round. The queue
                 // holds the not-yet-dealt goods (deal order, leftmost = next); the already-dealt
