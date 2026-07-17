@@ -201,7 +201,10 @@ export const splendorCardCss = `
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
 .gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
 @keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:2px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 4px rgba(0,0,0,.4);transition:all .12s}
+/* Matte gradient + drop shadow, NO ring: a same-hue ring is lighter than the vivid bottom
+   of the matte gradient, which paints a bright arc along each gem's lower edge. The gradient
+   (light top -> dark bottom) + shadow give enough shape on their own. */
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 4px rgba(0,0,0,.4);transition:all .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
@@ -251,7 +254,7 @@ export const splendorCardCss = `
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
 .card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
 .card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));border:1.5px solid color-mix(in srgb,var(--gc) 58%,#000);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
 /* Cost pips are tiny (~10-16px): the same-hue ring is too thin to read cleanly at that
