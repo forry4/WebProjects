@@ -642,11 +642,11 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
   { left: 50, top: 12.1 },  // 1 top (raised ~5px so the black depot doesn't cover its die when goods pile up)
-  { left: 83, top: 28.1 },  // 2 top-right (raised ~11px)
-  { left: 83, top: 71.9 },  // 3 bottom-right (lowered ~11px)
+  { left: 83, top: 30 },    // 2 top-right (goods render ABOVE the tiles — grow up, away from depot 3)
+  { left: 83, top: 70 },    // 3 bottom-right (goods below the tiles — grow down, away from depot 2)
   { left: 50, top: 88 },    // 4 bottom
-  { left: 17, top: 71.9 },  // 5 bottom-left (lowered ~11px)
-  { left: 17, top: 28.1 },  // 6 top-left (raised ~11px)
+  { left: 17, top: 70 },    // 5 bottom-left (goods below — grow down, away from depot 6)
+  { left: 17, top: 30 },    // 6 top-left (goods ABOVE — grow up, away from depot 5)
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -1140,6 +1140,9 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc-board-hex .coc-depot.coc-depot-side{width:88px}
   .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center}
   .coc-depot-side .coc-depot-goods{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%}
+  /* Top-half side depots (2/6): goods ABOVE the tiles so the pile grows UP into empty
+     board space instead of down toward the depot below (3/5), which keep goods below. */
+  .coc-depot-topside .coc-tilewrap .coc-depot-goods{order:-1}
   .coc-board-hex .coc-depot.coc-anchor-l{transform:translate(0,-50%)}
   .coc-board-hex .coc-depot.coc-anchor-r{transform:translate(-100%,-50%)}
 }
@@ -2705,12 +2708,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               const depotPick = shipPickMine ? () => shipPick(d)
                 : (buildingPickMine && bCands.length === 1 ? () => buildingPick(bCands[0]) : undefined);
               const isSide = d !== 1 && d !== 4;           // ring-side depots stack tiles vertically
+              // Top-half side depots (2/6) render goods ABOVE the tiles so the pile grows UP
+              // into empty board space; bottom side depots (3/5) keep goods below (grow down).
+              const topSide = isSide && pos.top < 50;
               // Side depots anchor to the board's edges (left for 5/6 — the same gutter
               // as the turn-order track — right for 2/3) instead of centering on left%;
               // top/bottom depots (coc-depot-tb) keep the horizontal tile row.
               const anchor = isSide ? (pos.left < 50 ? " coc-anchor-l" : " coc-anchor-r") : "";
               return (
-                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
+                <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${topSide ? " coc-depot-topside" : ""}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: isSide ? (pos.left < 50 ? 0 : "100%") : `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
