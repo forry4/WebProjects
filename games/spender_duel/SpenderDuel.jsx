@@ -221,6 +221,13 @@ const css = `
 .duel > .lby-header{margin:0 -14px 18px}
 .duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 352px;gap:18px;align-items:start}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
+/* Mobile Open/Active/History tab bar (mirrors Spender's .lobby-tabs). Hidden on wide
+   screens; shown (and made to hide the other two sections) in the max-width:720 block. */
+.duel-lobby-tabs{display:none;gap:6px;margin-bottom:16px;background:var(--surface2,#241d16);border:1px solid var(--line,#3a332a);border-radius:12px;padding:4px}
+.duel-lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim,#a89a82);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
+.duel-lobby-tab.sel{background:var(--lby-accent,#bf6fd0);color:#160f18;font-weight:700}
+.duel-lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.22);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
+.duel-lobby-tab:not(.sel) .duel-lobby-tab-count{background:var(--surface,#1b1712);color:var(--text-dim,#a89a82)}
 /* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
    an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
 .duel-pick-wrap{position:relative}
@@ -441,6 +448,13 @@ const css = `
 }
 @media(max-width:720px){
   .duel-cols{grid-template-columns:1fr}
+  /* Lobby: show the Open/Active/History tab bar and let the selected tab pick which of
+     the (now single-column) sections is visible — the others are hidden. */
+  .duel-lobby-tabs{display:flex}
+  .duel-lobby-cols{gap:0}
+  .duel-lobby-cols.tab-open>.active-section,.duel-lobby-cols.tab-open>.history-section,
+  .duel-lobby-cols.tab-active>.open-section,.duel-lobby-cols.tab-active>.history-section,
+  .duel-lobby-cols.tab-history>.open-section,.duel-lobby-cols.tab-history>.active-section{display:none}
   /* Menu + title + Rules + Abandon can't share one row on a phone — they used to run
      ~95px past the viewport and give the whole page a horizontal scrollbar. Wrap them
      and drop the flex spacers (which only exist to center the title on wide screens). */
@@ -516,6 +530,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("duel", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("duel", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("duel", myId, "history", []));
+  const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
@@ -1437,8 +1452,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           </div>
           <button className="btn btn-outline" onClick={fetchGames}>{loadingGames ? "…" : "↻"}</button>
         </div>
-        <div className="duel-lobby-cols">
-          <div className="duel-section">
+        {/* Mobile-only tab bar (mirrors Spender): the three columns can't fit side by side
+            on a phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
+        <div className="duel-lobby-tabs" role="tablist">
+          {[
+            ["open", "Open", openGames.length],
+            ["active", "Active", activeMine.length],
+            ["history", "History", history.length],
+          ].map(([key, label, count]) => (
+            <button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
+              className={`duel-lobby-tab${lobbyTab === key ? " sel" : ""}`}
+              onClick={() => setLobbyTab(key)}>
+              {label}{count > 0 ? <span className="duel-lobby-tab-count">{count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className={`duel-lobby-cols tab-${lobbyTab}`}>
+          <div className="duel-section open-section">
             <LobbySectionHd title="Open Games" />
             {openGames.length === 0 && <div className="lby-empty">No open games. Create one!</div>}
             {openGames.map((g) => (
@@ -1458,7 +1488,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
-          <div className="duel-section">
+          <div className="duel-section active-section">
             <LobbySectionHd title="Active Games" />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
               <div className="lby-card">
@@ -1483,7 +1513,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
-          <div className="duel-section">
+          <div className="duel-section history-section">
             <LobbySectionHd title="History" />
             {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
             {history.map((g) => (
