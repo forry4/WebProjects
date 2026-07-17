@@ -664,7 +664,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         <LobbyHeader
           onBack={onExit}
           title="Where Wolf"
-          onRules={() => setShowRules(true)}
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="ww-wrap">

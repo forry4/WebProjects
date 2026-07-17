@@ -2128,7 +2128,6 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         <LobbyHeader
           onBack={onExit}
           title="Castles of Crimson"
-          onRules={() => setShowRules(true)}
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="coc-wrap">

@@ -2535,7 +2535,6 @@ export default function SpenderApp() {
 				<LobbyHeader
 					onBack={() => setScreen("home")}
 					title="Spender"
-					onRules={() => setShowRules(true)}
 					user={<>
 						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
 						<span className="lby-head-name">{authUser?.name}</span>

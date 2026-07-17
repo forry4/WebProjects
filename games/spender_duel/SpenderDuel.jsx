@@ -1382,8 +1382,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         <LobbyHeader
           onBack={onExit}
           title="Spender Duel"
-          onRules={() => setShowRules(true)}
-          rulesLabel="How to Play"
           user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
         />
         <div className="duel-create-row">
