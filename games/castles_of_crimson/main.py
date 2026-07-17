@@ -117,6 +117,7 @@ coc_app.add_middleware(
 ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 AI_PID = "bot"
+MAX_PLAYERS = 4        # human-vs-human games seat 2-4 players (vs-bot stays 2)
 
 
 def _valid_board(board_id) -> str:
@@ -147,9 +148,17 @@ def coc_init_db() -> None:
         status TEXT,
         player1_id TEXT, player1_name TEXT,
         player2_id TEXT, player2_name TEXT,
+        player3_id TEXT, player3_name TEXT,
+        player4_id TEXT, player4_name TEXT,
         host_id TEXT,
         state_json TEXT,
         created_at INTEGER, updated_at INTEGER)""")
+    # Tolerant ALTER for the pre-existing 2-player prod table (columns may already exist).
+    for col in ("player3_id TEXT", "player3_name TEXT", "player4_id TEXT", "player4_name TEXT"):
+        try:
+            cur.execute(f"ALTER TABLE coc_games ADD COLUMN {col}")
+        except Exception:  # noqa: BLE001 — column already present
+            pass
     conn.commit()
     conn.close()
 
@@ -172,23 +181,37 @@ _DB_WRITE_EXEC = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_nam
 _save_conn = None  # persistent write connection; ONLY ever touched by the _DB_WRITE_EXEC thread
 
 
-def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, now, created_at) -> None:
-    """Upsert one coc_games row on the dedicated write thread using a reused connection."""
+def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> None:
+    """Upsert one coc_games row on the dedicated write thread using a reused connection.
+
+    `seats` is a list of (player_id, player_name) in seat order (up to 4). The columns
+    are a query index (the authoritative player list is in state_json); seats 2-4 can
+    fill in after creation (late joiners), so UPDATE rewrites them all."""
     global _save_conn
+    ids = [None, None, None, None]
+    names = [None, None, None, None]
+    for i, (pid, pname) in enumerate(seats[:4]):
+        ids[i], names[i] = pid, pname
     try:
         if _save_conn is None:
             _save_conn = _db()
         cur = _save_conn.cursor()
         cur.execute("SELECT id FROM coc_games WHERE id=?", (room_id,))
         if cur.fetchone() is not None:
-            cur.execute("""UPDATE coc_games SET status=?, player2_id=?, player2_name=?, state_json=?, updated_at=?
+            cur.execute("""UPDATE coc_games SET status=?,
+                             player2_id=?, player2_name=?, player3_id=?, player3_name=?,
+                             player4_id=?, player4_name=?, state_json=?, updated_at=?
                            WHERE id=?""",
-                        (status, p2id, p2name, state_json, now, room_id))
+                        (status, ids[1], names[1], ids[2], names[2], ids[3], names[3],
+                         state_json, now, room_id))
         else:
             cur.execute("""INSERT INTO coc_games
-                           (id,status,player1_id,player1_name,player2_id,player2_name,host_id,state_json,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                        (room_id, status, p1id, p1name, p2id, p2name, host, state_json, created_at, now))
+                           (id,status,player1_id,player1_name,player2_id,player2_name,
+                            player3_id,player3_name,player4_id,player4_name,
+                            host_id,state_json,created_at,updated_at)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (room_id, status, ids[0], names[0], ids[1], names[1],
+                         ids[2], names[2], ids[3], names[3], host, state_json, created_at, now))
         _save_conn.commit()
     except Exception:  # noqa: BLE001 — a save must never crash; drop the (maybe stale) conn so the next reconnects
         LOG.warning("coc save_game write failed for %s; dropping connection to reconnect next time", room_id,
@@ -207,8 +230,7 @@ def save_game(room_id: str) -> None:
     room = ROOMS.get(room_id)
     if not room:
         return
-    pids = list(room.get("players", {}).keys())
-    names = list(room.get("players", {}).values())
+    seats = list(room.get("players", {}).items())   # (id, name) in seat order, up to 4
     state = {
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -222,9 +244,7 @@ def save_game(room_id: str) -> None:
     }
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
-        _persist_row, room_id, room.get("status", "open"),
-        pids[0] if pids else None, names[0] if names else None,
-        pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
+        _persist_row, room_id, room.get("status", "open"), seats,
         room.get("host"), json.dumps(state), now, now,
     )
 
@@ -272,16 +292,40 @@ def load_game_to_memory(room_id: str) -> bool:
     return True
 
 
+def _parse_state(row) -> dict:
+    try:
+        return json.loads(row["state_json"] or "{}")
+    except Exception:
+        return {}
+
+
+def _ordered_players(state: dict) -> list[dict]:
+    """[{id, name}] in seat order for a parsed room state (2-4 players). Uses the game's
+    seat order once dealt, else the pre-start room player list."""
+    g = state.get("game") if isinstance(state, dict) else None
+    names = (state.get("players") if isinstance(state, dict) else None) or {}
+    if isinstance(g, dict) and g.get("order"):
+        gp = g.get("players") or {}
+        return [{"id": pid, "name": (gp.get(pid) or {}).get("name") or names.get(pid) or "Player"}
+                for pid in g["order"]]
+    return [{"id": pid, "name": nm} for pid, nm in names.items()]
+
+
 def list_open_games() -> list[dict]:
     maybe_cleanup_games("coc_games", background=True)  # throttled (<=1/h), non-blocking: prune stale games during long-awake periods
     conn = _db()
     cur = conn.cursor()
-    cur.execute("""SELECT id, player1_id, player1_name, created_at FROM coc_games
+    cur.execute("""SELECT id, player1_id, player1_name, state_json, created_at FROM coc_games
                    WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
-    return [{"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
-             "created_at": r["created_at"]} for r in rows]
+    out = []
+    for r in rows:
+        players = _ordered_players(_parse_state(r))
+        out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
+                    "player_count": len(players) or 1, "max_players": MAX_PLAYERS,
+                    "created_at": r["created_at"]})
+    return out
 
 
 def list_user_games(user_id: str) -> list[dict]:
@@ -290,22 +334,22 @@ def list_user_games(user_id: str) -> list[dict]:
     cur.execute("""SELECT id, status, player1_id, player1_name, player2_id, player2_name,
                           state_json, created_at, updated_at
                    FROM coc_games
-                   WHERE (player1_id=? OR player2_id=?) AND status != 'over'
-                   ORDER BY updated_at DESC""", (user_id, user_id))
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status != 'over'
+                   ORDER BY updated_at DESC""", (user_id,) * 4)
     rows = cur.fetchall()
     conn.close()
     out = []
     for r in rows:
-        try:
-            state = json.loads(r["state_json"] or "{}")
-        except Exception:
-            state = {}
+        state = _parse_state(r)
         g = state.get("game") or {}
+        players = _ordered_players(state)
         is_p1 = r["player1_id"] == user_id
         your_turn = isinstance(g, dict) and g.get("turn") == user_id
         out.append({
             "id": r["id"], "status": r["status"],
-            "player1_name": r["player1_name"], "player2_name": r["player2_name"],
+            "players": [{**p, "is_you": p["id"] == user_id} for p in players],
+            "player1_name": r["player1_name"], "player2_name": r["player2_name"],  # legacy 2p fields
             "you_are_p1": is_p1, "your_turn": your_turn,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
@@ -327,13 +371,12 @@ def list_active_games() -> list[dict]:
     conn.close()
     out = []
     for r in rows:
-        try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
-        except Exception:
-            g = {}
+        state = _parse_state(r)
+        g = state.get("game") or {}
         out.append({
             "id": r["id"],
-            "player1_id": r["player1_id"], "player1_name": r["player1_name"],
+            "players": _ordered_players(state),
+            "player1_id": r["player1_id"], "player1_name": r["player1_name"],  # legacy 2p fields
             "player2_id": r["player2_id"], "player2_name": r["player2_name"],
             "turn": g.get("turn") if isinstance(g, dict) else None,
             "created_at": r["created_at"], "updated_at": r["updated_at"],
@@ -349,16 +392,15 @@ def list_user_history(user_id: str) -> list[dict]:
     cur.execute("""SELECT id, player1_id, player1_name, player2_id, player2_name,
                           state_json, updated_at
                    FROM coc_games
-                   WHERE (player1_id=? OR player2_id=?) AND status='over'
-                   ORDER BY updated_at DESC LIMIT 30""", (user_id, user_id))
+                   WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
+                         AND status='over'
+                   ORDER BY updated_at DESC LIMIT 30""", (user_id,) * 4)
     rows = cur.fetchall()
     conn.close()
     out = []
     for r in rows:
-        try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
-        except Exception:
-            g = {}
+        state = _parse_state(r)
+        g = state.get("game") or {}
         if not isinstance(g, dict) or not g.get("players"):
             continue
         try:
@@ -366,13 +408,16 @@ def list_user_history(user_id: str) -> list[dict]:
         except Exception:
             scores = {}
         win = g.get("winner")
-        is_p1 = r["player1_id"] == user_id
-        opp_id = r["player2_id"] if is_p1 else r["player1_id"]
-        opp_name = (r["player2_name"] if is_p1 else r["player1_name"]) or "Opponent"
+        players = _ordered_players(state)
+        opps = [p for p in players if p["id"] != user_id]
+        opp_name = ", ".join(p["name"] for p in opps) if opps else "Opponent"
+        top_opp = max(opps, key=lambda p: scores.get(p["id"], 0), default=None)  # best opponent, for the 2-num display
         you_won = (win == user_id) or (isinstance(win, list) and user_id in win)
         out.append({
             "id": r["id"], "opp_name": opp_name,
-            "your_score": scores.get(user_id), "opp_score": scores.get(opp_id),
+            "players": [{**p, "is_you": p["id"] == user_id, "score": scores.get(p["id"])} for p in players],
+            "your_score": scores.get(user_id),
+            "opp_score": scores.get(top_opp["id"]) if top_opp else None,
             "you_won": you_won, "tie": isinstance(win, list),
             "updated_at": r["updated_at"],
         })
@@ -834,7 +879,8 @@ async def _handle_join(ws, room_id, pid, msg):
             await _send(ws, {"type": "error", "message": "no such room"})
             return
         if pid not in room["players"]:
-            if room.get("status") != "open" or len([p for p in room["players"] if p != AI_PID]) >= 2:
+            if room.get("vs_ai") or room.get("status") != "open" \
+                    or len([p for p in room["players"] if p != AI_PID]) >= MAX_PLAYERS:
                 await _send(ws, {"type": "error", "message": "room is full"})
                 return
             room["players"][pid] = name
@@ -858,8 +904,8 @@ async def _handle_start(ws, room_id, pid):
             await _send(ws, {"type": "error", "message": "only the host can start"})
             return
         humans = [p for p in room["players"]]
-        if len(humans) < 2:
-            await _send(ws, {"type": "error", "message": "need two players"})
+        if not 2 <= len(humans) <= MAX_PLAYERS:
+            await _send(ws, {"type": "error", "message": "need 2-4 players"})
             return
         if room.get("status") != "open":
             await _send(ws, {"type": "error", "message": "already started"})
