@@ -17,8 +17,13 @@ def load_cookie():
         line = line.strip()
         if not line:
             continue
+        # `name: value` (colon-space) -- split on the FIRST delimiter (values may contain '=').
+        m = re.match(r'^([A-Za-z0-9_]+)\s*:\s*"?(.+?)"?$', line)
+        if m:
+            c[m.group(1)] = m.group(2).strip()
+            continue
         m = re.match(r'^(\S+)[\t ]+"?([^"\s]+)"?', line)
-        if m and "=" not in m.group(1):
+        if m and "=" not in m.group(1) and ":" not in m.group(1):
             c[m.group(1)] = m.group(2)
         elif "=" in line:
             for p in re.split(r";\s*", line):

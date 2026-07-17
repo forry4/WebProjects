@@ -48,17 +48,28 @@ KEEP = ("TournoiEnLigne_sso_id", "TournoiEnLigne_sso_user",
 
 
 def _pairs():
-    """Parse the exported session file -> {name: value}."""
+    """Parse the exported session file -> {name: value}.
+
+    Tolerates three hand-export formats (cookie NAMES are [A-Za-z0-9_]+; VALUES can contain
+    '=', '%', etc., so always split on the FIRST delimiter only):
+      1. `name: value`   (colon-space -- DevTools 'copy as' often uses this)
+      2. `name<tab>value` / `name value`
+      3. `k=v; k=v`      (a raw Cookie header)
+    """
     raw = open(cc.COOKIE_FILE, encoding="utf-8").read()
     out = {}
     for line in raw.splitlines():
         line = line.strip()
         if not line:
             continue
-        m = re.match(r'^(\S+)[\t ]+"?([^"\s]+)"?', line)
-        if m and "=" not in m.group(1):
+        m = re.match(r'^([A-Za-z0-9_]+)\s*:\s*"?(.+?)"?$', line)     # name: value
+        if m:
+            out[m.group(1)] = m.group(2).strip()
+            continue
+        m = re.match(r'^(\S+)[\t ]+"?([^"\s]+)"?', line)             # name<tab>value
+        if m and "=" not in m.group(1) and ":" not in m.group(1):
             out[m.group(1)] = m.group(2)
-        elif "=" in line:
+        elif "=" in line:                                           # k=v; k=v
             for p in re.split(r";\s*", line):
                 if "=" in p:
                     k, v = p.split("=", 1)
