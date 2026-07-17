@@ -1513,6 +1513,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         : spec.kind === "slot" ? `[data-storage-slot="${spec.i}"]`
         : spec.kind === "hex" ? `[data-sid="${spec.sid}"]`
         : spec.kind === "mygoods" ? "[data-mygoods]"
+        : spec.kind === "goodsleft" ? "[data-goodsleft]"
         : spec.kind === "goodchip" ? `[data-goodchip="${spec.c}"]`
         : spec.kind === "oppgoodchip" ? `[data-oppgoodchip="${spec.c}"]`
         : spec.kind === "oppslot" ? `[data-oppstorage-slot="${spec.i}"]`
@@ -1603,6 +1604,24 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         const dcx = oChip ? oChip.left + oChip.width / 2 : oGoodsDest.left + 14;
         const dcy = oChip ? oChip.top + oChip.height / 2 : oGoodsDest.top + oGoodsDest.height / 2;
         add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color, left: scx - 13, top: scy - 13, w: 26, h: 26, dx: dcx - scx, dy: dcy - scy, s1: 1 });
+      }
+    }
+    // Round start: a good is handed out onto the white-die depot. Goods only ever appear
+    // on a depot via the per-round deal, so a good that's newly present on a depot (not in
+    // last update's depotGoods) is that deal — fly it from the goods-left row (the queue it
+    // left) to the chosen depot, growing as it lands.
+    {
+      const prevGoodIds = new Set((prev.depotGoods || []).map((g) => g.id));
+      const src = rectOf({ kind: "goodsleft" });
+      if (src) for (const g of depotGoods) {
+        if (prevGoodIds.has(g.id)) continue;
+        const d = rectOf({ kind: "depot", d: g.d });
+        if (!d) continue;
+        const W = 30, H = 30;
+        const scx = src.left + src.width / 2, scy = src.top + src.height / 2;
+        const dcx = d.left + d.width / 2, dcy = d.top + d.height / 2;
+        add.push({ id: `f${flyerSeq.current++}`, goods: true, color: g.color,
+          left: scx - W / 2, top: scy - H / 2, w: W, h: H, dx: dcx - scx, dy: dcy - scy, s0: 0.55, s1: 1 });
       }
     }
     // Skip a flood of TILE changes (reconnect / initial catch-up) so we animate only
@@ -2560,7 +2579,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                 const TOTAL = 5;                             // GOODS_PER_PHASE
                 const used = Math.max(0, TOTAL - q.length);  // dealt so far this phase
                 return (
-                  <span className="coc-pill coc-goods-left" title="This phase's goods — one is handed out each round; faded = already used">
+                  <span className="coc-pill coc-goods-left" data-goodsleft="1" title="This phase's goods — one is handed out each round; faded = already used">
                     {Array.from({ length: used }).map((_, i) => (
                       <span key={"u" + i} className="coc-tile goods coc-goods-used"
                         title={"Round " + (i + 1) + " goods — already handed out"} aria-hidden="true"></span>
@@ -2944,7 +2963,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             ) : f.goods ? (
               <div key={f.id} className="coc-flyer goods"
                 style={{ left: f.left, top: f.top, width: f.w, height: f.h, background: GOODS_HEX[f.color] || "#555",
-                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": 1, "--s1": f.s1 }}>
+                  "--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0 ?? 1, "--s1": f.s1 }}>
                 {goodsSellNum(f.color)}
               </div>
             ) : (
