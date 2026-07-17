@@ -250,8 +250,14 @@ const css = `
    swatches and its own palette.) */
 .duel-col-cards{container-type:inline-size}
 .duel-col-cards .level-row{
-  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding */
-  --card-w:clamp(52px, calc((100cqw - 80px) / 6), 190px);
+  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding.
+     The MIN must stay LOW (40, not 52): on a narrow phone (<~385px) a 52px floor forces
+     the 6-cell level-I row WIDER than the column, so it overflows and the flex shrinks the
+     items UNEVENLY — the deck (less content) shrinks more than the cards, and the roomier
+     3/4-card rows don't shrink at all, so decks came out different sizes per row. A 40 floor
+     lets --card-w track the true 6-cell fit at any width, so every cell (deck AND card) is
+     the SAME size in every row. */
+  --card-w:clamp(40px, calc((100cqw - 80px) / 6), 190px);
   --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
   margin-bottom:8px;
 }
@@ -270,10 +276,10 @@ const css = `
 .duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
 /* a double bonus overlaps by 40% of the (scaled) disc: 0.157 * 0.4 */
 .duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.063)}
-.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.082)}
+.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.097)}
 .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
-.duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.081);height:calc(var(--card-h) * 0.081)}
-.duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.08)}
+.duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.096);height:calc(var(--card-h) * 0.096)}
+.duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.095)}
 .duel-col-cards .level-row .card-cost{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .card-cost .cost-col{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
