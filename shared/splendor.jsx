@@ -27,12 +27,13 @@ export const GEM_HEX = {
 // Light chips need a dark glyph.
 const DARK_TEXT = new Set(["white", "gold", "pearl"]);
 // An UNATTACHED wild bonus can become any gem colour you already own a card for, so it
-// reads as a rainbow rather than a blank disc: a smooth diagonal spectrum plus a gloss
+// reads as a multi-colour disc rather than a blank one: a DESATURATED diagonal spectrum
+// (muted to sit calmly beside the matte gems, not a garish rainbow) plus a soft gloss
 // highlight, so it looks like a polished gem. (A conic wheel of the five GEM colours was
 // the obvious idea and looked bad — it put a black wedge in the "rainbow".)
 export const WILD_RAINBOW = [
-  "radial-gradient(circle at 30% 24%, rgba(255,255,255,.85) 0%, rgba(255,255,255,.32) 15%, rgba(255,255,255,0) 46%)",
-  "linear-gradient(135deg, #ff3b30 0%, #ff9500 17%, #ffe600 33%, #4cd964 50%, #34d8e8 67%, #3b6dff 83%, #c04cff 100%)",
+  "radial-gradient(circle at 32% 24%, rgba(255,255,255,.55) 0%, rgba(255,255,255,.12) 20%, rgba(255,255,255,0) 48%)",
+  "linear-gradient(135deg, #c98a86 0%, #ccb079 20%, #c3c583 38%, #8ec08f 56%, #83bcc7 72%, #8f9ed0 88%, #bd97cf 100%)",
 ].join(", ");
 // Gems show their initial; the wilds show a symbol.
 const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].toUpperCase());
@@ -41,7 +42,7 @@ const tokenGlyph = (c) => (c === "gold" ? "★" : c === "pearl" ? "●" : c[0].t
  * let CSS size it instead — Duel's board scales its tokens with the column, and an
  * inline width/height would beat the stylesheet and freeze them. */
 export function GemToken({ color, size = 42, className = "", onClick, title, dataCell }) {
-  const style = { background: GEM_HEX[color], color: DARK_TEXT.has(color) ? "#333" : "#fff" };
+  const style = { "--gc": GEM_HEX[color], color: DARK_TEXT.has(color) ? "#333" : "#fff" };
   if (size) { style.width = size; style.height = size; }
   return (
     <div className={`gem-token ${className}`.trim()} style={style} onClick={onClick}
@@ -93,12 +94,12 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
           // as a single gem sitting on top of another.
           card.bonus_count === 2 ? (
             <div className="card-bonus-pair" title="Gives 2 of this bonus">
-              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
-              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={{ background: bonusBg }} />
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={isWild ? { background: bonusBg } : { "--gc": bonusBg }} />
+              <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`} style={isWild ? { background: bonusBg } : { "--gc": bonusBg }} />
             </div>
           ) : (
             <div className={`card-bonus${isWild ? " card-bonus-wild" : ""}`}
-              style={{ background: bonusBg }}
+              style={isWild ? { background: bonusBg } : { "--gc": bonusBg }}
               title={isWild ? (asColor ? `Wild bonus (as ${asColor})` : "Wild bonus — attaches to one of your colors") : undefined} />
           )
         )}
@@ -113,7 +114,7 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
         <div className="cost-col">
           {gems.map(([c, n]) => (
             <div key={c} className="cost-row">
-              <div className="cost-gem" style={{ background: GEM_HEX[c] }} />
+              <div className="cost-gem" style={{ "--gc": GEM_HEX[c] }} />
               <span className="cost-num">{n}</span>
             </div>
           ))}
@@ -121,7 +122,7 @@ export function CardView({ card, selected, affordable, needsGold, disabled, onCl
         {pearl > 0 && (
           <div className="cost-col">
             <div className="cost-row">
-              <div className="cost-gem" style={{ background: GEM_HEX.pearl }} />
+              <div className="cost-gem" style={{ "--gc": GEM_HEX.pearl }} />
               <span className="cost-num">{pearl}</span>
             </div>
           </div>
@@ -200,7 +201,10 @@ export const splendorCardCss = `
 .gem-stack.disabled{opacity:.35;cursor:not-allowed}
 .gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
 @keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;border:2px solid rgba(255,255,255,.12);transition:all .12s}
+/* Matte gradient + drop shadow, NO ring: a same-hue ring is lighter than the vivid bottom
+   of the matte gradient, which paints a bright arc along each gem's lower edge. The gradient
+   (light top -> dark bottom) + shadow give enough shape on their own. */
+.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 4px rgba(0,0,0,.4);transition:all .12s}
 .gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
 
 /* ─── Cards ─────────────────────────────────────────────────────────────── */
@@ -214,7 +218,7 @@ export const splendorCardCss = `
 .deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
 .deck-pile.disabled{cursor:not-allowed;opacity:.5}
 .deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif}
-.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:var(--surface2);border:1px solid var(--border);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
+.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:linear-gradient(160deg,var(--surface3),var(--surface2));border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:all .15s;flex-shrink:0;position:relative}
 .card-slot{width:var(--card-w,88px);flex-shrink:0}
 /* Each cell in a level row (deck pile / card / empty slot) shares the row width
    equally but never exceeds --card-w (88px default; bigger on desktop). A full
@@ -248,12 +252,15 @@ export const splendorCardCss = `
 .card-back-level{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
 .card-back-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
 .card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px}
+.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
 .card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(255,255,255,.25)}
+.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 2px rgba(0,0,0,.35)}
 .card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
 .cost-row{display:flex;align-items:center;gap:4px}
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid rgba(255,255,255,.25)}
+/* Cost pips are tiny (~10-16px): the same-hue ring is too thin to read cleanly at that
+   size (it just muddies the pip), so drop it and keep only the matte gradient fill — the
+   lighter top still gives the dark pips enough separation from the card. */
+.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 1px rgba(0,0,0,.3)}
 .cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
 `;
 
@@ -264,7 +271,7 @@ export const splendorCardCss = `
 export const splendorCardExtraCss = `
 .card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
-.card-bonus-wild{border-style:dashed}
+.card-bonus-wild{border:none}
 /* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
    at a glance. The trailing disc sits on top; the leading one keeps its rim visible
    through the overlap. (Was a single disc ringed by a box-shadow, which just looked
@@ -318,7 +325,7 @@ export const splendorLogCss = `
 
 /* The panel shell — extracted VERBATIM from Spender.jsx. */
 export const splendorPanelCss = `
-.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px}
+.panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5)}
 .panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
 `;
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -337,7 +337,7 @@ const css = baseCss + lobbyCss + `
   .ww-seat .seat-name{font-size:10px;max-width:64px}
   .ww-actions{min-height:38px;gap:8px}
 }
-`;
+` + gameMenuCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
@@ -617,6 +617,44 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     if (loneWolfActive) { mv({ type: "wolf_peek_center", index: idx }); return; }
   };
 
+  // Rules modal — defined once and rendered in the lobby AND the in-game options menu,
+  // so "How to Play" is reachable during a game too.
+  const wwRulesModal = showRules && (
+    <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
+      <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>📖 How to Play — Where Wolf</h3>
+        <div className="ww-rules-body">
+          <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
+          <h4>Setup</h4>
+          <ul>
+            <li>The host picks a deck of <b>players + 3</b> role cards. Each player is secretly dealt one; the extra <b>3 sit face-down in the center</b>.</li>
+            <li>The role you're <b>dealt</b> is the one you act as during the night — even if your card changes later.</li>
+          </ul>
+          <h4>Night</h4>
+          <ul>
+            <li>Roles wake in a set order and act: werewolves see each other, the <b>seer</b> peeks a card, the <b>robber</b> steals a role, the <b>troublemaker</b> swaps two other players, the <b>drunk</b> blind-swaps with the center, and more.</li>
+            <li>Swaps move the <b>card in front of you</b> — so you may end the night as a role you don't know about.</li>
+          </ul>
+          <h4>Day &amp; the vote</h4>
+          <ul>
+            <li>Everyone discusses (there's a timer) and argues about who the werewolves are.</li>
+            <li>On the signal, all players vote at once. The player(s) with the <b>most votes die</b> — a tie kills everyone tied; if no one gets 2+ votes, nobody dies. A dead <b>hunter</b> also takes down whoever they voted for.</li>
+          </ul>
+          <h4>Who wins</h4>
+          <ul>
+            <li><b>Village</b> wins if at least one <b>werewolf</b> card dies.</li>
+            <li><b>Werewolves</b> win if a werewolf is in play and none of them die (the <b>minion</b> wins with them).</li>
+            <li>The <b>tanner</b> wins only by dying — and their death blocks a werewolf win.</li>
+          </ul>
+          <p className="ww-rules-note">Your final card at dawn decides your team, so pay attention to what moved in the night.</p>
+        </div>
+        <div className="ww-row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
+          <button className="ww-btn gold" onClick={() => setShowRules(false)}>Got it</button>
+        </div>
+      </div>
+    </div>
+  );
+
   // ─── Lobby ─────────────────────────────────────────────────────────────────
   if (screen === "lobby") {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
@@ -626,7 +664,6 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         <LobbyHeader
           onBack={onExit}
           title="Where Wolf"
-          onRules={() => setShowRules(true)}
           user={<span className="lby-head-name">{playerName}</span>}
         />
         <div className="ww-wrap">
@@ -679,41 +716,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             </div>
           </div>
         </div>
-        {showRules && (
-          <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
-            <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
-              <h3>📖 How to Play — Where Wolf</h3>
-              <div className="ww-rules-body">
-                <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
-                <h4>Setup</h4>
-                <ul>
-                  <li>The host picks a deck of <b>players + 3</b> role cards. Each player is secretly dealt one; the extra <b>3 sit face-down in the center</b>.</li>
-                  <li>The role you're <b>dealt</b> is the one you act as during the night — even if your card changes later.</li>
-                </ul>
-                <h4>Night</h4>
-                <ul>
-                  <li>Roles wake in a set order and act: werewolves see each other, the <b>seer</b> peeks a card, the <b>robber</b> steals a role, the <b>troublemaker</b> swaps two other players, the <b>drunk</b> blind-swaps with the center, and more.</li>
-                  <li>Swaps move the <b>card in front of you</b> — so you may end the night as a role you don't know about.</li>
-                </ul>
-                <h4>Day &amp; the vote</h4>
-                <ul>
-                  <li>Everyone discusses (there's a timer) and argues about who the werewolves are.</li>
-                  <li>On the signal, all players vote at once. The player(s) with the <b>most votes die</b> — a tie kills everyone tied; if no one gets 2+ votes, nobody dies. A dead <b>hunter</b> also takes down whoever they voted for.</li>
-                </ul>
-                <h4>Who wins</h4>
-                <ul>
-                  <li><b>Village</b> wins if at least one <b>werewolf</b> card dies.</li>
-                  <li><b>Werewolves</b> win if a werewolf is in play and none of them die (the <b>minion</b> wins with them).</li>
-                  <li>The <b>tanner</b> wins only by dying — and their death blocks a werewolf win.</li>
-                </ul>
-                <p className="ww-rules-note">Your final card at dawn decides your team, so pay attention to what moved in the night.</p>
-              </div>
-              <div className="ww-row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
-                <button className="ww-btn gold" onClick={() => setShowRules(false)}>Got it</button>
-              </div>
-            </div>
-          </div>
-        )}
+        {wwRulesModal}
         {toast && <div className="ww-toast">{toast}</div>}
       </div>
     );
@@ -735,10 +738,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     const selected = curDeck.length;
     const deckOk = selected === need;
     return (
-      <div className="ww"><style>{css}</style>
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
         <div className="ww-wrap">
           <div className="ww-top">
-            <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
+            <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
               <span className="ww-title">Where Wolf</span></div>
             <div className="ww-row" style={{ gap: 8 }}>
               {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
@@ -800,6 +803,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                   {!enough ? `Need ${roomData?.min_players || 3}+ players` : !deckOk ? `Deck ${selected}/${need}` : "Deal & Start"}</button>
               : <span className="ww-card-meta">Waiting for the host to start…</span>}
           </div>
+          {wwRulesModal}
           {toast && <div className="ww-toast">{toast}</div>}
         </div>
       </div>
@@ -892,10 +896,10 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   }).filter(Boolean);
 
   return (
-    <div className="ww"><style>{css}</style>
+    <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
       <div className="ww-wrap">
         <div className="ww-top">
-          <div className="ww-top-left"><button className="ww-btn ghost sm" onClick={leaveToLobby}>← Leave</button>
+          <div className="ww-top-left"><GameMenu items={[{ label: "Return to menu", icon: "←", onClick: leaveToLobby }, { label: "View rules", icon: "📖", onClick: () => setShowRules(true) }]} />
             <span className="ww-title">Where Wolf</span></div>
           <div className="ww-row" style={{ gap: 8 }}>
             {!connected && <button className="ww-btn sm" onClick={() => reconnectNow()} title="Reconnect">⟳ Reconnecting…</button>}
@@ -997,6 +1001,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             </div>
           </div>
         )}
+        {wwRulesModal}
         {toast && <div className="ww-toast">{toast}</div>}
       </div>
     </div>

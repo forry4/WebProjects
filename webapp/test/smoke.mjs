@@ -7,11 +7,65 @@
 //
 // Run: `npm run smoke` (from webapp/). Used locally before pushing and in CI.
 import { spawn } from "node:child_process";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
 
 const webappDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(webappDir, "..");
+
+// ── Static guard: NO backtick inside a `const css = ` ... `;` template literal ──
+// The runtime blank-page check (below) does NOT reliably catch this: a stray backtick
+// pair parses as a valid tagged template `(str).cls`...`` that throws at module load —
+// but esbuild's build output made it benign in the local build while the deployed build
+// blanked the page (build-env-dependent), so the render check greenlit a blank deploy
+// TWICE. The css literals are hand-authored and must contain no backtick but their two
+// delimiters (documented footgun in every game's jsx). Enforce it at the SOURCE so it
+// cannot depend on the bundler at all.
+function checkCssBackticks() {
+	const jsxFiles = [];
+	const walk = (dir) => {
+		for (const name of readdirSync(dir)) {
+			if (name === "node_modules" || name === "dist" || name.startsWith(".")) continue;
+			const full = path.join(dir, name);
+			if (statSync(full).isDirectory()) walk(full);
+			else if (name.endsWith(".jsx")) jsxFiles.push(full);
+		}
+	};
+	for (const d of ["games", "books", "shared", "webapp"]) {
+		try { walk(path.join(repoRoot, d)); } catch {}
+	}
+	const bad = [];
+	for (const file of jsxFiles) {
+		const src = readFileSync(file, "utf8");
+		// find each css-named template literal opening: `const <...css...> = [prefix]` then `
+		const re = /const\s+(\w*[cC]ss\w*)\s*=\s*[^`\n]*`/g;
+		let m;
+		while ((m = re.exec(src))) {
+			const open = m.index + m[0].length;   // first char INSIDE the literal
+			// walk to the TRUE close (first top-level backtick), honoring \escape + ${ } interp
+			let i = open, depth = 0;
+			for (; i < src.length; i++) {
+				const c = src[i];
+				if (c === "\\") { i++; continue; }
+				if (c === "$" && src[i + 1] === "{") { depth++; i++; continue; }
+				if (depth > 0) { if (c === "}") depth--; continue; }
+				if (c === "`") break;              // top-level close
+			}
+			// A well-formed literal is followed by a statement continuation (; + , ) ] } or EOF).
+			// A STRAY backtick makes the literal "close" early, followed by e.g. `.coc\`...` —
+			// which does NOT match, so it's flagged. (This is the whole bug: `(str).coc\`...\`.)
+			if (!/^\s*([;+,)\]}]|$)/.test(src.slice(i + 1))) {
+				const line = src.slice(0, i).split("\n").length;
+				bad.push(`${path.relative(repoRoot, file)}:${line}: "${m[1]}" template literal closes with a STRAY backtick (content follows the closing \`: ${JSON.stringify(src.slice(i + 1, i + 10))}) — this blanks the page. No backtick may appear inside a css template literal.`);
+			}
+			re.lastIndex = i + 1;
+		}
+	}
+	if (bad.length) throw new Error("CSS BACKTICK GUARD failed:\n  " + bad.join("\n  "));
+	console.log("css-backtick guard: OK (no stray backticks in any css template literal)");
+}
 const PORT = 4188;
 // Cumulative Layout Shift budget on load. Good CWV is < 0.1; our reflow bugs (font
 // swap reflowing the page, a resizing control) blow well past it. Keep it tight so
@@ -48,6 +102,7 @@ let preview;
 try {
 	// Build with the default base (/); preview serves it at the root. The JS is
 	// identical across bases, so a render crash is caught regardless.
+	checkCssBackticks();   // source-level guard for the stray-css-backtick blank-page bug
 	await run("npx", ["vite", "build"], {});
 	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
 		{ cwd: webappDir, stdio: "ignore", shell: true });

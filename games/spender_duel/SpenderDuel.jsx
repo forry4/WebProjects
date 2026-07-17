@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -225,8 +225,15 @@ const css = `
 /* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
 /* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
 .duel > .lby-header{margin:0 -14px 18px}
-.duel-lobby-cols{display:grid;grid-template-columns:1fr 1fr 320px;gap:18px;align-items:start}
+.duel-lobby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:18px;align-items:start}
 .duel-create-row{display:flex;gap:10px;align-items:center;justify-content:center;margin:6px 0 20px;flex-wrap:wrap}
+/* Mobile Open/Active/History tab bar (mirrors Spender's .lobby-tabs). Hidden on wide
+   screens; shown (and made to hide the other two sections) in the max-width:720 block. */
+.duel-lobby-tabs{display:none;gap:6px;margin-bottom:16px;background:var(--surface2,#241d16);border:1px solid var(--line,#3a332a);border-radius:12px;padding:4px}
+.duel-lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim,#a89a82);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
+.duel-lobby-tab.sel{background:var(--lby-accent,#bf6fd0);color:#160f18;font-weight:700}
+.duel-lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.22);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
+.duel-lobby-tab:not(.sel) .duel-lobby-tab-count{background:var(--surface,#1b1712);color:var(--text-dim,#a89a82)}
 /* The bot-tier picker FLOATS (position:absolute) rather than revealing inline —
    an inline reveal shifts the whole lobby down when it opens (Spender's lesson). */
 .duel-pick-wrap{position:relative}
@@ -240,7 +247,7 @@ const css = `
    the board is a fixed 5x5 grid and the player/moves rail is capped, neither needs
    the room. (Previously the rail was the 1fr and swallowed everything.) */
 .duel-cols{display:grid;grid-template-columns:minmax(420px,1.5fr) minmax(360px,1fr) minmax(260px,380px);gap:18px;align-items:start}
-.duel-panel{background:var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px}
+.duel-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5)}
 
 /* pyramid */
 /* Left-aligned, NOT centered: the rows hold different card counts (5/4/3), so centering
@@ -256,8 +263,14 @@ const css = `
    swatches and its own palette.) */
 .duel-col-cards{container-type:inline-size}
 .duel-col-cards .level-row{
-  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding */
-  --card-w:clamp(52px, calc((100cqw - 80px) / 6), 190px);
+  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding.
+     The MIN must stay LOW (40, not 52): on a narrow phone (<~385px) a 52px floor forces
+     the 6-cell level-I row WIDER than the column, so it overflows and the flex shrinks the
+     items UNEVENLY — the deck (less content) shrinks more than the cards, and the roomier
+     3/4-card rows don't shrink at all, so decks came out different sizes per row. A 40 floor
+     lets --card-w track the true 6-cell fit at any width, so every cell (deck AND card) is
+     the SAME size in every row. */
+  --card-w:clamp(40px, calc((100cqw - 80px) / 6), 190px);
   --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
   margin-bottom:8px;
 }
@@ -272,14 +285,20 @@ const css = `
    query, which we deliberately did not move; these mirror them for Duel's sizes. */
 .duel-col-cards .level-row .card{padding:calc(var(--card-h) * 0.049) calc(var(--card-h) * 0.043) calc(var(--card-h) * 0.043);justify-content:space-between}
 .duel-col-cards .level-row .card-header{margin-bottom:calc(var(--card-h) * 0.043)}
-.duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147)}
-.duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.157);height:calc(var(--card-h) * 0.157)}
-/* a double bonus overlaps by 40% of the (scaled) disc: 0.157 * 0.4 */
-.duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.063)}
-.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.082)}
+/* min-width:0 (the shared base pins points to 16px): on a narrow Duel card the fixed 16px
+   left the points + crowns + bonus too wide for the header, pushing the gem-type disc off
+   the card's right edge. Zeroing it (points are 1-2 chars anyway) keeps the header inside. */
+.duel-col-cards .level-row .card-points{font-size:calc(var(--card-h) * 0.147);min-width:0}
+.duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.14);height:calc(var(--card-h) * 0.14)}
+/* a double bonus overlaps by 40% of the (scaled) disc: 0.14 * 0.4 */
+.duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.056)}
+.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.12);margin-left:auto;margin-right:calc(var(--card-h) * 0.025)}
+.duel-col-cards .level-row .card-header .card-crowns+.card-bonus{margin-left:calc(var(--card-h) * 0.03)}
 .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
-.duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.081);height:calc(var(--card-h) * 0.081)}
-.duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.08)}
+.duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.096);height:calc(var(--card-h) * 0.096)}
+.duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.095)}
+/* pip -> number gap: tighter so the count sits right next to its gem (was the base 4px). */
+.duel-col-cards .level-row .cost-row{gap:calc(var(--card-h) * 0.02)}
 .duel-col-cards .level-row .card-cost{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .card-cost .cost-col{gap:calc(var(--card-h) * 0.027)}
 .duel-col-cards .level-row .deck-pile{font-size:calc(var(--card-h) * 0.068);gap:calc(var(--card-h) * 0.032)}
@@ -298,7 +317,7 @@ const css = `
    every cell centre — with fixed 7px/12px, the ratios drift as the cell scales. */
 .duel-col-board .duel-board{--dcell:clamp(50px, calc((100cqw - 24px) / 5.88), 104px)}
 .duel-board-wrap{display:flex;flex-direction:column;align-items:center;gap:10px}
-.duel-board{--dcell:58px;--dgap:calc(var(--dcell) * 0.12);position:relative;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:var(--dgap);padding:calc(var(--dcell) * 0.2);background:#241d13;border:1px solid #57493a;border-radius:14px}
+.duel-board{--dcell:58px;--dgap:calc(var(--dcell) * 0.12);position:relative;display:grid;grid-template-columns:repeat(5,var(--dcell));grid-auto-rows:var(--dcell);gap:var(--dgap);padding:calc(var(--dcell) * 0.2);background:linear-gradient(180deg,#1d160e,#2a2216);border:1px solid #5f4f3a;border-radius:14px;box-shadow:inset 0 3px 14px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.02),0 2px 6px -2px rgba(0,0,0,.4)}
 .duel-cell{display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px dashed #3c3227;position:relative;z-index:1}
 
 /* The REFILL PATH: replenish fills empty spaces from the centre outward along a fixed
@@ -327,11 +346,30 @@ const css = `
 .duel-royal-crown{color:#f5c842;font-size:.85rem}
 .duel-royal-pts{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#f4e9d4}
 .duel-royal-abil{font-size:.8rem;color:#d9c8f0}
-.duel-scrolls{display:inline-flex;gap:3px}
-.duel-scroll{opacity:.22;font-size:1.15rem;color:#e8c86a}
-.duel-scroll.full{opacity:1}
+/* Privilege tokens = dark coins with a big gold fleur (flat, high-contrast so the fleur
+   reads at ~26px). HELD = a filled coin; EMPTY = a hollow dashed ring (no fleur) so you
+   can see at a glance how many you own. When it's yours to spend (.clickable) the coins
+   get a soft gold ring — a tap cue that works on TOUCH, where there's no hover. Tapping
+   ARMS privilege mode (.armed) → a bright, persistent gold ring + glow + pulse, so
+   "selected — now pick a gem" is unmistakable. Hover-lift is DESKTOP-ONLY: a stray
+   tap-:hover otherwise stuck a ring on one coin on mobile (the reported confusion). */
+.duel-scrolls{display:inline-flex;gap:5px}
+.duel-scroll{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:50%;
+  font-size:1.45rem;line-height:1;color:#e6c260;
+  background:#241d14;border:1px solid #5a4a2c;
+  box-shadow:0 1px 2px rgba(0,0,0,.4);
+  transition:transform .1s ease,box-shadow .1s ease,border-color .1s ease,filter .1s ease;
+}
+.duel-scroll:not(.full){color:transparent;background:transparent;border:1.5px dashed #4a4030;box-shadow:none}
 .duel-scrolls.clickable{cursor:pointer}
-.duel-scrolls.armed .duel-scroll.full{animation:duelPulse 1.1s infinite}
+.duel-scrolls.clickable .duel-scroll.full{border-color:#7a6330;box-shadow:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(232,201,106,.28)}
+@media (hover:hover){
+  .duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
+}
+.duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);filter:brightness(1)}
+.duel-scrolls.armed .duel-scroll.full{border-color:#e6c260;box-shadow:0 0 0 2px rgba(232,201,106,.6),0 0 9px rgba(232,201,106,.45);animation:duelPulse 1.1s infinite}
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
@@ -375,11 +413,15 @@ const css = `
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
    identical to the token pill. */
 .duel-player .bonus-pill{letter-spacing:-.02em}
+/* Buffer between the privilege scrolls (⚜) and the token pills directly beneath them,
+   plus a smaller one before the bought-card indicators. */
+.duel-player .player-tokens{margin-top:13px}
+.duel-player .player-bonuses{margin-top:9px}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
-.duel-player.active{outline:2px solid #7a5f33;outline-offset:2px;border-radius:12px}
-.duel-stat{font-size:.92rem;margin-left:auto;display:flex;gap:10px;align-items:center}
+.duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
+.duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
@@ -418,24 +460,54 @@ const css = `
 }
 @media(max-width:720px){
   .duel-cols{grid-template-columns:1fr}
-  /* Menu + title + Rules + Abandon can't share one row on a phone — they used to run
-     ~95px past the viewport and give the whole page a horizontal scrollbar. Wrap them
-     and drop the flex spacers (which only exist to center the title on wide screens). */
-  .duel-topbar{flex-wrap:wrap;justify-content:center;gap:8px}
+  /* Trim the side buffer on phones so the board + cards get more width (matched header
+     margin keeps the full-bleed header exactly at the screen edge — a wider -14px here
+     would push it past an 8px padding and cause a horizontal scrollbar). */
+  .duel{padding-left:8px;padding-right:8px}
+  .duel > .lby-header{margin-left:-8px;margin-right:-8px}
+  /* Lobby: show the Open/Active/History tab bar and let the selected tab pick which of
+     the (now single-column) sections is visible — the others are hidden. */
+  .duel-lobby-tabs{display:flex}
+  .duel-lobby-cols{gap:0}
+  .duel-lobby-cols.tab-open>.active-section,.duel-lobby-cols.tab-open>.history-section,
+  .duel-lobby-cols.tab-active>.open-section,.duel-lobby-cols.tab-active>.history-section,
+  .duel-lobby-cols.tab-history>.open-section,.duel-lobby-cols.tab-history>.active-section{display:none}
+  /* Topbar: the options (☰) button stays on the LEFT with the title centered beside it —
+     it used to wrap onto its own line ABOVE the title (a stale rule from when this row held
+     three separate Menu/Rules/Abandon buttons; now it's one small ☰, so it fits). Drop the
+     flex spacers and let the title flex to fill the middle (text-align:center) between the
+     ☰ (left) and the right slot — no wrap, so it can never overflow. */
+  .duel-topbar{gap:8px}
   .duel-topbar .spacer{display:none}
-  .duel-title{flex:1 0 100%;text-align:center;font-size:1.25rem}
-  /* Cards + board cells size themselves from their column (container queries above), so
-     phones need no explicit sizes — hard-coding widths here would fight those clamps.
-     The board gap must NOT be overridden either: it scales with the cell to keep the
-     board's geometry proportional, which is what the refill path relies on (a fixed
-     5px here pushed the path ~6px off the cell centres at this width). */
+  .duel-title{flex:1;text-align:center;font-size:1.25rem;min-width:0}
+  /* Board cells size themselves from their column (container query above), so the board
+     needs no explicit sizes — hard-coding widths would fight those clamps. The board gap
+     must NOT be overridden either: it scales with the cell to keep the board's geometry
+     proportional, which is what the refill path relies on (a fixed 5px pushed the path
+     ~6px off the cell centres at this width). */
+  /* CARDS on phones: keep every card the SAME size (the shorter top rows just end early —
+     the pyramid — NOT stretched to fill), but make them as BIG as the row allows. The
+     level-I row is deck + 5 cards = 6 cells: with gap:6 the true fit-overhead is panel(24)
+     + gaps(30) = 54, so a 57px overhead (a ~3px slack — enough to absorb sub-pixel rounding
+     so the deck can't shrink below the cards) fills the row with only ~2px trailing instead
+     of the old 15px, i.e. bigger cards + no wasted space on the right. --card-h ratio 1.71
+     (~0.58 w:h) keeps the compact-but-legible height. */
+  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 6), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
   .duel .duel-deck{width:52px;min-height:80px}
+}
+@media(max-width:600px){
+  /* Lobby cards on phones: the shared .btn is big (11px 20px), so an Open card's
+     Return + Cancel (two Cinzel buttons) ran past the right edge. Shrink the card buttons
+     and let the actions WRAP below the info as a safety net, so nothing is ever clipped. */
+  .duel .lby-card{flex-wrap:wrap;row-gap:10px}
+  .duel .lby-card .btn{padding:8px 12px;font-size:.78rem}
+  .duel .lby-card-actions{margin-left:auto}
 }
 `;
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
-  + splendorPillCss + splendorLogCss + css;
+  + splendorPillCss + splendorLogCss + css + gameMenuCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -485,6 +557,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("duel", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("duel", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("duel", myId, "history", []));
+  const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
@@ -1393,8 +1466,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         <LobbyHeader
           onBack={onExit}
           title="Spender Duel"
-          onRules={() => setShowRules(true)}
-          rulesLabel="How to Play"
           user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null}
         />
         <div className="duel-create-row">
@@ -1413,8 +1484,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           </div>
           <button className="btn btn-outline" onClick={fetchGames}>{loadingGames ? "…" : "↻"}</button>
         </div>
-        <div className="duel-lobby-cols">
-          <div className="duel-section">
+        {/* Mobile-only tab bar (mirrors Spender): the three columns can't fit side by side
+            on a phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
+        <div className="duel-lobby-tabs" role="tablist">
+          {[
+            ["open", "Open", openGames.length],
+            ["active", "Active", activeMine.length],
+            ["history", "History", history.length],
+          ].map(([key, label, count]) => (
+            <button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
+              className={`duel-lobby-tab${lobbyTab === key ? " sel" : ""}`}
+              onClick={() => setLobbyTab(key)}>
+              {label}{count > 0 ? <span className="duel-lobby-tab-count">{count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className={`duel-lobby-cols tab-${lobbyTab}`}>
+          <div className="duel-section open-section">
             <LobbySectionHd title="Open Games" />
             {openGames.length === 0 && <div className="lby-empty">No open games. Create one!</div>}
             {openGames.map((g) => (
@@ -1434,7 +1520,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
-          <div className="duel-section">
+          <div className="duel-section active-section">
             <LobbySectionHd title="Active Games" />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
               <div className="lby-card">
@@ -1459,14 +1545,17 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
-          <div className="duel-section">
+          <div className="duel-section history-section">
             <LobbySectionHd title="History" />
             {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
             {history.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
-                  <div className="lby-card-title">{g.you_won ? "Won" : "Lost"} vs {g.opp_name}</div>
-                  <div className="lby-card-meta">{g.your_score ?? "?"}–{g.opp_score ?? "?"} · {WIN_DESC[g.win_condition] || ""} · {timeAgo(g.updated_at)}</div>
+                  <div className="lby-card-title">
+                    <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
+                    <span className="hist-scores"> vs {g.opp_name} <span className="hist-score-num">{g.your_score ?? "?"}-{g.opp_score ?? "?"}</span></span>
+                  </div>
+                  <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}</div>
                 </div>
                 <div className="lby-card-actions"><button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button></div>
               </div>
@@ -1512,23 +1601,23 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   }
 
   return (
-    <div className="app duel">
+    <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
-        <button className="btn btn-outline" onClick={leaveToLobby}>{"←"} Menu</button>
+        <GameMenu items={[
+          { label: "Return to menu", icon: "←", onClick: leaveToLobby },
+          { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+          // Abandon only exists for a LIVE game you're still playing.
+          (!over && !reviewOnly && !replaySnapshots) && { label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
+        ]} />
         <div className="spacer" />
         <h1 className="duel-title">Spender Duel</h1>
         {replaySnapshots && <span className="duel-review-badge">Review</span>}
         <div className="spacer" />
-        <button className="btn btn-outline" onClick={() => setShowRules(true)}>Rules</button>
-        {/* Abandon only exists for a LIVE game you're still playing. */}
-        {!over && !reviewOnly && !replaySnapshots && (
-          <button className="btn btn-outline" onClick={() => setConfirmAbandon(true)}>Abandon</button>
-        )}
-        {replaySnapshots && !reviewOnly && (
-          <button className="btn btn-outline" onClick={exitReview}>Exit review</button>
-        )}
+        {replaySnapshots && !reviewOnly
+          ? <button className="btn btn-outline" onClick={exitReview}>Exit review</button>
+          : <div style={{ width: 40 }} />}
       </div>
       {renderReplayBar()}
       <div className="duel-cols">
