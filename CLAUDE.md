@@ -1702,6 +1702,19 @@ and the CSS (`splendorPanelCss` + `splendorCardCss` + `splendorCardExtraCss` +
   inside Spender's own `min-width:901px` query and are mirrored, not moved).
 - Duel's board tokens are `.gem-token` with `size={null}` (CSS-sized so they scale with
   the cells; an inline width/height would freeze them) plus Duel-only state classes.
+- **Gem appearance = MATTE gradient + drop shadow, NO ring (do NOT re-add a ring).** Gem
+  color flows through a **`--gc` custom property**, NOT an inline `background` — `GemToken`,
+  `.card-bonus`, and `.cost-gem` set `style={{ "--gc": color }}` and the stylesheet builds
+  `background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000))`
+  (light top → darker bottom). **Why no ring (both bit us):** (1) a same-hue ring is LIGHTER
+  than the vivid gradient bottom, so it paints a bright arc along each gem's lower edge; (2) on
+  the tiny cost pips a thin ring just muddies the color. The gradient + `box-shadow` give enough
+  shape. **Wild bonuses** keep their INLINE background (`WILD_RAINBOW`, now a DESATURATED pastel
+  spectrum to sit with the matte gems — NOT a bright rainbow) with NO ring (`.card-bonus-wild{
+  border:none}`) and no `--gc`. The user chose this look interactively (variant "B — matte +
+  soft ring", then the ring was removed for the artifacts above). **STATUS: on the
+  `game-materiality` branch / STAGING only, NOT yet prod** — part of an in-game visual-polish
+  batch (matte gems + board/panel materiality + card/typography + the options menu below).
 
 ### Shared theme (`shared/theme.js`)
 - `baseCss` is the **single source of truth** for the site design: Cinzel/Crimson Pro
@@ -1710,6 +1723,42 @@ and the CSS (`splendorPanelCss` + `splendorCardCss` + `splendorCardExtraCss` +
   CSS (`<style>{baseCss + screenCss}</style>`); the `@import` must stay first, so
   baseCss always leads. Extracting it left Spender's rendered CSS byte-identical (the
   primitives just moved out of Spender.jsx into the shared file).
+
+### Shared lobby kit (`shared/lobby.jsx`) + in-game options menu
+The four games share their **lobby chrome** (top header bar, section headers, game-card rows,
+empty states, loading screen, turn badges) via `shared/lobby.jsx` — `lobbyCss` + `LobbyHeader`/
+`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/`TurnBadge` + `readLobbyCache`/`writeLobbyCache` — so
+the games don't drift apart. Token-driven with a per-game **`--lby-accent`** (falls back to
+`--gold`) set on the lobby root, threading the game's identity color through titles/labels/badges.
+- **`GameMenu` + `gameMenuCss` (same file) = the shared IN-GAME options dropdown** — one ☰
+  hamburger that opens a dropdown (Return to menu · View rules · Abandon game), replacing each
+  game's old row of Menu / Rules / Abandon top-bar buttons. `<GameMenu items={[{ label, onClick,
+  icon?, danger? }]} align? label? />`; **falsy items are filtered out** so a game omits an
+  action. Click-outside + **Esc** close it. Its CSS uses `var(--token, <fallback>)` for EVERY
+  token so it renders correctly in **CoC's bare mount** (no baseCss); append `gameMenuCss` AFTER
+  a `.coc *{margin:0;padding:0}` reset so the reset can't zero its padding (same footgun as
+  lobbyCss).
+- Each game sets `--lby-accent` on its **in-game** root too, so the hamburger themes to its
+  identity color (Spender gold, Duel purple `#bf6fd0`, CoC crimson `#d6454b`, WW blue `#6f86d6`).
+- **Rules-in-game (the wiring that made "View rules" work everywhere):** Spender/CoC/WW rendered
+  their "How to Play" modal ONLY inside the lobby screen return. Each was hoisted to a shared
+  const (`rulesModalEl` / `cocRulesModal` / `wwRulesModal`, defined before the screen returns,
+  `showRules && (...)`) rendered in BOTH the lobby and the in-game screen(s). Duel already had an
+  in-game rules modal (its `renderModals()` helper is called in every screen return — so its
+  dropdown's Rules/Abandon "just worked").
+- **Where Wolf has NO "Abandon"** (a party game — leaving just returns you to the lobby, the
+  game continues for others), so its menu is only Return to menu + View rules. Placement =
+  top-LEFT (where the old back/menu button sat).
+- **STATUS: on `game-materiality` / STAGING, not prod yet** (ships with the gem/materiality batch).
+- **Isolation verification harness (REUSABLE — the fast way to check a shared UI component
+  without a live game/backend):** esbuild-bundle a scratch React harness that imports the real
+  component + shared css exports, with **react aliased to `webapp/node_modules`** (`esbuild
+  --bundle --alias:react=<webapp>/node_modules/react --alias:react-dom=<...>/react-dom`), then
+  Playwright-screenshot (`chromium.launch()`, fall back to `channel:"msedge"` — bundled chromium
+  went missing after a `playwright install firefox`). To reproduce a game's real cards/board,
+  inline that game's container CSS (e.g. Duel's `.duel-col-cards` container-query sizing). **The
+  `npm run smoke` gate only renders the Spender LOBBY**, so game-screen changes still need this
+  isolation render or a live staging check — smoke catches compile/blank-page, not layout.
 
 ### Deploy / branch notes
 - Work lives on the **`feat/books`** branch (off `main`, isolated in worktree
