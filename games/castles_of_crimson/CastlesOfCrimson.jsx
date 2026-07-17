@@ -642,11 +642,11 @@ function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQR
 // right (see coc-anchor-l/r). `left` here only steers each mini-die's inner edge.
 const DEPOT_POS = [
   { left: 50, top: 12.1 },  // 1 top (raised ~5px so the black depot doesn't cover its die when goods pile up)
-  { left: 83, top: 30 },    // 2 top-right (goods render ABOVE the tiles — grow up, away from depot 3)
-  { left: 83, top: 70 },    // 3 bottom-right (goods below the tiles — grow down, away from depot 2)
+  { left: 83, top: 48 },    // 2 top-right — BOTTOM edge pinned just above board-center; grows UP
+  { left: 83, top: 52 },    // 3 bottom-right — TOP edge pinned just below board-center; grows DOWN
   { left: 50, top: 88 },    // 4 bottom
-  { left: 17, top: 70 },    // 5 bottom-left (goods below — grow down, away from depot 6)
-  { left: 17, top: 30 },    // 6 top-left (goods ABOVE — grow up, away from depot 5)
+  { left: 17, top: 52 },    // 5 bottom-left — TOP edge pinned just below board-center; grows DOWN
+  { left: 17, top: 48 },    // 6 top-left — BOTTOM edge pinned just above board-center; grows UP
 ];
 
 // ─── Minimal WebSocket hook ──────────────────────────────────────────────────
@@ -1138,16 +1138,22 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-depot-goods{display:contents}
 @media (min-width:601px){
   .coc-board-hex .coc-depot.coc-depot-side{width:88px}
-  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center;position:relative}
-  /* Goods float ABSOLUTELY off the tile stack (out of flow) so they can never grow the depot
-     box or shift the tiles — the tile stack stays pinned at the depot's anchor. Top depots
-     (2/6) stack goods ABOVE the tiles (grow up), bottom depots (3/5) BELOW (grow down); both
-     grow into empty board space, so the two depots on an edge can never overlap. */
-  .coc-depot-side .coc-depot-goods{position:absolute;left:0;right:0;display:flex;flex-wrap:wrap;gap:6px;justify-content:center}
-  .coc-depot-topside .coc-depot-goods{bottom:100%;margin-bottom:6px}
-  .coc-depot-side:not(.coc-depot-topside) .coc-depot-goods{top:100%;margin-top:6px}
-  .coc-board-hex .coc-depot.coc-anchor-l{transform:translate(0,-50%)}
-  .coc-board-hex .coc-depot.coc-anchor-r{transform:translate(-100%,-50%)}
+  .coc-depot-side .coc-tilewrap{flex-direction:column;flex-wrap:nowrap;align-items:center}
+  .coc-depot-side .coc-depot-goods{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%}
+  /* Top depots (2/6) put goods ABOVE the tiles so the tile stack sits at the box's inner
+     (bottom) edge near the black depot and goods extend UP; bottom depots (3/5) keep goods
+     below (grow down). The tile stack is pinned to the inner edge via justify-content. */
+  .coc-depot-topside .coc-depot-goods{order:-1}
+  .coc-board-hex .coc-depot.coc-depot-topside{justify-content:flex-end}
+  .coc-board-hex .coc-depot.coc-depot-side:not(.coc-depot-topside){justify-content:flex-start}
+  /* Side depots anchor the edge FACING the black depot (top depots bottom-anchored, bottom
+     depots top-anchored) and grow OUTWARD, so the inner edges stay pinned near board-center
+     (a small buffer apart) and goods only ever extend a box away from center — the two
+     depots on an edge can never collide no matter how many goods pile up. */
+  .coc-board-hex .coc-depot.coc-depot-topside.coc-anchor-l{transform:translate(0,-100%)}
+  .coc-board-hex .coc-depot.coc-depot-topside.coc-anchor-r{transform:translate(-100%,-100%)}
+  .coc-board-hex .coc-depot.coc-depot-side:not(.coc-depot-topside).coc-anchor-l{transform:translate(0,0)}
+  .coc-board-hex .coc-depot.coc-depot-side:not(.coc-depot-topside).coc-anchor-r{transform:translate(-100%,0)}
 }
 /* Fixed-size goods box — sized for exactly 3 goods types (the storage cap) + the
    face-down pile of goods you've already sold, pinned to its right edge. It sits
