@@ -6,6 +6,18 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const COC_WS = WS_RAW.replace(/\/ws$/, "/coc/ws");
 const COC_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/coc");
 
+// Board layouts are fully static, so we cache them in localStorage (stale-while-
+// revalidate). The board is then available synchronously on CoC entry — it never
+// gates the game screen on a network fetch — and a background refresh self-heals if
+// the board set ever changes (e.g. a board added). Bump the key on a shape change.
+const COC_BOARDS_CACHE = "coc_boards_v1";
+const boardsWithById = (d) => {
+  if (!d) return null;
+  const byId = {};
+  (d.boards || []).forEach((b) => { byId[b.id] = b; });
+  return { ...d, byId };
+};
+
 const TILE_HEX = {
   burgundy: "#a3263a",   // castle  -> crimson (the "burgundy" key is the backend's castle color)
   blue: "#3d6ea5",       // ship
@@ -512,12 +524,12 @@ const MONASTERY_ICON = {
   7: () => (<>{mIcon("cow", 8.8, 13.2, 12)}<g transform="rotate(-35 15.8 11.5)">{mArrowR(15.8, 11.5, 0.7, M_INK)}</g>{mStar(18.2, 6.4, 3)}</>), // livestock scored -> +1 VP
   8: () => (<>{mDie(5.0, 13, 1.1, [[0, 0]])}{mShift(12, 13, 0.76)}{mDie(19.0, 13, 1.1, [[-0.62, -0.62], [0, 0], [0.62, 0.62]])}</>), // adjust die by 2 (1 <-> 3)
   // 9-11: die + a colored hex swatch of the tile type(s) the free shift applies to
-  // 9-11 (PLACING): striped tile (left) + a worker above a right-pointing arrow (~70% size)
-  9: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.beige]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  10: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.blue, TILE_HEX.green]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  11: () => (<><HexStriped cx={7.5} cy={13} k={1.2} colors={[TILE_HEX.burgundy, TILE_HEX.gray, TILE_HEX.yellow]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
-  // 12 (TAKING): striped tile (top, nudged down) + a worker LEFT of a down-pointing arrow (~70% size)
-  12: () => (<><HexStriped cx={12} cy={10.2} k={1.16} colors={[TILE_HEX.burgundy, TILE_HEX.blue, TILE_HEX.gray, TILE_HEX.green, TILE_HEX.beige, TILE_HEX.yellow]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  // 9-11 (PLACING): striped tile (top) + a worker LEFT of a down-pointing arrow (~70% size)
+  9: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.beige]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  10: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.blue, TILE_HEX.green]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  11: () => (<><HexStriped cx={12} cy={10.2} k={1.2} colors={[TILE_HEX.burgundy, TILE_HEX.gray, TILE_HEX.yellow]} />{mPawn(7.4, 17.3, 0.82)}{mArrowV(12, 17.3, 0.7, 1, M_GREEN)}</>),
+  // 12 (TAKING): striped tile (left) + a worker above a right-pointing arrow (~70% size)
+  12: () => (<><HexStriped cx={7.5} cy={13} k={1.16} colors={[TILE_HEX.burgundy, TILE_HEX.blue, TILE_HEX.gray, TILE_HEX.green, TILE_HEX.beige, TILE_HEX.yellow]} />{mPawn(17.3, 7.4, 0.82)}{mArrowR(17.3, 13.2, 0.67, M_GREEN)}</>),
   13: () => (<>{mPawn(7.4, 13, 1.05)}{mPawn(10.9, 13, 1.05)}{mNum(14, 7.4, 4.2, "+")}{mCoin(17.2, 13, 1.08)}</>), // 2-workers action + 1 silver
   14: () => (<>{mPawn(5.6, 13, 0.92)}{mPawn(8.7, 13, 0.92)}{mNum(11.8, 7.4, 4.2, "+")}{mPawn(14.9, 13, 0.92)}{mPawn(18.0, 13, 0.92)}</>), // 2-workers action -> 4 (2 + 2)
   // ── end-game scoring ──
@@ -1251,7 +1263,10 @@ function BoardThumb({ spaces, name, selected, onClick }) {
 }
 
 export default function CastlesOfCrimson({ myId, authUser, onExit }) {
-  const [board, setBoard] = useState(null);            // {spaces, colors, castle, ...}
+  const [board, setBoard] = useState(() => {           // {spaces, colors, castle, ...} — hydrated from cache
+    try { const c = localStorage.getItem(COC_BOARDS_CACHE); if (c) return boardsWithById(JSON.parse(c)); } catch {}
+    return null;
+  });
   const [screen, setScreen] = useState("lobby");        // lobby | waiting | game
   // Instant feedback while the WS connects + the first room state arrives (~1 RTT +
   // a DB load): the screen otherwise stays frozen on the lobby, so clicking Resume/
@@ -1361,13 +1376,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
-  // fetch every selectable board layout once (shared meta + per-board spaces)
+  // fetch every selectable board layout once (shared meta + per-board spaces). The state
+  // is pre-hydrated from cache above, so this is a background refresh — it won't block
+  // the lobby/game render on a cold cache-miss either (LobbyLoading covers that).
   useEffect(() => {
     fetch(`${COC_HTTP}/boards`).then((r) => r.json()).then((d) => {
       if (!d.ok) return;
-      const byId = {};
-      (d.boards || []).forEach((b) => { byId[b.id] = b; });
-      setBoard({ ...d, byId });
+      setBoard(boardsWithById(d));
+      try { localStorage.setItem(COC_BOARDS_CACHE, JSON.stringify(d)); } catch {}
     }).catch(() => {});
   }, []);
 
