@@ -850,7 +850,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-duchy-board{width:100%;max-width:560px;align-self:center}
 .coc-duchy-board .coc-hexsvg{max-width:100%;margin:0}
 .coc-depot-n{display:flex;justify-content:center;margin-bottom:5px}
-.coc-minidie{align-self:center;flex:none;z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
+.coc-minidie{position:absolute;transform:translate(-50%,-50%);z-index:3;pointer-events:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:#f3ead8;color:#15100a;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.82rem;border-radius:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.55)}
 /* Phone: the hexagonal depot ring + absolutely-positioned turn-order track overflow
    on narrow screens (fixed 70px hex tiles can't fit a 31%-wide depot box). Reflow the
    shared board into a stack — turn order on top, the 6 numbered depots in a 2-col grid,
@@ -875,6 +875,7 @@ html,body{margin:0;padding:0;background:#120c0d}
      and (unlike transform) reduces the layout footprint so the board is more compact */
   .coc-board-hex .coc-depot{zoom:.9}
   .coc-board-hex .coc-depot:not(.coc-black-center){position:relative;left:auto!important;top:auto!important;transform:none!important;width:auto!important;min-height:0}
+  .coc-board-hex .coc-minidie{position:static!important;left:auto!important;top:auto!important;bottom:auto!important;transform:none!important;margin:0 auto 6px}
   .coc-board-hex .coc-black-center{position:relative;grid-column:1/-1;justify-self:center;left:auto!important;top:auto!important;transform:none!important}
   /* status bar: the 3-zone grid is too tight on phones — stack the left group on its
      own row, then center the score + right group (Abandon) below */
@@ -2709,31 +2710,41 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               // as the turn-order track — right for 2/3) instead of centering on left%;
               // top/bottom depots (coc-depot-tb) keep the horizontal tile row.
               const anchor = isSide ? (pos.left < 50 ? " coc-anchor-l" : " coc-anchor-r") : "";
+              // The depot-number die sits OUTSIDE the box on the edge facing the central black
+              // depot (as before). For side depots it's pinned to the BETWEEN-TILES level — a
+              // FIXED offset from the pinned inner tile (HEX_H+9 = the gap center, −12 to center
+              // the 24px die on it) — so it never moves as goods grow (0 change at 0 goods, when
+              // that level IS the box center). Top/bottom depots keep it just beyond the near edge.
+              const vx = 50 - pos.left, vy = 50 - pos.top, G = 6;
+              let numStyle;
+              if (isSide) {
+                const edge = vx < 0
+                  ? { left: 0, transform: `translateX(calc(-100% - ${G}px))` }
+                  : { left: "100%", transform: `translateX(${G}px)` };
+                numStyle = topSide ? { ...edge, bottom: `${HEX_H - 3}px` } : { ...edge, top: `${HEX_H - 3}px` };
+              } else {
+                numStyle = vy < 0
+                  ? { left: "50%", top: 0, transform: `translate(-50%, calc(-100% - ${G}px))` }
+                  : { left: "50%", top: "100%", transform: `translate(-50%, ${G}px)` };
+              }
               return (
                 <div key={d} data-depot={d} className={`coc-depot${isSide ? " coc-depot-side" : " coc-depot-tb"}${topSide ? " coc-depot-topside" : ""}${anchor}${match ? " match" : ""}${pickable ? " coc-depot-pick" : ""}`}
                   style={{ left: isSide ? (pos.left < 50 ? 0 : "100%") : `${pos.left}%`, top: `${pos.top}%` }}
                   onClick={depotPick}
                   title={pickable ? (shipPickMine ? `Take all goods from depot ${d}` : buildingPickMine ? `Take the highlighted tile from depot ${d}` : `Click a goods token to take that type`) : undefined}>
+                  <span className="coc-minidie" style={numStyle} title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>
                   <div className="coc-tilewrap">
-                    {depotSlots(d, depot.hexes).flatMap((slot, i) => {
-                      const tileEl = slot.tile ? (
-                        <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
-                          title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
-                          <TileArt tile={slot.tile} px={HEX_W} />
-                        </div>
-                      ) : (
-                        <div key={`ghost-${i}`} className="coc-tile coc-tile-ghost"
-                          style={{ background: TILE_HEX[slot.ghost] }}
-                          title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
-                        </div>
-                      );
-                      // The depot-number die sits BETWEEN the two tiles (rendered after the
-                      // first slot), in normal flow — so it stays put regardless of how the
-                      // goods pile grows (goods extend the box on the outer side only).
-                      return i === 0
-                        ? [tileEl, <span key="die" className="coc-minidie" title={`Depot ${d} — take a tile here with a die showing ${d}`}><Pips n={d} /></span>]
-                        : [tileEl];
-                    })}
+                    {depotSlots(d, depot.hexes).map((slot, i) => slot.tile ? (
+                      <div key={slot.tile.id} className={`coc-tile${buildingPickMine && buildingCands.includes(slot.tile.id) ? " coc-tile-pick" : ""}`} style={{ background: TILE_HEX[slot.tile.color] }}
+                        title={tileDesc(slot.tile, board)} onClick={(e) => clickDepotTile(d, slot.tile, e)}>
+                        <TileArt tile={slot.tile} px={HEX_W} />
+                      </div>
+                    ) : (
+                      <div key={`ghost-${i}`} className="coc-tile coc-tile-ghost"
+                        style={{ background: TILE_HEX[slot.ghost] }}
+                        title={`${COLOR_TYPE_LABEL[slot.ghost] || "Tile"} taken — this depot refills a ${COLOR_TYPE_LABEL[slot.ghost]?.toLowerCase() || ""} tile here each phase`}>
+                      </div>
+                    ))}
                     <div className="coc-depot-goods">
                       {depot.goods.map((gt) => {
                         const canPickGood = goodsPickMine && d === goodsPickDepot && goodsPickColors.includes(gt.color);
