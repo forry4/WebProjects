@@ -207,7 +207,7 @@ const css = baseCss + lobbyCss + `
    column so none pushes another down. The widened .browser uses the empty side space.
    Collapses to 2 columns (Open|Active, History spanning below) under 1280px, then 1
    column under 780px. */
-.lobby-grid{display:grid;grid-template-columns:1fr 1fr 340px;gap:24px 28px;align-items:start;margin-bottom:32px}
+.lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:24px 28px;align-items:start;margin-bottom:32px}
 .lobby-grid>.browser-section{min-width:0;margin-bottom:0}
 /* Explicit grid-row on EVERY item is REQUIRED (do not remove): the DOM order is
    Open, History, Active, so with column-only placement the sparse auto-flow cursor

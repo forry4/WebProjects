@@ -743,7 +743,7 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-ai-picker .coc-btn{white-space:nowrap}
 .coc-ai-picker-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase;text-align:center;margin-top:4px;padding-top:8px;border-top:1px solid var(--border)}
 /* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
-.coc-lobby-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px 24px;align-items:start}
+.coc-lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
 .coc-lobby-col{min-width:0}
 @media (max-width:1040px){.coc-lobby-grid{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
