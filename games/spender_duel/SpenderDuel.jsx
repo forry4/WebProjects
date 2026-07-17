@@ -19,6 +19,12 @@ const DUEL_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/duel");
 // gems here are literally Spender's gems.
 const COLORS = GEM_COLORS;
 const TOKENS = [...COLORS, "pearl", "gold"];
+
+// Flat pace for the client-side bot: each move takes at least this long, so it reads as
+// deliberating instead of snapping instantly. The search itself finishes in ~270ms (Duel
+// strength plateaus ~700 sims and it runs ~60k), so extra thinking buys NO strength — we
+// PAD to this floor rather than burn CPU/battery searching longer.
+const CLIENT_AI_MIN_MS = 1500;
 // take_same has no text glyph: it's drawn as a CIRCLE in the colour of the gem you may
 // take (which is the card's own bonus colour — cards.py guarantees take_same cards carry
 // a concrete colour), so the ability tells you WHICH gem at a glance. See abilityGlyph().
@@ -789,6 +795,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         if (!move || move.error) return;
         console.info(`[duel client-AI] ${good.length} workers, ${sims} sims in `
           + `${Math.round(performance.now() - t0)}ms ->`, move);
+        // Pad to a flat ~1.5s/move (device-independent: a fast client waits, a slow one
+        // doesn't). A stale submit after the wait is harmless — the server drops any
+        // ai_move whose decision has been superseded.
+        const wait = CLIENT_AI_MIN_MS - (performance.now() - t0);
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
         send({ action: "ai_move", decision: as.decision, move });
       } catch {}
     })();
