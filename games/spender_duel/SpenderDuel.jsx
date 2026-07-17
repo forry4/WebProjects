@@ -466,25 +466,27 @@ const css = `
   .duel-lobby-cols.tab-open>.active-section,.duel-lobby-cols.tab-open>.history-section,
   .duel-lobby-cols.tab-active>.open-section,.duel-lobby-cols.tab-active>.history-section,
   .duel-lobby-cols.tab-history>.open-section,.duel-lobby-cols.tab-history>.active-section{display:none}
-  /* Menu + title + Rules + Abandon can't share one row on a phone — they used to run
-     ~95px past the viewport and give the whole page a horizontal scrollbar. Wrap them
-     and drop the flex spacers (which only exist to center the title on wide screens). */
-  .duel-topbar{flex-wrap:wrap;justify-content:center;gap:8px}
+  /* Topbar: the options (☰) button stays on the LEFT with the title centered beside it —
+     it used to wrap onto its own line ABOVE the title (a stale rule from when this row held
+     three separate Menu/Rules/Abandon buttons; now it's one small ☰, so it fits). Drop the
+     flex spacers and let the title flex to fill the middle (text-align:center) between the
+     ☰ (left) and the right slot — no wrap, so it can never overflow. */
+  .duel-topbar{gap:8px}
   .duel-topbar .spacer{display:none}
-  .duel-title{flex:1 0 100%;text-align:center;font-size:1.25rem}
+  .duel-title{flex:1;text-align:center;font-size:1.25rem;min-width:0}
   /* Board cells size themselves from their column (container query above), so the board
      needs no explicit sizes — hard-coding widths would fight those clamps. The board gap
      must NOT be overridden either: it scales with the cell to keep the board's geometry
      proportional, which is what the refill path relies on (a fixed 5px pushed the path
      ~6px off the cell centres at this width). */
-  /* CARDS: on phones they were TINY because --card-h was --card-w * 1.364 (short), and
-     --card-w is capped at the narrow level-I fit (that row is deck + 5 cards = 6 columns).
-     Short card => the content, which scales off --card-h, was unreadable. Fix = keep the
-     base UNIFORM --card-w (so every card is the SAME size and the shorter top rows just
-     end early — the pyramid — NOT stretched to fill), but make the card TALLER: ratio 1.71
-     (~0.58 w:h) gives a compact card whose content is still legible. (Only --card-h is
-     overridden; --card-w falls through to the base clamp above.) */
-  .duel-col-cards .level-row{--card-h:calc(var(--card-w) * 1.71)}
+  /* CARDS on phones: keep every card the SAME size (the shorter top rows just end early —
+     the pyramid — NOT stretched to fill), but make them as BIG as the row allows. The
+     level-I row is deck + 5 cards = 6 cells: with gap:6 the true fit-overhead is panel(24)
+     + gaps(30) = 54, so a 57px overhead (a ~3px slack — enough to absorb sub-pixel rounding
+     so the deck can't shrink below the cards) fills the row with only ~2px trailing instead
+     of the old 15px, i.e. bigger cards + no wasted space on the right. --card-h ratio 1.71
+     (~0.58 w:h) keeps the compact-but-legible height. */
+  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 6), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 @media(max-width:600px){
