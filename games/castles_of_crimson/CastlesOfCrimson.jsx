@@ -1096,12 +1096,12 @@ html,body{margin:0;padding:0;background:#120c0d}
 /* grid items STRETCH (no align-items:start) so all three panels share the row's
    height — the board panel then flex-fills its spare height with the depot ring.
    The bottom margin is the buffer between the board/duchies and the move log. */
-/* minmax(0,1fr), NOT 1fr: the board column's min-content is set by the FIXED 70px depot
-   tiles, and a plain `1fr` (= minmax(auto,1fr)) can't shrink below that, so the whole
+/* minmax(0,1fr), NOT 1fr: the board column min-content is set by the FIXED 70px depot
+   tiles, and a plain 1fr (= minmax(auto,1fr)) cannot shrink below that, so the whole
    cols-grid was forced wider than the viewport and overflowed right — while the header +
    bonusbar (siblings, not inside this grid) stayed at container width. minmax(0,...) lets
-   the track shrink so the board reflows/scales instead of spilling. (The documented
-   grid-min-content footgun — same as Spender's.) */
+   the track shrink so the board reflows instead of spilling (the documented grid
+   min-content footgun). NOTE: no backticks in this comment — it lives in the css string. */
 .coc-game-cols{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-bottom:16px}
 /* opponent panel: dice + resources row, then storage/goods, then their board */
 .coc-oppbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:12px}
