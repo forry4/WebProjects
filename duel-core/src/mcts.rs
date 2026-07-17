@@ -403,6 +403,67 @@ fn select(node: &Node, total: i32) -> usize {
     best_i
 }
 
+/// Resample everything `pid` cannot legitimately see, drawing from `rng`.
+///
+/// Hidden: the bag's CONTENTS (its count is public), each deck's ORDER, and the opponent's
+/// BLIND reserved cards. We pool the decks with the opponent's blind reserves, canonicalize
+/// (sort) the pool, shuffle it, then re-deal — so two positions differing only in hidden
+/// order give the SAME search distribution. Public and therefore untouched: the board,
+/// pyramid, privileges, tokens, purchased cards, royals, and face-up (pyramid-sourced)
+/// reserves.
+///
+/// `pub(crate)` so `endgame` can determinize ONCE and then run an exact minimax over the
+/// resulting FIXED world (with an identity shuffler); the MCTS reaches it via
+/// `Search::determinize`. Extracted verbatim from that method — behaviour is unchanged, so
+/// the parity gates are unaffected.
+pub(crate) fn determinize_state(st: &State, pid: usize, rng: &mut Rng) -> State {
+    let mut g = st.clone();
+    let opp = opponent(pid);
+    let blind: Vec<usize> = g.players[opp].reserved_from_deck.clone();
+
+    // Resample PER LEVEL: a blind reserve's level is PUBLIC (the opponent saw which deck it
+    // came off), so only its identity within that level is unknown. Pool each level's unseen
+    // cards = that deck + the opponent's blind reserves of that level.
+    let mut unseen: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for lvl in 0..3 {
+        unseen[lvl].extend_from_slice(&g.decks[lvl]);
+    }
+    for &cid in &blind {
+        unseen[LEVEL_OF[cid] as usize - 1].push(cid);
+    }
+    for pool in unseen.iter_mut() {
+        pool.sort_unstable(); // canonicalize: kill the true order
+        rng.shuffle(pool);
+    }
+
+    // Re-deal the opponent's blind reserves (same level, new identity), keeping their
+    // face-up reserves — those are public — then refill each deck from the remainder.
+    if !blind.is_empty() {
+        let redealt: Vec<usize> = blind
+            .iter()
+            .map(|&cid| {
+                unseen[LEVEL_OF[cid] as usize - 1]
+                    .pop()
+                    .expect("a blind reserve is always in its own level's pool")
+            })
+            .collect();
+        let op = &mut g.players[opp];
+        let mut kept: Vec<usize> =
+            op.reserved.iter().copied().filter(|c| !blind.contains(c)).collect();
+        kept.extend_from_slice(&redealt);
+        op.reserved = kept;
+        op.reserved_from_deck = redealt;
+    }
+    for lvl in 0..3 {
+        let n = g.decks[lvl].len(); // sizes are public
+        g.decks[lvl] = unseen[lvl][..n].to_vec();
+    }
+
+    g.bag.sort_unstable(); // canonicalize; fill_board shuffles
+    rng.shuffle(&mut g.bag);
+    g
+}
+
 struct Search<'r, 'n> {
     rng: &'r mut Rng,
     take_dominance: bool,
@@ -435,60 +496,11 @@ impl Search<'_, '_> {
         }
     }
 
-    /// Resample everything `pid` cannot legitimately see.
-    ///
-    /// Hidden: the bag's CONTENTS (its count is public), each deck's ORDER, and the
-    /// opponent's BLIND reserved cards. We pool the decks with the opponent's blind
-    /// reserves, canonicalize (sort) the pool, shuffle it, then re-deal — so two positions
-    /// differing only in hidden order give the SAME search distribution. Public and
-    /// therefore untouched: the board, pyramid, privileges, tokens, purchased cards,
-    /// royals, and face-up (pyramid-sourced) reserves.
+    /// Resample everything `pid` cannot legitimately see. Thin delegate to the free
+    /// `determinize_state` (the endgame minimax reuses the SAME logic — one source of truth,
+    /// so the two searches can never drift on what "hidden" means).
     fn determinize(&mut self, st: &State, pid: usize) -> State {
-        let mut g = st.clone();
-        let opp = opponent(pid);
-        let blind: Vec<usize> = g.players[opp].reserved_from_deck.clone();
-
-        // Resample PER LEVEL: a blind reserve's level is PUBLIC (the opponent saw which
-        // deck it came off), so only its identity within that level is unknown. Pool each
-        // level's unseen cards = that deck + the opponent's blind reserves of that level.
-        let mut unseen: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-        for lvl in 0..3 {
-            unseen[lvl].extend_from_slice(&g.decks[lvl]);
-        }
-        for &cid in &blind {
-            unseen[LEVEL_OF[cid] as usize - 1].push(cid);
-        }
-        for pool in unseen.iter_mut() {
-            pool.sort_unstable(); // canonicalize: kill the true order
-            self.rng.shuffle(pool);
-        }
-
-        // Re-deal the opponent's blind reserves (same level, new identity), keeping their
-        // face-up reserves — those are public — then refill each deck from the remainder.
-        if !blind.is_empty() {
-            let redealt: Vec<usize> = blind
-                .iter()
-                .map(|&cid| {
-                    unseen[LEVEL_OF[cid] as usize - 1]
-                        .pop()
-                        .expect("a blind reserve is always in its own level's pool")
-                })
-                .collect();
-            let op = &mut g.players[opp];
-            let mut kept: Vec<usize> =
-                op.reserved.iter().copied().filter(|c| !blind.contains(c)).collect();
-            kept.extend_from_slice(&redealt);
-            op.reserved = kept;
-            op.reserved_from_deck = redealt;
-        }
-        for lvl in 0..3 {
-            let n = g.decks[lvl].len(); // sizes are public
-            g.decks[lvl] = unseen[lvl][..n].to_vec();
-        }
-
-        g.bag.sort_unstable(); // canonicalize; fill_board shuffles
-        self.rng.shuffle(&mut g.bag);
-        g
+        determinize_state(st, pid, self.rng)
     }
 
     fn rollout_move(&mut self, st: &State, pid: usize) -> Option<Move> {

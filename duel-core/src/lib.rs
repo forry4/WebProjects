@@ -22,6 +22,7 @@
 pub mod actions;
 pub mod cards;
 pub mod clock;
+pub mod endgame;
 pub mod engine;
 pub mod feats;
 pub mod mcts;

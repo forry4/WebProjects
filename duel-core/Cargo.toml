@@ -57,6 +57,12 @@ required-features = ["bridge"]
 name = "bench_leaf"
 required-features = ["bridge"]
 
+# EXACT endgame-search diagnostic (Part B): how often does the exact minimax find a forced
+# win/block that the sampled MCTS misses? Native-only, like the other offline tools.
+[[bin]]
+name = "endgame_diag"
+required-features = ["bridge"]
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
