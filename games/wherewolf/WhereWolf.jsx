@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -390,6 +391,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const overRef = useRef(false);
   overRef.current = phase === "over";
 
+  // ── URL routing (segment 2 = room id; the shell owns segment 1 = "/werewolf") ──
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const didInitRef = useRef(false);       // StrictMode double-mount guard for the deep-entry effect
+  const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
+
   // ── socket ──
   const handleMessage = useCallback((msg) => {
     if (msg.type === "error") {
@@ -415,6 +424,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
         if (at.kind === "join" || at.kind === "resume") setToast("That game is no longer available");
         attemptRef.current = { kind: null, rid: null, retried: false };
         setScreen("lobby");   // the lobby effect refreshes the games list
+        replacePath(buildPath("werewolf"));   // strip a dead room URL (dedup no-op otherwise)
         return;
       }
       setToast(m);
@@ -440,11 +450,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      // Entering the room gives it its URL (server-confirmed, never at click time;
+      // waiting + game share it and pushPath's dedup makes repeats no-ops).
+      if (rid) pushPath(buildPath("werewolf", rid));
       setScreen(inGame ? "game" : "waiting");
     } else if (msg.type === "room_update") {
       setScreen(inGame ? "game" : "waiting");
     }
-  }, [myId, roomId]);
+  }, [myId, roomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { connected, connect, send, disconnect } = useSocket(handleMessage);
 
@@ -460,10 +473,43 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
   // on load (jarring). Resume is EXPLICIT via the lobby's Rejoin button. Keep only the
-  // disconnect cleanup so an explicit connection tears down on unmount.
+  // disconnect cleanup so an explicit connection tears down on unmount. (A room id IN THE
+  // URL is different — that's an explicit destination; see the deep-entry effect below.)
   useEffect(() => {
     return () => disconnect();
   }, []); // eslint-disable-line
+
+  // ── URL deep entry + popstate (this component owns "/werewolf/<ROOMID>") ──
+  // Mount with a room in the URL → the EXISTING resume semantics (saved token →
+  // reconnect, else join — the invite-link behavior; the stale-error branch above
+  // handles failures with a toast + lobby + URL cleanup). Plain /werewolf mounts at
+  // the lobby exactly as before.
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    const r = parsePath();
+    if (r.game === "werewolf" && r.room) resume(r.room);
+  }, []); // eslint-disable-line
+  // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via
+  // the shell. Routed through a ref so the mount-once subscription never goes stale.
+  popHandlerRef.current = (r) => {
+    if (r.game !== "werewolf") return;
+    // NB leaveToLobby keeps roomId (WW leave keeps membership), so "same id" is not
+    // "already there" — re-enter whenever we're sitting in the lobby.
+    if (r.room && (r.room !== roomIdRef.current || screenRef.current === "lobby")) {
+      resume(r.room);
+    } else if (!r.room) {
+      if (screenRef.current === "game" || screenRef.current === "waiting") {
+        leaveToLobby();   // WW leave keeps membership; its pushPath dedups after a pop
+      } else if (attemptRef.current.kind) {
+        // Popping back during a still-connecting attempt: kill it, or the late
+        // "reconnected"/"joined" would push the room URL right back.
+        attemptRef.current = { kind: null, rid: null, retried: false };
+        leaveToLobby();
+      }
+    }
+  };
+  useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
   // clear transient selection when the step changes
@@ -528,6 +574,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // bring you right back. Use Cancel (host) to actually dispose of an open game.
   const leaveToLobby = () => {
     disconnect();
+    pushPath(buildPath("werewolf"));   // leave the room URL (dedup no-op when popstate-driven)
     setRoomData(null); setCaption(""); setScreen("lobby"); fetchGames();
   };
   // Force a fresh connection to the current room (manual recovery from a drop).

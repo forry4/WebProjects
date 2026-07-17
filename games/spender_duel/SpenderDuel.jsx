@@ -9,6 +9,7 @@ import {
   splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
   splendorLogCss,
 } from "../../shared/splendor.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -588,6 +589,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const clientAiArmedRef = useRef(null);     // room we've announced capability for (cleared on disconnect)
   const aiDispatchRef = useRef(null);        // "room:decision" we have already dispatched a search for
 
+  // ── URL routing (segment 2 = room id; the shell owns segment 1 = "/duel") ──
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const urlAttemptRef = useRef(null);     // {rid, retried} — a URL-driven room attempt in flight
+  const didInitRef = useRef(false);       // StrictMode double-mount guard for the deep-entry effect
+  const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
+
   const playerName = authUser?.name || "Player";
 
   // ── derived (keep ABOVE all effects — TDZ rule) ──
@@ -630,7 +640,28 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
-    if (msg.type === "error") { setToast(msg.message || "error"); return; }
+    if (msg.type === "error") {
+      // A URL-driven room attempt (deep link / popstate) failed. A stale token gets ONE
+      // retry as a plain join (invite-link case); anything else falls back to the lobby
+      // and the dead room URL is replaced with /duel so a reload doesn't re-attempt it.
+      const ua = urlAttemptRef.current;
+      if (ua) {
+        if (msg.message === "invalid token" && !ua.retried) {
+          ua.retried = true;
+          try { localStorage.removeItem(`duel_token_${ua.rid}_${myId}`); } catch {}
+          resumeGame(ua.rid);   // token now gone → plain join
+          return;
+        }
+        urlAttemptRef.current = null;
+        try {
+          if (localStorage.getItem("duel_roomId") === ua.rid) localStorage.removeItem("duel_roomId");
+          localStorage.removeItem(`duel_token_${ua.rid}_${myId}`);
+        } catch {}
+        setRoomId(""); setRoomData(null); setScreen("lobby");
+        replacePath(buildPath("duel"));
+      }
+      setToast(msg.message || "error"); return;
+    }
     const room = msg.room;
     if (!room) return;
     const rid = room.room_id || roomId;
@@ -644,11 +675,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      // Entering the room gives it its URL (server-confirmed, never at click time;
+      // waiting + game share it and pushPath's dedup makes repeats no-ops).
+      if (rid) pushPath(buildPath("duel", rid));
+      urlAttemptRef.current = null;
       setScreen(inGame ? "game" : "waiting");
     } else if (msg.type === "room_update" && inGame && screen !== "game") {
       setScreen("game");
     }
-  }, [myId, roomId, screen]);
+  }, [myId, roomId, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
@@ -672,10 +707,43 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
   // on load (jarring). Resume is EXPLICIT via the lobby's Resume button. Keep only the
-  // disconnect cleanup so an explicit connection tears down on unmount.
+  // disconnect cleanup so an explicit connection tears down on unmount. (A room id IN THE
+  // URL is different — that's an explicit destination; see the deep-entry effect below.)
   useEffect(() => {
     return () => disconnect();
   }, []); // eslint-disable-line
+
+  // ── URL deep entry + popstate (this component owns "/duel/<ROOMID>") ──
+  // URL-driven room entry: clear any read-only review state first (a popstate Forward
+  // can fire while reviewOnly is set), then run the existing resume semantics (saved
+  // token → reconnect, else join — the invite-link behavior).
+  const urlResume = (rid) => {
+    setReviewOnly(false); setReplaySnapshots(null); setReplayTurn(null);
+    urlAttemptRef.current = { rid, retried: false };
+    resumeGame(rid);
+  };
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    const r = parsePath();
+    if (r.game === "duel" && r.room) urlResume(r.room);
+  }, []); // eslint-disable-line
+  // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via
+  // the shell. Routed through a ref so the mount-once subscription never goes stale.
+  popHandlerRef.current = (r) => {
+    if (r.game !== "duel") return;
+    if (r.room && r.room !== roomIdRef.current) {
+      urlResume(r.room);
+    } else if (!r.room && (roomIdRef.current || urlAttemptRef.current)) {
+      // Back out of the room — INCLUDING out of a still-connecting attempt (popping
+      // during the join's round trip would otherwise let the late "reconnected"
+      // message push the room URL right back). leaveToLobby's disconnect kills the
+      // in-flight socket; its pushPath dedups (URL is already /duel after the pop).
+      urlAttemptRef.current = null;
+      leaveToLobby();
+    }
+  };
+  useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   // auto-reconnect while in a live game (load-bearing for vs-bot: the bot's turn is
   // re-driven on reconnect — the CoC "hung for minutes" lesson)
@@ -947,6 +1015,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   const leaveToLobby = () => {
     disconnect();
+    pushPath(buildPath("duel"));   // leave the room URL (dedup no-op when popstate-driven)
     setScreen("lobby");
     setRoomData(null);
     setRoomId("");

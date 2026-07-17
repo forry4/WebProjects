@@ -858,6 +858,10 @@ export default function SpenderApp() {
 	const [modalCard, setModalCard] = useState(null);
 	const [roomId, setRoomId] = useState("");
 	const [roomData, setRoomData] = useState(null);
+	// A Spender room id arriving from the URL (deep link / popstate Forward) — consumed by
+	// the deep-entry effect once the browser (lobby) screen is up. Plain /spender never
+	// sets it, preserving the deliberate no-auto-resume-on-mount design.
+	const [deepRoom, setDeepRoom] = useState(null);
 	// ── Game review / replay (read-only rewind of a finished game) ──
 	const [reviewing, setReviewing] = useState(false);            // viewing a finished game's board + log
 	const [replaySnapshots, setReplaySnapshots] = useState(null); // [{turn,mover,move,game}], or null = no turn-by-turn
@@ -1027,6 +1031,14 @@ export default function SpenderApp() {
 		// A finished game ("over") still belongs on the game screen so the
 		// winner/review UI shows — only a not-yet-started game goes to "waiting".
 		const inGame = (s) => s === "playing" || s === "over";
+		// Entering a room (server-confirmed, never at click time) gives it its URL —
+		// /spender/<RID>. waiting and game share the one room URL (status picks the
+		// internal screen); pushPath's dedup makes deep-link/repeat messages no-ops.
+		if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+			const rid = room?.room_id || roomId;
+			if (rid) pushPath(buildPath("spender", rid));
+			urlAttemptRef.current = null;
+		}
 		if (msg.type === "created") {
 			setRoomData(msg.room);
 			if (inGame(msg.room?.status)) setScreen("game");
@@ -1059,6 +1071,21 @@ export default function SpenderApp() {
 				&& (msg.message.includes("no longer available") || msg.message === "room not found");
 			if (msg.message === "invalid token" || gone) {
 				try { localStorage.removeItem("spender_roomId"); } catch {}
+			}
+			// URL-driven attempt (deep link / popstate Forward) failed. A stale token gets
+			// ONE retry as a plain join (the invite-link case: token orphaned but the room
+			// is open); anything else falls back to the lobby and the dead room URL is
+			// replaced with /spender so a reload doesn't re-attempt it.
+			const ua = urlAttemptRef.current;
+			if (ua) {
+				if (msg.message === "invalid token" && !ua.retried) {
+					ua.retried = true;
+					try { localStorage.removeItem(`spender_token_${ua.rid}_${myId}`); } catch {}
+					handleContinue(ua.rid);   // token now gone → plain join
+					return;
+				}
+				urlAttemptRef.current = null;
+				replacePath(buildPath("spender"));
 			}
 			if (gone && authUser) fetchGames(authUser);
 			setToast(msg.message);
@@ -1114,6 +1141,10 @@ export default function SpenderApp() {
 	const initialRouteRef = useRef(parsePath());   // parsed once at first render; landAt consumes it
 	const pendingRouteRef = useRef(null);          // deep link stashed across the auth screen
 	const applyPopRouteRef = useRef(() => {});     // fresh-closure mirror for the mount-once popstate effect
+	// A URL-driven room attempt in flight ({rid, retried}): its failure falls back to the
+	// lobby (replacePath /spender + toast) instead of leaving a dead room URL; a stale
+	// reconnect token is retried ONCE as a plain join (invite-link case).
+	const urlAttemptRef = useRef(null);
 	useEffect(() => subscribe((route) => {
 		// Back/Forward. While still booting, just retarget the landing; while on auth,
 		// retarget the post-login destination. Otherwise apply the route now.
@@ -2035,6 +2066,7 @@ export default function SpenderApp() {
 
 	const goToMenu = () => {
 		leaveSpenderRoomState();
+		pushPath(buildPath("spender"));   // leave the room URL (dedup no-op when popstate-driven)
 		setScreen("browser");
 		fetchGames(authUser);
 	};
@@ -2058,7 +2090,12 @@ export default function SpenderApp() {
 			return;
 		}
 		if (g === "puzzles") { enterPuzzles(); return; }   // needs the fetch+pick, not just the screen
-		setScreen(SCREEN_FOR_MODE[g]);   // spender→browser; coc/werewolf/duel/books mount and read their own segment 2
+		if (g === "spender") {
+			setScreen("browser");
+			if (route.room) setDeepRoom(route.room);   // deep entry once the lobby is up
+			return;
+		}
+		setScreen(SCREEN_FOR_MODE[g]);   // coc/werewolf/duel/books mount and read their own segment 2
 	};
 
 	// landAt(): boot injection — resolveDest still decides auth-vs-in, the initial URL
@@ -2082,23 +2119,55 @@ export default function SpenderApp() {
 		setScreen("home");
 	};
 
-	// applyPopRoute(): Back/Forward while on a real screen. Mode-level only — a same-mode
-	// pop belongs to whoever owns segment 2 (the mounted sub-game's own subscription).
-	// Mirrored into applyPopRouteRef every render so the mount-once popstate effect never
-	// runs a stale closure.
+	// applyPopRoute(): Back/Forward while on a real screen. Mode-level plus Spender's own
+	// segment 2 — a same-mode pop in a SUB-game belongs to its own subscription. Mirrored
+	// into applyPopRouteRef every render so the mount-once popstate effect never runs a
+	// stale closure.
 	const applyPopRoute = (route) => {
 		const s = screenRef.current;
+		const inSpenderRoom = (s === "waiting" || s === "game") && !puzzlingRef.current;
 		const curMode = (s === "waiting" || s === "game")
 			? (puzzlingRef.current ? "puzzles" : "spender")
 			: (MODE_FOR_SCREEN[s] || "home");
 		const target = route.game === null ? "home" : route.game;
-		if (target === curMode) return;   // segment-2 changes are the sub-game's (or Layer B's) business
+		if (target === curMode) {
+			if (target === "spender") {
+				// Spender owns its own segment 2 (rooms live in the shell, unlike sub-games).
+				const rid = route.room;
+				if (rid && (!inSpenderRoom || rid !== roomIdRef.current)) {
+					// Forward into a room (or across rooms): via the lobby + the deep-entry effect.
+					if (inSpenderRoom) leaveSpenderRoomState();
+					setScreen("browser");
+					setDeepRoom(rid);
+				} else if (!rid && (inSpenderRoom || urlAttemptRef.current)) {
+					// Back out of the room → lobby — INCLUDING out of a still-connecting URL
+					// attempt (popping during the join's round trip would otherwise let the
+					// late "joined" push the room URL back). goToMenu disconnects; its push
+					// dedups (URL already /spender).
+					urlAttemptRef.current = null;
+					goToMenu();
+				}
+			}
+			return;   // a sub-game's segment-2 change is handled by its own subscription
+		}
 		// Leaving the current mode: state-only cleanup, then land on the target.
 		if (puzzlingRef.current) resetPuzzleState();
 		else if (s === "waiting" || s === "game") leaveSpenderRoomState();
 		enterRoute(route);
 	};
 	applyPopRouteRef.current = applyPopRoute;
+
+	// Deep entry into a Spender room from the URL: once the lobby screen is up, run the
+	// EXISTING resume semantics (saved token → reconnect, else join — exactly the
+	// invite-link behavior). handleContinue's pendingActionRef suppresses the onOpen
+	// auto-reconnect fallback, so a deep link into room B can't cross-wire with a saved
+	// pointer at room A. Runs post-commit, so myId/playerName are settled after auth.
+	useEffect(() => {
+		if (!deepRoom || screen !== "browser") return;
+		urlAttemptRef.current = { rid: deepRoom, retried: false };
+		handleContinue(deepRoom);
+		setDeepRoom(null);
+	}, [deepRoom, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	const handleAbandon = () => {
 		send({ action: "abandon" });
@@ -2912,6 +2981,7 @@ export default function SpenderApp() {
 								try { localStorage.removeItem("spender_roomId"); } catch {}
 								setReviewing(false);
 								setReplaySnapshots(null); setReplayTurn(null);
+								pushPath(buildPath("spender"));   // leave the finished room's URL
 								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
 								fetchGames(authUser);
 							}}>

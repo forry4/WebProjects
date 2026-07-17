@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache } from "../../shared/lobby.jsx";
+import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
@@ -1328,6 +1329,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const prevPhaseRef = useRef(null);                    // last phase_letter seen (detect a phase advance)
   const phasePopTimer = useRef(null);                   // auto-dismiss timer for the phase overlay
 
+  // ── URL routing (segment 2 = room id; the shell owns segment 1 = "/coc") ──
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const roomIdRef = useRef(roomId);
+  roomIdRef.current = roomId;
+  const urlAttemptRef = useRef(null);   // {rid, retried} — a URL-driven room attempt in flight
+  const didInitRef = useRef(false);     // StrictMode double-mount guard for the deep-entry effect
+  const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
+
   const playerName = authUser?.name || "Player";
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
@@ -1373,6 +1383,25 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
       if (optimisticRef.current && preOptimisticRoomRef.current) setRoomData(preOptimisticRoomRef.current);
       optimisticRef.current = false;
       setConnecting(false);                                 // a connect that errored drops back to the lobby
+      // A URL-driven room attempt (deep link / popstate) failed. A stale token gets ONE
+      // retry as a plain join (invite-link case); anything else falls back to the lobby
+      // and the dead room URL is replaced with /coc so a reload doesn't re-attempt it.
+      const ua = urlAttemptRef.current;
+      if (ua) {
+        if (msg.message === "invalid token" && !ua.retried) {
+          ua.retried = true;
+          try { localStorage.removeItem(`coc_token_${ua.rid}_${myId}`); } catch {}
+          resume(ua.rid);   // token now gone → plain join
+          return;
+        }
+        urlAttemptRef.current = null;
+        try {
+          if (localStorage.getItem("coc_roomId") === ua.rid) localStorage.removeItem("coc_roomId");
+          localStorage.removeItem(`coc_token_${ua.rid}_${myId}`);
+        } catch {}
+        setRoomId(""); setRoomData(null); setScreen("lobby");
+        replacePath(buildPath("coc"));
+      }
       setToast(msg.message || "error"); return;
     }
     const room = msg.room;
@@ -1385,11 +1414,15 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     setRoomData(room);
     const inGame = room.status === "playing" || room.status === "over";
     if (msg.type === "created" || msg.type === "joined" || msg.type === "reconnected") {
+      // Entering the room gives it its URL (waiting + game share it; dedup makes
+      // deep-link/repeat messages no-ops). Server-confirmed, never at click time.
+      if (rid) pushPath(buildPath("coc", rid));
+      urlAttemptRef.current = null;
       setScreen(inGame ? "game" : "waiting");
     } else if (msg.type === "room_update") {
       if (inGame && screen !== "game") setScreen("game");
     }
-  }, [myId, roomId, screen]);
+  }, [myId, roomId, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
@@ -1459,10 +1492,47 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // Mount: do NOT auto-resume a saved game — it snapped you from the lobby into the game
   // on load (jarring). Resume is EXPLICIT via the lobby's Resume button. Keep only the
-  // disconnect cleanup so an explicit connection tears down on unmount.
+  // disconnect cleanup so an explicit connection tears down on unmount. (A room id IN THE
+  // URL is different — that's an explicit destination; see the deep-entry effect below.)
   useEffect(() => {
     return () => disconnect();
   }, []); // eslint-disable-line
+
+  // ── URL deep entry + popstate (this component owns "/coc/<ROOMID>") ──
+  // Mount with a room in the URL → the EXISTING resume semantics (saved token →
+  // reconnect, else join — exactly the invite-link behavior). A plain /coc mounts at
+  // the lobby exactly as before.
+  // URL-driven room entry: clear any read-only review state first (a popstate Forward can
+  // fire while reviewOnly is set — resume() alone would leave it stale and the reconnect
+  // loop gated off), then run the existing resume semantics.
+  const urlResume = (rid) => {
+    setReviewOnly(false); setReviewing(false);
+    urlAttemptRef.current = { rid, retried: false };
+    resume(rid);
+  };
+  useEffect(() => {
+    if (didInitRef.current) return;
+    didInitRef.current = true;
+    const r = parsePath();
+    if (r.game === "coc" && r.room) urlResume(r.room);
+  }, []); // eslint-disable-line
+  // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via the
+  // shell (whose unmount cleanup disconnects). Routed through a ref so the mount-once
+  // subscription never runs a stale closure.
+  popHandlerRef.current = (r) => {
+    if (r.game !== "coc") return;
+    if (r.room && r.room !== roomIdRef.current) {
+      urlResume(r.room);
+    } else if (!r.room && (roomIdRef.current || urlAttemptRef.current)) {
+      // Back out of the room — INCLUDING out of a still-connecting attempt (popping
+      // during the join's round trip would otherwise let the late "reconnected"
+      // message push the room URL right back). leaveToLobby's disconnect kills the
+      // in-flight socket; its pushPath dedups (URL is already /coc after the pop).
+      urlAttemptRef.current = null;
+      leaveToLobby();
+    }
+  };
+  useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   // Auto-reconnect: if the socket drops while in a LIVE game (Render cold start, a
   // network blip, or iOS killing a backgrounded WS), keep retrying with backoff —
@@ -1957,6 +2027,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     // real in-progress game the player also has.
     if (!reviewOnly) { try { localStorage.removeItem("coc_roomId"); } catch {} }
     setReviewOnly(false);
+    pushPath(buildPath("coc"));   // leave the room URL (dedup no-op when popstate-driven)
     setRoomData(null); setRoomId(""); setReviewing(false); setScreen("lobby"); fetchGames();
   };
   // Cancel an open game you created (host_id === myId). Mirrors Spender: authorize
