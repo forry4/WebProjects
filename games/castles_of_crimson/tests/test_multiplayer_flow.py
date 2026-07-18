@@ -94,6 +94,34 @@ def test_missing_max_players_defaults_to_four(monkeypatch):
     asyncio.run(run())
 
 
+def test_same_board_forces_everyone_onto_host_board(monkeypatch):
+    rid = "SAMEBRD"
+    m.ROOMS.pop(rid, None)
+    monkeypatch.setattr(m, "save_game", lambda room_id: None)
+    monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
+
+    async def run():
+        # host on board 3, same_board on; joiners pick different boards
+        await m._handle_create(_FakeWS(), rid, "h1", {"name": "H1", "vs_ai": False, "board_id": "3", "same_board": True})
+        assert m.ROOMS[rid]["same_board"] is True
+        await m._handle_join(_FakeWS(), rid, "h2", {"name": "H2", "board_id": "5"})
+        await m._handle_join(_FakeWS(), rid, "h3", {"name": "H3", "board_id": "7"})
+        await m._handle_start(_FakeWS(), rid, "h1")
+        g = m.ROOMS[rid]["game"]
+        boards = {pid: g["players"][pid]["board_id"] for pid in g["order"]}
+        assert set(boards.values()) == {"3"}, boards        # everyone on the host's board
+
+        # control: same_board OFF keeps each player's own pick
+        rid2 = "OWNBRD"
+        m.ROOMS.pop(rid2, None)
+        await m._handle_create(_FakeWS(), rid2, "a", {"name": "A", "vs_ai": False, "board_id": "3", "same_board": False})
+        await m._handle_join(_FakeWS(), rid2, "b", {"name": "B", "board_id": "5"})
+        await m._handle_start(_FakeWS(), rid2, "a")
+        g2 = m.ROOMS[rid2]["game"]
+        assert g2["players"]["a"]["board_id"] == "3" and g2["players"]["b"]["board_id"] == "5"
+    asyncio.run(run())
+
+
 def test_cannot_join_a_vs_ai_room(monkeypatch):
     rid = "VSAIJOIN"
     m.ROOMS.pop(rid, None)

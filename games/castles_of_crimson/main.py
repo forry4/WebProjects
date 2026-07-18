@@ -251,6 +251,7 @@ def save_game(room_id: str) -> None:
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "max_players": room.get("max_players"),
+        "same_board": room.get("same_board", False),
         "boards": room.get("boards", {}),
     }
     now = int(time.time())
@@ -298,6 +299,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "ai_player": state.get("ai_player"),
         "ai_difficulty": state.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "max_players": state.get("max_players"),
+        "same_board": state.get("same_board", False),
         "boards": state.get("boards", {}),
         "sockets": {},
     }
@@ -335,9 +337,12 @@ def list_open_games() -> list[dict]:
     for r in rows:
         state = _parse_state(r)
         players = _ordered_players(state)
+        host_board = (state.get("boards") or {}).get(state.get("host"))
         out.append({"id": r["id"], "host_id": r["player1_id"], "host_name": r["player1_name"],
                     "player_count": len(players) or 1,
                     "max_players": _valid_max_players(state.get("max_players")),
+                    "same_board": bool(state.get("same_board")),
+                    "host_board": host_board,
                     "created_at": r["created_at"]})
     return out
 
@@ -496,6 +501,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "max_players": room.get("max_players") or MAX_PLAYERS,
+        "same_board": room.get("same_board", False),
         "boards": room.get("boards", {}),
         # Only the recipient's OWN reconnect token. Direct replies pass viewer_pid=pid;
         # broadcast_room injects each recipient's token per socket. (Was: every seat's
@@ -854,6 +860,7 @@ async def _handle_create(ws, room_id, pid, msg):
     opp_board = _valid_board(msg.get("opp_board_id"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
     max_players = _valid_max_players(msg.get("max_players"))   # host-chosen seat cap (2-4; vs-AI is 2)
+    same_board = bool(msg.get("same_board"))                   # force everyone onto the host's board
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -869,6 +876,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "ai_player": None,
             "ai_difficulty": difficulty,
             "max_players": 2 if vs_ai else max_players,
+            "same_board": same_board,
             "boards": {pid: my_board},
         }
         ROOMS[room_id] = room
@@ -930,6 +938,9 @@ async def _handle_start(ws, room_id, pid):
             return
         room["status"] = "playing"
         boards = {p: _valid_board(room.get("boards", {}).get(p)) for p in humans}
+        if room.get("same_board"):
+            host_board = boards.get(room.get("host")) or _valid_board(None)   # everyone on the host's board
+            boards = {p: host_board for p in humans}
         room["boards"] = boards
         room["game"] = engine.new_game(humans, names=dict(room["players"]), boards=boards)
         save_game(room_id)
