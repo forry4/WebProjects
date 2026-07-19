@@ -450,20 +450,24 @@ const css = `
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
 .duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
 .duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
-/* Reserved cards render at ~2x the shared small-card (62x86 -> 124x172), with the
-   internals scaled off the new height by the SAME ratios the Duel pyramid cards use
-   (card-h x 0.147 points, x0.14 bonus, etc.) so they read like proper cards, not
-   blown-up thumbnails. Appended after splendorCardCss, so these win the equal-specificity
-   tie against the base .card.card-small internals. */
-.duel-reserved-row{--card-w-small:124px;--card-h-small:172px}
-.duel-reserved-row .card-points{font-size:25px}
-.duel-reserved-row .card-bonus{width:24px;height:24px}
-.duel-reserved-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:-10px}
-.duel-reserved-row .card-crowns{font-size:15px}
-.duel-reserved-row .card-back-level{font-size:29px}
-.duel-reserved-row .cost-gem{width:17px;height:17px}
-.duel-reserved-row .cost-num{font-size:15px}
-.duel-reserved-row .card-ability{font-size:14px}
+/* Reserved cards are sized so exactly THREE fit on ONE row of the player box: card width =
+   (box content width − the two 10px row gaps, with a few px of slack) / 3, read off the
+   .duel-player inline-size container (100cqw). Height keeps the 62:86 (=1.387) small-card
+   aspect, and the internals scale off that derived height by the pyramid's ratios so they
+   stay proportional as the box (and thus the card) grows/shrinks with the rail width.
+   The .card.card-small prefix (0,4,0) is REQUIRED to out-specify the shared .card.card-small
+   internals (0,3,0) — a bare .duel-reserved-row .card-* (0,2,0) silently loses to them. */
+.duel-reserved-row{--card-w-small:calc((100cqw - 24px) / 3);--card-h-small:calc(var(--card-w-small) * 1.387)}
+.duel-reserved-row .card.card-small{padding:calc(var(--card-h-small)*0.049) calc(var(--card-h-small)*0.043) calc(var(--card-h-small)*0.043)}
+.duel-reserved-row .card.card-small .card-header{margin-bottom:calc(var(--card-h-small)*0.043)}
+.duel-reserved-row .card.card-small .card-points{font-size:calc(var(--card-h-small)*0.147);min-width:0}
+.duel-reserved-row .card.card-small .card-bonus{width:calc(var(--card-h-small)*0.14);height:calc(var(--card-h-small)*0.14)}
+.duel-reserved-row .card.card-small .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h-small)*-0.056)}
+.duel-reserved-row .card.card-small .card-crowns{font-size:calc(var(--card-h-small)*0.11)}
+.duel-reserved-row .card.card-small .card-ability{font-size:calc(var(--card-h-small)*0.082);top:calc(var(--card-h-small)*0.24);right:calc(var(--card-h-small)*0.05)}
+.duel-reserved-row .card.card-small .card-back-level{font-size:calc(var(--card-h-small)*0.17)}
+.duel-reserved-row .card.card-small .cost-gem{width:calc(var(--card-h-small)*0.096);height:calc(var(--card-h-small)*0.096)}
+.duel-reserved-row .card.card-small .cost-num{font-size:calc(var(--card-h-small)*0.095)}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
    review vocabulary (clickable / log-selected / log-win / log-start). The log now sits
