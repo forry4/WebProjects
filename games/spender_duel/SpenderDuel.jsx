@@ -350,6 +350,13 @@ const css = `
 @keyframes duelPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
 .duel-board-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
+/* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
+   no border while btn-outline adds 1px — with border-box + auto height a border still adds
+   2px, so the gold Take/Buy came out 2px short; give gold a transparent border to match.
+   (2) the ✕ glyph falls back to a font with taller line metrics (+2px); pin line-height so
+   the glyph can't inflate its button past the text ones. */
+.duel-actionrow .btn-gold{border:1px solid transparent}
+.duel-actionrow .btn{line-height:1.2}
 .duel-royals-row{display:flex;gap:10px;justify-content:center}
 .duel-royal{position:relative;width:66px;height:46px;background:linear-gradient(160deg,#3a2c45,#2c2135);border:1px solid #6b5a80;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px}
 .duel-royal.dim{opacity:.35}
