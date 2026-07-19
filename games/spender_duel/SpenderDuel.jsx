@@ -275,14 +275,17 @@ const css = `
    swatches and its own palette.) */
 .duel-col-cards{container-type:inline-size}
 .duel-col-cards .level-row{
-  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8, plus the row/panel padding.
+  /* the widest row is deck + 5 cards = 6 cells, 5 gaps of 8 (=40) + the panel's 24px
+     padding = 64px of true overhead. We subtract 68 (not the old 80) so the cards are ~2px
+     bigger and the trailing buffer on the right of the level-I row is only ~4px instead of
+     ~16 — still enough slack to absorb sub-pixel rounding so all 6 cells stay on one row.
      The MIN must stay LOW (40, not 52): on a narrow phone (<~385px) a 52px floor forces
      the 6-cell level-I row WIDER than the column, so it overflows and the flex shrinks the
      items UNEVENLY — the deck (less content) shrinks more than the cards, and the roomier
      3/4-card rows don't shrink at all, so decks came out different sizes per row. A 40 floor
      lets --card-w track the true 6-cell fit at any width, so every cell (deck AND card) is
      the SAME size in every row. */
-  --card-w:clamp(40px, calc((100cqw - 80px) / 6), 190px);
+  --card-w:clamp(40px, calc((100cqw - 68px) / 6), 190px);
   --card-h:calc(var(--card-w) * 1.364);   /* Spender's 88x120 aspect */
   margin-bottom:8px;
 }
@@ -388,7 +391,9 @@ const css = `
   .duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
 }
 .duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);filter:brightness(1)}
-.duel-scrolls.armed .duel-scroll.full{border-color:#e6c260;box-shadow:0 0 0 2px rgba(232,201,106,.6),0 0 9px rgba(232,201,106,.45);animation:duelPulse 1.1s infinite}
+/* Only the LEFTMOST privilege coin lights up when armed (it's the one that gets spent) —
+   :first-child is always a .full coin when armed, since arming needs >=1 privilege. */
+.duel-scrolls.armed .duel-scroll.full:first-child{border-color:#e6c260;box-shadow:0 0 0 2px rgba(232,201,106,.6),0 0 9px rgba(232,201,106,.45);animation:duelPulse 1.1s infinite}
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
@@ -1351,7 +1356,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </button>
             )}
             {goldCell != null && <span className="duel-muted">Now pick a card or a deck to reserve…</span>}
-            {privArmed && <span className="duel-muted">Pick a gem or pearl to take with your Privilege…</span>}
             <button className="btn btn-outline" onClick={() => mv({ type: "replenish" })} disabled={!canReplenish}
               title={canReplenish ? "Refill the board from the bag (your opponent gains a Privilege)" : "Replenish unavailable"}>
               Replenish
