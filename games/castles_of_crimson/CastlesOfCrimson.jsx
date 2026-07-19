@@ -872,9 +872,11 @@ html,body{margin:0;padding:0;background:#120c0d}
   .coc .coc-wrap:not(.coc-wrap-game){padding-left:10px;padding-right:10px}
   /* the track is a static block above the board at every width now; just tighten it */
   .coc-track-block{max-width:none;padding:6px 7px}
-  /* shrink the 7 turn-order spaces so 0-6 fit on one row */
-  .coc-track-spaces{flex-wrap:wrap;gap:2px}
-  .coc-track-space{width:36px;min-height:50px;padding:16px 2px 4px}
+  /* the 7 turn-order spaces flex-SHARE the track width so they evenly fill it (prefixed to
+     beat the base fixed width — this @media block sits BEFORE the base rules); nowrap keeps
+     0-6 on a single row. min-width:0 lets the name tokens ellipsis. */
+  .coc .coc-track-spaces{flex-wrap:nowrap;gap:2px}
+  .coc .coc-track-space{flex:1 1 0;min-width:0;width:auto;min-height:50px;padding:16px 2px 4px}
   /* zoom shrinks each depot card AND the black depot's inline-px diamond consistently,
      and (unlike transform) reduces the layout footprint so the board is more compact */
   .coc-board-hex .coc-depot{zoom:.9}
