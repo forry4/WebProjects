@@ -433,7 +433,21 @@ const css = `
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
 .duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
-.duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+/* Reserved cards render at ~2x the shared small-card (62x86 -> 124x172), with the
+   internals scaled off the new height by the SAME ratios the Duel pyramid cards use
+   (card-h x 0.147 points, x0.14 bonus, etc.) so they read like proper cards, not
+   blown-up thumbnails. Appended after splendorCardCss, so these win the equal-specificity
+   tie against the base .card.card-small internals. */
+.duel-reserved-row{--card-w-small:124px;--card-h-small:172px}
+.duel-reserved-row .card-points{font-size:25px}
+.duel-reserved-row .card-bonus{width:24px;height:24px}
+.duel-reserved-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:-10px}
+.duel-reserved-row .card-crowns{font-size:15px}
+.duel-reserved-row .card-back-level{font-size:29px}
+.duel-reserved-row .cost-gem{width:17px;height:17px}
+.duel-reserved-row .cost-num{font-size:15px}
+.duel-reserved-row .card-ability{font-size:14px}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
    review vocabulary (clickable / log-selected / log-win / log-start). The log now sits
@@ -522,6 +536,28 @@ const css = `
   .duel .lby-card{flex-wrap:wrap;row-gap:10px}
   .duel .lby-card .btn{padding:8px 12px;font-size:.78rem}
   .duel .lby-card-actions{margin-left:auto}
+}
+@media(min-width:1121px){
+  /* Desktop game screen LOCKS to the viewport (the 3-col layout only): the columns fill
+     the space under the topbar so the board, player rail, and log all reach the bottom of
+     the screen, and the log scrolls INTERNALLY instead of growing the page. (.app is
+     min-height:100vh + flex-column; we pin a definite height here so 1fr rows + flex kids
+     resolve and overflow is contained. Fixed-position layers — modals/toast/flyers/reconn
+     bar/menu — are out of flow, so overflow:hidden can't clip them.) */
+  .duel-gamescreen{height:100dvh;overflow:hidden;padding-bottom:14px}
+  .duel-gamescreen .duel-cols{flex:1;min-height:0;align-items:stretch}
+  /* board fills its column; keep the 5x5 grid vertically centered in the tall panel */
+  .duel-gamescreen .duel-col-board{min-height:0;display:flex;flex-direction:column}
+  .duel-gamescreen .duel-board-wrap{flex:1;justify-content:center}
+  /* the two player boxes split the rail and reach the bottom; each box is a flex column
+     so its reserved cards anchor the box foot (rest of the content stays at the top). The
+     rail scrolls if a short screen can't fit both boxes rather than clipping them. */
+  .duel-gamescreen .duel-col-side{display:flex;flex-direction:column;gap:14px;min-height:0;overflow-y:auto}
+  .duel-gamescreen .duel-col-side .duel-player{flex:1 1 0;min-height:0;margin-bottom:0;display:flex;flex-direction:column}
+  .duel-gamescreen .duel-col-side .duel-reserved-row{margin-top:auto}
+  /* the log fills its (viewport-bounded) column and scrolls inside — the row-2 1fr height
+     caps it to the screen, min-height:0 lets the inner move-log overflow-scroll. */
+  .duel-gamescreen .duel-col-log{min-height:0}
 }
 `;
 
@@ -1708,7 +1744,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   }
 
   return (
-    <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
+    <div className="app duel duel-gamescreen" style={{ "--lby-accent": "#bf6fd0" }}>
       <style>{duelStyles}</style>
       {reconnecting && !connected && !reviewOnly && <div className="duel-reconnbar">Reconnecting…</div>}
       <div className="duel-topbar">
