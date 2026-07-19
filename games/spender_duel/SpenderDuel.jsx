@@ -387,10 +387,12 @@ const css = `
 .duel-scroll:not(.full){color:transparent;background:transparent;border:2px dashed #4a4030;box-shadow:none}
 .duel-scrolls.clickable{cursor:pointer}
 .duel-scrolls.clickable .duel-scroll.full{border-color:#7a6330;box-shadow:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(232,201,106,.28)}
+/* hover-lift + press only the LEFTMOST coin (the one a click spends), matching the armed
+   glow — hovering anywhere on the row still lifts just that coin. */
 @media (hover:hover){
-  .duel-scrolls.clickable:hover .duel-scroll.full{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
+  .duel-scrolls.clickable:hover .duel-scroll.full:first-child{transform:translateY(-1.5px);border-color:#8a6f34;box-shadow:0 4px 7px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,106,.4);filter:brightness(1.12)}
 }
-.duel-scrolls.clickable:active .duel-scroll.full{transform:translateY(1px);filter:brightness(1)}
+.duel-scrolls.clickable:active .duel-scroll.full:first-child{transform:translateY(1px);filter:brightness(1)}
 /* Only the LEFTMOST privilege coin lights up when armed (it's the one that gets spent) —
    :first-child is always a .full coin when armed, since arming needs >=1 privilege. */
 .duel-scrolls.armed .duel-scroll.full:first-child{border-color:#e6c260;box-shadow:0 0 0 2px rgba(232,201,106,.6),0 0 9px rgba(232,201,106,.45);animation:duelPulse 1.1s infinite}
@@ -582,7 +584,11 @@ const css = `
      so its reserved cards anchor the box foot (rest of the content stays at the top). The
      rail scrolls if a short screen can't fit both boxes rather than clipping them. */
   .duel-gamescreen .duel-col-side{display:flex;flex-direction:column;gap:14px;min-height:0;overflow-y:auto}
-  .duel-gamescreen .duel-col-side .duel-player{flex:1 1 0;min-height:0;margin-bottom:0;display:flex;flex-direction:column}
+  /* overflow-y:auto: each box is a fixed-height flex item, so when its content (esp. tall
+     reserved cards) can't fit it SCROLLS inside its own bounds instead of the card spilling
+     out past the box border. margin-top:auto still pins reserved to the foot when it fits
+     (auto margins only eat POSITIVE free space; with overflow it resolves to 0). */
+  .duel-gamescreen .duel-col-side .duel-player{flex:1 1 0;min-height:0;margin-bottom:0;display:flex;flex-direction:column;overflow-y:auto}
   .duel-gamescreen .duel-col-side .duel-reserved-row{margin-top:auto}
   /* the log fills its (viewport-bounded) column and scrolls inside — the row-2 1fr height
      caps it to the screen, min-height:0 lets the inner move-log overflow-scroll. */
