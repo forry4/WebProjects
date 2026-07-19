@@ -1,5 +1,3 @@
-/* @ts-self-types="./spender_core.d.ts" */
-
 /**
  * Convert the aggregate-winning action index to a dict-move JSON for the given state (the main thread
  * resolves it once, after summing visits across the worker pool). `{"error":...}` on a parse failure.

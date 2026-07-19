@@ -263,6 +263,17 @@ fn build_attn_net() -> crate::attn::AttnNet {
     }
 }
 
+// Per-worker parsed-net cache. A Web Worker persists across every move it serves, but the serving fns
+// rebuilt the net (parse ~2 MB of embedded JSON into nested Vec<f32>) on EVERY call. Parse once, lazily,
+// on first use and reuse for the worker's life — the weights are immutable, so this is byte-identical to
+// rebuilding. It also removes parse time from the timed budget: `start` is captured before the build, so
+// on slow devices the re-parse was subtracted from the 4.5 s search window every move. thread_local is
+// the right scope here (one wasm instance per worker; single-threaded).
+thread_local! {
+    static ATTN_NET: crate::attn::AttnNet = build_attn_net();
+    static PV_NET_21: crate::valuenet::PolicyValueNet = build_pv_net_21();
+}
+
 /// Variant PV root-parallel search: like `search_visits_n_timed`, but the net supplies BOTH the MCTS
 /// leaf VALUE and the POLICY PRIOR (`root_visits_until_pv`) over the 178-feat `features_ext` encoder —
 /// the learned AlphaZero policy+value head. Same SUM-then-argmax root-parallel aggregation as S/N.
@@ -278,23 +289,25 @@ pub fn search_visits_pv_timed(state_json: &str, seat: usize, budget_ms: f64, max
     let cap = if max_sims == 0 { usize::MAX } else { max_sims };
     if s.win_points == 21 {
         // Long mode: net_ext21_13 (MLP, features_ext) — unchanged.
-        let net = build_pv_net_21();
-        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-            let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
-            let (v, logits) = net.forward_raw(&raw);
-            (v as f64, logits.iter().map(|&x| x as f64).collect())
-        };
-        vsearch::root_visits_until_pv(&s, seat, &mut rng,
-            |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        PV_NET_21.with(|net| {
+            let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+                let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
+                let (v, logits) = net.forward_raw(&raw);
+                (v as f64, logits.iter().map(|&x| x as f64).collect())
+            };
+            vsearch::root_visits_until_pv(&s, seat, &mut rng,
+                |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        })
     } else {
         // Classic (15): card-set ATTENTION net (net_attn_3) — features_tokens leaf value + per-token policy.
-        let net = build_attn_net();
-        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-            let (t, msk, st2) = crate::feats::features_tokens(st, sd);
-            net.forward(&t, &msk, &st2)
-        };
-        vsearch::root_visits_until_pv(&s, seat, &mut rng,
-            |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        ATTN_NET.with(|net| {
+            let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+                let (t, msk, st2) = crate::feats::features_tokens(st, sd);
+                net.forward(&t, &msk, &st2)
+            };
+            vsearch::root_visits_until_pv(&s, seat, &mut rng,
+                |n| n < cap && (n % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        })
     }
 }
 
@@ -314,23 +327,25 @@ pub fn search_pv_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_s
     let cap = if max_sims == 0 { usize::MAX } else { max_sims };
     let (n, w) = if s.win_points == 21 {
         // Long mode: net_ext21_13 (MLP, features_ext) — unchanged.
-        let net = build_pv_net_21();
-        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-            let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
-            let (v, logits) = net.forward_raw(&raw);
-            (v as f64, logits.iter().map(|&x| x as f64).collect())
-        };
-        vsearch::root_nw_until_pv(&s, seat, &mut rng,
-            |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        PV_NET_21.with(|net| {
+            let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+                let raw: Vec<f32> = crate::feats::features_ext(st, sd).iter().map(|&x| x as f32).collect();
+                let (v, logits) = net.forward_raw(&raw);
+                (v as f64, logits.iter().map(|&x| x as f64).collect())
+            };
+            vsearch::root_nw_until_pv(&s, seat, &mut rng,
+                |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        })
     } else {
         // Classic (15): card-set ATTENTION net (net_attn_3) — features_tokens leaf value + per-token policy.
-        let net = build_attn_net();
-        let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
-            let (t, msk, st2) = crate::feats::features_tokens(st, sd);
-            net.forward(&t, &msk, &st2)
-        };
-        vsearch::root_nw_until_pv(&s, seat, &mut rng,
-            |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        ATTN_NET.with(|net| {
+            let pv = |st: &State, sd: usize| -> (f64, Vec<f64>) {
+                let (t, msk, st2) = crate::feats::features_tokens(st, sd);
+                net.forward(&t, &msk, &st2)
+            };
+            vsearch::root_nw_until_pv(&s, seat, &mut rng,
+                |i| i < cap && (i % 64 != 0 || (js_sys::Date::now() - start) < budget_ms), &pv)
+        })
     };
     let tot: i32 = n.iter().sum();
     let value = if tot > 0 { w.iter().sum::<f64>() / tot as f64 } else { 0.0 };
