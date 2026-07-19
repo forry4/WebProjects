@@ -171,8 +171,7 @@ function RoyalCard({ royal, dim, onClick, selected }) {
   return (
     <div className={`duel-royal${dim ? " dim" : ""}${selected ? " selected" : ""}`} onClick={onClick}
       title={royal.ability ? ABILITY_DESC[royal.ability] : "No ability"}>
-      <span className="duel-royal-crown">{"♛"}</span>
-      <span className="duel-royal-pts">{royal.points}</span>
+      <span className="duel-royal-pts">{"★"}{royal.points}</span>
       {royal.ability && <span className="duel-royal-abil">{ABILITY_GLYPH[royal.ability]}</span>}
     </div>
   );
@@ -361,11 +360,14 @@ const css = `
    the glyph can't inflate its button past the text ones. */
 .duel-actionrow .btn-gold{border:1px solid transparent}
 .duel-actionrow .btn{line-height:1.2}
+/* "Claim a Royal at 3 & 6 crowns" — the royal cards themselves no longer draw a crown
+   (it read as if a Royal cost/gave crowns); this line is the only crown-threshold cue. */
+.duel-royals-hint{font-size:.82rem;color:var(--gold,#e6c260);opacity:.9;text-align:center;letter-spacing:.02em}
+.duel-royals-hint b{color:#f5c842;font-weight:700}
 .duel-royals-row{display:flex;gap:10px;justify-content:center}
 .duel-royal{position:relative;width:66px;height:46px;background:linear-gradient(160deg,#3a2c45,#2c2135);border:1px solid #6b5a80;border-radius:8px;display:flex;align-items:center;justify-content:center;gap:6px}
 .duel-royal.dim{opacity:.35}
 .duel-royal.selected{box-shadow:0 0 0 2px #f5c842;cursor:pointer}
-.duel-royal-crown{color:#f5c842;font-size:.85rem}
 .duel-royal-pts{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:#f4e9d4}
 .duel-royal-abil{font-size:.8rem;color:#d9c8f0}
 /* Privilege tokens = dark coins with a big gold fleur (flat, high-contrast so the fleur
@@ -1379,6 +1381,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         {pendingMine && pendKind === "take_same" && (
           <span className="duel-muted">Ability: take a {pendCtx.color} token — click one on the board (or <a href="#" onClick={(ev) => { ev.preventDefault(); mv({ type: "skip_pending" }); }}>skip</a>)</span>
         )}
+      </div>
+      <div className="duel-royals-hint" title="When a player reaches 3 crowns they claim a Royal, and a second one at 6 crowns.">
+        Claim a Royal at <b>3</b> &amp; <b>6</b> {"♛"}
       </div>
       <div className="duel-royals-row">
         {Object.values(royals).map((r) => {
