@@ -71,6 +71,13 @@ export const lobbyCss = `
 	.lby-title{font-size:clamp(.82rem,3.2vw,1.1rem);letter-spacing:.03em}
 	.lby-back,.lby-headbtn{padding:5px 9px;font-size:.66rem;gap:4px}
 	.lby-head-name{max-width:104px;font-size:.72rem}
+	/* Shrink the CODE field to ~6 characters (room codes are 6), and tighten the row gap +
+	   button padding, so the create button, the code+Join group, and the refresh button all
+	   fit on ONE row on phones (down to ~360px). The descendant / doubled-class selectors
+	   out-specify the base rules (this @media block precedes them). */
+	.lby-create-row .lby-code{width:90px;padding-left:9px;padding-right:9px}
+	.lby-create-row.lby-create-row{gap:6px}
+	.lby-create-row .lby-cta,.lby-create-row .lby-join-btn{padding-left:11px;padding-right:11px}
 }
 `;
 
