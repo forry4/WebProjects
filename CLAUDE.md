@@ -1257,6 +1257,71 @@ All frontend (`CastlesOfCrimson.jsx`), no engine/backend change. Durable, non-ob
   then measures panel/header/depot geometry + screenshots at 1500/1600/1710/1920 (the user runs display
   scaling, so their effective viewport is ~1500–1600 — test there, not just 1920).
 
+### Session (2026-07-18/19) — CoC 2-4 PLAYER + game-screen layout overhaul (SHIPPED to prod)
+Frontend batch that made CoC playable **2-4 players** (vs friends; AI games stay 2p) and reworked the
+3-column game screen. Built on branch **`coc-4player`** in the `forrestm_projects-stgfix` worktree,
+iterated on **staging**, then shipped. **The 2-4p BACKEND (engine `depot_fill`/`black_fill(n)=2n` + 3p
+depot-6 castle→mine exception, `main.py` `max_players`/`same_board`/player3-4 columns, tests) was already
+on `origin/main`** (committed separately: `9b21c37`/`3c9d6f5`), so the **net diff of `coc-4player` vs
+`origin/main` was ONLY `CastlesOfCrimson.jsx`** → shipped frontend-only via a branch off origin/main
+bringing that one file. Durable, non-obvious facts:
+- **2-4 players (frontend):** opponent **peek tabs** (`.coc-opp-tab`, `viewOppId` state; `oppId` = the
+  tab selection or, by default, whoever's acting) — the two duchy columns show ME + one opponent, tabs
+  switch which; N-player lobby lists / waiting-room `x/N`; create-modal **player-count** selector (2/3/4)
+  + a **Same board** toggle (backend `max_players`/`same_board`; same_board forces everyone onto the
+  host's board at start).
+- **THE LAYOUT `useLayoutEffect` (`boardHexRef`, deps `[game]` + a resize listener) DOES A LOT — read it
+  before touching the game screen. 3-col desktop only (`innerWidth >= 1280`; clears everything below).**
+  The depot ring is absolutely-positioned (each depot pinned by % of the board-hex height), so the board
+  doesn't grow with content — the effect measures + drives it in 4 steps: (1) **`--coc-board-minh`** =
+  the height at which every numbered depot fits `[0,H]` given its center-fraction + pin type (tb =
+  centered `translate -50%`; side = edge-pinned, grows outward); content-sized depot heights are
+  H-independent so one pass converges. (2) **black-depot clearance** — the black depot is centered
+  (f=0.5) and tall at 4p, colliding with depot 1/4's inward mini-dice; adds `H·|0.5-f| >= blackH/2 + k +
+  8` (k = the die's fixed-px reach past the depot center), only binds at 4p. (3) **duchy-area height
+  sync** (the log-scroll fix, below). (4) **storage zoom** (below).
+- **LOG moved UNDER the duchies (load-bearing restructure).** The two duchies + log are wrapped in a flex
+  `.coc-duchy-area` (flex COLUMN) holding a `.coc-duchy-row` (the two duchies) + the `.coc-log-panel`;
+  **both wrappers are `display:contents` below 1280** so the 1/2-col layouts keep treating duchies+log as
+  direct grid children (unchanged). **THE LOG-SCROLL TRAP (do not regress):** an auto-height flex/grid
+  column ALWAYS grows to the log's content and stretches the board — `grid-template-rows:auto minmax(0,1fr)`
+  did NOT cap it (board grew 856→1939px with a long log). The ONLY fix that held: **JS height-sync** — in
+  the effect, `align-items:flex-start` on `.coc-game-cols` (so the log can't inflate the board via
+  stretch), measure the board column's natural depot height + the duchy-row height, pin BOTH the board
+  col and the duchy-area to `max(boardNat, rowH+130+16)`. Then `.coc-duchy-row{flex:none}` +
+  `.coc-log-panel{flex:1 1 0;min-height:0}` + inner `.coc-log{flex:1;min-height:0;overflow-y:auto}` → the
+  log fills the leftover and scrolls. **`flex:none` on the row is CRITICAL** (else the log's
+  `flex-basis:auto` content makes the row shrink and CLIPS the duchy boards).
+- **Depots = "option-5" (user pick): a 2×2 tile grid for ALL depots** (`.coc-tiles-inner{display:grid;
+  grid-template-columns:repeat(2,auto)}`, fixed depot width 158px). 4 tiles → 2×2 square; 2 → one row;
+  **3 → a TRIANGLE** (`.coc-tiles-tri`: the 3rd tile `grid-column:1/-1;justify-self:center;margin-top:-21px`
+  — pulled UP into the notch so its diagonal gap to the top two equals the 6px flat-side gap between them,
+  a honeycomb nestle for pointy-top hexes). Goods render as a wrapping row per depot; **topside side
+  depots (2/6) AND depot 1** put goods ABOVE the tiles (`order:-1`, grow up/away from center), the rest
+  below.
+- **Black depot = 2-column grid, rows = player count** (2/3/4 rows → 4/6/8 tiles), **FIXED size** via
+  `gridTemplateRows:repeat(num_players, HEX_H)` + `alignContent:start` so it NEVER shrinks as tiles are
+  bought (empty cells for taken tiles). Replaced the old 4-tile "kite" that silently dropped tiles 5-8 at
+  3-4p.
+- **Goods box: fixed 240px (= the natural 3-goods-type row width), sold pile `margin-left:auto` (pinned
+  right).** Do NOT use `fit-content` (it lets the sold pile drift left) and do NOT keep the old 260px (too
+  wide → a trailing gap). **Storage tiles are fixed 70px with fixed-px icons (can't flex-shrink)**, so the
+  effect **`zoom`s `.coc-storage`** to fill the space left beside the fixed goods box → they stay on one
+  row at narrow 3-col widths (caps at 1 = full size when there's room, e.g. ~1920+; ~55px at the user's
+  1536, tiny at 1280).
+- **Duchy board flush buffers:** the SVG viewBox uses `padX=(HEX_S-1.5)·√3/2+0.5` and
+  `padY=(HEX_S-1.5)+0.5` (the DRAWN hex half-extents) so the hexes sit flush on every edge, matching the
+  storage row's ~0 side buffer (was the looser `HEX_S+2`).
+- **Smaller layout tweaks:** turn-order track fills the panel width (`.coc-track-space{flex:1 1 0}`, 601+);
+  buffer ABOVE the track = `.coc-board-head{margin-bottom:14px}` (separates it from the phase-goods row);
+  color-bonus chips `.coc-bonus-sw` 15→19px; bottom page gap trimmed to ~16px (`.coc-wrap-game{padding-bottom:16px}`
+  + `.coc-game-cols{margin-bottom:0}`, was 64px).
+- **Verify at 1536** (the user's effective viewport under display scaling), not just 1920 — several of the
+  above (storage zoom, log fit) only bite at narrower 3-col widths. Multi-player Playwright: host creates
+  a VS-Friend N-player + Same-board game, N-1 guest contexts join the OPEN-GAME CARD's Join (lowest on the
+  page / filter by room code — NOT the top-bar join-by-code), each confirms the board modal's "Join Game",
+  host clicks Start.
+
 ### Session (2026-07-14/15) — monastery benefit ICONS + barrel goods SHIPPED to prod; CoB→CoC BGA mining pipeline; backend batch DEFERRED
 Two workstreams: (1) a visual pass on `CastlesOfCrimson.jsx` (SHIPPED to prod, frontend-only), and (2) mining Castles of Burgundy expert games off BGA to build a CoC-N training corpus (tooling in the `forrestm_projects-cobmining` worktree). Durable facts:
 - **Monastery benefit icons (SHIPPED) — each of the 26 monasteries shows a pictogram of its power.** All in `CastlesOfCrimson.jsx`: a `MONASTERY_ICON` map (`effect_id 1-26 → () => <svg fragment>`) built from small 24×24 primitive helpers (`mPawn/mCoin/mDie/mStar/mShift/mArrowR/mArrowV/mBarrel/mHouse/mHex/mHexFill/mNum/mIcon` + a `HexStriped` component + `mBonusTile/BonusTileBadge`), dark-on-yellow. `MonasteryArt({id})` composes the pictogram + a small corner id (kept for identity + "Monastery #N" log/tooltip refs). Wired into BOTH render paths — `TileArt` (HTML depot/storage) and `TileArtSvg` (SVG board) — since the fragment is pure SVG children. VP stars use `M_VP`=watchtower green `#356340`; the die-shift tiles (#9-12) tint hexes from the real `TILE_HEX` palette; #15 uses `GOODS_HEX` (goods #1/#2/#3 = amber/rose/jade). `HexStriped` uses a per-instance `useId()` clip id so many striped hexes co-exist.
