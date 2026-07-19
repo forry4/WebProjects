@@ -239,14 +239,15 @@ const css = `
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
 /* game columns (named areas): the LOG sits UNDER the cards on the left, while the
-   board + player rail stay full-height on the right. The side rail is now a full fr
-   track (was capped at 380px) so the two player boxes FILL it out to the screen edge;
-   the board stays a fixed 5x5 grid that centers any slack. The log stretches to fill
-   the left column down to the board's foot (scrolling internally past its cap) so no
-   gap opens under the pyramid early game when the log is short. */
+   board + player rail stay full-height on the right. The board stays a fixed 5x5 grid
+   that centers any slack; the log stretches to fill the left column down to the board's
+   foot (scrolling internally past its cap) so no gap opens under the pyramid early game.
+   Track widths: the side rail was cut 25% (min + fr, 320->240 / 1.1->0.825fr) and that
+   exact width handed to the CARDS column (400->480 / 1.2->1.475fr) — the board's 1fr is
+   untouched — so the pyramid's width-driven --card-w clamp renders BIGGER cards. */
 .duel-cols{
   display:grid;
-  grid-template-columns:minmax(400px,1.2fr) minmax(340px,1fr) minmax(320px,1.1fr);
+  grid-template-columns:minmax(480px,1.475fr) minmax(340px,1fr) minmax(240px,0.825fr);
   grid-template-areas:"cards board side" "log board side";
   grid-template-rows:auto 1fr;
   gap:18px;align-items:start}
