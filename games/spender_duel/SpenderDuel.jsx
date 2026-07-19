@@ -384,31 +384,42 @@ const css = `
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
-/* Token + bonus pills are CONTENT-SIZED chips that WRAP (5 gems + pearl + gold; the bonus
-   row: 5 colors + 2 royals). They USED to flex to 1/7 of the panel each with the anchor
-   derived from 100cqw — fine on the old narrow rail, but once the rail was widened to fill
-   the screen that stretched them into long capsules AND inflated their height. --pill-anchor
-   is now a FIXED size (decoupled from the rail width) so a wide rail no longer scales them,
-   and flex:0 0 auto lets each pill take only its content width (wrapping to a second row if
-   needed). Ratios are Spender's, nudged up a touch for legibility. */
+/* Pills fill exactly ONE row of 7 — Duel has 7 token types (5 gems + pearl + gold), and
+   the bonus row tops out at 7 too (5 colors + 2 royals). The rows use gap:4px, so 7 items
+   leave 6 gaps = 24px; nowrap + min-width:0 + overflow:hidden lets a pill take exactly
+   its share instead of wrapping or pushing the row wide — so all 7 stay on ONE row at any
+   rail width, shrinking to fit rather than wrapping.
+
+   SHAPE comes from Spender: it derives every pill dimension from --card-h (font x0.082,
+   padding x0.018/x0.006, gap x0.014, dot x0.078, radius 999px), giving a 1.82 w:h
+   capsule. Duel's rail has no card to anchor to, so we rebuild that anchor from the
+   pill's OWN width and reuse Spender's formulas verbatim — a Duel pill is a Spender pill
+   scaled, not a flattened one. (Measured: Spender's pill is 61.6 wide at --card-h 218.5,
+   hence the 3.547 factor. Sizing the width alone gave a 2.48-ratio flat pill.) */
 .duel-player{container-type:inline-size}
 .duel-player .player-tokens,.duel-player .player-bonuses{
-  flex-wrap:wrap;gap:7px;min-width:0;
-  --pill-anchor:240px;
+  flex-wrap:nowrap;min-width:0;
+  /* 100cqw is the panel's CONTENT box (padding already excluded), so the row only loses
+     its 6 gaps x 4px. Subtracting the padding again here under-sized the anchor and left
+     the pill at a 2.0 ratio instead of Spender's 1.82. */
+  --pill-anchor:calc(((100cqw - 24px) / 7) * 3.547);
 }
 .duel-player .token-pill,.duel-player .bonus-pill{
-  flex:0 0 auto;
-  min-width:0;justify-content:center;white-space:nowrap;
-  font-size:calc(var(--pill-anchor) * 0.088);
-  padding:calc(var(--pill-anchor) * 0.02) calc(var(--pill-anchor) * 0.034);
-  gap:calc(var(--pill-anchor) * 0.02);
+  flex:0 1 calc((100% - 24px) / 7);
+  min-width:0;justify-content:center;overflow:hidden;white-space:nowrap;
+  font-size:calc(var(--pill-anchor) * 0.082);
+  padding:calc(var(--pill-anchor) * 0.018) calc(var(--pill-anchor) * 0.006);
+  gap:calc(var(--pill-anchor) * 0.014);
   border-radius:999px;
-  min-height:calc(var(--pill-anchor) * 0.16);
+  /* Pin the HEIGHT to Spender's (its pill is 33.8 tall at --card-h 218.5 => 0.1547), so
+     both pills are the same capsule regardless of their text size — otherwise the
+     bonus pill's smaller font shrinks its box and the two rows stop matching. */
+  min-height:calc(var(--pill-anchor) * 0.1547);
   box-sizing:border-box;
 }
 .duel-player .player-tokens .token-pill>span{
-  width:calc(var(--pill-anchor) * 0.086)!important;
-  height:calc(var(--pill-anchor) * 0.086)!important;flex:0 0 auto;
+  width:calc(var(--pill-anchor) * 0.078)!important;
+  height:calc(var(--pill-anchor) * 0.078)!important;flex:0 0 auto;
 }
 /* Dropping the redundant color letter ("+3★3", not "+3 R★3" — the pill is already
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
@@ -464,6 +475,10 @@ const css = `
 .duel-modal h3{margin-top:0}
 .duel-modal-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:14px 0}
 .duel-overlay-note{text-align:center;margin-top:8px;opacity:.75;font-size:.9rem}
+/* Log-inspect card modal: snug width, and the card scaled up uniformly with zoom (the
+   codebase's scale-with-reflow approach) so its shared internals stay proportional. */
+.duel-cardmodal{max-width:280px}
+.duel-cardmodal .card{zoom:1.7;cursor:default;margin:0 auto}
 
 /* flyers */
 .duel-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:180}
@@ -632,6 +647,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [goldCell, setGoldCell] = useState(null);    // armed gold cell (reserve mode)
   const [selCard, setSelCard] = useState(null);      // {id, from} buy candidate
   const [wildPick, setWildPick] = useState(false);   // wild as_color chooser open
+  const [modalCard, setModalCard] = useState(null);  // a log entry's card, opened for inspection
   const [flyers, setFlyers] = useState([]);
   const flyerSeq = useRef(0);
   const prevLogLen = useRef(0);
@@ -687,10 +703,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     && !!game && game.board.some((t) => t && t !== "gold");
   const pendKind = game?.pending_kind;
   const pendCtx = game?.pending?.ctx || {};
-  // Have I done anything this turn? Derived from the log (entries carry the turn number)
-  // rather than a local flag, so it survives a reconnect and can't drift from the server.
-  const actedThisTurn = !!game && (game.log || []).some((e) => e.t === game.turn_number);
-  const canUndo = myTurn && actedThisTurn;
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
@@ -1110,12 +1122,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     });
   };
 
-  // Take the whole turn back (server-side; the engine restores its turn-start snapshot).
-  // Clear any local arming too, so the UI doesn't keep pointing at a move that's gone.
-  const undoTurn = () => {
-    setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null); setWildPick(false);
-    mv({ type: "undo_turn" });
-  };
 
   const submitTake = () => {
     if (selCells.length && lineOk(selCells, game.board)) {
@@ -1351,13 +1357,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         {pendingMine && pendKind === "take_same" && (
           <span className="duel-muted">Ability: take a {pendCtx.color} token — click one on the board (or <a href="#" onClick={(ev) => { ev.preventDefault(); mv({ type: "skip_pending" }); }}>skip</a>)</span>
         )}
-        {/* Undo sits OUTSIDE the not-pending block: a turn must be takeable back from any
-            point in it, including part-way through an ability. Actions like spending a
-            Privilege are real server moves — clearing the local selection can't undo them. */}
-        {canUndo && (
-          <button className="btn btn-outline" onClick={undoTurn}
-            title="Take back everything you've done this turn">↩ Undo turn</button>
-        )}
       </div>
       <div className="duel-royals-row">
         {Object.values(royals).map((r) => {
@@ -1394,14 +1393,21 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           )}
           {log.map((e, r) => ({ e, r })).reverse().slice(0, 150).map(({ e, r }) => {
             const target = snapForLogIndex(r);
-            const clickable = target >= 0;
-            const { name, action } = fmtLog(e, names, cardsById, royals);
+            const navigable = target >= 0;
+            const { name, action, card } = fmtLog(e, names, cardsById, royals);
+            // Click a reserve/buy row to inspect its card (Spender's log-inspect). A reserve
+            // from the DECK TOP is hidden info — the log strips its card_id, so `card` is
+            // null; show a face-down back instead of leaking it (and force it even if a
+            // future card_id ever leaks through). In review the click navigates instead.
+            const blindReserve = e.type === "reserve" && e.from_deck;
+            const peekCard = blindReserve ? { hidden: true, level: e.level } : card;
+            const clickable = navigable || !!peekCard;
             return (
               <LogEntry key={r} turn={e.t} name={name} action={action}
                 clickable={clickable}
                 selected={reviewing && target === replayTurn}
                 future={r >= shownLen}   /* moves after the board being shown, dimmed */
-                onClick={clickable ? () => goToTurn(target) : undefined} />
+                onClick={navigable ? () => goToTurn(target) : (peekCard ? () => setModalCard(peekCard) : undefined)} />
             );
           })}
           {replaySnapshots && (
@@ -1456,7 +1462,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             </div>
             <div className="duel-overlay-note">
               <button className="btn btn-outline" onClick={() => mv({ type: "skip_pending" })}>Skip</button>
-              {canUndo && <button className="btn btn-outline" onClick={undoTurn}>↩ Undo turn</button>}
             </div>
           </div>
         </div>
@@ -1471,11 +1476,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 <RoyalCard key={rid} royal={royals[rid]} selected onClick={() => mv({ type: "choose_royal", royal_id: rid })} />
               ))}
             </div>
-            {canUndo && (
-              <div className="duel-overlay-note">
-                <button className="btn btn-outline" onClick={undoTurn}>↩ Undo turn</button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1492,13 +1492,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 </div>
               ))}
             </div>
-            {/* This pending has no Skip (discarding is mandatory), so undo is the only
-                way out — e.g. you took a line you didn't mean to and are now over 10. */}
-            {canUndo && (
-              <div className="duel-overlay-note">
-                <button className="btn btn-outline" onClick={undoTurn}>↩ Undo the whole turn instead</button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1514,6 +1507,21 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                   <div className="duel-muted">{myBonuses[c]} bonus{myBonuses[c] === 1 ? "" : "es"}</div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Inspect a card from the log (a reserve/buy row). A deck-top reserve is shown
+          face-down — its identity is hidden info. */}
+      {modalCard && (
+        <div className="duel-backdrop" onClick={() => setModalCard(null)}>
+          <div className="duel-modal duel-cardmodal" onClick={(e) => e.stopPropagation()}>
+            <div className="duel-modal-row">
+              <DuelCard card={modalCard} />
+            </div>
+            {modalCard.hidden && <div className="duel-overlay-note">Reserved face-down from the deck — its card is hidden.</div>}
+            <div className="duel-modal-row">
+              <button className="btn btn-outline" onClick={() => setModalCard(null)}>Close</button>
             </div>
           </div>
         </div>
