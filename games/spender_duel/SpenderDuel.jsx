@@ -238,10 +238,26 @@ const css = `
 .duel-turnbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#3f5f33;color:#dfeecf;white-space:nowrap}
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
-/* game columns: the CARDS column is the only 1fr, so all spare width goes to it —
-   the board is a fixed 5x5 grid and the player/moves rail is capped, neither needs
-   the room. (Previously the rail was the 1fr and swallowed everything.) */
-.duel-cols{display:grid;grid-template-columns:minmax(420px,1.5fr) minmax(360px,1fr) minmax(260px,380px);gap:18px;align-items:start}
+/* game columns (named areas): the LOG sits UNDER the cards on the left, while the
+   board + player rail stay full-height on the right. The side rail is now a full fr
+   track (was capped at 380px) so the two player boxes FILL it out to the screen edge;
+   the board stays a fixed 5x5 grid that centers any slack. The log stretches to fill
+   the left column down to the board's foot (scrolling internally past its cap) so no
+   gap opens under the pyramid early game when the log is short. */
+.duel-cols{
+  display:grid;
+  grid-template-columns:minmax(400px,1.2fr) minmax(340px,1fr) minmax(320px,1.1fr);
+  grid-template-areas:"cards board side" "log board side";
+  grid-template-rows:auto 1fr;
+  gap:18px;align-items:start}
+.duel-col-cards{grid-area:cards}
+.duel-col-board{grid-area:board}
+.duel-col-side{grid-area:side}
+.duel-col-log{grid-area:log;align-self:stretch;min-height:0;display:flex}
+.duel-col-log .log-panel{flex:1;display:flex;flex-direction:column;min-height:0}
+/* .duel-prefixed so this fill beats the later, equal-specificity .duel-panel .move-log
+   cap (0,3,0 > 0,2,0) — otherwise the fixed max-height wins and the log won't fill. */
+.duel .duel-col-log .move-log{flex:1;min-height:0;max-height:none}
 .duel-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface,#1b1712);border:1px solid var(--line,#3a332a);border-radius:12px;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5)}
 
 /* pyramid */
@@ -420,8 +436,9 @@ const css = `
 .duel-reserved-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
 
 /* log: SPENDER's .move-log / .log-entry (shared/splendor.jsx) — same rows, same
-   review vocabulary (clickable / log-selected / log-win / log-start). Duel only
-   raises the height cap, since its rail has the room. */
+   review vocabulary (clickable / log-selected / log-win / log-start). The log now sits
+   in its own column UNDER the cards (.duel-col-log), where it stretches to fill; this
+   cap is the fallback (phones + any non-filling context). */
 .duel-panel .move-log{max-height:min(46vh,420px)}
 .log-entry.future{opacity:.35}
 
@@ -449,12 +466,20 @@ const css = `
 .duel-gameover-badge{font-size:1.05rem;margin:6px 0 2px;color:#f5c842}
 
 @media(max-width:1120px){
-  .duel-cols{grid-template-columns:1fr 1fr}
-  .duel .duel-col-side{grid-column:1 / -1}
+  /* 2-col: cards+log stack on the left, board fills the right; the player rail drops
+     to a full-width row beneath (areas replace the old grid-column:1/-1 span). */
+  .duel-cols{grid-template-columns:1fr 1fr;grid-template-rows:auto;
+    grid-template-areas:"cards board" "log board" "side side"}
   .duel-lobby-cols{grid-template-columns:1fr}
 }
 @media(max-width:720px){
-  .duel-cols{grid-template-columns:1fr}
+  /* Phone single-column: cards, board, player boxes, then the log LAST (a big log
+     shouldn't sit between the pyramid and the board on a small screen). */
+  .duel-cols{grid-template-columns:1fr;grid-template-rows:auto;
+    grid-template-areas:"cards" "board" "side" "log"}
+  /* Restore the internal-scroll cap on phones (the log is last, so don't let it fill
+     and stretch the page — cap it and scroll inside like before). */
+  .duel .duel-col-log .move-log{flex:none;max-height:min(46vh,420px)}
   /* Trim the side buffer on phones so the board + cards get more width (matched header
      margin keeps the full-bleed header exactly at the screen edge — a wider -14px here
      would push it past an 8px padding and cause a horizontal scrollbar). */
@@ -1708,8 +1733,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         <div className="duel-col-side">
           {oppId && renderPlayer(oppId, false)}
           {me && renderPlayer(myId, true)}
-          {renderLog()}
         </div>
+        <div className="duel-col-log">{renderLog()}</div>
       </div>
       <div className="duel-fly-layer">
         {flyers.map((f) => (
