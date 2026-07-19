@@ -364,16 +364,16 @@ const css = `
    ARMS privilege mode (.armed) → a bright, persistent gold ring + glow + pulse, so
    "selected — now pick a gem" is unmistakable. Hover-lift is DESKTOP-ONLY: a stray
    tap-:hover otherwise stuck a ring on one coin on mobile (the reported confusion). */
-.duel-scrolls{display:inline-flex;gap:5px}
+.duel-scrolls{display:inline-flex;gap:7px}
 .duel-scroll{
   display:inline-flex;align-items:center;justify-content:center;
-  width:26px;height:26px;border-radius:50%;
-  font-size:1.45rem;line-height:1;color:#e6c260;
+  width:34px;height:34px;border-radius:50%;
+  font-size:1.9rem;line-height:1;color:#e6c260;
   background:#241d14;border:1px solid #5a4a2c;
   box-shadow:0 1px 2px rgba(0,0,0,.4);
   transition:transform .1s ease,box-shadow .1s ease,border-color .1s ease,filter .1s ease;
 }
-.duel-scroll:not(.full){color:transparent;background:transparent;border:1.5px dashed #4a4030;box-shadow:none}
+.duel-scroll:not(.full){color:transparent;background:transparent;border:2px dashed #4a4030;box-shadow:none}
 .duel-scrolls.clickable{cursor:pointer}
 .duel-scrolls.clickable .duel-scroll.full{border-color:#7a6330;box-shadow:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(232,201,106,.28)}
 @media (hover:hover){
@@ -384,41 +384,31 @@ const css = `
 .duel-victory-chip{font-size:.8rem;opacity:.75;border:1px solid #3a332a;border-radius:999px;padding:3px 10px}
 
 /* player panels */
-/* Pills fill exactly ONE row of 7 — Duel has 7 token types (5 gems + pearl + gold), and
-   the bonus row tops out at 7 too (5 colors + 2 royals). The rows use gap:4px, so 7 items
-   leave 6 gaps = 24px; nowrap + min-width:0 + overflow:hidden lets a pill take exactly
-   its share instead of wrapping or pushing the row wide.
-
-   SHAPE comes from Spender: it derives every pill dimension from --card-h (font x0.082,
-   padding x0.018/x0.006, gap x0.014, dot x0.078, radius 999px), giving a 1.82 w:h
-   capsule. Duel's rail has no card to anchor to, so we rebuild that anchor from the
-   pill's OWN width and reuse Spender's formulas verbatim — a Duel pill is a Spender pill
-   scaled, not a flattened one. (Measured: Spender's pill is 61.6 wide at --card-h 218.5,
-   hence the 3.547 factor. Sizing the width alone gave a 2.48-ratio flat pill.) */
+/* Token + bonus pills are CONTENT-SIZED chips that WRAP (5 gems + pearl + gold; the bonus
+   row: 5 colors + 2 royals). They USED to flex to 1/7 of the panel each with the anchor
+   derived from 100cqw — fine on the old narrow rail, but once the rail was widened to fill
+   the screen that stretched them into long capsules AND inflated their height. --pill-anchor
+   is now a FIXED size (decoupled from the rail width) so a wide rail no longer scales them,
+   and flex:0 0 auto lets each pill take only its content width (wrapping to a second row if
+   needed). Ratios are Spender's, nudged up a touch for legibility. */
 .duel-player{container-type:inline-size}
 .duel-player .player-tokens,.duel-player .player-bonuses{
-  flex-wrap:nowrap;min-width:0;
-  /* 100cqw is the panel's CONTENT box (padding already excluded), so the row only loses
-     its 6 gaps x 4px. Subtracting the padding again here under-sized the anchor and left
-     the pill at a 2.0 ratio instead of Spender's 1.82. */
-  --pill-anchor:calc(((100cqw - 24px) / 7) * 3.547);
+  flex-wrap:wrap;gap:7px;min-width:0;
+  --pill-anchor:240px;
 }
 .duel-player .token-pill,.duel-player .bonus-pill{
-  flex:0 1 calc((100% - 24px) / 7);
-  min-width:0;justify-content:center;overflow:hidden;white-space:nowrap;
-  font-size:calc(var(--pill-anchor) * 0.082);
-  padding:calc(var(--pill-anchor) * 0.018) calc(var(--pill-anchor) * 0.006);
-  gap:calc(var(--pill-anchor) * 0.014);
+  flex:0 0 auto;
+  min-width:0;justify-content:center;white-space:nowrap;
+  font-size:calc(var(--pill-anchor) * 0.088);
+  padding:calc(var(--pill-anchor) * 0.02) calc(var(--pill-anchor) * 0.034);
+  gap:calc(var(--pill-anchor) * 0.02);
   border-radius:999px;
-  /* Pin the HEIGHT to Spender's (its pill is 33.8 tall at --card-h 218.5 => 0.1547), so
-     both pills are the same capsule regardless of their text size — otherwise the
-     bonus pill's smaller font shrinks its box and the two rows stop matching. */
-  min-height:calc(var(--pill-anchor) * 0.1547);
+  min-height:calc(var(--pill-anchor) * 0.16);
   box-sizing:border-box;
 }
 .duel-player .player-tokens .token-pill>span{
-  width:calc(var(--pill-anchor) * 0.078)!important;
-  height:calc(var(--pill-anchor) * 0.078)!important;flex:0 0 auto;
+  width:calc(var(--pill-anchor) * 0.086)!important;
+  height:calc(var(--pill-anchor) * 0.086)!important;flex:0 0 auto;
 }
 /* Dropping the redundant color letter ("+3★3", not "+3 R★3" — the pill is already
    color-coded) freed enough room that the bonus pill can use Spender's own font ratio,
