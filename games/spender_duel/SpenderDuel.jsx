@@ -418,6 +418,13 @@ const css = `
    plus a smaller one before the bought-card indicators. */
 .duel-player .player-tokens{margin-top:13px}
 .duel-player .player-bonuses{margin-top:9px}
+/* The "N tokens" summary chip is Spender's shared inline-block .gem-total, but the player
+   box is a flex COLUMN on desktop (the viewport-lock), whose default align-items:stretch
+   was blowing it out to the FULL box width — that's the "way too long" pill. Pin it to its
+   content width (align-self) and size it up a touch. Same align-self keeps the clickable
+   privilege-scroll row content-width so its onClick has no full-width dead zone. */
+.duel-player .gem-total{align-self:flex-start;font-size:.82rem;padding:3px 11px;border-radius:9px;margin-top:9px}
+.duel-player .duel-scrolls{align-self:flex-start}
 .duel-player{margin-bottom:14px}
 .duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
