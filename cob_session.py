@@ -14,9 +14,12 @@ Therefore: seed a cookie jar from the file and let Set-Cookie ride. The jar keep
 the freshly-minted PHPSESSID for the rest of the run, and each new run re-mints
 from tkt. The file's PHPSESSID going stale becomes a non-event.
 
-The ONLY thing that needs a human is `tkt` itself expiring (BGA's remember-me
-ticket, typically long-lived). is_auth_error() spots that so callers can say so
-plainly instead of retrying a dead credential.
+When `tkt` itself expires, Session.login() AUTO-RENEWS it: a real BGA login with
+stored credentials (env BGA_EMAIL/BGA_PASSWORD or CREDS_FILE) mints a fresh
+remember-me ticket, saves it to the session file, and the grind continues with no
+human. is_auth_error() spots the dead ticket so callers relogin instead of retrying
+a dead credential; a human is only needed if login() also fails (bad password /
+CAPTCHA / 2FA).
 
 REFRESHING THE SESSION (only needed if the TICKET dies — you'll see
 "persistent ticket rejected" / "re-export the BGA cookie" in resume_log.txt):
@@ -37,7 +40,10 @@ The cron then picks straight back up — progress is on disk, nothing is lost.
 """
 import http.cookiejar as cj
 import json
+import os
 import re
+import urllib.error
+import urllib.parse
 import urllib.request
 
 import cob_collect as cc
@@ -45,6 +51,53 @@ import cob_collect as cc
 # Cookies BGA actually needs. tkt = the persistent ticket (the real credential).
 KEEP = ("TournoiEnLigne_sso_id", "TournoiEnLigne_sso_user",
         "TournoiEnLigneidt", "TournoiEnLignetkt", "PHPSESSID")
+
+# Credentials for AUTO-RENEW (Session.login): env BGA_EMAIL/BGA_PASSWORD first, else this
+# file (same private dir as the session file, OUTSIDE the repo). Never commit real creds.
+CREDS_FILE = os.path.join(os.path.dirname(cc.COOKIE_FILE), "login.txt")
+# BGA's login contract (endpoint + field names), captured from a real login HAR (2026-07-19):
+#   POST .../account/auth/loginUserWithPassword.html
+#   body: username, password, remember_me=true, request_token   (+ X-Request-Token header)
+# The request_token is the page's `requestToken` (64-hex), tied to the PHPSESSID the same jar
+# just picked up, so the token GET and the login POST MUST share one opener (they do).
+LOGIN_URL = "https://en.boardgamearena.com/account/auth/loginUserWithPassword.html"
+TOKEN_URL = "https://en.boardgamearena.com/"
+
+
+def _load_creds():
+    """(email, password) from env (BGA_EMAIL/BGA_PASSWORD) or CREDS_FILE.
+    File format is forgiving: `email: you@x.com` / `password: ...` (or `=`), one per line;
+    keys email|user|username|login all mean the login id, pass|password the secret."""
+    email = os.environ.get("BGA_EMAIL", "").strip()
+    pw = os.environ.get("BGA_PASSWORD", "")
+    if email and pw:
+        return email, pw
+    try:
+        for line in open(CREDS_FILE, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            m = re.match(r'(?i)^(email|user(?:name)?|login|pass(?:word)?)\s*[:=]\s*"?(.+?)"?$', line)
+            if not m:
+                continue
+            k, v = m.group(1).lower(), m.group(2).strip()
+            if k.startswith("pass"):
+                pw = pw or v
+            else:
+                email = email or v
+    except FileNotFoundError:
+        pass
+    return email, pw
+
+
+def _write_session(jar):
+    """Persist the KEEP cookies (name<tab>value) so the next run reuses the fresh ticket."""
+    lines = [f"{c.name}\t{c.value}" for c in jar if c.name in KEEP and c.value]
+    os.makedirs(os.path.dirname(cc.COOKIE_FILE), exist_ok=True)
+    tmp = cc.COOKIE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, cc.COOKIE_FILE)
 
 
 def _pairs():
@@ -96,6 +149,68 @@ class Session:
 
     def has_ticket(self):
         return bool(self.tkt)
+
+    def login(self, log=lambda m: None):
+        """AUTO-RENEW: mint a FRESH ticket via a real BGA login (email+password), persist the
+        new cookies to the session file, and adopt the live jar. Returns True on success.
+
+        This is what removes the human from the loop when the remember-me ticket dies: on an
+        auth error the caller calls this instead of stopping. A dead ticket must NOT ride along,
+        so we log in on a clean jar. Fails cleanly (returns False, logs why) when there are no
+        credentials, or when BGA answers with a CAPTCHA/2FA challenge or rejects the password."""
+        email, pw = _load_creds()
+        if not email or not pw:
+            log(f"auto-login: no credentials — set BGA_EMAIL/BGA_PASSWORD or write {CREDS_FILE} "
+                "(email: / password: lines). Cannot renew the ticket automatically.")
+            return False
+        jar = cj.CookieJar()   # clean jar — the dead ticket does not ride along
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        # 1) a fresh request token (BGA embeds `requestToken` in the page bootstrap); it must
+        #    ride the SAME opener/PHPSESSID as the login POST below.
+        token = ""
+        try:
+            req = urllib.request.Request(TOKEN_URL, headers={"User-Agent": cc.UA})
+            html = opener.open(req, timeout=45).read().decode("utf-8", "replace")
+            m = re.search(r'requestToken["\']?\s*[:=]\s*["\']([A-Za-z0-9]+)', html)
+            token = m.group(1) if m else ""
+        except Exception as e:
+            log(f"auto-login: could not fetch request token ({type(e).__name__})")
+        if not token:
+            log("auto-login: no request_token on the login page — BGA changed the bootstrap.")
+            return False
+        # 2) POST credentials WITH remember_me so the new ticket is long-lived
+        body = urllib.parse.urlencode({
+            "username": email, "password": pw, "remember_me": "true", "request_token": token,
+        }).encode()
+        headers = {"User-Agent": cc.UA,
+                   "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                   "Origin": "https://en.boardgamearena.com",
+                   "Referer": "https://en.boardgamearena.com/?step=2&page=login",
+                   "X-Request-Token": token}
+        try:
+            req = urllib.request.Request(LOGIN_URL, data=body, headers=headers)
+            payload = opener.open(req, timeout=45).read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            log(f"auto-login: HTTP {e.code} from the login endpoint")
+            return False
+        except Exception as e:
+            log(f"auto-login: request failed ({type(e).__name__})")
+            return False
+        # success = a fresh ticket cookie is now in the jar (login mints it via Set-Cookie)
+        tkt = next((c.value for c in jar if c.name == "TournoiEnLignetkt"), "")
+        try:
+            ok = json.loads(payload).get("status") in (1, "1", True)
+        except Exception:
+            ok = bool(tkt)
+        if not (tkt and ok):
+            log("auto-login: rejected — no fresh ticket issued. Likely a wrong password, a "
+                "CAPTCHA/2FA challenge, or a changed login contract. Manual re-export needed.")
+            return False
+        self.jar, self.opener, self.tkt = jar, opener, tkt
+        self.token = next((c.value for c in jar if c.name == "TournoiEnLigneidt"), self.token)
+        _write_session(jar)
+        log("auto-login: fresh ticket minted and saved to the session file.")
+        return True
 
     def api(self, url):
         """JSON GET. The jar supplies cookies and absorbs any refreshed PHPSESSID."""

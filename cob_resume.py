@@ -51,11 +51,22 @@ def log(msg):
 
 
 class AuthDead(Exception):
-    """The persistent TICKET is dead — a human must re-export. Retrying cannot help.
+    """The persistent TICKET is dead. cob_session.Session.login() can auto-renew it (a real
+    BGA login with stored creds); only if that ALSO fails does a human need to step in.
 
     NOT raised for a stale PHPSESSID: that self-heals (cob_session mints a fresh one
     from tkt on the next request), so it never reaches this path.
     """
+
+
+def relogin_once(sess):
+    """Auto-renew a dead ticket via a real login — at most ONCE per run (guarded so a
+    persistently-bad credential can't loop). True if a fresh ticket is now in place."""
+    if getattr(sess, "_relogin_used", False):
+        return False
+    sess._relogin_used = True
+    log("ticket rejected — attempting auto-login to renew it…")
+    return sess.login(log)
 
 
 def api_retry(sess, url):
@@ -130,9 +141,11 @@ def main():
         log(f"FATAL: cannot read session file: {type(e).__name__}")
         return 1
     if not sess.has_ticket():
-        log("FATAL: no TournoiEnLignetkt in the session file — re-export from the "
-            "browser (see REFRESHING THE SESSION in cob_session.py). Stopping.")
-        return 2
+        log("no TournoiEnLignetkt in the session file — attempting auto-login…")
+        if not relogin_once(sess):
+            log("FATAL: no ticket and auto-login unavailable — set credentials "
+                "(cob_session.CREDS_FILE) or re-export the cookie. Stopping.")
+            return 2
     manifest = json.load(open(MANIFEST))
     os.makedirs(LOGS, exist_ok=True)
 
@@ -147,9 +160,15 @@ def main():
     try:
         _, quota = fetch_logs(sess, pending[0])
     except AuthDead as e:
-        log(f"FATAL: persistent ticket rejected ({e}) — re-export the BGA cookie "
-            "(see REFRESHING THE SESSION in cob_session.py). Stopping.")
-        return 2
+        if not relogin_once(sess):
+            log(f"FATAL: ticket rejected ({e}) and auto-login failed — re-export the BGA "
+                "cookie (see REFRESHING THE SESSION in cob_session.py). Stopping.")
+            return 2
+        try:
+            _, quota = fetch_logs(sess, pending[0])   # retry the probe on the fresh ticket
+        except Exception as e2:
+            log(f"FATAL: still failing after auto-login ({type(e2).__name__}). Stopping.")
+            return 2
     except Exception as e:
         log(f"preflight failed ({type(e).__name__}) — BGA may be down. Stopping.")
         return 1
@@ -167,9 +186,16 @@ def main():
         try:
             res = get_one(sess, tid, f"{LOGS}/{tid}.json", delay)
         except AuthDead as e:
-            log(f"FATAL: ticket died mid-run ({e}) — re-export the cookie "
-                "(see REFRESHING THE SESSION in cob_session.py). Stopping.")
-            break
+            if relogin_once(sess):
+                log(f"  ticket renewed mid-run — retrying {tid}")
+                try:
+                    res = get_one(sess, tid, f"{LOGS}/{tid}.json", delay)
+                except Exception as e2:
+                    res, _ = "fail", log(f"  {tid}: {type(e2).__name__} after auto-login")
+            else:
+                log(f"FATAL: ticket died mid-run ({e}) and auto-login failed — re-export "
+                    "the cookie (see REFRESHING THE SESSION in cob_session.py). Stopping.")
+                break
         except Exception as e:
             res, _ = "fail", log(f"  {tid}: {type(e).__name__}")
 
