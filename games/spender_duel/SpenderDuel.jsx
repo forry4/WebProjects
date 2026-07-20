@@ -676,6 +676,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [flyers, setFlyers] = useState([]);
   const flyerSeq = useRef(0);
   const prevLogLen = useRef(0);
+  const flyerRoomRef = useRef(null);   // which room prevLogLen is synced to (first-sight guard)
   const reconnTimer = useRef(null);
   const reconnTries = useRef(0);
   // client-side (WASM) bot search — see the effects below
@@ -885,12 +886,24 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   useEffect(() => {
     if (reviewing || reviewOnly) return;   // rewinding isn't a move: never animate history
     const log = liveGame?.log;
-    if (!log) { prevLogLen.current = 0; return; }
+    if (!log) return;
+    // First sight of THIS room's log — a fresh game (0 moves) or a resumed one (N moves):
+    // sync the counter without animating whatever is already there. This replaces the old
+    // `prev===0` guard, which also swallowed the FIRST move of a fresh game (0 -> 1).
+    if (flyerRoomRef.current !== roomId) {
+      flyerRoomRef.current = roomId;
+      prevLogLen.current = log.length;
+      return;
+    }
     const prev = prevLogLen.current;
     prevLogLen.current = log.length;
-    if (prev === 0 || log.length <= prev || log.length - prev > 6) return;  // initial load / reconnect catch-up
+    if (log.length <= prev || log.length - prev > 6) return;  // no new moves / reconnect catch-up
     const fresh = log.slice(prev);
     const rect = (sel) => { const el = document.querySelector(sel); return el ? el.getBoundingClientRect() : null; };
+    // A token flies to the EXACT pill it lands in (that player's pill for that color),
+    // not the middle of the whole tokens row; fall back to the row if the pill isn't there.
+    const tokTarget = (pid, color) =>
+      rect(`[data-tokens="${pid}"] [data-token="${color}"]`) || rect(`[data-tokens="${pid}"]`);
     const add = [];
     const mkTok = (color, from, to, size = 34) => {
       if (!from || !to) return;
@@ -901,25 +914,24 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
       });
     };
     for (const e of fresh) {
-      const panel = rect(`[data-tokens="${e.pid}"]`);
       if (e.type === "take" && e.cells) {
-        e.cells.forEach((cell, i) => mkTok(e.colors?.[i], rect(`[data-cell="${cell}"]`), panel));
+        e.cells.forEach((cell, i) => mkTok(e.colors?.[i], rect(`[data-cell="${cell}"]`), tokTarget(e.pid, e.colors?.[i])));
       } else if ((e.type === "use_privilege" || e.type === "take_same") && e.cell != null) {
-        mkTok(e.color, rect(`[data-cell="${e.cell}"]`), panel);
+        mkTok(e.color, rect(`[data-cell="${e.cell}"]`), tokTarget(e.pid, e.color));
       } else if (e.type === "reserve" && e.gold_cell != null) {
-        mkTok("gold", rect(`[data-cell="${e.gold_cell}"]`), panel);
+        mkTok("gold", rect(`[data-cell="${e.gold_cell}"]`), tokTarget(e.pid, "gold"));
       } else if (e.type === "steal") {
         const other = (liveGame.order || []).find((p) => p !== e.pid);
-        mkTok(e.color, rect(`[data-tokens="${other}"]`), panel);
+        mkTok(e.color, rect(`[data-tokens="${other}"]`), tokTarget(e.pid, e.color));
       } else if (e.type === "buy") {
-        mkTok(null, rect("[data-pyramid]"), panel, 44);
+        mkTok(null, rect("[data-pyramid]"), rect(`[data-tokens="${e.pid}"]`), 44);
       }
     }
     if (!add.length) return;
     setFlyers((f) => [...f, ...add]);
     const ids = new Set(add.map((a) => a.id));
     setTimeout(() => setFlyers((f) => f.filter((x) => !ids.has(x.id))), 620);
-  }, [liveGame?.log?.length]); // eslint-disable-line
+  }, [liveGame?.log?.length, roomId]); // eslint-disable-line
 
   // ── client-side (WASM) bot search ───────────────────────────────────────────
   // The bot's search runs HERE, on the player's CPU, instead of on Render's free tier
