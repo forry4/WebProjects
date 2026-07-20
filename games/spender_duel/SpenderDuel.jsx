@@ -1642,8 +1642,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             {createOpp === "ai" ? (
               <CmRow label="AI Difficulty">
                 <CmSeg value={createDiff} onChange={setCreateDiff}
-                  options={BOT_TIERS.map((t) => ({ value: t.id, label: t.name, title: t.desc }))} />
-                <span className="cm-hint">{BOT_TIERS.find((t) => t.id === createDiff)?.desc}</span>
+                  options={BOT_TIERS.map((t) => ({ value: t.id, label: t.name }))} />
               </CmRow>
             ) : (
               <span className="cm-hint">Duel is head-to-head — one friend joins from the lobby.</span>
