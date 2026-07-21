@@ -66,18 +66,14 @@ CLIENT_AI_TIERS = ("hard",)
 # move itself with the existing Python bot. Per-decision, so a flaky client costs sims,
 # never a stuck game.
 CLIENT_AI_TIMEOUT = 8.0
-# Per-DECISION wall-clock budget, and the AGGREGATE sim cap across the whole worker pool
-# (the client splits it evenly and SUMS the workers' root statistics). Measured in Node
-# on the built wasm: ~90k sims/s/core and ~0.64KB per sim of tree, so 60k aggregate is
-# ~170ms and ~14MB on a fast 4-core box, while a slow device stops at the clock instead.
-# Either way it is ~150x what the Render server manages, and ~15x a local Python `hard`
-# decision (~3,900 sims) — the cap is here to bound tab memory and latency, not strength.
-# BUDGET bumped 600 -> 1500ms: the shipped attention-net leaf (Hard) is far slower per sim than
-# the heuristic leaf the figures above describe, so wall-clock — not the 60k cap — is what binds
-# now. Duel search keeps improving to ~4-8k sims, so ~1.5s of the heavier net is strictly stronger
-# than 0.6s, and still well under the 8s watchdog + the frontend's 1.5s min-think floor.
-_CLIENT_AI_BUDGET_MS = 1500
-_CLIENT_AI_MAX_SIMS = 60000
+# Per-DECISION budget: 3.5s wall-clock OR ~10k aggregate sims across the worker pool, whichever
+# comes FIRST. The pool splits the sim cap evenly (perWorker = max_sims / nworkers) and SUMS the
+# workers' root stats; each worker stops on its own time OR sim bound. The attention-net leaf
+# (Hard) is slow per sim, so on a phone the 3.5s clock usually binds first, while a fast desktop
+# hits the 10k-sim cap — which holds search near where Duel's net stops improving rather than
+# burning cycles well past it. Both bounds sit under the 8s client watchdog (CLIENT_AI_TIMEOUT).
+_CLIENT_AI_BUDGET_MS = 3500
+_CLIENT_AI_MAX_SIMS = 10000
 
 
 def _valid_difficulty(value) -> str:
