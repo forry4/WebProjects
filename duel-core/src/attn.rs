@@ -6,9 +6,16 @@
 //! embed(TOK_F->D) -> L x [4-head masked self-attn + FFN(D->FF->D), residual + no-affine LayerNorm]
 //!   -> masked mean-pool over present tokens ++ state-embed(TOK_STATE->D) -> trunk(2D->H)+ReLU
 //!   -> value head(H->1) -> tanh. Computed in f32 to match the f32-trained net.
+//!
+//! PERF: the forward is called once per MCTS sim (millions/search), on a tiny net (15 tokens), so
+//! per-call heap allocation — not arithmetic — dominated. All scratch buffers now live in a
+//! thread-local, reused across calls; the math is byte-identical (same ops, same order), verified by
+//! `bin/attn_parity`. Buffers are fully overwritten each call except `pool` (accumulates from 0, so
+//! it is cleared) and `sc` (masked-out lanes are never read, so a stale value can't leak in).
 
 use crate::engine::State;
 use crate::feats::{features_tokens, TOK_F, TOK_N, TOK_STATE};
+use std::cell::RefCell;
 
 const D: usize = 64;
 const HEADS: usize = 4;
@@ -39,10 +46,25 @@ pub struct AttnNet {
 #[inline]
 fn linear(x: &[f32], w: &[f32], b: &[f32], k: usize, m: usize, y: &mut [f32]) {
     for mi in 0..m {
+        let wrow = &w[mi * k..mi * k + k];
+        // 8 independent lanes break the f32 reduction dependency, so LLVM can emit SIMD + FMA for
+        // the dot product (wasm128 is 4-wide f32, so this maps to two vector accumulators). This
+        // REASSOCIATES the sum vs a strict left-to-right add, shifting the f32 result by ~1e-6 —
+        // well within the `bin/attn_parity` tolerance; the argmax move is unchanged.
+        let mut acc = [0f32; 8];
+        let mut xc = x.chunks_exact(8);
+        let mut wc = wrow.chunks_exact(8);
+        for (xs, ws) in xc.by_ref().zip(wc.by_ref()) {
+            for l in 0..8 {
+                acc[l] += xs[l] * ws[l];
+            }
+        }
         let mut s = if b.is_empty() { 0.0 } else { b[mi] };
-        let row = mi * k;
-        for ki in 0..k {
-            s += x[ki] * w[row + ki];
+        for a in acc {
+            s += a;
+        }
+        for (xr, wr) in xc.remainder().iter().zip(wc.remainder()) {
+            s += xr * wr;
         }
         y[mi] = s;
     }
@@ -59,125 +81,168 @@ fn layernorm(x: &mut [f32]) {
     }
 }
 
+// Reused forward workspace (see the PERF note above). One per thread; in wasm each worker is its
+// own thread, so there is no sharing/contention. Sizes are compile-time constants.
+struct Scratch {
+    tok: Vec<f32>,
+    msk: Vec<f32>,
+    st: Vec<f32>,
+    x: Vec<f32>,
+    q: Vec<f32>,
+    k: Vec<f32>,
+    v: Vec<f32>,
+    ctx: Vec<f32>,
+    sc: Vec<f32>,
+    o: Vec<f32>,
+    h1: Vec<f32>,
+    h2: Vec<f32>,
+    pool: Vec<f32>,
+    se: Vec<f32>,
+    cat: Vec<f32>,
+    ht: Vec<f32>,
+}
+impl Scratch {
+    fn new() -> Self {
+        Scratch {
+            tok: vec![0.0; TOK_N * TOK_F],
+            msk: vec![0.0; TOK_N],
+            st: vec![0.0; TOK_STATE],
+            x: vec![0.0; TOK_N * D],
+            q: vec![0.0; TOK_N * D],
+            k: vec![0.0; TOK_N * D],
+            v: vec![0.0; TOK_N * D],
+            ctx: vec![0.0; TOK_N * D],
+            sc: vec![0.0; TOK_N],
+            o: vec![0.0; D],
+            h1: vec![0.0; FF],
+            h2: vec![0.0; D],
+            pool: vec![0.0; D],
+            se: vec![0.0; D],
+            cat: vec![0.0; 2 * D],
+            ht: vec![0.0; H],
+        }
+    }
+}
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::new());
+}
+
 impl AttnNet {
     /// value in [-1, 1]. `tokens` = TOK_N*TOK_F f64, `mask` = TOK_N, `state` = TOK_STATE.
     pub fn value(&self, tokens: &[f64], mask: &[f64], state: &[f64]) -> f64 {
-        let tok: Vec<f32> = tokens.iter().map(|&x| x as f32).collect();
-        let msk: Vec<f32> = mask.iter().map(|&x| x as f32).collect();
-        let st: Vec<f32> = state.iter().map(|&x| x as f32).collect();
-        let nob: Vec<f32> = vec![];
+        SCRATCH.with(|cell| {
+            let s = &mut *cell.borrow_mut();
+            let nob: &[f32] = &[];
 
-        // token embed
-        let mut x = vec![0f32; TOK_N * D];
-        for t in 0..TOK_N {
-            let mut e = vec![0f32; D];
-            linear(&tok[t * TOK_F..t * TOK_F + TOK_F], &self.emb_w, &self.emb_b, TOK_F, D, &mut e);
-            x[t * D..t * D + D].copy_from_slice(&e);
-        }
-
-        let scale = 1.0 / (HD as f32).sqrt();
-        for l in 0..L {
-            let (mut q, mut k, mut v) =
-                (vec![0f32; TOK_N * D], vec![0f32; TOK_N * D], vec![0f32; TOK_N * D]);
-            for t in 0..TOK_N {
-                linear(&x[t * D..t * D + D], &self.wq[l], &nob, D, D, &mut q[t * D..t * D + D]);
-                linear(&x[t * D..t * D + D], &self.wk[l], &nob, D, D, &mut k[t * D..t * D + D]);
-                linear(&x[t * D..t * D + D], &self.wv[l], &nob, D, D, &mut v[t * D..t * D + D]);
+            for (d, &sv) in s.tok.iter_mut().zip(tokens.iter()) {
+                *d = sv as f32;
             }
-            let mut ctx = vec![0f32; TOK_N * D];
-            for h in 0..HEADS {
-                let off = h * HD;
-                for i in 0..TOK_N {
-                    let mut sc = vec![f32::NEG_INFINITY; TOK_N];
-                    let mut mx = f32::NEG_INFINITY;
-                    for j in 0..TOK_N {
-                        if msk[j] < 0.5 {
-                            continue;
-                        }
-                        let mut s = 0.0;
-                        for d in 0..HD {
-                            s += q[i * D + off + d] * k[j * D + off + d];
-                        }
-                        s *= scale;
-                        sc[j] = s;
-                        if s > mx {
-                            mx = s;
-                        }
-                    }
-                    let mut den = 0.0;
-                    for j in 0..TOK_N {
-                        if msk[j] >= 0.5 {
-                            sc[j] = (sc[j] - mx).exp();
-                            den += sc[j];
-                        }
-                    }
-                    for d in 0..HD {
-                        let mut acc = 0.0;
+            for (d, &sv) in s.msk.iter_mut().zip(mask.iter()) {
+                *d = sv as f32;
+            }
+            for (d, &sv) in s.st.iter_mut().zip(state.iter()) {
+                *d = sv as f32;
+            }
+
+            // token embed (written straight into x)
+            for t in 0..TOK_N {
+                linear(&s.tok[t * TOK_F..t * TOK_F + TOK_F], &self.emb_w, &self.emb_b, TOK_F, D, &mut s.x[t * D..t * D + D]);
+            }
+
+            let scale = 1.0 / (HD as f32).sqrt();
+            for l in 0..L {
+                for t in 0..TOK_N {
+                    linear(&s.x[t * D..t * D + D], &self.wq[l], nob, D, D, &mut s.q[t * D..t * D + D]);
+                    linear(&s.x[t * D..t * D + D], &self.wk[l], nob, D, D, &mut s.k[t * D..t * D + D]);
+                    linear(&s.x[t * D..t * D + D], &self.wv[l], nob, D, D, &mut s.v[t * D..t * D + D]);
+                }
+                for h in 0..HEADS {
+                    let off = h * HD;
+                    for i in 0..TOK_N {
+                        let mut mx = f32::NEG_INFINITY;
                         for j in 0..TOK_N {
-                            if msk[j] >= 0.5 {
-                                acc += sc[j] * v[j * D + off + d];
+                            if s.msk[j] < 0.5 {
+                                continue;
+                            }
+                            let mut sv = 0.0;
+                            for d in 0..HD {
+                                sv += s.q[i * D + off + d] * s.k[j * D + off + d];
+                            }
+                            sv *= scale;
+                            s.sc[j] = sv;
+                            if sv > mx {
+                                mx = sv;
                             }
                         }
-                        ctx[i * D + off + d] = acc / den;
+                        let mut den = 0.0;
+                        for j in 0..TOK_N {
+                            if s.msk[j] >= 0.5 {
+                                s.sc[j] = (s.sc[j] - mx).exp();
+                                den += s.sc[j];
+                            }
+                        }
+                        for d in 0..HD {
+                            let mut acc = 0.0;
+                            for j in 0..TOK_N {
+                                if s.msk[j] >= 0.5 {
+                                    acc += s.sc[j] * s.v[j * D + off + d];
+                                }
+                            }
+                            s.ctx[i * D + off + d] = acc / den;
+                        }
                     }
                 }
-            }
-            for t in 0..TOK_N {
-                let mut o = vec![0f32; D];
-                linear(&ctx[t * D..t * D + D], &self.wo[l], &nob, D, D, &mut o);
-                for d in 0..D {
-                    x[t * D + d] += o[d];
-                }
-                layernorm(&mut x[t * D..t * D + D]);
-            }
-            for t in 0..TOK_N {
-                let mut h1 = vec![0f32; FF];
-                linear(&x[t * D..t * D + D], &self.f1w[l], &self.f1b[l], D, FF, &mut h1);
-                for vv in h1.iter_mut() {
-                    if *vv < 0.0 {
-                        *vv = 0.0;
+                for t in 0..TOK_N {
+                    linear(&s.ctx[t * D..t * D + D], &self.wo[l], nob, D, D, &mut s.o[..]);
+                    for d in 0..D {
+                        s.x[t * D + d] += s.o[d];
                     }
+                    layernorm(&mut s.x[t * D..t * D + D]);
                 }
-                let mut h2 = vec![0f32; D];
-                linear(&h1, &self.f2w[l], &self.f2b[l], FF, D, &mut h2);
-                for d in 0..D {
-                    x[t * D + d] += h2[d];
+                for t in 0..TOK_N {
+                    linear(&s.x[t * D..t * D + D], &self.f1w[l], &self.f1b[l], D, FF, &mut s.h1[..]);
+                    for vv in s.h1.iter_mut() {
+                        if *vv < 0.0 {
+                            *vv = 0.0;
+                        }
+                    }
+                    linear(&s.h1[..], &self.f2w[l], &self.f2b[l], FF, D, &mut s.h2[..]);
+                    for d in 0..D {
+                        s.x[t * D + d] += s.h2[d];
+                    }
+                    layernorm(&mut s.x[t * D..t * D + D]);
                 }
-                layernorm(&mut x[t * D..t * D + D]);
             }
-        }
 
-        // masked mean-pool ++ state embed -> trunk -> value
-        let mut pool = vec![0f32; D];
-        let mut cnt = 0.0;
-        for t in 0..TOK_N {
-            if msk[t] >= 0.5 {
-                cnt += 1.0;
-                for d in 0..D {
-                    pool[d] += x[t * D + d];
+            // masked mean-pool ++ state embed -> trunk -> value
+            s.pool.fill(0.0);
+            let mut cnt = 0.0;
+            for t in 0..TOK_N {
+                if s.msk[t] >= 0.5 {
+                    cnt += 1.0;
+                    for d in 0..D {
+                        s.pool[d] += s.x[t * D + d];
+                    }
                 }
             }
-        }
-        if cnt > 0.0 {
-            for d in 0..D {
-                pool[d] /= cnt;
+            if cnt > 0.0 {
+                for d in 0..D {
+                    s.pool[d] /= cnt;
+                }
             }
-        }
-        let mut se = vec![0f32; D];
-        linear(&st, &self.sw, &self.sb, TOK_STATE, D, &mut se);
-        let mut cat = vec![0f32; 2 * D];
-        cat[..D].copy_from_slice(&pool);
-        cat[D..].copy_from_slice(&se);
-        let mut ht = vec![0f32; H];
-        linear(&cat, &self.tw, &self.tb, 2 * D, H, &mut ht);
-        for vv in ht.iter_mut() {
-            if *vv < 0.0 {
-                *vv = 0.0;
+            linear(&s.st[..], &self.sw, &self.sb, TOK_STATE, D, &mut s.se[..]);
+            s.cat[..D].copy_from_slice(&s.pool);
+            s.cat[D..].copy_from_slice(&s.se);
+            linear(&s.cat[..], &self.tw, &self.tb, 2 * D, H, &mut s.ht[..]);
+            for vv in s.ht.iter_mut() {
+                if *vv < 0.0 {
+                    *vv = 0.0;
+                }
             }
-        }
-        let mut val = vec![0f32; 1];
-        linear(&ht, &self.vw, &self.vb, H, 1, &mut val);
-        val[0].tanh() as f64
+            let mut val = [0f32; 1];
+            linear(&s.ht[..], &self.vw, &self.vb, H, 1, &mut val);
+            val[0].tanh() as f64
+        })
     }
 
     /// Leaf value from `seat`'s perspective — tokenizes then forwards.
