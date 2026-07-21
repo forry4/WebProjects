@@ -11,6 +11,88 @@ Content below is preserved **verbatim** from the pre-split `CLAUDE.md` (git also
 
 
 <!-- ===================================================================== -->
+# ARCHIVE: Spender Duel AI — heuristic MCTS → netval → card-set ATTENTION value net (SHIPPED)
+<!-- ===================================================================== -->
+
+### Session (2026-07-20) — Duel Hard upgraded from the hand heuristic to a card-set ATTENTION value net (SHIPPED `e4b2c06`)
+
+**The result:** Duel **Hard** is now a card-set **attention value net** served as a NETVAL leaf (12-step
+rollout + attention value at truncation), replacing the board/deck-blind heuristic leaf. It beats the
+heuristic at equal sims across the ladder (700:0.58 / 2000:0.62 / 4000:0.59, **edge holds/GROWS with
+depth**) and replicates on 3 fresh seeds (0.599 / 0.603 / 0.638). First learned net to beat the Duel
+heuristic — the whole prior net campaign (flat value_net, pv_net policy) had failed.
+
+**The levers, in order (the plan was C → D → A/B); the first four are DO-NOT-RELITIGATE verdicts:**
+
+1. **C — exact endgame solver (`endgame.rs`): NO.** Correct + tested (finds forced wins, blocks losses,
+   exact ±1), but NOT serving-tractable: at a serving budget (~150ms/100k nodes, near-terminal only) it
+   is conclusive only ~15%, and of the forced wins it CAN cheaply prove the saturated MCTS ALREADY finds
+   all of them (0 missed over 12). The wins it would add need ~2M-node searches (beyond budget), and it
+   STEALS sims that matter (see #3). Different from Spender (whose endgame refine shipped) because Duel's
+   endgame is wide (~76 moves) + multi-action AGAIN chains. Tooling: `gate_endgame_native`, `endgame_diag`.
+
+2. **D — geometry-aware heuristic term (`value_geom`): NO — it was NOISE.** A best-line-take differential
+   (the board is otherwise geometry-blind) looked like +3.5% @ weight 0.05 — but METHOD ERROR: every
+   "confirmation" reused seed 70000 (the SAME ~200 decks) → I re-measured ONE fluctuation. Fresh seeds →
+   mean 0.496 (neutral). LESSON: a CRN gate over N decks at ONE seed base is ONE sample; VARY THE SEED
+   BASE to confirm. Demand-weighted variant (mode 2) also washed.
+
+3. **SATURATION PREMISE CORRECTED — Duel is NOT saturated at ~700 sims (that number was STALE/WRONG).**
+   Direct sims-asymmetry gate (`gate_sims`, CRN, mirror=0.5000): 700v400=0.57, **2000v700=0.61**,
+   4000v2000=0.57 — more search wins strongly to ~4-8k (user re-measured ~6k). Prod runs ~60k sims/0.5s
+   (well past the knee). Implication: the cheap leaf is at its heuristic ceiling → the lever is a BETTER
+   EVALUATOR; a heavier net leaf is fine IF it stays above ~6k sims (int8/throughput = the deploy enabler).
+
+4. **The 0-step learned leaf COLLAPSES with depth.** Existing flat `value_net` as a 0-step leaf vs the
+   heuristic (rollout+value) at equal sims: 700=0.40 / 2000=0.32 / 4000=0.31 / 6000=0.23. The rollout does
+   real work a 0-step net cannot replace — which is why the prior net campaign (0-step) failed.
+
+5. **NETVAL (rollout + net-value truncation) — CoC's formulation, first tried for Duel.** The existing
+   FLAT net via netval: 700=0.545 / 2000=0.555 / 4000=0.548 / 6000=0.494 — MATCHES the heuristic (rescued
+   from the 0-step collapse) but does not BEAT it, and is slower (loses at equal-wall-clock). So the leaf
+   FORMULATION is validated (netval is how to serve a net leaf here); the flat net just is not better.
+
+6. **A/B — card-set ATTENTION value net: BUILT + SHIPPED in-session.**
+   - Tokenizer `feats::features_tokens`: 15 card tokens (12 pyramid + 3 own-reserved; opp reserves stay
+     hidden) × 20 feats incl. per-card WIN-CONDITION proximity deltas (points/crowns/color after buy) +
+     a 46-dim global state with GEOMETRY (`best_line_len`) + PYRAMID color-demand — the board/deck
+     awareness the heuristic lacks (the user's instinct; flat encoding of these washed like Spender's did,
+     attention over the card set is the point).
+   - `attn.rs` = value-only attention forward (port of `spender-core::attn`, policy head dropped). PyTorch
+     twin `tools/attn_net.py`. **PARITY = 6.1e-8** (Rust f32 vs torch f64) via `bin/attn_parity` — it
+     plays what it trains.
+   - Trained on 368k positions (4k games, heuristic self-play @400 sims): best val AUC 0.7155 @ep6 — ties
+     the flat net's 0.7165 (AUC↔play is LOOSE; attention won in PLAY anyway, echoing Spender). Overfit
+     after ep6 (only ~4k independent game labels).
+   - Served: `Leaf::AttnVal`; wasm `duel_search` routes to it, net embedded (`attn_value_net.json`) +
+     cached per worker; wasm 191KB→2.14MB. Native lib tests 36/36. Rollback = `git revert e4b2c06`.
+
+**Durable methodology lessons:**
+- Gate EQUAL-SIMS first (does the eval help), then EQUAL-WALL-CLOCK (does it survive the leaf-speed cost).
+  The attention leaf is heavy → int8/throughput is the deploy enabler, not a nicety.
+- FRESH-SEED confirmation before shipping (the geometry seed-reuse burn, #2).
+- AUC ties but PLAY wins — never gate a net on AUC alone.
+- The heuristic is SCAFFOLDING, not the thing to keep tuning: it supplies the rollout, the residual-
+  baseline features, and the self-play game generator. From-scratch/flat nets don't beat it; attention
+  does because it reuses that structure + adds cross-card interaction + board/deck sight.
+- Native gates are CRN seat-swapped, mirror must read 0.5000, and MULTI-THREADED (a shared work counter;
+  one run saturates all cores — the single-threaded version wasted ~75% of a 12-core box).
+
+**IN PROGRESS / NEXT (as of this session):**
+- **v2 retrain** on the 48k-game harvest (`harvest_attn`, ~4.4M rows; trained on 32k games / VRAM-capped)
+  + weight-decay 2e-4 + early-stop — fixes the 368k-row overfit; gate v2 vs v1 + heuristic, re-ship only
+  if stronger.
+- **Self-play ITERATION** (train on the attention net's OWN games) is the real ceiling-breaker (training
+  DISTRIBUTION), but MUST use anchor + gate-and-promote — Spender's pure self-play DRIFTED (peaked iter 3
+  then fell). It does not skip the volume requirement, and attn-net games are ~several× slower to generate.
+- **Python server-side Hard fallback stays heuristic** (WASM is the real Hard; the fallback is a ~5-sim
+  Render bot). `choose_move` default leaf is still `Heuristic` (only wasm `duel_search` routes to AttnVal).
+
+**Tooling built (`duel-core`):** `attn.rs`, `feats::features_tokens`, `tools/{attn_net,train_attn}.py`,
+`bin/{harvest_attn, attn_parity, gate_netleaf (--leaf attnval|netval|net|net8), gate_sims, gate_geom,
+gate_endgame_native}`. `Leaf::{AttnVal, NetVal, HeuristicGeom}` added to `mcts.rs`.
+
+<!-- ===================================================================== -->
 # ARCHIVE: CoC — UI/UX & infra sessions (dice UX -> wwsd decommission)
 <!-- ===================================================================== -->
 

@@ -212,10 +212,15 @@ Lobby exposes persona pills mapping Easy→Expert. Internally there's a variant 
 |---|---|---|
 | **Easy** | `bot.py` random-legal | — |
 | **Normal** | determinized MCTS, **softmax(Q/T) sampling** (T≈0.08) | temperature (beatable) |
-| **Hard** | determinized MCTS, **greedy** pick (visit ties broken by value) | sims, greedy |
+| **Hard** | determinized MCTS, greedy pick, **card-set ATTENTION value net leaf** (netval = 12-step rollout + attention value) — SHIPPED `e4b2c06` | the net (retrain / self-play iteration) |
 
-Duel is ported to Rust→WASM (client-side, ~150× sims; SHIPPED) with a learned-net campaign in progress.
-**Duel strength saturates ~700 sims** — Hard is at the heuristic-leaf ceiling, not sims-limited.
+Duel is ported to Rust→WASM (client-side, ~150× sims; SHIPPED). **Hard's leaf is now a card-set ATTENTION
+value net** (`attn.rs` + `feats::features_tokens`, PyTorch twin `tools/attn_net.py`, parity 6.1e-8), served
+as a netval leaf — it replaced the board/deck-blind heuristic and beats it 0.58→0.62 across the sims ladder
+(edge GROWS with depth; fresh-seed confirmed). The heuristic leaf is retained for Normal/Easy + the server
+fallback + the rollout. **CORRECTION: sims are NOT saturated at ~700** (that figure was stale) — more search
+wins to ~4-8k and prod runs ~60k, which is why the heavier attention leaf still wins at the deployed budget.
+Full campaign + do-not-relitigate verdicts (endgame + geometry both washed): the research log.
 
 ### Where Wolf?
 No AI — a real-time social-deduction party game, humans only.
