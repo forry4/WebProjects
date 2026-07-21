@@ -29,7 +29,7 @@ use crate::cards::{LEVEL_OF, PEARL};
 use crate::clock::{Clock, Deadline};
 use crate::engine::{is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
 use crate::rng::Rng;
-use crate::value::value;
+use crate::value::{value, value_geom};
 use crate::valuenet::{QuantValueNet, ValueNet};
 
 pub const C_PUCT: f64 = 1.5;
@@ -104,6 +104,15 @@ pub struct Opts {
 #[derive(Clone, Copy)]
 pub enum Leaf<'a> {
     Heuristic,
+    // Experimental: the heuristic rollout, but the truncation uses the GEOMETRY-aware static eval
+    // (`value_geom`) instead of the board-blind `value`. A/B'd vs `Heuristic` by `bin/gate_geom`.
+    HeuristicGeom,
+    // NETVAL (CoC's winning formulation, untried for Duel): the SAME 12-step rollout, but truncated
+    // with the learned net's VALUE instead of the heuristic `value`. Isolates eval quality from the
+    // 0-step handicap that sinks plain `Net`. A/B'd vs `Heuristic` by `bin/gate_netleaf --leaf netval`.
+    NetVal(&'a ValueNet),
+    // The card-set ATTENTION value net as a netval leaf (rollout + attention value). The A/B swing.
+    AttnVal(&'a crate::attn::AttnNet),
     Net(&'a ValueNet),
     // The int8-trunk net (opt-in `:net8` arm). Same leaf semantics as `Net`; only the forward
     // arithmetic differs (quantized), gated by the strength A/B vs `Net`, not float parity.
@@ -472,13 +481,40 @@ struct Search<'r, 'n> {
 }
 
 impl Search<'_, '_> {
+    /// The STATIC leaf eval for the active leaf: geometry-aware for `HeuristicGeom`, the deployed
+    /// board-blind `value` for every other leaf (so Heuristic/Net/Net8 stay byte-identical).
+    #[inline]
+    fn leaf_static(&self, st: &State, pid: usize) -> f64 {
+        match self.leaf {
+            Leaf::HeuristicGeom => value_geom(st, pid),
+            _ => value(st, pid),
+        }
+    }
+
     /// The leaf truncation value from ROOT_PID's perspective. `Heuristic` runs the rollout
     /// (byte-identical to the deployed bot); `Net` returns a 0-step learned value — except at
     /// a terminal, which is a FACT, not a prediction, so it is scored ±1 exactly (the net's
     /// features assume a live position and must never be handed a finished game).
     fn leaf_eval(&mut self, st: &mut State, root_pid: usize) -> f64 {
         match self.leaf {
-            Leaf::Heuristic => self.rollout(st, root_pid),
+            Leaf::Heuristic | Leaf::HeuristicGeom => self.rollout(st, root_pid),
+            Leaf::NetVal(net) => {
+                // Same rollout as Heuristic, but truncate with the net's value (a FACT ±1 at a
+                // terminal, else the learned outcome estimate) instead of the heuristic `value`.
+                self.rollout_play(st);
+                if st.is_over() {
+                    return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
+                }
+                net.eval(st, root_pid)
+            }
+            Leaf::AttnVal(net) => {
+                // Netval with the card-set attention value net.
+                self.rollout_play(st);
+                if st.is_over() {
+                    return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
+                }
+                net.eval(st, root_pid)
+            }
             Leaf::Net(net) => {
                 if st.is_over() {
                     return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
@@ -534,7 +570,9 @@ impl Search<'_, '_> {
     /// assumed: Spender's static value-leaf beats its rollout, while Castles of Crimson
     /// needs the rollout (its payoffs are delayed, so a 0-step leaf undervalues in-flight
     /// turns). See `ai_selfplay.probe`.
-    fn rollout(&mut self, st: &mut State, pid: usize) -> f64 {
+    /// Play the short rollout continuation in place (shared by the heuristic and netval leaves; the
+    /// truncation EVAL is applied by the caller).
+    fn rollout_play(&mut self, st: &mut State) {
         for _ in 0..self.steps {
             if st.is_over() {
                 break;
@@ -549,7 +587,11 @@ impl Search<'_, '_> {
                 break;
             }
         }
-        value(st, pid)
+    }
+
+    fn rollout(&mut self, st: &mut State, pid: usize) -> f64 {
+        self.rollout_play(st);
+        self.leaf_static(st, pid)
     }
 
     /// One simulation. Returns the value from ROOT_PID's perspective.
@@ -568,11 +610,11 @@ impl Search<'_, '_> {
             st.apply_move(node.actor, &mv, &mut sh).is_ok()
         };
         if !ok {
-            return value(st, root_pid);
+            return self.leaf_static(st, root_pid);
         }
         if node.children[i].is_none() {
             let v = if st.is_over() {
-                value(st, root_pid)
+                self.leaf_static(st, root_pid)
             } else {
                 let actor = if st.pending_pid != -1 { st.pending_pid as usize } else { st.turn };
                 let moves = legal(st, actor, self.take_dominance);

@@ -20,6 +20,7 @@
 //! wrong by definition.
 
 pub mod actions;
+pub mod attn;
 pub mod cards;
 pub mod clock;
 pub mod endgame;

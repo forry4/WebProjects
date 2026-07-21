@@ -10,8 +10,9 @@
 //! (`a*x + b*y + c*z` groups left-to-right, and each `s +=` is its own rounding step).
 //! That is what lets the gate run at 1e-12 instead of a hand-waved epsilon.
 
-use crate::cards::{GOLD, WIN_COLOR_POINTS, WIN_CROWNS, WIN_POINTS};
-use crate::engine::{bonuses_of, color_points_of, crowns_of, opponent, points_of, State};
+use crate::cards::{COST, GOLD, N_COLORS, PEARL, WIN_COLOR_POINTS, WIN_CROWNS, WIN_POINTS};
+use crate::engine::{bonuses_of, color_points_of, crowns_of, opponent, points_of, State, N_CELLS};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 
 /// Tuned by `ai_selfplay.arena` (hard-vs-normal / hard-vs-random). The three win
 /// conditions make "progress toward the NEAREST win" the dominant term; it is convex so
@@ -95,6 +96,156 @@ pub fn value_w(st: &State, pid: usize, w: &Weights) -> f64 {
 #[inline]
 pub fn value(st: &State, pid: usize) -> f64 {
     value_w(st, pid, &WEIGHTS)
+}
+
+// ─── Geometry-aware eval (experimental; the deployed `value` is board-BLIND) ──────────
+//
+// The heuristic above never reads `st.board`, so it cannot tell a takeable 3-in-a-line of
+// gems a player needs from three scattered tokens — it is blind to gem-acquisition prospects
+// and board control. `value_geom` adds ONE term: each seat's best available line-take, weighted
+// by how useful those tokens are to THAT seat (pearls are scarce; a colored gem is worth more if
+// the seat already has a bonus in that color — synergy). Scored per-seat and SUBTRACTED, exactly
+// like `standing`, so "the board currently favors my needs over my opponent's" (and its denial
+// mirror) falls out of the search for free. This is NEW information the flat eval lacks, not a
+// re-weighting of existing terms (which is measured-saturated).
+
+const UNIT_DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (1, 1), (1, -1)]; // E, S, SE, SW (== engine)
+
+pub struct GeomWeights {
+    pub pearl: f64,
+    pub gem_base: f64,
+    pub gem_synergy: f64,
+}
+pub const GEOM: GeomWeights = GeomWeights { pearl: 1.0, gem_base: 0.5, gem_synergy: 0.4 };
+
+// Mode-2 (demand-weighted) scaling: a token's util is boosted by the fraction of face-up pyramid
+// cards that still need that color/pearl beyond the seat's permanent bonuses.
+const GEM_DEMAND_K: f64 = 1.0;
+const PEARL_DEMAND_K: f64 = 1.0;
+
+// Overall line-term multiplier + formulation MODE, both tunable at runtime so the gate can sweep
+// them without a rebuild. Serving uses the defaults (0.05 = the confirmed peak weight; mode 1).
+const DEFAULT_GEOM_LINE: f64 = 0.05;
+static GEOM_LINE_BITS: AtomicU64 = AtomicU64::new(u64::MAX); // u64::MAX = unset -> default
+static GEOM_MODE: AtomicU8 = AtomicU8::new(1);
+pub fn set_geom_line(w: f64) {
+    GEOM_LINE_BITS.store(w.to_bits(), Ordering::Relaxed);
+}
+pub fn set_geom_mode(m: u8) {
+    GEOM_MODE.store(m, Ordering::Relaxed);
+}
+#[inline]
+fn geom_line() -> f64 {
+    let b = GEOM_LINE_BITS.load(Ordering::Relaxed);
+    if b == u64::MAX {
+        DEFAULT_GEOM_LINE
+    } else {
+        f64::from_bits(b)
+    }
+}
+
+/// Per-token-type utility for `pid` under the active mode: index 0-4 = colors, 5 = pearl, 6 = gold
+/// (always 0 — gold is not line-takeable). Precomputed once per (state, seat) so the line scan is a
+/// pure lookup.
+fn token_utils(st: &State, pid: usize, g: &GeomWeights) -> [f64; 7] {
+    let bon = bonuses_of(&st.players[pid]);
+    let mut u = [0.0f64; 7];
+    match GEOM_MODE.load(Ordering::Relaxed) {
+        2 => {
+            // Demand-weighted: boost a color/pearl by how many face-up cards still need it (beyond
+            // this seat's permanent bonuses) — the "real needs" signal vs mode-1's synergy proxy.
+            let mut demand = [0i32; 7];
+            let mut ncards = 0i32;
+            for lvl in 0..3 {
+                for &cid in &st.pyramid[lvl] {
+                    if cid < 0 {
+                        continue;
+                    }
+                    ncards += 1;
+                    let cost = &COST[cid as usize];
+                    for c in 0..N_COLORS {
+                        if cost[c] > bon[c] {
+                            demand[c] += 1;
+                        }
+                    }
+                    if cost[PEARL] > 0 {
+                        demand[PEARL] += 1;
+                    }
+                }
+            }
+            let nc = ncards.max(1) as f64;
+            for c in 0..N_COLORS {
+                u[c] = g.gem_base * (1.0 + GEM_DEMAND_K * demand[c] as f64 / nc);
+            }
+            u[PEARL] = g.pearl * (1.0 + PEARL_DEMAND_K * demand[PEARL] as f64 / nc);
+        }
+        _ => {
+            // Mode 1 (default): synergy — a colored gem is worth more if the seat already builds it.
+            for c in 0..N_COLORS {
+                u[c] = g.gem_base + if bon[c] > 0 { g.gem_synergy } else { 0.0 };
+            }
+            u[PEARL] = g.pearl;
+        }
+    }
+    u
+}
+
+/// The single best available line-take value for `pid` over the shared board — the max over
+/// every straight line of 1-3 contiguous gems/pearls (the same geometry `engine::line_moves`
+/// enumerates), allocation-free.
+fn best_line_util(st: &State, pid: usize, g: &GeomWeights) -> f64 {
+    let board = &st.board;
+    let util = token_utils(st, pid, g);
+    let takeable = |i: usize| board[i] >= 0 && (board[i] as usize) <= PEARL; // gems 0-4 + pearl 5
+    let u = |i: usize| util[board[i] as usize];
+    let mut best = 0.0f64;
+    for i in 0..N_CELLS {
+        if !takeable(i) {
+            continue;
+        }
+        let ui = u(i);
+        if ui > best {
+            best = ui;
+        }
+        let (r, c) = ((i / 5) as i32, (i % 5) as i32);
+        for (dr, dc) in UNIT_DIRS {
+            let (r2, c2) = (r + dr, c + dc);
+            if !(0..5).contains(&r2) || !(0..5).contains(&c2) {
+                continue;
+            }
+            let j = (r2 * 5 + c2) as usize;
+            if !takeable(j) {
+                continue;
+            }
+            let uij = ui + u(j);
+            if uij > best {
+                best = uij;
+            }
+            let (r3, c3) = (r2 + dr, c2 + dc);
+            if (0..5).contains(&r3) && (0..5).contains(&c3) {
+                let k = (r3 * 5 + c3) as usize;
+                if takeable(k) {
+                    let uijk = uij + u(k);
+                    if uijk > best {
+                        best = uijk;
+                    }
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Geometry-aware leaf value in [-1, 1] from `pid`'s perspective: the standing difference plus
+/// the best-line-take differential, squashed by the same `scale`.
+pub fn value_geom(st: &State, pid: usize) -> f64 {
+    if st.is_over() {
+        return if st.winner == pid as i32 { 1.0 } else { -1.0 };
+    }
+    let opp = opponent(pid);
+    let base = standing(st, pid, &WEIGHTS) - standing(st, opp, &WEIGHTS);
+    let geom = geom_line() * (best_line_util(st, pid, &GEOM) - best_line_util(st, opp, &GEOM));
+    ((base + geom) / WEIGHTS.scale).tanh()
 }
 
 #[cfg(test)]

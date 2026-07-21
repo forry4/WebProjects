@@ -27,10 +27,12 @@
 //! endgame — that is the raw logit the net may reshape, so it is left as-is.
 
 use crate::cards::{
-    BONUS, COST, CROWNS, GOLD, MAX_RESERVED, N_COLORS, N_ROYALS, N_TOKENS, PEARL, PTS,
-    PYRAMID_SIZES,
+    BONUS, BONUS_COUNT, COST, CROWNS, GOLD, LEVEL_OF, MAX_RESERVED, N_COLORS, N_ROYALS, N_TOKENS,
+    PEARL, PTS, PYRAMID_SIZES,
 };
-use crate::engine::{bonuses_of, can_afford, color_points_of, crowns_of, points_of, State, EMPTY};
+use crate::engine::{
+    bonuses_of, can_afford, color_points_of, crowns_of, points_of, State, EMPTY, N_CELLS,
+};
 use crate::value::{standing, value, WEIGHTS};
 
 /// The per-card feature block (groups D and E), documented once at `push_card`.
@@ -99,6 +101,190 @@ fn push_card(
     out.push(eff_cost(ci, me_bon) as f32 / 15.0);
     out.push(if can_afford(ci, me_tok, me_bon) { 1.0 } else { 0.0 });
     out.push(eff_cost(ci, opp_bon) as f32 / 15.0);
+}
+
+// ═══ Card-set ATTENTION tokenizer (v1, value-only). Spec: scratchpad/duel_attn_design.md ═══
+// The flat `features` above encodes the pyramid as 12 INDEPENDENT blocks; attention over these tokens
+// lets a card's value depend on the others (the cross-card interaction that broke Spender's plateau).
+
+pub const TOK_N: usize = PYRAMID_SLOTS_TOTAL + MAX_RESERVED; // 12 pyramid + 3 own-reserved = 15
+pub const TOK_F: usize = 20; // per-card token features (see push_card_token)
+pub const TOK_STATE: usize = 46; // global state vector (asserted below)
+
+/// One card token — TOK_F features. `card<0` -> all zeros (masked out). Extends the proven per-card
+/// block with the 3 "win-condition proximity after buying this card" deltas (points/crowns/color).
+#[allow(clippy::too_many_arguments)]
+fn push_card_token(
+    out: &mut Vec<f64>,
+    card: i32,
+    reserved: bool,
+    me_bon: &[i32; N_COLORS],
+    opp_bon: &[i32; N_COLORS],
+    me_tok: &[i32; N_TOKENS],
+    me_points: i32,
+    me_crowns: i32,
+    me_cp: &[i32; N_COLORS],
+) {
+    if card < 0 {
+        out.extend(std::iter::repeat(0.0).take(TOK_F));
+        return;
+    }
+    let ci = card as usize;
+    let pts = PTS[ci];
+    let cr = CROWNS[ci];
+    out.push(1.0); // 0 present
+    out.push(pts as f64 / 6.0); // 1
+    out.push(cr as f64 / 3.0); // 2
+    let bidx = (BONUS[ci] + 1) as usize; // 3..9 bonus one-hot(7): none,white,blue,green,red,black,wild
+    for k in 0..7 {
+        out.push(if k == bidx { 1.0 } else { 0.0 });
+    }
+    out.push(BONUS_COUNT[ci] as f64 / 3.0); // 10
+    out.push(LEVEL_OF[ci] as f64 / 3.0); // 11
+    out.push(eff_cost(ci, me_bon) as f64 / 15.0); // 12 my colour-need after bonuses + pearls
+    out.push(if can_afford(ci, me_tok, me_bon) { 1.0 } else { 0.0 }); // 13
+    // 14 gold_needed proxy: colour+pearl shortfall vs tokens in hand (gold would cover the rest)
+    let mut shortfall = 0i32;
+    for c in 0..N_COLORS {
+        shortfall += ((COST[ci][c] - me_bon[c]).max(0) - me_tok[c]).max(0);
+    }
+    shortfall += (COST[ci][PEARL] - me_tok[PEARL]).max(0);
+    out.push(shortfall as f64 / 6.0); // 14
+    out.push(eff_cost(ci, opp_bon) as f64 / 15.0); // 15 contention (opponent's need)
+    out.push(if reserved { 1.0 } else { 0.0 }); // 16
+    out.push(((me_points + pts) as f64 / 20.0).min(1.0)); // 17 points-win proximity after buy
+    out.push(((me_crowns + cr) as f64 / 10.0).min(1.0)); // 18 crowns-win proximity after buy
+    let cw = if BONUS[ci] >= 0 && (BONUS[ci] as usize) < N_COLORS {
+        (me_cp[BONUS[ci] as usize] + pts) as f64 / 10.0
+    } else {
+        me_cp.iter().max().copied().unwrap_or(0) as f64 / 10.0
+    };
+    out.push(cw.min(1.0)); // 19 color-win proximity after buy
+}
+
+/// Longest contiguous takeable line (1-3) currently on the gem board — a cheap geometry signal for
+/// the state vector (the eval that's otherwise board-blind).
+fn best_line_len(st: &State) -> i32 {
+    let board = &st.board;
+    let takeable = |i: usize| board[i] >= 0 && (board[i] as usize) <= PEARL;
+    const DIRS: [(i32, i32); 4] = [(0, 1), (1, 0), (1, 1), (1, -1)];
+    let mut best = 0;
+    for i in 0..N_CELLS {
+        if !takeable(i) {
+            continue;
+        }
+        best = best.max(1);
+        let (r, c) = ((i / 5) as i32, (i % 5) as i32);
+        for (dr, dc) in DIRS {
+            let (r2, c2) = (r + dr, c + dc);
+            if !(0..5).contains(&r2) || !(0..5).contains(&c2) {
+                continue;
+            }
+            let j = (r2 * 5 + c2) as usize;
+            if !takeable(j) {
+                continue;
+            }
+            best = best.max(2);
+            let (r3, c3) = (r2 + dr, c2 + dc);
+            if (0..5).contains(&r3) && (0..5).contains(&c3) && takeable((r3 * 5 + c3) as usize) {
+                best = best.max(3);
+            }
+        }
+    }
+    best
+}
+
+/// Tokenized encoding for the attention net: (tokens[TOK_N*TOK_F], mask[TOK_N], state[TOK_STATE]),
+/// all f64, from `seat`'s perspective. Pure function of the state (root-parallel serving relies on it).
+pub fn features_tokens(st: &State, seat: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let opp = 1 - seat;
+    let me = &st.players[seat];
+    let me_bon = bonuses_of(me);
+    let opp_bon = bonuses_of(&st.players[opp]);
+    let me_pts = points_of(me);
+    let me_cr = crowns_of(me);
+    let me_cp = color_points_of(me);
+
+    // ── tokens + mask: 12 pyramid slots then 3 own-reserved ──
+    let mut tokens: Vec<f64> = Vec::with_capacity(TOK_N * TOK_F);
+    let mut mask: Vec<f64> = Vec::with_capacity(TOK_N);
+    for lvl in 0..3 {
+        for slot in 0..PYRAMID_SIZES[lvl] {
+            let card = st.pyramid[lvl].get(slot).copied().unwrap_or(EMPTY as i32);
+            mask.push(if card >= 0 { 1.0 } else { 0.0 });
+            push_card_token(&mut tokens, card, false, &me_bon, &opp_bon, &me.tokens, me_pts, me_cr, &me_cp);
+        }
+    }
+    for slot in 0..MAX_RESERVED {
+        let card = me.reserved.get(slot).map(|&c| c as i32).unwrap_or(EMPTY as i32);
+        mask.push(if card >= 0 { 1.0 } else { 0.0 });
+        push_card_token(&mut tokens, card, true, &me_bon, &opp_bon, &me.tokens, me_pts, me_cr, &me_cp);
+    }
+
+    // ── state ──
+    let mut s: Vec<f64> = Vec::with_capacity(TOK_STATE);
+    for &pid in &[seat, opp] {
+        let p = &st.players[pid];
+        let bon = if pid == seat { &me_bon } else { &opp_bon };
+        let cp = color_points_of(p);
+        let pts = points_of(p);
+        let cr = crowns_of(p);
+        let best_c = *cp.iter().max().unwrap();
+        let prog = (pts as f64 / 20.0).max(cr as f64 / 10.0).max(best_c as f64 / 10.0);
+        s.push(pts as f64 / 20.0);
+        s.push(cr as f64 / 10.0);
+        s.push(best_c as f64 / 10.0);
+        s.push(prog);
+        s.push(p.privileges as f64 / 3.0);
+        s.push(p.reserved.len() as f64 / 3.0);
+        s.push(p.tokens.iter().sum::<i32>() as f64 / 10.0);
+        s.push(p.tokens[GOLD] as f64 / 3.0);
+        s.push(bon.iter().sum::<i32>() as f64 / 15.0);
+    }
+    for &pid in &[seat, opp] {
+        let bon = if pid == seat { &me_bon } else { &opp_bon };
+        for c in 0..N_COLORS {
+            s.push(bon[c] as f64 / 5.0);
+        }
+    }
+    let mut counts = [0i32; N_TOKENS];
+    for &t in &st.board {
+        if t != EMPTY {
+            counts[t as usize] += 1;
+        }
+    }
+    for c in 0..N_COLORS {
+        s.push(counts[c] as f64 / 4.0);
+    }
+    s.push(counts[PEARL] as f64 / 2.0);
+    s.push(counts[GOLD] as f64 / 3.0);
+    s.push(best_line_len(st) as f64 / 3.0);
+    // pyramid colour-demand (what the available cards need beyond my bonuses) — observable deck proxy
+    let mut demand = [0i32; N_COLORS];
+    for lvl in 0..3 {
+        for slot in 0..PYRAMID_SIZES[lvl] {
+            if let Some(&card) = st.pyramid[lvl].get(slot) {
+                if card >= 0 {
+                    for c in 0..N_COLORS {
+                        demand[c] += (COST[card as usize][c] - me_bon[c]).max(0);
+                    }
+                }
+            }
+        }
+    }
+    for c in 0..N_COLORS {
+        s.push(demand[c] as f64 / 20.0);
+    }
+    s.push(st.turn_number as f64 / 50.0);
+    s.push(st.bag.len() as f64 / 25.0);
+    s.push(st.again as i32 as f64);
+    s.push(st.replenished as i32 as f64);
+    s.push(st.privileges_board as f64 / 3.0);
+
+    debug_assert_eq!(mask.len(), TOK_N);
+    debug_assert_eq!(tokens.len(), TOK_N * TOK_F);
+    debug_assert_eq!(s.len(), TOK_STATE, "TOK_STATE drift");
+    (tokens, mask, s)
 }
 
 /// Encode `st` from `seat`'s perspective into the frozen N_FEATS vector. Pure function of

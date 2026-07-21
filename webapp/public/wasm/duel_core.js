@@ -1,4 +1,42 @@
 /**
+ * Time `iters` f32 forwards (chunked `dot`, no-alloc) on a random net; report ms + sims/s.
+ * @param {number} iters
+ * @param {number} seed
+ * @returns {string}
+ */
+export function duel_bench_forward_f32(iters, seed) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.duel_bench_forward_f32(iters, seed);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Time `iters` int8 forwards (quantized trunk, `qdot` i32x4_dot arm) on a random net.
+ * @param {number} iters
+ * @param {number} seed
+ * @returns {string}
+ */
+export function duel_bench_forward_i8(iters, seed) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.duel_bench_forward_i8(iters, seed);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * Apply the tier's pick rule to POOLED root statistics and return the winning move in
  * `encmove` (== `gen_engine_fixtures.enc_move`) encoding.
  *

@@ -26,10 +26,20 @@
 
 use wasm_bindgen::prelude::*;
 
+use crate::attn::AttnNet;
 use crate::compact::from_proj;
 use crate::encmove::enc_move;
-use crate::mcts::{pick, root_moves, root_search, Opts, RootStats};
+use crate::mcts::{pick, root_moves, root_search_with_leaf, Leaf, Opts, RootStats};
 use crate::rng::Rng;
+
+// The deployed Hard leaf: the card-set ATTENTION value net (rollout + attention value = "attnval").
+// It beat the heuristic leaf at equal sims across the ladder (700:0.58 / 2000:0.62 / 4000:0.59, edge
+// GROWS with depth) where the heuristic saturates by ~6k — so at prod's ~60k sims it is the stronger
+// bot. Embedded (~1.9MB JSON) + parsed once per worker (thread_local). Rollout unchanged.
+static ATTN_JSON: &str = include_str!("attn_value_net.json");
+thread_local! {
+    static ATTN_NET: AttnNet = AttnNet::from_json_str(ATTN_JSON).expect("embedded attn_value_net.json");
+}
 
 /// The tier this serves. `duel_search` takes its budget from the caller instead of the
 /// tier's `max_iters`/`time_limit`, which were sized for a starved Python server — but
@@ -64,10 +74,12 @@ pub fn duel_search(state_json: &str, budget_ms: f64, max_sims: u32, seed: f64) -
         ..Default::default()
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);
-    match root_search(&st, seat, TIER, &opts, &mut rng) {
-        Some(s) => serde_json::json!({ "visits": s.n, "wins": s.w }).to_string(),
-        None => err("no decision"),
-    }
+    ATTN_NET.with(|attn| {
+        match root_search_with_leaf(&st, seat, TIER, &opts, Leaf::AttnVal(attn), &mut rng) {
+            Some(s) => serde_json::json!({ "visits": s.n, "wins": s.w }).to_string(),
+            None => err("no decision"),
+        }
+    })
 }
 
 /// Apply the tier's pick rule to POOLED root statistics and return the winning move in
