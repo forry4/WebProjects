@@ -72,7 +72,11 @@ CLIENT_AI_TIMEOUT = 8.0
 # ~170ms and ~14MB on a fast 4-core box, while a slow device stops at the clock instead.
 # Either way it is ~150x what the Render server manages, and ~15x a local Python `hard`
 # decision (~3,900 sims) — the cap is here to bound tab memory and latency, not strength.
-_CLIENT_AI_BUDGET_MS = 600
+# BUDGET bumped 600 -> 1500ms: the shipped attention-net leaf (Hard) is far slower per sim than
+# the heuristic leaf the figures above describe, so wall-clock — not the 60k cap — is what binds
+# now. Duel search keeps improving to ~4-8k sims, so ~1.5s of the heavier net is strictly stronger
+# than 0.6s, and still well under the 8s watchdog + the frontend's 1.5s min-think floor.
+_CLIENT_AI_BUDGET_MS = 1500
 _CLIENT_AI_MAX_SIMS = 60000
 
 

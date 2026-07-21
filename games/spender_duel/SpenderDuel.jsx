@@ -177,11 +177,20 @@ function RoyalCard({ royal, dim, onClick, selected }) {
   );
 }
 
+// Fleur-de-lis as an inline SVG rather than the ⚜ text glyph: the glyph's horizontal
+// side-bearings vary by platform font, so flexbox centres its ADVANCE box while the ink
+// sits off-centre (right-shifted on iOS/Android system fonts) — an SVG centres identically
+// everywhere. fill:currentColor keeps the exact colour logic (gold when .full, transparent
+// when empty via the :not(.full) rule). Path is a symmetric heraldic fleur-de-lis.
+const FLEUR_PATH = "M400.3 425.1L360 464h74.7c14.3 0 21.4-17.3 11.3-27.4l-45.7-45.7c-.1 2.7-.1 5.4-.1 8.1c0 9.1 0 18.1 .1 26.1zM320 96c0-35.3-28.7-64-64-64s-64 28.7-64 64c0 23.6 12.9 44.3 32 55.4V208H160c0-53-43-96-96-96H32c-17.7 0-32 14.3-32 32c0 106 86 192 192 192h32V448c0 17.7 14.3 32 32 32s32-14.3 32-32V368h32c106 0 192-86 192-192c0-17.7-14.3-32-32-32H448c-53 0-96 43-96 96H288V151.4c19.1-11.1 32-31.8 32-55.4z";
+
 function Scroll({ n, armed, onClick, title }) {
   return (
     <div className={`duel-scrolls${armed ? " armed" : ""}${onClick ? " clickable" : ""}`} onClick={onClick} title={title}>
       {Array.from({ length: 3 }, (_, i) => (
-        <span key={i} className={`duel-scroll${i < n ? " full" : ""}`}>{"⚜"}</span>
+        <span key={i} className={`duel-scroll${i < n ? " full" : ""}`}>
+          <svg viewBox="0 0 512 512" aria-hidden="true"><path d={FLEUR_PATH} /></svg>
+        </span>
       ))}
     </div>
   );
@@ -380,12 +389,12 @@ const css = `
 .duel-scrolls{display:inline-flex;gap:7px}
 .duel-scroll{
   display:inline-flex;align-items:center;justify-content:center;
-  width:34px;height:34px;border-radius:50%;
-  font-size:1.9rem;line-height:1;color:#e6c260;
+  width:34px;height:34px;border-radius:50%;color:#e6c260;
   background:#241d14;border:1px solid #5a4a2c;
   box-shadow:0 1px 2px rgba(0,0,0,.4);
   transition:transform .1s ease,box-shadow .1s ease,border-color .1s ease,filter .1s ease;
 }
+.duel-scroll svg{width:20px;height:20px;fill:currentColor;display:block}
 .duel-scroll:not(.full){color:transparent;background:transparent;border:2px dashed #4a4030;box-shadow:none}
 .duel-scrolls.clickable{cursor:pointer}
 .duel-scrolls.clickable .duel-scroll.full{border-color:#7a6330;box-shadow:0 1px 2px rgba(0,0,0,.4),0 0 0 1px rgba(232,201,106,.28)}
@@ -569,6 +578,14 @@ const css = `
   .duel .lby-card{flex-wrap:wrap;row-gap:10px}
   .duel .lby-card .btn{padding:8px 12px;font-size:.78rem}
   .duel .lby-card-actions{margin-left:auto}
+}
+@media(max-width:480px){
+  /* Action row on phones: the take/buy + Replenish + close(X) trio is at most 3 buttons
+     (selCells and selCard are mutually exclusive). The Cinzel buttons are wide (letter-spacing),
+     so at full padding "Take 3 tokens" pushed the X onto its own line. Shrink padding/gap/spacing
+     so all three stay on ONE row down to ~300px, while still wrapping gracefully if ever more. */
+  .duel-actionrow{gap:6px}
+  .duel-actionrow .btn{padding:8px 12px;font-size:.8rem;letter-spacing:.03em}
 }
 @media(min-width:1121px){
   /* Desktop game screen LOCKS to the viewport (the 3-col layout only): the columns fill
