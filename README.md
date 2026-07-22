@@ -104,7 +104,7 @@ search for free (no special-cased "block the opponent" logic). The consistent le
 across dozens of offline experiments — captured in the [research log](docs/ai-research-log.md)
 — is that **search depth (simulations/move) is the dominant strength lever**, and
 that static-eval re-weighting saturates fast. That's what motivated the Rust→WASM
-port: moving inference into the browser buys ~100–1000× more simulations per move on
+port: moving inference into the browser buys ~1000× more simulations per move on
 the same free hosting. The learned nets (an AlphaZero-style policy+value net for
 Spender, a card-set **attention** value net for Spender Duel) were each shipped only
 after beating the prior champion in **equal-time**, paired-seed arenas — and the log
