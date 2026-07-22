@@ -14,6 +14,26 @@ Content below is preserved **verbatim** from the pre-split `CLAUDE.md` (git also
 # ARCHIVE: Spender Duel AI — heuristic MCTS → netval → card-set ATTENTION value net (SHIPPED)
 <!-- ===================================================================== -->
 
+### Session (2026-07-22) — v2 retrain SHIPPED; forward speedups banked; self-play / capacity / policy campaign → **v2 is at the ceiling** (do-not-relitigate)
+
+**Bottom line:** after systematically testing the three real strength levers, **Duel Hard v2 is at the ceiling for the value-net + determinized-MCTS approach**, and the reason is intrinsic to the game — near-uniform root Q (many equivalent moves). v2 stands (SHIPPED `3d0cecb`; beats v1 0.63, heuristic 0.80). The ~3.3× forward/rollout speedups are banked (`63eb9ab`).
+
+1. **v2 SHIPPED (`3d0cecb`) — larger-data retrain of the attention net.** 2.96M rows / 32k games + weight-decay fixed v1's ep6 overfit collapse (val AUC plateaus 0.742). Gate @2000 sims, n=800, mirror 0.5000: **v2 vs v1 = 0.6300**, v2 vs heuristic = 0.7963.
+
+2. **Forward speedups (banked, `63eb9ab`) — MEASURE first.** `bin/attn_bench`: one attn forward = 458µs but only **~30% of a sim** — the 12-step rollout is **~70%**. So no-alloc thread-local scratch gave only ~4% (allocation was never the bottleneck), while SIMD chunked-dot in `linear()` (8 accumulators → breaks the f32 reduction dep → wasm128 FMA) cut the forward 458→240µs (1.9×) and *improved* parity (6.1e-8 → 1.7e-9). Value-net is unchanged, so the wasm redeploy is deferred (batched with any future net ship).
+
+3. **Rollout 12→2 (gate-verified — DO NOT RELITIGATE).** `gate_rollout`, equal-sims, mirror 0.5000, n=160: **roll=0 LOSES (0.431)** but **roll=2 / 3 / 4 all TIE roll=12** (0.525 / 0.469 / 0.506). So 2-step is the floor — the rollout matters (0-step loses) but 6× fewer steps costs nothing. Rollout was 70% of a sim → **~3.3× generation**. Applied as `opts.rollout_steps=2` in the harvester, NOT the global HARD cfg (which also drives the heuristic serving fallback).
+
+4. **Saturation re-measured on the ATTN net: ~4k (below the old ~6k heuristic figure).** net@8000 vs net@4000 = **0.4688** [0.393,0.546] n=160 — doubling past 4k gives nothing (a stronger leaf needs *less* search). Prod budget set to **3.5s OR 10k sims, whichever first** (`05519e3`).
+
+5. **Self-play iteration round 1 (v3) — WASH.** 12k net-strength games (attn leaf, 2-step, 2000 sims, opening temp) → same-arch retrain → **v3 vs v2 = 0.5117** [0.472,0.551] n=600. Two lessons: (a) **value-only self-play doesn't bootstrap** — AZ's improvement engine is the *policy* loop, which Duel lacks (see #7); retraining a value head on stronger-play outcomes is a weak signal. (b) 12k STRONG games play *even* with v2's 32k WEAK (heuristic) games → strong data is more efficient per game, but a same-arch retrain does not exceed v2. My initial "need ~30k games" read was the wrong lever (user callout: Spender never won via data volume — its wins were method: search, attention, a working policy head).
+
+6. **Bigger net (v3big: D=96/HEADS=6/FF=192/L=3/H=192, ~3× params) — OVERFIT, no gain.** Same v3 corpus → val AUC 0.717 < v3's 0.721; train_mse plunges to 0.77 while val AUC declines from ep8. Capacity is not the constraint. Parity re-verified 3.57e-8 before training (the D=96 twin in `attn_net.py`+`attn.rs` is correct if ever revisited — but it needs far MORE data, not just width); arch reverted to D=64.
+
+7. **★ POLICY HEAD RE-TEST — DEAD, and it is the GAME not the evaluator (RESOLVES the "re-test if the net changes" caveat).** Re-ran the old near-uniform-policy dead-end on the STRONG v2 net (`harvest_pv` wired to `root_search_with_leaf` + `Leaf::AttnVal`). Policy-target entropy ratio (entropy ÷ log n_legal, ~18 legal root moves): **600 sims 0.908, 2000 sims 0.899 — MORE SEARCH DID NOT SHARPEN IT.** If real Q-signal were masked by visit noise, 3.3× the sims would surface it; it didn't. So the flat root Q is **genuine**, not evaluator-limited: Duel positions have many near-equivalent moves, so a PUCT prior has nothing to bias toward. The old "flatness = the coarse heuristic" hunch is **refuted** — the sharp net gives flat Q too. This is exactly WHY Spender's policy lever (its policy beats H3 by +0.58) does NOT transfer to Duel: Spender's move-values are differentiated; Duel's are not.
+
+**Ceiling verdict (do-not-relitigate unless the ENCODER or algorithm changes):** all three real levers are ruled out — more data (v3 wash), more capacity (v3big overfit), a policy head (#7 flat Q). The value-net + determinized-MCTS approach is maxed for Duel; the ceiling is structural (flat move-value landscape). Only a fundamentally different encoder/algorithm could break it (low odds, out of scope for "make this net stronger"). The 12k-game net-strength corpus is KEPT at `C:/Users/Forrest/duel_run/v3/` for any future attempt. Session tooling (native, `--features bridge`): `attn_bench`, `gate_sims`/`gate_rollout` (attn leaf), `harvest_attn`/`harvest_pv` (attn-leaf self-play), `gate_netleaf` (net-vs-net), `train_attn`.
+
 ### Session (2026-07-20) — Duel Hard upgraded from the hand heuristic to a card-set ATTENTION value net (SHIPPED `e4b2c06`)
 
 **The result:** Duel **Hard** is now a card-set **attention value net** served as a NETVAL leaf (12-step
