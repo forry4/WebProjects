@@ -1181,7 +1181,12 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (!["S", "N"].includes(roomData?.ai_variant) || wasmPoolRef.current || typeof Worker === "undefined") return;
 		const url = `${import.meta.env.BASE_URL}wasm/s-worker.js`;
-		const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+		// Reserve one core for the browser's main/compositor/raster threads: the WASM search is CPU-bound,
+		// and a pool that pegs EVERY core starves the compositor → the GPU-composited flying-gem/card
+		// animations stutter while the AI thinks. Sims are capped in AGGREGATE (perWorkerSims scales to the
+		// pool size), so one fewer worker keeps total sims ~unchanged — this only bites on low-core machines
+		// where the contention actually exists (6-/8-core boxes still get the full 4).
+		const cores = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
 		const makeWorker = () => {
 			let w;
 			try { w = new Worker(url, { type: "module" }); } catch { return null; }
