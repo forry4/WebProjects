@@ -309,6 +309,10 @@ const css = baseCss + lobbyCss + `
   .board-actions .target-label{font-size:1rem}
   .board-actions-btns{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
   .board-actions-btns:empty{display:none}
+  /* Drop the admin "Vals" toggle here (mobile/tablet): beside the nobles there's only room
+     for the Take/Buy/✕ controls, and Vals + a "Take N" button wrapped the row to a 2nd line.
+     Desktop keeps it — its toggle lives in the separate .actions-panel-btns. */
+  .board-actions-btns .ai-vals-toggle{display:none}
   .board-actions .btn{padding:9px 14px}
 }
 `
