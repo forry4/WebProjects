@@ -358,7 +358,7 @@ const css = baseCss + lobbyCss + `
 
 /* ─── Player panels ─────────────────────────────────────────────────────── */
 .players-area{display:flex;flex-direction:column;gap:8px}
-.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s,box-shadow .2s,background .2s}
+.player-panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5);transition:border-color .2s}
 /* the active player's box gets a clean gold rounded border (the only highlight);
    your own box is identified by the active dot + "(you)" label, no extra accent. */
 .player-panel.active-turn{border-color:var(--gold);background:linear-gradient(180deg,rgba(255,255,255,.04),transparent 46%),var(--surface3);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(201,168,76,.28),0 3px 16px -4px rgba(201,168,76,.22),0 2px 10px -4px rgba(0,0,0,.5)}
