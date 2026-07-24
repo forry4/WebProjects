@@ -22,7 +22,7 @@ const SITE_NAME = "Forrest Games";
 // Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
 const GAMES = [
 	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser", accent: "#d4a84c", players: "1–4 players" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#d6454b", players: "1–2 players" },
+	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#d6454b", players: "1–4 players" },
 	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#6f86d6", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#bf6fd0", players: "1–2 players" },
 ];
