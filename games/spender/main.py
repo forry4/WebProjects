@@ -649,7 +649,7 @@ CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's
 # heuristic variant, or the cheap rollout fallback) feels robotic. A FLOOR, not an added delay:
 # real think time counts toward it, so the strong searches (and the client-WASM path, always
 # seconds) are unaffected.
-_MIN_BOT_THINK = 0.5
+_MIN_BOT_THINK = 0.7
 
 
 async def _floor_bot_move(t0: float) -> None:

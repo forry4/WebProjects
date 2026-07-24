@@ -49,8 +49,8 @@ _BOT_MOVE_DELAY = 0.9
 # A bot's FIRST move of a turn never lands sooner than this after the turn became
 # the bot's — an instant reply (easy random bot, or a forced single-legal move)
 # feels robotic. A floor, not an added delay: real search time counts toward it, so
-# the heavy MCTS tiers (already > 0.5s) are unaffected.
-_MIN_BOT_THINK = 0.5
+# the heavy MCTS tiers (already > 0.7s) are unaffected.
+_MIN_BOT_THINK = 0.7
 
 
 async def _floor_bot_move(t0: float) -> None:

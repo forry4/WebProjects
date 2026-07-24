@@ -101,7 +101,7 @@ _POST_TURN_PAUSE = 1.0
 # Floor before the bot's very first move when NO human turn preceded it (the bot is the
 # start player) — an instant opening move feels robotic. The post-turn/phase pauses above
 # already exceed this in every other case.
-_MIN_BOT_THINK = 0.5
+_MIN_BOT_THINK = 0.7
 
 
 def _valid_difficulty(value) -> str:
