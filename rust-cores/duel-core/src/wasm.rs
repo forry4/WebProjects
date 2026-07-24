@@ -41,6 +41,15 @@ thread_local! {
     static ATTN_NET: AttnNet = AttnNet::from_json_str(ATTN_JSON).expect("embedded attn_value_net.json");
 }
 
+// The EXPERT leaf: champion-1 — the deployed v2 (Hard) further retrained to DEFEND patient development
+// (the human-exploited blind spot), via a league dev-defense pass. Beats Hard's v2 0.559/0.570/0.583
+// at 700/2k/4k sims (edge GROWS with search, so stronger still at prod's ~60k). Same arch/serving
+// path as Hard — only the weights differ; selected by `duel_search_expert`.
+static EXPERT_JSON: &str = include_str!("attn_expert_net.json");
+thread_local! {
+    static EXPERT_NET: AttnNet = AttnNet::from_json_str(EXPERT_JSON).expect("embedded attn_expert_net.json");
+}
+
 /// The tier this serves. `duel_search` takes its budget from the caller instead of the
 /// tier's `max_iters`/`time_limit`, which were sized for a starved Python server — but
 /// everything else about the bot (leaf, prune, rollout depth, greedy pick) is the tier's.
@@ -75,6 +84,30 @@ pub fn duel_search(state_json: &str, budget_ms: f64, max_sims: u32, seed: f64) -
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);
     ATTN_NET.with(|attn| {
+        match root_search_with_leaf(&st, seat, TIER, &opts, Leaf::AttnVal(attn), &mut rng) {
+            Some(s) => serde_json::json!({ "visits": s.n, "wins": s.w }).to_string(),
+            None => err("no decision"),
+        }
+    })
+}
+
+/// `duel_search` for the EXPERT tier — the identical search (same `TIER` config, leaf, prune, rollout,
+/// greedy pick) but with the stronger `EXPERT_NET` (champion-1) as the value leaf. A separate entry
+/// (not a tier param) so the existing Hard worker call is byte-unchanged; the worker picks this when
+/// the room difficulty is "expert". `duel_pick_move` is net-independent (pooled-stats pick) → shared.
+#[wasm_bindgen]
+pub fn duel_search_expert(state_json: &str, budget_ms: f64, max_sims: u32, seed: f64) -> String {
+    let (st, seat) = match parse_state(state_json) {
+        Some(x) => x,
+        None => return err("bad state"),
+    };
+    let opts = Opts {
+        time_limit: Some((budget_ms / 1000.0).max(0.0)),
+        max_iters: Some(if max_sims == 0 { u64::MAX } else { max_sims as u64 }),
+        ..Default::default()
+    };
+    let mut rng = Rng::new(seed.max(0.0) as u64);
+    EXPERT_NET.with(|attn| {
         match root_search_with_leaf(&st, seat, TIER, &opts, Leaf::AttnVal(attn), &mut rng) {
             Some(s) => serde_json::json!({ "visits": s.n, "wins": s.w }).to_string(),
             None => err("no decision"),

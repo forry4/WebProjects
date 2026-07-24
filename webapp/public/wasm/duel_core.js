@@ -101,6 +101,32 @@ export function duel_search(state_json, budget_ms, max_sims, seed) {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
     }
 }
+
+/**
+ * `duel_search` for the EXPERT tier — the identical search (same `TIER` config, leaf, prune, rollout,
+ * greedy pick) but with the stronger `EXPERT_NET` (champion-1) as the value leaf. A separate entry
+ * (not a tier param) so the existing Hard worker call is byte-unchanged; the worker picks this when
+ * the room difficulty is "expert". `duel_pick_move` is net-independent (pooled-stats pick) → shared.
+ * @param {string} state_json
+ * @param {number} budget_ms
+ * @param {number} max_sims
+ * @param {number} seed
+ * @returns {string}
+ */
+export function duel_search_expert(state_json, budget_ms, max_sims, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.duel_search_expert(ptr0, len0, budget_ms, max_sims, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

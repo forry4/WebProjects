@@ -63,6 +63,7 @@ const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, barely plans" },
   { id: "normal", name: "Normal", desc: "Thinks a little, makes mistakes" },
   { id: "hard", name: "Hard", desc: "Searches properly — a real fight" },
+  { id: "expert", name: "Expert", desc: "Hard, retrained to punish impatience" },
 ];
 const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard" };
 
@@ -991,7 +992,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   // no wasm, a search error, a slow device. We only ever announce `client_ai_ready`
   // once at least one worker is alive.
   useEffect(() => {
-    if (!roomData?.vs_ai || roomData?.ai_difficulty !== "hard"
+    if (!roomData?.vs_ai || (roomData?.ai_difficulty !== "hard" && roomData?.ai_difficulty !== "expert")
       || wasmPoolRef.current || typeof Worker === "undefined") return;
     const url = `${import.meta.env.BASE_URL}wasm/duel-worker.js`;
     const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
@@ -1065,6 +1066,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         const parts = await Promise.all(pool.map((wk, i) => wk.request({
           kind: "search", state, budget: as.budget_ms, maxSims: perWorker,
           seed: ((as.decision * 2654435761) ^ (i * 40503 + 1)) >>> 0,
+          expert: roomData.ai_difficulty === "expert",
         }).catch(() => null)));
         const good = parts.filter((p) => p && p.visits && p.wins);
         if (!good.length) return;                 // every worker failed -> server fallback

@@ -20,7 +20,7 @@
 //   (the main thread drops this worker; if none are ready it never announces
 //   client_ai_ready and the SERVER computes the bot's move — the pre-existing path).
 
-import init, { duel_search, duel_pick_move } from "./duel_core.js";
+import init, { duel_search, duel_search_expert, duel_pick_move } from "./duel_core.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -36,7 +36,8 @@ self.onmessage = async (e) => {
   if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
     if (msg.kind === "search") {
-      const r = JSON.parse(duel_search(
+      const search = msg.expert ? duel_search_expert : duel_search;
+      const r = JSON.parse(search(
         String(msg.state), Number(msg.budget), (msg.maxSims >>> 0) || 0, Number(msg.seed >>> 0)));
       if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
       self.postMessage({ id: msg.id, visits: r.visits, wins: r.wins });
