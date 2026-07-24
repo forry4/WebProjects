@@ -28,7 +28,7 @@ import os
 # `enc_move` is the encoding the wasm emits; reuse the generator's copy rather than
 # hand-rolling a third one in the test (a test that encodes it its own way would pass
 # while the real client failed).
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "duel-core", "tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "rust-cores", "duel-core", "tools"))
 import gen_engine_fixtures as G  # noqa: E402
 
 

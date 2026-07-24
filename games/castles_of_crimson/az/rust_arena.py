@@ -33,7 +33,7 @@ from games.castles_of_crimson import ai, bot, engine  # noqa: E402
 from games.castles_of_crimson.az import bridge, compact  # noqa: E402
 
 PIDS = ["P0", "P1"]
-SERVER_DEFAULT = os.path.join(_REPO, "coc-core", "target", "release", "move_server_coc.exe")
+SERVER_DEFAULT = os.path.join(_REPO, "rust-cores", "coc-core", "target", "release", "move_server_coc.exe")
 
 _SERVER = None
 _ARGS = None

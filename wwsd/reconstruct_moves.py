@@ -21,7 +21,7 @@ C2 = [[a, b] for a in range(5) for b in range(a+1, 5)]                          
 
 def load_pts():
     try:
-        rs = (pathlib.Path(__file__).resolve().parent.parent / "spender-core/src/cards.rs").read_text()
+        rs = (pathlib.Path(__file__).resolve().parent.parent / "rust-cores/spender-core/src/cards.rs").read_text()
         return ast.literal_eval(re.search(r"const PTS:[^=]*=\s*(\[.*?\]);", rs, re.S).group(1))
     except Exception:
         return None

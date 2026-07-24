@@ -1182,7 +1182,7 @@ def _s_searched_value(game: dict):
 # eval"), so the overlay carries just `ai_position_eval` (N's leaf value of the live position).
 # Single source of truth: the net JSON is the SAME file the WASM embeds, so the two never drift.
 _N_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(_AI_DIR))), "spender-core", "src", "n_model.json")
+    os.path.dirname(os.path.dirname(os.path.dirname(_AI_DIR))), "rust-cores", "spender-core", "src", "n_model.json")
 _N_MODEL = None  # (w0, b0, w1, b1, mu, sd) lazily loaded numpy arrays, or False if unavailable
 
 
