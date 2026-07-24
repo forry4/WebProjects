@@ -73,6 +73,12 @@ DIFFICULTY = {
                "temperature": 0.08, "rollout_steps": 12},
     "hard": {"turn_budget": 5.0, "time_limit": 2.5, "max_iters": 5000,
              "temperature": 0.0, "rollout_steps": 12},
+    # "expert" = Hard's search config. The strength difference lives in the CLIENT wasm (a stronger
+    # value net, champion-1); the server-side fallback leaf is the heuristic for BOTH tiers, so the
+    # server plays them identically — expert just needs a real tier here so the fallback never crashes
+    # or silently downgrades.
+    "expert": {"turn_budget": 5.0, "time_limit": 2.5, "max_iters": 5000,
+               "temperature": 0.0, "rollout_steps": 12},
 }
 DEFAULT_DIFFICULTY = "hard"
 

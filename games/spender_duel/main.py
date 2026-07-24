@@ -62,7 +62,7 @@ async def _floor_bot_move(t0: float) -> None:
 
 # Opponent tiers. "easy" = the trivial tiered random-legal bot (no search);
 # "normal"/"hard" = determinized MCTS (ai.DIFFICULTY), planned in a thread pool.
-AI_DIFFICULTIES = ("easy", "normal", "hard")
+AI_DIFFICULTIES = ("easy", "normal", "hard", "expert")
 DEFAULT_DIFFICULTY = "hard"
 
 # ── Client-side (WASM) search ────────────────────────────────────────────────
@@ -74,7 +74,7 @@ DEFAULT_DIFFICULTY = "hard"
 # beatable (small budget + temperature sampling, measured hard >> normal >> easy), so
 # handing it ~100x the sims would quietly break the ladder — that is a strength change,
 # and this is a serving change.
-CLIENT_AI_TIERS = ("hard",)
+CLIENT_AI_TIERS = ("hard", "expert")
 # The whole degradation story: no valid client move inside this and the SERVER plays the
 # move itself with the existing Python bot. Per-decision, so a flaky client costs sims,
 # never a stuck game.
