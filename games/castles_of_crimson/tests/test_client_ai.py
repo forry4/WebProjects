@@ -30,6 +30,7 @@ def _isolate(monkeypatch, rid):
     monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.001)
     monkeypatch.setattr(m, "_PHASE_END_PAUSE", 0.001)
     monkeypatch.setattr(m, "_POST_TURN_PAUSE", 0.001)
+    monkeypatch.setattr(m, "_MIN_BOT_THINK", 0.0)
 
 
 async def _create_expert(rid, pid):

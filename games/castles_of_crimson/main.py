@@ -98,6 +98,10 @@ _PHASE_END_PAUSE = 2.6
 # up — so finishing your turn isn't immediately steamrolled by the opponent view. Matches
 # the client's board-open delay so the board is up before the bot's first move lands.
 _POST_TURN_PAUSE = 1.0
+# Floor before the bot's very first move when NO human turn preceded it (the bot is the
+# start player) — an instant opening move feels robotic. The post-turn/phase pauses above
+# already exceed this in every other case.
+_MIN_BOT_THINK = 0.5
 
 
 def _valid_difficulty(value) -> str:
@@ -687,7 +691,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
         elif game.get("phase") == "playing":
             first_pause = _POST_TURN_PAUSE
         else:
-            first_pause = 0.0
+            first_pause = _MIN_BOT_THINK   # bot-as-start-player (setup): still not instant
 
     try:
         if first_pause:

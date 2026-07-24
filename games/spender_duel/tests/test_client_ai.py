@@ -51,6 +51,7 @@ def _isolate(monkeypatch, rid):
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
     monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.0)
+    monkeypatch.setattr(m, "_MIN_BOT_THINK", 0.0)   # no real-time first-move floor under the sleep(0) driver
     # Pin every source of game entropy (deck seed, first player, bot moves). Without this
     # each run gets a different deal, so a test can only HOPE the bot is to move when it
     # asserts a client move lands — which is why this suite passed 20/20 locally and then

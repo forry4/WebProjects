@@ -46,6 +46,19 @@ LOG = logging.getLogger("games.spender_duel")
 
 # Pause between the bot's individual moves so the client animates each one.
 _BOT_MOVE_DELAY = 0.9
+# A bot's FIRST move of a turn never lands sooner than this after the turn became
+# the bot's — an instant reply (easy random bot, or a forced single-legal move)
+# feels robotic. A floor, not an added delay: real search time counts toward it, so
+# the heavy MCTS tiers (already > 0.5s) are unaffected.
+_MIN_BOT_THINK = 0.5
+
+
+async def _floor_bot_move(t0: float) -> None:
+    """Sleep so the bot's first move isn't shown before _MIN_BOT_THINK from turn start.
+    Idempotent — a no-op once that long has elapsed, so later (already-paced) moves pass through."""
+    remaining = _MIN_BOT_THINK - (time.monotonic() - t0)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
 
 # Opponent tiers. "easy" = the trivial tiered random-legal bot (no search);
 # "normal"/"hard" = determinized MCTS (ai.DIFFICULTY), planned in a thread pool.
@@ -365,7 +378,7 @@ def _bot_should_act(room: dict) -> bool:
 
 
 # ── Bot turn scheduler ────────────────────────────────────────────────────────
-async def _client_bot_turn(room_id: str) -> None:
+async def _client_bot_turn(room_id: str, t0: float) -> None:
     """Play the bot's turn one DECISION at a time through the human's browser.
 
     A Duel turn is several decisions (optional privilege/replenish -> the mandatory
@@ -447,6 +460,7 @@ async def _client_bot_turn(room_id: str) -> None:
             room["_ai_search"] = None
             _sync_status_from_game(room)
             more = _bot_should_act(room)
+        await _floor_bot_move(t0)            # never show the turn's first move before the floor
         await broadcast_state(room_id)
         save_game(room_id)
         if not more:
@@ -488,10 +502,11 @@ async def _schedule_bot_turn(room_id: str) -> None:
         room["_bot_running"] = True
         difficulty = _valid_difficulty(room.get("ai_difficulty"))
         use_client = difficulty in CLIENT_AI_TIERS and bool(room.get("client_ai"))
+    t0 = time.monotonic()                    # turn start — the first-move floor measures from here
     try:
         rng = _new_rng()
         if use_client:
-            await _client_bot_turn(room_id)
+            await _client_bot_turn(room_id, t0)
 
         # Server path (easy/normal, and the client tiers' fallback). Snapshot AFTER the
         # client attempt — it may have played part of the turn already.
@@ -527,6 +542,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
                     break
                 _sync_status_from_game(room)
                 more = _bot_should_act(room)
+            await _floor_bot_move(t0)
             await broadcast_state(room_id)
             save_game(room_id)
             if not more:
@@ -548,6 +564,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
                     return
                 _sync_status_from_game(room)
                 more = _bot_should_act(room)
+            await _floor_bot_move(t0)
             await broadcast_state(room_id)
             save_game(room_id)
             if not more:

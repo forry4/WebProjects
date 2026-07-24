@@ -645,6 +645,20 @@ CLIENT_AI_TIMEOUT = 15.0  # seconds a VISIBLE tab may take before the server com
                           # with no WASM (never armed) or a genuine focused crash — both rare.
 CLIENT_AI_SIMS = 4000     # suggested search budget for the client (≫ Render's sims-starved ~380/move)
 
+# A bot never plays its move sooner than this after its turn begins — an instant reply (a fast
+# heuristic variant, or the cheap rollout fallback) feels robotic. A FLOOR, not an added delay:
+# real think time counts toward it, so the strong searches (and the client-WASM path, always
+# seconds) are unaffected.
+_MIN_BOT_THINK = 0.5
+
+
+async def _floor_bot_move(t0: float) -> None:
+    """Sleep so the AI's move isn't broadcast before _MIN_BOT_THINK from the turn's start.
+    A no-op once that long has elapsed (the strong/searched paths already exceed it)."""
+    remaining = _MIN_BOT_THINK - (time.monotonic() - t0)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+
 
 def _compact_state_dict(game: dict) -> dict:
     """Serialize the AI-perspective compact engine State (from_game_dict) to the JSON shape the WASM
@@ -2480,6 +2494,7 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
 async def _schedule_ai_turn(room_id: str) -> None:
     """Broadcast the post-human-move state immediately, then run MCTS in a thread pool
     (non-blocking) and broadcast the AI's move when it finishes."""
+    t0 = time.monotonic()   # turn start — the AI's move is floored to _MIN_BOT_THINK from here
     # If it's the HUMAN's turn in an S game (human-first start / reconnect, where no AI move
     # fires below), kick the searched-eval search. Fully guarded, so a no-op otherwise.
     asyncio.create_task(_schedule_s_searched_eval(room_id))
@@ -2580,6 +2595,7 @@ async def _schedule_ai_turn(room_id: str) -> None:
         if g.get("phase") == "over":
             r["status"] = "over"
 
+    await _floor_bot_move(t0)   # never show the AI's move before the floor (instant heuristic/fallback)
     save_game(room_id)
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
     # It's the human's turn now — kick off a fresh searched-eval search for the human's position

@@ -39,6 +39,7 @@ def _isolate(monkeypatch, rid):
     monkeypatch.setattr(m, "load_game_state", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
     monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.001)
+    monkeypatch.setattr(m, "_MIN_BOT_THINK", 0.0)   # skip the real-time first-move floor in tests
     # Pin the BOT's rng. Without this the bot's moves come off real entropy, so a test
     # can only hope it exercises the path under assertion — the flake that made this
     # suite fail ~1/14 on nothing but luck. Deploy gates must not be coin flips.
