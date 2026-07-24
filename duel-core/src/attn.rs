@@ -41,6 +41,10 @@ pub struct AttnNet {
     pub tb: Vec<f32>,
     pub vw: Vec<f32>,
     pub vb: Vec<f32>,
+    /// Policy head (AZ): logits over `actions::N_ACTIONS`. EMPTY for a value-only net (v2) — the
+    /// search then runs unguided. `pw` is row-major [N_ACTIONS x H]; `pb` is [N_ACTIONS].
+    pub pw: Vec<f32>,
+    pub pb: Vec<f32>,
 }
 
 #[inline]
@@ -128,10 +132,10 @@ thread_local! {
 }
 
 impl AttnNet {
-    /// value in [-1, 1]. `tokens` = TOK_N*TOK_F f64, `mask` = TOK_N, `state` = TOK_STATE.
-    pub fn value(&self, tokens: &[f64], mask: &[f64], state: &[f64]) -> f64 {
-        SCRATCH.with(|cell| {
-            let s = &mut *cell.borrow_mut();
+    /// Fill `s.ht` (the shared trunk) from inputs — the parity-locked forward up to the trunk,
+    /// shared by the value head (`value`) and the policy head (`policy_logits`). Byte-identical to
+    /// the old inlined `value` up to the trunk (verified by `bin/attn_parity`).
+    fn trunk_into(&self, s: &mut Scratch, tokens: &[f64], mask: &[f64], state: &[f64]) {
             let nob: &[f32] = &[];
 
             for (d, &sv) in s.tok.iter_mut().zip(tokens.iter()) {
@@ -239,10 +243,43 @@ impl AttnNet {
                     *vv = 0.0;
                 }
             }
+    }
+
+    /// value in [-1, 1]. `tokens` = TOK_N*TOK_F f64, `mask` = TOK_N, `state` = TOK_STATE.
+    pub fn value(&self, tokens: &[f64], mask: &[f64], state: &[f64]) -> f64 {
+        SCRATCH.with(|cell| {
+            let s = &mut *cell.borrow_mut();
+            self.trunk_into(s, tokens, mask, state);
             let mut val = [0f32; 1];
             linear(&s.ht[..], &self.vw, &self.vb, H, 1, &mut val);
             val[0].tanh() as f64
         })
+    }
+
+    /// Policy logits over the 320-action space (`actions.rs`) from RAW inputs — the parity path and
+    /// the tokenized `policy_logits`'s worker. EMPTY for a value-only net (no policy head loaded), so
+    /// the shipped v2 net keeps searching exactly as before (callers treat empty as "no prior").
+    pub fn policy_logits_raw(&self, tokens: &[f64], mask: &[f64], state: &[f64]) -> Vec<f32> {
+        if self.pb.is_empty() {
+            return Vec::new();
+        }
+        SCRATCH.with(|cell| {
+            let s = &mut *cell.borrow_mut();
+            self.trunk_into(s, tokens, mask, state);
+            let mut out = vec![0f32; self.pb.len()];
+            linear(&s.ht[..], &self.pw, &self.pb, H, self.pb.len(), &mut out);
+            out
+        })
+    }
+
+    /// Policy logits over the 320-action space for `seat` at state `st` (tokenizes then forwards).
+    /// EMPTY for a value-only net — the search runs unguided.
+    pub fn policy_logits(&self, st: &State, seat: usize) -> Vec<f32> {
+        if self.pb.is_empty() {
+            return Vec::new();
+        }
+        let (t, m, sst) = features_tokens(st, seat);
+        self.policy_logits_raw(&t, &m, &sst)
     }
 
     /// Leaf value from `seat`'s perspective — tokenizes then forwards.
@@ -271,6 +308,10 @@ struct AttnJson {
     tb: Vec<f32>,
     vw: Vec<f32>,
     vb: Vec<f32>,
+    #[serde(default)]
+    pw: Vec<f32>,
+    #[serde(default)]
+    pb: Vec<f32>,
 }
 
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
@@ -281,6 +322,7 @@ impl AttnNet {
             emb_w: j.emb_w, emb_b: j.emb_b, wq: j.wq, wk: j.wk, wv: j.wv, wo: j.wo,
             f1w: j.f1w, f1b: j.f1b, f2w: j.f2w, f2b: j.f2b,
             sw: j.sw, sb: j.sb, tw: j.tw, tb: j.tb, vw: j.vw, vb: j.vb,
+            pw: j.pw, pb: j.pb,
         })
     }
 }

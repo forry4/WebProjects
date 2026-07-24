@@ -63,6 +63,24 @@ required-features = ["bridge"]
 name = "endgame_diag"
 required-features = ["bridge"]
 
+# Featurize externally-supplied positions (human-game debias harvest) through the EXACT serving path
+# (compact::from_proj + feats::features_tokens) + the shipped net's value — drift-free vs training.
+[[bin]]
+name = "featurize_positions"
+required-features = ["bridge"]
+
+# Self-play harvest WITH auxiliary game-final targets (card/crown margin, win-cond, game length) for
+# the attention value net — aux heads regularize the trunk (training-only; value path served unchanged).
+[[bin]]
+name = "harvest_aux"
+required-features = ["bridge"]
+
+# Self-play harvest for the learned ATTENTION policy+value net (AZ): token-features + softmax-over-Q
+# policy target (320-action space) + outcome, from the shipped v2 attention search. Native-only.
+[[bin]]
+name = "harvest_attn_pv"
+required-features = ["bridge"]
+
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

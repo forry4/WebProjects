@@ -136,6 +136,7 @@ fn run_mcts(
             temperature: req.temperature,
             rollout_steps: req.rollout_steps,
             take_dominance: req.take_dominance,
+            ..Default::default()
         }
     } else {
         // Sims arm (the existing arena currency): bound by ITERATIONS, clock free, so a busy
@@ -146,6 +147,7 @@ fn run_mcts(
             temperature: req.temperature,
             rollout_steps: req.rollout_steps,
             take_dominance: req.take_dominance,
+            ..Default::default()
         }
     };
     let leaf = match req.leaf.as_deref() {

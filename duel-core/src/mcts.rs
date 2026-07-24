@@ -25,9 +25,10 @@
 //!      follows either way. Card pools DO sort identically (`d{lvl}_{idx:02}` is
 //!      zero-padded, so within a level string order == index order).
 
+use crate::actions::move_to_index;
 use crate::cards::{LEVEL_OF, PEARL};
 use crate::clock::{Clock, Deadline};
-use crate::engine::{is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
+use crate::engine::{bonuses_of, is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
 use crate::rng::Rng;
 use crate::value::{value, value_geom};
 use crate::valuenet::{QuantValueNet, ValueNet};
@@ -90,6 +91,23 @@ pub struct Opts {
     pub temperature: Option<f64>,
     pub rollout_steps: Option<usize>,
     pub take_dominance: Option<bool>,
+    /// Experimental (default None = OFF = byte-identical to the deployed search): enable a
+    /// 1-ply HEURISTIC policy prior in PUCT with this softmax temperature. Spender's H3-prior
+    /// analog — the guided-search lever Duel's uniform PUCT never had. See `compute_priors`.
+    pub prior_temp: Option<f64>,
+    /// C_PUCT override used ONLY when `prior_temp` is set (concentrating search changes the
+    /// optimal exploration level, so it is swept alongside `prior_temp`). None -> `C_PUCT`.
+    pub prior_c: Option<f64>,
+    /// Development-tilt on the (attention) net leaf: `net.eval + dev_tilt * dev_margin`. Default
+    /// 0.0 = OFF = byte-identical. A value-bias PROBE of whether v2 under-values card development
+    /// (the diagnosed under-development blind spot); if a small tilt beats plain v2 it is also a
+    /// shippable leaf fix. See `dev_margin` + `gate_netleaf --dev-tilt`.
+    pub dev_tilt: f64,
+    /// AZ policy prior (default None = OFF = flat/unguided). When set AND the leaf is `AttnVal(net)`
+    /// with a POLICY head, PUCT priors come from the net's policy logits (softmax over legal moves at
+    /// this SERVING temperature) instead of the heuristic. The learned-policy analog of `prior_temp`;
+    /// higher temp = softer prior. See `net_policy_priors` + `gate_netleaf --net-policy-temp`.
+    pub net_policy_temp: Option<f64>,
 }
 
 /// Which evaluator the search truncates to at a leaf.
@@ -366,43 +384,166 @@ pub struct Node {
     pub children: Vec<Option<Box<Node>>>,
     pub n: Vec<i32>,
     pub w: Vec<f64>,
+    /// PUCT prior multiplier per move (empty = flat = the deployed search). Set only when
+    /// `Opts::prior_temp` is on; see `compute_priors`.
+    pub priors: Vec<f64>,
 }
 
 impl Node {
     pub fn new(actor: usize, moves: Vec<Move>) -> Node {
         let k = moves.len();
-        Node { actor, moves, children: (0..k).map(|_| None).collect(), n: vec![0; k], w: vec![0.0; k] }
+        Node {
+            actor,
+            moves,
+            children: (0..k).map(|_| None).collect(),
+            n: vec![0; k],
+            w: vec![0.0; k],
+            priors: Vec::new(),
+        }
     }
 }
 
-/// UCT selection: `U = C_PUCT*sqrt(N)/(1+n)`, with NO 1/branches prior scaling.
+/// Development margin from `seat`'s view: (my total bonuses − opp's) / 15, i.e. the engine-strength
+/// lead (each bonus is a permanent discount — the "development" the under-development blind spot is
+/// about). Used ONLY by the optional dev-tilt leaf (`Opts::dev_tilt`), a value-bias probe. Off by
+/// default (tilt 0) → the leaf is byte-identical.
+fn dev_margin(st: &State, seat: usize) -> f64 {
+    let me: i32 = bonuses_of(&st.players[seat]).iter().sum();
+    let opp: i32 = bonuses_of(&st.players[opponent(seat)]).iter().sum();
+    (me - opp) as f64 / 15.0
+}
+
+/// No-op shuffler for the prior's throwaway 1-ply applies. Unlike `engine::NoShuffle` (which
+/// PANICS to guard contexts that must never draw), this silently leaves the bag order as-is: a
+/// prior apply CAN trigger a board refill, and which token refills does not affect the actor's
+/// own standing enough to change the move-ranking — and consuming no rng keeps the search
+/// reproducible (so the default, prior-off path stays byte-identical).
+struct PriorShuffle;
+impl Shuffler for PriorShuffle {
+    fn shuffle(&mut self, _bag: &mut Vec<u8>) {}
+}
+
+/// A 1-ply HEURISTIC policy prior — Spender's H3-prior analog, the guided-search lever Duel's
+/// uniform PUCT never had. Ranks `actor`'s `moves` by the heuristic `value` of the resulting
+/// position (one cheap eval per move, applied with a `NoShuffle` so NO rng is consumed and the
+/// prior stays a pure function of the state), softmaxes with temperature `t`, and returns a
+/// MULTIPLIER centered at 1 (`n * softmax`) so a UNIFORM score reproduces the flat search
+/// EXACTLY — it only ever REALLOCATES exploration toward moves the heuristic likes, never
+/// changes the overall exploration scale. Off by default (`Opts::prior_temp` = None).
+fn compute_priors(st: &State, moves: &[Move], actor: usize, t: f64) -> Vec<f64> {
+    let n = moves.len();
+    let mut scores = vec![f64::NEG_INFINITY; n];
+    for (i, mv) in moves.iter().enumerate() {
+        let mut child = st.clone();
+        let mut sh = PriorShuffle;
+        if child.apply_move(actor, mv, &mut sh).is_ok() {
+            scores[i] = value(&child, actor);
+        }
+    }
+    let mx = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    if !mx.is_finite() {
+        return vec![1.0; n]; // no move applied cleanly -> flat (degenerate; never in practice)
+    }
+    let mut w = vec![0.0f64; n];
+    let mut sum = 0.0;
+    for i in 0..n {
+        let e = if scores[i].is_finite() { ((scores[i] - mx) / t).exp() } else { 0.0 };
+        w[i] = e;
+        sum += e;
+    }
+    for x in w.iter_mut() {
+        *x = *x / sum * n as f64; // sum > 0: the argmax move contributes exp(0) = 1
+    }
+    w
+}
+
+/// A LEARNED policy prior from the attention net's policy head — the AZ analog of `compute_priors`,
+/// but scored by the net's policy LOGITS (gathered over `moves` via `actions::move_to_index`) instead
+/// of the heuristic value of the resulting position. Softmaxed at serving temperature `t` and returned
+/// in the SAME multiplier convention (`n * softmax`, uniform -> 1.0), so a value-only net (no policy
+/// head -> empty logits) reproduces the flat search EXACTLY. Higher `t` = softer prior.
+fn net_policy_priors(net: &crate::attn::AttnNet, st: &State, moves: &[Move], actor: usize, t: f64) -> Vec<f64> {
+    let n = moves.len();
+    let logits = net.policy_logits(st, actor);
+    if logits.is_empty() {
+        return vec![1.0; n]; // value-only net -> flat (the prior has no effect)
+    }
+    let raw: Vec<f64> = moves.iter().map(|m| logits[move_to_index(st, m)] as f64).collect();
+    let mx = raw.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let mut w = vec![0.0f64; n];
+    let mut sum = 0.0;
+    for i in 0..n {
+        let e = ((raw[i] - mx) / t).exp();
+        w[i] = e;
+        sum += e;
+    }
+    for x in w.iter_mut() {
+        *x = *x / sum * n as f64;
+    }
+    w
+}
+
+/// 1-ply GREEDY move with a value net: apply each legal move, evaluate the resulting position with
+/// `net`, and play the argmax — NO tree search. The "net picks the best resulting position"
+/// baseline; A/B'd vs the full determinized search (`gate_netleaf --greedy-net`) it measures how
+/// much the SEARCH adds over the net's raw 1-ply judgment. Uses the same pruned root move list the
+/// search would (`root_moves`) and the same rng-free `PriorShuffle` for the throwaway applies.
+/// Terminal children are a FACT (±1), not a net prediction (its features assume a live position).
+pub fn greedy_net_move(st: &State, pid: usize, net: &crate::attn::AttnNet) -> Option<Move> {
+    let moves = root_moves(st, pid, true);
+    if moves.is_empty() {
+        return None;
+    }
+    let (mut best, mut best_i) = (f64::NEG_INFINITY, 0usize);
+    for (i, mv) in moves.iter().enumerate() {
+        let mut child = st.clone();
+        let mut sh = PriorShuffle;
+        let v = if child.apply_move(pid, mv, &mut sh).is_ok() {
+            if child.is_over() {
+                if child.winner == pid as i32 { 1.0 } else { -1.0 }
+            } else {
+                net.eval(&child, pid)
+            }
+        } else {
+            f64::NEG_INFINITY
+        };
+        if v > best {
+            best = v;
+            best_i = i;
+        }
+    }
+    Some(moves[best_i].clone())
+}
+
+/// UCT/PUCT selection: `U = c_puct * P * sqrt(N)/(1+n)`. With NO prior (`node.priors` empty —
+/// the DEFAULT), `P = 1` and this is the deployed UCT exactly (the do-not-regress behaviour).
+/// With an informative prior it is true PUCT.
 ///
-/// The missing prior looks like a bug. It isn't, and the reason is MEASURED, not argued
-/// (CRN-paired, equal sims, mirror verified at exactly 0.5000):
-///
+/// WHY the default has no prior (MEASURED, CRN-paired, equal sims, mirror 0.5000):
 ///     prior@c100    vs no-prior@c1.5  ->  0.5000   (100/76 ~= 1.3 ~= 1.5: identical)
 ///     no-prior@c0.4 vs no-prior@c1.5  ->  0.5000   (broad plateau)
 ///     prior@c1.5    vs no-prior@c1.5  ->  0.2500   (effective c ~= 0.02: far too low)
+/// A FLAT prior is just a constant rescale of C_PUCT — no information; what mattered was the
+/// exploration LEVEL (wide plateau ~0.4-1.5, cliff below). Selection and the final pick are a
+/// PAIR: near-uniform visits are sound only because the pick breaks visit ties by value.
 ///
-/// So a FLAT prior is mathematically just a constant rescale of C_PUCT — it carries no
-/// information. What matters is the exploration LEVEL, and there is a wide plateau
-/// (~0.4-1.5) with a cliff below it: at c~=0.02 the search commits to whatever the first
-/// couple of rollouts liked, and this leaf is NOISY (rollout ~+-0.3), so it commits to
-/// noise. Broad sampling + picking the best MEAN (the value tie-break in `choose_move`) is
-/// the better estimator here.
-///
-/// Selection and the final pick are a PAIR: near-uniform visits are only sound because the
-/// pick breaks visit ties by value. Don't change one without re-measuring the other. A
-/// LEARNED prior would be different — it carries real information — so revisit this if a
-/// policy net ever lands.
-fn select(node: &Node, total: i32) -> usize {
+/// MEASURED 2026-07-23 (DO-NOT-RELITIGATE): an INFORMATIVE prior still HURTS. Heuristic 1-ply
+/// prior (temp 0.05/0.1/0.2) = 0.19/0.24/0.25 vs plain v2; the NET's 1-ply argmax (the strongest
+/// possible prior, `greedy_net_move`, even handed the TRUE hidden state) = 0.174. Duel's search
+/// wants BREADTH: flat move-values + hidden-info determinization noise make any single-position
+/// eval noise-dominated, so ANY early commitment loses. Opposite of AlphaZero/Spender (sharp
+/// values -> prior helps). `compute_priors`/`greedy_net_move` + `Opts::prior_*` are kept as
+/// documented, OFF-by-default tooling; A/B via `gate_netleaf --prior-temp` / `--greedy-net`.
+fn select(node: &Node, total: i32, c_puct: f64) -> usize {
     let mut best = -1e18f64;
     let mut best_i = 0usize;
     let sqrt_t = (total.max(1) as f64).sqrt();
+    let has_prior = !node.priors.is_empty();
     for i in 0..node.moves.len() {
         let n = node.n[i];
         let q = if n != 0 { node.w[i] / n as f64 } else { 0.0 }; // FPU: unvisited looks neutral
-        let u = C_PUCT * sqrt_t / (1 + n) as f64;
+        let p = if has_prior { node.priors[i] } else { 1.0 };
+        let u = c_puct * p * sqrt_t / (1 + n) as f64;
         let s = q + u;
         if s > best {
             best = s;
@@ -478,9 +619,28 @@ struct Search<'r, 'n> {
     take_dominance: bool,
     steps: usize,
     leaf: Leaf<'n>,
+    prior_temp: Option<f64>,
+    c_puct: f64,
+    dev_tilt: f64,
+    net_policy_temp: Option<f64>,
 }
 
 impl Search<'_, '_> {
+    /// The node's PUCT priors: the LEARNED net policy (if `net_policy_temp` is set and the leaf is an
+    /// attention net with a policy head), else the heuristic `compute_priors` (if `prior_temp`), else
+    /// empty = flat (the deployed default). One source of truth for root + child expansion.
+    fn node_priors(&self, st: &State, moves: &[Move], actor: usize) -> Vec<f64> {
+        if let Some(t) = self.net_policy_temp {
+            if let Leaf::AttnVal(net) = self.leaf {
+                return net_policy_priors(net, st, moves, actor, t);
+            }
+        }
+        if let Some(t) = self.prior_temp {
+            return compute_priors(st, moves, actor, t);
+        }
+        Vec::new()
+    }
+
     /// The STATIC leaf eval for the active leaf: geometry-aware for `HeuristicGeom`, the deployed
     /// board-blind `value` for every other leaf (so Heuristic/Net/Net8 stay byte-identical).
     #[inline]
@@ -513,7 +673,10 @@ impl Search<'_, '_> {
                 if st.is_over() {
                     return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
                 }
-                net.eval(st, root_pid)
+                let v = net.eval(st, root_pid);
+                // dev_tilt (default 0 -> byte-identical, guarded): value-bias probe of whether v2
+                // UNDER-values card development. NOT applied at a terminal (that outcome is a fact).
+                if self.dev_tilt != 0.0 { v + self.dev_tilt * dev_margin(st, root_pid) } else { v }
             }
             Leaf::Net(net) => {
                 if st.is_over() {
@@ -603,7 +766,7 @@ impl Search<'_, '_> {
             return self.leaf_eval(st, root_pid);
         }
         let total: i32 = node.n.iter().sum();
-        let i = select(node, total);
+        let i = select(node, total, self.c_puct);
         let mv = node.moves[i].clone();
         let ok = {
             let mut sh = RngShuffler { rng: &mut *self.rng };
@@ -618,7 +781,11 @@ impl Search<'_, '_> {
             } else {
                 let actor = if st.pending_pid != -1 { st.pending_pid as usize } else { st.turn };
                 let moves = legal(st, actor, self.take_dominance);
-                node.children[i] = Some(Box::new(Node::new(actor, moves)));
+                let mut child = Box::new(Node::new(actor, moves));
+                // Compute the child's priors from `st` BEFORE `leaf_eval`'s rollout mutates it (net
+                // policy or heuristic; empty = flat when no prior is configured — the default).
+                child.priors = self.node_priors(st, &child.moves, actor);
+                node.children[i] = Some(child);
                 self.leaf_eval(st, root_pid)
             };
             node.n[i] += 1;
@@ -700,9 +867,16 @@ pub fn root_search_with_leaf(
         return Some(RootStats { moves, n: vec![0], w: vec![0.0] });
     }
 
+    let prior_temp = opts.prior_temp;
+    let c_puct = opts.prior_c.unwrap_or(C_PUCT);
     let mut root = Node::new(pid, moves);
     let deadline = Deadline::new(time_limit);
-    let mut s = Search { rng, take_dominance, steps, leaf };
+    let mut s = Search {
+        rng, take_dominance, steps, leaf, prior_temp, c_puct,
+        dev_tilt: opts.dev_tilt, net_policy_temp: opts.net_policy_temp,
+    };
+    // Root priors (net policy or heuristic; empty = flat), computed once before the sim loop.
+    root.priors = s.node_priors(st, &root.moves, pid);
     let mut iters: u64 = 0;
     while iters < max_iters && !deadline.expired() {
         iters += 1;
@@ -924,11 +1098,11 @@ mod tests {
         b.decks[0] = vec![4, 2, 0, 3, 1]; // same multiset, different order
         let da = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&a, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&a, 0)
         };
         let db = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&b, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&b, 0)
         };
         assert_eq!(da.decks[0], db.decks[0], "the sort must erase the true order");
     }
@@ -942,7 +1116,7 @@ mod tests {
         st.players[1].reserved = vec![10, 60]; // 10 = face-up L1, 60 = blind L3
         st.players[1].reserved_from_deck = vec![60];
         let mut rng = Rng::new(3);
-        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic }.determinize(&st, 0);
+        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&st, 0);
         assert_eq!(d.players[1].reserved_from_deck.len(), 1);
         let got = d.players[1].reserved_from_deck[0];
         assert!([54, 55, 56, 60].contains(&got), "redealt from the L3 pool, got {}", got);
@@ -1021,7 +1195,7 @@ mod tests {
         n[0] = 4;
         w[0] = 4.0; // q = 1.0, a perfect score so far
         let node = node_with(n, w);
-        assert_eq!(select(&node, 4), 1, "an unvisited move must out-score a 4-visit q=1.0 move");
+        assert_eq!(select(&node, 4, C_PUCT), 1, "an unvisited move must out-score a 4-visit q=1.0 move");
     }
 
     /// The whole point of the port: the search must actually terminate and return a legal
