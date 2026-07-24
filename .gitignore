@@ -61,6 +61,7 @@ build/
 /engine_stk_*.out
 /engine_stk_*.err
 
-# duel-core: build output + generated parity fixtures
+# duel-core: build output + generated parity fixtures + arena run logs
 duel-core/target/
 duel-core/fixtures/
+duel-core/*.out

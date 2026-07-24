@@ -1184,7 +1184,7 @@ export default function SpenderApp() {
 
 	useEffect(() => {
 		if (!["S", "N"].includes(roomData?.ai_variant) || wasmPoolRef.current || typeof Worker === "undefined") return;
-		const url = `${import.meta.env.BASE_URL}wasm/s-worker.js`;
+		const url = `${import.meta.env.BASE_URL}wasm/spender-worker.js`;
 		// Reserve one core for the browser's main/compositor/raster threads: the WASM search is CPU-bound,
 		// and a pool that pegs EVERY core starves the compositor → the GPU-composited flying-gem/card
 		// animations stutter while the AI thinks. Sims are capped in AGGREGATE (perWorkerSims scales to the

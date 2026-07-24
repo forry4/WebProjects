@@ -80,7 +80,8 @@ removed the old circular imports — never reintroduce a `games.*` import into `
 **Why the split is non-obvious:** cross-cutting infra (DB + auth) was pulled OUT of
 `games/spender/main.py` into `core/` so features depend on a neutral platform, not on a game. Each
 game is a thin FastAPI sub-app (`rooms`/WS/REST/persistence) that delegates all rules to its pure
-`engine.py`. Root-level `Procfile`/`render.yaml`/`docs/` stay at root (repo-wide deploy orchestration).
+`engine.py`. Root-level `render.yaml`/`docs/` stay at root (repo-wide deploy orchestration; the
+Docker image is built from `games/spender/Dockerfile` per `render.yaml`).
 
 ---
 
@@ -106,7 +107,7 @@ Referrer-Policy, HSTS, Permissions-Policy — threaded into the mounted sub-apps
 Spender's `router`, `setup_books(...)`, and mounts CoC/WW/Duel each behind a **defensive try/except**
 (so the core backend never goes down if a game package is absent). No CSP on the API (it serves JSON;
 CSP is Pages' job). Deploy entrypoint is unchanged: `games/spender/app.py` is a thin shim re-exporting
-the root `app`, so Procfile/Dockerfile/render.yaml keep targeting `games.spender.app:app`.
+the root `app`, so the Dockerfile/render.yaml keep targeting `games.spender.app:app`.
 
 ### Persistence — Turso/libSQL (prod)
 Render's free filesystem is ephemeral — sqlite `users.db` is recreated empty on every deploy/cold-start.
