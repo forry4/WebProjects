@@ -12,12 +12,6 @@ compiled to WASM.
 
 ---
 
-## Critical rule
-**NEVER add `Co-Authored-By: Claude` (or any Anthropic attribution) to commit messages.** The
-user has explicitly prohibited this.
-
----
-
 ## Tech stack
 
 | Layer | Tech |
@@ -293,9 +287,10 @@ Organized into three clearly-separated subpackages (the old 70-file `ai/az/` dum
 deployed brain is legible and offline probes can't trigger a backend deploy):
 - **`ai/serving/`** — the deployed brain `main.py` imports at runtime: `engine`, `actions`,
   `heuristic{,2,3}`, `valuation{,2,3}` (`valuation3` = the Cython hot leaf), `v_state`, `vsearch`,
-  `mcts`, `infer_np`, `replay`, `distill_features`, `features` + the `turns_table*.json` data. This is
-  the ONLY ai subtree in the `deploy-render.yml` path filter. `valuation3` reads its `turns_table*.json`
-  and (experimental) `leaf_model.npz`/`vsearch_s21.json` from this dir via `dirname(__file__)`.
+  `mcts`, `infer_np`, `replay`, `distill_features`, `features` + the `turns_table*.json` data. Along
+  with `ai/models/`, this is a `deploy-render.yml` path-filter trigger (`ai/offline/` is deliberately
+  NOT). `valuation3` reads its `turns_table*.json` and (experimental) `leaf_model.npz`/`vsearch_s21.json`
+  from this dir via `dirname(__file__)`.
 - **`ai/offline/`** — the research toolkit (never imported by the server; imports the serving stack via
   `from ..serving import …`): the AZ training stack (`train_az`/`selfplay`/`league`/`net*`), the
   `h2_*`/`h3_*`/`s_*`/`vsearch_*` campaigns, `arena`/`bench`/probes/distill/bootstrap, `s_checkpoints/`,
