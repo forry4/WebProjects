@@ -41,7 +41,7 @@ _MODS = (vsearch, v_state, H3, V3)
 # every knob any config may touch — frozen pins these to their committed defaults, captured at import.
 # (A new knob MUST be listed here or frozen won't reset it each turn -> both sides would inherit it,
 #  silently breaking the A/B.)
-_PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
+_PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA", "BACKUP_MIN_VISITS",
                "H3_PICK_W", "RESERVE_PRIOR_W", "TAKE_PRIOR_W",
                "ENDGAME_TIEBREAK_W", "NOBLE_MULTI_W", "W_NOBLE",  # v_state (Gap A + multi-noble + its magnitude)
                "NOBLE_SCALE", "NOBLE_COUNT_W",                    # heuristic3/valuation3 (noble weight + overlap shape)
@@ -51,7 +51,8 @@ _PROBE_KEYS = ["PRIOR_UNIFORM", "POLICY_TEMP", "C_PUCT", "BACKUP_LAMBDA",
                "ENG_DECK_W", "DECK_STAGE_TILT", "DECK_STAGE_T0",  # valuation3 (deck-demand weight + level tilt)
                "DECK_BONUS_DISCOUNT",  # valuation3 (seat-aware bonus-discounted deck demand)
                "NOBLE_RACE_W", "NOBLE_RACE_SCALE",  # valuation3 (noble race gate: marginal win-probability model)
-               "PROGRESS_TOPK", "PROGRESS_DECAY", "W_PROGRESS"]  # v_state (cascade-weighted progress over top-K targets + its weight)
+               "PROGRESS_TOPK", "PROGRESS_DECAY", "W_PROGRESS",  # v_state (cascade-weighted progress over top-K targets + its weight)
+               "ENGINE_STOCK_BOARD_W", "W_ENGINE_STK"]  # v_state (durable board-coverage engine term + its magnitude)
 FROZEN: dict = {}
 
 

@@ -66,7 +66,8 @@ class Search:
     def __init__(self, root: E.State, rng: random.Random, *,
                  c_puct: float = 2.0, dirichlet_alpha: float = 0.5,
                  dirichlet_eps: float = 0.25, add_noise: bool = True,
-                 leaf_state: bool = False, backup_lambda: float = 0.0):
+                 leaf_state: bool = False, backup_lambda: float = 0.0,
+                 backup_min_visits: int = 1):
         if root.phase == E.OVER:
             raise ValueError("cannot search a terminal state")
         self.root_state = root
@@ -87,6 +88,17 @@ class Search:
         # over-pessimism at opponent nodes). Parked default-off; confirms "search-aggregation re-tweaks
         # wash" — the static eval is already used near-optimally by the averaging backup.
         self.backup_lambda = backup_lambda
+        # backup_min_visits: only let a grandchild's Q count toward the best-reply max if it has been
+        # visited >= this many times. The 2nd attempt at mixmax: the unguarded max (min_visits=1) ran
+        # over ANY visited grandchild incl. 1-visit pure-leaf-noise nodes, so it MAXIMIZED noise ->
+        # over-estimated the opponent's best reply -> the monotonic degradation above. A higher floor
+        # only pessimizes over replies the search actually trusts; when no grandchild clears it the edge
+        # falls back to its mean (pure averaging). Default 1 == old `if nb:` filter == byte-identical.
+        # TESTED & REJECTED (June 2026 — do not relitigate): the guard ALSO washes vs frozen-S. mv in
+        # {6,12} screened/freshed across sims=160 AND sims=400 (6 estimates) all straddle 0.5 (0.48-0.55,
+        # no signal). So the noisy-max wasn't the cause — the mixmax mechanism itself is inert here:
+        # plain averaging already aggregates this leaf near-optimally. Parked default-off (mv=1).
+        self.backup_min_visits = backup_min_visits
         # leaf_state: hand the leaf STATE to the evaluator instead of F.encode(s) — for a heuristic
         # value leaf (v_state) that reads the State directly (no net-feature packing). The driver
         # must use the incremental leaf_batch()/apply_evals() API, NOT run() (which numpy-batches).
@@ -179,14 +191,15 @@ class Search:
         if child is None:
             return mean
         cN, cW = child.N, child.W
+        mv = self.backup_min_visits
         best = None
         for b in range(E.N_ACTIONS):
             nb = cN[b]
-            if nb:
+            if nb >= mv:                          # skip under-searched (noisy) replies; mv=1 == `if nb:`
                 qb = cW[b] / nb
                 if best is None or qb > best:
                     best = qb
-        if best is None:
+        if best is None:                          # no trusted reply -> fall back to the plain mean
             return mean
         reply = best if child.to_play == node.to_play else -best
         return (1.0 - lam) * mean + lam * reply

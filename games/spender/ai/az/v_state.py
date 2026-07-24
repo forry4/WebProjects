@@ -76,6 +76,16 @@ PROGRESS_DECAY = 1.0  # geometric decay across the top-K take_values: weight_i =
                       # weighted MEAN (same scale) -- tests breadth/shape, NOT a stealth W_PROGRESS bump.
 TURNS_REF = 12.0      # horizon normalizer (estimated_turns_remaining ~ 1..12)
 ENGINE_DR_EXP = 0.5   # diminishing-returns exponent on held bonuses per color (sqrt by default)
+ENGINE_STOCK_BOARD_W = 0.0  # board-coverage term added to engine_stock (deck-only otherwise). The
+                      # engine_leak_probe showed engine_stock credits held bonuses ONLY against the
+                      # undealt DECK, so its contribution decays to ~0 by midgame (w*dengine 0.14 ->
+                      # 0.005); the held engine's DURABLE value vs the live board is uncredited
+                      # (progress credits only the board-LOCAL take_value -- myopic). With W>0 each held
+                      # bonus ALSO earns W * board_color_demand[c] * b**ENGINE_DR_EXP -- the board analog
+                      # of the deck term (color-coverage breadth, a different shape than progress's top-k
+                      # take_value, so not a pure double-count). 0 = byte-identical. Tests whether
+                      # crediting durable board coverage fixes the early-midgame under-build, against the
+                      # documented leaf-saturation / mirror-blindness wall.
 ECON_HOARD = 0.15     # penalty per token held above 8 (discourage hoarding / over-reserving)
 ECON_GOLD = 0.2       # credit per gold that actually furthers the best target (gold_needed-capped)
 BLIND_RESERVE_CONST = 0.5  # expected standing of one unknown opponent face-down reserve
@@ -114,12 +124,38 @@ def _engine_stock(val: V.Valuation, seat: int) -> float:
     `ENGINE_DR_EXP` — the first bonus in a color matters most. ~0 late game (no turns to compound)."""
     bon = val.s.bonuses[seat]
     horizon = val.estimated_turns_remaining()
+    board_demand = _board_color_demand(val.s) if ENGINE_STOCK_BOARD_W else None
     cover = 0.0
     for c in range(5):
         b = bon[c]
         if b > 0:
-            cover += val.deck_color_demand[c] * (b ** ENGINE_DR_EXP)
+            demand = val.deck_color_demand[c]
+            if board_demand is not None:                 # durable coverage of the live board too
+                demand += ENGINE_STOCK_BOARD_W * board_demand[c]
+            cover += demand * (b ** ENGINE_DR_EXP)
     return cover * (horizon / TURNS_REF)
+
+
+def _board_color_demand(s):
+    """Share of the CURRENT board's total cost in each color (seat-blind, normalized by the board's
+    raw total) — the board analog of valuation3.deck_color_demand, used only when ENGINE_STOCK_BOARD_W
+    is set. Cheap (12 cards x 5 colors); engine_stock calls it once per seat per leaf."""
+    demand = [0.0] * 5
+    total = 0.0
+    for slot in range(12):
+        ci = s.board[slot]
+        if ci < 0:
+            continue
+        cost = E.COST[ci]
+        for c in range(5):
+            cc = cost[c]
+            if cc > 0:
+                demand[c] += cc
+                total += cc
+    if total:
+        for c in range(5):
+            demand[c] /= total
+    return demand
 
 
 def _seat_targets(val: V.Valuation, seat: int, hide_blind: bool):

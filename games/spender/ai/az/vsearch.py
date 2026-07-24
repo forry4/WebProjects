@@ -39,8 +39,16 @@ from .mcts import Search
 # ─── tunables (the autotuner sweeps these on the panel-average objective) ─────────────────────
 SIMS = 200            # MCTS simulations per PLAY decision (serving uses a wall-clock budget instead)
 C_PUCT = 1.5          # PUCT exploration constant; maximin-tuned (was 2.0)
-BACKUP_LAMBDA = 0.0   # mixmax selection-Q blend (0 = pure averaging, byte-identical). TESTED & REJECTED
-                      # (see mcts.Search.backup_lambda): monotonic degradation vs frozen-S; parked off.
+BACKUP_LAMBDA = 0.0   # mixmax selection-Q blend (0 = pure averaging, byte-identical). REJECTED both
+                      # unguarded (monotonic degradation) AND with the min-visit guard below; parked off.
+BACKUP_MIN_VISITS = 1 # min grandchild visits for its Q to count toward the mixmax best-reply max. 1 =
+                      # byte-identical (old `if nb:`); >1 debiases the noisy-max that sank the 1st attempt.
+                      # TESTED & REJECTED (June 2026, do not relitigate): the guard ALSO washes. mv in
+                      # {6,12} x lam in {0.15,0.3} vs frozen-S — 6 estimates across sims=160 AND sims=400,
+                      # screen+fresh — all straddle 0.5 (0.48-0.55, no signal; a lone sims=160 fresh 0.5521
+                      # was winner's-curse, refuted by sims=400 screen 0.483 / fresh 0.500). So it's the
+                      # mechanism, not just the noisy max, that's inert: PUCT already aggregates this leaf
+                      # near-optimally by plain averaging. Lever is leaf STRUCTURE + search DEPTH, not backup.
 POLICY_TEMP = 0.7     # softmax temperature on the H3 action-score prior (lower = sharper toward H3)
 RESERVE_PRIOR_W = 0.5 # reserve actions get this fraction of the card's take_value as their prior score
 TAKE_PRIOR_W = 1.0    # scale on the (normalized) need-vector alignment score for take actions
@@ -179,7 +187,7 @@ def _expand(search) -> None:
 def _run_search(s, seat: int, sims: int):
     """Fixed-iteration search (offline A/B + tuning). Returns root visit counts."""
     search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True,
-                    backup_lambda=BACKUP_LAMBDA)
+                    backup_lambda=BACKUP_LAMBDA, backup_min_visits=BACKUP_MIN_VISITS)
     for _ in range(sims):
         _expand(search)
     return search.root.N
@@ -188,7 +196,7 @@ def _run_search(s, seat: int, sims: int):
 def _run_search_timed(s, seat: int, time_limit: float):
     """Wall-clock-budgeted search (serving): sims until the deadline, with a min floor + hard cap."""
     search = Search(s, _RNG, c_puct=C_PUCT, add_noise=False, leaf_state=True,
-                    backup_lambda=BACKUP_LAMBDA)
+                    backup_lambda=BACKUP_LAMBDA, backup_min_visits=BACKUP_MIN_VISITS)
     t0 = time.time()
     deadline = t0 + time_limit
     done = 0
