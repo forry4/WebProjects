@@ -52,7 +52,7 @@ fn mix(a: u64, b: u64) -> u64 {
     x
 }
 
-fn agent_move(st: &State, mover: usize, leaf: Leaf, sims: u64, dseed: u64, prior: Option<(f64, f64)>, greedy: bool, dev_tilt: f64, net_policy_temp: Option<f64>) -> Option<Move> {
+fn agent_move(st: &State, mover: usize, leaf: Leaf, sims: u64, dseed: u64, prior: Option<(f64, f64)>, greedy: bool, dev_tilt: f64, net_policy_temp: Option<f64>, no_determinize: bool, root_dets: Option<usize>) -> Option<Move> {
     if greedy {
         if let Leaf::AttnVal(net) = leaf {
             return greedy_net_move(st, mover, net); // 1-ply greedy net, NO search
@@ -70,6 +70,8 @@ fn agent_move(st: &State, mover: usize, leaf: Leaf, sims: u64, dseed: u64, prior
         prior_c,
         dev_tilt,
         net_policy_temp,
+        no_determinize,
+        root_dets,
         ..Default::default()
     };
     let mut rng = Rng::new(dseed ^ 0x4D43_5453);
@@ -77,7 +79,7 @@ fn agent_move(st: &State, mover: usize, leaf: Leaf, sims: u64, dseed: u64, prior
 }
 
 /// Agent A (seat `a_seat`) uses `leaf_a`; B uses `leaf_b`. Both at `sims`. Returns A's score.
-fn play(gseed: u64, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf, sims: u64, cap: usize, prior_a: Option<(f64, f64)>, greedy_a: bool, dev_tilt_a: f64, net_policy_temp_a: Option<f64>) -> f64 {
+fn play(gseed: u64, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf, sims: u64, cap: usize, prior_a: Option<(f64, f64)>, greedy_a: bool, dev_tilt_a: f64, net_policy_temp_a: Option<f64>, no_determinize_a: bool, root_dets_a: Option<usize>) -> f64 {
     let mut setup = Rng::new(mix(gseed, 0x5E7));
     let mut st = new_game(&mut setup);
     let mut game_rng = Rng::new(mix(gseed, 0x6A3E));
@@ -90,8 +92,10 @@ fn play(gseed: u64, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf, sims: u64, cap: u
         let greedy = mover == a_seat && greedy_a;
         let dev_tilt = if mover == a_seat { dev_tilt_a } else { 0.0 };
         let net_policy_temp = if mover == a_seat { net_policy_temp_a } else { None };
+        let no_determinize = mover == a_seat && no_determinize_a;
+        let root_dets = if mover == a_seat { root_dets_a } else { None };
         let dseed = mix(mix(gseed, mover as u64), ply as u64);
-        let mv = match agent_move(&st, mover, leaf, sims, dseed, prior, greedy, dev_tilt, net_policy_temp) {
+        let mv = match agent_move(&st, mover, leaf, sims, dseed, prior, greedy, dev_tilt, net_policy_temp, no_determinize, root_dets) {
             Some(m) => m,
             None => break,
         };
@@ -111,7 +115,7 @@ fn play(gseed: u64, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf, sims: u64, cap: u
     }
 }
 
-fn run_match(leaf_a: Leaf, leaf_b: Leaf, sims: u64, games: u64, seed0: u64, cap: usize, prior_a: Option<(f64, f64)>, greedy_a: bool, dev_tilt_a: f64, net_policy_temp_a: Option<f64>) -> (f64, u64) {
+fn run_match(leaf_a: Leaf, leaf_b: Leaf, sims: u64, games: u64, seed0: u64, cap: usize, prior_a: Option<(f64, f64)>, greedy_a: bool, dev_tilt_a: f64, net_policy_temp_a: Option<f64>, no_determinize_a: bool, root_dets_a: Option<usize>) -> (f64, u64) {
     // Multi-threaded: games are independent + deterministic, so a shared work counter gives the SAME
     // result as the sequential loop while saturating every core (the attention leaf is heavy).
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -127,8 +131,8 @@ fn run_match(leaf_a: Leaf, leaf_b: Leaf, sims: u64, games: u64, seed0: u64, cap:
                     if g >= games {
                         break;
                     }
-                    local += play(seed0 + g, 0, leaf_a, leaf_b, sims, cap, prior_a, greedy_a, dev_tilt_a, net_policy_temp_a);
-                    local += play(seed0 + g, 1, leaf_a, leaf_b, sims, cap, prior_a, greedy_a, dev_tilt_a, net_policy_temp_a);
+                    local += play(seed0 + g, 0, leaf_a, leaf_b, sims, cap, prior_a, greedy_a, dev_tilt_a, net_policy_temp_a, no_determinize_a, root_dets_a);
+                    local += play(seed0 + g, 1, leaf_a, leaf_b, sims, cap, prior_a, greedy_a, dev_tilt_a, net_policy_temp_a, no_determinize_a, root_dets_a);
                 }
                 *total.lock().unwrap() += local;
             });
@@ -166,6 +170,8 @@ fn main() {
     let mut greedy_net: bool = false; // side-A plays 1-ply GREEDY net (no search) instead
     let mut dev_tilt: f64 = 0.0; // side-A development-tilt on the net leaf (0 = off)
     let mut net_policy_temp: Option<f64> = None; // side-A LEARNED policy prior temperature (off = None)
+    let mut no_determinize: bool = false; // side-A PERFECT-INFO probe (search the TRUE hidden state)
+    let mut root_dets: Option<usize> = None; // side-A ROOT-DETERMINIZATION (K fixed worlds, coherent)
     let mut seed0: u64 = 70_000;
     let cap: usize = 400;
     let mut i = 1;
@@ -187,6 +193,8 @@ fn main() {
             "--greedy-net" => greedy_net = true,
             "--dev-tilt" => dev_tilt = next().parse().unwrap(),
             "--net-policy-temp" => net_policy_temp = Some(next().parse().unwrap()),
+            "--no-determinize" => no_determinize = true,
+            "--root-dets" => root_dets = Some(next().parse().unwrap()),
             "--seed" => seed0 = next().parse().unwrap(),
             other => panic!("unknown arg: {}", other),
         }
@@ -222,9 +230,9 @@ fn main() {
     // Side A's optional 1-ply heuristic prior (temp, c_puct); c defaults to C_PUCT (1.5) if only temp given.
     let prior_a = prior_temp.map(|t| (t, prior_c.unwrap_or(1.5)));
     // Mirror sanity: identical configs (heur vs heur, no prior/greedy/tilt) must read 0.5000.
-    let (m, mn) = run_match(Leaf::Heuristic, Leaf::Heuristic, sims, 8, seed0, cap, None, false, 0.0, None);
+    let (m, mn) = run_match(Leaf::Heuristic, Leaf::Heuristic, sims, 8, seed0, cap, None, false, 0.0, None, false, None);
     println!("[mirror] heur vs heur @ {sims} : {m:.4} (n={mn}) — must be 0.5000");
-    let (r, n) = run_match(leaf_a, leaf_b, sims, games, seed0, cap, prior_a, greedy_net, dev_tilt, net_policy_temp);
+    let (r, n) = run_match(leaf_a, leaf_b, sims, games, seed0, cap, prior_a, greedy_net, dev_tilt, net_policy_temp, no_determinize, root_dets);
     let (lo, hi) = wilson(r, n);
     println!("NETLEAF GATE: {leaf_kind} vs {leaf_b_kind} @ {sims} sims : {r:.4} [{lo:.3}, {hi:.3}] (n={n})");
     if greedy_net {
@@ -233,6 +241,10 @@ fn main() {
         println!("  (side A = {leaf_kind} + dev-tilt {dev_tilt}; side B = {leaf_b_kind} plain; >0.5 = dev-tilt helps => v2 UNDER-values development)");
     } else if let Some(t) = net_policy_temp {
         println!("  (side A = {leaf_kind} + LEARNED policy prior temp={t}; side B = {leaf_b_kind} plain; >0.5 = the learned policy prior helps)");
+    } else if no_determinize {
+        println!("  (side A = {leaf_kind} PERFECT-INFO cheat (true hidden state); side B = {leaf_b_kind} normal; >0.5 = imperfect-info determinization COSTS this much = search-rework headroom)");
+    } else if let Some(k) = root_dets {
+        println!("  (side A = {leaf_kind} ROOT-DET K={k} (fix a world per group, coherent); side B = {leaf_b_kind} per-sim PIMC; >0.5 = coherent per-world search helps = CLOSEABLE gap)");
     } else {
         match prior_a {
             Some((t, c)) => println!("  (side A = {leaf_kind} + 1-ply prior temp={t} c_puct={c}; side B = {leaf_b_kind} plain; >0.5 = prior helps)"),

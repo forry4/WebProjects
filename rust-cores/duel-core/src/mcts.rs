@@ -108,6 +108,16 @@ pub struct Opts {
     /// this SERVING temperature) instead of the heuristic. The learned-policy analog of `prior_temp`;
     /// higher temp = softer prior. See `net_policy_priors` + `gate_netleaf --net-policy-temp`.
     pub net_policy_temp: Option<f64>,
+    /// PERFECT-INFO PROBE (Stage-0, default false = OFF = byte-identical): search the TRUE hidden
+    /// state instead of resampling it every sim — a CHEATING upper bound on how much the imperfect-
+    /// info determinization is costing (does a better imperfect-info search have headroom?). NOT
+    /// shippable — it reads hidden info. See `gate_netleaf --no-determinize`.
+    pub no_determinize: bool,
+    /// ROOT-DETERMINIZATION (Stage-0 de-risk, default None = OFF = per-sim PIMC): fix ONE hidden world
+    /// per group and run `max_iters/K` coherent sims on it, pooling root stats over K worlds. Measures
+    /// the CLOSEABLE imperfect-info gap (does coherent per-world search beat per-sim resampling?). See
+    /// `gate_netleaf --root-dets`.
+    pub root_dets: Option<usize>,
 }
 
 /// Which evaluator the search truncates to at a leaf.
@@ -882,11 +892,33 @@ pub fn root_search_with_leaf(
     };
     // Root priors (net policy or heuristic; empty = flat), computed once before the sim loop.
     root.priors = s.node_priors(st, &root.moves, pid);
-    let mut iters: u64 = 0;
-    while iters < max_iters && !deadline.expired() {
-        iters += 1;
-        let mut sim = s.determinize(st, pid);
-        s.simulate(&mut sim, &mut root, pid, 0);
+    match opts.root_dets {
+        // ROOT-DETERMINIZATION (Stage-0 de-risk): fix ONE hidden world per group, run coherent sims on
+        // clones of it, pool root stats over K worlds — vs the default per-sim resampling. Off by
+        // default → byte-identical per-sim PIMC. (Ignored under no_determinize — that's the cheat path.)
+        Some(k) if k >= 1 && !opts.no_determinize => {
+            let per_group = (max_iters / k as u64).max(1);
+            'groups: for _ in 0..k {
+                let world = s.determinize(st, pid);
+                for _ in 0..per_group {
+                    if deadline.expired() {
+                        break 'groups;
+                    }
+                    let mut sim = world.clone();
+                    s.simulate(&mut sim, &mut root, pid, 0);
+                }
+            }
+        }
+        _ => {
+            let mut iters: u64 = 0;
+            while iters < max_iters && !deadline.expired() {
+                iters += 1;
+                // no_determinize (Stage-0 probe): search the TRUE hidden state (cheating upper bound).
+                // Off by default → resample every sim, exactly the deployed PIMC.
+                let mut sim = if opts.no_determinize { st.clone() } else { s.determinize(st, pid) };
+                s.simulate(&mut sim, &mut root, pid, 0);
+            }
+        }
     }
     Some(RootStats { moves: root.moves, n: root.n, w: root.w })
 }
