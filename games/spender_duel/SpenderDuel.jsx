@@ -577,12 +577,18 @@ const css = `
      ~6px off the cell centres at this width). */
   /* CARDS on phones: keep every card the SAME size (the shorter top rows just end early —
      the pyramid — NOT stretched to fill), but make them as BIG as the row allows. The
-     level-I row is deck + 5 cards = 6 cells: with gap:6 the true fit-overhead is panel(24)
-     + gaps(30) = 54, so a 57px overhead (a ~3px slack — enough to absorb sub-pixel rounding
-     so the deck can't shrink below the cards) fills the row with only ~2px trailing instead
-     of the old 15px, i.e. bigger cards + no wasted space on the right. --card-h ratio 1.71
-     (~0.58 w:h) keeps the compact-but-legible height. */
-  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 6), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
+     level-I row is deck + 5 cards. Like SPENDER on mobile, the deck is a THINNER stub
+     (0.8x a card) so the five face-up cards get the freed width — so the row is 5 + 0.8 =
+     5.8 card-widths, not 6. Overhead is panel(24) + gaps(5x6=30) + ~3px slack = 57. The deck
+     is an explicit 0.8x --card-w (a FIXED fraction, not flex) so every row's deck stub is the
+     SAME width — the uneven-per-row shrink an earlier flex approach caused can't recur.
+     --card-h ratio 1.71 (~0.58 w:h) keeps the compact-but-legible height. */
+  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 5.8), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
+  /* The shared .level-row>* rule makes every cell flex-GROW (capped at --card-w). Pin the deck
+     to a FIXED 0.8x stub (no grow/shrink) so it can't balloon to fill the slack on the shorter
+     3/4-card rows — that flex-grow is exactly what made the deck a different width per row.
+     The face-up cards still grow into the width the thinner deck frees. */
+  .duel-col-cards .level-row .deck-pile{flex:0 0 calc(var(--card-w) * 0.8);max-width:calc(var(--card-w) * 0.8)}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 @media(max-width:600px){
