@@ -1,6 +1,6 @@
 """Generate spender-core/src/cards.rs from the Python engine's card/noble tables.
 
-Single source of truth: games/spender/ai/az/engine.py builds COST/PTS/BONUS/LEVEL_OF/NOBLE_REQ/
+Single source of truth: games/spender/ai/serving/engine.py builds COST/PTS/BONUS/LEVEL_OF/NOBLE_REQ/
 NOBLE_PTS/CARD_NAME/NOBLE_NAME from games/spender/main.py. We dump them verbatim as Rust consts so
 the Rust port can NEVER drift from the Python deck. Re-run after any card-data change.
 
@@ -14,7 +14,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))   # spender-core/tools ->
 sys.path.insert(0, REPO)
 os.environ.setdefault("SPENDER_AZ_MODEL", "none")
 
-from games.spender.ai.az import engine as E  # noqa: E402
+from games.spender.ai.serving import engine as E  # noqa: E402
 
 
 def _rows(rows):

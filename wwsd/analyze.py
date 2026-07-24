@@ -16,9 +16,9 @@ import json
 import os
 import time
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import mcts as _mcts
-from games.spender.ai.az import vsearch as VS
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import mcts as _mcts
+from games.spender.ai.serving import vsearch as VS
 
 CLR = E.GEM_COLORS                                   # [white, blue, green, red, black]
 _HERE = os.path.dirname(__file__)

@@ -9,9 +9,9 @@ import random
 
 import pytest
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import valuation2 as V
-from games.spender.ai.az import heuristic2 as H
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import valuation2 as V
+from games.spender.ai.serving import heuristic2 as H
 
 
 def _find_card(pred):

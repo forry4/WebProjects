@@ -16,9 +16,9 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, REPO)
 os.environ.setdefault("SPENDER_AZ_MODEL", "none")
 
-from games.spender.ai.az import engine as E       # noqa: E402
-from games.spender.ai.az import valuation3 as V3  # noqa: E402
-from games.spender.ai.az import heuristic3 as H3   # noqa: E402
+from games.spender.ai.serving import engine as E       # noqa: E402
+from games.spender.ai.serving import valuation3 as V3  # noqa: E402
+from games.spender.ai.serving import heuristic3 as H3   # noqa: E402
 
 WT, WG, WGO = H3.W_TEMPO, H3.W_GEM, H3.W_GOLD
 

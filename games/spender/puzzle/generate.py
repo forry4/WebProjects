@@ -22,8 +22,8 @@ import argparse
 import os
 import random
 
-from games.spender.ai.az import actions as _A
-from games.spender.ai.az import engine as E
+from games.spender.ai.serving import actions as _A
+from games.spender.ai.serving import engine as E
 from . import schema, solver
 
 

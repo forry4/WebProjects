@@ -23,7 +23,7 @@ The two phases tune different, composable parts of the same agent: Phase 1 the
 move policy, Phase 2 the position evaluation that policy's tree search leans on.
 
 Usage:
-    python -m games.spender.ai.train all      --out games/spender/ai/weights.json
+    python -m games.spender.ai.train all      --out games/spender/ai/models/weights.json
     python -m games.spender.ai.train evolve    --generations 15 --pop 10
     python -m games.spender.ai.train td        --games 2000
     python -m games.spender.ai.train validate  --games 40        # MCTS, learned vs default
@@ -97,7 +97,7 @@ TACTICAL_BOUNDS = {
 COEVOLVE_KEYS = CARD_KEYS + TACTICAL_KEYS
 COEVOLVE_BOUNDS = {**CARD_BOUNDS, **TACTICAL_BOUNDS}
 
-WEIGHTS_OUT = os.path.join(os.path.dirname(__file__), "weights.json")
+WEIGHTS_OUT = os.path.join(os.path.dirname(__file__), "models", "weights.json")
 
 
 # ─── Headless game runner ─────────────────────────────────────────────────────

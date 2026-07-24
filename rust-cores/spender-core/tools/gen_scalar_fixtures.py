@@ -16,8 +16,8 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, REPO)
 os.environ.setdefault("SPENDER_AZ_MODEL", "none")
 
-from games.spender.ai.az import engine as E  # noqa: E402
-from games.spender.ai.az import valuation3 as V3  # noqa: E402
+from games.spender.ai.serving import engine as E  # noqa: E402
+from games.spender.ai.serving import valuation3 as V3  # noqa: E402
 
 
 def dump(s):

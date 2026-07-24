@@ -8,10 +8,10 @@ import random
 import numpy as np
 import pytest
 
-from games.spender.ai.az import actions as A
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import features as F
-from games.spender.ai.az import mcts as M
+from games.spender.ai.serving import actions as A
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import features as F
+from games.spender.ai.serving import mcts as M
 
 
 def _fresh(seed=3):
@@ -77,7 +77,7 @@ def test_az_choose_move_returns_legal_dict_move(monkeypatch):
 
 def test_arena_bridge_plays_full_game():
     from games.spender import main as inc
-    from games.spender.ai.az import arena
+    from games.spender.ai.offline import arena
 
     rng = random.Random(17)
     score = arena.play_game(_uniform_eval, 0, dict(inc.DEFAULT_WEIGHTS),
@@ -211,7 +211,7 @@ def test_mcts_finds_forced_winning_buy():
 
 def test_net_forward_and_evaluator():
     torch = pytest.importorskip("torch")
-    from games.spender.ai.az import net as N
+    from games.spender.ai.offline import net as N
 
     net = N.SpenderNet()
     s = _fresh()

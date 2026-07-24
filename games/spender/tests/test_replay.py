@@ -1,4 +1,4 @@
-"""Tests for offline game reconstruction (games/spender/ai/az/replay.py) and the
+"""Tests for offline game reconstruction (games/spender/ai/serving/replay.py) and the
 main.py changes that make it possible (the setup snapshot + discard logging).
 
 The core test is differential: play random 2-player games in the AZ engine, emit the
@@ -14,9 +14,9 @@ import random
 import pytest
 
 from games.spender import main as M
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import actions as A
-from games.spender.ai.az import replay as R
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import actions as A
+from games.spender.ai.serving import replay as R
 
 PIDS = ("p0", "p1")
 

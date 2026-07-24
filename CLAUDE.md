@@ -282,17 +282,31 @@ No AI — a real-time social-deduction party game, humans only.
   the reserved-aware heuristic finish on any client failure. Only benefits N (S one-hots H3 discards).
 - **Move log is id-only + a static catalog** (`card_catalog()` resolves id→card; deck is fixed), cap 500
   → the whole game logs. Blind-reserve redaction strips `card_id` (the id reveals the card via the catalog).
-- **Game reconstruction / review** (`ai/az/replay.py`): `_capture_setup(g)` snapshots the dealt board +
+- **Game reconstruction / review** (`ai/serving/replay.py`): `_capture_setup(g)` snapshots the dealt board +
   deck order + nobles into `g["setup"]` at creation (stripped from the wire, persisted), and discards are
   logged — together these make a finished game replayable move-by-move and re-scorable. `GET
   /games/{id}/review` (player-only) returns per-turn snapshots; the frontend renders a read-only rewind.
   Games created before `setup` shipped show only the final board.
 
 ### AI stack (`games/spender/ai/`)
-The current deployed Expert is variant **N** (attention net, client-WASM). Everything else — the learned
-`weights.json`, `value_model.json`, the AlphaZero `ai/az/` stack (variant Z), heuristics H/H2/H3, variant
-S, and the whole strength campaign that produced them — is documented in the **research log**. Offline
-tooling is `python -m games.spender.ai.train` (writes into `ai/`) and the many `ai/az/*` benches.
+Organized into three clearly-separated subpackages (the old 70-file `ai/az/` dump was split so the
+deployed brain is legible and offline probes can't trigger a backend deploy):
+- **`ai/serving/`** — the deployed brain `main.py` imports at runtime: `engine`, `actions`,
+  `heuristic{,2,3}`, `valuation{,2,3}` (`valuation3` = the Cython hot leaf), `v_state`, `vsearch`,
+  `mcts`, `infer_np`, `replay`, `distill_features`, `features` + the `turns_table*.json` data. This is
+  the ONLY ai subtree in the `deploy-render.yml` path filter. `valuation3` reads its `turns_table*.json`
+  and (experimental) `leaf_model.npz`/`vsearch_s21.json` from this dir via `dirname(__file__)`.
+- **`ai/offline/`** — the research toolkit (never imported by the server; imports the serving stack via
+  `from ..serving import …`): the AZ training stack (`train_az`/`selfplay`/`league`/`net*`), the
+  `h2_*`/`h3_*`/`s_*`/`vsearch_*` campaigns, `arena`/`bench`/probes/distill/bootstrap, `s_checkpoints/`,
+  and the `FEATURES_V4.md`/`H2.md` campaign notes. Editing anything here does NOT redeploy the backend.
+- **`ai/models/`** — the committed model artifacts loaded at import by `main.py`: `weights*.json`
+  (variants A/B/C/C2/tactics/targeting), `az_model.npz` (variant Z), `value_model.json`.
+
+The current deployed Expert is variant **N** (attention net, client-WASM). The learned weights, the
+AlphaZero stack (variant Z), heuristics H/H2/H3, variant S, and the whole strength campaign that produced
+them are documented in the **research log**. Offline tooling entry: `python -m games.spender.ai.train`
+(writes `ai/models/weights.json`); the many benches live in `ai/offline/`.
 
 **Rust→WASM serving core (`rust-cores/spender-core/`) — durable architecture:** a pure-Rust port of the engine +
 `v_state`/`heuristic3`/`vsearch`/`mcts` + `feats` (attention tokenizer) + the action↔move-dict bridge,

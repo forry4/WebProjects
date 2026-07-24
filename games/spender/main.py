@@ -650,7 +650,7 @@ def _compact_state_dict(game: dict) -> dict:
     """Serialize the AI-perspective compact engine State (from_game_dict) to the JSON shape the WASM
     `choose_move` expects. For a vs-AI game this is the AI's full view; the client only ever uses it on
     the AI's turn, and a curious human seeing the AI's own reserves only weakens their own opponent."""
-    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.serving import engine as _aze
     s = _aze.from_game_dict(game)
     return {
         "bank": list(s.bank),
@@ -739,7 +739,7 @@ def _deal_board(decks: dict) -> dict:
 
 def _capture_setup(g: dict) -> None:
     """Snapshot the dealt initial board / deck-order / nobles (ids only) so a finished game can
-    be replayed move-by-move offline (games/spender/ai/az/replay.py). The deck is shuffled in
+    be replayed move-by-move offline (games/spender/ai/serving/replay.py). The deck is shuffled in
     place and popped during play with no seed stored, so without this the per-turn 12-card board
     (the biggest input to the S evaluator) is unrecoverable. Captured ONCE right after the board
     and nobles are dealt, before any move. ids only -> compact; resolve via card_catalog()."""
@@ -873,10 +873,11 @@ WEIGHTS: dict[str, float] = dict(DEFAULT_WEIGHTS)
 
 # AI data files (weight sets + value model) live in the ai/ subpackage.
 _AI_DIR = os.path.join(os.path.dirname(__file__), "ai")
+_MODELS_DIR = os.path.join(_AI_DIR, "models")   # weights*.json, az_model.npz, value_model.json
 
 # Path can be overridden for playtesting (e.g. SPENDER_WEIGHTS=weights.candidate.json,
 # or a nonexistent path to force the original defaults).
-WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(_AI_DIR, "weights.json")
+WEIGHTS_PATH = os.environ.get("SPENDER_WEIGHTS") or os.path.join(_MODELS_DIR, "weights.json")
 
 # Named weight variants available for per-game selection. "A" is the default
 # deployed weights (env-overridable for playtest scripts); the rest load from the
@@ -919,7 +920,7 @@ def load_weights(path: str | None = None) -> dict[str, float]:
     WEIGHT_VARIANTS.clear()
     WEIGHT_VARIANTS["A"] = WEIGHTS
     for name, fname in VARIANT_FILES.items():
-        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(_AI_DIR, fname), WEIGHTS)
+        WEIGHT_VARIANTS[name] = _merge_weights_file(os.path.join(_MODELS_DIR, fname), WEIGHTS)
     return WEIGHTS
 
 
@@ -931,7 +932,7 @@ load_weights()
 # selectable as AI variant "Z" (PUCT search + numpy inference — no torch in
 # production). Absent → AZ_EVALUATE stays None and nothing changes.
 
-AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_AI_DIR, "az_model.npz")
+AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_MODELS_DIR, "az_model.npz")
 AZ_EVALUATE = None
 
 
@@ -943,14 +944,14 @@ def load_az_model() -> None:
         return
     try:
         if os.path.exists(AZ_MODEL_PATH):
-            from games.spender.ai.az.infer_np import load_evaluator
+            from games.spender.ai.serving.infer_np import load_evaluator
             AZ_EVALUATE = load_evaluator(AZ_MODEL_PATH)
             LOG.info("loaded AZ model from %s (AI variant Z enabled)", AZ_MODEL_PATH)
     except Exception as e:
         LOG.warning("could not load AZ model from %s: %s", AZ_MODEL_PATH, e)
 
 
-load_az_model()  # loads ai/az_model.npz → variant Z
+load_az_model()  # loads ai/models/az_model.npz → variant Z
 
 
 def _ai_variant_valid(variant: str) -> bool:
@@ -963,9 +964,9 @@ def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
     """Variant-Z move selection: time-budgeted PUCT over the fast az engine.
     Returns an incumbent dict-move; post-move discard/noble sub-decisions are
     resolved by _run_ai_turn's heuristics, same as the other variants."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az.mcts import Search
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving.mcts import Search
 
     s = _aze.from_game_dict(game)
     legal = _aze.legal_actions(s)
@@ -990,9 +991,9 @@ def _v4_choose_move(game: dict, ai_pid: str) -> dict:
     argmax over the shared card-valuation model (no search). Returns an
     incumbent dict-move; post-move discard/noble sub-decisions are resolved by
     _run_ai_turn, same as the other variants. Fast (no model file, no MCTS)."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic as _azh
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import heuristic as _azh
 
     s = _aze.from_game_dict(game)
     a = _azh.choose_action(s, s.turn)
@@ -1006,9 +1007,9 @@ def _v4_card_values(game: dict, seat_pid: str) -> dict:
     on the move: their own values on their turn, the bot's on its turn). Keyed by card id
     (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
     broadcast. Wrapped by callers in try/except so it can never break a room update."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation as _azv
-    from games.spender.ai.az import heuristic as _azh
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation as _azv
+    from games.spender.ai.serving import heuristic as _azh
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1029,9 +1030,9 @@ def _v4_card_values(game: dict, seat_pid: str) -> dict:
 def _h2_choose_move(game: dict, ai_pid: str) -> dict:
     """Variant-H2 move selection: the take_value heuristic (heuristic2) — a 1-ply
     greedy choose_action over the take_value model. Same dict-move contract as H/Z."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic2 as _azh2
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import heuristic2 as _azh2
 
     s = _aze.from_game_dict(game)
     a = _azh2.choose_action(s, s.turn)
@@ -1043,9 +1044,9 @@ def _h2_card_values(game: dict, seat_pid: str) -> dict:
     cards, the four take_value pieces {t: take, e: engine, p: point, c: cost} from
     seat_pid's seat (whoever's turn it is). Keyed by card id (CARD_NAME[ci]). Wrapped
     by callers in try/except."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation2 as _azv2
-    from games.spender.ai.az import heuristic2 as _azh2
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation2 as _azv2
+    from games.spender.ai.serving import heuristic2 as _azh2
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1073,9 +1074,9 @@ def _h3_choose_move(game: dict, ai_pid: str) -> dict:
     """Variant-H3 move selection: heuristic3 — the take_value model paired with
     valuation3's potential/engine. 1-ply greedy choose_action; same dict-move contract
     as H/H2/Z."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     s = _aze.from_game_dict(game)
     a = _azh3.choose_action(s, s.turn)
@@ -1088,9 +1089,9 @@ def _h3_card_values(game: dict, seat_pid: str) -> dict:
     worth as a DESTINATION, distinct from its immediate take value), per visible board card
     + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). Keyed by card
     id. Wrapped by callers in try/except."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation3 as _azv3
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation3 as _azv3
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1118,9 +1119,9 @@ def _s_card_values(game: dict, seat_pid: str) -> dict:
     """Variant-S transparency overlay: H3's four take components {t,e,p,c} per visible board
     card + seat_pid's reserved cards, from seat_pid's seat (whoever's turn it is). No
     potential term. Keyed by card id."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import valuation3 as _azv3
-    from games.spender.ai.az import heuristic3 as _azh3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import valuation3 as _azv3
+    from games.spender.ai.serving import heuristic3 as _azh3
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1150,8 +1151,8 @@ def _s_position_eval(game: dict, seat_pid: str):
     per-card values for the admin AI-values button. Returns None if the seat can't be resolved.
     Wrapped by callers in try/except. (Uses base 15-point weights even on a 21-point game, mirroring
     _s_card_values; the S21 overrides are transient to the search only.)"""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import v_state as _azvs
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import v_state as _azvs
 
     try:
         seat = game["order"].index(seat_pid)
@@ -1167,8 +1168,8 @@ def _s_searched_value(game: dict):
     searched counterpart to the static _s_position_eval. EXPENSIVE (~SERVE_TIME) — must run in a
     thread pool, never on the event loop. None for forced/non-PLAY positions. Base 15-pt weights
     (mirrors _s_position_eval)."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import vsearch as _azvs
     s = _aze.from_game_dict(game)
     v = _azvs.searched_value(s, s.turn, time_limit=_azvs.SERVE_TIME)
     return None if v is None else round(v, 3)
@@ -1213,10 +1214,10 @@ def _n_features(s, seat: int) -> list[float]:
     """The 101-dim feature vector for `seat` to move in state `s` — a faithful port of
     spender-core/src/feats.rs::features (same order). Reuses the Python v_state/valuation3 helpers
     the Rust was ported from, so the served features match the net's trained inputs."""
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import v_state as _vs
-    from games.spender.ai.az import valuation3 as _v3
-    from games.spender.ai.az import heuristic3 as _h3
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import v_state as _vs
+    from games.spender.ai.serving import valuation3 as _v3
+    from games.spender.ai.serving import heuristic3 as _h3
 
     opp = 1 - seat
     val = _v3.Valuation(s, _h3.W_TEMPO, _h3.W_GEM, _h3.W_GOLD)
@@ -1274,7 +1275,7 @@ def _n_position_eval(game: dict, seat_pid: str):
     model = _load_n_model()
     if model is None:
         return None
-    from games.spender.ai.az import engine as _aze
+    from games.spender.ai.serving import engine as _aze
     import numpy as _np
     try:
         seat = game["order"].index(seat_pid)
@@ -1317,13 +1318,13 @@ def _compute_overlay(game: dict, persp: str, variant: str) -> dict:
 # When a game is win_points==21, variant S applies a config tuned for the longer game (weights that
 # the offline 21-point retune found differ from the 15-point S) on top of the per-game win_points the
 # engine/eval already honor (the convex near-win zone, the 21-point turns table). The overrides live
-# in ai/az/vsearch_s21.json as {KEY: VALUE}; an EMPTY/absent file means the retune found no weight
+# in ai/serving/vsearch_s21.json as {KEY: VALUE}; an EMPTY/absent file means the retune found no weight
 # change worth making, so 21-point S == 15-point S (still correct, just not re-weighted).
 _S21_LOCK = threading.Lock()   # serializes S searches while S21 overrides exist (they mutate module globals)
 
 
 def _load_s21_config() -> dict:
-    p = os.path.join(os.path.dirname(__file__), "ai", "az", "vsearch_s21.json")
+    p = os.path.join(os.path.dirname(__file__), "ai", "serving", "vsearch_s21.json")
     try:
         with open(p) as f:
             cfg = json.load(f)
@@ -1337,10 +1338,10 @@ S21_CONFIG = _load_s21_config()
 
 def _s_route_attr(key: str):
     """Module that defines `key` (vsearch / v_state / heuristic3 / valuation3), or None."""
-    from games.spender.ai.az import heuristic3 as _h3
-    from games.spender.ai.az import v_state as _vs
-    from games.spender.ai.az import valuation3 as _v3
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import heuristic3 as _h3
+    from games.spender.ai.serving import v_state as _vs
+    from games.spender.ai.serving import valuation3 as _v3
+    from games.spender.ai.serving import vsearch as _azvs
     for mod in (_azvs, _vs, _h3, _v3):
         if hasattr(mod, key):
             return mod
@@ -1354,9 +1355,9 @@ def _s_choose_move(game: dict, ai_pid: str) -> dict:
     lever); wall-clock budgeted. Same dict-move contract as H3/Z. On a win_points==21 game with a
     non-empty S21 config, the tuned overrides are applied under a lock (race-safe vs concurrent
     15-point searches that read the same module globals)."""
-    from games.spender.ai.az import actions as _aza
-    from games.spender.ai.az import engine as _aze
-    from games.spender.ai.az import vsearch as _azvs
+    from games.spender.ai.serving import actions as _aza
+    from games.spender.ai.serving import engine as _aze
+    from games.spender.ai.serving import vsearch as _azvs
 
     s = _aze.from_game_dict(game)
     if not S21_CONFIG:                                    # no overrides exist -> no lock, no swap
@@ -1431,7 +1432,7 @@ def _board_scarcity(game: dict) -> float:
 
 # Override for playtesting: SPENDER_VALUE_MODEL=value_model.candidate.json to try a
 # candidate, or =none (a nonexistent path) to force the rollout MCTS.
-VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(_AI_DIR, "value_model.json")
+VALUE_MODEL_PATH = os.environ.get("SPENDER_VALUE_MODEL") or os.path.join(_MODELS_DIR, "value_model.json")
 _VALUE_MODEL: dict | None = None
 USE_VALUE_LEAF: bool = False
 # Human-readable feature order (for the trainer / introspection); MUST match
@@ -3090,8 +3091,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                             # `discard` validates; on a normal turn only the PLAY moves do.
                             legal = False
                             try:
-                                from games.spender.ai.az import actions as _aza
-                                from games.spender.ai.az import engine as _aze
+                                from games.spender.ai.serving import actions as _aza
+                                from games.spender.ai.serving import engine as _aze
                                 s = _aze.from_game_dict(g)
                                 act = _aza.move_to_action(s, mv)
                                 legal = act in _aze.legal_actions(s)
@@ -3404,7 +3405,7 @@ def _build_review_snapshots(game: dict, viewer_pid: str, ai_variant: str | None 
     AI game, each PLAYING snapshot also carries the static AI-values overlay (from the
     mover's seat) so the admin Vals button works while rewinding."""
     try:
-        from games.spender.ai.az import replay
+        from games.spender.ai.serving import replay
     except Exception:
         return None
     try:

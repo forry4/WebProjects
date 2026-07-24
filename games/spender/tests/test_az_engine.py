@@ -1,4 +1,4 @@
-"""Parity + rule tests for the AZ fast engine (games/spender/ai/az/engine.py).
+"""Parity + rule tests for the AZ fast engine (games/spender/ai/serving/engine.py).
 
 The differential test drives random games through BOTH engines — the new
 compact-state engine and the incumbent main._sim_apply_move — asserting
@@ -15,8 +15,8 @@ import random
 import pytest
 
 from games.spender import main
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import actions as A
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import actions as A
 
 PIDS = ("p0", "p1")
 

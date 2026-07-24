@@ -8,8 +8,8 @@ assert the helpers turn it into a per-turn list of renderable board states.
 import random
 
 from games.spender import main as M
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import actions as A
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import actions as A
 
 PIDS = ("p0", "p1")
 

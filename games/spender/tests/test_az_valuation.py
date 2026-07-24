@@ -9,9 +9,9 @@ import random
 
 import pytest
 
-from games.spender.ai.az import engine as E
-from games.spender.ai.az import heuristic as H
-from games.spender.ai.az import valuation as V
+from games.spender.ai.serving import engine as E
+from games.spender.ai.serving import heuristic as H
+from games.spender.ai.serving import valuation as V
 
 
 # ─── Scalar formulas ─────────────────────────────────────────────────────────

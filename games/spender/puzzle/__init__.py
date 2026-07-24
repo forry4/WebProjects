@@ -8,6 +8,6 @@ opponent only ever needs to reply ALONG the canonical line — so its replies ar
 frozen into the puzzle file and the whole thing plays as a deterministic
 walkthrough (no AI compute at serve time).
 
-This package is offline + pure-Python. It reuses games/spender/ai/az/* (engine for
+This package is offline + pure-Python. It reuses games/spender/ai/serving/* (engine for
 rules/state, vsearch for variant S, heuristic3 for the greedy "triviality" filter).
 """

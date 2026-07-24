@@ -23,8 +23,8 @@ os.environ.setdefault("SPENDER_AZ_MODEL", "none")
 
 import random  # noqa: E402
 
-from games.spender.ai.az import engine as E      # noqa: E402
-from games.spender.ai.az import vsearch as PV     # noqa: E402
+from games.spender.ai.serving import engine as E      # noqa: E402
+from games.spender.ai.serving import vsearch as PV     # noqa: E402
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 50
 SIMS = int(sys.argv[2]) if len(sys.argv) > 2 else 80
