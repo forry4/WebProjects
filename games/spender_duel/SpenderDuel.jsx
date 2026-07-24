@@ -181,35 +181,12 @@ function WinMeters({ pts, crowns, cpts }) {
 // The bag of tokens waiting to be drawn: a cinched drawstring pouch with the remaining
 // count in its belly. `.duel-bag` is also the ORIGIN anchor for the refill animation
 // (tokens fly from here to the board), so it must stay a stable, measurable element.
-// Pixel-art drawstring pouch (blue body, silver rim + drawstring). Drawn on a 13x15 pixel
-// grid so it reads as a retro sprite; the token count overlays its belly.
-const BAG_PIX = [
-  "...oo...oo...",
-  "..oHo...oHo..",
-  "..oSoooooSo..",
-  ".ooSSSSSSSoo.",
-  ".oSssBBBssSo.",
-  "oSSBBBBBBbSSo",
-  "oSBBHBBBBBbSo",
-  "oSBBBBBBBBbSo",
-  "osBBBBBBBBbso",
-  "oSBBBBBBBBbSo",
-  "oSSBBBBBBbSSo",
-  ".oSsBBBBBbSo.",
-  ".ooSssSSssoo.",
-  "..oosssssoo..",
-  "...ooooooo...",
-];
-const BAG_PIX_COLORS = { o: "#22304e", S: "#cfd4dd", s: "#98a0af", B: "#4a86e0", b: "#3767b8", H: "#eaf1fb" };
+// The token bag: a pixel-art sprite (webapp/public/duel-bag.png) with the remaining count
+// overlaid on its belly. `.duel-bag` is also the ORIGIN anchor for the refill animation.
 function DuelBag({ count }) {
-  const cols = BAG_PIX[0].length, rows = BAG_PIX.length;
   return (
     <span className="duel-bag" title={`${count} token${count === 1 ? "" : "s"} waiting in the bag`}>
-      <svg viewBox={`0 0 ${cols} ${rows}`} className="duel-bag-svg" aria-hidden="true" shapeRendering="crispEdges">
-        {BAG_PIX.flatMap((line, y) => line.split("").map((ch, x) =>
-          ch === "." ? null
-            : <rect key={`${x},${y}`} x={x} y={y} width="1.03" height="1.03" fill={BAG_PIX_COLORS[ch]} />))}
-      </svg>
+      <img className="duel-bag-img" src={`${import.meta.env.BASE_URL}duel-bag.png`} alt="" draggable="false" />
       <span className="duel-bag-num">{count}</span>
     </span>
   );
@@ -444,10 +421,10 @@ const css = `
 .duel-cell .gem-token.inert{cursor:default}
 @keyframes duelPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
 .duel-board-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
-/* Pixel-art drawstring bag with the remaining token count in its belly. */
-.duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:33px;height:38px;flex-shrink:0}
-.duel-bag-svg{width:100%;height:100%;display:block;image-rendering:pixelated}
-.duel-bag-num{position:absolute;left:0;right:0;top:56%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.8rem;line-height:1;color:#fff;pointer-events:none;text-shadow:0 1px 1px rgba(10,20,40,.6),0 0 2px rgba(10,20,40,.5)}
+/* Token bag: pixel-art sprite with the remaining count overlaid on its belly. */
+.duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:39px;flex-shrink:0}
+.duel-bag-img{width:100%;height:100%;object-fit:contain;display:block;-webkit-user-select:none;user-select:none;filter:hue-rotate(55deg) saturate(1.1)}
+.duel-bag-num{position:absolute;left:0;right:0;top:62%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.72rem;line-height:1;color:#1c2a46;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.85),0 1px 1px rgba(255,255,255,.7)}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
 /* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
    no border while btn-outline adds 1px — with border-box + auto height a border still adds
