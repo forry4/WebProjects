@@ -71,7 +71,7 @@ CLIENT_AI_TIERS = ("hard", "expert")
 _CLIENT_AI_MODEL = {"hard": "coc_pv_model_hard.bin", "expert": "coc_pv_model.bin"}
 
 # Expert client-search config. _EXPERT_MODE mirrors the offline gate verdict:
-# "netval" = net policy prior + 20-step rollout + the net VALUE HEAD at the
+# "netval" = net policy prior + 30-step rollout (NETVAL_ROLLOUT_STEPS) + the net VALUE HEAD at the
 # truncation. It beats the plain-"hybrid" (heuristic-truncation) leaf ~0.58-0.61,
 # and the edge GROWS with sims (gated on two fresh seed bases + a scaffold
 # yardstick jump 0.36->0.52) — the campaign's one genuine gain over the bootstrap.

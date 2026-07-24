@@ -31,7 +31,8 @@ compiled to WASM.
 
 ### Run it locally
 - Backend: `python -m uvicorn app:app --reload --port 8000` (the composition-root app at repo root).
-  Spender alone: `uvicorn games.spender.main:app` — but prefer the root `app`.
+  Spender is a `router` included by the root `app` (no separate Spender server); the deploy shim
+  `games/spender/app.py` just re-exports the root `app`.
 - Frontend: `cd webapp && VITE_BASE=/ VITE_WS_URL=wss://splendid-nelz.onrender.com/ws npm run dev`
   — HMR against the **prod backend** is the fastest loop (resume a real game from your account).
   For a fully local stack point `VITE_WS_URL` at `ws://localhost:8000/ws`.
@@ -105,7 +106,7 @@ Docker image is built from `games/spender/Dockerfile` per `render.yaml`).
 ### Composition root — `app.py`
 Creates `app = FastAPI()`, applies CORS + a pure-ASGI `SecurityHeadersMiddleware` (nosniff, DENY,
 Referrer-Policy, HSTS, Permissions-Policy — threaded into the mounted sub-apps too), `include_router`s
-Spender's `router`, `setup_books(...)`, and mounts CoC/WW/Duel each behind a **defensive try/except**
+Spender's `router`, `setup_books(...)`, `setup_puzzles(...)`, and mounts CoC/WW/Duel each behind a **defensive try/except**
 (so the core backend never goes down if a game package is absent). No CSP on the API (it serves JSON;
 CSP is Pages' job). Deploy entrypoint is unchanged: `games/spender/app.py` is a thin shim re-exporting
 the root `app`, so the Dockerfile/render.yaml keep targeting `games.spender.app:app`.
@@ -152,7 +153,7 @@ ROOMS[room_id] = {
 **Load-bearing invariants across all four games:**
 - **Pending sub-decisions are real game-state keys**, not transient message fields — so they survive
   saves/reconnects and are server-enforced (Spender `pending_noble_pid`/`pending_discard_pid`; CoC
-  `pending_pid`/`pending_kind`/`pending`; Duel `pending`; WW `night_step`). A stray `room_update` can't
+  `pending_pid`/`pending_kind`/`pending`; Duel `pending_pid`/`pending_kind`/`pending`; WW `night_step`). A stray `room_update` can't
   clear an unmet requirement.
 - **The game dict is JSON-safe** (no sets anywhere; RNG persisted as lists in `rng_state`) → reconnect-
   and save/load-safe.
@@ -188,7 +189,8 @@ Lobby exposes persona pills mapping Easy→Expert. Internally there's a variant 
 
 - **Serving:** on the AI's turn the server ships `ai_search` (the AI-perspective compact state) in room
   state; the browser worker pool searches and submits `ai_move`; the server validates it's in
-  `legal_actions` and applies it. `CLIENT_AI_TIMEOUT` (8s) → server computes the fallback. Discard/noble
+  `legal_actions` and applies it. `CLIENT_AI_TIMEOUT` (15s; raised for N's heavier WASM worker) → server
+  computes the fallback. Discard/noble
   finishes are routed to the client net too (`defer_discard`) so ONE brain decides take+discard (see
   Spender AI notes). Absent a WASM client it's byte-identical to server play.
 - **21-pt "Long" mode** is a per-game `win_points`; any picked AI auto-adapts, and N/S have 21-pt
@@ -257,7 +259,7 @@ No AI — a real-time social-deduction party game, humans only.
   phase "over"    → "game is over"
   turn != pid     → "not your turn"
   pending_noble_pid == pid & type != pick_noble  → "must choose a noble first"
-  pending_discard_pid == pid & type != discard   → "must discard down to 10 gems first"
+  pending_discard_pid == pid & type not in (discard, undo_discard) → "must discard down to 10 gems first"
   ```
 - **Pending state in the game dict** (`pending_noble_pid`, `pending_discard_pid`) is set when the
   condition arises, cleared when resolved, and rejects any other move meanwhile. Frontend derives
@@ -272,7 +274,7 @@ No AI — a real-time social-deduction party game, humans only.
   heuristic — a DIFFERENT brain than the net → the take→discard→re-take loop. Fix: `_run_ai_turn(...,
   defer_discard=True)` (client path only) sets `pending_discard_pid` and RETURNS without finishing; the
   existing `mk_room_state` `ai_search` block ships the DISCARD-phase state, the ply-keyed client effect
-  re-searches and submits a `discard` `ai_move`. `_schedule_ai_discard_fallback` (ply-guarded, 8s) lets
+  re-searches and submits a `discard` `ai_move`. `_schedule_ai_discard_fallback` (ply-guarded, 15s) lets
   the reserved-aware heuristic finish on any client failure. Only benefits N (S one-hots H3 discards).
 - **Move log is id-only + a static catalog** (`card_catalog()` resolves id→card; deck is fixed), cap 500
   → the whole game logs. Blind-reserve redaction strips `card_id` (the id reveals the card via the catalog).
@@ -335,7 +337,8 @@ so committing it never deploys anything on its own.
 - Move types: `take_hex`/`place_tile`/`sell_goods`/`take_workers`/`buy_black`/`adjust_die`/
   `discard_storage`/`end_turn`/`monastery6_take` + the pending resolvers.
 - **Rulebook-fidelity invariants locked by tests** (do not "simplify" away): seat-dependent starting
-  workers; the exact base-game hex supply; black depot refills 4/phase (`BLACK_FILL_2P`); starting castles
+  workers; the exact base-game hex supply; black depot refills 2×players per phase (4/6/8 for 2/3/4p via
+  `tiles.black_fill`; `BLACK_FILL_2P`=4 is legacy-2p-only); starting castles
   never score; monastery 5 *chooses* the adjacent depot.
 - **House variant — fixed depot layout** (`tiles.DEPOT_PLAN`): each numbered depot refills each phase with
   two hex tiles of fixed TYPES (the specific building/monastery still varies by seed). Locked by tests.
@@ -459,7 +462,7 @@ top-level package (neither a game nor part of Spender).
 ## Shared frontend kits (`shared/`)
 
 - **`theme.js` — `baseCss`** is the single source of truth for the design system (font `@import`/
-  `@font-face` first, `:root` tokens, `.btn`/`.input`). Spender + Books + Duel import it; CoC/WW render
+  `@font-face` first, `:root` tokens, `.btn`/`.input`). Spender + Books + Duel + WW import it; CoC renders
   it too (CoC carries a copy since it mounts bare).
 - **`lobby.jsx`** — shared lobby chrome (`LobbyHeader`/`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/
   `TurnBadge`, cache helpers) + `GameMenu` (the in-game ☰ dropdown: Return / View rules / Abandon; falsy
@@ -600,10 +603,10 @@ home-menu 🧩 button; backend is static (no serve-time AI).
 
 - **Rules/engine unit tests are the most valuable to protect** — each game has them: Spender
   `tests/test_game_logic.py` + `test_replay.py`/`test_review.py`; CoC `tests/` (~319, board invariants,
-  placement, scoring, lifecycle, one-per-monastery, endgame) + `test_client_ai.py`; WW `tests/` (67, deck
+  placement, scoring, lifecycle, one-per-monastery, endgame) + `test_client_ai.py`; WW `tests/` (~73, deck
   validation, every night action, win-condition matrix, `player_view` redaction matrix); Duel `tests/`
   (card invariants, redaction, bot-vs-bot soak with a 25-token conservation invariant); `core/tests/`
-  (db/auth/ratelimit/retention, in-memory sqlite); Books `tests/` (14, in-memory DB).
+  (db/auth/ratelimit/retention, in-memory sqlite); Books `tests/` (17, in-memory DB).
 - **CoC Python↔Rust differential parity** — regen fixtures via `gen_engine_fixtures.py`, then
   `cargo test --release --features bridge` in `rust-cores/coc-core`. Spender: `rust-cores/spender-core`
   `cargo test --lib` (`src/bin/*` need `--features bridge`).
@@ -651,7 +654,7 @@ home-menu 🧩 button; backend is static (no serve-time AI).
 - **Verify a Pages deploy by a CONTENT marker in the live bundle, not the filename hash** (CDN lag / Vite
   chunking can keep the hash looking unchanged). The `deploy-pages.yml` run status is the authoritative
   signal (Pages source = "GitHub Actions").
-- **A stale `vite preview --strictPort` on 5173 serves an OLD `dist/`** — kill listeners on the port before
+- **A stale `vite preview --port 5173` process serves an OLD `dist/`** — kill listeners on the port before
   serving, confirm the fresh bundle by a content marker.
 - **Never blind-push `staging:main`** — `staging` has DIVERGED (behind main on backends; has historically
   carried the WW card). A force-push would wipe main's backend history. To ship staging frontend, branch
@@ -681,9 +684,13 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 - **Deploy preference (user):** land changes on `main` directly — don't hand over a PR (`gh` isn't
   installed; branch off `origin/main`, push `<branch>:main` to fast-forward). When both backend + frontend
   change, ship backend first (else a new client hits an old backend → transient "unknown action").
-- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): cron-job.org is the
-  reliable primary (`/health`, 5min, 07:00–22:00 PT); GitHub scheduled workflows are too unreliable (the
-  `keepalive.yml` long-lived pinger is only a backup); the only *guaranteed* fix is the $7/mo Starter tier.
+- **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): `keepalive.yml`
+  (GitHub Actions) is the SOLE mechanism — several INDEPENDENT long-lived (~90min) pre-7am runs, each
+  HOLDING the connection open and retrying through the spin-up 503s (`curl --retry-all-errors` + long
+  `--max-time`, like a browser) so any firing completes the wake (~7s). **Key lesson (do not regress):**
+  a SHORT 30s pinger (the old cron-job.org job) is worse than nothing — it disconnects mid-spin-up and
+  ABORTS the wake, which was the actual cause of the 7-9am outages (not "GitHub fired late"). The only
+  *guaranteed* fix is the $7/mo Starter tier.
 - **Staging** (Cloudflare Worker `webprojectsstaging.forry4.workers.dev`, tracks the `staging` branch,
   reuses the prod backend) — test frontend/layout changes on a real URL first. Local↔Cloudflare bundle
   hashes differ; verify by served content. Use vs-AI games so test data stays private.
