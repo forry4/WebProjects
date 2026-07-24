@@ -147,6 +147,58 @@ function canAffordCard(card, player, cardsById) {
   return goldNeeded(card.cost, player.tokens, b) <= (player.tokens?.gold || 0);
 }
 
+// The three victory conditions with progress meters (any one wins): 20 total prestige,
+// 10 prestige in a single colour (the player's best colour), 10 crowns. Replaces the bare
+// "★ pts ♛ crowns" so the player board reads as a race toward each finish line.
+function WinMeters({ pts, crowns, cpts }) {
+  const best = COLORS.reduce((a, c) => ((cpts[c] || 0) > (cpts[a] || 0) ? c : a), COLORS[0]);
+  const meters = [
+    { key: "pts", n: pts, t: 20, label: `${pts} / 20 total prestige points`,
+      ico: <span className="duel-wm-ico" style={{ color: "#e8c96a" }}>★</span> },
+    { key: "color", n: cpts[best] || 0, t: 10, label: `${cpts[best] || 0} / 10 prestige in one colour (best: ${best})`,
+      ico: <span className="duel-wm-ico duel-wm-dot"
+        style={{ background: GEM_HEX[best], borderColor: best === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.28)" }} /> },
+    { key: "crowns", n: crowns, t: 10, label: `${crowns} / 10 crowns`,
+      ico: <span className="duel-wm-ico" style={{ color: "#f5c842" }}>♛</span> },
+  ];
+  return (
+    <div className="duel-winmeters">
+      {meters.map((m) => {
+        const done = m.n >= m.t;
+        const pct = Math.max(0, Math.min(100, (m.n / m.t) * 100));
+        return (
+          <div key={m.key} className={`duel-wm${done ? " done" : ""}`} title={m.label}>
+            {m.ico}
+            <span className="duel-wm-bar"><span className="duel-wm-fill" style={{ width: pct + "%" }} /></span>
+            <span className="duel-wm-txt">{m.n}<span className="duel-wm-t">/{m.t}</span></span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// The bag of tokens waiting to be drawn: a cinched drawstring pouch with the remaining
+// count in its belly. `.duel-bag` is also the ORIGIN anchor for the refill animation
+// (tokens fly from here to the board), so it must stay a stable, measurable element.
+function DuelBag({ count }) {
+  return (
+    <span className="duel-bag" title={`${count} token${count === 1 ? "" : "s"} waiting in the bag`}>
+      <svg viewBox="0 0 40 44" className="duel-bag-svg" aria-hidden="true">
+        {/* pouch body */}
+        <path className="duel-bag-body"
+          d="M12 15 C6.5 20 4.5 29 8 36 C10.7 41.5 15.5 43 20 43 C24.5 43 29.3 41.5 32 36 C35.5 29 33.5 20 28 15 Z" />
+        {/* cinched neck */}
+        <ellipse className="duel-bag-neck" cx="20" cy="14.5" rx="9" ry="2.9" />
+        {/* drawstring arcing over the neck + two ends splaying out to the sides */}
+        <path className="duel-bag-string" d="M11.5 13 Q20 9 28.5 13" />
+        <path className="duel-bag-string" d="M13.5 11.9 Q9 9.5 7.5 12 M26.5 11.9 Q31 9.5 32.5 12" />
+      </svg>
+      <span className="duel-bag-num">{count}</span>
+    </span>
+  );
+}
+
 // ─── Small components ───────────────────────────────────────────────────────
 // GemToken / CardView / LogEntry come from shared/splendor.jsx — Spender's ACTUAL
 // gems, jewel cards and log. Only what Splendor Duel adds on top lives here.
@@ -376,6 +428,13 @@ const css = `
 .duel-cell .gem-token.inert{cursor:default}
 @keyframes duelPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
 .duel-board-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
+/* Drawstring bag with the remaining token count in its belly. */
+.duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:34px;height:37px;flex-shrink:0}
+.duel-bag-svg{width:100%;height:100%;display:block;overflow:visible}
+.duel-bag-body{fill:#b07e3c;stroke:#5f4527;stroke-width:1.5;stroke-linejoin:round}
+.duel-bag-neck{fill:#c69553;stroke:#5f4527;stroke-width:1.3}
+.duel-bag-string{fill:none;stroke:#e8c96a;stroke-width:1.6;stroke-linecap:round}
+.duel-bag-num{position:absolute;left:0;right:0;top:59%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.86rem;line-height:1;color:#2c1f0d;pointer-events:none;text-shadow:0 1px 0 rgba(255,255,255,.18)}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
 /* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
    no border while btn-outline adds 1px — with border-box + auto height a border still adds
@@ -482,6 +541,18 @@ const css = `
 .duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
 .duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
+/* The three victory-condition progress meters (top-right of a player board). Compact so
+   name + turn badge + meters share the header row on both phone and desktop. */
+.duel-winmeters{margin-left:auto;display:flex;flex-direction:column;gap:3px;align-items:stretch;min-width:104px;flex-shrink:0}
+.duel-wm{display:flex;align-items:center;gap:5px}
+.duel-wm-ico{font-size:.82rem;width:13px;text-align:center;flex-shrink:0;line-height:1}
+.duel-wm-dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.28);box-sizing:border-box}
+.duel-wm-bar{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden;min-width:34px}
+.duel-wm-fill{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#b0862c,#e8c96a);transition:width .35s ease}
+.duel-wm.done .duel-wm-fill{background:linear-gradient(90deg,#4e8f3a,#79d35c)}
+.duel-wm-txt{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;font-weight:700;min-width:32px;text-align:right;white-space:nowrap;color:var(--text)}
+.duel-wm.done .duel-wm-txt{color:#8fe07a}
+.duel-wm-t{opacity:.5;font-weight:400}
 .duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
 /* Reserved cards are sized so exactly THREE fit on ONE row of the player box: card width =
    (box content width − the two 10px row gaps, with a few px of slack) / 3, read off the
@@ -529,6 +600,12 @@ const css = `
 .duel-fly-layer{position:fixed;inset:0;pointer-events:none;z-index:180}
 .duel-flyer{position:absolute;animation:duelFly .55s cubic-bezier(.3,.7,.4,1) forwards}
 @keyframes duelFly{from{transform:translate(0,0) scale(var(--s0,1));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1,.6));opacity:.15}}
+/* Refill flyers: fly bag->cell staying solid, landing at full size (the real token is hidden
+   until then, so it reads as a draw from the bag). fill-mode both holds the start state through
+   the per-token delay (queued in the bag) and the end state after it lands (until we remove it). */
+.duel-flyer-in{position:absolute;animation-name:duelFlyIn;animation-timing-function:cubic-bezier(.3,.6,.4,1);animation-fill-mode:both}
+@keyframes duelFlyIn{from{transform:translate(0,0) scale(.5);opacity:.35}60%{opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(1);opacity:1}}
+.gem-token.duel-refill-hidden{opacity:0}
 
 /* waiting screen */
 .duel-waiting{max-width:520px;margin:40px auto;text-align:center}
@@ -721,6 +798,12 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [flyers, setFlyers] = useState([]);
   const flyerSeq = useRef(0);
   const prevLogLen = useRef(0);
+  // Board REFILL animation: tokens fly from the bag to each newly-filled cell, one by one.
+  const [refillFlyers, setRefillFlyers] = useState([]);
+  const [hiddenCells, setHiddenCells] = useState(() => new Set());   // real tokens hidden until their flyer lands
+  const refillSeq = useRef(0);
+  const prevBoardRef = useRef(null);
+  const refillRoomRef = useRef(null);
   const flyerRoomRef = useRef(null);   // which room prevLogLen is synced to (first-sight guard)
   const reconnTimer = useRef(null);
   const reconnTries = useRef(0);
@@ -977,6 +1060,56 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     const ids = new Set(add.map((a) => a.id));
     setTimeout(() => setFlyers((f) => f.filter((x) => !ids.has(x.id))), 620);
   }, [liveGame?.log?.length, roomId]); // eslint-disable-line
+
+  // ── board REFILL animation: on a replenish, empty cells go null->token; fly each new
+  //    token from the bag to its cell, staggered center-outward, and keep the real cell
+  //    EMPTY (hidden) until its flyer lands — so it reads as tokens drawn from the bag. ──
+  useEffect(() => {
+    const board = liveGame?.board;
+    if (!board) return;
+    // Don't animate while rewinding, and re-baseline on first sight of a room / after review
+    // so a resume or a review-exit never bursts the whole board.
+    if (reviewing || reviewOnly || refillRoomRef.current !== roomId) {
+      refillRoomRef.current = roomId; prevBoardRef.current = board; return;
+    }
+    const prev = prevBoardRef.current;
+    prevBoardRef.current = board;
+    if (!prev) return;
+    // Newly-filled cells (null/absent -> a token). In Duel the board only GAINS tokens via a
+    // bag refill, so this diff is exactly the replenish set.
+    const filled = [];
+    for (let i = 0; i < board.length; i++) if (board[i] && !prev[i]) filled.push({ cell: i, color: board[i] });
+    if (!filled.length) return;
+    const bag = document.querySelector(".duel-bag");
+    if (!bag) return;                                  // no anchor -> skip (tokens just appear)
+    const br = bag.getBoundingClientRect();
+    const from = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
+    // Fill order: centre cell (2,2) outward, so it mirrors the printed refill spiral.
+    const d2 = (i) => (Math.floor(i / 5) - 2) ** 2 + ((i % 5) - 2) ** 2;
+    filled.sort((a, b) => d2(a.cell) - d2(b.cell));
+    const STEP = 45, DUR = 300;
+    const add = [];
+    filled.forEach((f, k) => {
+      const el = document.querySelector(`[data-cell="${f.cell}"]`);
+      if (!el) return;
+      const cr = el.getBoundingClientRect();
+      const size = Math.max(18, Math.round(cr.width || 34));
+      const to = { x: cr.left + cr.width / 2, y: cr.top + cr.height / 2 };
+      add.push({
+        id: `r${refillSeq.current++}`, cell: f.cell, color: f.color, size,
+        left: from.x - size / 2, top: from.y - size / 2,
+        dx: to.x - from.x, dy: to.y - from.y, delay: k * STEP, dur: DUR,
+      });
+    });
+    if (!add.length) return;
+    setHiddenCells((s) => new Set([...s, ...add.map((a) => a.cell)]));
+    setRefillFlyers((fl) => [...fl, ...add]);
+    // Each token is REVEALED (and its flyer removed) exactly when it lands.
+    add.forEach((f) => setTimeout(() => {
+      setHiddenCells((s) => { const n = new Set(s); n.delete(f.cell); return n; });
+      setRefillFlyers((fl) => fl.filter((x) => x.id !== f.id));
+    }, f.delay + f.dur));
+  }, [liveGame?.board, roomId, reviewing]); // eslint-disable-line
 
   // ── client-side (WASM) bot search ───────────────────────────────────────────
   // The bot's search runs HERE, on the player's CPU, instead of on Render's free tier
@@ -1291,10 +1424,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             )}
           </span>
           {active && <span className="duel-turnbadge">{isMe ? "Your turn" : roomData?.vs_ai && pid === roomData?.ai_player ? "Bot is playing…" : "Their turn"}</span>}
-          <span className="duel-stat">
-            <span title="Prestige points">★ {pts}</span>
-            <span title="Crowns" style={{ color: "#f5c842" }}>{"♛"} {crowns}</span>
-          </span>
+          <WinMeters pts={pts} crowns={crowns} cpts={cpts} />
         </div>
         <Scroll n={p.privileges}
           armed={isMe && privArmed}
@@ -1377,7 +1507,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     <div className="duel-panel duel-board-wrap">
       <div className="duel-board-meta">
         <Scroll n={game.privileges_board} title="Privileges available above the board" />
-        <span className="duel-muted" title="Tokens waiting in the bag">Bag: {game.bag_count}</span>
+        <DuelBag count={game.bag_count} />
         <span className="duel-victory-chip" title="Win by any: 20 points · 10 crowns · 10 points in one color">
           20 ★ &nbsp;|&nbsp; 10 ♛ &nbsp;|&nbsp; 10 ★ one color
         </span>
@@ -1398,10 +1528,11 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           const cls = tok === "gold"
             ? (goldCell === i ? "goldarm" : myTurn && !pendingMine ? "" : "inert")
             : sel ? "sel" : isMatch ? "matchable" : "";
+          const hidden = hiddenCells.has(i);   // token in flight from the bag — keep the cell empty until it lands
           return (
             <div key={i} className="duel-cell">
               {/* no `size`: the board's tokens scale with their cells via CSS */}
-              {tok && <GemToken color={tok} size={null} dataCell={i} className={cls} onClick={() => cellClick(i)} />}
+              {tok && <GemToken color={tok} size={null} dataCell={i} className={`${cls}${hidden ? " duel-refill-hidden" : ""}`.trim()} onClick={() => cellClick(i)} />}
               {!tok && <div data-cell={i} style={{ width: 1, height: 1 }} />}
             </div>
           );
@@ -1868,6 +1999,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             {f.color
               ? <GemToken color={f.color} size={f.size} />
               : <div className="card card-small" style={{ cursor: "default" }} />}
+          </div>
+        ))}
+        {refillFlyers.map((f) => (
+          <div key={f.id} className="duel-flyer-in"
+            style={{ left: f.left, top: f.top, width: f.size, height: f.size,
+              "--dx": `${f.dx}px`, "--dy": `${f.dy}px`,
+              animationDelay: `${f.delay}ms`, animationDuration: `${f.dur}ms` }}>
+            <GemToken color={f.color} size={f.size} />
           </div>
         ))}
       </div>
