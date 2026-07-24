@@ -125,9 +125,10 @@ games/
 books/                 # Books site feature (wired via dependency injection)
 shared/                # cross-game frontend kits (theme, lobby, shared card/gem components)
 webapp/                # Vite + React build — the shell that mounts every feature
-spender-core/          # Rust → WASM: Spender search core (client-side inference)
-coc-core/              # Rust → WASM: Castles of Crimson search core
-duel-core/             # Rust → WASM: Spender Duel search core
+rust-cores/            # Per-game Rust → WASM search crates (client-side inference; not the Python core/)
+  spender-core/        #   Spender search core
+  coc-core/            #   Castles of Crimson search core
+  duel-core/           #   Spender Duel search core
 wwsd/                  # standalone browser autoplayer for a friend's external site
 docs/                  # GitHub Pages build output (CI-owned) + ai-research-log.md
 ```

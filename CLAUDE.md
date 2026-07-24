@@ -68,10 +68,17 @@ books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
 webapp/                # Vite + React build (neutral, repo-root) — main.jsx mounts Spender.jsx (the shell)
 wwsd/                  # "What Would Steve Do" — browser autoplayer for a friend's external site
-spender-core/          # Rust crate → WASM: Spender variant S/N search core (client-side serving)
-coc-core/              # Rust crate → WASM: CoC Expert (netval) search core
+rust-cores/            # Per-game Rust→WASM search crates (client-side serving). NOT the Python core/.
+  spender-core/        #   Spender variant S/N search core (client-side serving)
+  coc-core/            #   CoC Expert (netval) search core
+  duel-core/           #   Spender Duel card-set ATTENTION value-net search core
 docs/                  # GitHub Pages build output + ai-research-log.md
 ```
+
+**Naming caution:** `core/` (top-level, singular) is the **Python** backend platform every feature
+imports. `rust-cores/*-core/` are **Rust→WASM** crates, one per game — build artifacts, imported by
+nothing in Python. They are per-game siblings (like `games/*`), not part of `core/`; the shared word
+"core" is the only thing they have in common.
 
 **Layering:** `core/` (bottom, depends on nothing) → features (games, books) → `app.py` (top). The
 composition root depends on features; features depend only on `core`. This is the extraction that
@@ -205,7 +212,7 @@ Lobby exposes persona pills mapping Easy→Expert. Internally there's a variant 
   undervalues in-flight turns — the short rollout is why netval works (see research log).
 - **Serving mirrors Spender:** per-decision `ai_search` (compact state, undrawn pools sorted) → client
   searches → `ai_move`; watchdog `CLIENT_AI_TIMEOUT=8s` → falls back to the server hard bot.
-- **Model upgrade = no wasm rebuild:** `python coc-core/tools/pv_json_to_bin.py <winner.json>
+- **Model upgrade = no wasm rebuild:** `python rust-cores/coc-core/tools/pv_json_to_bin.py <winner.json>
   webapp/public/wasm/coc_pv_model.bin` + push. The net blob is fetched (browser-cached), not embedded.
 
 ### Spender Duel — Easy / Normal / Hard
@@ -287,11 +294,11 @@ The current deployed Expert is variant **N** (attention net, client-WASM). Every
 S, and the whole strength campaign that produced them — is documented in the **research log**. Offline
 tooling is `python -m games.spender.ai.train` (writes into `ai/`) and the many `ai/az/*` benches.
 
-**Rust→WASM serving core (`spender-core/`) — durable architecture:** a pure-Rust port of the engine +
+**Rust→WASM serving core (`rust-cores/spender-core/`) — durable architecture:** a pure-Rust port of the engine +
 `v_state`/`heuristic3`/`vsearch`/`mcts` + `feats` (attention tokenizer) + the action↔move-dict bridge,
 compiled with `wasm-pack --target web`. Validated bit-exact against Python (engine, leaf, policy, move
-bridge; Rust-S ≈ Python-S at 0.50). Deploy = `cd spender-core && wasm-pack build --target web --release
---no-typescript` → `cp pkg/spender_core.{js,_bg.wasm} webapp/public/wasm/` → commit those two files (CI
+bridge; Rust-S ≈ Python-S at 0.50). Deploy = `cd rust-cores/spender-core && wasm-pack build --target web --release
+--no-typescript` → `cp pkg/spender_core.{js,_bg.wasm} ../../webapp/public/wasm/` → commit those two files (CI
 does NOT rebuild Rust; the wasm is a committed artifact) → push. **Same wasm filename ⇒ browsers may
 serve the cached old wasm** (~10 min Pages TTL / hard-refresh). The crate is in **neither** CI path filter,
 so committing it never deploys anything on its own.
@@ -589,8 +596,8 @@ home-menu 🧩 button; backend is static (no serve-time AI).
   (card invariants, redaction, bot-vs-bot soak with a 25-token conservation invariant); `core/tests/`
   (db/auth/ratelimit/retention, in-memory sqlite); Books `tests/` (14, in-memory DB).
 - **CoC Python↔Rust differential parity** — regen fixtures via `gen_engine_fixtures.py`, then
-  `cargo test --release --features bridge` in `coc-core`. Spender: `spender-core` `cargo test --lib`
-  (`src/bin/*` need `--features bridge`).
+  `cargo test --release --features bridge` in `rust-cores/coc-core`. Spender: `rust-cores/spender-core`
+  `cargo test --lib` (`src/bin/*` need `--features bridge`).
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run smoke`.
 - AI strength benchmarking is offline (per-game `ai_selfplay` / arena / gate bins) — never in a serving
