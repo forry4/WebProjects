@@ -181,12 +181,28 @@ function WinMeters({ pts, crowns, cpts }) {
 // The bag of tokens waiting to be drawn: a cinched drawstring pouch with the remaining
 // count in its belly. `.duel-bag` is also the ORIGIN anchor for the refill animation
 // (tokens fly from here to the board), so it must stay a stable, measurable element.
-// The token bag: a pixel-art sprite (webapp/public/duel-bag.png) with the remaining count
-// overlaid on its belly. `.duel-bag` is also the ORIGIN anchor for the refill animation.
+// The token bag: a smooth white drawstring pouch (hand-drawn vector) with a blue cord and the
+// remaining count on its body. `.duel-bag` is also the ORIGIN anchor for the refill animation.
 function DuelBag({ count }) {
   return (
     <span className="duel-bag" title={`${count} token${count === 1 ? "" : "s"} waiting in the bag`}>
-      <img className="duel-bag-img" src={`${import.meta.env.BASE_URL}duel-bag.png`} alt="" draggable="false" />
+      <svg className="duel-bag-svg" viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="dbBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#ffffff"/><stop offset="1" stopColor="#d0d6e0"/></linearGradient>
+          <linearGradient id="dbNeck" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#f4f6fa"/><stop offset="1" stopColor="#cfd5df"/></linearGradient>
+          <linearGradient id="dbCord" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#5f97e8"/><stop offset="1" stopColor="#2f62b4"/></linearGradient>
+        </defs>
+        {/* gathered fabric above the cinch */}
+        <path d="M25 24C23 15 26 9 29 8 30 13 31 15 32 15 33 15 34 13 35 8 38 9 41 15 39 24Z" fill="url(#dbNeck)" stroke="#5b6a86" strokeWidth="1.4" strokeLinejoin="round"/>
+        {/* white sack body */}
+        <path d="M22 22C11 27 8 41 13 51 16 58 24 61 32 61 40 61 48 58 51 51 56 41 53 27 42 22 36 19 28 19 22 22Z" fill="url(#dbBody)" stroke="#5b6a86" strokeWidth="1.9" strokeLinejoin="round"/>
+        {/* blue drawstring cinch + cord ends + knot */}
+        <path d="M18 22Q32 29 46 22L45 27Q32 33 19 27Z" fill="url(#dbCord)" stroke="#22417a" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M26 22C22 19 20 13 24 10M38 22C42 19 44 13 40 10" fill="none" stroke="url(#dbCord)" strokeWidth="2.4" strokeLinecap="round"/>
+        <circle cx="32" cy="23.5" r="2.6" fill="url(#dbCord)" stroke="#22417a" strokeWidth="1.3"/>
+        {/* body highlight */}
+        <ellipse cx="23" cy="40" rx="4" ry="8" fill="#fff" opacity=".55"/>
+      </svg>
       <span className="duel-bag-num">{count}</span>
     </span>
   );
@@ -421,10 +437,10 @@ const css = `
 .duel-cell .gem-token.inert{cursor:default}
 @keyframes duelPulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.35)}}
 .duel-board-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
-/* Token bag: pixel-art sprite with the remaining count overlaid on its belly. */
-.duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:38px;height:39px;flex-shrink:0}
-.duel-bag-img{width:100%;height:100%;object-fit:contain;display:block;-webkit-user-select:none;user-select:none;filter:hue-rotate(55deg) saturate(1.1)}
-.duel-bag-num{position:absolute;left:0;right:0;top:62%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.72rem;line-height:1;color:#1c2a46;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.85),0 1px 1px rgba(255,255,255,.7)}
+/* Token bag: white drawstring pouch (vector) with the remaining count on its body. */
+.duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:37px;height:38px;flex-shrink:0}
+.duel-bag-svg{width:100%;height:100%;display:block}
+.duel-bag-num{position:absolute;left:0;right:0;top:64%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.72rem;line-height:1;color:#2a3f6b;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.9),0 1px 1px rgba(255,255,255,.7)}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
 /* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
    no border while btn-outline adds 1px — with border-box + auto height a border still adds
