@@ -98,6 +98,60 @@ pub fn value(st: &State, pid: usize) -> f64 {
     value_w(st, pid, &WEIGHTS)
 }
 
+/// DEVELOPER weights — a development-BIASED variant of `WEIGHTS` for the exploiter de-risk (the
+/// inverse of v2's under-development blind spot): the permanent-bonus ENGINE is up-weighted, and
+/// token-hoarding / over-reserving are down-weighted, while the win-PROGRESS terms are UNCHANGED
+/// (it must still play to WIN, not just pile up bonuses). NOT a serving path — used only by
+/// `Leaf::HeuristicDev` to test whether a committed development strategy pressures v2 (does the
+/// blind spot exist AND is it heuristically executable). No parity impact (`value` keeps `WEIGHTS`).
+pub const DEV_WEIGHTS: Weights = Weights {
+    progress: 26.0,
+    progress_exp: 2.0,
+    points: 1.00,
+    crowns: 1.35,
+    color: 0.55,
+    bonus: 1.70,        // 0.85 -> 2x: the permanent-discount ENGINE is the developer's priority
+    bonus_spread: 0.40, // 0.20 -> 2x: engine breadth (keep many colors reachable)
+    token: 0.06,        // 0.16 -> down: raw tokens in hand are nearly worthless (convert to cards)
+    gold: 0.15,         // 0.30 -> down: don't hoard the wild either
+    privilege: 0.13,
+    reserved: 0.08,     // 0.25 -> down: don't over-reserve cheap cards
+    scale: 9.0,
+};
+
+/// Leaf value in [-1,1] under the DEVELOPER weights (the exploiter-de-risk leaf; see `DEV_WEIGHTS`).
+#[inline]
+pub fn value_dev(st: &State, pid: usize) -> f64 {
+    value_w(st, pid, &DEV_WEIGHTS)
+}
+
+// ─── The diverse-league SPECIALIST basis ───────────────────────────────────────────────
+// Each specialist is `WEIGHTS` tilted toward ONE strategic axis (the natural basis of Duel: the 3
+// win conditions + development), keeping the win-progress terms so it still plays to WIN. Used as
+// `Leaf::HeuristicW(&SPECIALIST)` to (a) DIAGNOSE which axis v2 is blind to (gate each vs v2, paired
+// with the plain-heuristic baseline) and (b) seed a diverse league opponent pool. No parity impact.
+
+/// CROWN-rusher: crowns are up-weighted (they gate royals + are the 10-crown win). Racing crowns is
+/// a distinct line self-play under-explores.
+pub const CROWN_WEIGHTS: Weights = Weights {
+    crowns: 3.20, // 1.35 -> race the 10-crown condition + royal claims
+    ..WEIGHTS
+};
+
+/// COLOR-rusher: concentrate prestige in a single color (the 10-in-a-color win).
+pub const COLOR_WEIGHTS: Weights = Weights {
+    color: 2.00,        // 0.55 -> pile points into one color
+    bonus_spread: 0.05, // 0.20 -> the OPPOSITE of spread: commit to one color, not many
+    ..WEIGHTS
+};
+
+/// POINTS-rusher: raw prestige toward the 20-point win, fast (less patient development).
+pub const POINTS_WEIGHTS: Weights = Weights {
+    points: 2.20, // 1.00 -> rush realized prestige
+    bonus: 0.45,  // 0.85 -> down: don't over-invest in the slow engine
+    ..WEIGHTS
+};
+
 // ─── Geometry-aware eval (experimental; the deployed `value` is board-BLIND) ──────────
 //
 // The heuristic above never reads `st.board`, so it cannot tell a takeable 3-in-a-line of

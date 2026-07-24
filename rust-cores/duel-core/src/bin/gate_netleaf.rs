@@ -160,6 +160,7 @@ fn main() {
     let mut leaf_kind = "net".to_string();
     let mut leaf_b_kind = "heur".to_string(); // side B (default heuristic)
     let mut attn_file: Option<String> = None; // a net loaded from disk (e.g. v2), leaf kind "attnfile"
+    let mut attn_file_b: Option<String> = None; // a SECOND loaded net, leaf kind "attnfile2" (net-vs-net)
     let mut prior_temp: Option<f64> = None; // side-A 1-ply heuristic prior temperature (off = None)
     let mut prior_c: Option<f64> = None; // side-A C_PUCT override when the prior is on
     let mut greedy_net: bool = false; // side-A plays 1-ply GREEDY net (no search) instead
@@ -180,6 +181,7 @@ fn main() {
             "--leaf" => leaf_kind = next(),
             "--leaf-b" => leaf_b_kind = next(),
             "--attn-file" => attn_file = Some(next()),
+            "--attn-file-b" => attn_file_b = Some(next()),
             "--prior-temp" => prior_temp = Some(next().parse().unwrap()),
             "--prior-c" => prior_c = Some(next().parse().unwrap()),
             "--greedy-net" => greedy_net = true,
@@ -196,15 +198,23 @@ fn main() {
     let attn2 = attn_file.map(|p| {
         AttnNet::from_json_str(&std::fs::read_to_string(&p).expect("read --attn-file")).expect("parse --attn-file")
     });
+    let attn3 = attn_file_b.map(|p| {
+        AttnNet::from_json_str(&std::fs::read_to_string(&p).expect("read --attn-file-b")).expect("parse --attn-file-b")
+    });
     let pick = |kind: &str, which: &str| -> Leaf {
         match kind {
             "heur" => Leaf::Heuristic,
+            "heurdev" => Leaf::HeuristicW(&duel_core::value::DEV_WEIGHTS),
+            "heurcrown" => Leaf::HeuristicW(&duel_core::value::CROWN_WEIGHTS),
+            "heurcolor" => Leaf::HeuristicW(&duel_core::value::COLOR_WEIGHTS),
+            "heurpoints" => Leaf::HeuristicW(&duel_core::value::POINTS_WEIGHTS),
             "net" => Leaf::Net(&net),
             "net8" => Leaf::Net8(&net8),
             "netval" => Leaf::NetVal(&net),
             "attnval" => Leaf::AttnVal(&attn),
             "attnfile" => Leaf::AttnVal(attn2.as_ref().expect("--attn-file required for attnfile")),
-            o => panic!("{which} must be heur|net|net8|netval|attnval|attnfile, got {o}"),
+            "attnfile2" => Leaf::AttnVal(attn3.as_ref().expect("--attn-file-b required for attnfile2")),
+            o => panic!("{which} must be heur|heurdev|heurcrown|heurcolor|heurpoints|net|net8|netval|attnval|attnfile|attnfile2, got {o}"),
         }
     };
     let leaf_a = pick(&leaf_kind, "--leaf");

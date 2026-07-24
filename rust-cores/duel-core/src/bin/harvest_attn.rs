@@ -59,7 +59,7 @@ struct Row {
     outcome: f32,
 }
 
-fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, cap: usize, net: &AttnNet) -> Vec<Row> {
+fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, cap: usize, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf) -> Vec<Row> {
     let mut rng = Rng::new(seed);
     let mut st = new_game(&mut rng);
     let mut pending: Vec<(usize, Vec<f64>, Vec<f64>, Vec<f64>, f64)> = Vec::new();
@@ -76,7 +76,8 @@ fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, c
         pending.push((mover, t, m, s, value(&st, mover)));
         let temperature = if ply < temp_plies { Some(temp) } else { None };
         let opts = Opts { max_iters: Some(sims), time_limit: Some(f64::INFINITY), temperature, rollout_steps: Some(2), ..Default::default() };
-        let mv = match choose_move_with_leaf(&st, mover, "hard", &opts, Leaf::AttnVal(net), &mut rng) {
+        let leaf = if mover == a_seat { leaf_a } else { leaf_b };
+        let mv = match choose_move_with_leaf(&st, mover, "hard", &opts, leaf, &mut rng) {
             Some(m) => m,
             None => break,
         };
@@ -112,6 +113,10 @@ fn main() {
     let mut temp: f64 = 0.5;
     let mut seed: u64 = 0;
     let mut out = "attn_harvest.csv".to_string();
+    let mut leaf_kind = "attnval".to_string();
+    let mut leaf_b_kind = String::new(); // empty -> same as --leaf (self-play)
+    let mut attn_file: Option<String> = None; // a net loaded from disk, for the "attnfile" leaf kind
+    let mut attn_file_b: Option<String> = None; // a SECOND loaded net, for the "attnfile2" leaf kind
     let cap: usize = 600;
     let mut i = 1;
     while i < argv.len() {
@@ -127,12 +132,37 @@ fn main() {
             "--temp" => temp = next().parse().unwrap(),
             "--seed" => seed = next().parse().unwrap(),
             "--out" => out = next(),
+            "--leaf" => leaf_kind = next(),
+            "--leaf-b" => leaf_b_kind = next(),
+            "--attn-file" => attn_file = Some(next()),
+            "--attn-file-b" => attn_file_b = Some(next()),
             other => panic!("unknown arg: {}", other),
         }
         i += 1;
     }
 
     let net = AttnNet::from_json_str(ATTN_NET_JSON).expect("load embedded attn_value_net.json");
+    let net2 = attn_file.as_ref().map(|p| {
+        AttnNet::from_json_str(&std::fs::read_to_string(p).expect("read --attn-file")).expect("parse --attn-file")
+    });
+    let net3 = attn_file_b.as_ref().map(|p| {
+        AttnNet::from_json_str(&std::fs::read_to_string(p).expect("read --attn-file-b")).expect("parse --attn-file-b")
+    });
+    // Per-seat leaves — self-play when --leaf-b is unset, else a MATCHUP (e.g. v2 vs a loaded developer
+    // net: `--leaf attnval --leaf-b attnfile --attn-file dev_net.json`). Seats swap by game parity for
+    // first-player balance; every position (both seats) is recorded, labeled by its mover's outcome.
+    let mk_leaf = |kind: &str| -> Leaf {
+        match kind {
+            "attnval" => Leaf::AttnVal(&net),
+            "attnfile" => Leaf::AttnVal(net2.as_ref().expect("--attn-file required for attnfile")),
+            "attnfile2" => Leaf::AttnVal(net3.as_ref().expect("--attn-file-b required for attnfile2")),
+            "heurdev" => Leaf::HeuristicW(&duel_core::value::DEV_WEIGHTS),
+            "heur" => Leaf::Heuristic,
+            o => panic!("leaf must be attnval|attnfile|attnfile2|heurdev|heur, got {o}"),
+        }
+    };
+    let leaf_a = mk_leaf(&leaf_kind);
+    let leaf_b = mk_leaf(if leaf_b_kind.is_empty() { &leaf_kind } else { &leaf_b_kind });
 
     let file = std::fs::File::create(&out).expect("create out");
     let mut w = BufWriter::new(file);
@@ -155,7 +185,7 @@ fn main() {
     let mut line = String::with_capacity(4096);
     for g in 0..games {
         let gseed = seed ^ (g.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-        let rs = play_game(g, sims, temp_plies, temp, gseed, cap, &net);
+        let rs = play_game(g, sims, temp_plies, temp, gseed, cap, (g % 2) as usize, leaf_a, leaf_b);
         if rs.is_empty() {
             continue;
         }

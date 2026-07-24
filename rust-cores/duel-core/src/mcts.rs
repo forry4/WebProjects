@@ -30,7 +30,7 @@ use crate::cards::{LEVEL_OF, PEARL};
 use crate::clock::{Clock, Deadline};
 use crate::engine::{bonuses_of, is_gem_or_pearl, opponent, Move, ReserveSrc, Shuffler, State, EMPTY, N_CELLS};
 use crate::rng::Rng;
-use crate::value::{value, value_geom};
+use crate::value::{value, value_geom, value_w, Weights};
 use crate::valuenet::{QuantValueNet, ValueNet};
 
 pub const C_PUCT: f64 = 1.5;
@@ -125,6 +125,10 @@ pub enum Leaf<'a> {
     // Experimental: the heuristic rollout, but the truncation uses the GEOMETRY-aware static eval
     // (`value_geom`) instead of the board-blind `value`. A/B'd vs `Heuristic` by `bin/gate_geom`.
     HeuristicGeom,
+    // A HEURISTIC leaf under ARBITRARY weights — the diverse-league specialist basis (developer /
+    // crown-rush / color-rush / points-rush, see `value::*_WEIGHTS`). The rollout truncates with
+    // `value_w(.., w)`. A/B'd vs `attnval` (v2) by `gate_netleaf --leaf heurdev|heurcrown|...`.
+    HeuristicW(&'a Weights),
     // NETVAL (CoC's winning formulation, untried for Duel): the SAME 12-step rollout, but truncated
     // with the learned net's VALUE instead of the heuristic `value`. Isolates eval quality from the
     // 0-step handicap that sinks plain `Net`. A/B'd vs `Heuristic` by `bin/gate_netleaf --leaf netval`.
@@ -647,6 +651,7 @@ impl Search<'_, '_> {
     fn leaf_static(&self, st: &State, pid: usize) -> f64 {
         match self.leaf {
             Leaf::HeuristicGeom => value_geom(st, pid),
+            Leaf::HeuristicW(w) => value_w(st, pid, w),
             _ => value(st, pid),
         }
     }
@@ -657,7 +662,7 @@ impl Search<'_, '_> {
     /// features assume a live position and must never be handed a finished game).
     fn leaf_eval(&mut self, st: &mut State, root_pid: usize) -> f64 {
         match self.leaf {
-            Leaf::Heuristic | Leaf::HeuristicGeom => self.rollout(st, root_pid),
+            Leaf::Heuristic | Leaf::HeuristicGeom | Leaf::HeuristicW(_) => self.rollout(st, root_pid),
             Leaf::NetVal(net) => {
                 // Same rollout as Heuristic, but truncate with the net's value (a FACT ±1 at a
                 // terminal, else the learned outcome estimate) instead of the heuristic `value`.

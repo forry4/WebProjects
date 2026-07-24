@@ -50,6 +50,21 @@ def auc(scores, labels):
     return (ranks[labels == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
 
 
+def load_weights(net, js):
+    """Warm-start: assign flattened export()-JSON weights into the torch net's value path."""
+    def setlin(lin, w, b=None):
+        o, i = lin.weight.shape
+        lin.weight.data.copy_(torch.tensor(w, dtype=torch.float32).view(o, i))
+        if b is not None:
+            lin.bias.data.copy_(torch.tensor(b, dtype=torch.float32))
+    setlin(net.emb, js["emb_w"], js["emb_b"])
+    for l in range(len(net.wq)):
+        setlin(net.wq[l], js["wq"][l]); setlin(net.wk[l], js["wk"][l])
+        setlin(net.wv[l], js["wv"][l]); setlin(net.wo[l], js["wo"][l])
+        setlin(net.f1[l], js["f1w"][l], js["f1b"][l]); setlin(net.f2[l], js["f2w"][l], js["f2b"][l])
+    setlin(net.s, js["sw"], js["sb"]); setlin(net.t, js["tw"], js["tb"]); setlin(net.v, js["vw"], js["vb"])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
@@ -60,6 +75,7 @@ def main():
     ap.add_argument("--weight-decay", type=float, default=2e-4)  # L2 reg — curbs the small-data overfit
     ap.add_argument("--val-frac", type=float, default=0.08)
     ap.add_argument("--patience", type=int, default=12)  # early-stop after N epochs without a val-AUC best
+    ap.add_argument("--init", default=None, help="warm-start from this attn value-net JSON (fine-tune)")
     a = ap.parse_args()
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -76,6 +92,10 @@ def main():
     idx_val = torch.nonzero(is_val).squeeze(1)
 
     net = AttnNet().to(dev)
+    if a.init:
+        with open(a.init) as f:
+            load_weights(net, json.load(f))
+        print(f"warm-started from {a.init}", flush=True)
     opt = torch.optim.Adam(net.parameters(), lr=a.lr, weight_decay=a.weight_decay)
     lossf = nn.MSELoss()
 
