@@ -578,17 +578,24 @@ const css = `
   /* CARDS on phones: keep every card the SAME size (the shorter top rows just end early —
      the pyramid — NOT stretched to fill), but make them as BIG as the row allows. The
      level-I row is deck + 5 cards. Like SPENDER on mobile, the deck is a THINNER stub
-     (0.6x a card) so the five face-up cards get the freed width — so the row is 5 + 0.6 =
-     5.6 card-widths, not 6. Overhead is panel(24) + gaps(5x6=30) + ~3px slack = 57. The deck
-     is an explicit 0.6x --card-w (a FIXED fraction, not flex) so every row's deck stub is the
+     (0.75x a card) so the five face-up cards get the freed width — so the row is 5 + 0.75 =
+     5.75 card-widths, not 6. Overhead is panel(24) + gaps(5x6=30) + ~3px slack = 57. The deck
+     is an explicit 0.75x --card-w (a FIXED fraction, not flex) so every row's deck stub is the
      SAME width — the uneven-per-row shrink an earlier flex approach caused can't recur.
      --card-h ratio 1.71 (~0.58 w:h) keeps the compact-but-legible height. */
-  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 5.6), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
+  .duel-col-cards .level-row{--card-w:clamp(40px, calc((100cqw - 57px) / 5.75), 190px);--card-h:calc(var(--card-w) * 1.71);gap:6px}
   /* The shared .level-row>* rule makes every cell flex-GROW (capped at --card-w). Pin the deck
-     to a FIXED 0.6x stub (no grow/shrink) so it can't balloon to fill the slack on the shorter
+     to a FIXED 0.75x stub (no grow/shrink) so it can't balloon to fill the slack on the shorter
      3/4-card rows — that flex-grow is exactly what made the deck a different width per row.
      The face-up cards still grow into the width the thinner deck frees. */
-  .duel-col-cards .level-row .deck-pile{flex:0 0 calc(var(--card-w) * 0.6);max-width:calc(var(--card-w) * 0.6)}
+  .duel-col-cards .level-row .deck-pile{flex:0 0 calc(var(--card-w) * 0.75);max-width:calc(var(--card-w) * 0.75)}
+  /* Mobile only: bump the card's info icons +20% for legibility at phone card sizes — the cost
+     pips + their numbers, the card-type (bonus) disc, and the special-ability glyph. These are
+     the base Duel ratios (the .card-* rules above) x1.2; overriding here keeps desktop as-is. */
+  .duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.1152);height:calc(var(--card-h) * 0.1152)}
+  .duel-col-cards .level-row .cost-num{font-size:calc(var(--card-h) * 0.114)}
+  .duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.168);height:calc(var(--card-h) * 0.168)}
+  .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.0984)}
   .duel .duel-deck{width:52px;min-height:80px}
 }
 @media(max-width:600px){
