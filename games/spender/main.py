@@ -741,104 +741,26 @@ def load_weights(path: str | None = None) -> dict[str, float]:
 load_weights()
 
 
-# ─── AlphaZero variant ("Z") ──────────────────────────────────────────────────
-# When an exported az_model.npz is present, an AlphaZero-trained net becomes
-# selectable as AI variant "Z" (PUCT search + numpy inference — no torch in
-# production). Absent → AZ_EVALUATE stays None and nothing changes.
+# ─── Retired variants (Z, H) ─────────────────────────────────────────────────
+# Retired = no lobby offers them. NOT dead: `ai_variant` is persisted, so an old
+# saved game against Z or H must still get a real move on its next AI turn. Their
+# implementations live in ai/serving/legacy_variants.py — still in the SERVING
+# stack (ai/offline/ is never imported by the server), just out of this module.
+from games.spender.ai.serving import legacy_variants as _legacy
 
-AZ_MODEL_PATH = os.environ.get("SPENDER_AZ_MODEL") or os.path.join(_MODELS_DIR, "az_model.npz")
-AZ_EVALUATE = None
-
-
-def load_az_model() -> None:
-    """Load the exported AZ net for variant Z. Safe at import; never raises."""
-    global AZ_EVALUATE
-    AZ_EVALUATE = None
-    if os.environ.get("SPENDER_AZ_MODEL") == "none":
-        return
-    try:
-        if os.path.exists(AZ_MODEL_PATH):
-            from games.spender.ai.serving.infer_np import load_evaluator
-            AZ_EVALUATE = load_evaluator(AZ_MODEL_PATH)
-            LOG.info("loaded AZ model from %s (AI variant Z enabled)", AZ_MODEL_PATH)
-    except Exception as e:
-        LOG.warning("could not load AZ model from %s: %s", AZ_MODEL_PATH, e)
-
-
-load_az_model()  # loads ai/models/az_model.npz → variant Z
+_az_choose_move = _legacy.az_choose_move
+_v4_choose_move = _legacy.v4_choose_move
+_v4_card_values = _legacy.v4_card_values
+load_az_model = _legacy.load_az_model
+AZ_MODEL_PATH = _legacy.AZ_MODEL_PATH
 
 
 def _ai_variant_valid(variant: str) -> bool:
+    """Is `variant` selectable/resumable? Z only when its net actually loaded, so a
+    fresh game can never pick a variant the server can't play."""
     return (variant in WEIGHT_VARIANTS
-            or (variant == "Z" and AZ_EVALUATE is not None)
+            or (variant == "Z" and _legacy.AZ_EVALUATE is not None)
             or variant in ("H", "H2", "H3", "S", "N", "PV"))  # H/H2/H3 = greedy heuristics; S = H3-eval+PUCT; N = learned-value leaf + PUCT; PV = learned value+POLICY net + PUCT (N/PV client-WASM; server falls back to S)
-
-
-def _az_choose_move(game: dict, ai_pid: str, time_limit: float = 5.0) -> dict:
-    """Variant-Z move selection: time-budgeted PUCT over the fast az engine.
-    Returns an incumbent dict-move; post-move discard/noble sub-decisions are
-    resolved by _run_ai_turn's heuristics, same as the other variants."""
-    from games.spender.ai.serving import actions as _aza
-    from games.spender.ai.serving import engine as _aze
-    from games.spender.ai.serving.mcts import Search
-
-    s = _aze.from_game_dict(game)
-    legal = _aze.legal_actions(s)
-    if len(legal) == 1:
-        return _aza.action_to_move(s, legal[0])
-    search = Search(s, random.Random(), add_noise=False)
-    deadline = time.time() + time_limit
-    while time.time() < deadline:
-        for _ in range(32):  # check the clock every 32 simulations
-            req = search.leaf_batch()
-            if req is None:
-                continue
-            feats, mask = req
-            p, v = AZ_EVALUATE(feats[None, :], mask[None, :])
-            search.apply_evals(p[0], float(v[0]))
-    visits = search.root.N
-    return _aza.action_to_move(s, max(range(len(visits)), key=visits.__getitem__))
-
-
-def _v4_choose_move(game: dict, ai_pid: str) -> dict:
-    """Variant-H move selection: the v4 valuation heuristic — a 1-ply greedy
-    argmax over the shared card-valuation model (no search). Returns an
-    incumbent dict-move; post-move discard/noble sub-decisions are resolved by
-    _run_ai_turn, same as the other variants. Fast (no model file, no MCTS)."""
-    from games.spender.ai.serving import actions as _aza
-    from games.spender.ai.serving import engine as _aze
-    from games.spender.ai.serving import heuristic as _azh
-
-    s = _aze.from_game_dict(game)
-    a = _azh.choose_action(s, s.turn)
-    return _aza.action_to_move(s, a)
-
-
-def _v4_card_values(game: dict, seat_pid: str) -> dict:
-    """The v4 heuristic's card_value for every visible board card + that seat's own
-    reserved cards, from seat_pid's perspective (whoever's turn it is) — a transparency
-    overlay for variant-H games (so a human can see what each card is worth to the player
-    on the move: their own values on their turn, the bot's on its turn). Keyed by card id
-    (CARD_NAME[ci]) so the frontend can show it per card. Cheap; recomputed per
-    broadcast. Wrapped by callers in try/except so it can never break a room update."""
-    from games.spender.ai.serving import engine as _aze
-    from games.spender.ai.serving import valuation as _azv
-    from games.spender.ai.serving import heuristic as _azh
-
-    try:
-        seat = game["order"].index(seat_pid)
-    except (KeyError, ValueError):
-        return {}
-    s = _aze.from_game_dict(game)
-    val = _azv.Valuation(s)
-    out: dict[str, float] = {}
-    for slot in range(12):
-        ci = s.board[slot]
-        if ci >= 0:
-            out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
-    for ci in s.reserved[seat]:
-        out[_aze.CARD_NAME[ci]] = round(_azh.card_value(val, s, ci, seat), 1)
-    return out
 
 
 def _h2_choose_move(game: dict, ai_pid: str) -> dict:
@@ -2283,7 +2205,7 @@ def _ai_think(variant: str, game: dict, ai_pid: str) -> dict:
     """Dispatch to the configured variant's move chooser. Runs in a thread-pool executor
     (so the event loop stays free during the compute); raises if the chooser fails — the
     caller guards that and falls back so a failed think can't freeze the AI's turn."""
-    if variant == "Z" and AZ_EVALUATE is not None:
+    if variant == "Z" and _legacy.AZ_EVALUATE is not None:
         return _az_choose_move(game, ai_pid, 5.0)
     if variant == "H":
         return _v4_choose_move(game, ai_pid)

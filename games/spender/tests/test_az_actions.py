@@ -60,17 +60,21 @@ def test_az_choose_move_returns_legal_dict_move(monkeypatch):
     must return a move the incumbent engine accepts, and variant gating must
     open/close with the evaluator."""
     from games.spender import main as inc
+    # Z's net + chooser live in ai/serving/legacy_variants.py (retired variants are
+    # kept SERVING because `ai_variant` is persisted and old games resume into them).
+    # main re-exports the chooser, but the evaluator has to be patched at its home.
+    from games.spender.ai.serving import legacy_variants as legacy
 
     s = E.new_game(random.Random(23))
     game = E.to_game_dict(s, ("human", "ai"))
 
-    monkeypatch.setattr(inc, "AZ_EVALUATE", _uniform_eval)
+    monkeypatch.setattr(legacy, "AZ_EVALUATE", _uniform_eval)
     assert inc._ai_variant_valid("Z")
     mv = inc._az_choose_move(game, "ai", time_limit=0.2)
     a = A.move_to_action(s, mv)  # raises if not mappable
     assert a in E.legal_actions(s)
 
-    monkeypatch.setattr(inc, "AZ_EVALUATE", None)
+    monkeypatch.setattr(legacy, "AZ_EVALUATE", None)
     assert not inc._ai_variant_valid("Z")
     assert inc._ai_variant_valid("A")
 
