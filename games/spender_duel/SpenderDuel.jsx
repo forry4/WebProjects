@@ -1089,10 +1089,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     if (!bag) return;                                  // no anchor -> skip (tokens just appear)
     const br = bag.getBoundingClientRect();
     const from = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
-    // Fill order: centre cell (2,2) outward, so it mirrors the printed refill spiral.
-    const d2 = (i) => (Math.floor(i / 5) - 2) ** 2 + ((i % 5) - 2) ** 2;
-    filled.sort((a, b) => d2(a.cell) - d2(b.cell));
-    const STEP = 45, DUR = 300;
+    // Fill order: follow the game's REAL refill spiral (cards.SPIRAL_ORDER, served as
+    // catalog.spiral) — the exact centre-outward sequence the engine fills empties in and the
+    // printed on-board spiral traces. (Distance-from-centre only approximated it and scrambled
+    // cells at equal radius, so it didn't read as travelling along the path.)
+    const spiralPos = new Map((catalog?.spiral || []).map((cell, i) => [cell, i]));
+    const rank = (i) => (spiralPos.has(i) ? spiralPos.get(i) : 1000 + i);
+    filled.sort((a, b) => rank(a.cell) - rank(b.cell));
+    const STEP = 70, DUR = 260;
     const add = [];
     filled.forEach((f, k) => {
       const el = document.querySelector(`[data-cell="${f.cell}"]`);
