@@ -526,12 +526,8 @@ const css = `
    plus a smaller one before the bought-card indicators. */
 .duel-player .player-tokens{margin-top:13px}
 .duel-player .player-bonuses{margin-top:9px}
-/* The "N tokens" summary chip is Spender's shared inline-block .gem-total, but the player
-   box is a flex COLUMN on desktop (the viewport-lock), whose default align-items:stretch
-   was blowing it out to the FULL box width — that's the "way too long" pill. Pin it to its
-   content width (align-self) and size it up a touch. Same align-self keeps the clickable
-   privilege-scroll row content-width so its onClick has no full-width dead zone. */
-.duel-player .gem-total{align-self:flex-start;font-size:.82rem;padding:3px 11px;border-radius:9px;margin-top:9px}
+/* align-self keeps the clickable privilege-scroll row content-width (the box is a flex
+   COLUMN with align-items:stretch on desktop), so its onClick has no full-width dead zone. */
 .duel-player .duel-scrolls{align-self:flex-start}
 .duel-player{margin-bottom:14px}
 /* Reserve the top-right for the (absolutely-positioned) win meters so the name/turn-badge
@@ -636,6 +632,11 @@ const css = `
      would push it past an 8px padding and cause a horizontal scrollbar). */
   .duel{padding-left:8px;padding-right:8px}
   .duel > .lby-header{margin-left:-8px;margin-right:-8px}
+  /* Board meta on phones: keep privilege + bag + win-conditions on ONE row (the victory
+     chip was wrapping to a second line). Tighten the gap and shrink the chip so all three
+     fit across a narrow screen; nowrap guarantees they never split. */
+  .duel-board-meta{flex-wrap:nowrap;gap:10px}
+  .duel-victory-chip{font-size:.66rem;padding:3px 8px;white-space:nowrap;flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
   /* Lobby: show the Open/Active/History tab bar and let the selected tab pick which of
      the (now single-column) sections is visible — the others are hidden. */
   .duel-lobby-tabs{display:flex}
@@ -1398,21 +1399,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   };
 
   // ── renders ──
-  // Gems in hand: Spender's .token-pill row + its "N gems" total (was a bespoke
-  // disc-and-badge). The row keeps its data-tokens anchor for the flyer animations.
-  const renderTokens = (p, pid) => {
-    const total = TOKENS.reduce((a, t) => a + (p?.tokens?.[t] || 0), 0);
-    return (
-      <>
-        <div className="player-tokens" data-tokens={pid}>
-          {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
-            <TokenPill key={t} color={t} count={p.tokens[t]} />
-          ))}
-        </div>
-        <div className="gem-total">{total} {total === 1 ? "token" : "tokens"}</div>
-      </>
-    );
-  };
+  // Gems in hand: Spender's .token-pill row (the "N tokens" summary chip was dropped —
+  // the win meters carry progress now). The row keeps its data-tokens anchor for flyers.
+  const renderTokens = (p, pid) => (
+    <div className="player-tokens" data-tokens={pid}>
+      {TOKENS.map((t) => (p?.tokens?.[t] || 0) > 0 && (
+        <TokenPill key={t} color={t} count={p.tokens[t]} />
+      ))}
+    </div>
+  );
 
   const renderPlayer = (pid, isMe) => {
     const p = game.players[pid];
@@ -1561,7 +1556,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 Buy card
               </button>
             )}
-            {goldCell != null && <span className="duel-muted">Now pick a card or a deck to reserve…</span>}
+            {goldCell != null && <span className="duel-muted">Select a card or deck to reserve…</span>}
             <button className="btn btn-outline" onClick={() => mv({ type: "replenish" })} disabled={!canReplenish}
               title={canReplenish ? "Refill the board from the bag (your opponent gains a Privilege)" : "Replenish unavailable"}>
               Replenish
