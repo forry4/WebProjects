@@ -349,6 +349,68 @@ try {
 		await ctx.close();
 	}
 
+	// ── Two clients: the waiting room ─────────────────────────────────────────
+	// Spender's `waiting` screen is only reachable in a human-vs-human game, so a
+	// single-client walk can never see it — it was the last Spender screen with no
+	// coverage at all. Two browser contexts: one creates a friend game, the other
+	// joins by the shared room code, and both must end up seated in the same room.
+	// This also exercises the join handshake and the broadcast fan-out to a SECOND
+	// socket, which the vs-AI walk never touches.
+	{
+		const mk = async (id) => {
+			const c = await browser.newContext();
+			await c.addInitScript((pid) => localStorage.setItem("spender_user",
+				JSON.stringify({ id: pid, name: pid, guest: true })), id);
+			return c;
+		};
+		const hostCtx = await mk("host-harness");
+		const joinCtx = await mk("join-harness");
+		const host = await hostCtx.newPage();
+		const joiner = await joinCtx.newPage();
+		const errors = [];
+		host.on("pageerror", (e) => errors.push("host: " + e));
+		joiner.on("pageerror", (e) => errors.push("joiner: " + e));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await host.goto(`http://localhost:${PORT}/spender`, { waitUntil: "networkidle" });
+		await host.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
+		await host.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
+		await host.waitForSelector(".cm-panel", { timeout: 15_000 }).catch(() => {});
+		// Switch the opponent segment from the default (AI) to "friend".
+		await host.locator(".cm-seg button").first().click({ timeout: 10_000 }).catch(() => {});
+		await host.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+
+		const gotWaiting = await host.waitForSelector(".room-code-box", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("a friend game reaches the waiting room", gotWaiting);
+		const code = (await host.locator(".room-code-box").innerText().catch(() => "")).trim();
+		check("the waiting room shows a join code", /^[A-Z]{4,8}$/.test(code), `got ${JSON.stringify(code)}`);
+
+		if (code) {
+			await joiner.goto(`http://localhost:${PORT}/spender`, { waitUntil: "networkidle" });
+			await joiner.waitForSelector(".lby-code", { timeout: 25_000 }).catch(() => {});
+			await joiner.locator(".lby-code").fill(code).catch(() => {});
+			await joiner.locator(".lby-join-btn").click({ timeout: 15_000 }).catch(() => {});
+			const joined = await joiner.waitForSelector(".room-code-box", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			check("the second client joins that room", joined);
+
+			// The host must LEARN about the joiner — that is the broadcast working.
+			let seats = 0;
+			for (let i = 0; i < 25 && seats < 2; i++) {
+				seats = await host.locator(".player-list li").count().catch(() => 0);
+				if (seats < 2) await sleep(400);
+			}
+			check("the host sees the second player arrive", seats >= 2, `saw ${seats} seats`);
+		}
+		check("no page errors in the two-client flow", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await hostCtx.close();
+		await joinCtx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;
