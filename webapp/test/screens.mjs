@@ -129,11 +129,68 @@ try {
 		await ctx.close();
 	}
 
-	if (failures.length) {
-		console.error(`\nSCREENS FAIL — ${failures.length}/${SCREENS.length} game screens did not render.`);
+	// ── Shell interactions ────────────────────────────────────────────────────
+	// Rendering a screen by URL proves the component mounts. These prove the SHELL
+	// still works: the state it owns (screen, identity, routing) is exactly what a
+	// Spender.jsx shell/game split would break, and none of it is exercised by
+	// loading a deep link directly.
+	const shell = [];
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "screens-harness", name: "Harness", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+		const has = async (sel, ms = 25_000) => {
+			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
+			return (await page.locator(sel).count().catch(() => 0)) > 0;
+		};
+		// A click that can't land is itself a finding, not a reason to abort: when the
+		// shell breaks, several checks fail together and the whole picture is the
+		// useful output. Swallow the timeout so the remaining checks still report.
+		const click = async (sel, nth = 0) => {
+			try { await page.locator(sel).nth(nth).click({ timeout: 15_000 }); return true; }
+			catch { return false; }
+		};
+		const at = () => { try { return new URL(page.url()).pathname; } catch { return "?"; } };
+
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		check("home renders the game menu", await has(".home-game-card"));
+
+		// Click through to a game. nav() must write the URL BEFORE switching screen,
+		// because a sub-game reads parsePath() at mount.
+		check("can click the Duel card", await click(".home-game-card", 3));
+		check("clicking a game card mounts that game", await has(".duel"));
+		check("...and the URL became its route", at() === "/duel", `got ${at()}`);
+
+		// Back must return home. The router contract is that popstate is the ONLY
+		// notifier and a no-op path write never double-pushes — a broken split shows
+		// up here as Back doing nothing, or needing two presses.
+		await page.goBack({ waitUntil: "networkidle" }).catch(() => {});
+		check("Back returns to the home menu", await has(".home-game-card"));
+		check("...and the URL went back to /", at() === "/", `got ${at()}`);
+
+		// Spender's own lobby is the shell's most entangled screen: it shares the
+		// shell's auth state and game-list fetching.
+		check("can click the Spender card", await click(".home-game-card", 0));
+		check("Spender lobby renders", await has(".browser"));
+
+		check("no page errors during shell navigation", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
+	if (failures.length || shell.length) {
+		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;
 	} else {
-		console.log(`\nSCREENS PASS — all ${SCREENS.length} game screens rendered against a live backend.`);
+		console.log(`\nSCREENS PASS — ${SCREENS.length} game screens + shell navigation, against a live backend.`);
 	}
 } catch (err) {
 	console.error("SCREENS ERROR:", err.message);
