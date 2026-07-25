@@ -1,3 +1,15 @@
+
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _splendorCardCssText from "./splendor.splendor-card-css.css?inline";
+import _splendorCardExtraCssText from "./splendor.splendor-card-extra-css.css?inline";
+import _splendorLogCssText from "./splendor.splendor-log-css.css?inline";
+import _splendorPanelCssText from "./splendor.splendor-panel-css.css?inline";
+import _splendorPillCssText from "./splendor.splendor-pill-css.css?inline";
 /* Shared Splendor visual vocabulary — gem tokens, jewel cards, and the move log.
  *
  * Spender and Spender Duel are the same FAMILY of game (gems, cards with costs and
@@ -194,149 +206,21 @@ export function LogEntry({ turn, name, action, clickable, selected, kind, future
 
 /* Gems + jewel cards — extracted VERBATIM from Spender.jsx. Don't restyle for one
    game only: both import this. */
-export const splendorCardCss = `
-.gem-stack{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;transition:transform .12s;user-select:none}
-.gem-stack:hover .gem-token{transform:scale(1.08)}
-.gem-stack.selected .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 12px rgba(232,201,106,.3)}
-.gem-stack.disabled{opacity:.35;cursor:not-allowed}
-.gem-stack.reserve-ready .gem-token{box-shadow:0 0 0 2px var(--gold-light),0 0 14px rgba(232,201,106,.6);animation:reserve-pulse 1.1s ease-in-out infinite}
-@keyframes reserve-pulse{0%,100%{box-shadow:0 0 0 2px var(--gold-light),0 0 8px rgba(232,201,106,.45)}50%{box-shadow:0 0 0 2px var(--gold-light),0 0 18px rgba(232,201,106,.85)}}
-/* Matte gradient + drop shadow, NO ring: a same-hue ring is lighter than the vivid bottom
-   of the matte gradient, which paints a bright arc along each gem's lower edge. The gradient
-   (light top -> dark bottom) + shadow give enough shape on their own. */
-.gem-token{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.95rem;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 4px rgba(0,0,0,.4);transition:transform .12s}
-.gem-count{font-size:.75rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif}
-
-/* ─── Cards ─────────────────────────────────────────────────────────────── */
-/* overflow-x:auto clips both axes, which would cut off the hover lift / top border
-   and the selection outline of the first & last items (flush at the clip edges).
-   Padding on all sides + matching -margin gives clip-room without moving the row. */
-.level-row{display:flex;gap:8px;align-items:flex-start;flex-wrap:nowrap;overflow-x:auto;padding:6px 4px 4px;margin:-6px -4px 0}
-.level-row::-webkit-scrollbar{height:4px}.level-row::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.deck-pile{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;color:var(--text-dim);cursor:pointer;flex-shrink:0;background:var(--surface2);transition:border-color .12s,color .12s;flex-direction:column;gap:4px}
-.deck-pile:hover{border-color:var(--gold);color:var(--gold)}
-.deck-pile.selected{border-color:var(--gold-light);color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
-.deck-pile.disabled{cursor:not-allowed;opacity:.5}
-.deck-remaining{font-size:1.3rem;font-weight:700;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif}
-.card{width:var(--card-w,88px);min-height:var(--card-h,120px);border-radius:var(--radius);background:linear-gradient(160deg,var(--surface3),var(--surface2));border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045);padding:8px 6px 6px;display:flex;flex-direction:column;cursor:pointer;transition:transform .15s,border-color .15s,opacity .15s;flex-shrink:0;position:relative}
-.card-slot{width:var(--card-w,88px);flex-shrink:0}
-/* Each cell in a level row (deck pile / card / empty slot) shares the row width
-   equally but never exceeds --card-w (88px default; bigger on desktop). A full
-   level (deck + 4 cards) always fits the column width — no horizontal scroll or
-   clipped card — at every size. */
-.level-row>*{flex:1 1 0;min-width:0;max-width:var(--card-w,88px)}
-.ai-val{position:absolute;bottom:5px;right:5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:1.4;pointer-events:none}
-.ai-vals{position:absolute;bottom:3px;right:3px;display:grid;grid-template-columns:auto auto;gap:0 5px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.5rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.5);border-radius:4px;padding:2px 4px;line-height:1.4;pointer-events:none}
-.ai-vals b{color:#9a8fb0;font-weight:700;margin-right:1px}
-/* "mine" = overlay computed for the player on the move (your turn) — tinted green to
-   distinguish from the AI's own values (gold), since the overlay flips with the turn. */
-.ai-vals.mine,.ai-val.mine{color:#8fdca0;box-shadow:0 0 0 1px rgba(143,220,160,.55)}
-/* The "Show AI values" toggle sits at the far LEFT of the actions box (Take/Buy stay
-   to its right); same gold styling as the action buttons via .btn.btn-gold. */
-.ai-vals-toggle{margin-right:auto}
-/* S's whole-position eval chip, shown beside the toggle when the overlay is on (S games only). */
-.ai-pos-eval{display:inline-flex;align-items:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;font-weight:600;color:#e8c86a;background:rgba(0,0,0,.4);border:1px solid rgba(201,168,76,.4);border-radius:5px;padding:1px 7px;white-space:nowrap}
-.ai-pos-eval.mine{color:#8fdca0;border-color:rgba(143,220,160,.5)}
-.ai-pos-eval b{color:#9a8fb0;font-weight:700;margin-right:3px}
-.ai-pos-eval-srch{margin-left:7px;padding-left:7px;border-left:1px solid rgba(201,168,76,.3)}
-/* Pinned to the top-right of the actions box (absolute) so it never displaces the
-   Target / buttons / hint. The box is position:relative (.actions-panel / .board-actions). */
-.ai-pos-eval-row{position:absolute;top:7px;right:9px;display:flex;z-index:2}
-.card:hover{border-color:rgba(201,168,76,.5);transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.4)}
-.card.selected{border-color:var(--gold-light);box-shadow:0 0 0 2px var(--gold-light)}
-.card.affordable{border-color:var(--green-gem)}
-.card.affordable-gold{border-color:var(--gold-light)}
-.card.disabled{cursor:not-allowed;opacity:.6}
-.card-back{cursor:default;align-items:center;justify-content:center;gap:8px;border-style:dashed;background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 6px,var(--surface) 6px,var(--surface) 12px)}
-.card-back:hover{transform:none;border-color:var(--border);box-shadow:none}
-.card-back-level{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.3rem;color:var(--text-dim)}
-.card-back-label{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.55rem;letter-spacing:.1em;color:var(--text-dim);text-transform:uppercase}
-.card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px}
-.card-points{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:1.1rem;color:var(--gold);min-width:16px;text-shadow:0 1px 2px rgba(0,0,0,.45)}
-.card-points.zero{color:transparent}
-.card-bonus{width:20px;height:20px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 2px rgba(0,0,0,.35)}
-.card-cost{display:flex;flex-direction:column;gap:3px;margin-top:auto}
-.cost-row{display:flex;align-items:center;gap:4px}
-/* Cost pips are tiny (~10-16px): the same-hue ring is too thin to read cleanly at that
-   size (it just muddies the pip), so drop it and keep only the matte gradient fill — the
-   lighter top still gives the dark pips enough separation from the card. */
-.cost-gem{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:linear-gradient(180deg,color-mix(in srgb,var(--gc) 80%,#fff),color-mix(in srgb,var(--gc) 86%,#000));box-shadow:0 1px 1px rgba(0,0,0,.3)}
-.cost-num{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--text-dim)}
-`;
+export const splendorCardCss = _splendorCardCssText;
 
 /* Additions the shared CardView needs beyond Spender's originals: Duel's crowns, wild
    bonus, ability glyph and the pearl's second cost column, plus a `small` variant for
    reserve hands. Kept SEPARATE and applied after the verbatim block, so Spender's own
    rules keep both their content and their order — it simply never emits these. */
-export const splendorCardExtraCss = `
-.card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.5px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
-.card-header .card-crowns+.card-bonus{margin-left:4px}
-.card-bonus-wild{border:none}
-/* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"
-   at a glance. The trailing disc sits on top; the leading one keeps its rim visible
-   through the overlap. (Was a single disc ringed by a box-shadow, which just looked
-   like one gem directly on top of another.) */
-.card-bonus-pair{display:flex;align-items:center;margin-left:auto;flex:0 0 auto}
-.card-bonus-pair .card-bonus{margin-left:0}
-/* Overlap = 40% of the DISC's width. A % margin would resolve against the container's
-   width (which is shrink-to-fit here), so each size context sets the px itself; this is
-   the 20px base. Spender never renders a pair (no bonus_count on its cards), so only
-   Duel's contexts override it. */
-.card-bonus-pair .card-bonus+.card-bonus{margin-left:-8px}
-.card-ability{position:absolute;top:32px;right:6px;font-size:.7rem;color:var(--text);background:rgba(0,0,0,.35);border:1px solid var(--border);border-radius:4px;padding:0 3px;line-height:1.35;pointer-events:none;display:flex;align-items:center;gap:1px}
-/* The take-a-gem ability's target, as a real gem CIRCLE in that gem's colour (em-sized,
-   so it tracks the ability font as the card scales). */
-.card-ability-gem{display:inline-block;width:.82em;height:.82em;border-radius:50%;border:1px solid rgba(255,255,255,.35);flex:0 0 auto}
-.card-cost .cost-col{display:flex;flex-direction:column;gap:3px}
-.card-cost.card-cost-2col{flex-direction:row;align-items:flex-end;gap:8px}
-.card.card-small{width:var(--card-w-small,62px);min-height:var(--card-h-small,86px);padding:5px 4px 4px}
-.card.card-small .card-points{font-size:.9rem}
-.card.card-small .card-bonus{width:14px;height:14px}
-.card.card-small .card-bonus-pair .card-bonus+.card-bonus{margin-left:-5.6px}
-.card.card-small .card-back-level{font-size:1rem}
-`;
+export const splendorCardExtraCss = _splendorCardExtraCssText;
 
 /* The move log — extracted VERBATIM from Spender.jsx. It already carries the review
    vocabulary (clickable rows, log-selected, log-win, log-start). */
-export const splendorLogCss = `
-/* ─── Move log ──────────────────────────────────────────────────────────── */
-.move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto;overflow-x:hidden}
-.log-empty{color:var(--text-muted);font-style:italic;font-size:.85rem;padding:4px 0}
-.move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
-.log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
-.log-entry:first-child{color:var(--text)}
-.log-turn{flex:0 0 auto;min-width:1.6em;text-align:right;color:var(--text-muted);font-variant-numeric:tabular-nums;font-size:.92em}
-.log-entry.clickable{cursor:pointer}
-.log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
-/* Review: the turn currently shown on the board is highlighted in the log. */
-.log-entry.log-selected{background:rgba(201,168,76,.2);border-radius:4px;box-shadow:inset 2px 0 0 var(--gold)}
-/* "X won the game" marker at the top of a finished game's log. */
-.log-entry.log-win .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.04em;color:var(--gold-light);font-weight:600}
-/* "Game started" anchor at the bottom of the log (jumps to the initial board). */
-.log-entry.log-start .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.04em;color:var(--text-dim)}
-/* Review controls in the action bar: Prev / where / Next / Latest. */
-.replay-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.replay-where{font-size:.78rem;color:var(--text-dim);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
-.replay-move{color:var(--text-muted)}
-.log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
-.log-action{flex:1}
-`;
+export const splendorLogCss = _splendorLogCssText;
 
 /* The panel shell — extracted VERBATIM from Spender.jsx. */
-export const splendorPanelCss = `
-.panel{background:linear-gradient(180deg,rgba(255,255,255,.03),transparent 46%),var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 10px -4px rgba(0,0,0,.5)}
-.panel-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.14em;color:var(--gold);margin-bottom:10px;text-transform:uppercase}
-`;
+export const splendorPanelCss = _splendorPanelCssText;
 
 /* Player pills (gems held + BOUGHT-CARD bonuses) — extracted VERBATIM from Spender.jsx.
    .bonus-pill is the "what cards you own" indicator; .token-pill the gems in hand. */
-export const splendorPillCss = `
-.player-tokens{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
-.token-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700}
-.player-bonuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;margin-bottom:6px}
-.bonus-pill{display:flex;align-items:center;gap:3px;padding:2px 7px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;font-weight:700;border:1px solid}
-.reserved-label{font-size:.62rem;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;letter-spacing:.06em;margin-bottom:4px;text-transform:uppercase}
-.reserved-row{display:flex;gap:4px;flex-wrap:wrap}
-.gem-total{display:inline-block;font-size:.66rem;color:var(--text);font-family:'Cinzel','Cinzel Fallback',serif;font-weight:600;letter-spacing:.03em;margin-top:3px;background:var(--surface3);border:1.5px solid #7a6e58;padding:1px 8px;border-radius:8px;box-shadow:0 0 0 1px rgba(0,0,0,.5)}
-`;
+export const splendorPillCss = _splendorPillCssText;

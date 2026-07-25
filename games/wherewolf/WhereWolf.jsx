@@ -4,6 +4,14 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobby
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
+// CSS lives in the sibling .css file(s) imported below, NOT in a JS template
+// literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
+// by this component's own <style> tag only while it is mounted — behaviour is
+// unchanged. What goes away is the footgun: a single stray backtick inside a css
+// template literal silently reparsed the rest of the file as a tagged template and
+// blanked the whole page. A .css file cannot do that, and editors lint it properly.
+import _cssText from "./WhereWolf.css?inline";
+
 // ─── Config ────────────────────────────────────────────────────────────────
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const WW_WS = WS_RAW.replace(/\/ws$/, "/werewolf/ws");
@@ -200,146 +208,7 @@ function useIsMobile() {
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
-const css = baseCss + lobbyCss + `
-.ww{min-height:100vh;background:var(--bg);color:var(--text)}
-.ww *,.ww *::before,.ww *::after{box-sizing:border-box}
-.ww-wrap{max-width:1200px;margin:0 auto;padding:20px 16px 48px;display:flex;flex-direction:column;gap:16px}
-.ww-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.ww-top-left{display:flex;align-items:center;gap:10px;min-width:0}
-.ww-title{font-family:Cinzel,serif;font-weight:700;color:var(--gold-light);letter-spacing:.5px}
-.ww-user{color:var(--text-dim);font-size:13px}
-.ww-btn{font-family:Cinzel,serif;font-size:14px;border:1px solid var(--border);background:var(--surface2);color:var(--text);
-  padding:9px 16px;border-radius:var(--radius);cursor:pointer;transition:all .15s}
-.ww-btn:hover{border-color:var(--gold);color:var(--gold-light)}
-.ww-btn.gold{background:linear-gradient(180deg,#7a3f4a,#5a2630);border-color:#9a4a58;color:#f2dcc4}
-.ww-btn.gold:hover{filter:brightness(1.12)}
-.ww-btn.sm{padding:6px 11px;font-size:12px}
-.ww-btn.ghost{background:transparent;border-color:transparent;color:var(--text-dim)}
-.ww-btn.ghost:hover{color:var(--gold-light)}
-.ww-btn:disabled{opacity:.4;cursor:not-allowed}
-.ww-input{font-family:Cinzel,serif;letter-spacing:3px;text-transform:uppercase;background:var(--surface);border:1px solid var(--border);
-  color:var(--text);padding:9px 12px;border-radius:var(--radius);width:120px;text-align:center}
-.ww-hero{text-align:center;padding:8px 0 4px}
-.ww-lobby-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px 24px;align-items:start;margin-top:2px}
-.ww-lobby-col{min-width:0}
-@media(max-width:700px){.ww-lobby-grid{grid-template-columns:1fr;gap:0}}
-.ww-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center}
-.ww-section{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin-top:10px;border-bottom:1px solid var(--border);padding-bottom:4px}
-.ww-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius);padding:10px 14px}
-.ww-card-title{font-family:Cinzel,serif}
-.ww-card-meta{color:var(--text-dim);font-size:12px}
-.ww-empty{color:var(--text-muted);text-align:center;padding:20px}
-.ww-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#2a1c20;border:1px solid var(--gold);
-  color:var(--gold-light);padding:10px 18px;border-radius:var(--radius);z-index:50;font-size:14px}
-/* How-to-play (Rules) modal */
-.ww-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px}
-.ww-modal{background:var(--surface);border:1px solid var(--gold);border-radius:var(--radius);padding:20px;max-width:540px;width:100%;display:flex;flex-direction:column;max-height:86vh}
-.ww-modal h3{font-family:Cinzel,serif;color:var(--gold-light);font-size:1rem;margin-bottom:8px}
-.ww-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
-.ww-rules-body p{color:var(--text-dim);font-size:14px;line-height:1.5;margin-bottom:10px}
-.ww-rules-lead{color:var(--text)}
-.ww-rules-note{color:var(--text-muted);font-size:12px;font-style:italic;margin-bottom:0}
-.ww-rules-body h4{font-family:Cinzel,serif;color:var(--gold);font-size:14px;margin:14px 0 6px}
-.ww-rules-body ul{margin:0 0 10px;padding-left:20px}
-.ww-rules-body li{color:var(--text-dim);font-size:13px;line-height:1.5;margin-bottom:4px}
-.ww-rules-body b{color:var(--text)}
-
-/* waiting room */
-.ww-code{font-family:Cinzel,serif;font-size:40px;letter-spacing:8px;color:var(--gold-light);text-align:center}
-.ww-players-list{display:flex;flex-direction:column;gap:6px}
-.ww-pl{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px}
-.ww-pl .crown{color:var(--gold)}
-
-/* the table */
-.ww-table-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
-.ww-banner{min-height:30px;text-align:center;font-family:Cinzel,serif;color:var(--gold-light);font-size:16px}
-.ww-sub{text-align:center;color:var(--text-dim);font-size:13px;min-height:18px}
-.ww-table{position:relative;width:min(92vw,68vh);aspect-ratio:1;margin:4px auto}
-.ww-table.night{filter:saturate(.5) brightness(.62)}
-.ww-arrows{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
-.ww-seat{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;z-index:2}
-.ww-seat .seat-name{font-size:11px;color:var(--text-dim);max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ww-seat.me .seat-name{color:var(--gold-light)}
-.ww-pcard{width:var(--pcw,72px);height:var(--pch,94px);border-radius:8px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
-  text-align:center;font-family:Cinzel,serif;font-size:var(--pcf,11px);line-height:1.1;padding:3px;overflow-wrap:anywhere;background:#1a1622;position:relative;transition:all .15s}
-.ww-pcard.back{background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);color:transparent}
-.ww-pcard.back::after{content:"?";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:24px}
-.ww-pcard.clickable{cursor:pointer;border-color:var(--gold)}
-.ww-pcard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light);transform:translateY(-2px)}
-.ww-pcard.selected{box-shadow:0 0 0 3px var(--gold-light)}
-.ww-pcard.revealed{box-shadow:0 0 0 3px #e0c14c}
-.ww-badge{position:absolute;top:-9px;right:-9px;background:var(--gold);color:#1a1410;border-radius:999px;min-width:20px;height:20px;
-  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;padding:0 5px}
-.ww-lock{position:absolute;top:-9px;left:-9px;font-size:14px}
-.ww-ready{position:absolute;bottom:-8px;font-size:13px}
-
-/* center: the 3 face-down cards + the token row */
-.ww-center{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;z-index:2}
-.ww-center-cards{display:flex;gap:8px}
-.ww-ccard{width:62px;height:82px;border-radius:7px;border:2px solid var(--border);background:repeating-linear-gradient(45deg,#241a2e,#241a2e 6px,#2c2038 6px,#2c2038 12px);
-  display:flex;align-items:center;justify-content:center;text-align:center;font-family:Cinzel,serif;font-size:11px;line-height:1.1;padding:3px;overflow-wrap:anywhere;color:transparent;position:relative}
-.ww-ccard::after{content:"";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#54486a;font-size:18px}
-.ww-ccard.up{background:#1a1622;color:var(--text)}
-.ww-ccard.clickable{cursor:pointer;border-color:var(--gold)}
-.ww-ccard.clickable:hover{box-shadow:0 0 0 2px var(--gold-light)}
-.ww-ccard.selected{box-shadow:0 0 0 3px var(--gold-light)}
-.ww-tokens{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;max-width:230px}
-.ww-token{width:26px;height:26px;border-radius:999px;border:1px solid #6a5a3a;background:#2a2418;color:var(--gold-light);
-  display:flex;align-items:center;justify-content:center;font-family:Cinzel,serif;font-size:11px;font-weight:700;cursor:pointer;user-select:none}
-.ww-token:hover{border-color:var(--gold);color:#fff}
-.ww-token-info{max-width:280px;margin-top:2px;text-align:center;font-family:Crimson Pro,serif;font-size:12px;line-height:1.25;
-  color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:5px 9px;cursor:pointer}
-
-/* action bar */
-.ww-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:center;min-height:44px}
-.ww-you{font-size:13px;color:var(--text-dim)}
-.ww-you b{color:var(--gold-light)}
-.ww-timer{font-family:Cinzel,serif;font-size:18px;color:var(--gold-light)}
-
-/* win screen */
-.ww-win{text-align:center;padding:14px}
-.ww-win h2{font-family:Cinzel,serif;font-size:30px;margin-bottom:6px}
-.ww-win.villagers h2{color:#7ed07a}
-.ww-win.wolves h2{color:#e0655a}
-.ww-win.tanner h2{color:#d6a24a}
-.ww-win.neutral h2{color:var(--gold-light)}
-.ww-dead{position:absolute;top:-9px;left:-9px;font-size:14px}
-.ww-won{color:#7ed07a;font-weight:700}
-.ww-lost{color:var(--text-muted)}
-
-/* host role picker */
-.ww-deck-status{font-family:Crimson Pro,serif;font-size:13px;margin-left:8px}
-.ww-deck-status.ok{color:#7ed07a}
-.ww-deck-status.bad{color:#d99}
-.ww-rolepick{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 10px;margin:4px 0}
-.ww-rolepick.readonly{display:flex;flex-wrap:wrap;gap:6px}
-.ww-rolepick-row{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:4px 8px}
-.ww-rp-name{flex:1;font-family:Cinzel,serif;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ww-rp-count{min-width:14px;text-align:center;font-family:Cinzel,serif}
-.ww-cap-btn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer;font-size:15px;line-height:1}
-.ww-cap-btn:hover:not(:disabled){border-color:var(--gold);color:var(--gold-light)}
-.ww-cap-btn:disabled{opacity:.35;cursor:not-allowed}
-.ww-rp-chip{border:1px solid var(--border);border-radius:999px;padding:3px 9px;font-size:12px;font-family:Cinzel,serif}
-
-/* ── Phone: use the whole screen — the table becomes a TALL ellipse so YOU sit at
-   the very bottom and everyone else rings the edges; cards shrink (see cardVars). ── */
-@media(max-width:600px){
-  .ww-wrap{min-height:100dvh;padding:8px 6px 6px;gap:8px}
-  .ww-banner{font-size:14px;min-height:24px}
-  .ww-sub{font-size:12px;min-height:16px}
-  /* the game's table area fills the space between the sub-prompt and the action bar */
-  .ww-table-wrap{flex:1;min-height:0;width:100%;gap:4px}
-  .ww-table{width:100%;height:auto;flex:1;min-height:0;aspect-ratio:auto;margin:0}
-  /* center cluster sits a bit higher so the tall ellipse stays balanced */
-  .ww-center{top:40%;gap:5px}
-  .ww-ccard{width:50px;height:66px;font-size:10px}
-  .ww-tokens{gap:4px;max-width:96vw}
-  .ww-token{width:23px;height:23px;font-size:10px}
-  .ww-seat .seat-name{font-size:10px;max-width:64px}
-  .ww-actions{min-height:38px;gap:8px}
-}
-` + gameMenuCss + createModalCss + lobbyCreateRowCss;
+const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {

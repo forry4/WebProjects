@@ -1,0 +1,22 @@
+/* ─── Move log ──────────────────────────────────────────────────────────── */
+.move-log{display:flex;flex-direction:column;gap:0;max-height:200px;overflow-y:auto;overflow-x:hidden}
+.log-empty{color:var(--text-muted);font-style:italic;font-size:.85rem;padding:4px 0}
+.move-log::-webkit-scrollbar{width:3px}.move-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.log-entry{display:flex;gap:6px;align-items:baseline;font-size:.76rem;color:var(--text-dim);padding:4px 0;line-height:1.4;animation:log-in .2s ease}
+.log-entry+.log-entry{border-top:1px solid rgba(58,52,42,.4)}
+.log-entry:first-child{color:var(--text)}
+.log-turn{flex:0 0 auto;min-width:1.6em;text-align:right;color:var(--text-muted);font-variant-numeric:tabular-nums;font-size:.92em}
+.log-entry.clickable{cursor:pointer}
+.log-entry.clickable:hover{background:rgba(201,168,76,.08);border-radius:4px}
+/* Review: the turn currently shown on the board is highlighted in the log. */
+.log-entry.log-selected{background:rgba(201,168,76,.2);border-radius:4px;box-shadow:inset 2px 0 0 var(--gold)}
+/* "X won the game" marker at the top of a finished game's log. */
+.log-entry.log-win .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;letter-spacing:.04em;color:var(--gold-light);font-weight:600}
+/* "Game started" anchor at the bottom of the log (jumps to the initial board). */
+.log-entry.log-start .log-action{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;letter-spacing:.04em;color:var(--text-dim)}
+/* Review controls in the action bar: Prev / where / Next / Latest. */
+.replay-nav{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.replay-where{font-size:.78rem;color:var(--text-dim);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.replay-move{color:var(--text-muted)}
+.log-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;color:var(--gold-light);flex-shrink:0}
+.log-action{flex:1}

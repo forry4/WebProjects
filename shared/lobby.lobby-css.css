@@ -1,0 +1,64 @@
+/* ─── Shared lobby chrome (.lby-*) ─────────────────────────────────────────── */
+/* Full-width flush top bar: back + rules (left) · title (center) · user (right). Render
+   as a direct child of the app root (outside centered content) so the border spans the
+   screen; left/right rails are flex:1 so the title stays truly centered. */
+.lby-header{display:flex;align-items:center;gap:12px;padding:13px 24px;padding-top:calc(env(safe-area-inset-top,0px) + 13px);border-bottom:1px solid var(--border);background:var(--surface);box-shadow:0 1px 0 rgba(0,0,0,.28)}
+.lby-head-left{flex:1 1 0;display:flex;align-items:center;justify-content:flex-start;gap:8px;min-width:0}
+.lby-title{flex:0 0 auto;text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-size:clamp(1.15rem,2.6vw,1.85rem);font-weight:700;color:var(--lby-accent,var(--gold));letter-spacing:.05em;white-space:nowrap}
+.lby-head-right{flex:1 1 0;display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
+.lby-head-name{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lby-head-tag{font-size:.62rem;letter-spacing:.1em;color:var(--text-dim);border:1px solid var(--border);padding:2px 8px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase;white-space:nowrap}
+
+/* One shared button style for the header (back + rules), identical across all games. */
+.lby-back,.lby-headbtn{display:inline-flex;align-items:center;gap:6px;padding:8px 15px;border-radius:var(--radius,8px);border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.75rem;letter-spacing:.05em;font-weight:600;white-space:nowrap;transition:border-color .15s,color .15s}
+.lby-back:hover,.lby-headbtn:hover{border-color:var(--lby-accent,var(--gold));color:var(--text)}
+
+/* Section header: micro uppercase accent label + optional muted note, underlined. */
+.lby-section-hd{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.lby-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--lby-accent,var(--gold));text-transform:uppercase}
+.lby-muted{font-size:.74rem;color:var(--text-dim)}
+
+/* Game-card row. */
+.lby-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;display:flex;align-items:center;gap:14px;margin-bottom:9px;transition:border-color .15s,background .15s,transform .15s}
+.lby-card:hover{border-color:var(--lby-accent,var(--gold));background:var(--surface2);transform:translateY(-1px)}
+.lby-card-info{flex:1;min-width:0}
+.lby-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.9rem;letter-spacing:.03em;margin-bottom:4px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lby-card-meta{font-size:.78rem;color:var(--text-dim)}
+.lby-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+/* History rows (shared): a Won/Lost/Tie badge on the left + the final scores with YOUR
+   number bold — matching Spender's history look. Put both inside a .lby-card-title. */
+.hist-result{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
+.hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
+.hist-result.lost,.hist-result.tie{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
+.hist-score-num{color:var(--text);font-weight:600}
+
+/* Empty state (dashed placeholder). */
+.lby-empty{text-align:center;padding:26px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
+
+/* Loading screen (shown while a game boots / fetches). */
+.lby-loading{min-height:56vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.12em;text-transform:uppercase}
+.lby-spinner{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--lby-accent,var(--gold));border-radius:50%;animation:lby-spin .7s linear infinite}
+@keyframes lby-spin{to{transform:rotate(360deg)}}
+
+/* Turn / status pill: "-turn" = your turn (accent), "-wait" = someone else (muted). */
+.lby-badge{padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.lby-badge-turn{background:var(--lby-accent,var(--gold));color:var(--bg);font-weight:700}
+.lby-badge-wait{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+
+@media(max-width:600px){
+	.lby-header{padding-left:10px;padding-right:10px;gap:7px}
+	/* the 3-part header (Back | title | user) overflows on phones with a long game title
+	   (Castles of Crimson) — the title is nowrap+non-shrinking and pushed into the username.
+	   Shrink the title + Back so all three fit; shorter titles just render a touch smaller. */
+	.lby-title{font-size:clamp(.82rem,3.2vw,1.1rem);letter-spacing:.03em}
+	.lby-back,.lby-headbtn{padding:5px 9px;font-size:.66rem;gap:4px}
+	.lby-head-name{max-width:104px;font-size:.72rem}
+	/* Shrink the CODE field to ~6 characters (room codes are 6), and tighten the row gap +
+	   button padding, so the create button, the code+Join group, and the refresh button all
+	   fit on ONE row on phones (down to ~360px). The descendant / doubled-class selectors
+	   out-specify the base rules (this @media block precedes them). */
+	.lby-create-row .lby-code{width:90px;padding-left:9px;padding-right:9px}
+	.lby-create-row.lby-create-row{gap:6px}
+	.lby-create-row .lby-cta,.lby-create-row .lby-join-btn{padding-left:11px;padding-right:11px}
+}
