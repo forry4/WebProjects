@@ -15,6 +15,7 @@ import json
 import pytest
 from fastapi import WebSocketDisconnect
 
+from core import rooms as _rooms
 from games.wherewolf import main as m
 
 
@@ -51,6 +52,9 @@ def _isolate(monkeypatch):
     asyncio.set_event_loop(loop)
     m.ROOMS.clear()
     m.ROOM_LOCK = asyncio.Lock()
+    # Shared 60/min WS connect budget, keyed "unknown" for every fake socket here —
+    # reset it per test or the suite eventually throttles itself. See core.rooms.
+    _rooms._ws_connect_limiter.reset()
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
     monkeypatch.setattr(m, "get_user_by_session", lambda tok: None)

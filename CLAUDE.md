@@ -66,6 +66,8 @@ games/
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
 webapp/                # Vite + React build (neutral, repo-root) — main.jsx mounts Spender.jsx (the shell)
+  shell/               #   site-shell screens extracted from Spender.jsx (AuthScreen, HomeScreen)
+  test/                #   smoke.mjs (blank-page/CLS gate) + screens.mjs (real render gate)
 wwsd/                  # "What Would Steve Do" — browser autoplayer for a friend's external site
 rust-cores/            # Per-game Rust→WASM search crates (client-side serving). NOT the Python core/.
   spender-core/        #   Spender variant S/N search core (client-side serving)
@@ -685,6 +687,14 @@ home-menu 🧩 button; backend is static (no serve-time AI).
   backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
   screen (identical `#root` length, ~99% injected CSS). It genuinely catches a blank page, a bundle
   that throws at load, and layout shift. That is all.
+- **The four games + Books are CODE-SPLIT** (`React.lazy` in Spender.jsx): the entry chunk is ~310KB
+  instead of ~600KB, so the home menu no longer downloads every game. Adding a game screen means
+  adding a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
+- **The WS throttle is process-global and keyed on client IP** (`core.rooms`, 60 connects/min,
+  300 msgs/min). Test fake sockets all report `"unknown"`, so they share ONE budget: any test module
+  driving `ws_room_player` MUST reset `_rooms._ws_connect_limiter` per test, or the suite eventually
+  throttles itself and the failures look like anything but a rate limit (measured: 90 of 150
+  in-process connects rejected without the reset).
 - **`npm run screens` is the real render gate** (`webapp/test/screens.mjs`): boots the actual backend,
   builds, serves on **5173** (load-bearing — `core/config.py` only allowlists that port for CORS;
   anywhere else the fetch is blocked and the app hangs on the loader), seeds a guest identity, and

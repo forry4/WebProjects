@@ -18,6 +18,7 @@ import json
 import pytest
 from fastapi import WebSocketDisconnect
 
+from core import rooms as _rooms
 from games.castles_of_crimson import main as m
 
 
@@ -54,6 +55,12 @@ def _isolate(monkeypatch):
     asyncio.set_event_loop(loop)
     m.ROOMS.clear()
     m.ROOM_LOCK = asyncio.Lock()
+    # The WS connect throttle (core.rooms) is a per-process sliding window keyed on
+    # client IP — and every fake socket here reports "unknown", so the whole suite
+    # shares ONE 60/min budget with no natural reset. Left alone, adding tests (or a
+    # re-run inside the same minute) starts closing sockets with 1008 and the failures
+    # look like anything but a rate limit. Reset it per test.
+    _rooms._ws_connect_limiter.reset()
     monkeypatch.setattr(m, "save_game", lambda room_id: None)
     monkeypatch.setattr(m, "load_game_to_memory", lambda room_id: False)
     monkeypatch.setattr(m, "get_user_by_session", lambda tok: None)
