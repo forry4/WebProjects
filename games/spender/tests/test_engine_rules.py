@@ -558,3 +558,84 @@ def test_random_legal_play_preserves_token_conservation(seed):
         for c in totals:
             held = sum(p["tokens"].get(c, 0) for p in g["players"].values())
             assert g["bank"].get(c, 0) + held == totals[c], f"{c} leaked/duplicated"
+
+
+# ─── the undo snapshot is taken ONLY when it can be used ─────────────────────
+
+def test_no_snapshot_is_taken_on_an_ordinary_take():
+    """The deep copy used to be unconditional — ~106% overhead on the vast majority
+    of moves that can never invoke undo."""
+    g = make_game()
+    ok, _, fx = apply(g, "p1", {"type": "take_gems", "colors": ["red", "blue", "green"]})
+    assert ok and fx["discard_pid"] is None
+    assert "pre_discard_snapshot" not in g
+
+
+def test_no_snapshot_is_taken_on_an_ordinary_reserve():
+    g = make_game()
+    ok, _, _ = apply(g, "p1", {"type": "reserve", "card_id": g["board"]["L1"][0]["id"]})
+    assert ok and "pre_discard_snapshot" not in g
+
+
+def test_snapshot_is_still_taken_when_the_take_overfills():
+    g = make_game()
+    _at_ten_tokens(g)
+    ok, _, fx = apply(g, "p1", {"type": "take_gems", "colors": ["red"]})
+    assert ok and fx["discard_pid"] == "p1"
+    assert "pre_discard_snapshot" in g
+
+
+def test_snapshot_is_still_taken_when_the_reserve_overfills():
+    g = make_game()
+    _at_ten_tokens(g)
+    ok, _, fx = apply(g, "p1", {"type": "reserve", "card_id": g["board"]["L1"][0]["id"]})
+    assert ok and fx["discard_pid"] == "p1"
+    assert "pre_discard_snapshot" in g
+
+
+def test_reserve_with_no_gold_in_bank_cannot_overfill_so_takes_no_snapshot():
+    """The gain is 1 only if the bank still HAS a gold — the prediction accounts for
+    it, so a full-handed player reserving from an empty gold pile needs no snapshot."""
+    g = make_game()
+    _at_ten_tokens(g)
+    g["bank"]["gold"] = 0
+    ok, _, fx = apply(g, "p1", {"type": "reserve", "card_id": g["board"]["L1"][0]["id"]})
+    assert ok and fx["discard_pid"] is None
+    assert "pre_discard_snapshot" not in g
+
+
+def test_undo_still_works_after_the_deferral():
+    g = make_game()
+    _at_ten_tokens(g)
+    before = copy.deepcopy(g)
+    apply(g, "p1", {"type": "take_gems", "colors": ["red", "blue"]})
+    apply(g, "p1", {"type": "discard", "color": "green"})
+    ok, err, _ = apply(g, "p1", {"type": "undo_discard"})
+    assert (ok, err) == (True, None)
+    assert g["players"]["p1"]["tokens"] == before["players"]["p1"]["tokens"]
+    assert g["bank"] == before["bank"]
+
+
+@pytest.mark.parametrize("seed", range(12))
+def test_fuzz_a_discard_is_never_parked_without_a_snapshot(seed):
+    """THE INVARIANT the deferral rests on: whenever a move parks a discard
+    sub-decision, the snapshot needed to undo it must exist. `_settle_or_discard`
+    asserts this internally, so a wrong prediction would raise here rather than
+    silently strand a player mid-turn with a dead Undo button."""
+    rng = random.Random(seed)
+    g = make_game()
+    for _ in range(400):
+        if g["phase"] == "over":
+            break
+        pid = g["turn"]
+        moves = main._get_all_moves(g, pid)
+        if not moves:
+            break
+        apply(g, pid, rng.choice(moves))          # raises if the prediction is wrong
+        if g.get("pending_discard_pid") == pid:
+            assert "pre_discard_snapshot" in g
+            while g.get("pending_discard_pid") == pid:
+                colour = next(c for c, n in g["players"][pid]["tokens"].items() if n > 0)
+                apply(g, pid, {"type": "discard", "color": colour})
+        if g.get("pending_noble_pid") == pid:
+            apply(g, pid, {"type": "pick_noble", "noble_id": g["pending_noble_choice"][0]})

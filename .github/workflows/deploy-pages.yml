@@ -65,6 +65,25 @@ jobs:
         working-directory: webapp
         run: npm run smoke
 
+      # The REAL render gate. `smoke` never leaves the loading screen (the shell pings
+      # the backend before it routes, and smoke has no backend), so it has never once
+      # rendered a game — a mount-time crash in any game passes smoke green. This boots
+      # the actual backend and asserts each game screen mounts its own markup.
+      # Verified by injecting a runtime throw into WhereWolf: smoke PASSED, this FAILED.
+      - name: Set up Python (for the screens gate's backend)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r games/spender/requirements.txt
+
+      - name: Game-screen render gate (real backend)
+        working-directory: webapp
+        run: npm run screens
+
       - name: Build
         working-directory: webapp
         env:

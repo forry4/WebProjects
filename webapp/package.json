@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview --port 5173",
-    "smoke": "node test/smoke.mjs"
+    "smoke": "node test/smoke.mjs",
+    "screens": "node test/screens.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

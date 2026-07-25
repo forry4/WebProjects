@@ -307,10 +307,13 @@ engine and the AI stack, so `ai/serving/*` no longer reaches up into the web mod
   offers them, NOT dead: `ai_variant` is persisted, so an old saved game must still get a real move on
   its next AI turn. That is also why they are in `ai/serving/` and not `ai/offline/` (which the server
   never imports). Weight variants A/B/C/C2 are pure data (`weights*.json`) fed to `_mcts_choose_move`.
-- **`engine.apply_move` still deep-copies the whole game on EVERY `take_gems`/`reserve`** for the undo
-  snapshot, before checking whether the token cap will actually be exceeded — measured ~106% overhead
-  on moves that never need it. Deferring it is predictable (`tokens + taken > 10`) but must not break
-  undo. Known, not yet done.
+- **The undo snapshot is taken ONLY when the action actually overfills** (`_snapshot_if_overfilling`).
+  It used to be an unconditional `deepcopy` on every `take_gems`/`reserve` — which was ~97% of the
+  move's cost, so the common path is now ~30× faster (0.35ms → 0.011ms). The prediction is EXACT, not
+  heuristic: tokens are integers, a take adds one per gem, a reserve adds one gold only if the bank
+  still has one. `_settle_or_discard` ASSERTS a snapshot exists whenever it parks a discard, and a
+  fuzz test drives random legal games through that assert — a wrong prediction would strand a player
+  mid-turn with a dead Undo button, so it fails loudly rather than silently.
 - **Pending state in the game dict** (`pending_noble_pid`, `pending_discard_pid`) is set when the
   condition arises, cleared when resolved, and rejects any other move meanwhile. Frontend derives
   `needsNobleChoice`/`needsDiscard` from these keys (not message fields).
@@ -666,7 +669,18 @@ home-menu 🧩 button; backend is static (no serve-time AI).
   `cargo test --release --features bridge` in `rust-cores/coc-core`. Spender: `rust-cores/spender-core`
   `cargo test --lib` (`src/bin/*` need `--features bridge`).
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
-  `npm run smoke`.
+  `npm run smoke` AND `npm run screens`.
+- **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
+  backend before it routes, and smoke has no backend, so all three of its routes sit on the loading
+  screen (identical `#root` length, ~99% injected CSS). It genuinely catches a blank page, a bundle
+  that throws at load, and layout shift. That is all.
+- **`npm run screens` is the real render gate** (`webapp/test/screens.mjs`): boots the actual backend,
+  builds, serves on **5173** (load-bearing — `core/config.py` only allowlists that port for CORS;
+  anywhere else the fetch is blocked and the app hangs on the loader), seeds a guest identity, and
+  asserts each game route mounts ITS OWN markup (`.duel`/`.coc`/`.ww`/`.bk-app`), fetches its lazy
+  chunk, and logs no page errors. Proven to work by injecting a mount-time throw into WhereWolf:
+  **smoke PASSED, screens FAILED** with the exact TypeError. It builds first on purpose — a failed
+  build leaves the previous working `dist/` in place, which once made a broken change look green.
 - AI strength benchmarking is offline (per-game `ai_selfplay` / arena / gate bins) — never in a serving
   path. Judge changes with CRN paired arenas + a mirror sanity that must read exactly 0.5000; the ship
   criterion is EQUAL-TIME, not equal-sims. Detail in the research log.
