@@ -45,3 +45,18 @@ def test_is_lone_wolf_flag():
     g2 = night(engine.STEP_WOLVES, {"a": "werewolf", "b": "werewolf", "c": "villager"},
                players=("a", "b", "c"))
     assert engine.player_view(g2, "a")["is_lone_wolf"] is False
+
+
+def test_deck_field_is_sorted_not_live_order():
+    """player_view['deck'] must be a SORTED multiset, never the position-tied live order.
+    Raw deck[i] == order[i]'s dealt_role and deck[len(order):] == the center, so shipping
+    the live list would leak every hidden role AND the whole center. Regression guard."""
+    g = night(engine.STEP_WOLVES, {"a": "werewolf", "b": "villager"})
+    # A deliberately UNSORTED deck so the check distinguishes a sorted copy from the raw list.
+    g["deck"] = ["werewolf", "seer", "robber", "villager", "villager"]
+    for viewer in g["order"]:
+        v = engine.player_view(g, viewer)
+        assert v["deck"] == sorted(g["deck"])   # sorted copy, identical for every viewer
+        assert v["deck"] != g["deck"]           # never the raw (position-tied) order
+    # And the center stays redacted for a plain villager (deck must not reconstruct it).
+    assert all(c is None for c in engine.player_view(g, "b")["center"])

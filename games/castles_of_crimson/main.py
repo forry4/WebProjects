@@ -495,6 +495,14 @@ async def broadcast_room(room_id: str, msg: dict[str, Any]) -> None:
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
+    if isinstance(g, dict):
+        # Hidden-info redaction for the wire (mirrors Spender/Duel): the ordered draw piles are
+        # future depot tiles, and rng_state lets a client reconstruct every future die for BOTH
+        # players — both hidden in real Castles of Burgundy. The frontend reads none of them (the
+        # visible depots live in `depots`/`boards`). Shallow-copy so the live game dict is untouched.
+        _HIDE = ("supply", "black_supply", "goods_supply", "rng_state")
+        if any(k in g for k in _HIDE):
+            g = {k: v for k, v in g.items() if k not in _HIDE}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),

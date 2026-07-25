@@ -524,7 +524,11 @@ def player_view(game: dict, pid: str) -> dict:
         "center": center_out,
         "center_count": len(game["center"]),
         "roles_in_play": list(game["roles_in_play"]),
-        "deck": list(game.get("deck", [])),   # public multiset (== the token row)
+        # SORTED, never the live order: game["deck"] is position-tied (deck[i] == order[i]'s
+        # dealt_role, deck[n:] == the center), so shipping it raw would leak every hidden role
+        # and the whole center. The client only renders it sorted (the public token row), so a
+        # sorted copy is all it needs. (Do NOT ship list(game["deck"]).)
+        "deck": sorted(game.get("deck", [])),
         "you": pid,
         "your_dealt_role": dealt,
         "is_active": dealt in roles.ACTIVE_ROLES,

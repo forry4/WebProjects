@@ -688,12 +688,18 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
     room = ROOMS.get(room_id, {})
     game_view = _redact_blind_reserves(room.get("game"), viewer_pid)
     _STRIP = ("setup", "s_searched", "_s_eval_running", "ai_server_fallbacks")
-    if isinstance(game_view, dict) and any(k in game_view for k in _STRIP):
+    if isinstance(game_view, dict):
+        # Shallow-copy so the live/redacted dict is untouched (about to be JSON-serialized).
         # `setup` is static replay metadata (the dealt deck order) — persisted by save_game
         # and served by the admin /full dump, but kept OFF the wire. `s_searched`/`_s_eval_running`
         # are S searched-eval overlay metadata (surfaced separately as ai_position_eval_searched).
-        # Shallow-copy so the live/redacted dict is untouched (about to be JSON-serialized).
         game_view = {k: v for k, v in game_view.items() if k not in _STRIP}
+        # `decks` is the ORDERED future-draw pile (the engine .pop()s the end to refill the board),
+        # so shipping the card list would leak every future draw. The client needs only the per-level
+        # COUNT (game.decks[lk].length), so send same-length null lists — no card identity on the wire.
+        _decks = game_view.get("decks")
+        if isinstance(_decks, dict):
+            game_view["decks"] = {lk: [None] * len(v) for lk, v in _decks.items()}
     state = {
         "room_id": room_id,
         "players": room.get("players", {}),
@@ -2697,36 +2703,46 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 max_players = mp if 2 <= mp <= MAX_PLAYERS else MAX_PLAYERS
                 async with ROOM_LOCK:
                     r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
-                    r["players"][pid] = name
-                    r["host"] = pid
-                    r["status"] = "open"
-                    r["max_players"] = max_players
-                    bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
-                    r["game"] = {
-                        "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
-                        "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
-                        "moves": [], "win_points": win_points,
-                    }
-                    r["meta"][pid] = {"token": gen_token(6)}
-                    r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
-                    if vs_ai:
-                        ai_pid = "ai"
-                        r["players"][ai_pid] = f"AI ({ai_variant})"
-                        r["ai_variant"] = ai_variant
-                        g = r["game"]
-                        g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
-                        g["ai_player"] = ai_pid
-                        order = [pid, ai_pid]
-                        random.shuffle(order)
-                        g["order"] = order
-                        g["turn"] = order[0]
-                        g["phase"] = "playing"
-                        g["board"] = _deal_board(g["decks"])
-                        nobles_pool = list(ALL_NOBLES)
-                        random.shuffle(nobles_pool)
-                        g["nobles"] = nobles_pool[:3]
-                        _capture_setup(g)   # snapshot dealt state for offline replay/eval
-                        r["status"] = "playing"
+                    # Don't clobber a game that already exists here. The connect handler above has
+                    # already loaded any persisted game into ROOMS, so a non-None game means this
+                    # room code is taken (a legit create always targets a fresh client-generated
+                    # code). Without this guard a crafted `create` on someone else's room code would
+                    # wipe their in-progress game in memory AND DB. CoC/WW/Duel reject the same way.
+                    already_exists = r.get("game") is not None
+                    if not already_exists:
+                        r["players"][pid] = name
+                        r["host"] = pid
+                        r["status"] = "open"
+                        r["max_players"] = max_players
+                        bank = _bank_for(2)  # placeholder for the waiting room; rescaled at start to the seated count
+                        r["game"] = {
+                            "bank": bank, "decks": build_deck(), "board": None, "nobles": None,
+                            "players": {}, "turn": None, "order": [], "phase": "waiting", "winner": None,
+                            "moves": [], "win_points": win_points,
+                        }
+                        r["meta"][pid] = {"token": gen_token(6)}
+                        r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                        if vs_ai:
+                            ai_pid = "ai"
+                            r["players"][ai_pid] = f"AI ({ai_variant})"
+                            r["ai_variant"] = ai_variant
+                            g = r["game"]
+                            g["players"][ai_pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                            g["ai_player"] = ai_pid
+                            order = [pid, ai_pid]
+                            random.shuffle(order)
+                            g["order"] = order
+                            g["turn"] = order[0]
+                            g["phase"] = "playing"
+                            g["board"] = _deal_board(g["decks"])
+                            nobles_pool = list(ALL_NOBLES)
+                            random.shuffle(nobles_pool)
+                            g["nobles"] = nobles_pool[:3]
+                            _capture_setup(g)   # snapshot dealt state for offline replay/eval
+                            r["status"] = "playing"
+                if already_exists:
+                    await websocket.send_text(json.dumps({"type": "error", "message": "room already exists"}))
+                    continue
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 if vs_ai:
@@ -3408,8 +3424,14 @@ def _review_view(game: dict, viewer_pid: str) -> dict:
     the reviewer's perspective (a finished/over snapshot reveals everything — see
     _redact_blind_reserves) and the static `setup` blob stripped (client never uses it)."""
     g = _redact_blind_reserves(game, viewer_pid) or game
-    if isinstance(g, dict) and "setup" in g:
+    if isinstance(g, dict):
+        # Copy + strip `setup` (client never uses it) and null the ordered draw piles. Review
+        # isn't gated on game-over, so a participant could otherwise read `decks` on their OWN
+        # in-progress game — the same future-draw leak mk_room_state closes for the live wire.
         g = {k: v for k, v in g.items() if k != "setup"}
+        _d = g.get("decks")
+        if isinstance(_d, dict):
+            g["decks"] = {lk: [None] * len(v) for lk, v in _d.items()}
     return g
 
 
