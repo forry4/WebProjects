@@ -269,7 +269,7 @@ export const splendorCardCss = `
    reserve hands. Kept SEPARATE and applied after the verbatim block, so Spender's own
    rules keep both their content and their order — it simply never emits these. */
 export const splendorCardExtraCss = `
-.card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:-1px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
+.card-crowns{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.5px;color:var(--gold);margin:3px 3px 0 auto;white-space:nowrap;line-height:1}
 .card-header .card-crowns+.card-bonus{margin-left:4px}
 .card-bonus-wild{border:none}
 /* Double bonus = two discs OVERLAPPING by ~40% of their width, so you read "two gems"

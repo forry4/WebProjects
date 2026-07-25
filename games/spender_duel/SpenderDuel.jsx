@@ -382,7 +382,7 @@ const css = `
 .duel-col-cards .level-row .card-bonus{width:calc(var(--card-h) * 0.14);height:calc(var(--card-h) * 0.14)}
 /* a double bonus overlaps by 40% of the (scaled) disc: 0.14 * 0.4 */
 .duel-col-cards .level-row .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h) * -0.056)}
-.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.12);margin-left:auto;margin-right:calc(var(--card-h) * 0.025)}
+.duel-col-cards .level-row .card-crowns{font-size:calc(var(--card-h) * 0.132);margin-left:auto;margin-right:calc(var(--card-h) * 0.025)}
 .duel-col-cards .level-row .card-header .card-crowns+.card-bonus{margin-left:calc(var(--card-h) * 0.03)}
 .duel-col-cards .level-row .card-ability{font-size:calc(var(--card-h) * 0.082);top:calc(var(--card-h) * 0.24);right:calc(var(--card-h) * 0.05)}
 .duel-col-cards .level-row .cost-gem{width:calc(var(--card-h) * 0.096);height:calc(var(--card-h) * 0.096)}
@@ -566,7 +566,7 @@ const css = `
 .duel-reserved-row .card.card-small .card-points{font-size:calc(var(--card-h-small)*0.147);min-width:0}
 .duel-reserved-row .card.card-small .card-bonus{width:calc(var(--card-h-small)*0.14);height:calc(var(--card-h-small)*0.14)}
 .duel-reserved-row .card.card-small .card-bonus-pair .card-bonus+.card-bonus{margin-left:calc(var(--card-h-small)*-0.056)}
-.duel-reserved-row .card.card-small .card-crowns{font-size:calc(var(--card-h-small)*0.11)}
+.duel-reserved-row .card.card-small .card-crowns{font-size:calc(var(--card-h-small)*0.121)}
 .duel-reserved-row .card.card-small .card-ability{font-size:calc(var(--card-h-small)*0.082);top:calc(var(--card-h-small)*0.24);right:calc(var(--card-h-small)*0.05)}
 .duel-reserved-row .card.card-small .card-back-level{font-size:calc(var(--card-h-small)*0.17)}
 .duel-reserved-row .card.card-small .cost-gem{width:calc(var(--card-h-small)*0.096);height:calc(var(--card-h-small)*0.096)}
