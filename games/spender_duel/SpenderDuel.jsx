@@ -156,8 +156,8 @@ function WinMeters({ pts, crowns, cpts }) {
     { key: "pts", n: pts, t: 20, label: `${pts} / 20 total prestige points`,
       ico: <span className="duel-wm-ico" style={{ color: "#e8c96a" }}>★</span> },
     { key: "color", n: cpts[best] || 0, t: 10, label: `${cpts[best] || 0} / 10 prestige in one colour (best: ${best})`,
-      ico: <span className="duel-wm-ico duel-wm-dot"
-        style={{ background: GEM_HEX[best], borderColor: best === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.28)" }} /> },
+      ico: <span className="duel-wm-ico"><span className="duel-wm-dot"
+        style={{ background: GEM_HEX[best], borderColor: best === "black" ? "rgba(255,255,255,.45)" : "rgba(255,255,255,.28)" }} /></span> },
     { key: "crowns", n: crowns, t: 10, label: `${crowns} / 10 crowns`,
       ico: <span className="duel-wm-ico" style={{ color: "#f5c842" }}>♛</span> },
   ];
@@ -546,8 +546,10 @@ const css = `
    scrolls / tokens below them down. pointer-events:none so they never intercept a box tap. */
 .duel-winmeters{position:absolute;top:11px;right:12px;width:138px;display:flex;flex-direction:column;gap:4px;align-items:stretch;pointer-events:none}
 .duel-wm{display:flex;align-items:center;gap:7px}
-.duel-wm-ico{font-size:1.2rem;width:19px;text-align:center;flex-shrink:0;line-height:1}
-.duel-wm-dot{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.28);box-sizing:border-box}
+/* Every icon occupies the SAME fixed box (flex-centred) so all three bars start at the same x —
+   the glyphs (★/♛) and the colour dot alike. */
+.duel-wm-ico{flex:0 0 19px;width:19px;min-width:0;display:inline-flex;align-items:center;justify-content:center;font-size:1.2rem;line-height:1}
+.duel-wm-dot{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.28);box-sizing:border-box;flex-shrink:0}
 .duel-wm-bar{flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden;min-width:42px}
 .duel-wm-fill{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#b0862c,#e8c96a);transition:width .35s ease}
 .duel-wm.done .duel-wm-fill{background:linear-gradient(90deg,#4e8f3a,#79d35c)}
