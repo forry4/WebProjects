@@ -1254,13 +1254,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     rid = (rid || "").toUpperCase().trim();
     if (!rid) return;
     setRoomId(rid);
-    connect(`${DUEL_WS}/${rid}/${myId}`, { action: "join", name: playerName });
+    connect(`${DUEL_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resumeGame = (rid) => {
     let tok = null;
     try { tok = localStorage.getItem(`duel_token_${rid}_${myId}`); } catch {}
     setRoomId(rid);
-    connect(`${DUEL_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    connect(`${DUEL_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };

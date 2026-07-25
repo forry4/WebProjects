@@ -1,12 +1,12 @@
 """Action-space helpers around engine.py's fixed 70-action indexing.
 
 engine.py owns legality and apply; this module provides the NN-facing mask,
-debug names, and conversion to the incumbent main.py dict-move format (used by
+debug names, and conversion to the authoritative engine.py dict-move format (used by
 the parity tests and, later, the serving bridge).
 """
 from __future__ import annotations
 
-from games.spender.main import GEM_COLORS
+from games.spender.cards import GEM_COLORS
 
 from . import engine as E
 

@@ -807,7 +807,15 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
-
+    # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
+    # is broadcast in the public players map, so anyone who can see a game can open a
+    # socket claiming another seat's pid — and then move on its turn (`_handle_move`
+    # only checks whose turn it is) or silently reassign its board (`_handle_join`
+    # rewrites `boards[pid]` on every join). `authed` flips true only via a handshake
+    # that proves ownership: create (minted the seat), join as a brand-new seat, join to
+    # an existing seat with a matching session token, reconnect with the per-seat room
+    # token, or auth_reconnect with a valid server token. Mirrors Where Wolf?'s binding.
+    authed = False
     try:
         while True:
             raw = await websocket.receive_text()
@@ -819,23 +827,31 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             action = msg.get("action")
 
             if action == "create":
-                await _handle_create(websocket, room_id, pid, msg)
+                authed = await _handle_create(websocket, room_id, pid, msg) or authed
             elif action == "join":
-                await _handle_join(websocket, room_id, pid, msg)
-            elif action == "start":
-                await _handle_start(websocket, room_id, pid)
-            elif action == "move":
-                await _handle_move(websocket, room_id, pid, msg)
+                authed = await _handle_join(websocket, room_id, pid, msg) or authed
             elif action == "reconnect":
-                await _handle_reconnect(websocket, room_id, pid, msg)
+                authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
-                await _handle_auth_reconnect(websocket, room_id, pid, msg)
-            elif action == "abandon":
-                await _handle_abandon(websocket, room_id, pid)
-            elif action == "client_ai_ready":
-                await _handle_client_ai_ready(websocket, room_id, pid, msg)
-            elif action == "ai_move":
-                await _handle_ai_move(websocket, room_id, pid, msg)
+                authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
+            elif action in ("start", "move", "abandon", "client_ai_ready", "ai_move"):
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                # (`start`/`move` also check host/turn, but pid alone is spoofable — this
+                # is what makes those checks mean anything.)
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
+                if action == "start":
+                    await _handle_start(websocket, room_id, pid)
+                elif action == "move":
+                    await _handle_move(websocket, room_id, pid, msg)
+                elif action == "abandon":
+                    await _handle_abandon(websocket, room_id, pid)
+                elif action == "client_ai_ready":
+                    await _handle_client_ai_ready(websocket, room_id, pid, msg)
+                else:
+                    await _handle_ai_move(websocket, room_id, pid, msg)
             else:
                 await websocket.send_text(json.dumps({"type": "error", "message": "unknown action"}))
     except WebSocketDisconnect:
@@ -876,7 +892,7 @@ async def _handle_create(ws, room_id, pid, msg):
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
-            return
+            return False
         room = {
             "players": {pid: name},
             "sockets": {pid: ws},
@@ -906,21 +922,37 @@ async def _handle_create(ws, room_id, pid, msg):
     await _send(ws, {"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # the creator minted this seat → owns it
 
 
 async def _handle_join(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
+    # A logged-in user re-entering a seat they ALREADY hold (new device / cleared
+    # storage → no per-seat room token) proves ownership with their session token:
+    # pid == their account id, which an attacker can't forge. Resolved before the lock
+    # (a DB read; mirrors _handle_auth_reconnect validating before ROOM_LOCK).
+    sess = msg.get("session_token")
+    session_uid = (get_user_by_session(sess) or {}).get("id") if sess else None
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room:
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
-        if pid not in room["players"]:
+            return False
+        if pid in room["players"]:
+            # Re-entry to an EXISTING seat. Identity MUST be proven: unproven, this
+            # would rewrite that seat's `boards[pid]` below (changing someone else's
+            # duchy mid-lobby) and hand the socket their view. `join` carries no room
+            # token (that's `reconnect`), so a matching session is the only proof.
+            if session_uid != pid:
+                await _send(ws, {"type": "error",
+                                 "message": "seat already taken — reconnect to rejoin"})
+                return False
+        else:
             cap = int(room.get("max_players") or MAX_PLAYERS)
             if room.get("vs_ai") or room.get("status") != "open" \
                     or len([p for p in room["players"] if p != AI_PID]) >= cap:
                 await _send(ws, {"type": "error", "message": "room is full"})
-                return
+                return False
             room["players"][pid] = name
             room.setdefault("meta", {})[pid] = {"token": _gen_token()}
         room.setdefault("boards", {})[pid] = _valid_board(msg.get("board_id"))
@@ -930,6 +962,7 @@ async def _handle_join(ws, room_id, pid, msg):
     # injects each recipient's token per socket).
     await _send(ws, {"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)})
     await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
+    return True
 
 
 async def _handle_start(ws, room_id, pid):
@@ -1051,15 +1084,16 @@ async def _handle_reconnect(ws, room_id, pid, msg):
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         if room.get("meta", {}).get(pid, {}).get("token") != token:
             await _send(ws, {"type": "error", "message": "invalid token"})
-            return
+            return False
         room["sockets"][pid] = ws
         bot_turn = _bot_should_act(room)
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # per-seat room token proves ownership
 
 
 async def _handle_auth_reconnect(ws, room_id, pid, msg):
@@ -1067,13 +1101,13 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     info = validate_reconnect_token(token)
     if not info or info.get("room_id") != room_id or info.get("player_id") != pid:
         await _send(ws, {"type": "error", "message": "invalid token"})
-        return
+        return False
     mark_reconnect_token_used(token)
     async with ROOM_LOCK:
         room = _ensure_room_loaded(room_id)
         if not room or pid not in room.get("players", {}):
             await _send(ws, {"type": "error", "message": "no such room"})
-            return
+            return False
         room["sockets"][pid] = ws
         # refresh this player's room reconnect token
         room.setdefault("meta", {}).setdefault(pid, {})["token"] = _gen_token()
@@ -1082,6 +1116,7 @@ async def _handle_auth_reconnect(ws, room_id, pid, msg):
     await _send(ws, {"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)})
     if bot_turn:
         asyncio.create_task(_schedule_bot_turn(room_id))
+    return True   # server-issued reconnect token, scoped to (room_id, pid)
 
 
 async def _handle_abandon(ws, room_id, pid):

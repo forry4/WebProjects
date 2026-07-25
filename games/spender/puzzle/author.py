@@ -16,7 +16,7 @@ that give the bonuses/points you want — `cards_for` helps pick them).
 """
 from __future__ import annotations
 
-from games.spender.main import GEM_COLORS
+from games.spender.cards import GEM_COLORS
 
 from games.spender.ai.serving import actions as A
 from games.spender.ai.serving import engine as E

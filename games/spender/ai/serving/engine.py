@@ -1,7 +1,8 @@
 """Fast compact-state Spender simulator for AlphaZero self-play.
 
-Rule-parity target: games/spender/main.py (the incumbent engine). Card/noble
-data is imported from main at module load — never duplicated. State is plain
+Rule-parity target: games/spender/engine.py (the authoritative rules). Card/noble
+data comes from the leaf `games.spender.cards` — never duplicated, and never by
+reaching up into the web module. State is plain
 int lists behind __slots__; the hot path uses no dicts and no string keys.
 
 Color order everywhere: white=0, blue=1, green=2, red=3, black=4, gold=5.
@@ -25,9 +26,9 @@ from __future__ import annotations
 import random
 from itertools import combinations
 
-from games.spender.main import ALL_NOBLES, GEM_COLORS, LEVEL1, LEVEL2, LEVEL3
+from games.spender.cards import ALL_NOBLES, GEM_COLORS, LEVEL1, LEVEL2, LEVEL3
 
-# ─── Static card tables (built once from main's data) ────────────────────────
+# ─── Static card tables (built once from cards.py's data) ────────────────────
 
 _CIDX = {c: i for i, c in enumerate(GEM_COLORS)}  # white..black -> 0..4
 N_CARDS = len(LEVEL1) + len(LEVEL2) + len(LEVEL3)  # 90

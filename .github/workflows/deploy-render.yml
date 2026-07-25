@@ -39,8 +39,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r games/spender/requirements.txt
       - name: Run tests
-        run: |
-          python -m pytest core/tests/ games/spender/tests/ books/tests/ games/castles_of_crimson/tests/ games/wherewolf/tests/ games/spender_duel/tests/ wwsd/tests/ -q
+        # Bare pytest — the suite is defined by `testpaths` in pytest.ini, so this
+        # gate and the PR gate (python-app.yml) can't drift apart again.
+        run: python -m pytest -q
 
   deploy:
     needs: test

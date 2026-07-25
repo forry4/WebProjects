@@ -2156,14 +2156,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     setRoomId(rid);
     setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard });
+    connect(`${COC_WS}/${rid}/${myId}`, { action: "join", name: playerName, board_id: myBoard, session_token: authUser?.session_token });
   };
   const resume = (rid) => {
     const tok = localStorage.getItem(`coc_token_${rid}_${myId}`);
     setRoomId(rid);
     setConnecting(true);
     try { localStorage.setItem("coc_roomId", rid); } catch {}
-    connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName });
+    connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const leaveToLobby = () => {
     setConnecting(false);
