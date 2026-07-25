@@ -1747,7 +1747,7 @@ export default function SpenderApp() {
 	const handleJoinGame = (gameId) => {
 		setRoomId(gameId);
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
-		pendingActionRef.current = { action: "join", name: playerName };
+		pendingActionRef.current = { action: "join", name: playerName, session_token: authUser?.session_token };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
@@ -1777,7 +1777,7 @@ export default function SpenderApp() {
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
 		pendingActionRef.current = savedToken
 			? { action: "reconnect", token: savedToken }
-			: { action: "join", name: playerName };
+			: { action: "join", name: playerName, session_token: authUser?.session_token };
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 

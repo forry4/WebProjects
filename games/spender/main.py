@@ -618,26 +618,24 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
     return state
 
 
-def _deal_board(decks: dict) -> dict:
-    return {lk: [decks[lk].pop() if decks[lk] else None for _ in range(4)] for lk in ["L1", "L2", "L3"]}
-
-
-def _capture_setup(g: dict) -> None:
-    """Snapshot the dealt initial board / deck-order / nobles (ids only) so a finished game can
-    be replayed move-by-move offline (games/spender/ai/serving/replay.py). The deck is shuffled in
-    place and popped during play with no seed stored, so without this the per-turn 12-card board
-    (the biggest input to the S evaluator) is unrecoverable. Captured ONCE right after the board
-    and nobles are dealt, before any move. ids only -> compact; resolve via card_catalog()."""
-    g["setup"] = {
-        "board": {lk: [c["id"] if c else None for c in g["board"][lk]] for lk in g["board"]},
-        "decks": {lk: [c["id"] for c in g["decks"][lk]] for lk in g["decks"]},
-        "nobles": [n["id"] for n in g["nobles"]],
-    }
-
-
-def _check_nobles(game: dict, pid: str) -> list:
-    bonuses = bonuses_from(game["players"][pid]["purchased"])
-    return [n for n in game["nobles"] if all(bonuses.get(c, 0) >= v for c, v in n["req"].items())]
+# ─── Rules ──────────────────────────────────────────────────────────────────
+# The rules live in `engine.py` — the single source of truth for how a move changes
+# the game, shared by this handler, the tests, and the replay tooling. These aliases
+# keep the historical private names working for the offline tooling and the AI code
+# that already imports them from this module.
+from games.spender import engine
+from games.spender.engine import (          # noqa: F401  (re-exported for callers)
+    deal_board as _deal_board,
+    capture_setup as _capture_setup,
+    check_nobles as _check_nobles,
+    advance_turn as _advance_turn,
+    calc_points as _calc_points,
+    resolve_winner as _resolve_winner,
+    win_points as _win_points,
+    finish_turn as _finish_turn,
+    check_winner as _check_winner,
+    log_move as _log_move,
+)
 
 
 def _ai_pick_noble(claimable: list, game: dict, ai_pid: str) -> dict:
@@ -651,68 +649,6 @@ def _ai_pick_noble(claimable: list, game: dict, ai_pid: str) -> dict:
     def opp_deficit(n: dict) -> int:
         return sum(max(0, need - opp_bonuses.get(c, 0)) for c, need in n["req"].items())
     return min(claimable, key=opp_deficit)
-
-
-def _advance_turn(game: dict) -> str:
-    order = game["order"]
-    return order[(order.index(game["turn"]) + 1) % len(order)]
-
-
-def _calc_points(ps: dict) -> int:
-    return sum(c["points"] for c in ps["purchased"]) + sum(n["points"] for n in ps["nobles"])
-
-
-def _resolve_winner(game: dict) -> None:
-    """End the game: pick winner(s) via tiebreakers — most pts → fewest purchased → shared."""
-    def score_key(pid):
-        ps = game["players"][pid]
-        return (_calc_points(ps), -len(ps["purchased"]))
-
-    scores = {pid: score_key(pid) for pid in game["order"]}
-    best = max(scores.values())
-    winners = [pid for pid, s in scores.items() if s == best]
-    game["phase"] = "over"
-    game["winner"] = winners[0] if len(winners) == 1 else winners
-
-
-def _win_points(game: dict) -> int:
-    """Points needed to trigger the final round. Defaults to 15 (Classic); 21 for the Long mode.
-    Read per-game so the value lives in the game dict (persisted by save/load; old saves -> 15)."""
-    return int(game.get("win_points", 15))
-
-
-def _finish_turn(game: dict, pid: str) -> None:
-    """Advance turn after pid's action; start final-round countdown if pid hit the win threshold; end game when round completes."""
-    if _calc_points(game["players"][pid]) >= _win_points(game) and "final_round_trigger" not in game:
-        game["final_round_trigger"] = pid
-
-    new_turn = _advance_turn(game)
-    game["turn"] = new_turn
-
-    if "final_round_trigger" in game:
-        trigger_idx = game["order"].index(game["final_round_trigger"])
-        if game["order"].index(new_turn) <= trigger_idx:
-            _resolve_winner(game)
-
-
-def _check_winner(game: dict) -> str | None:
-    wp = _win_points(game)
-    for pid in game["order"]:
-        if _calc_points(game["players"][pid]) >= wp:
-            return pid
-    return None
-
-
-def _log_move(game: dict, pid: str, mv_type: str, **details) -> None:
-    """Prepend a move record to game['moves'] (newest first). Entries are COMPACT — a
-    buy/reserve stores only `card_id` (resolve via card_catalog()/build_deck()), not the
-    full card dict — so the whole game is cheap to keep and ship over the wire. The 500
-    cap is a safety bound (a real game is well under it). Read by the end-game Review
-    screen and the admin GET /games/{id}/full analysis endpoint."""
-    entry: dict = {"pid": pid, "type": mv_type}
-    entry.update({k: v for k, v in details.items() if v is not None})
-    game.setdefault("moves", []).insert(0, entry)
-    game["moves"] = game["moves"][:500]
 
 
 # ─── AI tunable weights ─────────────────────────────────────────────────────
@@ -2550,6 +2486,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         await websocket.close(code=1008)
         return
     LOG.info("ws connect room=%s player=%s", room_id, pid)
+    # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
+    # is broadcast in the public players map, so anyone who can see a game could open a
+    # socket claiming another seat's pid, receive that seat's `viewer_pid`-redacted view
+    # (its blind reserves), and move on its turn — the move handler only checks whose
+    # turn it is. `authed` flips true only through a handshake that PROVES ownership;
+    # every mutating action is gated on it. Mirrors Where Wolf?/Duel/CoC.
+    authed = False
 
     async with ROOM_LOCK:
         if room_id not in ROOMS:
@@ -2628,6 +2571,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await websocket.send_text(json.dumps({"type": "error", "message": "room already exists"}))
                     continue
                 save_game(room_id)
+                authed = True   # the creator minted this seat -> owns it
                 await websocket.send_text(json.dumps({"type": "created", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 if vs_ai:
                     asyncio.create_task(_schedule_ai_turn(room_id))
@@ -2641,6 +2585,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         await websocket.send_text(json.dumps({"type": "error", "message": "invalid token"}))
                         continue
                     r["sockets"][pid] = websocket
+                authed = True   # per-seat room token proves ownership
                 LOG.info("player %s reconnected to room %s", pid, room_id)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -2649,6 +2594,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # ── join ────────────────────────────────────────────────────────
             elif action == "join":
                 name = str(msg.get("name") or pid).strip()[:24] or "Player"
+                # A logged-in user re-entering a seat they ALREADY hold (new device /
+                # cleared storage -> no per-seat room token) proves ownership with their
+                # session token: pid == their account id, which an attacker can't forge.
+                # Resolved before the lock (a DB read).
+                _sess = msg.get("session_token")
+                _session_uid = (get_user_by_session(_sess) or {}).get("id") if _sess else None
                 async with ROOM_LOCK:
                     if room_id not in ROOMS:
                         await websocket.send_text(json.dumps({"type": "error", "message": "room not found"}))
@@ -2660,7 +2611,17 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     if not r.get("host") or r.get("game") is None:
                         await websocket.send_text(json.dumps({"type": "error", "message": "this game is no longer available"}))
                         continue
-                    if pid not in r["players"]:
+                    if pid in r["players"]:
+                        # Re-entry to an EXISTING seat. Identity MUST be proven, or the
+                        # "joined" reply below hands a stranger this seat's private view
+                        # and its socket. `join` carries no room token (that's
+                        # `reconnect`), so a matching session is the only proof.
+                        if _session_uid != pid:
+                            await websocket.send_text(json.dumps(
+                                {"type": "error",
+                                 "message": "seat already taken — reconnect to rejoin"}))
+                            continue
+                    else:
                         # New player joining: only OPEN, non-AI human lobbies, up to MAX_PLAYERS.
                         if r.get("ai_variant"):
                             await websocket.send_text(json.dumps({"type": "error", "message": "can't join an AI game"}))
@@ -2678,6 +2639,7 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         r["meta"][pid] = {"token": gen_token(6)}
                     if r.get("game") and pid not in r["game"]["players"]:
                         r["game"]["players"][pid] = {"tokens": empty_gems(), "purchased": [], "reserved": [], "nobles": []}
+                authed = True
                 save_game(room_id)
                 await websocket.send_text(json.dumps({"type": "joined", "room_id": room_id, "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
@@ -2698,12 +2660,18 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     r["sockets"][pid] = websocket
                     r["meta"].setdefault(pid, {})["user_id"] = info.get("user_id")
                 mark_reconnect_token_used(token)
+                authed = True   # server-issued reconnect token, scoped to (room_id, pid)
                 await websocket.send_text(json.dumps({"type": "reconnected", "room": mk_room_state(room_id, viewer_pid=pid)}))
                 await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
                 asyncio.create_task(_schedule_ai_turn(room_id))
 
             # ── start ───────────────────────────────────────────────────────
             elif action == "start":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _err: str | None = None
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
@@ -2733,6 +2701,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── move ────────────────────────────────────────────────────────
             elif action == "move":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 mv = msg.get("move") or {}
                 _err = None
                 _did_change = False
@@ -2741,6 +2714,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
+                    # Room-level gates stay here (they are about the ROOM, not the rules);
+                    # everything from "is this a legal move" onward is engine.apply_move,
+                    # the same code the rules tests drive. See engine.py's docstring for
+                    # why that split matters.
                     if not r:
                         _err = "game not started"
                     elif r.get("status") == "over":
@@ -2749,197 +2726,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                         _err = "game not started"
                     else:
                         g = r["game"]
-                        if g.get("phase") == "over":
-                            _err = "game is over"
-                        elif g.get("turn") != pid:
-                            _err = "not your turn"
-                        else:
-                            ps = g["players"][pid]
-                            move_type = mv.get("type")
-
-                            if g.get("pending_noble_pid") == pid and move_type != "pick_noble":
-                                _err = "must choose a noble first"
-                            elif g.get("pending_discard_pid") == pid and move_type not in ("discard", "undo_discard"):
-                                _err = "must discard down to 10 gems first"
-                            elif move_type == "take_gems":
-                                colors = mv.get("colors", [])
-                                if not colors or len(colors) > 3:
-                                    _err = "take 1-3 gems"
-                                else:
-                                    freq: dict[str, int] = {}
-                                    for c in colors:
-                                        freq[c] = freq.get(c, 0) + 1
-                                    doubles = [c for c, n in freq.items() if n == 2]
-                                    if any(n > 2 for n in freq.values()) or len(doubles) > 1:
-                                        _err = "invalid gem selection"
-                                    elif doubles and (len(colors) != 2 or len(freq) != 1):
-                                        _err = "double take must be exactly 2 of one color"
-                                    elif doubles and g["bank"].get(doubles[0], 0) < 4:
-                                        _err = "need >= 4 in bank for double take"
-                                    else:
-                                        for c in colors:
-                                            if g["bank"].get(c, 0) <= 0:
-                                                _err = f"no {c} in bank"
-                                                break
-                                        else:
-                                            _pre = copy.deepcopy(g)  # for undo if this overfills
-                                            for c in colors:
-                                                g["bank"][c] -= 1
-                                                ps["tokens"][c] = ps["tokens"].get(c, 0) + 1
-                                            _log_move(g, pid, "take_gems", colors=colors)
-                                            _did_change = True
-                                            if sum(ps["tokens"].values()) > 10:
-                                                _discard_pid = pid
-                                                g["pending_discard_pid"] = pid
-                                                g["pre_discard_snapshot"] = _pre
-                                            else:
-                                                g.pop("pending_discard_pid", None)
-                                                _finish_turn(g, pid)
-                                                _post_turn(g, r)
-
-                            elif move_type == "discard":
-                                color = mv.get("color")
-                                if not color or ps["tokens"].get(color, 0) <= 0:
-                                    _err = "can't discard that"
-                                else:
-                                    ps["tokens"][color] -= 1
-                                    g["bank"][color] = g["bank"].get(color, 0) + 1
-                                    # Log on commit; an undo_discard restores the pre-action
-                                    # snapshot (taken before the take/reserve was logged), which
-                                    # drops these discard entries too — so the log stays faithful.
-                                    _log_move(g, pid, "discard", color=color)
-                                    _did_change = True
-                                    if sum(ps["tokens"].values()) > 10:
-                                        _discard_pid = pid
-                                        g["pending_discard_pid"] = pid
-                                    else:
-                                        g.pop("pending_discard_pid", None)
-                                        g.pop("pre_discard_snapshot", None)
-                                        _finish_turn(g, pid)
-                                        _post_turn(g, r)
-
-                            elif move_type == "undo_discard":
-                                # Revert the whole over-filling action (take/reserve) and any
-                                # discards made since, restoring the pre-action snapshot.
-                                snap = g.get("pre_discard_snapshot")
-                                if g.get("pending_discard_pid") != pid or not snap:
-                                    _err = "nothing to undo"
-                                else:
-                                    r["game"] = copy.deepcopy(snap)  # snapshot has no pending/snapshot keys
-                                    g = r["game"]
-                                    _did_change = True
-
-                            elif move_type == "buy":
-                                card_id = mv.get("card_id")
-                                card: dict | None = None
-                                source: tuple | None = None
-                                for lk in ["L1", "L2", "L3"]:
-                                    for i, c in enumerate(g["board"][lk]):
-                                        if c and c["id"] == card_id:
-                                            card, source = c, ("board", lk, i)
-                                            break
-                                    if card:
-                                        break
-                                if not card:
-                                    for i, c in enumerate(ps["reserved"]):
-                                        if c["id"] == card_id:
-                                            card, source = c, ("reserved", i)
-                                            break
-                                if not card:
-                                    _err = "card not found"
-                                else:
-                                    bonuses = bonuses_from(ps["purchased"])
-                                    if not can_afford(card["cost"], ps["tokens"], bonuses):
-                                        _err = "can't afford"
-                                    else:
-                                        spend = calc_spend(card["cost"], ps["tokens"], bonuses)
-                                        for c, n in spend.items():
-                                            ps["tokens"][c] = ps["tokens"].get(c, 0) - n
-                                            g["bank"][c] = g["bank"].get(c, 0) + n
-                                        ps["purchased"].append(card)
-                                        if source[0] == "board":  # type: ignore[index]
-                                            lk, idx = source[1], source[2]  # type: ignore[misc]
-                                            g["board"][lk][idx] = g["decks"][lk].pop() if g["decks"][lk] else None
-                                        else:
-                                            ps["reserved"].pop(source[1])  # type: ignore[index]
-                                        _log_move(g, pid, "buy", card_id=card["id"])
-                                        claimable = _check_nobles(g, pid)
-                                        if len(claimable) > 1:
-                                            g["pending_noble_choice"] = [n["id"] for n in claimable]
-                                            g["pending_noble_pid"] = pid
-                                            _noble_choice_pid = pid
-                                        elif claimable:
-                                            n = claimable[0]
-                                            ps["nobles"].append(n)
-                                            g["nobles"] = [x for x in g["nobles"] if x["id"] != n["id"]]
-                                            _log_move(g, pid, "noble", pts=n["points"], noble_id=n["id"])
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                                        else:
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                                        _did_change = True
-
-                            elif move_type == "reserve":
-                                if len(ps["reserved"]) >= 3:
-                                    _err = "already have 3 reserved"
-                                else:
-                                    _pre = copy.deepcopy(g)  # for undo if this overfills
-                                    card_id = mv.get("card_id")
-                                    deck_level = mv.get("deck_level")
-                                    card = None
-                                    if card_id:
-                                        for lk in ["L1", "L2", "L3"]:
-                                            for i, c in enumerate(g["board"][lk]):
-                                                if c and c["id"] == card_id:
-                                                    card = c
-                                                    g["board"][lk][i] = g["decks"][lk].pop() if g["decks"][lk] else None
-                                                    break
-                                            if card:
-                                                break
-                                    elif deck_level:
-                                        lk = f"L{deck_level}"
-                                        if g["decks"][lk]:
-                                            card = g["decks"][lk].pop()
-                                            # blind deck-top reserve — hidden from the opponent (Splendor rule)
-                                            card["from_deck"] = True
-                                    if not card:
-                                        _err = "card not found"
-                                    else:
-                                        ps["reserved"].append(card)
-                                        if g["bank"].get("gold", 0) > 0:
-                                            g["bank"]["gold"] -= 1
-                                            ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-                                        _log_move(g, pid, "reserve", card_id=card["id"], from_deck=card.get("from_deck"))
-                                        _did_change = True
-                                        if sum(ps["tokens"].values()) > 10:
-                                            _discard_pid = pid
-                                            g["pending_discard_pid"] = pid
-                                            g["pre_discard_snapshot"] = _pre
-                                        else:
-                                            g.pop("pending_discard_pid", None)
-                                            _finish_turn(g, pid)
-                                            _post_turn(g, r)
-                            elif move_type == "pick_noble":
-                                noble_id = mv.get("noble_id")
-                                pending = g.get("pending_noble_choice") or []
-                                if g.get("pending_noble_pid") != pid or noble_id not in pending:
-                                    _err = "no noble choice pending"
-                                else:
-                                    noble = next((n for n in g["nobles"] if n["id"] == noble_id), None)
-                                    if not noble:
-                                        _err = "noble not found"
-                                    else:
-                                        ps["nobles"].append(noble)
-                                        g["nobles"] = [x for x in g["nobles"] if x["id"] != noble_id]
-                                        _log_move(g, pid, "noble", pts=noble["points"], noble_id=noble_id)
-                                        g.pop("pending_noble_choice", None)
-                                        g.pop("pending_noble_pid", None)
-                                        _finish_turn(g, pid)
-                                        _post_turn(g, r)
-                                        _did_change = True
-                            else:
-                                _err = "unknown move type"
+                        ok, _err, _fx = engine.apply_move(g, pid, mv)
+                        if ok:
+                            _did_change = True
+                            _discard_pid = _fx["discard_pid"]
+                            _noble_choice_pid = _fx["noble_choice_pid"]
+                            _post_turn(g, r)
 
                 if _err:
                     await websocket.send_text(json.dumps({"type": "error", "message": _err}))
@@ -2958,6 +2750,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── client_ai_ready (the browser can run the WASM variant-S search) ──
             elif action == "client_ai_ready":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
                     if r is not None:
@@ -2971,6 +2768,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # wait for the client's full-strength N move (delivered when the tab next gets CPU, usually on
             # refocus) — we never substitute the weaker S move for N.
             elif action == "client_ai_hidden":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _hidden = bool(msg.get("hidden"))
                 async with ROOM_LOCK:
                     r = ROOMS.get(room_id)
@@ -2979,6 +2781,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── ai_move (client-computed AI move in a vs-S game) ──────────────
             elif action == "ai_move":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 mv = msg.get("move") or {}
                 _err = None
                 _did_change = False
@@ -3069,6 +2876,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── abandon ─────────────────────────────────────────────────────
             elif action == "abandon":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 _err = None
                 _did_change = False
                 async with ROOM_LOCK:
@@ -3096,6 +2908,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
 
             # ── ping (a player tapped another's box → a chime for the tapped one) ──
             elif action == "ping":
+                # Privileged: only a socket that has PROVEN it owns `pid` may act as it.
+                if not authed:
+                    await websocket.send_text(json.dumps(
+                        {"type": "error", "message": "not authenticated for this seat"}))
+                    continue
                 target = msg.get("target")
                 async with ROOM_LOCK:
                     rr = ROOMS.get(room_id)
