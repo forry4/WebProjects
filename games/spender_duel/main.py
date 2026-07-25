@@ -926,12 +926,14 @@ async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
         if not state:
             return {"ok": False, "message": "not found"}
         g, players = state.get("game"), state.get("players", {})
-    if not isinstance(g, dict) or not g.get("players") or g.get("phase") != "over":
-        return {"ok": False, "message": "game not finished"}
+    # Participation FIRST: a non-participant must not learn even whether the game exists/finished.
+    # (player_id is the guest identity — same bearer model as reconnect tokens — so it's kept.)
     user = get_user_by_session(token) if token else None
     requester = (user or {}).get("id") or player_id
     if not requester or requester not in players:
         return {"ok": False, "message": "not your game"}
+    if not isinstance(g, dict) or not g.get("players") or g.get("phase") != "over":
+        return {"ok": False, "message": "game not finished"}
     return {
         "ok": True, "game": engine.player_view(g, requester), "players": players,
         "winner": g.get("winner"), "win_condition": g.get("win_condition"),

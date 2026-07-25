@@ -65,7 +65,7 @@ const BOT_TIERS = [
   { id: "hard", name: "Hard", desc: "Searches properly — a real fight" },
   { id: "expert", name: "Expert", desc: "Hard, retrained to punish impatience" },
 ];
-const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard" };
+const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }

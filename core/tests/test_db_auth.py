@@ -182,6 +182,26 @@ def test_get_user_by_session_agrees_with_login_on_admin(tmp_path, monkeypatch):
     assert authm.get_user_by_session(rando_login["session_token"])["is_admin"] is False
 
 
+def test_site_owner_match_is_case_insensitive(tmp_path, monkeypatch):
+    # Regression: usernames are looked up / unique NOCASE, but the SITE_OWNER match used a
+    # case-sensitive ==, so SITE_OWNER=forrestm never matched a stored "Forrestm" and the owner
+    # silently lost admin on every path.
+    monkeypatch.setattr(dbm, "DB_PATH", str(tmp_path / "owner_case.db"))
+    monkeypatch.setenv("SITE_OWNER", "forrestm")            # lowercase env
+    conn = dbm.get_db_conn()
+    dbm.init_core_schema(conn)
+    conn.close()
+
+    authm.create_user("Forrestm", "pw")                     # stored with different casing
+
+    login = authm.authenticate_user("Forrestm", "pw")
+    assert login["is_admin"] is True                        # login grants admin despite case
+    assert authm.get_user_by_session(login["session_token"])["is_admin"] is True
+    assert authm.is_site_owner({"name": "Forrestm", "is_admin": False}) is True
+    assert authm.is_site_owner({"name": "FORRESTM", "is_admin": False}) is True
+    assert authm.is_site_owner({"name": "someone_else", "is_admin": False}) is False
+
+
 def test_create_user_rejects_duplicate_usernames_case_insensitively(tmp_path, monkeypatch):
     # Regression: users.name had no UNIQUE constraint and create_user only caught
     # IntegrityError, so duplicate usernames slipped through (two "Forrestm" rows in prod).

@@ -644,21 +644,20 @@ export default function WhereWolf({ myId, authUser, onExit }) {
       if (pid === myId) return;
       mv({ type: "robber_swap", target: pid });
     } else if (step === "troublemaker" && myDealt === "troublemaker" && !acted.troublemaker) {
-      setTmSel((sel) => {
-        const next = sel.includes(pid) ? sel.filter((x) => x !== pid) : [...sel, pid];
-        if (next.length === 2) { mv({ type: "troublemaker_swap", a: next[0], b: next[1] }); return []; }
-        return next;
-      });
+      // Compute from current state, then send OUTSIDE the updater — a setState updater must be
+      // pure; a send() inside it can double-fire under StrictMode / a concurrent re-render.
+      const next = tmSel.includes(pid) ? tmSel.filter((x) => x !== pid) : [...tmSel, pid];
+      if (next.length === 2) { setTmSel([]); mv({ type: "troublemaker_swap", a: next[0], b: next[1] }); }
+      else { setTmSel(next); }
     }
   };
   const clickCenter = (idx) => {
     if (phase !== "night") return;
     if (step === "seer" && myDealt === "seer" && !acted.seer) {
-      setCenterSel((sel) => {
-        const next = sel.includes(idx) ? sel.filter((x) => x !== idx) : [...sel, idx];
-        if (next.length === 2) { mv({ type: "seer_peek_center", indices: next }); return []; }
-        return next;
-      });
+      // Compute from current state, then send OUTSIDE the updater (updaters must be pure).
+      const next = centerSel.includes(idx) ? centerSel.filter((x) => x !== idx) : [...centerSel, idx];
+      if (next.length === 2) { setCenterSel([]); mv({ type: "seer_peek_center", indices: next }); }
+      else { setCenterSel(next); }
       return;
     }
     if (step === "drunk" && myDealt === "drunk" && !acted.drunk) { mv({ type: "drunk_swap", center_index: idx }); return; }
