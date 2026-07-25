@@ -493,7 +493,7 @@ const css = `
    pill's OWN width and reuse Spender's formulas verbatim — a Duel pill is a Spender pill
    scaled, not a flattened one. (Measured: Spender's pill is 61.6 wide at --card-h 218.5,
    hence the 3.547 factor. Sizing the width alone gave a 2.48-ratio flat pill.) */
-.duel-player{container-type:inline-size}
+.duel-player{container-type:inline-size;position:relative}
 .duel-player .player-tokens,.duel-player .player-bonuses{
   flex-wrap:nowrap;min-width:0;
   /* 100cqw is the panel's CONTENT box (padding already excluded), so the row only loses
@@ -534,20 +534,24 @@ const css = `
 .duel-player .gem-total{align-self:flex-start;font-size:.82rem;padding:3px 11px;border-radius:9px;margin-top:9px}
 .duel-player .duel-scrolls{align-self:flex-start}
 .duel-player{margin-bottom:14px}
-.duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem}
+/* Reserve the top-right for the (absolutely-positioned) win meters so the name/turn-badge
+   never run under them; the name truncates rather than colliding. */
+.duel-player .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-right:150px;min-height:22px}
+.duel-player .hd .nm{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.02rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.duel-player .hd .duel-turnbadge{flex-shrink:0}
 .duel-player.active{border-color:#e8c96a;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 0 0 1px rgba(232,201,106,.3),0 3px 16px -4px rgba(201,168,76,.3),0 2px 10px -4px rgba(0,0,0,.5)}
 .duel-stat{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.98rem;font-weight:700;margin-left:auto;display:flex;gap:10px;align-items:center}
-/* The three victory-condition progress meters (top-right of a player board). Compact so
-   name + turn badge + meters share the header row on both phone and desktop. */
-.duel-winmeters{margin-left:auto;display:flex;flex-direction:column;gap:3px;align-items:stretch;min-width:104px;flex-shrink:0}
-.duel-wm{display:flex;align-items:center;gap:5px}
-.duel-wm-ico{font-size:.82rem;width:13px;text-align:center;flex-shrink:0;line-height:1}
-.duel-wm-dot{width:11px;height:11px;border-radius:50%;border:1px solid rgba(255,255,255,.28);box-sizing:border-box}
-.duel-wm-bar{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden;min-width:34px}
-.duel-wm-fill{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#b0862c,#e8c96a);transition:width .35s ease}
+/* The three victory-condition progress meters, pinned to the player board's top-right corner
+   (position:absolute, out of flow) so they can be sized up WITHOUT pushing the privilege
+   scrolls / tokens below them down. pointer-events:none so they never intercept a box tap. */
+.duel-winmeters{position:absolute;top:11px;right:12px;width:138px;display:flex;flex-direction:column;gap:4px;align-items:stretch;pointer-events:none}
+.duel-wm{display:flex;align-items:center;gap:7px}
+.duel-wm-ico{font-size:1.2rem;width:19px;text-align:center;flex-shrink:0;line-height:1}
+.duel-wm-dot{width:16px;height:16px;border-radius:50%;border:1px solid rgba(255,255,255,.28);box-sizing:border-box}
+.duel-wm-bar{flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden;min-width:42px}
+.duel-wm-fill{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#b0862c,#e8c96a);transition:width .35s ease}
 .duel-wm.done .duel-wm-fill{background:linear-gradient(90deg,#4e8f3a,#79d35c)}
-.duel-wm-txt{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.74rem;font-weight:700;min-width:32px;text-align:right;white-space:nowrap;color:var(--text)}
+.duel-wm-txt{font-family:'Cinzel','Cinzel Fallback',serif;font-size:1.05rem;font-weight:700;min-width:44px;text-align:right;white-space:nowrap;color:var(--text)}
 .duel-wm.done .duel-wm-txt{color:#8fe07a}
 .duel-wm-t{opacity:.5;font-weight:400}
 .duel-reserved-row{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
