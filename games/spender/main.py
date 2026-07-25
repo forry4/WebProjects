@@ -2397,6 +2397,7 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None, defer_discard:
 
     elif mv["type"] == "reserve":
         card_id = mv.get("card_id")
+        deck_level = mv.get("deck_level")
         card = None
         if card_id:
             for lk in ["L1", "L2", "L3"]:
@@ -2407,12 +2408,20 @@ def _run_ai_turn(game: dict, ai_pid: str, mv: dict | None = None, defer_discard:
                         break
                 if card:
                     break
+        elif deck_level:
+            # Blind deck-top reserve (no card_id): the search picks A_RES_DECK -> deck_level, and
+            # the human path supports it. Without this branch the AI silently passed its turn (no
+            # card, no gold). from_deck=True keeps it hidden from the opponent (Splendor rule).
+            lk = f"L{deck_level}"
+            if game["decks"].get(lk):
+                card = game["decks"][lk].pop()
+                card["from_deck"] = True
         if card:
             ps["reserved"].append(card)
             if game["bank"].get("gold", 0) > 0:
                 game["bank"]["gold"] -= 1
                 ps["tokens"]["gold"] = ps["tokens"].get("gold", 0) + 1
-            _log_move(game, ai_pid, "reserve", card_id=card["id"])
+            _log_move(game, ai_pid, "reserve", card_id=card["id"], from_deck=card.get("from_deck"))
             if _defer_or_finish_discards(game, ai_pid, defer_discard):
                 return  # deferred: the client's net will submit the discard; turn NOT finished
 
@@ -2516,9 +2525,19 @@ async def _schedule_ai_turn(room_id: str) -> None:
         ai_pid = g.get("ai_player")
         if not ai_pid or g.get("turn") != ai_pid or g.get("phase") != "playing":
             return
+        pending_discard = g.get("pending_discard_pid") == ai_pid
         client_ai = bool(r.get("client_ai"))
         client_hidden = bool(r.get("client_hidden"))
         wait_ply = len(g.get("moves", []))
+    if pending_discard:
+        # A deferred over-cap discard is pending — this is NOT a play turn. Running the play search
+        # here would mis-handle it: the engine reconstructs a DISCARD phase, so the search returns a
+        # discard action, and _run_ai_turn has no discard branch — it drops the discard and finishes
+        # the turn with >10 tokens while pending_discard_pid sticks forever, wedging every later AI
+        # turn. Re-arm the discard fallback (idempotent + ply-guarded) so the discard resolves via
+        # the client or the heuristic, and don't run the play search.
+        asyncio.create_task(_schedule_ai_discard_fallback(room_id, ai_pid, wait_ply))
+        return
     if client_ai:
         if client_hidden:
             return  # backgrounded tab: NEVER substitute the weaker S move. The client always plays the
@@ -3258,12 +3277,16 @@ def bearer_token(authorization: str | None = Header(default=None),
 
 
 def _client_ip(request: Request) -> str:
-    """Best-effort client IP for rate-limiting. Render terminates TLS at a proxy,
-    so the real client is the first hop in X-Forwarded-For; fall back to the socket
-    peer for local/dev."""
+    """Best-effort client IP for rate-limiting. Render's proxy APPENDS the real peer IP to any
+    client-supplied X-Forwarded-For, so the LAST hop is the trustworthy one. Trusting the leftmost
+    (as before) is the classic XFF bug: a client rotating a spoofed `X-Forwarded-For` per request
+    lands under a fresh limiter key every time, defeating the per-IP login/register throttles.
+    Fall back to the socket peer for local/dev."""
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",")[0].strip()
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.client.host if request.client else "unknown"
 
 

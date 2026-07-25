@@ -780,6 +780,12 @@ function useWebSocket(onMessage, { onOpen, onClose } = {}) {
 			try { onOpenRef.current?.({ event: ev, send }); } catch {}
 		};
 		ws.onclose = () => {
+			// Stale-socket guard (the frontend analog of the backend's): if a newer connect() has
+			// already replaced this socket, do nothing. Without it, a socket closed BY connect()
+			// (e.g. the visibility handler firing while a reconnect is mid-handshake) fires this
+			// onclose AFTER wsRef points at the new socket, schedules a reconnect, and that reconnect
+			// then closes the healthy new socket — a self-sustaining ~2s disconnect/reconnect loop.
+			if (wsRef.current !== ws) return;
 			try { onCloseRef.current?.(); } catch {}
 			// auto-reconnect unless the user intentionally disconnected
 			if (!intentionalRef.current && urlRef.current) {

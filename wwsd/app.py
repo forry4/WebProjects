@@ -57,8 +57,15 @@ def _rate_ok(ip: str) -> bool:
 
 
 def _client_ip(req: Request) -> str:
+    # Render's proxy APPENDS the real peer IP, so the LAST hop is trustworthy; the leftmost is
+    # client-spoofable and trusting it lets a secret-holder rotate the header to dodge the per-IP
+    # rate limit (the compute-abuse control).
     xff = req.headers.get("x-forwarded-for")
-    return xff.split(",")[0].strip() if xff else (req.client.host if req.client else "?")
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    return req.client.host if req.client else "?"
 
 
 def _budget(t_param) -> float:
