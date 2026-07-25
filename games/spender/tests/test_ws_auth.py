@@ -230,3 +230,69 @@ def test_reconnect_with_a_wrong_token_does_not_authenticate():
     _run(ws, "ROOMK", "guest")
     assert "reconnected" not in ws.types()
     assert AUTH_ERR in ws.errors()
+
+
+# ── disconnect cleanup (shared guard, Spender's own policy) ──────────────────
+
+def test_stale_socket_disconnect_stays_silent():
+    """A socket already superseded by a reconnect must not be treated as a leaver:
+    it removes nothing and broadcasts nothing. (The shared core/rooms guard covers
+    the removal; this pins Spender's extra 'tell the survivors' broadcast, which
+    must fire ONLY when our socket was really the live one.)"""
+    _create(room="ROOML", pid="host")
+    live = _FakeWS()
+    m.ROOMS["ROOML"]["sockets"]["guest"] = live
+    m.ROOMS["ROOML"]["players"]["guest"] = "Guest"
+
+    stale = _FakeWS()                      # never registered — superseded
+    _run(stale, "ROOML", "guest")
+
+    assert m.ROOMS["ROOML"]["sockets"]["guest"] is live   # live socket untouched
+    assert live.types() == []                             # survivors not notified
+
+
+def test_departing_socket_notifies_the_survivors():
+    """The control for the above: when OUR socket really is the live one and the
+    room outlives it, the remaining sockets do get a room_update."""
+    _create(room="ROOMM", pid="host")
+    other = _FakeWS()
+    m.ROOMS["ROOMM"]["sockets"]["other"] = other
+    m.ROOMS["ROOMM"]["players"]["other"] = "Other"
+
+    leaver = _FakeWS(inbox=[json.dumps({"action": "join", "name": "Guest"})])
+    _run(leaver, "ROOMM", "guest")
+
+    asyncio.get_event_loop().run_until_complete(asyncio.sleep(0))  # let the task run
+    assert "guest" not in m.ROOMS["ROOMM"]["sockets"]
+    assert "room_update" in other.types()
+
+
+def test_connecting_alone_leaks_nothing():
+    """REGRESSION (found in the pre-ship health check). The socket used to be
+    registered in `room["sockets"]` at CONNECT time, before any proof of identity.
+    Because broadcast_room rebuilds room state PER RECIPIENT keyed on that pid,
+    merely opening a socket claiming a victim's pid — sending nothing at all —
+    returned that seat's own view: its blind reserves AND its `reconnect_tokens`
+    entry, which could then be replayed as `{"action":"reconnect"}` to become fully
+    authenticated. It also displaced the victim's live socket, dropping them.
+    """
+    _create(room="ROOMN", pid="victim")
+    m.ROOMS["ROOMN"]["game"]["players"]["victim"]["reserved"] = [
+        {"id": "L3-7", "level": 3, "from_deck": True, "points": 5, "bonus": "red", "cost": {}}]
+    live = _FakeWS()
+    m.ROOMS["ROOMN"]["sockets"]["victim"] = live
+
+    attacker = _FakeWS()                       # connects, sends nothing
+    _run(attacker, "ROOMN", "victim")
+
+    assert attacker.sent == []                                  # no frame at all
+    assert m.ROOMS["ROOMN"]["sockets"]["victim"] is live        # victim not dropped
+
+
+def test_connect_does_not_register_the_socket():
+    """The mechanism behind the above, pinned directly: connecting is not a
+    handshake, so it must not put the socket in the room."""
+    _create(room="ROOMO", pid="host")
+    before = dict(m.ROOMS["ROOMO"]["sockets"])
+    _run(_FakeWS(), "ROOMO", "stranger")
+    assert dict(m.ROOMS["ROOMO"]["sockets"]) == before

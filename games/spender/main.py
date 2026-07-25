@@ -2413,12 +2413,20 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         if room_id not in ROOMS:
             load_game_to_memory(room_id)
         r = ROOMS.setdefault(room_id, {"players": {}, "sockets": {}, "status": "open", "game": None, "host": None})
-        r["sockets"][pid] = websocket
         r.setdefault("meta", {})
+        # The socket is REGISTERED BY THE HANDSHAKE (create/join/reconnect/
+        # auth_reconnect), never here. Registering it at connect time — before any
+        # proof of identity — was a full seat takeover: `broadcast_room` rebuilds
+        # room state PER RECIPIENT keyed on the socket's pid, so merely opening a
+        # socket claiming a victim's pid and sending NOTHING returned that seat's
+        # own view — its blind reserves AND its `reconnect_tokens` entry. Replaying
+        # that token as `{"action":"reconnect"}` then defeats the identity binding
+        # entirely. It also displaced the victim's live socket, dropping them.
 
     try:
-        await broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)})
-
+        # No broadcast here either: an unregistered socket has nothing to receive,
+        # and the other seats have nothing to learn from a stranger connecting. Each
+        # handshake replies with the room state itself (created/joined/reconnected).
         while True:
             text = await websocket.receive_text()
             try:
@@ -2453,6 +2461,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     already_exists = r.get("game") is not None
                     if not already_exists:
                         r["players"][pid] = name
+                        # Register the socket HERE: the creator minted this seat, so
+                        # this is the first point ownership is proven. (Connect no
+                        # longer registers it — see ws_room_player.)
+                        r["sockets"][pid] = websocket
                         r["host"] = pid
                         r["status"] = "open"
                         r["max_players"] = max_players
@@ -2850,10 +2862,14 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
             # race (WS1 dropping after WS2 registered) would delete a live room.
             # Spender's policy differs deliberately — it drops ANY empty room, not
             # just never-started lobbies — and it tells the survivors someone left.
-            still_here = room_id in ROOMS
+            # `was_ours` must be read BEFORE the release: the survivors are told
+            # someone left only when THIS socket was the live one and the room
+            # outlived it. A stale socket (already superseded by a reconnect) must
+            # stay completely silent — it didn't leave, it was replaced.
+            was_ours = ROOMS.get(room_id, {}).get("sockets", {}).get(pid) is websocket
             dropped = _rooms.release_socket(ROOMS, room_id, pid, websocket,
                                             drop_empty_open_only=False)
-            if still_here and not dropped and ROOMS.get(room_id, {}).get("sockets"):
+            if was_ours and not dropped and ROOMS.get(room_id, {}).get("sockets"):
                 asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
 
 

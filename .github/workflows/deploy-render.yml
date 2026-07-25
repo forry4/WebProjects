@@ -5,11 +5,15 @@ on:
     branches: [main]
     paths:
       - 'app.py'   # composition root — creates the FastAPI app + mounts the features
-      - 'core/**/*.py'   # shared DB + auth layer imported by main + coc + books
-      - 'games/spender/main.py'
+      - 'core/**/*.py'   # shared DB + auth layer + room primitives, imported by every game
+      # Spender's TOP-LEVEL modules: main.py (router/rooms/WS), engine.py (the
+      # authoritative rules), cards.py (static card data), app.py (deploy shim).
+      # A single `*` does not cross `/`, so this still excludes ai/offline/ below.
+      # Was `games/spender/main.py` literally — which meant a fix to the rules in
+      # engine.py would pass CI and silently never reach prod.
+      - 'games/spender/*.py'
       - 'books/**'
       - 'games/spender/requirements.txt'
-      - 'games/spender/app.py'
       - 'games/spender/Dockerfile'
       - 'games/spender/ai/serving/**/*.py'   # serving stack: heuristic, valuation, engine, actions, mcts, infer_np, v_state, vsearch, replay
       - 'games/spender/ai/serving/*.json'   # serving data (turns tables)
