@@ -112,15 +112,30 @@ def release_socket(rooms: Rooms, room_id: str, pid: str, websocket,
       - `drop_empty_open_only`: keep playing/over games resident when the last
         socket leaves (they are resumable); drop only never-started open lobbies.
         Spender passes False — it drops any empty room.
+
+    PHANTOM ROOMS are collected regardless of who owned the socket. Spender's WS
+    handler `setdefault`s a room shell on CONNECT so it has something to hold
+    `meta`, but the socket is no longer registered until a handshake proves
+    identity — so the ownership check below can never match for a client that
+    connects and leaves without handshaking, and the empty shell would leak
+    FOREVER. Unauthenticated and trivially repeatable: opening sockets to random
+    room codes grew `ROOMS` without bound on a 512MB instance. A room with no
+    sockets, no players and no game is unambiguously garbage whoever is leaving.
     """
     room = rooms.get(room_id)
-    if not room or room.get("sockets", {}).get(pid) is not websocket:
+    if not room:
         return False
-    room["sockets"].pop(pid, None)
-    if disarm_client_ai:
-        room["client_ai"] = False
-    if room["sockets"]:
+
+    if room.get("sockets", {}).get(pid) is websocket:
+        room["sockets"].pop(pid, None)
+        if disarm_client_ai:
+            room["client_ai"] = False
+
+    if room.get("sockets"):
         return False
+    if not room.get("players") and room.get("game") is None:
+        rooms.pop(room_id, None)     # never-used shell — see PHANTOM ROOMS above
+        return True
     if drop_empty_open_only and not (room.get("status") == "open" and room.get("game") is None):
         return False
     rooms.pop(room_id, None)

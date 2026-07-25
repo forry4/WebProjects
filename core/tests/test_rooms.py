@@ -211,3 +211,31 @@ def test_release_socket_leaves_client_ai_alone_by_default():
 
 def test_release_socket_on_a_missing_room_is_a_noop():
     assert rooms.release_socket({}, "GONE", "p1", object()) is False
+
+
+def test_phantom_room_is_collected_even_though_no_socket_matched():
+    """REGRESSION: Spender's WS handler setdefaults a room shell on CONNECT but no
+    longer registers the socket until a handshake proves identity — so a client that
+    connects and leaves never matches the ownership check, and the shell used to
+    leak forever. Unauthenticated and repeatable with random room codes."""
+    store = {"R": {"players": {}, "sockets": {}, "status": "open", "game": None, "meta": {}}}
+    assert rooms.release_socket(store, "R", "nobody", object()) is True
+    assert store == {}
+
+
+def test_phantom_collection_never_touches_a_room_with_players():
+    """A real room whose last socket dropped is NOT a phantom — a resumable game
+    keeps its seats and must stay resident."""
+    store = {"R": {"players": {"p1": "Ann"}, "sockets": {}, "status": "playing",
+                   "game": {"phase": "playing"}}}
+    assert rooms.release_socket(store, "R", "p1", object()) is False
+    assert "R" in store
+
+
+def test_phantom_collection_does_not_break_the_stale_socket_guard():
+    """A superseded socket must still not disturb a LIVE room."""
+    new = object()
+    store = {"R": {"players": {"p1": "Ann"}, "sockets": {"p1": new}, "status": "playing",
+                   "game": {"phase": "playing"}}}
+    assert rooms.release_socket(store, "R", "p1", object()) is False
+    assert store["R"]["sockets"]["p1"] is new
