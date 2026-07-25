@@ -23,6 +23,7 @@ from core.auth import (
     validate_credentials,
 )
 from core.ratelimit import SlidingWindowLimiter
+from core.build_info import build_info
 
 # Spender's HTTP + WebSocket routes live on this router. The composition root
 # (top-level app.py) creates the FastAPI app, applies CORS middleware, includes
@@ -55,7 +56,9 @@ async def health():
         db_ok = await asyncio.to_thread(_db_ping)
     except Exception:
         pass
-    return {"status": "ok", "service": "spender", "version": "1.1", "db": db_ok}
+    # `commit`/`started_at` let CI verify the deploy actually landed (core/build_info).
+    return {"status": "ok", "service": "spender", "version": "1.1", "db": db_ok,
+            **build_info()}
 
 
 # ─── Card data + cost helpers ───────────────────────────────────────────────

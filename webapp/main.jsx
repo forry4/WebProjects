@@ -1,6 +1,10 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import SpenderApp from '../games/spender/Spender.jsx'
+// Pages caches the bundle ~10 min, so a tab can outlive its deploy. Watches for a
+// newer build and offers a refresh. Outside React on purpose: the shell early-returns
+// each game's component, so there is no single tree the banner could live in.
+import { startUpdateNudge } from '../shared/update-nudge.js'
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
@@ -27,3 +31,5 @@ createRoot(document.getElementById('root')).render(
     )
   )
 )
+
+startUpdateNudge()

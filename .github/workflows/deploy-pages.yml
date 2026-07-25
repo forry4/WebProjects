@@ -69,6 +69,10 @@ jobs:
         working-directory: webapp
         env:
           VITE_WS_URL: wss://splendid-nelz.onrender.com/ws
+          # Stamps the bundle AND the emitted version.json with this commit, so a
+          # tab still running an older build can notice and offer a refresh
+          # (shared/update-nudge.js). Absent locally -> 'dev' -> nudge disabled.
+          GITHUB_SHA: ${{ github.sha }}
         run: npm run build
 
       # SPA deep-link fallback: GitHub Pages has no rewrite rules, so an unknown path

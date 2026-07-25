@@ -41,6 +41,7 @@ from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
 from core.config import cors_allowed_origins
+from core.build_info import build_info
 
 LOG = logging.getLogger("games.wherewolf")
 
@@ -758,7 +759,7 @@ async def _handle_abandon(ws, room_id, pid):
 # ── REST ──────────────────────────────────────────────────────────────────────
 @werewolf_app.get("/health")
 async def health():
-    return {"status": "ok", "service": "wherewolf", "version": "1.0"}
+    return {"status": "ok", "service": "wherewolf", "version": "1.0", **build_info()}
 
 
 @werewolf_app.get("/games")

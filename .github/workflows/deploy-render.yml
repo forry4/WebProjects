@@ -51,8 +51,71 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
+      # Fired BEFORE the hook: the fallback gate below asks "did a process boot
+      # after this moment?", so it has to be read before anything is triggered.
+      - name: Mark the pre-deploy instant
+        id: pre
+        run: echo "t0=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Trigger Render deploy
         run: |
           response=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.RENDER_DEPLOY_HOOK }}")
           echo "Render response: $response"
           [ "$response" = "200" ] || [ "$response" = "202" ] || { echo "Deploy hook failed with status $response"; exit 1; }
+
+      # THE ACTUAL GATE. The step above only proves Render ACCEPTED the request —
+      # it is green whether the image builds or not. A failed Docker build (the
+      # Cython parity gate in the Dockerfile is designed to fail one) or a boot
+      # crash used to leave prod silently on the old code behind a green tick.
+      # Poll /health until it reports the commit we just pushed.
+      #
+      # `commit` is exact but needs Render to set RENDER_GIT_COMMIT. If it doesn't,
+      # fall back to `started_at` (a process that booted after t0) and say so, so
+      # the weaker check is never silent. Non-200s are normal here: the free tier
+      # returns 503 while spinning up and during the deploy swap.
+      - name: Verify the new build is actually live
+        env:
+          HEALTH_URL: https://splendid-nelz.onrender.com/health
+          WANT_SHA: ${{ github.sha }}
+          T0: ${{ steps.pre.outputs.t0 }}
+          TIMEOUT_SECONDS: "1200"   # 20 min: Docker build + wheelhouse + Cython on the free tier
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys, time
+
+          url, want = os.environ["HEALTH_URL"], os.environ["WANT_SHA"]
+          t0, deadline = int(os.environ["T0"]), time.time() + int(os.environ["TIMEOUT_SECONDS"])
+          print(f"waiting for {want[:7]} at {url}", flush=True)
+
+          last = None
+          while time.time() < deadline:
+              try:
+                  out = subprocess.run(
+                      ["curl", "-s", "--max-time", "45", url],
+                      capture_output=True, text=True, timeout=60).stdout
+                  data = json.loads(out)
+              except Exception as e:
+                  data, last = None, f"unreachable ({type(e).__name__})"
+              if data:
+                  commit, started = data.get("commit", "unknown"), data.get("started_at", 0)
+                  last = f"commit={commit[:7] if commit != 'unknown' else 'unknown'} started_at={started}"
+                  if commit != "unknown":
+                      if commit.startswith(want) or want.startswith(commit):
+                          print(f"OK  live commit matches {want[:7]}")
+                          sys.exit(0)
+                  elif started > t0:
+                      print("::warning::/health reports commit=unknown — RENDER_GIT_COMMIT is not set "
+                            "on the service, so this deploy was verified only by process start time "
+                            "(weaker: a cold start can look like a deploy). Set it in the Render "
+                            "dashboard to get an exact check.")
+                      print(f"OK  a new process booted at {started} (> {t0})")
+                      sys.exit(0)
+              print(f"  ... {last}", flush=True)
+              time.sleep(15)
+
+          print(f"::error::Timed out after {os.environ['TIMEOUT_SECONDS']}s waiting for {want[:7]} "
+                f"to go live. Last seen: {last}. The Render build likely FAILED or the new process "
+                f"crashed on boot — check the Render dashboard logs. Prod is still serving the "
+                f"previous build (nothing was rolled back).")
+          sys.exit(1)
+          PY

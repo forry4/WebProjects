@@ -678,12 +678,35 @@ git add <files> && git commit -m "..."
 git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 ```
 
-- **Backend** (`**/*.py`) deploys to Render on push to main. After a backend push, poll `/health` +
-  `/coc/health` across the deploy window (Render's zero-downtime swap keeps 200 throughout for a clean
-  deploy). CoC model swap needs no wasm rebuild (fetch a new `.bin`).
+- **Backend** (`**/*.py`) deploys to Render on push to main. The deploy job **verifies itself**: it
+  polls `/health` until it reports the pushed commit and FAILS if that never happens (see below).
+  CoC model swap needs no wasm rebuild (fetch a new `.bin`).
+- **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means
+  Render accepted the request. A failed Docker build — the Dockerfile's Cython parity gate is *designed*
+  to fail one — or a boot crash used to leave prod silently on the old code behind a green tick.
+  `core/build_info.py` puts `commit` + `started_at` in every `/health`, and `deploy-render.yml` polls
+  for the pushed SHA (falling back to "a process booted after we fired the hook", with a loud warning,
+  if `RENDER_GIT_COMMIT` isn't set on the service). A timeout means the build failed — check Render's
+  logs; nothing was rolled back, prod is still serving the previous build.
 - **Deploy preference (user):** land changes on `main` directly — don't hand over a PR (`gh` isn't
-  installed; branch off `origin/main`, push `<branch>:main` to fast-forward). When both backend + frontend
-  change, ship backend first (else a new client hits an old backend → transient "unknown action").
+  installed; branch off `origin/main`, push `<branch>:main` to fast-forward).
+- **COUPLED backend+frontend changes: use expand/contract, don't guess an order.** One push fires both
+  workflows in parallel, and Pages caches the bundle ~10 min on top of that, so *some* client always
+  runs the old frontend against the new backend. The old "ship backend first" rule only covers one
+  direction — when the BACKEND adds a requirement that the FRONTEND must satisfy, backend-first is the
+  wrong order (the seat-binding release: a cached bundle omitted `session_token` on join, so re-entering
+  your own seat answered "seat already taken"). Instead, in three pushes:
+    1. **expand** — backend accepts BOTH the old and new shapes;
+    2. ship the frontend that sends the new shape;
+    3. **contract** — remove the compatibility path.
+  Order-independent, zero broken window. The exception is a change whose whole point is to STOP
+  accepting the old shape (closing a security hole): there the compat window *is* the vulnerability, so
+  break deliberately — and rely on the update nudge below to explain it.
+- **Stale-tab nudge**: the build stamps `__BUILD_ID__` into the bundle and emits a matching
+  `version.json`; `shared/update-nudge.js` re-checks it on tab-focus and offers "A new version is
+  available — Refresh". It compares frontend-to-frontend, **never** against the backend's commit — the
+  backend only redeploys when backend paths change, so the two SHAs are legitimately different after any
+  frontend-only push and a cross-comparison would cry wolf on every deploy.
 - **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): `keepalive.yml`
   (GitHub Actions) is the SOLE mechanism — several INDEPENDENT long-lived (~90min) pre-7am runs, each
   HOLDING the connection open and retrying through the spin-up 503s (`curl --retry-all-errors` + long
