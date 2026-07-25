@@ -142,16 +142,24 @@ def _valid_max_players(value) -> int:
 
 
 # ── Shared-identity / DB helpers (thin aliases over the shared core package) ──
-def _db():
-    return get_db_conn()
+# ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
+# These were byte-identical in all four games. Aliased under the historical private
+# names so the rest of this module (and its tests) are unchanged.
+from core import rooms as _rooms
+
+normalize_room = _rooms.normalize_room
+_gen_token = _rooms.gen_room_token
+_db = _rooms.db_conn
+_send = _rooms.send_json
 
 
-def _gen_token(n: int = 12) -> str:
-    return gen_token(n)
+def _ensure_room_loaded(room_id: str) -> dict | None:
+    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
 
 
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+
+
+
 
 
 def coc_init_db() -> None:
@@ -448,23 +456,9 @@ def list_user_history(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    """Delete an OPEN game the user hosts (lobby 'cancel'). Returns True if a row
-    was removed. Uses an existence check rather than cursor.rowcount: the
-    driver-agnostic core.db wrapper (sqlite3 / libsql) doesn't expose rowcount,
-    and libsql's rowcount semantics are unreliable -- on the prod Turso backend
-    `cur.rowcount` raised, 500ing cancel. SELECT-then-DELETE is correct on both
-    backends (mirrors Spender's delete_open_game)."""
-    conn = _db()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
-                (game_id, user_id))
-    existed = cur.fetchone() is not None
-    if existed:
-        conn.execute("DELETE FROM coc_games WHERE id=? AND player1_id=? AND status='open'",
-                     (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return existed
+    """Cancel an open game this user hosts. SELECT-then-DELETE lives in
+    core.rooms — never cursor.rowcount (absent on libsql; it 500'd prod)."""
+    return _rooms.delete_open_game("coc_games", "player1_id", game_id, user_id)
 
 
 # ── Room helpers ──────────────────────────────────────────────────────────────
@@ -857,28 +851,12 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     except WebSocketDisconnect:
         pass
     finally:
-        # Stale-socket guard: only remove if THIS socket is still registered.
-        room = ROOMS.get(room_id)
-        if room and room.get("sockets", {}).get(pid) is websocket:
-            room["sockets"].pop(pid, None)
-            # Disarm the client AI when its tab goes away, so the bot's next
-            # decisions go straight to the server path instead of waiting out the
-            # per-decision watchdog. A reconnecting client re-arms itself.
-            room["client_ai"] = False
-            if not room["sockets"] and room.get("status") != "playing":
-                # keep playing/over games in memory; drop empty open rooms only
-                if room.get("status") == "open" and room.get("game") is None:
-                    ROOMS.pop(room_id, None)
+        # Stale-socket guard + client-AI disarm + empty-room cleanup: core/rooms.py.
+        _rooms.release_socket(ROOMS, room_id, pid, websocket, disarm_client_ai=True)
 
 
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    if room_id not in ROOMS:
-        load_game_to_memory(room_id)
-    return ROOMS.get(room_id)
 
 
-async def _send(ws: WebSocket, payload: dict) -> None:
-    await ws.send_text(json.dumps(payload))
 
 
 async def _handle_create(ws, room_id, pid, msg):

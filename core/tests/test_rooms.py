@@ -1,0 +1,213 @@
+"""core/rooms.py — the shared room-server primitives.
+
+These used to be four hand-maintained copies, one per game. The tests that matter
+most here are the ones guarding the two rules that copies kept getting subtly
+different: the SELECT-then-DELETE cancel (never cursor.rowcount, which raises on
+libsql) and the stale-socket disconnect guard.
+"""
+import asyncio
+import json
+import sqlite3
+
+import pytest
+
+from core import rooms
+
+
+# ─── small helpers ───────────────────────────────────────────────────────────
+
+def test_normalize_room_uppercases_and_tolerates_none():
+    assert rooms.normalize_room("abc123") == "ABC123"
+    assert rooms.normalize_room("ABC") == "ABC"
+    assert rooms.normalize_room(None) == ""
+    assert rooms.normalize_room("") == ""
+
+
+def test_gen_room_token_is_random_and_sized():
+    a, b = rooms.gen_room_token(), rooms.gen_room_token()
+    assert a != b
+    assert len(rooms.gen_room_token(6)) > 0
+
+
+def test_ensure_room_loaded_hydrates_once():
+    store = {}
+    calls = []
+
+    def loader(rid):
+        calls.append(rid)
+        store[rid] = {"players": {}, "sockets": {}}
+
+    assert rooms.ensure_room_loaded(store, "R1", loader) is store["R1"]
+    assert calls == ["R1"]
+    # Already resident -> no second load.
+    assert rooms.ensure_room_loaded(store, "R1", loader) is store["R1"]
+    assert calls == ["R1"]
+
+
+def test_ensure_room_loaded_returns_none_when_the_loader_finds_nothing():
+    assert rooms.ensure_room_loaded({}, "GONE", lambda rid: None) is None
+
+
+def test_send_json_serialises_the_payload():
+    sent = []
+
+    class WS:
+        async def send_text(self, t):
+            sent.append(t)
+
+    asyncio.new_event_loop().run_until_complete(rooms.send_json(WS(), {"type": "ok", "n": 1}))
+    assert json.loads(sent[0]) == {"type": "ok", "n": 1}
+
+
+# ─── delete_open_game ────────────────────────────────────────────────────────
+
+class _NoCloseConn:
+    """Wraps a live sqlite3 connection so the helper's own `close()` is a no-op —
+    otherwise the in-memory DB would vanish between statements. Everything else
+    passes straight through."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def close(self):
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+@pytest.fixture
+def db(monkeypatch):
+    """An in-memory DB standing in for the shared connection."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE t_games (id TEXT PRIMARY KEY, owner TEXT, status TEXT)")
+    conn.commit()
+    monkeypatch.setattr(rooms, "db_conn", lambda: _NoCloseConn(conn))
+    return conn
+
+
+def _rows(conn):
+    return conn.execute("SELECT id FROM t_games").fetchall()
+
+
+def test_delete_open_game_removes_the_hosts_open_row(db):
+    db.execute("INSERT INTO t_games VALUES ('g1', 'u1', 'open')")
+    db.commit()
+    assert rooms.delete_open_game("t_games", "owner", "g1", "u1") is True
+    assert _rows(db) == []
+
+
+def test_delete_open_game_refuses_someone_elses_game(db):
+    db.execute("INSERT INTO t_games VALUES ('g1', 'u1', 'open')")
+    db.commit()
+    assert rooms.delete_open_game("t_games", "owner", "g1", "attacker") is False
+    assert len(_rows(db)) == 1
+
+
+def test_delete_open_game_refuses_a_game_in_progress(db):
+    db.execute("INSERT INTO t_games VALUES ('g1', 'u1', 'playing')")
+    db.commit()
+    assert rooms.delete_open_game("t_games", "owner", "g1", "u1") is False
+    assert len(_rows(db)) == 1
+
+
+def test_delete_open_game_on_a_missing_row_is_false_not_an_error(db):
+    assert rooms.delete_open_game("t_games", "owner", "nope", "u1") is False
+
+
+def test_delete_open_game_never_reads_rowcount(db, monkeypatch):
+    """THE REGRESSION THIS EXISTS FOR: libsql's wrapper has no cursor.rowcount, and
+    reading it RAISED on the prod Turso backend — 500ing the cancel endpoint. Stand
+    up a connection whose cursors explode on `.rowcount` and prove the helper works."""
+
+    class NoRowcountCursor:
+        def __init__(self, cur):
+            self._cur = cur
+
+        def __getattr__(self, name):
+            if name == "rowcount":
+                raise AttributeError("libsql cursors have no rowcount")
+            return getattr(self._cur, name)
+
+    class NoRowcountConn(_NoCloseConn):
+        def cursor(self):
+            return NoRowcountCursor(self._conn.cursor())
+
+    monkeypatch.setattr(rooms, "db_conn", lambda: NoRowcountConn(db))
+    db.execute("INSERT INTO t_games VALUES ('g1', 'u1', 'open')")
+    db.commit()
+    assert rooms.delete_open_game("t_games", "owner", "g1", "u1") is True
+    assert _rows(db) == []
+
+
+def test_delete_open_game_rejects_a_non_identifier_table():
+    with pytest.raises(AssertionError):
+        rooms.delete_open_game("t_games; DROP TABLE users", "owner", "g", "u")
+
+
+# ─── release_socket (the stale-socket guard) ─────────────────────────────────
+
+def _room(status="open", game=None, **sockets):
+    return {"players": {}, "sockets": dict(sockets), "status": status, "game": game}
+
+
+def test_release_socket_removes_only_the_matching_socket():
+    ws = object()
+    store = {"R": _room(p1=ws, p2=object())}
+    rooms.release_socket(store, "R", "p1", ws)
+    assert "p1" not in store["R"]["sockets"]
+    assert "p2" in store["R"]["sockets"]
+
+
+def test_release_socket_ignores_a_superseded_socket():
+    """THE RECONNECT RACE: WS1 drops after WS2 has already registered. The departing
+    handler must not remove the live socket (that once deleted rooms mid-game)."""
+    old, new = object(), object()
+    store = {"R": _room(p1=new)}
+    dropped = rooms.release_socket(store, "R", "p1", old)
+    assert dropped is False
+    assert store["R"]["sockets"]["p1"] is new
+    assert "R" in store
+
+
+def test_release_socket_drops_an_empty_never_started_lobby():
+    ws = object()
+    store = {"R": _room(status="open", game=None, p1=ws)}
+    assert rooms.release_socket(store, "R", "p1", ws) is True
+    assert "R" not in store
+
+
+def test_release_socket_keeps_an_empty_game_in_progress():
+    """A playing/over game stays resident so it can be resumed."""
+    ws = object()
+    store = {"R": _room(status="playing", game={"phase": "playing"}, p1=ws)}
+    assert rooms.release_socket(store, "R", "p1", ws) is False
+    assert "R" in store
+
+
+def test_release_socket_drop_empty_open_only_false_drops_anything():
+    """Spender's variant: any empty room goes."""
+    ws = object()
+    store = {"R": _room(status="playing", game={"phase": "playing"}, p1=ws)}
+    assert rooms.release_socket(store, "R", "p1", ws, drop_empty_open_only=False) is True
+    assert "R" not in store
+
+
+def test_release_socket_disarms_the_client_ai_when_asked():
+    ws = object()
+    store = {"R": _room(status="playing", game={}, p1=ws, p2=object())}
+    store["R"]["client_ai"] = True
+    rooms.release_socket(store, "R", "p1", ws, disarm_client_ai=True)
+    assert store["R"]["client_ai"] is False
+
+
+def test_release_socket_leaves_client_ai_alone_by_default():
+    ws = object()
+    store = {"R": _room(status="playing", game={}, p1=ws, p2=object())}
+    store["R"]["client_ai"] = True
+    rooms.release_socket(store, "R", "p1", ws)
+    assert store["R"]["client_ai"] is True
+
+
+def test_release_socket_on_a_missing_room_is_a_noop():
+    assert rooms.release_socket({}, "GONE", "p1", object()) is False

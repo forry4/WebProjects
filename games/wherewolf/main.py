@@ -73,16 +73,24 @@ ROOMS: dict[str, dict] = {}
 ROOM_LOCK = asyncio.Lock()
 
 
-def _db():
-    return get_db_conn()
+# ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
+# These were byte-identical in all four games. Aliased under the historical private
+# names so the rest of this module (and its tests) are unchanged.
+from core import rooms as _rooms
+
+normalize_room = _rooms.normalize_room
+_gen_token = _rooms.gen_room_token
+_db = _rooms.db_conn
+_send = _rooms.send_json
 
 
-def _gen_token(n: int = 12) -> str:
-    return gen_token(n)
+def _ensure_room_loaded(room_id: str) -> dict | None:
+    return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
 
 
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+
+
+
 
 
 def ww_init_db() -> None:
@@ -276,17 +284,9 @@ def list_user_games(user_id: str) -> list[dict]:
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:
-    conn = _db()
-    cur = conn.cursor()
-    # Count first (the driver-agnostic cursor has no reliable rowcount on libsql).
-    cur.execute("SELECT COUNT(*) FROM werewolf_games WHERE id=? AND host_id=? AND status='open'",
-                (game_id, user_id))
-    deleted = (cur.fetchone()[0] or 0) > 0
-    if deleted:
-        cur.execute("DELETE FROM werewolf_games WHERE id=? AND host_id=? AND status='open'", (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return deleted
+    """Cancel an open game this user hosts. SELECT-then-DELETE lives in
+    core.rooms — never cursor.rowcount (absent on libsql; it 500'd prod)."""
+    return _rooms.delete_open_game("werewolf_games", "host_id", game_id, user_id)
 
 
 # ── Broadcast (per-recipient redaction) ───────────────────────────────────────
@@ -532,22 +532,13 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     except WebSocketDisconnect:
         pass
     finally:
-        room = ROOMS.get(room_id)
-        if room and room.get("sockets", {}).get(pid) is websocket:
-            room["sockets"].pop(pid, None)
-            # Drop only empty, not-yet-started open rooms; keep playing/over in memory.
-            if not room["sockets"] and room.get("status") == "open" and room.get("game") is None:
-                ROOMS.pop(room_id, None)
+        # Stale-socket guard + empty-room cleanup, shared: core/rooms.py.
+        # Drops only empty, not-yet-started open rooms; playing/over stay resident.
+        _rooms.release_socket(ROOMS, room_id, pid, websocket)
 
 
-def _ensure_room_loaded(room_id: str) -> dict | None:
-    if room_id not in ROOMS:
-        load_game_to_memory(room_id)
-    return ROOMS.get(room_id)
 
 
-async def _send(ws: WebSocket, payload: dict) -> None:
-    await ws.send_text(json.dumps(payload))
 
 
 async def _handle_create(ws, room_id, pid, msg) -> bool:

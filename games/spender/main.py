@@ -79,8 +79,11 @@ LOG = logging.getLogger("games.spender")
 logging.basicConfig(level=logging.INFO)
 
 
-def normalize_room(rid: str) -> str:
-    return (rid or "").upper()
+# ── Shared room-server primitives (core/rooms.py) ────────────────────────────
+# Byte-identical in all four games; aliased under the historical names here.
+from core import rooms as _rooms
+
+normalize_room = _rooms.normalize_room
 
 
 # ─── Spender DB schema ──────────────────────────
@@ -400,17 +403,7 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
     _Cursor wrapper (sqlite3 / libsql) doesn't expose rowcount, and libsql's
     rowcount semantics are unreliable -- so we SELECT-then-DELETE, which is
     correct on both backends."""
-    conn = get_db_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT 1 FROM games WHERE id=? AND player1_id=? AND status='open'",
-                (game_id, user_id))
-    existed = cur.fetchone() is not None
-    if existed:
-        conn.execute("DELETE FROM games WHERE id=? AND player1_id=? AND status='open'",
-                     (game_id, user_id))
-        conn.commit()
-    conn.close()
-    return existed
+    return _rooms.delete_open_game("games", "player1_id", game_id, user_id)
 
 
 init_db()
@@ -2930,17 +2923,16 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         LOG.info("ws disconnected room=%s player=%s", room_id, pid)
     finally:
         async with ROOM_LOCK:
-            r = ROOMS.get(room_id)
-            if r:
-                # Only clean up if our socket hasn't been replaced by a reconnect.
-                # If it has, the new socket is already registered; removing it would
-                # delete the room and cause "game not started" on the next move.
-                if r["sockets"].get(pid) is websocket:
-                    r["sockets"].pop(pid, None)
-                    if not r["sockets"]:
-                        ROOMS.pop(room_id, None)
-                    else:
-                        asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
+            # Stale-socket guard shared with the other three games (core/rooms.py):
+            # only act if OUR socket is still the registered one, else a reconnect
+            # race (WS1 dropping after WS2 registered) would delete a live room.
+            # Spender's policy differs deliberately — it drops ANY empty room, not
+            # just never-started lobbies — and it tells the survivors someone left.
+            still_here = room_id in ROOMS
+            dropped = _rooms.release_socket(ROOMS, room_id, pid, websocket,
+                                            drop_empty_open_only=False)
+            if still_here and not dropped and ROOMS.get(room_id, {}).get("sockets"):
+                asyncio.create_task(broadcast_room(room_id, {"type": "room_update", "room": mk_room_state(room_id)}))
 
 
 # ─── HTTP endpoints ───────────────────────────────────────────────────────────
