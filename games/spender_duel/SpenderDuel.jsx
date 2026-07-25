@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
@@ -190,9 +190,9 @@ function DuelBag({ count }) {
     <span className="duel-bag" title={`${count} token${count === 1 ? "" : "s"} waiting in the bag`}>
       <svg className="duel-bag-svg" viewBox="64 16 384 484" aria-hidden="true">
         <clipPath id="dbTop"><rect x="0" y="0" width="512" height="200" /></clipPath>
-        <path d={BAG_PATH} fill="#eef1f6" stroke="#4a5a78" strokeWidth="7" strokeLinejoin="round" />
-        <path d={BAG_PATH} fill="#4a86e0" clipPath="url(#dbTop)" />
-        <path d={BAG_PATH} fill="none" stroke="#22417a" strokeWidth="7" strokeLinejoin="round" clipPath="url(#dbTop)" />
+        <path d={BAG_PATH} fill="#eef1f6" stroke="#5b5570" strokeWidth="7" strokeLinejoin="round" />
+        <path d={BAG_PATH} fill="#bf6fd0" clipPath="url(#dbTop)" />
+        <path d={BAG_PATH} fill="none" stroke="#7a3d96" strokeWidth="7" strokeLinejoin="round" clipPath="url(#dbTop)" />
       </svg>
       <span className="duel-bag-num">{count}</span>
     </span>
@@ -431,7 +431,7 @@ const css = `
 /* Token bag: white drawstring pouch (vector) with the remaining count on its body. */
 .duel-bag{position:relative;display:inline-flex;align-items:center;justify-content:center;width:42px;height:52px;flex-shrink:0}
 .duel-bag-svg{width:100%;height:100%;display:block}
-.duel-bag-num{position:absolute;left:0;right:0;top:69%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.86rem;line-height:1;color:#2a3f6b;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.9),0 1px 1px rgba(255,255,255,.7)}
+.duel-bag-num{position:absolute;left:0;right:0;top:69%;transform:translateY(-50%);text-align:center;font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;font-size:.86rem;line-height:1;color:#5a2f74;pointer-events:none;text-shadow:0 0 2px rgba(255,255,255,.9),0 1px 1px rgba(255,255,255,.7)}
 .duel-actionrow{display:flex;gap:10px;align-items:center;min-height:40px;flex-wrap:wrap;justify-content:center}
 /* Keep every action-row button the SAME height. Two mismatches to cancel: (1) btn-gold has
    no border while btn-outline adds 1px — with border-box + auto height a border still adds
@@ -1060,8 +1060,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // ── board REFILL animation: on a replenish, empty cells go null->token; fly each new
   //    token from the bag to its cell, staggered center-outward, and keep the real cell
-  //    EMPTY (hidden) until its flyer lands — so it reads as tokens drawn from the bag. ──
-  useEffect(() => {
+  //    EMPTY (hidden) until its flyer lands — so it reads as tokens drawn from the bag.
+  //    useLayoutEffect (not useEffect): hide the new tokens BEFORE the browser paints them,
+  //    else there's a one-frame flash of the filled board before the animation starts. ──
+  useLayoutEffect(() => {
     const board = liveGame?.board;
     if (!board) return;
     // Don't animate while rewinding, and re-baseline on first sight of a room / after review
