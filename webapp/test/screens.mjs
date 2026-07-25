@@ -424,6 +424,20 @@ try {
 				if (seats < 2) await sleep(400);
 			}
 			check("the host sees the second player arrive", seats >= 2, `saw ${seats} seats`);
+
+			// DEEP LINK into that room by URL — the invite-link path. This is driven by
+			// a separate deep-entry effect that only runs on Spender's LOBBY screen, and
+			// a shipped bug proved nothing was watching it: after the site/Spender screen
+			// split its guard still read `screen !== "browser"`, which can never be true
+			// now, so invite links silently stopped working while every other check
+			// stayed green.
+			const deep = await joinCtx.newPage();
+			await deep.goto(`http://localhost:${PORT}/spender/${code}`, { waitUntil: "networkidle" });
+			const landed = await deep.waitForSelector(".room-code-box, .game", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			check("a deep link enters the room it names", landed,
+				`url ${new URL(deep.url()).pathname}`);
+			await deep.close();
 		}
 		check("no page errors in the two-client flow", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await hostCtx.close();

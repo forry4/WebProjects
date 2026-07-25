@@ -43,12 +43,12 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // ─── Site identity ─────────────────────────────────────────────────────────
 // Registry of games shown on the home menu. Add future games here — each tile
 // routes to its own `screen`. `status: "ready"` is playable; "soon" shows a
-// Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
+// Coming Soon placeholder. Spender's lobby is its "browser" spenderScreen.
 
 // URL path segment 1 ↔ shell screen (shared/router.js). Always translate through these
-// tables — GAMES[].id ≠ path for wherewolf, and Spender's lobby screen is "browser".
+// tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
-// "waiting"/"game" screens map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
+// Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
 const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
 const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
 
@@ -1970,7 +1970,7 @@ export default function SpenderApp() {
 		}
 		// Leaving the current mode: state-only cleanup, then land on the target.
 		if (puzzlingRef.current) resetPuzzleState();
-		else if (s === "waiting" || s === "game") leaveSpenderRoomState();
+		else if (inRoomScreen) leaveSpenderRoomState();
 		enterRoute(route);
 	};
 	applyPopRouteRef.current = applyPopRoute;
@@ -1981,7 +1981,7 @@ export default function SpenderApp() {
 	// auto-reconnect fallback, so a deep link into room B can't cross-wire with a saved
 	// pointer at room A. Runs post-commit, so myId/playerName are settled after auth.
 	useEffect(() => {
-		if (!deepRoom || screen !== "browser") return;
+		if (!deepRoom || screen !== "spender" || spenderScreen !== "browser") return;
 		urlAttemptRef.current = { rid: deepRoom, retried: false };
 		handleContinue(deepRoom);
 		setDeepRoom(null);
