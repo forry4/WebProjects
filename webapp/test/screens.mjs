@@ -186,6 +186,42 @@ try {
 		await ctx.close();
 	}
 
+	// ── Auth screen ───────────────────────────────────────────────────────────
+	// Every context above SEEDS a guest identity to skip straight to a game, so
+	// nothing else here ever renders the auth screen. It is the site's front door
+	// and the first screen extracted into webapp/shell/, so it gets its own pass
+	// with NO stored user.
+	{
+		const ctx = await browser.newContext();           // deliberately unseeded
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+		const has = async (sel, ms = 25_000) => {
+			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
+			return (await page.locator(sel).count().catch(() => 0)) > 0;
+		};
+
+		await page.goto(`http://localhost:${PORT}/`, { waitUntil: "networkidle" });
+		check("a fresh visitor gets the auth screen", await has(".auth-screen"));
+		check("...with all three tabs", await page.locator(".auth-tab").count() === 3);
+
+		// Guest sign-in is the one path that needs no account, so it is the flow the
+		// harness can drive end to end: it must produce an identity and land on home.
+		await page.locator(".auth-tab").nth(2).click().catch(() => {});
+		const guestBtn = page.locator("button", { hasText: "Play as Guest" });
+		await guestBtn.click({ timeout: 15_000 }).catch(() => {});
+		check("guest sign-in reaches the home menu", await has(".home-game-card"));
+		const stored = await page.evaluate(() => localStorage.getItem("spender_user"));
+		check("...and a guest is NOT persisted to localStorage", stored === null,
+			`got ${stored}`);
+		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

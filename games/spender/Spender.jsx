@@ -24,6 +24,9 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+// Site-shell screens, extracted out of this file (see webapp/shell/AuthScreen.jsx).
+import AuthScreen from "../../webapp/shell/AuthScreen.jsx";
+import HomeScreen, { SITE_NAME, GAMES } from "../../webapp/shell/HomeScreen.jsx";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -38,16 +41,9 @@ const WS_BASE = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 
 // ─── Site identity ─────────────────────────────────────────────────────────
-const SITE_NAME = "Forrest Games";
 // Registry of games shown on the home menu. Add future games here — each tile
 // routes to its own `screen`. `status: "ready"` is playable; "soon" shows a
 // Coming Soon placeholder. Spender's lobby is the existing "browser" screen.
-const GAMES = [
-	{ id: "spender", name: "Spender", tagline: "A gem merchant's game of prestige", status: "ready", screen: "browser", accent: "#d4a84c", players: "1–4 players" },
-	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#d6454b", players: "1–4 players" },
-	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#6f86d6", players: "3–10 players" },
-	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#bf6fd0", players: "1–2 players" },
-];
 
 // URL path segment 1 ↔ shell screen (shared/router.js). Always translate through these
 // tables — GAMES[].id ≠ path for wherewolf, and Spender's lobby screen is "browser".
@@ -59,12 +55,6 @@ const MODE_FOR_SCREEN = { home: "home", browser: "spender", coc: "coc", werewolf
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
 // the game: cut gem / castle gate / crescent moon / crown.
-const GAME_EMBLEM = {
-	spender: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M7 5H17L20 9L12 20L4 9Z" /><path d="M4 9H20M7 5L9 9M17 5L15 9M9 9L12 20M15 9L12 20M9 9H15" /></svg>),
-	coc: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 20V10H7V7H10V10H14V7H17V10H20V20Z" /><path d="M10 20V15H14V20" /></svg>),
-	wherewolf: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M20 15A8 8 0 1 1 11 4A6.5 6.5 0 0 0 20 15Z" /><circle cx="17.5" cy="6" r=".9" fill="currentColor" stroke="none" /></svg>),
-	duel: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 9L7 16H17L20 9L15.5 12.5L12 6L8.5 12.5Z" /><path d="M7.5 19H16.5" /></svg>),
-};
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 // GEM_COLORS / GEM_LABELS / GEM_HEX now come from shared/splendor.jsx (imported
@@ -789,12 +779,6 @@ export default function SpenderApp() {
 	});
 
 	// ── Auth form state ────────────────────────────────────────────────────
-	const [authTab, setAuthTab] = useState("login");
-	const [authName, setAuthName] = useState("");
-	const [authPassword, setAuthPassword] = useState("");
-	const [guestName, setGuestName] = useState("");
-	const [authError, setAuthError] = useState("");
-	const [authLoading, setAuthLoading] = useState(false);
 
 	// ── Browser state ──────────────────────────────────────────────────────
 	const [openGames, setOpenGames] = useState(() => readLobbyCache("spender", myId, "open", []));
@@ -1508,37 +1492,17 @@ export default function SpenderApp() {
 	}
 
 	// ── Auth actions ───────────────────────────────────────────────────────
-	const handleAuth = async () => {
-		if (!authName.trim() || !authPassword.trim()) {
-			setAuthError("Name and password required"); return;
+	// The FORM lives in webapp/shell/AuthScreen.jsx; the shell keeps identity. A
+	// registered user's id/token is persisted, a guest's is not (guests keep the
+	// anonymous id they already had, so a game started before signing in stays theirs).
+	const handleAuthenticated = (user) => {
+		if (!user.guest) {
+			try {
+				localStorage.setItem("spender_user", JSON.stringify(user));
+				localStorage.setItem("spender_myId", user.id);
+			} catch {}
+			setMyId(user.id);
 		}
-		setAuthError(""); setAuthLoading(true);
-		try {
-			const endpoint = authTab === "login" ? "/auth/login" : "/auth/register";
-			const res = await fetch(`${HTTP_BASE}${endpoint}`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ name: authName.trim(), password: authPassword.trim() }),
-			});
-			const data = await res.json();
-			if (data.ok) {
-				const user = { id: data.user.id, name: data.user.name, is_admin: !!data.user.is_admin, session_token: data.session_token || null };
-				try { localStorage.setItem("spender_user", JSON.stringify(user)); localStorage.setItem("spender_myId", user.id); } catch {}
-				setAuthUser(user);
-				setMyId(user.id);
-				consumePendingRoute();
-			} else {
-				setAuthError(data.message || "Something went wrong");
-			}
-		} catch {
-			setAuthError("Could not reach server");
-		}
-		setAuthLoading(false);
-	};
-
-	const handleGuestPlay = () => {
-		const name = guestName.trim() || `Guest${Math.floor(Math.random() * 9000 + 1000)}`;
-		const user = { id: myId, name, guest: true };
 		setAuthUser(user);
 		consumePendingRoute();
 	};
@@ -2391,104 +2355,17 @@ export default function SpenderApp() {
 
 	// Auth screen
 	if (screen === "auth") return (
-		<>
-			<style>{css}</style>
-			<div className="app auth-screen">
-				<div className="auth-logo">{SITE_NAME}</div>
-				<p className="auth-tagline">A collection of tabletop games</p>
-
-				<div className="auth-card">
-					<div className="auth-tabs">
-						{["login", "register", "guest"].map(tab => (
-							<button key={tab} className={`auth-tab${authTab === tab ? " active" : ""}`}
-								onClick={() => { setAuthTab(tab); setAuthError(""); }}>
-								{tab === "login" ? "Sign In" : tab === "register" ? "Register" : "Guest"}
-							</button>
-						))}
-					</div>
-
-					{authTab !== "guest" ? (
-						<>
-							<input className="auth-field" placeholder="Name" value={authName}
-								onChange={e => setAuthName(e.target.value)} maxLength={authTab === "register" ? 16 : 64}
-								onKeyDown={e => e.key === "Enter" && handleAuth()} />
-							<input className="auth-field" placeholder="Password" type="password" value={authPassword}
-								onChange={e => setAuthPassword(e.target.value)} maxLength={authTab === "register" ? 16 : 128}
-								onKeyDown={e => e.key === "Enter" && handleAuth()} />
-							{authError && <div className="auth-error">{authError}</div>}
-							<button className="btn btn-gold btn-full mt-8" onClick={handleAuth} disabled={authLoading}>
-								{authLoading && <span className="spinner" />}
-								{authTab === "login" ? "Sign In" : "Create Account"}
-							</button>
-						</>
-					) : (
-						<>
-							<p style={{ color: "var(--text-dim)", fontSize: ".88rem", marginBottom: 14, lineHeight: 1.5 }}>
-								Play without an account. Your game history won't be saved.
-							</p>
-							<div className="guest-name-row">
-								<input className="auth-field" placeholder="Display name (optional)"
-									value={guestName} onChange={e => setGuestName(e.target.value)} maxLength={20}
-									onKeyDown={e => e.key === "Enter" && handleGuestPlay()} />
-							</div>
-							<button className="btn btn-outline btn-full mt-8" onClick={handleGuestPlay}>
-								Play as Guest
-							</button>
-						</>
-					)}
-				</div>
-			</div>
-		</>
+		<AuthScreen siteName={SITE_NAME} httpBase={HTTP_BASE} css={css} myId={myId}
+			onAuthenticated={handleAuthenticated} />
 	);
 
 	// Home menu — pick a game (Forrest Games landing)
 	if (screen === "home") return (
-		<>
-			<style>{css}</style>
-			<div className="app">
-				<div className="home">
-					<div className="home-header">
-						<div className="browser-user">
-							{authUser?.guest && <span className="browser-guest-badge">Guest</span>}
-							<span className="browser-username">{authUser?.name}</span>
-							<button className="btn btn-ghost btn-sm" onClick={handleLogout}>
-								{authUser?.guest ? "Exit" : "Logout"}
-							</button>
-						</div>
-					</div>
-
-					<div className="home-hero">
-						<div className="home-logo">{SITE_NAME}</div>
-						<p className="home-tagline">Choose a game</p>
-					</div>
-
-					<div className="home-games">
-						{GAMES.map(gm => (
-							<button key={gm.id} className={`home-game-card ${gm.status}`}
-								style={{ "--accent": gm.accent }}
-								onClick={() => nav(gm.screen)}>
-								<span className="home-game-emblem" aria-hidden="true">{GAME_EMBLEM[gm.id]}</span>
-								<div className="home-game-text">
-									<div className="home-game-name">{gm.name}</div>
-									<div className="home-game-desc">{gm.tagline}</div>
-									<span className="home-game-players">{gm.players}</span>
-								</div>
-							</button>
-						))}
-					</div>
-
-					<div style={{ textAlign: "center", marginTop: 24, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-						<button type="button" className="btn btn-ghost" onClick={() => { pushPath(buildPath("puzzles")); enterPuzzles(); }}>
-							🧩 Spender Puzzles
-						</button>
-						<button type="button" className="btn btn-ghost" onClick={() => nav("books")}>
-							📚 Books
-						</button>
-					</div>
-				</div>
-				{toast && <div className="toast">{toast}</div>}
-			</div>
-		</>
+		<HomeScreen authUser={authUser} css={css} toast={toast}
+			onPickGame={nav}
+			onPuzzles={() => { pushPath(buildPath("puzzles")); enterPuzzles(); }}
+			onBooks={() => nav("books")}
+			onLogout={handleLogout} />
 	);
 
 	// Books — personal ranked reading list (public read, owner edit)

@@ -543,6 +543,17 @@ game-screen changes need this isolation render or a live staging check.
 `webapp/main.jsx` mounts `Spender.jsx`, which is both the site shell (home menu, auth, routing to every
 game/Books/Puzzles) and Spender's own game UI.
 
+**Shell/game split — IN PROGRESS.** The auth screen and home menu now live in `webapp/shell/`
+(`AuthScreen.jsx`, `HomeScreen.jsx`), outside the Spender package, along with the site's game
+catalogue. AuthScreen owns its own six form-state hooks and reports back through a single
+`onAuthenticated(user)`; the shell keeps identity. Note the asymmetry it preserves: a REGISTERED user
+is written to `localStorage`, a GUEST is not (guests keep the anonymous id they already had, so a game
+started before signing in stays theirs) — `npm run screens` asserts exactly that.
+**Still to invert:** `screen`, `myId`, `authUser` and `toast` remain in `SpenderApp` alongside ~48
+Spender-only state hooks. Finishing it means lifting those 48 into a `SpenderGame` component so the
+shell owns routing and each game is a sibling. Do NOT attempt it without `npm run screens` green —
+and note the harness proves screens MOUNT and navigation works, not that gameplay still works.
+
 ### Screen flow & derived state
 - `"auth"` → `"browser"` → `"waiting"` (2-player) | `"game"` (vs-AI goes straight to game).
 - `inGame(status)` = `"playing"` OR `"over"` (a finished game stays on the game screen for the review UI).
