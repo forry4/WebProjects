@@ -345,6 +345,25 @@ try {
 		check("the server applied the move and re-broadcast our panel",
 			panelAfter !== panelBefore && panelAfter.length > 0,
 			`panel unchanged: ${JSON.stringify(panelBefore.slice(0, 60))}`);
+		// Back OUT of a live room. This drives applyPopRoute's inSpenderRoom branch —
+		// the subtlest thing the site/Spender screen split touches, since it has to tell
+		// "in a Spender ROOM" (waiting/game) from "in the Spender LOBBY" (browser) now
+		// that those live in two different pieces of state.
+		await page.goBack({ waitUntil: "networkidle" }).catch(() => {});
+		const backToLobby = await has(".lby-create-row", 20_000);
+		check("Back leaves a live game and returns to the Spender lobby", backToLobby,
+			`url ${new URL(page.url()).pathname}`);
+
+		// Puzzles are their own SITE-level mode but render on Spender's GAME screen —
+		// the one place the two levels deliberately disagree (site mode "puzzles",
+		// spenderScreen "game", puzzling=true, and no socket). /puzzles picks one
+		// immediately rather than showing a list, so assert the board itself.
+		await page.goto(`http://localhost:${PORT}/puzzles`, { waitUntil: "networkidle" });
+		const puzzleBoard = await has(".game", 25_000);
+		const puzzleText = await page.locator("#root").innerText().catch(() => "");
+		check("a puzzle renders on Spender's game screen", puzzleBoard && /PUZZLE/i.test(puzzleText),
+			`board=${puzzleBoard} url=${new URL(page.url()).pathname}`);
+
 		check("no page errors while playing", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}

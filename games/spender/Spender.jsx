@@ -49,8 +49,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf, and Spender's lobby screen is "browser".
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // "waiting"/"game" screens map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "browser", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
-const MODE_FOR_SCREEN = { home: "home", browser: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", books: "books", puzzles: "puzzles" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -654,7 +654,18 @@ export default function SpenderApp() {
 	});
 
 	// ── Screen & room state ────────────────────────────────────────────────
+	// SITE-LEVEL mode only: loading | auth | home | spender | coc | werewolf | duel |
+	// books | puzzles. `screen` used to ALSO carry Spender's own browser/waiting/game,
+	// conflating "which part of the site am I in" with "which Spender screen" — which is
+	// what made the shell impossible to lift out of this file. Spender's own screen now
+	// lives in `spenderScreen` and is only meaningful while screen === "spender".
 	const [screen, setScreen] = useState("loading");
+	const [spenderScreen, setSpenderScreen] = useState("browser");   // browser | waiting | game
+
+	// Enter one of Spender's own screens. Always sets BOTH, so the two can never drift
+	// (a bare setSpenderScreen while the site is on, say, /coc would render nothing).
+	// NOTE: a puzzle also runs on "game" — with puzzling=true and no socket.
+	const goSpender = (sub) => { setScreen("spender"); setSpenderScreen(sub); };
 	const [loadingProgress, setLoadingProgress] = useState(0);
 	const [showLoading, setShowLoading] = useState(false);
 	// Bumped when the tab is foregrounded while still stuck on the loading screen, to
@@ -844,19 +855,19 @@ export default function SpenderApp() {
 		}
 		if (msg.type === "created") {
 			setRoomData(msg.room);
-			if (inGame(msg.room?.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room?.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "joined") {
 			setRoomData(msg.room);
-			if (inGame(msg.room?.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room?.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "reconnected") {
 			setRoomData(msg.room);
-			if (inGame(msg.room.status)) setScreen("game");
-			else setScreen("waiting");
+			if (inGame(msg.room.status)) goSpender("game");
+			else goSpender("waiting");
 		} else if (msg.type === "room_update") {
 			setRoomData(msg.room);
-			if (inGame(msg.room.status) && screen !== "game") setScreen("game");
+			if (inGame(msg.room.status) && spenderScreen !== "game") goSpender("game");
 		} else if (msg.type === "ping") {
 			// Another player tapped your player box (or you tapped theirs) → chime.
 			playPing();
@@ -917,7 +928,7 @@ export default function SpenderApp() {
 
 	// ── Mount: do NOT auto-resume a saved game ─────────────────────────────
 	// Auto-reconnecting on load snapped you from the home/lobby straight into the game
-	// (the async "reconnected"/"room_update" forced setScreen("game")) — jarring. Resume
+	// (the async "reconnected"/"room_update" forced goSpender("game")) — jarring. Resume
 	// is now EXPLICIT via the lobby's Resume/Continue buttons (handleContinue connects +
 	// enters). Keep only the disconnect cleanup so an explicit connection tears down on
 	// unmount.
@@ -930,6 +941,8 @@ export default function SpenderApp() {
 	roomIdRef.current = roomId;
 	const screenRef = useRef(screen);
 	screenRef.current = screen;
+	const spenderScreenRef = useRef(spenderScreen);
+	spenderScreenRef.current = spenderScreen;
 	const reviewingRef = useRef(reviewing);
 	reviewingRef.current = reviewing;
 	// A puzzle drives the "game" screen with roomId set to the puzzle id but NO socket
@@ -963,7 +976,7 @@ export default function SpenderApp() {
 			// reviewing a finished game or playing a puzzle (neither has a live socket —
 			// a reconnect would be spurious and, in a puzzle, clobbers the board).
 			if (document.visibilityState === "visible"
-				&& screenRef.current === "game"
+				&& screenRef.current === "spender" && spenderScreenRef.current === "game"
 				&& !reviewingRef.current
 				&& !puzzlingRef.current
 				&& roomIdRef.current
@@ -1164,7 +1177,7 @@ export default function SpenderApp() {
 	}, [humanGame, myTurn]);
 
 	useEffect(() => {
-		if (screen === "browser" && authUser) fetchGames(authUser);
+		if (screen === "spender" && spenderScreen === "browser" && authUser) fetchGames(authUser);
 	}, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
@@ -1193,7 +1206,7 @@ export default function SpenderApp() {
 		const vp = document.querySelector('meta[name="viewport"]');
 		if (!vp) return;
 		const base = "width=device-width, initial-scale=1.0";
-		if (screen === "game") vp.setAttribute("content", base + ", maximum-scale=1.0, user-scalable=no");
+		if (screen === "spender" && spenderScreen === "game") vp.setAttribute("content", base + ", maximum-scale=1.0, user-scalable=no");
 		return () => vp.setAttribute("content", base);
 	}, [screen]);
 
@@ -1597,7 +1610,7 @@ export default function SpenderApp() {
 					ai_variant: data.ai_variant,
 				});
 				setResultReady(true);
-				setScreen("game");
+				goSpender("game");
 			}
 			setReplaySnapshots(snaps);
 			setReplayTurn(null);
@@ -1766,7 +1779,7 @@ export default function SpenderApp() {
 				game: { ...relabelGame(puz.steps[0].snapshot, heroPid), moves: [] },
 			});
 			setPuzzling(true);
-			setScreen("game");
+			goSpender("game");
 		} catch { setToast("Couldn't reach the server"); }
 	};
 
@@ -1868,7 +1881,7 @@ export default function SpenderApp() {
 	const goToMenu = () => {
 		leaveSpenderRoomState();
 		pushPath(buildPath("spender"));   // leave the room URL (dedup no-op when popstate-driven)
-		setScreen("browser");
+		goSpender("browser");
 		fetchGames(authUser);
 	};
 
@@ -1892,7 +1905,7 @@ export default function SpenderApp() {
 		}
 		if (g === "puzzles") { enterPuzzles(); return; }   // needs the fetch+pick, not just the screen
 		if (g === "spender") {
-			setScreen("browser");
+			goSpender("browser");
 			if (route.room) setDeepRoom(route.room);   // deep entry once the lobby is up
 			return;
 		}
@@ -1926,8 +1939,12 @@ export default function SpenderApp() {
 	// stale closure.
 	const applyPopRoute = (route) => {
 		const s = screenRef.current;
-		const inSpenderRoom = (s === "waiting" || s === "game") && !puzzlingRef.current;
-		const curMode = (s === "waiting" || s === "game")
+		// "in a Spender ROOM" means waiting/game — the lobby (browser) is not a room.
+		const inRoomScreen = s === "spender"
+			&& (spenderScreenRef.current === "waiting" || spenderScreenRef.current === "game");
+		const inSpenderRoom = inRoomScreen && !puzzlingRef.current;
+		// A puzzle runs on Spender's game screen but is its own site-level mode.
+		const curMode = inRoomScreen
 			? (puzzlingRef.current ? "puzzles" : "spender")
 			: (MODE_FOR_SCREEN[s] || "home");
 		const target = route.game === null ? "home" : route.game;
@@ -1938,7 +1955,7 @@ export default function SpenderApp() {
 				if (rid && (!inSpenderRoom || rid !== roomIdRef.current)) {
 					// Forward into a room (or across rooms): via the lobby + the deep-entry effect.
 					if (inSpenderRoom) leaveSpenderRoomState();
-					setScreen("browser");
+					goSpender("browser");
 					setDeepRoom(rid);
 				} else if (!rid && (inSpenderRoom || urlAttemptRef.current)) {
 					// Back out of the room → lobby — INCLUDING out of a still-connecting URL
@@ -2422,7 +2439,7 @@ export default function SpenderApp() {
 	);
 
 	// Game browser screen
-	if (screen === "browser") return (
+	if (screen === "spender" && spenderScreen === "browser") return (
 		<>
 			<style>{css}</style>
 			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
@@ -2645,7 +2662,7 @@ export default function SpenderApp() {
 	);
 
 	// Waiting screen
-	if (screen === "waiting") return (
+	if (screen === "spender" && spenderScreen === "waiting") return (
 		<>
 			<style>{css}</style>
 			<div className="app" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
@@ -2692,7 +2709,7 @@ export default function SpenderApp() {
 
 	// Winner screen (held back 2s after the game ends — see the resultReady effect —
 	// so the final board is visible for a beat before the result is revealed).
-	if (screen === "game" && game?.phase === "over" && !reviewing && !puzzling && resultReady) {
+	if (screen === "spender" && spenderScreen === "game" && game?.phase === "over" && !reviewing && !puzzling && resultReady) {
 		const winners = Array.isArray(game.winner) ? game.winner : [game.winner];
 		const isTie = winners.length > 1;
 		const iWon = winners.includes(myId);
@@ -2725,7 +2742,7 @@ export default function SpenderApp() {
 								setReviewing(false);
 								setReplaySnapshots(null); setReplayTurn(null);
 								pushPath(buildPath("spender"));   // leave the finished room's URL
-								setScreen("browser"); setRoomData(null); setRoomId(""); disconnect();
+								goSpender("browser"); setRoomData(null); setRoomId(""); disconnect();
 								fetchGames(authUser);
 							}}>
 								Back to lobby
@@ -2738,7 +2755,7 @@ export default function SpenderApp() {
 	}
 
 	// Game screen
-	if (screen === "game" && game) return (
+	if (screen === "spender" && spenderScreen === "game" && game) return (
 		<>
 			<style>{css}</style>
 			<div className="app game-screen">
