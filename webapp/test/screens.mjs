@@ -18,7 +18,7 @@
  *
  * Run: `npm run screens` (from webapp/). Needs Python + the backend requirements.
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -57,18 +57,51 @@ async function launchBrowser() {
 }
 
 let api, preview, browser;
-const shutdown = () => {
-	for (const p of [api, preview]) { try { p?.kill(); } catch {} }
+
+// Kill the process TREE, not just the child. Both servers are spawned with
+// `shell: true`, so `child.kill()` reaps the shell and leaves the real uvicorn /
+// vite grandchild running — which then squats on the port and makes the NEXT run
+// test a stale backend (exactly the failure the started_at guard above now
+// catches). Reaping properly is the actual fix; the guard is the safety net.
+const killTree = (child) => {
+	if (!child?.pid) return;
+	try {
+		if (process.platform === "win32") {
+			// spawnSync, not spawn: shutdown() runs from process "exit", where an async
+			// child never gets to run and the server survives the harness.
+			spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+		} else {
+			process.kill(-child.pid, "SIGKILL");
+		}
+	} catch { /* already gone */ }
+	try { child.kill(); } catch {}
 };
+const shutdown = () => { for (const p of [api, preview]) killTree(p); };
 process.on("exit", shutdown);
 process.on("SIGINT", () => { shutdown(); process.exit(130); });
 
 try {
+	// Record BEFORE spawning: /health reports `started_at` (core/build_info), so we can
+	// prove the backend answering us is the one WE started.
+	//
+	// THIS IS NOT PARANOIA. A stale uvicorn left on 8000 from an earlier session makes
+	// our spawn fail to bind while the health check succeeds instantly — against the OLD
+	// code. Every backend assertion then silently tests a build that no longer exists.
+	// Caught exactly that way: a deliberately broken engine.apply_move still "passed".
+	// The port can't just be randomised — VITE_WS_URL bakes localhost:8000 into the
+	// bundle — so detect it and fail loudly instead.
+	const spawnedAt = Math.floor(Date.now() / 1000);
 	console.log("starting backend (uvicorn app:app) ...");
 	api = spawn("python", ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
 		{ cwd: repoRoot, stdio: "ignore", shell: true });
 	await waitForHttp(`http://localhost:${API_PORT}/health`, 90_000, "backend");
-	console.log("  backend up");
+	const health = await (await fetch(`http://localhost:${API_PORT}/health`)).json();
+	if (!(health.started_at >= spawnedAt - 2)) {
+		throw new Error(
+			`port ${API_PORT} is already serving a DIFFERENT backend (started_at=${health.started_at}, ` +
+			`we started at ${spawnedAt}). Kill it and re-run — otherwise this harness tests stale code.`);
+	}
+	console.log("  backend up (verified ours)");
 
 	// BUILD FIRST. Without this the harness happily tests whatever is already in
 	// dist/ — and a build that FAILS leaves the previous, working bundle in place,
@@ -219,6 +252,100 @@ try {
 		check("...and a guest is NOT persisted to localStorage", stored === null,
 			`got ${stored}`);
 		check("no page errors during auth", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
+	// ── Play a turn ───────────────────────────────────────────────────────────
+	// The only end-to-end exercise of the stack that actually matters: create a
+	// vs-AI game, take gems, and watch the board change. Everything above proves
+	// screens MOUNT. This proves the WebSocket handshake, the room server, the
+	// engine's apply_move, the per-recipient broadcast and the AI scheduler all
+	// still work together — none of which any other test touches from the client.
+	//
+	// It is also the coverage the shell/game split needs: `screen` currently
+	// conflates the site-level mode with Spender's own browser/waiting/game, and
+	// separating them is exactly the kind of change that renders fine and plays
+	// wrong.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "play-harness", name: "Player", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+		const has = async (sel, ms = 25_000) => {
+			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
+			return (await page.locator(sel).count().catch(() => 0)) > 0;
+		};
+
+		await page.goto(`http://localhost:${PORT}/spender`, { waitUntil: "networkidle" });
+		check("Spender lobby reachable by URL", await has(".lby-create-row"));
+
+		// New Game -> the modal defaults to a vs-AI opponent, so accept and create.
+		await page.locator(".lby-cta").click({ timeout: 15_000 }).catch(() => {});
+		check("the create-game modal opens", await has(".cm-panel"));
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+
+		// A vs-AI game starts immediately — no waiting room.
+		check("a vs-AI game starts and the board renders", await has(".gem-stack", 30_000));
+		const boardCards = await page.locator(".card").count().catch(() => 0);
+		check("the board dealt its cards", boardCards >= 12, `saw ${boardCards}`);
+
+		// The first player is randomised, so the bot may move first — WAIT for our
+		// turn rather than assuming it. `disabled` marks a stack that can't be taken
+		// (empty bank, or not our turn).
+		let takeable = 0;
+		for (let i = 0; i < 40 && takeable < 3; i++) {
+			takeable = await page.locator(".gem-stack:not(.disabled)").count().catch(() => 0);
+			if (takeable < 3) await sleep(500);
+		}
+		check("our turn arrives (waiting out the bot if it moved first)",
+			takeable >= 3, `${takeable} takeable stacks`);
+
+		// Snapshot our own panel: the server broadcast updating it is the proof the
+		// move was really applied, and comparing text avoids depending on the exact
+		// markup of the token row.
+		const myPanel = () => page.locator(".player-panel.me").first().innerText().catch(() => "");
+		const panelBefore = await myPanel();
+
+		// Click three distinct COLOURS by data-color. Not `nth(i)` over the
+		// non-disabled set: that set is re-evaluated after every click (selecting
+		// gems disables others), and it includes the GOLD stack — whose click handler
+		// arms a reserve and CLEARS the gem selection, which silently cost a gem.
+		const colours = (await page.evaluate(() =>
+			[...document.querySelectorAll(".gem-stack:not(.disabled)")]
+				.map((e) => e.dataset.color)
+				.filter((c) => c && c !== "gold"))).slice(0, 3);
+		check("three colours are available to take", colours.length === 3, colours.join(","));
+		for (const c of colours) {
+			await page.locator(`.gem-stack[data-color="${c}"]`).click({ timeout: 10_000 }).catch(() => {});
+		}
+		// `button:visible` matters: the actions area is rendered THREE times (mobile and
+		// desktop variants) and only one copy is visible. innerText happily reads a
+		// hidden copy, so a plain .first() click times out — and because the click was
+		// wrapped in .catch(() => {}), the move silently never happened while the label
+		// check still passed. Clicking is now a CHECK, not a swallowed side effect.
+		const takeBtn = page.locator("button:visible", { hasText: /^Take/ });
+		const takeLabel = await takeBtn.first().innerText().catch(() => "");
+		check("the Take button reflects the 3 selected gems",
+			takeLabel.replace(/\s+/g, "") === "Take3", `label was ${JSON.stringify(takeLabel)}`);
+		const submitted = await takeBtn.first().click({ timeout: 15_000 })
+			.then(() => true).catch(() => false);
+		check("the Take button is clickable", submitted);
+
+		let panelAfter = panelBefore;
+		for (let i = 0; i < 30 && panelAfter === panelBefore; i++) {
+			await sleep(400);
+			panelAfter = await myPanel();
+		}
+		check("the server applied the move and re-broadcast our panel",
+			panelAfter !== panelBefore && panelAfter.length > 0,
+			`panel unchanged: ${JSON.stringify(panelBefore.slice(0, 60))}`);
+		check("no page errors while playing", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
 
