@@ -24,6 +24,9 @@ from core.auth import (
 )
 from core.ratelimit import SlidingWindowLimiter
 from core.build_info import build_info
+from core import rooms as _rooms
+from games.spender import engine
+from games.spender.ai.serving import legacy_variants as _legacy
 
 # Spender's HTTP + WebSocket routes live on this router. The composition root
 # (top-level app.py) creates the FastAPI app, applies CORS middleware, includes
@@ -84,7 +87,6 @@ logging.basicConfig(level=logging.INFO)
 
 # ── Shared room-server primitives (core/rooms.py) ────────────────────────────
 # Byte-identical in all four games; aliased under the historical names here.
-from core import rooms as _rooms
 
 normalize_room = _rooms.normalize_room
 
@@ -619,7 +621,6 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
 # the game, shared by this handler, the tests, and the replay tooling. These aliases
 # keep the historical private names working for the offline tooling and the AI code
 # that already imports them from this module.
-from games.spender import engine
 from games.spender.engine import (          # noqa: F401  (re-exported for callers)
     deal_board as _deal_board,
     capture_setup as _capture_setup,
@@ -749,7 +750,6 @@ load_weights()
 # saved game against Z or H must still get a real move on its next AI turn. Their
 # implementations live in ai/serving/legacy_variants.py — still in the SERVING
 # stack (ai/offline/ is never imported by the server), just out of this module.
-from games.spender.ai.serving import legacy_variants as _legacy
 
 _az_choose_move = _legacy.az_choose_move
 _v4_choose_move = _legacy.v4_choose_move
@@ -1383,7 +1383,6 @@ def _ai_score_card(card: dict, game: dict, ai_pid: str, urgency: float) -> float
         contested_score = (1.0 + pts) * _opp_reach(game, ai_pid, card) * WEIGHTS["contested_weight"]
 
     return (point_score + bonus_score + noble_score + contested_score) * accessibility
-
 
 
 def _opp_winning_buys(game: dict, opp_pid: str) -> list[dict]:
@@ -2403,6 +2402,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     if len(room_id) > 64 or len(pid) > 64:
         await websocket.close(code=1008)
         return
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    # Before the room shell is allocated below, so a flood can't grow ROOMS at all.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
     LOG.info("ws connect room=%s player=%s", room_id, pid)
     # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
     # is broadcast in the public players map, so anyone who can see a game could open a
@@ -2432,6 +2436,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         # handshake replies with the room state itself (created/joined/reconnected).
         while True:
             text = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError as e:

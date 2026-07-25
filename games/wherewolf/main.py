@@ -42,6 +42,7 @@ from core.auth import (
 )
 from core.config import cors_allowed_origins
 from core.build_info import build_info
+from core import rooms as _rooms
 
 LOG = logging.getLogger("games.wherewolf")
 
@@ -77,7 +78,6 @@ ROOM_LOCK = asyncio.Lock()
 # ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
 # These were byte-identical in all four games. Aliased under the historical private
 # names so the rest of this module (and its tests) are unchanged.
-from core import rooms as _rooms
 
 normalize_room = _rooms.normalize_room
 _gen_token = _rooms.gen_room_token
@@ -87,11 +87,6 @@ _send = _rooms.send_json
 
 def _ensure_room_loaded(room_id: str) -> dict | None:
     return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
-
-
-
-
-
 
 
 def ww_init_db() -> None:
@@ -486,6 +481,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
     # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: anyone can open a
     # socket claiming any pid (all pids are broadcast in the public players map). So a
     # socket must PROVE ownership of `pid` before it can act as that seat or receive
@@ -498,6 +497,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     try:
         while True:
             raw = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(raw)
             except Exception:
@@ -536,10 +538,6 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
         # Stale-socket guard + empty-room cleanup, shared: core/rooms.py.
         # Drops only empty, not-yet-started open rooms; playing/over stay resident.
         _rooms.release_socket(ROOMS, room_id, pid, websocket)
-
-
-
-
 
 
 async def _handle_create(ws, room_id, pid, msg) -> bool:

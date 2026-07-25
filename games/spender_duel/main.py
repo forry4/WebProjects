@@ -41,6 +41,7 @@ from core.auth import (
     gen_token, get_user_by_session, validate_reconnect_token, mark_reconnect_token_used,
 )
 from core.config import cors_allowed_origins
+from core import rooms as _rooms
 from core.build_info import build_info
 
 LOG = logging.getLogger("games.spender_duel")
@@ -111,7 +112,6 @@ AI_PID = "bot"
 # ── Shared room-server primitives (core/rooms.py) ─────────────────────────────
 # These were byte-identical in all four games. Aliased under the historical private
 # names so the rest of this module (and its tests) are unchanged.
-from core import rooms as _rooms
 
 normalize_room = _rooms.normalize_room
 _gen_token = _rooms.gen_room_token
@@ -121,11 +121,6 @@ _send = _rooms.send_json
 
 def _ensure_room_loaded(room_id: str) -> dict | None:
     return _rooms.ensure_room_loaded(ROOMS, room_id, load_game_to_memory)
-
-
-
-
-
 
 
 def duel_init_db() -> None:
@@ -585,6 +580,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     await websocket.accept()
     room_id = normalize_room(room)
     pid = player
+    # Abuse throttles (core.rooms): cap connects per IP and messages per socket.
+    if await _rooms.reject_if_connecting_too_fast(websocket):
+        return
+    _msg_throttle = _rooms.MessageThrottle()
     # The `player` path segment is CLIENT-SUPPLIED and NOT trusted: every pid in a room
     # is broadcast in the public players map, so anyone who can see a game can open a
     # socket claiming the OPPONENT's pid. Duel's state is per-recipient redacted by
@@ -598,6 +597,9 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     try:
         while True:
             raw = await websocket.receive_text()
+            if not _msg_throttle.allow():
+                await websocket.close(code=1008)
+                return
             try:
                 msg = json.loads(raw)
             except Exception:
@@ -639,10 +641,6 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     finally:
         # Stale-socket guard + client-AI disarm + empty-room cleanup: core/rooms.py.
         _rooms.release_socket(ROOMS, room_id, pid, websocket, disarm_client_ai=True)
-
-
-
-
 
 
 async def _handle_create(ws, room_id, pid, msg):

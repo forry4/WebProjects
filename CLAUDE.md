@@ -52,10 +52,14 @@ app.py                 # COMPOSITION ROOT: FastAPI app + CORS/security middlewar
 core/                  # SHARED BACKEND PLATFORM (imported by every feature; imports no game)
   db.py                #   dual sqlite/Turso conn wrapper + get_db_conn + init_core_schema + retention
   auth.py              #   users/sessions/passwords, admin + SITE_OWNER identity, reconnect tokens
-  ratelimit.py         #   SlidingWindowLimiter (auth abuse throttle)
+  ratelimit.py         #   SlidingWindowLimiter (auth + WebSocket abuse throttle)
   config.py            #   cors_allowed_origins()
+  rooms.py             #   shared room-server primitives (normalize/token/db/send/delete/release_socket)
+  build_info.py        #   commit + started_at for /health, so a deploy can be VERIFIED not assumed
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
+                       #   engine.py = the rules (single source of truth); cards.py = static card data
+                       #   ai/serving/legacy_variants.py = retired-but-still-serving variants Z/H
   castles_of_crimson/  # CoC — engine.py + ai.py + main.py (coc_app @ /coc) + CastlesOfCrimson.jsx
   wherewolf/           # Where Wolf? — engine.py + main.py (werewolf_app @ /werewolf) + WhereWolf.jsx
   spender_duel/        # Spender Duel — engine.py + ai.py + main.py (duel_app @ /duel) + SpenderDuel.jsx
@@ -119,6 +123,19 @@ for Python 3.14 on this box; prod Docker is Python 3.11 where wheels exist) — 
 + a login that survives a redeploy. The sqlite path (identical wrapper) IS locally tested.
 
 ### Auth correctness & security (hard-won — do not regress)
+- **WS SEAT IDENTITY IS BOUND IN ALL FOUR GAMES.** The `player` path segment is client-supplied and
+  every pid is broadcast in the public players map, so a socket must PROVE it owns its pid before it
+  can act as that seat or receive that seat's view. `authed` flips true only via create / join-as-a-new-
+  seat / join-with-a-matching-`session_token` / reconnect-with-the-room-token / auth_reconnect; every
+  mutating action is gated on it. Frontends send `session_token` on join. Tests: each game's
+  `tests/test_ws_auth.py`.
+- **NEVER register a socket in `room["sockets"]` before that handshake.** Spender used to, at connect
+  time, and `broadcast_room` rebuilds state PER RECIPIENT keyed on the socket's pid — so merely opening
+  a socket claiming a victim's pid and sending NOTHING returned that seat's blind reserves AND its
+  `reconnect_tokens` entry, which replays as `{"action":"reconnect"}` for a full takeover. It also
+  displaced the victim's live socket. (The follow-on trap: the connect-time registration was also what
+  made the room get cleaned up, so removing it leaked an empty `ROOMS` shell per connect —
+  `core.rooms.release_socket` now collects phantom rooms independently of socket ownership.)
 - **`is_admin` is computed the same way on every path** — `is_admin_id(conn, id)` (plain SELECT) or a
   live `SITE_OWNER` username match. NEVER a correlated subquery — it reads NULL on the libsql driver
   (works on sqlite → invisible in tests), which made the owner lose admin on every session refresh.
@@ -137,10 +154,21 @@ for Python 3.14 on this box; prod Docker is Python 3.11 where wheels exist) — 
 
 ## Shared room-server pattern (mirrored in every game's `main.py`)
 
-Each game's `main.py` reimplements the same scaffolding (a Phase-3 DRY-into-`core` extraction is
-**deferred** — see research log): in-memory `ROOMS: dict[str, dict]` under a single `ROOM_LOCK`,
-`save_game`/`load_game_to_memory`, `broadcast_room`, `mk_room_state`, a stale-socket disconnect guard,
-and an async opponent scheduler.
+Each game's `main.py` builds the same scaffolding: in-memory `ROOMS: dict[str, dict]` under a single
+`ROOM_LOCK`, `save_game`/`load_game_to_memory`, `broadcast_room`, `mk_room_state`, a stale-socket
+disconnect guard, and an async opponent scheduler.
+
+**The generic half now lives in `core/rooms.py`** (all four games use it, aliased to their historical
+private names): `normalize_room`, `gen_room_token`, `db_conn`, `ensure_room_loaded`, `send_json`,
+`delete_open_game(table, host_col, ...)` (the SELECT-then-DELETE rule — never `cursor.rowcount`), and
+`release_socket` (the stale-socket guard + phantom-room collection; per-game policy stays explicit as
+the `disarm_client_ai` / `drop_empty_open_only` flags). Extracting it was not tidiness: the same
+hidden-info broadcast leak had to be found and fixed THREE times because three copies of
+`mk_room_state` each leaked differently.
+
+**Still duplicated (~25 functions, the obvious next extraction):** `save_game`, `load_game_to_memory`,
+`_persist_row` and the `list_open_games`/`list_user_games`/`list_user_history`/`list_active_games`
+family. Same shape in all four games, differing only in table name and columns.
 
 ```python
 ROOMS[room_id] = {
@@ -249,18 +277,40 @@ No AI — a real-time social-deduction party game, humans only.
 
 ## Spender (Splendor)
 
-### Backend (`games/spender/main.py` → `router`)
-- Game logic + the original MCTS bot live here; `ai/` holds all AI data + the AZ/heuristic stacks.
-- **Move handler error hierarchy** (order matters):
+### Rules — `games/spender/engine.py` (the single source of truth)
+`apply_move(game, pid, mv) -> (ok, err, effects)`, mirroring CoC/WW/Duel. Mutates in place, returns
+`(False, "reason", {})` untouched on an illegal move, and reports sub-decisions via
+`effects["discard_pid"]` / `effects["noble_choice_pid"]`. Imports only the `cards` leaf — no FastAPI,
+no DB, no rooms. **Historically these rules lived INLINE in the WS handler and nothing tested them**
+(the suite covered helpers + the MCTS simulator, and the parity chain tied the AZ engine and the Rust
+port to each other, never to the live path). `tests/test_engine_rules.py` drives this module.
+
+**Card data + the pure cost maths live in the leaf `games/spender/cards.py`** — imported by both the
+engine and the AI stack, so `ai/serving/*` no longer reaches up into the web module for it.
+
+- **Move handler error hierarchy** (order matters — enforced in `engine.apply_move`, except the first
+  three which are ROOM-level and stay in `main.py`'s WS handler):
   ```
-  not game        → "game not started"
-  status "over"   → "game is over"
-  status not playing → "game not started"
+  not game        → "game not started"        (room-level, main.py)
+  status "over"   → "game is over"            (room-level, main.py)
+  status not playing → "game not started"     (room-level, main.py)
   phase "over"    → "game is over"
   turn != pid     → "not your turn"
   pending_noble_pid == pid & type != pick_noble  → "must choose a noble first"
   pending_discard_pid == pid & type not in (discard, undo_discard) → "must discard down to 10 gems first"
   ```
+
+### Backend (`games/spender/main.py` → `router`)
+- Rooms/WS/persistence/AI dispatch + the original MCTS bot live here; rules are `engine.py`, card data
+  is `cards.py`, and `ai/` holds all AI data + the AZ/heuristic stacks.
+- **Retired AI variants (Z, H) live in `ai/serving/legacy_variants.py`** — retired means no lobby
+  offers them, NOT dead: `ai_variant` is persisted, so an old saved game must still get a real move on
+  its next AI turn. That is also why they are in `ai/serving/` and not `ai/offline/` (which the server
+  never imports). Weight variants A/B/C/C2 are pure data (`weights*.json`) fed to `_mcts_choose_move`.
+- **`engine.apply_move` still deep-copies the whole game on EVERY `take_gems`/`reserve`** for the undo
+  snapshot, before checking whether the token cap will actually be exceeded — measured ~106% overhead
+  on moves that never need it. Deferring it is predictable (`tokens + taken > 10`) but must not break
+  undo. Known, not yet done.
 - **Pending state in the game dict** (`pending_noble_pid`, `pending_discard_pid`) is set when the
   condition arises, cleared when resolved, and rejects any other move meanwhile. Frontend derives
   `needsNobleChoice`/`needsDiscard` from these keys (not message fields).
@@ -601,8 +651,13 @@ home-menu 🧩 button; backend is static (no serve-time AI).
 
 ## Testing
 
+- **The suite is defined ONCE** in `pytest.ini` `testpaths`; both CI workflows run a bare `pytest`.
+  They used to carry two hand-maintained path lists that drifted (Duel's tests ran only at deploy).
 - **Rules/engine unit tests are the most valuable to protect** — each game has them: Spender
-  `tests/test_game_logic.py` + `test_replay.py`/`test_review.py`; CoC `tests/` (~319, board invariants,
+  `tests/test_engine_rules.py` (the AUTHORITATIVE `engine.apply_move`: error hierarchy, every move
+  type, pending sub-decisions + undo, a differential check against the MCTS simulator pinning where it
+  deliberately DIFFERS, and a token-conservation soak) + `test_game_logic.py` (helpers + the simulator)
+  + `test_ws_auth.py` + `test_replay.py`/`test_review.py`; CoC `tests/` (~319, board invariants,
   placement, scoring, lifecycle, one-per-monastery, endgame) + `test_client_ai.py`; WW `tests/` (~73, deck
   validation, every night action, win-condition matrix, `player_view` redaction matrix); Duel `tests/`
   (card invariants, redaction, bot-vs-bot soak with a 25-token conservation invariant); `core/tests/`
@@ -628,9 +683,15 @@ home-menu 🧩 button; backend is static (no serve-time AI).
   `python -m` / `cargo` / `wasm-pack` / `cythonize`. rustup is at `~/.cargo/bin` (off PATH → prepend it).
 
 **Frontend / CSS**
-- **The `css` template literal must contain NO backtick** — a backtick terminates the JS template literal
-  → the rest parses as a tagged template → "…is not a function" at load → blank page. Shared across
-  Spender/CoC/WW/Duel; the smoke test catches it.
+- **CSS lives in real `.css` files, imported with `?inline`** (`games/*/X.css`, `shared/*.css`) — the
+  string is still injected by each component's own `<style>` tag, only while mounted, so CoC's bare
+  mount and its `html,body` reset are unaffected. This RETIRED the repo's most expensive footgun: CSS
+  used to be a `const css = ` \` … \` template literal, where one stray backtick terminated the literal,
+  reparsed the rest of the file as a tagged template, and blanked the page — it shipped a blank deploy
+  twice. **Do not move CSS back into a JS literal.** The smoke test's backtick guard is kept as a net
+  for any new one. `build.cssMinify` is deliberately **false**: these strings were never processed by
+  Vite before, so keeping the emitted CSS byte-identical makes the move provably behaviour-free (worth
+  ~45KB if you ever turn it on deliberately, with a visual check).
 - **Media-query cascade ordering**: mobile `@media` blocks sit BEFORE the base rules, so a single-class
   mobile override loses to a later equal-specificity base rule. Every mobile override must be
   higher-specificity (e.g. `.coc `-prefixed).

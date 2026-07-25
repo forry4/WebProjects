@@ -239,3 +239,75 @@ def test_phantom_collection_does_not_break_the_stale_socket_guard():
                    "game": {"phase": "playing"}}}
     assert rooms.release_socket(store, "R", "p1", object()) is False
     assert store["R"]["sockets"]["p1"] is new
+
+
+# ─── WebSocket abuse throttles ───────────────────────────────────────────────
+
+class _FakeWS:
+    def __init__(self, headers=None, host="1.2.3.4"):
+        self.headers = headers or {}
+        self.client = type("C", (), {"host": host})()
+        self.closed_with = None
+
+    async def close(self, code=1000):
+        self.closed_with = code
+
+
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_client_ip_uses_the_last_xff_hop():
+    """Render APPENDS the real peer to any client-supplied X-Forwarded-For, so the
+    LAST hop is trustworthy. Trusting the leftmost is the classic XFF bug: a peer
+    rotating a spoofed header would land under a fresh key every time."""
+    ws = _FakeWS(headers={"x-forwarded-for": "9.9.9.9, 8.8.8.8, 203.0.113.7"})
+    assert rooms.client_ip(ws) == "203.0.113.7"
+
+
+def test_client_ip_falls_back_to_the_socket_peer():
+    assert rooms.client_ip(_FakeWS(host="10.0.0.5")) == "10.0.0.5"
+    assert rooms.client_ip(_FakeWS(host=None)) == "unknown"
+
+
+def test_connect_flood_is_cut_off_and_the_socket_closed():
+    rooms._ws_connect_limiter.reset()
+    allowed = 0
+    for _ in range(rooms.WS_CONNECTS_PER_MIN + 10):
+        ws = _FakeWS(host="203.0.113.9")
+        if not _run(rooms.reject_if_connecting_too_fast(ws)):
+            allowed += 1
+        else:
+            assert ws.closed_with == 1008
+    assert allowed == rooms.WS_CONNECTS_PER_MIN
+    rooms._ws_connect_limiter.reset()
+
+
+def test_connect_limit_is_per_ip_not_global():
+    rooms._ws_connect_limiter.reset()
+    for _ in range(rooms.WS_CONNECTS_PER_MIN):
+        _run(rooms.reject_if_connecting_too_fast(_FakeWS(host="198.51.100.1")))
+    # A different peer is unaffected.
+    assert _run(rooms.reject_if_connecting_too_fast(_FakeWS(host="198.51.100.2"))) is False
+    rooms._ws_connect_limiter.reset()
+
+
+def test_message_throttle_allows_then_blocks_within_the_window():
+    t = rooms.MessageThrottle(max_per_min=3)
+    assert [t.allow(now=1000.0) for _ in range(3)] == [True, True, True]
+    assert t.allow(now=1000.0) is False
+
+
+def test_message_throttle_recovers_after_the_window():
+    t = rooms.MessageThrottle(max_per_min=2)
+    t.allow(now=1000.0); t.allow(now=1000.0)
+    assert t.allow(now=1000.0) is False
+    assert t.allow(now=1061.0) is True      # window rolled past
+
+
+def test_message_throttle_is_per_socket_so_it_cannot_leak():
+    """Per-instance deque, not a shared dict keyed by socket — it dies with the
+    connection rather than accumulating entries for every peer ever seen."""
+    a, b = rooms.MessageThrottle(max_per_min=1), rooms.MessageThrottle(max_per_min=1)
+    assert a.allow(now=1.0) is True and a.allow(now=1.0) is False
+    assert b.allow(now=1.0) is True        # independent budget

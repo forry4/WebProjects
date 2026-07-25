@@ -1,8 +1,22 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import CastlesOfCrimson from "../castles_of_crimson/CastlesOfCrimson.jsx";
-import WhereWolf from "../wherewolf/WhereWolf.jsx";
-import SpenderDuel from "../spender_duel/SpenderDuel.jsx";
-import Books from "../../books/Books.jsx";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
+
+// The other games are CODE-SPLIT. Statically importing them put all four games plus
+// Books into one ~600KB chunk that every visitor downloaded just to see the home
+// menu — Vite warned about the chunk size on every build. Each is a self-contained
+// default-export component mounted at exactly one branch below, so lazy() is a
+// clean fit: its chunk is fetched when you actually open that game.
+const CastlesOfCrimson = lazy(() => import("../castles_of_crimson/CastlesOfCrimson.jsx"));
+const WhereWolf = lazy(() => import("../wherewolf/WhereWolf.jsx"));
+const SpenderDuel = lazy(() => import("../spender_duel/SpenderDuel.jsx"));
+const Books = lazy(() => import("../../books/Books.jsx"));
+
+// Shown while a game's chunk loads. Deliberately an empty full-height panel in the
+// site's dark background: each game injects its OWN stylesheet when it mounts, so
+// there is no shared CSS to rely on here, and painting nothing avoids a flash of
+// un-themed white and any layout shift when the real screen arrives.
+const GameChunkLoading = () => (
+	<div style={{ minHeight: "100vh", background: "#120c0d" }} />
+);
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
@@ -2479,22 +2493,36 @@ export default function SpenderApp() {
 
 	// Books — personal ranked reading list (public read, owner edit)
 	if (screen === "books") return (
-		<Books authUser={authUser} onExit={() => nav("home")} />
+		<Suspense fallback={<GameChunkLoading />}>
+			<Books authUser={authUser} onExit={() => nav("home")} />
+		</Suspense>
 	);
 
 	// Castles of Crimson — self-contained game component, mounted by the shell.
 	if (screen === "coc") {
-		return <CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => nav("home")} />;
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<CastlesOfCrimson myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
 	}
 
 	// Where Wolf? — self-contained social-deduction game component.
 	if (screen === "werewolf") {
-		return <WhereWolf myId={myId} authUser={authUser} onExit={() => nav("home")} />;
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<WhereWolf myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
 	}
 
 	// Spender Duel — self-contained 2-player game component.
 	if (screen === "duel") {
-		return <SpenderDuel myId={myId} authUser={authUser} onExit={() => nav("home")} />;
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<SpenderDuel myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
 	}
 
 	// Puzzle picker — pick a scripted endgame puzzle to solve vs S.

@@ -20,10 +20,13 @@ does not know what a game is.
 from __future__ import annotations
 
 import json
+import time
+from collections import deque
 from typing import Any, Callable
 
 from core.auth import gen_token
 from core.db import get_db_conn
+from core.ratelimit import SlidingWindowLimiter
 
 # The room dict shape every game shares:
 #   {"players": {pid: name}, "sockets": {pid: ws}, "status": "open"|"playing"|"over",
@@ -140,3 +143,73 @@ def release_socket(rooms: Rooms, room_id: str, pid: str, websocket,
         return False
     rooms.pop(room_id, None)
     return True
+
+
+# ─── WebSocket abuse throttles ───────────────────────────────────────────────
+# `core.ratelimit` protected login/register, but WebSockets were completely
+# unthrottled: a client could open sockets and push messages as fast as it liked.
+# Both are cheap to abuse and expensive to serve — every message takes ROOM_LOCK,
+# and every connect allocates a room shell. In-memory and per-process, like the
+# auth limiters: the site runs one uvicorn process, and losing counters on restart
+# is fine for abuse prevention.
+#
+# Limits are far above real play (a turn is a handful of messages; the client's
+# reconnect backoff is 2s) and are about cutting floods to a trickle, not policing
+# users. Both close with 1008 (policy violation) rather than erroring, so an
+# abusive peer stops consuming a connection slot.
+
+WS_CONNECTS_PER_MIN = 60
+WS_MESSAGES_PER_MIN = 300
+
+_ws_connect_limiter = SlidingWindowLimiter(max_hits=WS_CONNECTS_PER_MIN, window_seconds=60)
+
+
+def client_ip(ws) -> str:
+    """Best-effort peer IP for throttling. Render's proxy APPENDS the real peer to
+    any client-supplied X-Forwarded-For, so the LAST hop is the trustworthy one —
+    trusting the leftmost is the classic XFF bug (a peer rotating a spoofed header
+    lands under a fresh key every time, defeating the throttle). Mirrors the HTTP
+    `_client_ip` in games/spender/main.py."""
+    xff = ws.headers.get("x-forwarded-for") if getattr(ws, "headers", None) else None
+    if xff:
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
+    client = getattr(ws, "client", None)
+    return getattr(client, "host", None) or "unknown"
+
+
+async def reject_if_connecting_too_fast(ws) -> bool:
+    """Record this connection and, if the peer is over the limit, close it.
+
+    Returns True when the caller should ABORT (the socket is closed). Call right
+    after `accept()`, before touching ROOMS.
+    """
+    ip = client_ip(ws)
+    if _ws_connect_limiter.exceeded(ip):
+        try:
+            await ws.close(code=1008)
+        except Exception:
+            pass
+        return True
+    _ws_connect_limiter.record(ip)
+    return False
+
+
+class MessageThrottle:
+    """Per-socket message budget. Deliberately per-INSTANCE (a plain deque, no
+    shared dict) so it cannot leak: it dies with the connection."""
+
+    def __init__(self, max_per_min: int = WS_MESSAGES_PER_MIN):
+        self._max = max_per_min
+        self._hits: deque[float] = deque()
+
+    def allow(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        cutoff = now - 60.0
+        while self._hits and self._hits[0] < cutoff:
+            self._hits.popleft()
+        if len(self._hits) >= self._max:
+            return False
+        self._hits.append(now)
+        return True
