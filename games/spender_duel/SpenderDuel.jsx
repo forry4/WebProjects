@@ -1625,8 +1625,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         <div className="duel-col-cards">{renderPyramid()}</div>
         <div className="duel-col-board">{renderBoard()}</div>
         <div className="duel-col-side">
-          {oppId && renderPlayer(oppId, false)}
-          {me && renderPlayer(myId, true)}
+          {/* Seat order, so the FIRST PLAYER is always the top box — matching Spender,
+              which already renders `game.order`. This used to be opponent-then-me
+              regardless of who started, which reads as if the opponent always went
+              first. `order` is fixed at the deal (main.py shuffles the seats, then
+              order[0] takes the first turn) and never rotates, so the boxes stay put
+              for the whole game. renderPlayer sets its own key, so mapping is safe. */}
+          {(game.order || [oppId, myId]).filter(Boolean)
+            .map((pid) => renderPlayer(pid, pid === myId))}
         </div>
         <div className="duel-col-log">{renderLog()}</div>
       </div>
