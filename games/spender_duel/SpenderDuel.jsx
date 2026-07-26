@@ -421,6 +421,12 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const botThinking = !reviewing && !!game && roomData?.vs_ai && !over
     && (game.pending_pid || game.turn) === roomData?.ai_player;
   const replenished = !!game?.turn_flags?.replenished;
+  // Set by the engine the moment this turn exposes hidden information — a card flipped
+  // face up off a deck, or tokens drawn out of the bag. Undo is refused from then on,
+  // because those can't be un-seen. Declared with the other derived state (above every
+  // effect) — this file's hoisting rule: a later declaration throws a TDZ
+  // ReferenceError in Firefox production builds.
+  const turnRevealed = !!game?.turn_flags?.revealed;
   const myBonuses = useMemo(() => bonusesOf(me, cardsById), [me, cardsById]);
   // The replenish spiral, as cell-centre points (the backend serves the real order).
   const spiralPts = useMemo(
@@ -1118,6 +1124,20 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         })}
       </div>
       <div className="duel-actionrow">
+        {/* Undo the whole turn. Offered mid-pending too — an ability's sub-decision is
+            takeable back — but NOT once this turn has revealed hidden information: a
+            card flipped face up off a deck, or tokens drawn out of the bag. Those
+            can't be un-seen, so the engine refuses (see engine._mark_revealed) and the
+            button mirrors that rather than letting the server reject the click. */}
+        {myTurn && !over && (
+          <button className="btn btn-outline" onClick={() => mv({ type: "undo_turn" })}
+            disabled={turnRevealed}
+            title={turnRevealed
+              ? "Can't undo — new cards or tokens have been revealed this turn"
+              : "Take back everything you've done this turn"}>
+            ↩ Undo turn
+          </button>
+        )}
         {myTurn && !pendingMine && (
           <>
             {selCells.length > 0 && (

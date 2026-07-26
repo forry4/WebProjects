@@ -501,6 +501,17 @@ Strictly 2-player. Mounted at `/duel`. LIVE on prod.
   (auto-abilities, `again`, `extra_turn`), and an auto-resolved take is byte-identical to a chosen one —
   so records can't be classified by shape; `_replay` lets the engine disambiguate by counting how many
   records the sim's log grew by. A finished game reveals reserves.
+- **Turn undo is gated on HIDDEN INFORMATION, not on which actions you took.** `undo_turn` restores the
+  whole turn from `turn_undo` (a full snapshot, taken at turn start and stripped from `player_view` —
+  it contains the bag and decks). It is refused once `turn_flags["revealed"]` is set, which
+  `_mark_revealed` does whenever a card is flipped face up off a deck or tokens are drawn out of the
+  bag. That closes the documented blind-reserve exploit (reserve off a deck, read the top card, undo)
+  WITHOUT reshuffling — a reshuffle is a random event that never reaches the log, so `replay.py` would
+  diverge from what was played. In practice the guard only bites while the turn is still yours:
+  reserve/buy are the MANDATORY action and pass the turn on anyway, so the case it really protects is
+  **a pyramid buy that opens an ability sub-decision** (new card flipped up, turn not yet over), plus
+  replenish. `legal_moves` deliberately omits `undo_turn`, which keeps the bot from taking it and stops
+  a tampered client smuggling one through `ai_move`.
 - **AI determinization needs `players[pid]["reserved_from_deck"]`** (a list of card ids stripped by
   `player_view`) — the log can't answer "was this reserve blind?" because it omits `card_id` for blind
   draws. Blind reserves resample PER LEVEL (which deck is public; identity is secret).

@@ -130,6 +130,22 @@ def _snapshot_turn(game: dict) -> None:
     game["turn_undo"] = copy.deepcopy(game)
 
 
+def _mark_revealed(game: dict) -> None:
+    """Record that this turn has exposed hidden information to the player.
+
+    Undo is blocked once this is set. Everything a turn does is otherwise takeable
+    back, but a card flipped off a deck or a token drawn from the bag CANNOT be
+    un-seen: undoing after that would let a player blind-reserve, read the deck's top
+    card, take it back, and act on what they learned.
+
+    The alternative — reshuffling on undo — was considered and rejected because the
+    reshuffle is a random event that never reaches the move log, so `replay.py` would
+    diverge from what was actually played. Refusing the undo keeps the game
+    reproducible from seed + log AND closes the exploit.
+    """
+    game.setdefault("turn_flags", {})["revealed"] = True
+
+
 def _log(game: dict, pid, mtype: str, **fields) -> None:
     entry = {"t": game["turn_number"], "pid": pid, "type": mtype}
     entry.update({k: v for k, v in fields.items() if v is not None})
@@ -257,7 +273,7 @@ def new_game(player_ids: list, names: dict | None = None, seed=None) -> dict:
         "order": list(player_ids),
         "turn": player_ids[0],
         "turn_number": 1,
-        "turn_flags": {"replenished": False},
+        "turn_flags": {"replenished": False, "revealed": False},
         "again": False,
         "board": [None] * 25,
         "bag": list(C.TOKEN_BAG),
@@ -392,7 +408,7 @@ def _check_victory(game: dict, pid: str) -> bool:
 def _finish_turn(game: dict, pid: str) -> None:
     if _check_victory(game, pid):  # victory pre-empts AGAIN
         return
-    game["turn_flags"] = {"replenished": False}
+    game["turn_flags"] = {"replenished": False, "revealed": False}
     game["turn_number"] += 1
     if game["again"]:
         game["again"] = False
@@ -433,6 +449,8 @@ def _h_replenish(game: dict, pid: str, move: dict):
     placed = _fill_board(game, rng)
     _save_rng(game, rng)
     game["turn_flags"]["replenished"] = True
+    if placed:
+        _mark_revealed(game)      # tokens came out of the bag — can't be un-seen
     granted = _grant_privilege(game, _opponent(game, pid))
     _log(game, pid, "replenish", count=placed, opp_privilege=granted or None)
     return True, None
@@ -475,7 +493,11 @@ def _h_reserve(game: dict, pid: str, move: dict):
         if not isinstance(slot, int) or not 0 <= slot < len(row) or row[slot] is None:
             return False, "no card in that pyramid slot"
         cid = row[slot]
-        row[slot] = game["decks"][lvl].pop() if game["decks"][lvl] else None
+        if game["decks"][lvl]:
+            row[slot] = game["decks"][lvl].pop()
+            _mark_revealed(game)  # a new card is now face up
+        else:
+            row[slot] = None
         p["reserved"].append(cid)
         # Face-up reserve was public when performed -> card id in the log is fine.
         _log(game, pid, "reserve", level=int(lvl), slot=slot, card_id=cid, gold_cell=gold_cell)
@@ -483,6 +505,7 @@ def _h_reserve(game: dict, pid: str, move: dict):
         if not game["decks"][lvl]:
             return False, "that deck is empty"
         cid = game["decks"][lvl].pop()
+        _mark_revealed(game)      # a blind draw: this player has now seen that card
         p["reserved"].append(cid)
         p["reserved_from_deck"].append(cid)
         # Blind draw: the log must NOT carry the card id.
@@ -536,7 +559,11 @@ def _h_buy(game: dict, pid: str, move: dict):
         p["tokens"][col] -= n
         game["bag"].extend([col] * n)  # spent tokens return to the bag
     if frm == "pyramid":
-        game["pyramid"][lvl][slot] = game["decks"][lvl].pop() if game["decks"][lvl] else None
+        if game["decks"][lvl]:
+            game["pyramid"][lvl][slot] = game["decks"][lvl].pop()
+            _mark_revealed(game)  # a new card is now face up
+        else:
+            game["pyramid"][lvl][slot] = None
     else:
         p["reserved"].remove(cid)
         if cid in p["reserved_from_deck"]:
@@ -783,16 +810,26 @@ def _undo_turn(game: dict, pid: str) -> tuple:
     the log and break turn-by-turn review.) The rng_state is restored too, so a redone
     draw plays out identically and the game stays reproducible from seed + log.
 
-    KNOWN TRADE-OFF (same one CoC's undo accepts): a player can blind-reserve, see the
-    card, and undo — learning that deck's top card. Re-shuffling on undo would close
-    that, but the reshuffle is a random event that ISN'T in the log, so replay would
-    diverge from what was played. A friendly-game undo is worth more than the exploit.
+    HIDDEN INFORMATION CLOSES THE UNDO. This used to accept a known exploit: a player
+    could blind-reserve, see the deck's top card, undo, and act on what they had
+    learned. The two obvious answers were both bad — accept it, or reshuffle on undo
+    (which breaks `replay.py`, since the reshuffle is a random event that never reaches
+    the log). The third one is simply to refuse: once this turn has flipped a card face
+    up or drawn tokens out of the bag, there is nothing to reshuffle because nothing is
+    taken back. `turn_flags["revealed"]` records it (see `_mark_revealed`), so the game
+    stays exactly reproducible from seed + log and the exploit is gone.
+
+    Everything that reveals nothing is still fully undoable — taking tokens off the
+    board, spending a privilege, buying a card you can already see, part-way through an
+    ability's sub-decision.
     """
     if game.get("turn") != pid:
         return False, "you can only undo on your turn"
     snap = game.get("turn_undo")
     if not snap:
         return False, "nothing to undo"
+    if game.get("turn_flags", {}).get("revealed"):
+        return False, "can't undo — new cards or tokens have been revealed"
     restored = copy.deepcopy(snap)
     game.clear()
     game.update(restored)

@@ -744,16 +744,22 @@ def test_undo_takes_back_a_used_privilege():
 
 
 def test_undo_works_at_any_point_in_a_turn():
-    """Optional action, mandatory action, and mid-pending must all be undoable."""
-    # after an optional replenish
+    """What is still undoable now that a reveal closes the turn.
+
+    Reserving or buying off the PYRAMID flips its replacement face up, and replenish
+    pulls tokens out of the bag — both are reveals and are refused (covered by the
+    tests below). Everything that exposes nothing is still fully takeable back,
+    INCLUDING part-way through an ability's sub-decision.
+    """
+    # a privilege spend: neither ends the turn nor reveals anything
     g = fresh()
-    clear_board(g)
-    g["bag"] = ["white", "blue"]
+    g["players"][A]["privileges"] = 1
     arm(g)
-    assert engine.apply_move(g, A, {"type": "replenish"})[0]
+    mv = next(m for m in engine.legal_moves(g, A) if m["type"] == "use_privilege")
+    assert engine.apply_move(g, A, mv)[0]
+    assert g["turn_flags"]["revealed"] is False
     assert engine.apply_move(g, A, {"type": "undo_turn"})[0]
-    assert len(g["bag"]) == 2 and all(t is None for t in g["board"])
-    assert g["turn_flags"]["replenished"] is False
+    assert g["players"][A]["privileges"] == 1
 
     # once the mandatory action has passed the turn on, it is no longer yours to undo
     g2 = fresh()
@@ -765,19 +771,19 @@ def test_undo_works_at_any_point_in_a_turn():
     ok, err = engine.apply_move(g2, A, {"type": "undo_turn"})
     assert not ok and "your turn" in err
 
-    # mid-pending (an ability's sub-decision) is undoable
+    # mid-pending (an ability's sub-decision) is undoable when nothing was revealed
     g3 = fresh()
     clear_board(g3)
     put(g3, 3, "white"); put(g3, 9, "white")
-    cid = find_card(level=1, ability="take_same", bonus="white")["id"]
-    stage_pyramid(g3, cid)
-    afford(g3, A, cid)
+    cid3 = find_card(level=1, ability="take_same", bonus="white")["id"]
+    g3["players"][A]["reserved"].append(cid3)      # from reserve, so no slot refills
+    afford(g3, A, cid3)
     arm(g3)
-    assert buy(g3, A, cid)[0]
+    assert engine.apply_move(g3, A, {"type": "buy", "card_id": cid3, "from": "reserve"})[0]
     assert g3["pending_kind"] == "take_same"
     assert engine.apply_move(g3, A, {"type": "undo_turn"})[0]
     assert g3["pending_pid"] is None
-    assert g3["players"][A]["purchased"] == []        # the buy is gone too
+    assert g3["players"][A]["purchased"] == []      # the buy is gone too
     assert g3["board"][3] == "white" and g3["board"][9] == "white"
 
 
@@ -908,3 +914,148 @@ def test_soak_bot_vs_bot():
         assert g["winner"] in (A, B)
         # privileges also conserve
         assert g["privileges_board"] + sum(p["privileges"] for p in g["players"].values()) == 3
+
+
+# ── Undo: allowed, except once hidden information has been revealed ──────────
+
+def _spend_a_privilege(g, pid):
+    """The one action that neither ends the turn nor reveals anything.
+
+    `take` and `buy` are the MANDATORY action — they pass the turn on, after which
+    undo correctly refuses ("you can only undo on your turn"). Replenish and any
+    pyramid buy/reserve reveal. So a privilege spend is what exercises undo itself.
+    """
+    g["players"][pid]["privileges"] = max(1, g["players"][pid]["privileges"])
+    engine._snapshot_turn(g)
+    mv = next(m for m in engine.legal_moves(g, pid) if m["type"] == "use_privilege")
+    ok, err = engine.apply_move(g, pid, mv)
+    assert ok, err
+    return mv
+
+
+def test_undo_restores_the_turn_start_state():
+    g = fresh()
+    pid = g["turn"]
+    before = None
+    g["players"][pid]["privileges"] = 1
+    arm(g)
+    before = copy.deepcopy({k: v for k, v in g.items() if k != "turn_undo"})
+    _spend_a_privilege(g, pid)
+    assert g != before
+    ok, err = engine.apply_move(g, pid, {"type": "undo_turn"})
+    assert (ok, err) == (True, None)
+    after = {k: v for k, v in g.items() if k != "turn_undo"}
+    assert after == before
+
+
+def test_undo_leaves_no_trace_in_the_move_log():
+    """replay.py rebuilds a game by re-applying its log, so an undone action must not
+    appear there — otherwise review would replay a move that never stood."""
+    g = fresh()
+    pid = g["turn"]
+    arm(g)
+    n = len(g["log"])
+    _spend_a_privilege(g, pid)
+    assert len(g["log"]) > n
+    engine.apply_move(g, pid, {"type": "undo_turn"})
+    assert len(g["log"]) == n
+
+
+def test_undo_is_refused_once_the_bag_has_been_drawn_from():
+    """Replenish pulls tokens out of the bag onto the board — they can't be un-seen."""
+    g = fresh()
+    pid = g["turn"]
+    clear_board(g)                            # new_game deals all 25 tokens out
+    g["bag"] = ["white", "blue"]               # ...so the bag needs seeding
+    arm(g)
+    ok, err = engine.apply_move(g, pid, {"type": "replenish"})
+    assert ok, err
+    assert g["turn_flags"]["revealed"] is True
+    ok, err = engine.apply_move(g, pid, {"type": "undo_turn"})
+    assert ok is False and "revealed" in err
+
+
+def test_a_turn_ending_reveal_is_refused_by_the_turn_check():
+    """Reserving (like buying) is the MANDATORY action, so it passes the turn on and
+    the reveal flag is reset for the next player. Undo is refused either way — just by
+    the turn check rather than the reveal guard. Pinned so the two aren't confused."""
+    g = fresh()
+    pid = g["turn"]
+    clear_board(g)
+    put(g, 0, "gold")
+    arm(g)
+    mv = {"type": "reserve", "gold_cell": 0, "source": {"kind": "deck", "level": 1}}
+    assert mv in engine.legal_moves(g, pid)
+    assert engine.apply_move(g, pid, mv)[0]
+    assert g["turn"] != pid
+    ok, err = engine.apply_move(g, pid, {"type": "undo_turn"})
+    assert ok is False and "your turn" in err
+
+
+def test_undo_is_refused_mid_ability_when_the_pyramid_refilled():
+    """THE case the reveal guard exists for. Buying a pyramid card flips its
+    replacement face up, and an ability keeps the turn yours — so without the guard a
+    player could read the new card and then take the whole turn back."""
+    g = fresh()
+    clear_board(g)
+    put(g, 3, "white"); put(g, 9, "white")
+    cid = find_card(level=1, ability="take_same", bonus="white")["id"]
+    stage_pyramid(g, cid)
+    afford(g, A, cid)
+    arm(g)
+    assert buy(g, A, cid)[0]
+    assert g["pending_kind"] == "take_same"        # turn is still ours
+    assert g["turn"] == A
+    assert g["turn_flags"]["revealed"] is True     # ...but a card was flipped up
+    ok, err = engine.apply_move(g, A, {"type": "undo_turn"})
+    assert ok is False and "revealed" in err
+
+
+def test_an_exhausted_deck_reveals_nothing_so_undo_still_works():
+    """The refill only reveals when a card is ACTUALLY drawn. With that deck empty the
+    slot just empties, nothing becomes visible, and the turn stays takeable back — the
+    control that proves the guard keys on a real reveal, not merely on buying."""
+    g = fresh()
+    clear_board(g)
+    put(g, 3, "white"); put(g, 9, "white")
+    cid = find_card(level=1, ability="take_same", bonus="white")["id"]
+    stage_pyramid(g, cid)
+    afford(g, A, cid)
+    for k in g["decks"]:                            # exhaust every deck
+        g["decks"][k] = []
+    arm(g)
+    assert buy(g, A, cid)[0]
+    assert g["pending_kind"] == "take_same"
+    assert g["turn_flags"]["revealed"] is False     # nothing was flipped up
+    ok, err = engine.apply_move(g, A, {"type": "undo_turn"})
+    assert (ok, err) == (True, None)
+    assert g["players"][A]["purchased"] == []
+
+
+def test_the_reveal_flag_resets_on_the_next_turn():
+    g = fresh()
+    pid = g["turn"]
+    clear_board(g)
+    g["bag"] = ["white", "blue"]
+    arm(g)
+    assert engine.apply_move(g, pid, {"type": "replenish"})[0]
+    assert g["turn_flags"]["revealed"] is True
+    put(g, 12, "red")
+    assert engine.apply_move(g, pid, {"type": "take", "cells": [12]})[0]   # ends the turn
+    assert g["turn"] != pid                        # a new turn began
+    assert g["turn_flags"]["revealed"] is False    # ...with a clean slate
+
+
+def test_undo_is_only_available_to_the_player_whose_turn_it_is():
+    g = fresh()
+    other = next(p for p in g["players"] if p != g["turn"])
+    arm(g)
+    ok, err = engine.apply_move(g, other, {"type": "undo_turn"})
+    assert ok is False and "your turn" in err
+
+
+def test_undo_is_not_a_legal_move_so_the_bot_never_picks_it():
+    """legal_moves feeds the search AND validates client-submitted AI moves, so keeping
+    undo out of it stops the bot undoing and stops a tampered client smuggling one in."""
+    g = fresh()
+    assert all(m["type"] != "undo_turn" for m in engine.legal_moves(g, g["turn"]))
