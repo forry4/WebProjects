@@ -65,8 +65,9 @@ games/
   spender_duel/        # Spender Duel — engine.py + ai.py + main.py (duel_app @ /duel) + SpenderDuel.jsx
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
+                       #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
+                       #   dependency direction (games -> shared, never back); see the split notes
 webapp/                # Vite + React build (neutral, repo-root) — main.jsx mounts Spender.jsx (the shell)
-  shell/               #   site-shell screens extracted from Spender.jsx (AuthScreen, HomeScreen)
   test/                #   smoke.mjs (blank-page/CLS gate) + screens.mjs (real render gate)
 wwsd/                  # "What Would Steve Do" — browser autoplayer for a friend's external site
 rust-cores/            # Per-game Rust→WASM search crates (client-side serving). NOT the Python core/.
