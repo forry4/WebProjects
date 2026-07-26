@@ -1363,12 +1363,21 @@ export default function SpenderApp() {
 		const raf = requestAnimationFrame(() => {
 			const made = [];
 			let total = 0;
-			// Center of the first VISIBLE element matching `sel` inside the box (its
-			// per-color gem/card indicator); falls back to the box center (e.g. on
-			// mobile where the detail pills are hidden).
-			const targetIn = (boxEl, sel) => {
-				const el = boxEl.querySelector(sel);
-				if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+			// Center of the first VISIBLE element matching one of `sels`, in order.
+			//
+			// The ORDER matters, and the middle entry is not decoration. A per-colour
+			// `.token-pill` only exists once you already hold that colour, so when a
+			// take is pre-animated on click the pill for a NEW colour has not rendered
+			// yet. Falling straight through to the box centre put the gems ~108px below
+			// where they actually land, and made all three converge on one point.
+			// `.player-tokens` (the row that will contain the pills) is present with
+			// real dimensions even while empty, and its centre measured within 1px of
+			// the pills' final y — so it is the right fallback.
+			const targetIn = (boxEl, ...sels) => {
+				for (const sel of sels) {
+					const el = sel && boxEl.querySelector(sel);
+					if (el) { const r = el.getBoundingClientRect(); if (r.width > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+				}
 				const r = boxEl.getBoundingClientRect();
 				return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 			};
@@ -1378,7 +1387,8 @@ export default function SpenderApp() {
 				if (!bankEl || !boxEl) continue;
 				const br = bankEl.getBoundingClientRect();
 				const bank = { x: br.left + br.width / 2, y: br.top + br.height / 2 };
-				const box = targetIn(boxEl, `.token-pill[data-token="${s.color}"]`);  // this color's gem indicator
+				// this colour's gem indicator; the gem row while that pill doesn't exist yet
+				const box = targetIn(boxEl, `.token-pill[data-token="${s.color}"]`, ".player-tokens");
 				const size = Math.max(18, Math.round(br.width || 40));
 				const from = s.grow ? box : bank;
 				const to = s.grow ? bank : box;
@@ -1399,7 +1409,7 @@ export default function SpenderApp() {
 					const sr = slotEl.getBoundingClientRect();
 					const cx = sr.left + sr.width / 2, cy = sr.top + sr.height / 2;
 					// fly to this card's bonus-color indicator (its card pill); fallback box center
-					const dest = targetIn(boxEl, `.bonus-pill[data-bonus="${cardFly.card.bonus}"]`);
+					const dest = targetIn(boxEl, `.bonus-pill[data-bonus="${cardFly.card.bonus}"]`, ".player-bonuses");
 					made.push({
 						id: ++flyIdRef.current, kind: "card",
 						color: cardFly.card.bonus, points: cardFly.card.points,
