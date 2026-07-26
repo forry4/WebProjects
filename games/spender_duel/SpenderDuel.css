@@ -239,6 +239,11 @@
    plus a smaller one before the bought-card indicators. */
 .duel-player .player-tokens{margin-top:13px}
 .duel-player .player-bonuses{margin-top:9px}
+/* The "N tokens" summary chip is Spender's shared inline-block .gem-total, but the
+   player box is a flex COLUMN on desktop, whose default align-items:stretch blows it
+   out to the FULL box width — pin it to its content width. Desktop only: it is hidden
+   below 1120px, where the pills already carry every count and vertical space is tight. */
+.duel-player .gem-total{align-self:flex-start;font-size:.82rem;padding:3px 11px;border-radius:9px;margin-top:9px}
 /* align-self keeps the clickable privilege-scroll row content-width (the box is a flex
    COLUMN with align-items:stretch on desktop), so its onClick has no full-width dead zone. */
 .duel-player .duel-scrolls{align-self:flex-start}
@@ -326,6 +331,7 @@
 .duel-gameover-badge{font-size:1.05rem;margin:6px 0 2px;color:#f5c842}
 
 @media(max-width:1120px){
+  .duel-token-total{display:none}   /* mobile: pills already show every count */
   /* 2-col: cards+log stack on the left, board fills the right; the player rail drops
      to a full-width row beneath (areas replace the old grid-column:1/-1 span). */
   .duel-cols{grid-template-columns:1fr 1fr;grid-template-rows:auto;
