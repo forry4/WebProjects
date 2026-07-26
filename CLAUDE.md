@@ -261,6 +261,13 @@ Full campaign + do-not-relitigate verdicts (endgame + geometry both washed): the
 No AI — a real-time social-deduction party game, humans only.
 
 ### Cross-game AI facts (do not relitigate — full detail in research log)
+- **A client-WASM worker pool must NEVER take every core.** The search is CPU-bound; a pool that pegs
+  all of them starves the browser's main/compositor/raster threads and the flying-gem/token animations
+  stutter while the AI thinks. Each game sizes its own pool by hand, so the rule has to be re-applied
+  every time: Spender `min(hc-1, 4)`, Duel `min(hc-1, 4)`, CoC `hc<=4 ? hc-1 : min(hc-2, 8)`. Spender
+  had it; **Duel and CoC shipped without it for months** and took every core on a 4-core machine — the
+  clearest example of why the per-game duplication costs correctness, not just tidiness. Only bites at
+  ≤4 cores (the caps dominate above that).
 - **Determinization is a correctness requirement, not a strength knob** — the AI holds the real game
   dict server-side, so it must resample everything it can't legally see (decks, opponent blind reserves,
   future dice), canonicalizing each pool before reshuffling so the search provably can't read hidden order.

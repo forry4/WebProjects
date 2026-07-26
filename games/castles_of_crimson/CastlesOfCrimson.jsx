@@ -1470,11 +1470,14 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
         || wasmPoolRef.current || typeof Worker === "undefined") return;
     const model = roomData.ai_difficulty === "hard" ? "coc_pv_model_hard.bin" : "coc_pv_model.bin";
     const url = `${import.meta.env.BASE_URL}wasm/coc-worker.js?model=${model}`;
-    // Worker count: small devices keep the old min(cores,4); bigger machines get
-    // up to 8 workers, always leaving 2 cores for the main thread + OS (CoC trees
-    // are small — ~30MB at the sims cap — so RAM is not the constraint here).
+    // Worker count: bigger machines get up to 8 workers, always leaving 2 cores for
+    // the main thread + OS (CoC trees are small — ~30MB at the sims cap — so RAM is
+    // not the constraint here). Small devices leave ONE core for the same reason:
+    // the <=4-core branch used to take every core, and a pool that pegs them all
+    // starves the browser's compositor/raster threads, so animations stutter while
+    // the AI thinks. Spender documents this rule; CoC and Duel never had it.
     const hc = navigator.hardwareConcurrency || 4;
-    const cores = hc <= 4 ? Math.max(1, hc) : Math.min(hc - 2, 8);
+    const cores = hc <= 4 ? Math.max(1, hc - 1) : Math.min(hc - 2, 8);
     const makeWorker = () => {
       let w;
       try { w = new Worker(url, { type: "module" }); } catch { return null; }

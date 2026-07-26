@@ -708,7 +708,12 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     if (!roomData?.vs_ai || (roomData?.ai_difficulty !== "hard" && roomData?.ai_difficulty !== "expert")
       || wasmPoolRef.current || typeof Worker === "undefined") return;
     const url = `${import.meta.env.BASE_URL}wasm/duel-worker.js`;
-    const cores = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4));
+    // Reserve one core for the browser's main/compositor/raster threads — the same
+    // rule Spender documents: the WASM search is CPU-bound, and a pool that pegs
+    // EVERY core starves the compositor, so the flying-token animations stutter while
+    // the AI thinks. Only bites on <=4-core machines (the cap of 4 dominates above
+    // that), which is exactly where the contention is real.
+    const cores = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
     const makeWorker = () => {
       let w;
       try { w = new Worker(url, { type: "module" }); } catch { return null; }
