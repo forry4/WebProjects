@@ -80,6 +80,11 @@ pub fn duel_search(state_json: &str, budget_ms: f64, max_sims: u32, seed: f64) -
     let opts = Opts {
         time_limit: Some((budget_ms / 1000.0).max(0.0)),
         max_iters: Some(if max_sims == 0 { u64::MAX } else { max_sims as u64 }),
+        // COHERENT single-world search (determinize once + chance held fixed). Beats the old per-sim
+        // PIMC ~0.585 (n=400, mirror 0.5000). Per-worker one world -> the root-pool over N workers is an
+        // N-world coherent ensemble (hedges strategy fusion). c_puct 1.0 = the winning plateau (0.3-1.0).
+        coherent: true,
+        prior_c: Some(1.0),
         ..Default::default()
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);
@@ -104,6 +109,11 @@ pub fn duel_search_expert(state_json: &str, budget_ms: f64, max_sims: u32, seed:
     let opts = Opts {
         time_limit: Some((budget_ms / 1000.0).max(0.0)),
         max_iters: Some(if max_sims == 0 { u64::MAX } else { max_sims as u64 }),
+        // COHERENT single-world search (determinize once + chance held fixed). Beats the old per-sim
+        // PIMC ~0.585 (n=400, mirror 0.5000). Per-worker one world -> the root-pool over N workers is an
+        // N-world coherent ensemble (hedges strategy fusion). c_puct 1.0 = the winning plateau (0.3-1.0).
+        coherent: true,
+        prior_c: Some(1.0),
         ..Default::default()
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);

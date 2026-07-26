@@ -103,6 +103,11 @@ pub struct Opts {
     /// (the diagnosed under-development blind spot); if a small tilt beats plain v2 it is also a
     /// shippable leaf fix. See `dev_margin` + `gate_netleaf --dev-tilt`.
     pub dev_tilt: f64,
+    /// Leaf blend toward the HEURISTIC value (default 0.0 = OFF = pure net = byte-identical). On the
+    /// `AttnVal` leaf, `v = (1-b)*net + b*value`. The heuristic correctly ranks buy/develop over
+    /// tread-water where the net blunders (both are tanh-[-1,1], so the mix is well-scaled). A no-data
+    /// leaf-fix lever — the point of it is to inject the one thing the net is missing without a retrain.
+    pub leaf_blend: f64,
     /// AZ policy prior (default None = OFF = flat/unguided). When set AND the leaf is `AttnVal(net)`
     /// with a POLICY head, PUCT priors come from the net's policy logits (softmax over legal moves at
     /// this SERVING temperature) instead of the heuristic. The learned-policy analog of `prior_temp`;
@@ -118,6 +123,11 @@ pub struct Opts {
     /// the CLOSEABLE imperfect-info gap (does coherent per-world search beat per-sim resampling?). See
     /// `gate_netleaf --root-dets`.
     pub root_dets: Option<usize>,
+    /// COHERENT single-world search (default false): determinize the hidden world ONCE at the root AND
+    /// hold chance FIXED (PriorShuffle in sims, so refills draw the determinized order deterministically).
+    /// Q-values stop being per-sim noise, so UCB can actually concentrate -> sharp per-world visits. The
+    /// training-TARGET fix for the near-perfect-info regime (per-world bias averages across games).
+    pub coherent: bool,
 }
 
 /// Which evaluator the search truncates to at a leaf.
@@ -636,7 +646,9 @@ struct Search<'r, 'n> {
     prior_temp: Option<f64>,
     c_puct: f64,
     dev_tilt: f64,
+    leaf_blend: f64,
     net_policy_temp: Option<f64>,
+    coherent: bool,
 }
 
 impl Search<'_, '_> {
@@ -688,7 +700,13 @@ impl Search<'_, '_> {
                 if st.is_over() {
                     return if st.winner == root_pid as i32 { 1.0 } else { -1.0 };
                 }
-                let v = net.eval(st, root_pid);
+                let mut v = net.eval(st, root_pid);
+                // leaf_blend (default 0 -> byte-identical): convex mix toward the HEURISTIC value,
+                // which ranks buy/develop over tread-water where the net blunders. Both are tanh-
+                // [-1,1], so the mix is well-scaled. A no-data leaf-fix lever.
+                if self.leaf_blend != 0.0 {
+                    v = (1.0 - self.leaf_blend) * v + self.leaf_blend * value(st, root_pid);
+                }
                 // dev_tilt (default 0 -> byte-identical, guarded): value-bias probe of whether v2
                 // UNDER-values card development. NOT applied at a terminal (that outcome is a fact).
                 if self.dev_tilt != 0.0 { v + self.dev_tilt * dev_margin(st, root_pid) } else { v }
@@ -760,8 +778,13 @@ impl Search<'_, '_> {
                 Some(m) => m,
                 None => break,
             };
-            let mut sh = RngShuffler { rng: &mut *self.rng };
-            if st.apply_move(actor, &mv, &mut sh).is_err() {
+            let ok = if self.coherent {
+                st.apply_move(actor, &mv, &mut PriorShuffle).is_ok()
+            } else {
+                let mut sh = RngShuffler { rng: &mut *self.rng };
+                st.apply_move(actor, &mv, &mut sh).is_ok()
+            };
+            if !ok {
                 break;
             }
         }
@@ -783,7 +806,10 @@ impl Search<'_, '_> {
         let total: i32 = node.n.iter().sum();
         let i = select(node, total, self.c_puct);
         let mv = node.moves[i].clone();
-        let ok = {
+        let ok = if self.coherent {
+            // chance held fixed: draw the determinized bag/deck order deterministically (no re-shuffle)
+            st.apply_move(node.actor, &mv, &mut PriorShuffle).is_ok()
+        } else {
             let mut sh = RngShuffler { rng: &mut *self.rng };
             st.apply_move(node.actor, &mv, &mut sh).is_ok()
         };
@@ -888,10 +914,22 @@ pub fn root_search_with_leaf(
     let deadline = Deadline::new(time_limit);
     let mut s = Search {
         rng, take_dominance, steps, leaf, prior_temp, c_puct,
-        dev_tilt: opts.dev_tilt, net_policy_temp: opts.net_policy_temp,
+        dev_tilt: opts.dev_tilt, leaf_blend: opts.leaf_blend, net_policy_temp: opts.net_policy_temp,
+        coherent: opts.coherent,
     };
     // Root priors (net policy or heuristic; empty = flat), computed once before the sim loop.
     root.priors = s.node_priors(st, &root.moves, pid);
+    if opts.coherent && !opts.no_determinize {
+        // COHERENT: ONE determinized world, chance held fixed (Search.coherent -> PriorShuffle in sims).
+        let world = s.determinize(st, pid);
+        let mut iters: u64 = 0;
+        while iters < max_iters && !deadline.expired() {
+            iters += 1;
+            let mut sim = world.clone();
+            s.simulate(&mut sim, &mut root, pid, 0);
+        }
+        return Some(RootStats { moves: root.moves, n: root.n, w: root.w });
+    }
     match opts.root_dets {
         // ROOT-DETERMINIZATION (Stage-0 de-risk): fix ONE hidden world per group, run coherent sims on
         // clones of it, pool root stats over K worlds — vs the default per-sim resampling. Off by
@@ -959,6 +997,30 @@ pub fn choose_move_with_leaf(
     let stats = root_search_with_leaf(st, pid, diff, opts, leaf, rng)?;
     let i = pick(&stats, temperature, rng);
     Some(stats.moves[i].clone())
+}
+
+/// `choose_move_with_leaf` that ALSO returns the search's ROOT VALUE — the visit-weighted mean
+/// Q at the root (`Σw/Σn`), in `[-1,1]` from `pid`'s perspective (the SAME perspective the harvest
+/// outcome label uses). This is the per-position signal for VALUE-BOOTSTRAP training targets
+/// (`(1-β)·outcome + β·rootval`) — richer than the coarse game outcome, whose absence is why
+/// value-only self-play washed. The rng draws are IDENTICAL to `choose_move_with_leaf` (computing
+/// the mean touches no rng), so a harvest switched to this plays byte-for-byte the same games.
+pub fn choose_move_and_rootval_with_leaf(
+    st: &State,
+    pid: usize,
+    diff: &str,
+    opts: &Opts,
+    leaf: Leaf,
+    rng: &mut Rng,
+) -> Option<(Move, f64)> {
+    let temperature = opts.temperature.unwrap_or(difficulty(diff).temperature);
+    let stats = root_search_with_leaf(st, pid, diff, opts, leaf, rng)?;
+    let tot_n: i64 = stats.n.iter().map(|&x| x as i64).sum();
+    // Σw/Σn = the root's backed-up value estimate. An unsearched single-move root (n=[0]) has
+    // Σn==0 → neutral 0.0, matching pick()'s index-0 resolve of an all-zero root.
+    let rootval = if tot_n > 0 { stats.w.iter().sum::<f64>() / tot_n as f64 } else { 0.0 };
+    let i = pick(&stats, temperature, rng);
+    Some((stats.moves[i].clone(), rootval))
 }
 
 /// Sample by VALUE (softmax over mean Q), NOT by visit count.
@@ -1135,11 +1197,11 @@ mod tests {
         b.decks[0] = vec![4, 2, 0, 3, 1]; // same multiset, different order
         let da = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&a, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&a, 0)
         };
         let db = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&b, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&b, 0)
         };
         assert_eq!(da.decks[0], db.decks[0], "the sort must erase the true order");
     }
@@ -1153,7 +1215,7 @@ mod tests {
         st.players[1].reserved = vec![10, 60]; // 10 = face-up L1, 60 = blind L3
         st.players[1].reserved_from_deck = vec![60];
         let mut rng = Rng::new(3);
-        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, net_policy_temp: None }.determinize(&st, 0);
+        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&st, 0);
         assert_eq!(d.players[1].reserved_from_deck.len(), 1);
         let got = d.players[1].reserved_from_deck[0];
         assert!([54, 55, 56, 60].contains(&got), "redealt from the L3 pool, got {}", got);
