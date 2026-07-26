@@ -1348,63 +1348,18 @@ export default function SpenderApp() {
 	const prevBoardRef = useRef(null);
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
-	useEffect(() => {
-		if (reviewing) return;   // no flying gems/cards while rewinding (puzzle steps DO animate)
-		const players = game?.players;
-		if (!players) return;
-		const prev = prevPlayersRef.current;
-		const prevBoard = prevBoardRef.current;
-		const movesLen = game?.moves?.length || 0;
-		const prevMovesLen = prevMovesLenRef.current;
-		// Snapshot players (tokens + purchased ids) + board slot ids for next diff.
-		const snap = {};
-		for (const pid of Object.keys(players)) {
-			snap[pid] = { tokens: { ...(players[pid].tokens || {}) }, purchased: (players[pid].purchased || []).map(c => c.id) };
-		}
-		const boardSnap = {};
-		for (const lk of ["L3", "L2", "L1"]) boardSnap[lk] = (game.board?.[lk] || []).map(c => c ? c.id : null);
-		prevPlayersRef.current = snap;
-		prevBoardRef.current = boardSnap;
-		prevMovesLenRef.current = movesLen;
-		// Only animate exactly one new move (avoids a burst on load/reconnect).
-		if (!prev || movesLen !== prevMovesLen + 1) return;
+	// Set when we pre-animate our OWN take on click (see handleTakeGems). The server
+	// broadcast that follows would otherwise diff the same gems and fly them a second
+	// time. Timestamped so a rejected/never-arriving move can't suppress a later,
+	// legitimate animation forever.
+	const preFlownRef = useRef(0);
 
-		const ALL = [...GEM_COLORS, "gold"];
-		const specs = [];   // gem moves
-		for (const pid of Object.keys(players)) {
-			const before = prev[pid];
-			if (!before) continue;
-			const now = players[pid].tokens || {};
-			for (const c of ALL) {
-				const delta = (now[c] || 0) - (before.tokens[c] || 0);
-				if (delta > 0) specs.push({ pid, color: c, count: delta, grow: false });   // bank -> player
-				else if (delta < 0) specs.push({ pid, color: c, count: -delta, grow: true }); // player -> bank
-			}
-		}
-
-		// A bought card: a player's purchased grew. Find the new card + the board
-		// slot it came from (so it can fly from there to the buyer's box).
-		let cardFly = null;
-		for (const pid of Object.keys(players)) {
-			const before = prev[pid];
-			if (!before) continue;
-			const nowPurchased = players[pid].purchased || [];
-			if (nowPurchased.length > before.purchased.length) {
-				const beforeIds = new Set(before.purchased);
-				const bought = nowPurchased.find(c => !beforeIds.has(c.id));
-				if (bought) {
-					let pos = null;
-					if (prevBoard) for (const lk of ["L3", "L2", "L1"]) {
-						const idx = (prevBoard[lk] || []).indexOf(bought.id);
-						if (idx >= 0) { pos = `${lk}-${idx}`; break; }
-					}
-					cardFly = { pid, card: bought, pos };
-				}
-			}
-		}
-
-		if (!specs.length && !cardFly) return;
-
+	// Spawn flyers for gem moves (+ optionally a bought card). Measures in ONE
+	// requestAnimationFrame — all reads together, no interleaved writes — so it can't
+	// thrash layout. Extracted from the diff effect below so a click can fire it
+	// immediately, before the server has replied.
+	const spawnFlyers = (specs, cardFly) => {
+		if (!specs.length && !cardFly) return () => {};
 		const raf = requestAnimationFrame(() => {
 			const made = [];
 			let total = 0;
@@ -1460,6 +1415,73 @@ export default function SpenderApp() {
 			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 600 + maxDelay);
 		});
 		return () => cancelAnimationFrame(raf);
+	};
+
+	useEffect(() => {
+		if (reviewing) return;   // no flying gems/cards while rewinding (puzzle steps DO animate)
+		const players = game?.players;
+		if (!players) return;
+		const prev = prevPlayersRef.current;
+		const prevBoard = prevBoardRef.current;
+		const movesLen = game?.moves?.length || 0;
+		const prevMovesLen = prevMovesLenRef.current;
+		// Snapshot players (tokens + purchased ids) + board slot ids for next diff.
+		const snap = {};
+		for (const pid of Object.keys(players)) {
+			snap[pid] = { tokens: { ...(players[pid].tokens || {}) }, purchased: (players[pid].purchased || []).map(c => c.id) };
+		}
+		const boardSnap = {};
+		for (const lk of ["L3", "L2", "L1"]) boardSnap[lk] = (game.board?.[lk] || []).map(c => c ? c.id : null);
+		prevPlayersRef.current = snap;
+		prevBoardRef.current = boardSnap;
+		prevMovesLenRef.current = movesLen;
+		// Only animate exactly one new move (avoids a burst on load/reconnect).
+		if (!prev || movesLen !== prevMovesLen + 1) return;
+
+		const ALL = [...GEM_COLORS, "gold"];
+		const specs = [];   // gem moves
+		for (const pid of Object.keys(players)) {
+			const before = prev[pid];
+			if (!before) continue;
+			const now = players[pid].tokens || {};
+			for (const c of ALL) {
+				const delta = (now[c] || 0) - (before.tokens[c] || 0);
+				if (delta > 0) specs.push({ pid, color: c, count: delta, grow: false });   // bank -> player
+				else if (delta < 0) specs.push({ pid, color: c, count: -delta, grow: true }); // player -> bank
+			}
+		}
+
+		// A bought card: a player's purchased grew. Find the new card + the board
+		// slot it came from (so it can fly from there to the buyer's box).
+		let cardFly = null;
+		for (const pid of Object.keys(players)) {
+			const before = prev[pid];
+			if (!before) continue;
+			const nowPurchased = players[pid].purchased || [];
+			if (nowPurchased.length > before.purchased.length) {
+				const beforeIds = new Set(before.purchased);
+				const bought = nowPurchased.find(c => !beforeIds.has(c.id));
+				if (bought) {
+					let pos = null;
+					if (prevBoard) for (const lk of ["L3", "L2", "L1"]) {
+						const idx = (prevBoard[lk] || []).indexOf(bought.id);
+						if (idx >= 0) { pos = `${lk}-${idx}`; break; }
+					}
+					cardFly = { pid, card: bought, pos };
+				}
+			}
+		}
+
+		// We already flew our own take the moment it was clicked; don't fly it twice.
+		// Only bank->you gems for US are dropped — an over-cap discard (you->bank) in
+		// the same broadcast was never pre-animated and must still show.
+		let gemSpecs = specs;
+		if (preFlownRef.current && Date.now() - preFlownRef.current < 5000) {
+			gemSpecs = specs.filter(s => !(s.pid === myId && !s.grow));
+			preFlownRef.current = 0;
+		}
+
+		return spawnFlyers(gemSpecs, cardFly);
 	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	// ── Move log helpers ──────────────────────────────────────────────────────
@@ -2038,6 +2060,27 @@ export default function SpenderApp() {
 
 	const handleTakeGems = () => {
 		if (!myTurn || selectedGems.length === 0) return;
+		// INSTANT ACKNOWLEDGEMENT. The server is authoritative, so the board and our
+		// token counts can only change when its broadcast arrives — measured at ~250ms
+		// median to Render but ranging past 1s, and that VARIANCE is what reads as
+		// jitter far more than the delay itself. Until now a click produced no feedback
+		// at all for that whole window.
+		//
+		// So fly the gems immediately. This changes NO game state — it is purely the
+		// animation, which is why it needs no rollback if the server rejects the move
+		// (it can't, in practice: the UI only enables legal takes). The flight lasts
+		// ~600ms, which happens to cover a typical round trip, so the counts settle
+		// just about as the gems land.
+		//
+		// A puzzle is resolved locally with no socket, so its animation already comes
+		// from the state diff — pre-flying there would double it.
+		if (!puzzling) {
+			const counts = {};
+			for (const c of selectedGems) counts[c] = (counts[c] || 0) + 1;
+			spawnFlyers(Object.entries(counts).map(([color, count]) =>
+				({ pid: myId, color, count, grow: false })), null);
+			preFlownRef.current = Date.now();   // tells the diff effect not to repeat it
+		}
 		sendMove({ type: "take_gems", colors: selectedGems });
 		setSelectedGems([]);
 	};
