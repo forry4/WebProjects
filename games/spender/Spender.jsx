@@ -226,11 +226,13 @@ const css = baseCss + lobbyCss + _cssText
    A fixed overlay layer of gem dots animated between the bank and a player box;
    per-flyer --dx/--dy/--s0/--s1 set the trip + start/end scale. */
 .fly-layer{position:fixed;inset:0;pointer-events:none;z-index:90}
-.fly-gem{position:fixed;border-radius:50%;border:2px solid rgba(255,255,255,.3);box-shadow:0 2px 10px rgba(0,0,0,.55);animation:fly .42s ease both;will-change:transform,opacity}
+.fly-gem{position:fixed;animation:flyGem .55s cubic-bezier(.3,.7,.4,1) both;will-change:transform,opacity}
 .fly-card{position:fixed;border-radius:8px;background:var(--surface2);border:2px solid var(--border);box-shadow:0 6px 20px rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:space-between;padding:6px 8px;overflow:hidden;transform-origin:center;animation:fly .5s ease both;will-change:transform,opacity}
 .fly-card-pt{font-family:'Cinzel','Cinzel Fallback',serif;font-weight:700;color:var(--gold);font-size:1.3rem;line-height:1}
 .fly-card-dot{width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.3);flex-shrink:0}
 @keyframes fly{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.5}}
+/* Gems fly the real gradient GemToken (like Duel): slower Duel easing + a deeper fade. */
+@keyframes flyGem{from{transform:translate(0,0) scale(var(--s0));opacity:1}to{transform:translate(var(--dx),var(--dy)) scale(var(--s1));opacity:.15}}
 
 /* ─── AI thinking dots ──────────────────────────────────────────────────── */
 .ai-thinking{display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:var(--text-muted);font-style:italic}
@@ -1430,7 +1432,7 @@ export default function SpenderApp() {
 					made.push({
 						id: ++flyIdRef.current, kind: "gem", color: s.color, size,
 						x: from.x, y: from.y, dx: to.x - from.x, dy: to.y - from.y,
-						s0: s.grow ? 0.35 : 1, s1: s.grow ? 1 : 0.35, delay: i * 55,
+						s0: s.grow ? 0.55 : 1, s1: s.grow ? 1 : 0.55, delay: i * 55,
 					});
 				}
 			}
@@ -1455,7 +1457,7 @@ export default function SpenderApp() {
 			setFlyers(f => [...f, ...made]);
 			const ids = new Set(made.map(m => m.id));
 			const maxDelay = made.reduce((m, x) => Math.max(m, x.delay), 0);
-			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 560 + maxDelay);
+			setTimeout(() => setFlyers(f => f.filter(x => !ids.has(x.id))), 600 + maxDelay);
 		});
 		return () => cancelAnimationFrame(raf);
 	}, [game]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -3076,10 +3078,11 @@ export default function SpenderApp() {
 						) : (
 							<div key={f.id} className="fly-gem" style={{
 								left: f.x - f.size / 2, top: f.y - f.size / 2, width: f.size, height: f.size,
-								background: GEM_HEX[f.color],
 								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
 								animationDelay: `${f.delay}ms`,
-							}} />
+							}}>
+								<GemToken color={f.color} size={f.size} />
+							</div>
 						))}
 					</div>
 				)}
