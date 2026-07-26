@@ -5,10 +5,43 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 // menu — Vite warned about the chunk size on every build. Each is a self-contained
 // default-export component mounted at exactly one branch below, so lazy() is a
 // clean fit: its chunk is fetched when you actually open that game.
-const CastlesOfCrimson = lazy(() => import("../castles_of_crimson/CastlesOfCrimson.jsx"));
-const WhereWolf = lazy(() => import("../wherewolf/WhereWolf.jsx"));
-const SpenderDuel = lazy(() => import("../spender_duel/SpenderDuel.jsx"));
-const Books = lazy(() => import("../../books/Books.jsx"));
+//
+// STALE TAB AFTER A DEPLOY — the failure mode code-splitting introduces, and the
+// reason for the wrapper below. Chunk filenames carry a content hash, and GitHub
+// Pages does not keep the old ones. A tab left open across a deploy still holds the
+// PREVIOUS index chunk, so opening a game asks for e.g. SpenderDuel-<oldhash>.js,
+// gets a 404, and React surfaces "TypeError: Importing a module script failed" in the
+// error boundary. Before the split this could not happen: everything arrived in one
+// chunk at page load, and a stale tab simply kept running the old build.
+//
+// So: retry once (covers a transient network blip), then reload the page — which
+// fetches a fresh index.html with the CURRENT hashes and lands the user where they
+// were. The sessionStorage guard means a genuinely missing chunk reloads only once
+// and then shows the real error, instead of looping forever.
+// The guard is a TIMESTAMP, not a boolean. A boolean has to be cleared somewhere for a
+// tab that survives two deploys to heal twice — and clearing it on successful load
+// re-arms it immediately after the reload, which loops forever (measured: 284
+// navigations). A cooldown needs no reset: a second deploy minutes later is outside the
+// window and heals, while a chunk that is genuinely gone reloads once and then reports.
+const RELOADED_KEY = "spender_chunk_reloaded_at";
+const RELOAD_COOLDOWN_MS = 30_000;
+const lazyChunk = (name, importer) => lazy(() => importer().catch(() => importer()).catch((err) => {
+	let last = 0;
+	try { last = Number(sessionStorage.getItem(RELOADED_KEY)) || 0; } catch { /* private mode */ }
+	if (Date.now() - last > RELOAD_COOLDOWN_MS) {
+		try { sessionStorage.setItem(RELOADED_KEY, String(Date.now())); } catch {}
+		console.warn(`[chunk] ${name} failed to load (stale build?) — reloading once`);
+		window.location.reload();
+		return new Promise(() => {});   // never settles; the reload takes over
+	}
+	console.error(`[chunk] ${name} still failing after a reload — surfacing the error`);
+	throw err;
+}));
+
+const CastlesOfCrimson = lazyChunk("CastlesOfCrimson", () => import("../castles_of_crimson/CastlesOfCrimson.jsx"));
+const WhereWolf = lazyChunk("WhereWolf", () => import("../wherewolf/WhereWolf.jsx"));
+const SpenderDuel = lazyChunk("SpenderDuel", () => import("../spender_duel/SpenderDuel.jsx"));
+const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
 // site's dark background: each game injects its OWN stylesheet when it mounts, so
