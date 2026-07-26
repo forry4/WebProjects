@@ -367,6 +367,18 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [privArmed, setPrivArmed] = useState(false); // privilege mode (pick a token)
   const [goldCell, setGoldCell] = useState(null);    // armed gold cell (reserve mode)
   const [selCard, setSelCard] = useState(null);      // {id, from} buy candidate
+  // Did I do anything this turn? Gates the Undo button so it fades when there is nothing
+  // to take back — the same shape CoC uses. A local flag is needed because most Duel
+  // actions leave no state the client can read back as "I acted": a take or a buy ENDS
+  // the turn, so what is still visible mid-turn (a replenish, an ability pending) is only
+  // part of the picture. Those are OR'd in as a backstop for a reconnect, where this flag
+  // starts false but the turn is already underway.
+  //
+  // Declared HERE, with the rest of the selection state, because `hasActed` reads it ~400
+  // lines above where it used to sit next to `mv` — a const used before its declaration is
+  // a TDZ ReferenceError at render, and the bundler does not catch it. Same rule as the
+  // derived-state hoisting note in CLAUDE.md.
+  const [actedThisTurn, setActedThisTurn] = useState(false);
   const [wildPick, setWildPick] = useState(false);   // wild as_color chooser open
   const [modalCard, setModalCard] = useState(null);  // a log entry's card, opened for inspection
   const [flyers, setFlyers] = useState([]);
@@ -427,6 +439,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   // effect) — this file's hoisting rule: a later declaration throws a TDZ
   // ReferenceError in Firefox production builds.
   const turnRevealed = !!game?.turn_flags?.revealed;
+  // Anything selected locally, or any action already taken this turn. `replenished` and
+  // a live ability pending are server-visible proof of an action, so Undo stays correct
+  // after a reconnect mid-turn; `actedThisTurn` covers the rest.
+  const hasSelection = selCells.length > 0 || goldCell != null || privArmed || selCard != null;
+  const hasActed = actedThisTurn || replenished || pendingMine;
+  // The button clears the selection AND undoes the turn. Clearing is local so it works
+  // even after a reveal; the server undo does not. So it is live whenever there is
+  // EITHER something selected or (undoable) something done.
+  const canTakeBack = hasSelection || (hasActed && !turnRevealed);
   const myBonuses = useMemo(() => bonusesOf(me, cardsById), [me, cardsById]);
   // The replenish spiral, as cell-centre points (the backend serves the real order).
   const spiralPts = useMemo(
@@ -588,6 +609,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   useEffect(() => {
     setSelCells([]); setPrivArmed(false); setGoldCell(null); setSelCard(null); setWildPick(false);
   }, [game?.turn, game?.turn_number, game?.pending_kind]);
+
+  // A new turn has nothing to undo yet.
+  useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.turn_number]);
   useEffect(() => { setGameOverDismissed(false); }, [roomId]);
 
   // ── flyer animations: driven by NEW log entries (each carries pid + cells/colors) ──
@@ -820,7 +844,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   }, [roomData, wasmReady, send]);
 
   // ── actions ──
-  const mv = (move) => send({ action: "move", move });
+  const mv = (move) => {
+    if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    send({ action: "move", move });
+  };
 
   const createGame = (vsAi, difficulty) => {
     const rid = roomCode();
@@ -1140,13 +1167,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             the bag): those can't be un-seen, so the engine refuses (see
             engine._mark_revealed) and we don't send a request we know will fail. */}
         {myTurn && !over && (
-          <button className="btn btn-outline" onClick={() => {
-            setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null);
-            if (!turnRevealed) mv({ type: "undo_turn" });
-          }}
-            title={turnRevealed
-              ? "Clear your selection — the turn itself can't be undone now that new cards or tokens have been revealed"
-              : "Take back everything you've done this turn"}>
+          <button className="btn btn-outline" disabled={!canTakeBack}
+            onClick={() => {
+              setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null);
+              if (!turnRevealed) { setActedThisTurn(false); mv({ type: "undo_turn" }); }
+            }}
+            title={!canTakeBack ? "Nothing to undo yet"
+              : turnRevealed
+                ? "Clear your selection — the turn itself can't be undone now that new cards or tokens have been revealed"
+                : "Take back everything you've done this turn"}>
             ↩ Undo
           </button>
         )}
