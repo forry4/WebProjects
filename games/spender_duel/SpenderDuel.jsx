@@ -1159,26 +1159,6 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         })}
       </div>
       <div className="duel-actionrow">
-        {/* ONE button for "take it back": clears whatever is selected AND undoes the
-            turn on the server. The selection is purely local, so that half always works
-            — which is why this stays ENABLED after a reveal rather than being disabled
-            like the server undo was. Undo itself is refused once the turn has exposed
-            hidden information (a card flipped face up off a deck, or tokens drawn from
-            the bag): those can't be un-seen, so the engine refuses (see
-            engine._mark_revealed) and we don't send a request we know will fail. */}
-        {myTurn && !over && (
-          <button className="btn btn-outline" disabled={!canTakeBack}
-            onClick={() => {
-              setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null);
-              if (!turnRevealed) { setActedThisTurn(false); mv({ type: "undo_turn" }); }
-            }}
-            title={!canTakeBack ? "Nothing to undo yet"
-              : turnRevealed
-                ? "Clear your selection — the turn itself can't be undone now that new cards or tokens have been revealed"
-                : "Take back everything you've done this turn"}>
-            ↩ Undo
-          </button>
-        )}
         {myTurn && !pendingMine && (
           <>
             {selCells.length > 0 && (
@@ -1198,6 +1178,29 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               Replenish
             </button>
           </>
+        )}
+        {/* Sits to the RIGHT of Replenish, but deliberately OUTSIDE the !pendingMine
+            group above so it survives an ability's sub-decision, when the action
+            buttons are hidden but the turn is still takeable back.
+            ONE button for "take it back": clears whatever is selected AND undoes the
+            turn on the server. The selection is purely local, so that half always works
+            — which is why this stays ENABLED after a reveal rather than being disabled
+            like the server undo was. Undo itself is refused once the turn has exposed
+            hidden information (a card flipped face up off a deck, or tokens drawn from
+            the bag): those can't be un-seen, so the engine refuses (see
+            engine._mark_revealed) and we don't send a request we know will fail. */}
+        {myTurn && !over && (
+          <button className="btn btn-outline" disabled={!canTakeBack}
+            onClick={() => {
+              setSelCells([]); setGoldCell(null); setPrivArmed(false); setSelCard(null);
+              if (!turnRevealed) { setActedThisTurn(false); mv({ type: "undo_turn" }); }
+            }}
+            title={!canTakeBack ? "Nothing to undo yet"
+              : turnRevealed
+                ? "Clear your selection — the turn itself can't be undone now that new cards or tokens have been revealed"
+                : "Take back everything you've done this turn"}>
+            ↩ Undo
+          </button>
         )}
         {!myTurn && !over && (
           <span className="duel-muted">{botThinking ? "Bot is thinking…" : `Waiting for ${names[oppId] || "opponent"}…`}</span>
