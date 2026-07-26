@@ -7,9 +7,13 @@
  * nothing else in the file, and the screen's only outward effect is "a user was
  * authenticated". So it lifts out whole, with a one-callback interface.
  *
- * It lives under webapp/shell/ rather than games/spender/ deliberately: the shell is
- * not part of the Spender game, and every screen moved here is one the eventual
- * inversion (shell owns routing, each game is a sibling) no longer has to untangle.
+ * It lives in shared/ so the dependency runs ONE WAY, games -> shared, exactly like
+ * every other game. It sat briefly in webapp/shell/ — which is where it belongs in the
+ * finished architecture (main.jsx -> Shell.jsx -> games/*) — but until the shell is
+ * actually lifted out of Spender.jsx that made games/spender import from webapp/ while
+ * webapp/main.jsx imports games/spender: a directory-level cycle, and Spender the only
+ * game reaching outside shared/. A mild naming compromise (shared/ otherwise means
+ * cross-game kits) beats a cycle waiting on a refactor that may never happen.
  *
  * Owns only its own form state. It does NOT know about localStorage, routing, or the
  * session — the shell still owns identity, and `onAuthenticated(user)` hands it back.

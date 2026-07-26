@@ -24,9 +24,9 @@ import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
-// Site-shell screens, extracted out of this file (see webapp/shell/AuthScreen.jsx).
-import AuthScreen from "../../webapp/shell/AuthScreen.jsx";
-import HomeScreen, { SITE_NAME, GAMES } from "../../webapp/shell/HomeScreen.jsx";
+// Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
+import AuthScreen from "../../shared/AuthScreen.jsx";
+import HomeScreen, { SITE_NAME, GAMES } from "../../shared/HomeScreen.jsx";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -1507,7 +1507,7 @@ export default function SpenderApp() {
 	}
 
 	// ── Auth actions ───────────────────────────────────────────────────────
-	// The FORM lives in webapp/shell/AuthScreen.jsx; the shell keeps identity. A
+	// The FORM lives in shared/AuthScreen.jsx; the shell keeps identity. A
 	// registered user's id/token is persisted, a guest's is not (guests keep the
 	// anonymous id they already had, so a game started before signing in stays theirs).
 	const handleAuthenticated = (user) => {

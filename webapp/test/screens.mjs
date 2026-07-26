@@ -222,7 +222,7 @@ try {
 	// ── Auth screen ───────────────────────────────────────────────────────────
 	// Every context above SEEDS a guest identity to skip straight to a game, so
 	// nothing else here ever renders the auth screen. It is the site's front door
-	// and the first screen extracted into webapp/shell/, so it gets its own pass
+	// and the first screen extracted out of Spender.jsx, so it gets its own pass
 	// with NO stored user.
 	{
 		const ctx = await browser.newContext();           // deliberately unseeded

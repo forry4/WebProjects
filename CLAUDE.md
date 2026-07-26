@@ -545,16 +545,35 @@ game-screen changes need this isolation render or a live staging check.
 `webapp/main.jsx` mounts `Spender.jsx`, which is both the site shell (home menu, auth, routing to every
 game/Books/Puzzles) and Spender's own game UI.
 
-**Shell/game split — IN PROGRESS.** The auth screen and home menu now live in `webapp/shell/`
-(`AuthScreen.jsx`, `HomeScreen.jsx`), outside the Spender package, along with the site's game
-catalogue. AuthScreen owns its own six form-state hooks and reports back through a single
+**Shell/game split — PARTIALLY DONE, and parked deliberately.** The auth screen and home menu live
+in `shared/` (`AuthScreen.jsx`, `HomeScreen.jsx`), outside the Spender package, along with the site's
+game catalogue. **They are in `shared/` for the DEPENDENCY DIRECTION, not for semantics** — `shared/`
+otherwise means cross-game kits. They briefly sat in `webapp/shell/`, which is where they belong once
+the shell is really lifted out (`main.jsx` -> `Shell.jsx` -> `games/*`), but until then that made
+`games/spender` import from `webapp/` while `webapp/main.jsx` imports `games/spender` — a
+directory-level cycle. One-way (`games -> shared`) beats a cycle waiting on a refactor. AuthScreen owns its own six form-state hooks and reports back through a single
 `onAuthenticated(user)`; the shell keeps identity. Note the asymmetry it preserves: a REGISTERED user
 is written to `localStorage`, a GUEST is not (guests keep the anonymous id they already had, so a game
 started before signing in stays theirs) — `npm run screens` asserts exactly that.
-**Still to invert:** `screen`, `myId`, `authUser` and `toast` remain in `SpenderApp` alongside ~48
-Spender-only state hooks. Finishing it means lifting those 48 into a `SpenderGame` component so the
-shell owns routing and each game is a sibling. Do NOT attempt it without `npm run screens` green —
-and note the harness proves screens MOUNT and navigation works, not that gameplay still works.
+**Still to invert:** `screen`, `myId`, `authUser` and `toast` remain in `SpenderApp`, and ~38
+routing-machinery references (`screenRef`/`applyPopRoute`/`enterRoute`/`deepRoom`) are still entangled
+there. Finishing it means the shell takes those over AND Spender takes over its own room segment, the
+way CoC/WW/Duel already do.
+
+**Adding a 5th game does NOT require finishing it** — the `{ myId, authUser, onExit }` peer contract
+already works four times. A new game is ~8 edits: 4 in `Spender.jsx` (lazy import, the two
+SCREEN_FOR_MODE/MODE_FOR_SCREEN entries, a render branch), 2 in `shared/HomeScreen.jsx` (catalogue +
+emblem), 1 in `webapp/test/screens.mjs` (a SCREENS entry), 1 mount block in `app.py`. Doing the split
+LATER costs only those 4 lines moving with the rest, so a new game is a weak reason to do it now.
+
+**The real forcing function is the shell needing to change INDEPENDENTLY of Spender** (its own
+auth/nav/layout work, conditional mounting, two people working in parallel) — not another game.
+
+**Before attempting it, extend `npm run screens`:** review/replay (~30 refs), the discard and noble
+sub-decisions, and the client-WASM AI path (`ai_search`/`client_ai` — how the strongest AI serves) all
+have ZERO browser coverage today, and the split rewrites routing right next to them. Note also that a
+smaller, purely mechanical step (splitting `screen`) still shipped two regressions including broken
+invite links.
 
 ### Screen flow & derived state
 - `"auth"` → `"browser"` → `"waiting"` (2-player) | `"game"` (vs-AI goes straight to game).
