@@ -1348,6 +1348,32 @@ export default function SpenderApp() {
 	const prevBoardRef = useRef(null);
 	const prevMovesLenRef = useRef(0);
 	const flyIdRef = useRef(0);
+	// Run the flight through the Web Animations API with LITERAL pixel values.
+	//
+	// The CSS keyframes interpolate `translate(var(--dx), var(--dy))`. An animation
+	// whose keyframes read custom properties can't reliably be promoted to the
+	// compositor, so it runs on the MAIN thread — where it competes with whatever
+	// else is happening. That never showed while the animation started only after the
+	// server broadcast (nothing else was running). Now that a take animates from the
+	// click, the broadcast re-render plus the AI's WASM worker start-up land right in
+	// the flight, and cost a dropped frame at the landing.
+	//
+	// Literal values let the compositor own it, so main-thread work can't stutter it.
+	// The CSS animation stays as the fallback for browsers without WAAPI.
+	const animatedFlyRef = useRef(new Set());
+	const animateFlyer = (el, f) => {
+		if (!el || typeof el.animate !== "function") return;
+		if (animatedFlyRef.current.has(f.id)) return;   // refs fire on every re-render
+		animatedFlyRef.current.add(f.id);
+		el.style.animation = "none";                    // take over from the CSS keyframes
+		el.animate(
+			[{ transform: `translate(0,0) scale(${f.s0})`, opacity: 1 },
+			 { transform: `translate(${f.dx}px, ${f.dy}px) scale(${f.s1})`,
+			   opacity: f.kind === "card" ? 0.5 : 0.15 }],
+			{ duration: f.kind === "card" ? 500 : 550, delay: f.delay || 0,
+			  easing: "cubic-bezier(.3,.7,.4,1)", fill: "both" });
+	};
+
 	// Set when we pre-animate our OWN take on click (see handleTakeGems). The server
 	// broadcast that follows would otherwise diff the same gems and fly them a second
 	// time. Timestamped so a rejected/never-arriving move can't suppress a later,
@@ -3120,7 +3146,7 @@ export default function SpenderApp() {
 				{flyers.length > 0 && (
 					<div className="fly-layer">
 						{flyers.map(f => f.kind === "card" ? (
-							<div key={f.id} className="fly-card" style={{
+							<div key={f.id} className="fly-card" ref={el => animateFlyer(el, f)} style={{
 								left: f.x, top: f.y, width: f.w, height: f.h, borderColor: GEM_HEX[f.color],
 								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
 								animationDelay: `${f.delay}ms`,
@@ -3129,7 +3155,7 @@ export default function SpenderApp() {
 								<span className="fly-card-dot" style={{ background: GEM_HEX[f.color] }} />
 							</div>
 						) : (
-							<div key={f.id} className="fly-gem" style={{
+							<div key={f.id} className="fly-gem" ref={el => animateFlyer(el, f)} style={{
 								left: f.x - f.size / 2, top: f.y - f.size / 2, width: f.size, height: f.size,
 								"--dx": `${f.dx}px`, "--dy": `${f.dy}px`, "--s0": f.s0, "--s1": f.s1,
 								animationDelay: `${f.delay}ms`,
