@@ -428,6 +428,15 @@ pub struct Node {
     pub children: Vec<Option<Box<Node>>>,
     pub n: Vec<i32>,
     pub w: Vec<f64>,
+    /// Whether `priors` has been computed for this node. LAZY: priors are only READ by `select`,
+    /// which runs when we DESCEND into a node — so a node expanded once and never revisited (the
+    /// majority, at Duel's ~76-wide root) never needs them. Deferring the computation from
+    /// expansion-time to first-descent is BIT-IDENTICAL (the prior is a pure function of the node
+    /// state: `PriorShuffle` consumes no rng and the net forward is pure) and skips the wasted
+    /// policy pass entirely. Measured 2026-07-27: the policy prior cost 1.82x throughput at
+    /// serving; this recovers most of that for free. An empty `priors` with the flag SET is the
+    /// legitimate "no prior configured" case (flat search).
+    priors_ready: bool,
     /// PUCT prior multiplier per move (empty = flat = the deployed search). Set only when
     /// `Opts::prior_temp` is on; see `compute_priors`.
     pub priors: Vec<f64>,
@@ -443,6 +452,7 @@ impl Node {
             n: vec![0; k],
             w: vec![0.0; k],
             priors: Vec::new(),
+            priors_ready: false,
         }
     }
 }
@@ -849,6 +859,13 @@ impl Search<'_, '_> {
         if st.is_over() || depth >= self.max_depth {
             return self.leaf_eval(st, root_pid);
         }
+        // LAZY PRIORS (see `Node::priors_ready`): computed on first DESCENT, not at expansion, so
+        // never-revisited nodes never pay the policy forward. `st` here IS this node's state —
+        // clean, since every sim replays from a fresh clone of the determinized world.
+        if !node.priors_ready {
+            node.priors = self.node_priors(st, &node.moves, node.actor);
+            node.priors_ready = true;
+        }
         let total: i32 = node.n.iter().sum();
         let i = select(node, total, self.c_puct, self.minimax && node.actor != root_pid, self.fpu);
         let mv = node.moves[i].clone();
@@ -868,10 +885,10 @@ impl Search<'_, '_> {
             } else {
                 let actor = if st.pending_pid != -1 { st.pending_pid as usize } else { st.turn };
                 let moves = legal(st, actor, self.take_dominance);
-                let mut child = Box::new(Node::new(actor, moves));
-                // Compute the child's priors from `st` BEFORE `leaf_eval`'s rollout mutates it (net
-                // policy or heuristic; empty = flat when no prior is configured — the default).
-                child.priors = self.node_priors(st, &child.moves, actor);
+                // Priors are NOT computed here — `leaf_eval` below mutates `st` (rollout), and most
+                // children are never revisited anyway. They are computed lazily on first descent,
+                // from a clean replayed state. See `Node::priors_ready`.
+                let child = Box::new(Node::new(actor, moves));
                 node.children[i] = Some(child);
                 self.leaf_eval(st, root_pid)
             };
@@ -964,8 +981,9 @@ pub fn root_search_with_leaf(
         coherent: opts.coherent, minimax: opts.minimax, fpu: opts.fpu,
         max_depth: opts.max_depth.unwrap_or(MAX_TREE_DEPTH),
     };
-    // Root priors (net policy or heuristic; empty = flat), computed once before the sim loop.
-    root.priors = s.node_priors(st, &root.moves, pid);
+    // Root priors are computed lazily too — `simulate` fills them on the first sim (the root is
+    // descended every sim, so there is no saving here; keeping ONE code path avoids the two
+    // drifting apart, which is how the leak-three-times class of bug starts).
     if opts.coherent && !opts.no_determinize {
         // COHERENT: K determinized worlds (K = `root_dets`, default 1), chance held FIXED per world
         // (Search.coherent -> PriorShuffle in sims). K=1 is the single-world serving/harvest search
@@ -1355,7 +1373,37 @@ mod tests {
         n[0] = 4;
         w[0] = 4.0; // q = 1.0, a perfect score so far
         let node = node_with(n, w);
-        assert_eq!(select(&node, 4, C_PUCT), 1, "an unvisited move must out-score a 4-visit q=1.0 move");
+        // flip=false, fpu=None => the DEPLOYED selection (max-max, neutral-0 FPU) this pins.
+        assert_eq!(select(&node, 4, C_PUCT, false, None), 1, "an unvisited move must out-score a 4-visit q=1.0 move");
+        // MINIMAX (flip=true) at an opponent node: the same 4-visit q=1.0 edge is now q=-1.0 from
+        // the actor's view, so exploration must still win — and by MORE, never less.
+        assert_eq!(select(&node, 4, C_PUCT, true, None), 1, "minimax must not commit to an early winner either");
+        // FPU reduction makes unvisited moves look WORSE (parent q - r), so it is the setting that
+        // could flip this. At r=0.2 with a neutral parent, exploration must still win at 4 visits.
+        assert_eq!(select(&node, 4, C_PUCT, false, Some(0.2)), 1, "a mild FPU reduction must not commit either");
+    }
+
+    /// MINIMAX selection must actually pick the opponent's BEST reply, i.e. the move that
+    /// MINIMIZES the root-perspective Q that `node.w` accumulates. The deployed max-max picks the
+    /// opposite — the pair of asserts is the whole difference, and it is why the flag exists.
+    #[test]
+    fn minimax_selects_the_move_worst_for_the_root() {
+        // Two well-visited moves: index 0 great for the root, index 1 terrible for it. High visit
+        // counts keep the U term small so Q decides.
+        let mut n = vec![0; 10];
+        let mut w = vec![0.0; 10];
+        n[0] = 100;
+        w[0] = 90.0; // q = +0.9 (root loves it)
+        n[1] = 100;
+        w[1] = -90.0; // q = -0.9 (root hates it)
+        for i in 2..10 {
+            n[i] = 100;
+            w[i] = 0.0;
+        }
+        let node = node_with(n, w);
+        let total = 1000;
+        assert_eq!(select(&node, total, C_PUCT, false, None), 0, "max-max takes the ROOT's best (the deployed behaviour)");
+        assert_eq!(select(&node, total, C_PUCT, true, None), 1, "minimax takes the OPPONENT's best = the root's worst");
     }
 
     /// The whole point of the port: the search must actually terminate and return a legal
