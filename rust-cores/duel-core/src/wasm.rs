@@ -114,6 +114,15 @@ pub fn duel_search_expert(state_json: &str, budget_ms: f64, max_sims: u32, seed:
         // N-world coherent ensemble (hedges strategy fusion). c_puct 1.0 = the winning plateau (0.3-1.0).
         coherent: true,
         prior_c: Some(1.0),
+        // MINIMAX selection: sign Q by node actor. The historical max-max (maximizing the ROOT's value
+        // even at OPPONENT nodes = a cooperating-opponent model) measured 0.62 @cpuct1.0 / 0.67 @cpuct0.3
+        // WORSE than this, control 0.5000 exact (2026-07-26). Expert only — Hard stays byte-unchanged.
+        minimax: true,
+        // AZ POLICY PRIOR at the measured optimum T*=2.0 (temp ladder: 0.5 sharp -> 0.446 HURTS,
+        // 1.0 -> 0.524, 2.0 soft -> 0.5887 [.554,.622] = GO-strong; guide, don't dominate). Requires a
+        // policy head — EXPERT_NET carries one, so this entry point ONLY. Edge decays with per-world
+        // depth (0.535 @4000 sims), so re-verify if the sims/worker budget moves a lot.
+        net_policy_temp: Some(2.0),
         ..Default::default()
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);

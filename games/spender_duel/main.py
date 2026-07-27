@@ -81,14 +81,22 @@ CLIENT_AI_TIERS = ("hard", "expert")
 # move itself with the existing Python bot. Per-decision, so a flaky client costs sims,
 # never a stuck game.
 CLIENT_AI_TIMEOUT = 8.0
-# Per-DECISION budget: 3.5s wall-clock OR ~10k aggregate sims across the worker pool, whichever
+# Per-DECISION budget: 3.5s wall-clock OR the aggregate sim cap across the worker pool, whichever
 # comes FIRST. The pool splits the sim cap evenly (perWorker = max_sims / nworkers) and SUMS the
 # workers' root stats; each worker stops on its own time OR sim bound. The attention-net leaf
 # (Hard) is slow per sim, so on a phone the 3.5s clock usually binds first, while a fast desktop
-# hits the 10k-sim cap — which holds search near where Duel's net stops improving rather than
-# burning cycles well past it. Both bounds sit under the 8s client watchdog (CLIENT_AI_TIMEOUT).
+# used to hit the sim cap. Both bounds sit under the 8s client watchdog (CLIENT_AI_TIMEOUT).
+#
+# RAISED 10k -> 20k (2026-07-27): the 10k cap was set at the then-measured saturation (~4-8k), but
+# that was measured under PER-SIM determinization + max-max selection, where a marginal sim bought
+# mostly cross-world noise. COHERENT + MINIMAX search makes each sim a real deepening of one sound
+# world, which pushes saturation outward. At ~1420 sims/s/core (simd wasm) 3.5s allows ~5k/worker
+# ~= 20k aggregate at the 4-worker pool cap, so the TIME bound now governs on desktop too (the sim
+# cap stops being the binding constraint rather than being replaced by a bigger arbitrary one).
+# Trade-off: a fast desktop now searches the full 3.5s instead of finishing early -> stronger, but
+# moves visibly take longer. The saturation ladder under the new search is still pending.
 _CLIENT_AI_BUDGET_MS = 3500
-_CLIENT_AI_MAX_SIMS = 10000
+_CLIENT_AI_MAX_SIMS = 20000
 
 
 def _valid_difficulty(value) -> str:
