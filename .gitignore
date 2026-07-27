@@ -65,5 +65,8 @@ build/
 
 # duel-core: build output + generated parity fixtures + arena run logs
 rust-cores/duel-core/target/
+# Scratch build dirs: cargo cannot relink an .exe another process is running, so a
+# long gate/harvest run blocks rebuilds. Building to a side dir keeps both alive.
+rust-cores/duel-core/target-*/
 rust-cores/duel-core/fixtures/
 rust-cores/duel-core/*.out

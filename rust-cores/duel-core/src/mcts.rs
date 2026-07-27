@@ -946,6 +946,51 @@ pub fn root_search(st: &State, pid: usize, diff: &str, opts: &Opts, rng: &mut Rn
     root_search_with_leaf(st, pid, diff, opts, Leaf::Heuristic, rng)
 }
 
+/// SERVING-SHAPE ensemble: `k` INDEPENDENT searches whose ROOT statistics are summed — exactly
+/// what the browser does (N module workers, each running its own `duel_search` on its own tree
+/// with its own seed; `duel-worker.js` sums `visits`/`wins` by index and picks once from the
+/// pooled arrays). Indices align because `root_moves` is a pure function of the state.
+///
+/// This is NOT the same as `Opts::root_dets` under `coherent`, which runs K worlds into ONE
+/// SHARED tree — there, world 2's sims descend statistics world 1 wrote, and UCB selection is
+/// coupled across worlds. That coupling is a different algorithm (closer to coarse-grained
+/// per-sim determinization) and it is NOT what serving runs. Found 2026-07-27 when the user
+/// asked why nothing had been gated at the live bot's 4-worker shape; every headline number to
+/// date (coherent 0.585, minimax 0.62/0.67, prior 0.589, visits-vs-qsoftmax 0.655) is a
+/// SINGLE-tree K=1 measurement, so each remains a ship-CANDIDATE until confirmed here.
+///
+/// `max_iters` in `opts` is the PER-SEARCH budget (one worker's), not the total — mirroring
+/// `perWorker = max_sims / pool.length` on the client.
+pub fn root_search_pooled_with_leaf(
+    st: &State,
+    pid: usize,
+    diff: &str,
+    opts: &Opts,
+    leaf: Leaf,
+    rng: &mut Rng,
+    k: usize,
+) -> Option<RootStats> {
+    let mut acc: Option<RootStats> = None;
+    for _ in 0..k.max(1) {
+        // Fresh root each time (own tree); the shared `rng` gives each its own world + stream,
+        // the analog of the client's per-worker seed.
+        let s = root_search_with_leaf(st, pid, diff, opts, leaf, rng)?;
+        match acc {
+            None => acc = Some(s),
+            Some(ref mut a) => {
+                if a.n.len() != s.n.len() {
+                    return None; // move lists must agree — a mismatch would sum DIFFERENT moves
+                }
+                for i in 0..a.n.len() {
+                    a.n[i] += s.n[i];
+                    a.w[i] += s.w[i];
+                }
+            }
+        }
+    }
+    acc
+}
+
 /// `root_search` with an explicit leaf evaluator. The Phase-2 entry point: pass
 /// `Leaf::Net(&net)` to search with the learned value at the truncation. `Leaf::Heuristic`
 /// reproduces `root_search` exactly (that is what `root_search` calls).

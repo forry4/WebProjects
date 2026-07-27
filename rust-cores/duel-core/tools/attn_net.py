@@ -19,8 +19,8 @@ FF = 128
 L = 2
 H = 128
 TOK_N = 15
-TOK_F = 20
-TOK_STATE = 46
+TOK_F = 30
+TOK_STATE = 47
 N_ACTIONS = 320  # policy output space — must match duel-core/src/actions.rs::N_ACTIONS
 
 

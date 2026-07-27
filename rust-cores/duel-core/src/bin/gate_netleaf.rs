@@ -69,6 +69,10 @@ struct SideCfg<'a> {
     fpu: Option<f64>,             // first-play urgency reduction (unvisited q = parent q - r)
     max_depth: Option<usize>,     // in-tree depth cap override (None = MAX_TREE_DEPTH 14)
     rollout: Option<usize>,       // rollout-steps override (None = difficulty default 12)
+    /// SERVING SHAPE: pool this many INDEPENDENT searches by root stats (the browser's worker
+    /// pool). `sims` is then the PER-WORKER budget, as on the client. None = 1 = a single tree.
+    /// Distinct from `root_dets`, which shares ONE tree across worlds — not what serving runs.
+    pool: Option<usize>,
 }
 
 impl<'a> SideCfg<'a> {
@@ -88,6 +92,7 @@ impl<'a> SideCfg<'a> {
             fpu: None,
             max_depth: None,
             rollout: None,
+            pool: None,
         }
     }
 }
@@ -120,6 +125,18 @@ fn agent_move(st: &State, mover: usize, cfg: &SideCfg, dseed: u64) -> Option<Mov
         ..Default::default()
     };
     let mut rng = Rng::new(dseed ^ 0x4D43_5453);
+    if let Some(k) = cfg.pool.filter(|&k| k > 1) {
+        // Serving shape: k independent searches, root stats summed, one pick from the pool —
+        // the same three steps duel-worker.js + the main thread perform. The pick mirrors
+        // `wasm::duel_pick_move` exactly: `pick(stats, 0.0, ..)`, greedy (the client serves
+        // "hard", temperature 0), so the whole chain matches what the browser runs.
+        let stats = duel_core::mcts::root_search_pooled_with_leaf(
+            st, mover, "hard", &opts, cfg.leaf, &mut rng, k,
+        )?;
+        let mut prng = Rng::new(0);
+        let i = duel_core::mcts::pick(&stats, 0.0, &mut prng);
+        return Some(stats.moves[i].clone());
+    }
     choose_move_with_leaf(st, mover, "hard", &opts, cfg.leaf, &mut rng)
 }
 
@@ -225,6 +242,8 @@ fn main() {
     let mut max_depth_b: Option<usize> = None;
     let mut rollout: Option<usize> = None; // side-A rollout-steps override
     let mut rollout_b: Option<usize> = None;
+    let mut pool: Option<usize> = None; // side-A serving-shape worker pool
+    let mut pool_b: Option<usize> = None;
     let mut seed0: u64 = 70_000;
     let cap: usize = 400;
     let mut i = 1;
@@ -263,6 +282,10 @@ fn main() {
             "--max-depth-b" => max_depth_b = Some(next().parse().unwrap()),
             "--rollout-steps" => rollout = Some(next().parse().unwrap()),
             "--rollout-steps-b" => rollout_b = Some(next().parse().unwrap()),
+            // SERVING SHAPE: N independent searches pooled by root stats (the browser worker
+            // pool). --sims becomes the PER-WORKER budget, exactly as on the client.
+            "--pool" => pool = Some(next().parse().unwrap()),
+            "--pool-b" => pool_b = Some(next().parse().unwrap()),
             "--seed" => seed0 = next().parse().unwrap(),
             other => panic!("unknown arg: {}", other),
         }
@@ -308,6 +331,7 @@ fn main() {
         fpu,
         max_depth,
         rollout,
+        pool,
     };
     let cfg_b = SideCfg {
         leaf: pick(&leaf_b_kind, "--leaf-b"),
@@ -320,6 +344,7 @@ fn main() {
         fpu: fpu_b,
         max_depth: max_depth_b,
         rollout: rollout_b,
+        pool: pool_b,
         ..SideCfg::plain(Leaf::Heuristic, sims)
     };
     // Mirror sanity: identical plain configs (heur vs heur) must read 0.5000.
@@ -375,6 +400,12 @@ fn main() {
     }
     if let Some(s) = rollout {
         notes.push(format!("A=rollout {s}"));
+    }
+    if let Some(p) = pool {
+        notes.push(format!("A=SERVING POOL {p}x{sims} sims (independent trees, root-summed)"));
+    }
+    if let Some(p) = pool_b {
+        notes.push(format!("B=SERVING POOL {p}x{} sims", cfg_b.sims));
     }
     if let Some(s) = rollout_b {
         notes.push(format!("B=rollout {s}"));
