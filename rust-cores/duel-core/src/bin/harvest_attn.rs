@@ -1,6 +1,6 @@
 //! Self-play harvest for the ATTENTION value net (native-only, `--features bridge`). Emits the TOKEN
 //! encoding (`feats::features_tokens`) per decision:
-//!   `game_id, seat, <TOK_N*TOK_F tokens>, <TOK_N mask>, <TOK_STATE state>, hval, outcome`.
+//!   `game_id, seat, <TOK_N*TOK_F tokens>, <TOK_N mask>, <TOK_STATE state>, hval, rootval, outcome`.
 //! `hval` = the heuristic `value` (corr-with-outcome sanity + a training baseline). Label = the
 //! game's eventual result from that row's mover seat (+1/-1).
 //!
@@ -19,7 +19,7 @@ use duel_core::cards::{SPIRAL_ORDER, TOKEN_BAG};
 use duel_core::clock::Clock;
 use duel_core::engine::{State, EMPTY, N_CELLS};
 use duel_core::feats::{features_tokens, TOK_F, TOK_N, TOK_STATE};
-use duel_core::mcts::{choose_move_with_leaf, Leaf, Opts, RngShuffler};
+use duel_core::mcts::{choose_move_and_rootval_with_leaf, Leaf, Opts, RngShuffler};
 use duel_core::rng::Rng;
 use duel_core::value::value;
 
@@ -56,13 +56,14 @@ struct Row {
     mask: Vec<f64>,
     state: Vec<f64>,
     hval: f64,
+    rootval: f64,
     outcome: f32,
 }
 
 fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, cap: usize, a_seat: usize, leaf_a: Leaf, leaf_b: Leaf) -> Vec<Row> {
     let mut rng = Rng::new(seed);
     let mut st = new_game(&mut rng);
-    let mut pending: Vec<(usize, Vec<f64>, Vec<f64>, Vec<f64>, f64)> = Vec::new();
+    let mut pending: Vec<(usize, Vec<f64>, Vec<f64>, Vec<f64>, f64, f64)> = Vec::new();
     let mut ply = 0usize;
     loop {
         if st.is_over() {
@@ -73,14 +74,16 @@ fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, c
         }
         let mover = if st.pending_pid != -1 { st.pending_pid as usize } else { st.turn };
         let (t, m, s) = features_tokens(&st, mover);
-        pending.push((mover, t, m, s, value(&st, mover)));
+        let hval = value(&st, mover);
         let temperature = if ply < temp_plies { Some(temp) } else { None };
-        let opts = Opts { max_iters: Some(sims), time_limit: Some(f64::INFINITY), temperature, rollout_steps: Some(2), ..Default::default() };
+        let opts = Opts { max_iters: Some(sims), time_limit: Some(f64::INFINITY), temperature, rollout_steps: Some(2), coherent: true, prior_c: Some(1.0), ..Default::default() };
         let leaf = if mover == a_seat { leaf_a } else { leaf_b };
-        let mv = match choose_move_with_leaf(&st, mover, "hard", &opts, leaf, &mut rng) {
-            Some(m) => m,
+        // Search THIS position: pick the move AND capture the root value (Σw/Σn) for value-bootstrap.
+        let (mv, rootval) = match choose_move_and_rootval_with_leaf(&st, mover, "hard", &opts, leaf, &mut rng) {
+            Some(x) => x,
             None => break,
         };
+        pending.push((mover, t, m, s, hval, rootval));
         let mut sh = RngShuffler { rng: &mut rng };
         if st.apply_move(mover, &mv, &mut sh).is_err() {
             break;
@@ -93,13 +96,14 @@ fn play_game(game_id: u64, sims: u64, temp_plies: usize, temp: f64, seed: u64, c
     let winner = st.winner;
     pending
         .into_iter()
-        .map(|(seat, tokens, mask, state, hval)| Row {
+        .map(|(seat, tokens, mask, state, hval, rootval)| Row {
             game_id,
             seat,
             tokens,
             mask,
             state,
             hval,
+            rootval,
             outcome: if winner == seat as i32 { 1.0 } else { -1.0 },
         })
         .collect()
@@ -176,9 +180,10 @@ fn main() {
     for i in 0..TOK_STATE {
         write!(w, ",st{i}").unwrap();
     }
-    writeln!(w, ",hval,outcome").unwrap();
+    writeln!(w, ",hval,rootval,outcome").unwrap();
 
     let (mut n, mut sx, mut sy, mut sxx, mut syy, mut sxy) = (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
+    let (mut sr, mut srr, mut sry) = (0f64, 0f64, 0f64); // corr(rootval,outcome) accumulators
     let mut rows = 0u64;
     let mut terminated = 0u64;
     let clock = Clock::start();
@@ -191,15 +196,16 @@ fn main() {
         }
         terminated += 1;
         for r in &rs {
-            let (x, y) = (r.hval, r.outcome as f64);
+            let (x, y, rv) = (r.hval, r.outcome as f64, r.rootval);
             n += 1.0; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y;
+            sr += rv; srr += rv * rv; sry += rv * y;
             line.clear();
             use std::fmt::Write as _;
             let _ = write!(line, "{},{}", r.game_id, r.seat);
             for &v in &r.tokens { let _ = write!(line, ",{v}"); }
             for &v in &r.mask { let _ = write!(line, ",{v}"); }
             for &v in &r.state { let _ = write!(line, ",{v}"); }
-            let _ = write!(line, ",{},{}", r.hval, r.outcome);
+            let _ = write!(line, ",{},{},{}", r.hval, r.rootval, r.outcome);
             writeln!(w, "{line}").unwrap();
             rows += 1;
         }
@@ -212,6 +218,13 @@ fn main() {
         let d = (vx * vy).sqrt();
         if d == 0.0 { 0.0 } else { cov / d }
     };
+    let corr_rv = {
+        let cov = n * sry - sr * sy;
+        let vx = n * srr - sr * sr;
+        let vy = n * syy - sy * sy;
+        let d = (vx * vy).sqrt();
+        if d == 0.0 { 0.0 } else { cov / d }
+    };
     eprintln!("── attn harvest ── out {out}  games(term) {terminated}/{games}  rows {rows}  {:.1}s", clock.elapsed_secs());
-    eprintln!("cols: 2 + {}(tok) + {}(mask) + {}(state) + 2  |  SANITY corr(hval,outcome)={:.4} (must be >0)", TOK_N * TOK_F, TOK_N, TOK_STATE, corr);
+    eprintln!("cols: 2 + {}(tok) + {}(mask) + {}(state) + 3  |  SANITY corr(hval,outcome)={:.4} corr(rootval,outcome)={:.4} (both >0; rootval≥hval expected)", TOK_N * TOK_F, TOK_N, TOK_STATE, corr, corr_rv);
 }

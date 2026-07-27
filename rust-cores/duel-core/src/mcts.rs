@@ -95,8 +95,10 @@ pub struct Opts {
     /// 1-ply HEURISTIC policy prior in PUCT with this softmax temperature. Spender's H3-prior
     /// analog — the guided-search lever Duel's uniform PUCT never had. See `compute_priors`.
     pub prior_temp: Option<f64>,
-    /// C_PUCT override used ONLY when `prior_temp` is set (concentrating search changes the
-    /// optimal exploration level, so it is swept alongside `prior_temp`). None -> `C_PUCT`.
+    /// C_PUCT override — applied UNCONDITIONALLY (`prior_c.unwrap_or(C_PUCT)`), prior or no prior.
+    /// The shipped coherent serving depends on this (wasm.rs sets `prior_c: Some(1.0)` with no
+    /// prior_temp). Historically documented as prior-only — that was never what the code did.
+    /// None -> `C_PUCT` (1.5).
     pub prior_c: Option<f64>,
     /// Development-tilt on the (attention) net leaf: `net.eval + dev_tilt * dev_margin`. Default
     /// 0.0 = OFF = byte-identical. A value-bias PROBE of whether v2 under-values card development
@@ -128,6 +130,24 @@ pub struct Opts {
     /// Q-values stop being per-sim noise, so UCB can actually concentrate -> sharp per-world visits. The
     /// training-TARGET fix for the near-perfect-info regime (per-world bias averages across games).
     pub coherent: bool,
+    /// MINIMAX SELECTION (default false = the deployed MAX-MAX — see `select`): negate Q in the PUCT
+    /// argmax at nodes whose actor is NOT the root player, so the opponent model picks ITS best reply
+    /// instead of the root's. The deployed search never flips (both the Python original and this port),
+    /// i.e. it assumes a COOPERATING opponent below the root — masked in the per-sim era (U-dominated
+    /// near-uniform visits ~= averaging over replies), but under COHERENT concentration the visits
+    /// increasingly chase lines where the opponent helps. Spender-core signs by node actor (minimax).
+    /// A/B via `gate_netleaf --minimax`; ship only on a measured win.
+    pub minimax: bool,
+    /// First-play urgency (default None = the deployed neutral 0.0): unvisited moves score
+    /// `(signed parent Q) - r` instead of 0.0, the AlphaZero-style FPU reduction. With sharp coherent
+    /// Q, a hard 0.0 makes unvisited moves look artificially good under a losing parent (and bad under
+    /// a winning one). A/B via `gate_netleaf --fpu`.
+    pub fpu: Option<f64>,
+    /// In-tree depth cap override (default None = `MAX_TREE_DEPTH` = 14 plies before rollout
+    /// truncation). Tuned in the per-sim era, where deep in-tree lines were cross-world noise; under
+    /// COHERENT search deep lines are real, and at prod budgets (~20-60k sims) the PV easily exceeds
+    /// 14 plies, so the cap may now bind. A/B via `gate_netleaf --max-depth`.
+    pub max_depth: Option<usize>,
 }
 
 /// Which evaluator the search truncates to at a leaf.
@@ -558,14 +578,37 @@ pub fn greedy_net_move(st: &State, pid: usize, net: &crate::attn::AttnNet) -> Op
 /// eval noise-dominated, so ANY early commitment loses. Opposite of AlphaZero/Spender (sharp
 /// values -> prior helps). `compute_priors`/`greedy_net_move` + `Opts::prior_*` are kept as
 /// documented, OFF-by-default tooling; A/B via `gate_netleaf --prior-temp` / `--greedy-net`.
-fn select(node: &Node, total: i32, c_puct: f64) -> usize {
+/// (Those prior verdicts are PER-SIM-ERA — being re-tested under coherent search; see the plan.)
+///
+/// SIGN CONVENTION (found 2026-07-26): `node.w` accumulates values from the ROOT's perspective at
+/// every node, and the deployed selection maximizes that Q at EVERY node — including the OPPONENT's
+/// (max-max: the opponent is modeled as picking the ROOT's best outcome). Spender-core signs by
+/// node actor (proper minimax). Per-sim noise made this nearly moot (U dominated; visits
+/// near-uniform ~= averaging over replies — the "broad sampling" the docstring above embraces);
+/// coherent concentration makes it live. `flip` (from `Opts::minimax`, default OFF = deployed
+/// behaviour, byte-identical) negates Q at opponent nodes so each actor maximizes its OWN value.
+/// `fpu` (from `Opts::fpu`, default None = 0.0-neutral = deployed) scores unvisited moves at
+/// `(signed parent Q) - r` instead of 0.0.
+fn select(node: &Node, total: i32, c_puct: f64, flip: bool, fpu: Option<f64>) -> usize {
     let mut best = -1e18f64;
     let mut best_i = 0usize;
     let sqrt_t = (total.max(1) as f64).sqrt();
     let has_prior = !node.priors.is_empty();
+    let fpu_q = match fpu {
+        None => 0.0, // FPU: unvisited looks neutral (the deployed default)
+        Some(r) => {
+            let pq = if total > 0 { node.w.iter().sum::<f64>() / total as f64 } else { 0.0 };
+            (if flip { -pq } else { pq }) - r
+        }
+    };
     for i in 0..node.moves.len() {
         let n = node.n[i];
-        let q = if n != 0 { node.w[i] / n as f64 } else { 0.0 }; // FPU: unvisited looks neutral
+        let q = if n != 0 {
+            let raw = node.w[i] / n as f64;
+            if flip { -raw } else { raw }
+        } else {
+            fpu_q
+        };
         let p = if has_prior { node.priors[i] } else { 1.0 };
         let u = c_puct * p * sqrt_t / (1 + n) as f64;
         let s = q + u;
@@ -649,6 +692,9 @@ struct Search<'r, 'n> {
     leaf_blend: f64,
     net_policy_temp: Option<f64>,
     coherent: bool,
+    minimax: bool,
+    fpu: Option<f64>,
+    max_depth: usize,
 }
 
 impl Search<'_, '_> {
@@ -800,11 +846,11 @@ impl Search<'_, '_> {
     /// Turns don't strictly alternate (AGAIN chains, pendings), so each edge is credited
     /// by the ACTING player's identity, not by parity.
     fn simulate(&mut self, st: &mut State, node: &mut Node, root_pid: usize, depth: usize) -> f64 {
-        if st.is_over() || depth >= MAX_TREE_DEPTH {
+        if st.is_over() || depth >= self.max_depth {
             return self.leaf_eval(st, root_pid);
         }
         let total: i32 = node.n.iter().sum();
-        let i = select(node, total, self.c_puct);
+        let i = select(node, total, self.c_puct, self.minimax && node.actor != root_pid, self.fpu);
         let mv = node.moves[i].clone();
         let ok = if self.coherent {
             // chance held fixed: draw the determinized bag/deck order deterministically (no re-shuffle)
@@ -915,18 +961,33 @@ pub fn root_search_with_leaf(
     let mut s = Search {
         rng, take_dominance, steps, leaf, prior_temp, c_puct,
         dev_tilt: opts.dev_tilt, leaf_blend: opts.leaf_blend, net_policy_temp: opts.net_policy_temp,
-        coherent: opts.coherent,
+        coherent: opts.coherent, minimax: opts.minimax, fpu: opts.fpu,
+        max_depth: opts.max_depth.unwrap_or(MAX_TREE_DEPTH),
     };
     // Root priors (net policy or heuristic; empty = flat), computed once before the sim loop.
     root.priors = s.node_priors(st, &root.moves, pid);
     if opts.coherent && !opts.no_determinize {
-        // COHERENT: ONE determinized world, chance held fixed (Search.coherent -> PriorShuffle in sims).
-        let world = s.determinize(st, pid);
-        let mut iters: u64 = 0;
-        while iters < max_iters && !deadline.expired() {
-            iters += 1;
-            let mut sim = world.clone();
-            s.simulate(&mut sim, &mut root, pid, 0);
+        // COHERENT: K determinized worlds (K = `root_dets`, default 1), chance held FIXED per world
+        // (Search.coherent -> PriorShuffle in sims). K=1 is the single-world serving/harvest search
+        // (byte-identical to before: one determinize, `max_iters` sims). K>1 pools K coherent worlds
+        // in one process — the browser's N-worker ensemble, which hedges the residual strategy fusion;
+        // budget splits `max_iters/K` per world. Root stats (n, w) are additive, so pooling == one
+        // search of the combined budget spread over K worlds (the same property serving relies on).
+        // CAVEAT: the split is by ITERATION count — correct for iteration-bounded callers (gates,
+        // harvest). A TIME-bounded caller (wasm serving) at K>1 would spend the whole deadline on
+        // world 0; serving is K=1 today (root_dets None), so before ever shipping K>1 in wasm, split
+        // the deadline per world here. In the browser, K>1 is achieved across WORKERS anyway.
+        let k = opts.root_dets.map(|k| k.max(1)).unwrap_or(1);
+        let per_world = (max_iters / k as u64).max(1);
+        'worlds: for _ in 0..k {
+            let world = s.determinize(st, pid);
+            for _ in 0..per_world {
+                if deadline.expired() {
+                    break 'worlds;
+                }
+                let mut sim = world.clone();
+                s.simulate(&mut sim, &mut root, pid, 0);
+            }
         }
         return Some(RootStats { moves: root.moves, n: root.n, w: root.w });
     }
@@ -1197,11 +1258,11 @@ mod tests {
         b.decks[0] = vec![4, 2, 0, 3, 1]; // same multiset, different order
         let da = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&a, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&a, 0)
         };
         let db = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&b, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&b, 0)
         };
         assert_eq!(da.decks[0], db.decks[0], "the sort must erase the true order");
     }
@@ -1215,7 +1276,7 @@ mod tests {
         st.players[1].reserved = vec![10, 60]; // 10 = face-up L1, 60 = blind L3
         st.players[1].reserved_from_deck = vec![60];
         let mut rng = Rng::new(3);
-        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false }.determinize(&st, 0);
+        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&st, 0);
         assert_eq!(d.players[1].reserved_from_deck.len(), 1);
         let got = d.players[1].reserved_from_deck[0];
         assert!([54, 55, 56, 60].contains(&got), "redealt from the L3 pool, got {}", got);

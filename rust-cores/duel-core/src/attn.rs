@@ -45,6 +45,12 @@ pub struct AttnNet {
     /// search then runs unguided. `pw` is row-major [N_ACTIONS x H]; `pb` is [N_ACTIONS].
     pub pw: Vec<f32>,
     pub pb: Vec<f32>,
+    /// Input dims read from the loaded weights (emb_w is [D x tf], sw is [D x sf]). A net trained on a
+    /// SMALLER feature set than the current featurizer reads only the first `tf`/`sf` values per token —
+    /// valid because the featurizer only ever APPENDS features, so the prefix is byte-identical to the
+    /// set the net trained on. This is what lets an old 20-feat net keep playing after a feature add.
+    pub tf: usize,
+    pub sf: usize,
 }
 
 #[inline]
@@ -138,19 +144,25 @@ impl AttnNet {
     fn trunk_into(&self, s: &mut Scratch, tokens: &[f64], mask: &[f64], state: &[f64]) {
             let nob: &[f32] = &[];
 
-            for (d, &sv) in s.tok.iter_mut().zip(tokens.iter()) {
-                *d = sv as f32;
+            // Repack to THIS net's input dims: the featurizer may emit MORE features than the net was
+            // trained on (features are only ever appended), so read the first `tf`/`sf` — the byte-
+            // identical prefix. `src_tf` = the featurizer's actual per-token stride.
+            let src_tf = tokens.len() / TOK_N;
+            for t in 0..TOK_N {
+                for f in 0..self.tf {
+                    s.tok[t * self.tf + f] = tokens[t * src_tf + f] as f32;
+                }
             }
             for (d, &sv) in s.msk.iter_mut().zip(mask.iter()) {
                 *d = sv as f32;
             }
-            for (d, &sv) in s.st.iter_mut().zip(state.iter()) {
-                *d = sv as f32;
+            for f in 0..self.sf {
+                s.st[f] = state[f] as f32;
             }
 
             // token embed (written straight into x)
             for t in 0..TOK_N {
-                linear(&s.tok[t * TOK_F..t * TOK_F + TOK_F], &self.emb_w, &self.emb_b, TOK_F, D, &mut s.x[t * D..t * D + D]);
+                linear(&s.tok[t * self.tf..t * self.tf + self.tf], &self.emb_w, &self.emb_b, self.tf, D, &mut s.x[t * D..t * D + D]);
             }
 
             let scale = 1.0 / (HD as f32).sqrt();
@@ -234,7 +246,7 @@ impl AttnNet {
                     s.pool[d] /= cnt;
                 }
             }
-            linear(&s.st[..], &self.sw, &self.sb, TOK_STATE, D, &mut s.se[..]);
+            linear(&s.st[..self.sf], &self.sw, &self.sb, self.sf, D, &mut s.se[..]);
             s.cat[..D].copy_from_slice(&s.pool);
             s.cat[D..].copy_from_slice(&s.se);
             linear(&s.cat[..], &self.tw, &self.tb, 2 * D, H, &mut s.ht[..]);
@@ -318,11 +330,13 @@ struct AttnJson {
 impl AttnNet {
     pub fn from_json_str(s: &str) -> Result<Self, String> {
         let j: AttnJson = serde_json::from_str(s).map_err(|e| e.to_string())?;
+        let tf = j.emb_w.len() / D; // emb_w is [D x tf] row-major
+        let sf = j.sw.len() / D; //    sw    is [D x sf]
         Ok(AttnNet {
             emb_w: j.emb_w, emb_b: j.emb_b, wq: j.wq, wk: j.wk, wv: j.wv, wo: j.wo,
             f1w: j.f1w, f1b: j.f1b, f2w: j.f2w, f2b: j.f2b,
             sw: j.sw, sb: j.sb, tw: j.tw, tb: j.tb, vw: j.vw, vb: j.vb,
-            pw: j.pw, pb: j.pb,
+            pw: j.pw, pb: j.pb, tf, sf,
         })
     }
 }

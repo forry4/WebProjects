@@ -66,6 +66,62 @@ fn eff_cost(ci: usize, bon: &[i32; N_COLORS]) -> i32 {
     s + COST[ci][PEARL]
 }
 
+/// Turns-to-afford estimate for card `ci` given `bon`/`tok` — a tempo SIGNAL, not an oracle.
+/// Gold covers any color; a line-take grabs ~3 tokens/turn, or ~2 of one color. Mirrors the
+/// tempo feature Spender's campaign found load-bearing (hand the net the raw estimate; let
+/// search learn the weighting). Capped at 6 by the caller's /6 norm.
+#[inline]
+fn turns_to_afford(ci: usize, bon: &[i32; N_COLORS], tok: &[i32; N_TOKENS]) -> i32 {
+    let mut sum_d = 0i32;
+    let mut per_color = 0i32;
+    for c in 0..N_COLORS {
+        let d = ((COST[ci][c] - bon[c]).max(0) - tok[c]).max(0);
+        sum_d += d;
+        per_color = per_color.max((d + 1) / 2); // ceil(d/2): can't sustain take-2-same forever
+    }
+    let total = sum_d + (COST[ci][PEARL] - tok[PEARL]).max(0);
+    let net = (total - tok[GOLD]).max(0); // a wild covers any single missing token
+    ((net + 2) / 3).max(per_color) // ceil(net/3) vs the single-color pace
+}
+
+/// Engine value of buying `ci`: the discount its +1 bonus grants every OTHER candidate card
+/// (board + my reserved) that still needs that color — the cross-card DEVELOPMENT term
+/// (Spender's flagship feature, the one it notes an MLP cannot derive from a flat vector).
+/// `others` is the full candidate-card id list; a wild bonus helps whatever a card needs most.
+fn engine_value(ci: usize, bon: &[i32; N_COLORS], others: &[i32]) -> f64 {
+    let bcol = BONUS[ci];
+    let colored = bcol >= 0 && (bcol as usize) < N_COLORS;
+    let wild = bcol as usize == N_COLORS;
+    if !colored && !wild {
+        return 0.0; // a card with no bonus builds no engine
+    }
+    let mut ev = 0.0f64;
+    for &cj in others {
+        if cj < 0 || cj == ci as i32 {
+            continue;
+        }
+        let cj = cj as usize;
+        let (needs, heavy) = if colored {
+            let bc = bcol as usize;
+            ((COST[cj][bc] - bon[bc]).max(0), COST[cj][bc])
+        } else {
+            // wild: credit the color cj is most short of
+            let mut best = 0;
+            for c in 0..N_COLORS {
+                best = best.max((COST[cj][c] - bon[c]).max(0));
+            }
+            (best, best)
+        };
+        if needs > 0 {
+            let w_value = PTS[cj] as f64 / 5.0 + 0.2; // point-heavy cards weigh more (+floor)
+            let total_cost =
+                ((0..N_COLORS).map(|c| COST[cj][c]).sum::<i32>() + COST[cj][PEARL]).max(1);
+            ev += w_value * (heavy as f64 / total_cost as f64); // × how bcol-heavy cj is
+        }
+    }
+    ev
+}
+
 /// One card's CARD_BLOCK (13) features — used for every pyramid slot (D) and every reserved
 /// slot (E). `card < 0` is an empty/exhausted slot and encodes as all zeros (so "no card" is
 /// distinguishable from "a 0-point card": the `present` flag is the discriminator).
@@ -108,8 +164,8 @@ fn push_card(
 // lets a card's value depend on the others (the cross-card interaction that broke Spender's plateau).
 
 pub const TOK_N: usize = PYRAMID_SLOTS_TOTAL + MAX_RESERVED; // 12 pyramid + 3 own-reserved = 15
-pub const TOK_F: usize = 20; // per-card token features (see push_card_token)
-pub const TOK_STATE: usize = 46; // global state vector (asserted below)
+pub const TOK_F: usize = 30; // per-card token features (see push_card_token)
+pub const TOK_STATE: usize = 47; // global state vector (asserted below)
 
 /// One card token — TOK_F features. `card<0` -> all zeros (masked out). Extends the proven per-card
 /// block with the 3 "win-condition proximity after buying this card" deltas (points/crowns/color).
@@ -121,9 +177,11 @@ fn push_card_token(
     me_bon: &[i32; N_COLORS],
     opp_bon: &[i32; N_COLORS],
     me_tok: &[i32; N_TOKENS],
+    opp_tok: &[i32; N_TOKENS],
     me_points: i32,
     me_crowns: i32,
     me_cp: &[i32; N_COLORS],
+    others: &[i32],
 ) {
     if card < 0 {
         out.extend(std::iter::repeat(0.0).take(TOK_F));
@@ -160,6 +218,16 @@ fn push_card_token(
         me_cp.iter().max().copied().unwrap_or(0) as f64 / 10.0
     };
     out.push(cw.min(1.0)); // 19 color-win proximity after buy
+    // ── representation upgrade (me-side): per-color effective cost, tempo, engine value ──
+    for c in 0..N_COLORS {
+        out.push((COST[ci][c] - me_bon[c]).max(0) as f64 / 7.0); // 20..24 per-color effective cost
+    }
+    out.push(turns_to_afford(ci, me_bon, me_tok) as f64 / 6.0); // 25 turns-to-afford (tempo/planning)
+    out.push((engine_value(ci, me_bon, others) / 3.0).min(1.0)); // 26 engine value (development)
+    // ── opp-side denial / contest: how close the OPPONENT is to this same card ──
+    out.push(if can_afford(ci, opp_tok, opp_bon) { 1.0 } else { 0.0 }); // 27 opp affordable now
+    out.push(turns_to_afford(ci, opp_bon, opp_tok) as f64 / 6.0); // 28 opp turns-to-afford (contest)
+    out.push((engine_value(ci, opp_bon, &others[..PYRAMID_SLOTS_TOTAL]) / 3.0).min(1.0)); // 29 opp engine value (board-only)
 }
 
 /// Longest contiguous takeable line (1-3) currently on the gem board — a cheap geometry signal for
@@ -201,9 +269,21 @@ pub fn features_tokens(st: &State, seat: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>
     let me = &st.players[seat];
     let me_bon = bonuses_of(me);
     let opp_bon = bonuses_of(&st.players[opp]);
+    let opp_tok = &st.players[opp].tokens;
     let me_pts = points_of(me);
     let me_cr = crowns_of(me);
     let me_cp = color_points_of(me);
+
+    // Candidate-card id list (12 pyramid + 3 my reserved) — shared context for engine value.
+    let mut others: Vec<i32> = Vec::with_capacity(TOK_N);
+    for lvl in 0..3 {
+        for slot in 0..PYRAMID_SIZES[lvl] {
+            others.push(st.pyramid[lvl].get(slot).copied().unwrap_or(EMPTY as i32));
+        }
+    }
+    for slot in 0..MAX_RESERVED {
+        others.push(me.reserved.get(slot).map(|&c| c as i32).unwrap_or(EMPTY as i32));
+    }
 
     // ── tokens + mask: 12 pyramid slots then 3 own-reserved ──
     let mut tokens: Vec<f64> = Vec::with_capacity(TOK_N * TOK_F);
@@ -212,13 +292,13 @@ pub fn features_tokens(st: &State, seat: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>
         for slot in 0..PYRAMID_SIZES[lvl] {
             let card = st.pyramid[lvl].get(slot).copied().unwrap_or(EMPTY as i32);
             mask.push(if card >= 0 { 1.0 } else { 0.0 });
-            push_card_token(&mut tokens, card, false, &me_bon, &opp_bon, &me.tokens, me_pts, me_cr, &me_cp);
+            push_card_token(&mut tokens, card, false, &me_bon, &opp_bon, &me.tokens, opp_tok, me_pts, me_cr, &me_cp, &others);
         }
     }
     for slot in 0..MAX_RESERVED {
         let card = me.reserved.get(slot).map(|&c| c as i32).unwrap_or(EMPTY as i32);
         mask.push(if card >= 0 { 1.0 } else { 0.0 });
-        push_card_token(&mut tokens, card, true, &me_bon, &opp_bon, &me.tokens, me_pts, me_cr, &me_cp);
+        push_card_token(&mut tokens, card, true, &me_bon, &opp_bon, &me.tokens, opp_tok, me_pts, me_cr, &me_cp, &others);
     }
 
     // ── state ──
@@ -280,6 +360,12 @@ pub fn features_tokens(st: &State, seat: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>
     s.push(st.again as i32 as f64);
     s.push(st.replenished as i32 as f64);
     s.push(st.privileges_board as f64 / 3.0);
+    // anti-hoard: how many candidate cards I could buy RIGHT NOW (idle-token opportunity cost)
+    let n_afford = others
+        .iter()
+        .filter(|&&cj| cj >= 0 && can_afford(cj as usize, &me.tokens, &me_bon))
+        .count();
+    s.push(n_afford as f64 / 5.0);
 
     debug_assert_eq!(mask.len(), TOK_N);
     debug_assert_eq!(tokens.len(), TOK_N * TOK_F);
