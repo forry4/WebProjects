@@ -26,6 +26,12 @@ on:
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'
+      # Docs never reach the bundle — nothing in the build imports markdown, and the
+      # per-package CLAUDE.md files live INSIDE the globs above, so without this every
+      # docs edit rebuilt and republished a byte-identical site. Must be a trailing
+      # negative pattern rather than `paths-ignore`: GitHub rejects both filters on one
+      # event, and later patterns override earlier ones.
+      - '!**/*.md'
   workflow_dispatch:   # manual "Run workflow" button
 
 # Grant the deploy job the OIDC + Pages permissions the official action needs.
