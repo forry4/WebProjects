@@ -24,7 +24,9 @@ higher-sims confirm. Winners (>=0.53) combine into one final combo-vs-default ga
 import os, re, subprocess
 
 CORE = r"C:/Users/Forrest/forrestm_projects/rust-cores/duel-core"
-GATE = CORE + "/target/release/gate_netleaf.exe"
+# Overridable: when the flywheel is running it holds target/release, so point this at the side
+# build (target-pool/release) to use a fresher binary without fighting the lock.
+GATE = os.environ.get("HP_GATE", CORE + "/target/release/gate_netleaf.exe")
 CHAMP0 = CORE + "/src/attn_champion1_frozen.json"
 RUN = r"C:/Users/Forrest/duel_run/hp_sweep"
 GAMES = int(os.environ.get("HP_GAMES", 200))

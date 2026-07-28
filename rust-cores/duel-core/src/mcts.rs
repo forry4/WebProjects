@@ -138,6 +138,19 @@ pub struct Opts {
     /// increasingly chase lines where the opponent helps. Spender-core signs by node actor (minimax).
     /// A/B via `gate_netleaf --minimax`; ship only on a measured win.
     pub minimax: bool,
+    /// OPPONENT-MODEL sharpness: `c_puct` used at nodes whose actor is NOT the root player
+    /// (default None = the same `prior_c`/`C_PUCT` both sides = the shipped behaviour).
+    ///
+    /// This is the minimax↔expectimax axis. With `minimax` on, an opponent node selects by
+    /// `-Q + c·P·√N/(1+n)`: a LOW `opp_c` makes it commit to its single best reply (hard minimax),
+    /// a HIGH one keeps its visits spread so what propagates up is closer to an AVERAGE over its
+    /// replies (expectimax — an unknown/weak opponent). Both extremes are wrong for a different
+    /// reason: hard minimax in a DETERMINIZED search models an opponent who can see the sampled
+    /// hidden world (deck order, our reserves) — the classic PIMC over-pessimism — while pure
+    /// averaging is the accidental behaviour the per-sim era had. The optimum should be interior,
+    /// as every other temperature-like knob here has been (policy prior peaked at 2.0, losing at
+    /// both ends). A/B via `gate_netleaf --opp-c`.
+    pub opp_c: Option<f64>,
     /// First-play urgency (default None = the deployed neutral 0.0): unvisited moves score
     /// `(signed parent Q) - r` instead of 0.0, the AlphaZero-style FPU reduction. With sharp coherent
     /// Q, a hard 0.0 makes unvisited moves look artificially good under a losing parent (and bad under
@@ -705,6 +718,7 @@ struct Search<'r, 'n> {
     minimax: bool,
     fpu: Option<f64>,
     max_depth: usize,
+    opp_c: Option<f64>,
 }
 
 impl Search<'_, '_> {
@@ -867,7 +881,11 @@ impl Search<'_, '_> {
             node.priors_ready = true;
         }
         let total: i32 = node.n.iter().sum();
-        let i = select(node, total, self.c_puct, self.minimax && node.actor != root_pid, self.fpu);
+        let is_opp = node.actor != root_pid;
+        // Opponent nodes may use their own exploration constant — the minimax<->expectimax knob
+        // (see `Opts::opp_c`). None => identical to the root's, i.e. the shipped behaviour.
+        let c = if is_opp { self.opp_c.unwrap_or(self.c_puct) } else { self.c_puct };
+        let i = select(node, total, c, self.minimax && is_opp, self.fpu);
         let mv = node.moves[i].clone();
         let ok = if self.coherent {
             // chance held fixed: draw the determinized bag/deck order deterministically (no re-shuffle)
@@ -1024,7 +1042,7 @@ pub fn root_search_with_leaf(
         rng, take_dominance, steps, leaf, prior_temp, c_puct,
         dev_tilt: opts.dev_tilt, leaf_blend: opts.leaf_blend, net_policy_temp: opts.net_policy_temp,
         coherent: opts.coherent, minimax: opts.minimax, fpu: opts.fpu,
-        max_depth: opts.max_depth.unwrap_or(MAX_TREE_DEPTH),
+        max_depth: opts.max_depth.unwrap_or(MAX_TREE_DEPTH), opp_c: opts.opp_c,
     };
     // Root priors are computed lazily too — `simulate` fills them on the first sim (the root is
     // descended every sim, so there is no saving here; keeping ONE code path avoids the two
@@ -1321,11 +1339,11 @@ mod tests {
         b.decks[0] = vec![4, 2, 0, 3, 1]; // same multiset, different order
         let da = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&a, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH, opp_c: None }.determinize(&a, 0)
         };
         let db = {
             let mut rng = Rng::new(7);
-            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&b, 0)
+            Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH, opp_c: None }.determinize(&b, 0)
         };
         assert_eq!(da.decks[0], db.decks[0], "the sort must erase the true order");
     }
@@ -1339,7 +1357,7 @@ mod tests {
         st.players[1].reserved = vec![10, 60]; // 10 = face-up L1, 60 = blind L3
         st.players[1].reserved_from_deck = vec![60];
         let mut rng = Rng::new(3);
-        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH }.determinize(&st, 0);
+        let d = Search { rng: &mut rng, take_dominance: true, steps: 12, leaf: Leaf::Heuristic, prior_temp: None, c_puct: C_PUCT, dev_tilt: 0.0, leaf_blend: 0.0, net_policy_temp: None, coherent: false, minimax: false, fpu: None, max_depth: MAX_TREE_DEPTH, opp_c: None }.determinize(&st, 0);
         assert_eq!(d.players[1].reserved_from_deck.len(), 1);
         let got = d.players[1].reserved_from_deck[0];
         assert!([54, 55, 56, 60].contains(&got), "redealt from the L3 pool, got {}", got);

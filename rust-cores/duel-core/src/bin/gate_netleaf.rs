@@ -73,6 +73,7 @@ struct SideCfg<'a> {
     /// pool). `sims` is then the PER-WORKER budget, as on the client. None = 1 = a single tree.
     /// Distinct from `root_dets`, which shares ONE tree across worlds — not what serving runs.
     pool: Option<usize>,
+    opp_c: Option<f64>,           // c_puct at OPPONENT nodes: the minimax<->expectimax knob
 }
 
 impl<'a> SideCfg<'a> {
@@ -93,6 +94,7 @@ impl<'a> SideCfg<'a> {
             max_depth: None,
             rollout: None,
             pool: None,
+            opp_c: None,
         }
     }
 }
@@ -122,6 +124,7 @@ fn agent_move(st: &State, mover: usize, cfg: &SideCfg, dseed: u64) -> Option<Mov
         fpu: cfg.fpu,
         max_depth: cfg.max_depth,
         rollout_steps: cfg.rollout,
+        opp_c: cfg.opp_c,
         ..Default::default()
     };
     let mut rng = Rng::new(dseed ^ 0x4D43_5453);
@@ -244,6 +247,8 @@ fn main() {
     let mut rollout_b: Option<usize> = None;
     let mut pool: Option<usize> = None; // side-A serving-shape worker pool
     let mut pool_b: Option<usize> = None;
+    let mut opp_c: Option<f64> = None; // side-A opponent-node c_puct
+    let mut opp_c_b: Option<f64> = None;
     let mut seed0: u64 = 70_000;
     let cap: usize = 400;
     let mut i = 1;
@@ -286,6 +291,11 @@ fn main() {
             // pool). --sims becomes the PER-WORKER budget, exactly as on the client.
             "--pool" => pool = Some(next().parse().unwrap()),
             "--pool-b" => pool_b = Some(next().parse().unwrap()),
+            // OPPONENT MODEL: c_puct at opponent nodes. LOW = hard minimax (commits to their best
+            // reply); HIGH = their visits stay spread, so we effectively average over replies
+            // (expectimax). Unset = same as ours = shipped behaviour.
+            "--opp-c" => opp_c = Some(next().parse().unwrap()),
+            "--opp-c-b" => opp_c_b = Some(next().parse().unwrap()),
             "--seed" => seed0 = next().parse().unwrap(),
             other => panic!("unknown arg: {}", other),
         }
@@ -332,6 +342,7 @@ fn main() {
         max_depth,
         rollout,
         pool,
+        opp_c,
     };
     let cfg_b = SideCfg {
         leaf: pick(&leaf_b_kind, "--leaf-b"),
@@ -345,6 +356,7 @@ fn main() {
         max_depth: max_depth_b,
         rollout: rollout_b,
         pool: pool_b,
+        opp_c: opp_c_b,
         ..SideCfg::plain(Leaf::Heuristic, sims)
     };
     // Mirror sanity: identical plain configs (heur vs heur) must read 0.5000.
@@ -400,6 +412,12 @@ fn main() {
     }
     if let Some(s) = rollout {
         notes.push(format!("A=rollout {s}"));
+    }
+    if let Some(c) = opp_c {
+        notes.push(format!("A=opp-c {c} (opponent-model sharpness; low=minimax, high=expectimax)"));
+    }
+    if let Some(c) = opp_c_b {
+        notes.push(format!("B=opp-c {c}"));
     }
     if let Some(p) = pool {
         notes.push(format!("A=SERVING POOL {p}x{sims} sims (independent trees, root-summed)"));
