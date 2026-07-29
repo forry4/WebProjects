@@ -148,6 +148,7 @@ try {
 	const checks = [
 		["/", { checkCls: true }],                        // the original blank-page + CLS gate
 		["/duel", { pathPrefix: "/duel" }],               // mode deep link survives + renders
+		["/dontminion", { pathPrefix: "/dontminion" }],   // 5th game's mode deep link
 		["/spender/ABCDEF", { pathPrefix: "/spender" }],  // room-segment parse (Layer B may normalize to /spender)
 	];
 	const failures = [];

@@ -1,0 +1,220 @@
+/* Dontminion — game-local styles. Rides the shared .card frame (splendorCardCss)
+   via --card-w/--card-h; everything here is .dm-scoped. NO BACKTICKS in this file. */
+
+.dm { color: var(--text, #e8dfc8); }
+.dm-center { min-height: 60vh; display: flex; align-items: center; justify-content: center; }
+
+/* ── lobby ── */
+.dm-lobby-cols {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px; padding: 12px 18px 40px; max-width: 1280px; margin: 0 auto; width: 100%;
+}
+.dm-toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  color: var(--text, #e8dfc8); padding: 10px 18px; border-radius: 8px; z-index: 60;
+}
+.dm-checks { display: flex; gap: 8px; }
+.dm-check {
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  color: var(--text-dim, #8a7d6a); border-radius: 8px; padding: 8px 14px;
+  cursor: pointer; font: inherit;
+}
+.dm-check-on { color: var(--gold-light, #e8c96a); border-color: var(--gold, #c9a84c); }
+
+/* ── waiting room ── */
+.dm-wait { max-width: 520px; margin: 40px auto; padding: 0 18px; text-align: center; }
+.dm-wait h2 { font-family: 'Cinzel','Cinzel Fallback',serif; letter-spacing: 2px; }
+.dm-wait-note { color: var(--text-dim, #8a7d6a); margin: 6px 0; }
+.dm-wait-players { margin: 22px 0; }
+.dm-wait-players ul { list-style: none; padding: 8px 0 0; margin: 0; }
+.dm-wait-players li { padding: 6px 0; border-bottom: 1px solid var(--border, #3a342a); }
+
+/* ── game frame ── */
+.dm-gamescreen { min-height: 100vh; display: flex; flex-direction: column; }
+.dm-top {
+  display: flex; align-items: center; gap: 14px; padding: 8px 14px;
+  border-bottom: 1px solid var(--border, #3a342a); background: var(--surface, #1a1814);
+  position: sticky; top: 0; z-index: 20;
+}
+.dm-hud { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+.dm-hud span { color: var(--text-dim, #8a7d6a); font-size: 14px; }
+.dm-phase { color: var(--text, #e8dfc8) !important; font-weight: 600; }
+.dm-phase-mine { color: var(--gold-light, #e8c96a) !important; }
+.dm-reconn { margin-left: auto; color: var(--red-gem, #dc4040); font-size: 13px; }
+
+.dm-main {
+  display: grid; grid-template-columns: 300px minmax(0, 1fr);
+  gap: 14px; padding: 12px 14px 26px; flex: 1; align-items: start;
+  max-width: 1500px; margin: 0 auto; width: 100%;
+}
+.dm-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dm-center-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* ── opponents / trash / log ── */
+.dm-opp {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+}
+.dm-opp-acting { border-color: var(--gold, #c9a84c); }
+.dm-opp-name { font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dm-opp-stats { display: flex; gap: 12px; color: var(--text-dim, #8a7d6a); font-size: 13px; margin-top: 4px; }
+.dm-opp-discard { color: var(--text-dim, #8a7d6a); font-size: 12px; margin-top: 3px; }
+.dm-trash {
+  background: var(--surface, #1a1814); border: 1px dashed var(--border, #3a342a);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+  color: var(--text-dim, #8a7d6a);
+}
+.dm-trash-list { margin-top: 6px; color: var(--text, #e8dfc8); font-size: 12px; }
+.dm-log {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 8px 10px;
+  font-size: 12px; line-height: 1.5; overflow-y: auto; max-height: 320px;
+  display: flex; flex-direction: column-reverse;
+}
+.dm-log-line { color: var(--text-dim, #8a7d6a); }
+.dm-log-line:last-child { color: var(--text, #e8dfc8); }
+
+/* ── supply ── */
+.dm-supply {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 12px;
+  container-type: inline-size;
+  --card-w: clamp(64px, calc((100cqw - 8 * 8px - 24px) / 8.5), 118px);
+  --card-h: calc(var(--card-w) * 1.4);
+}
+.dm-supply-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.dm-basics { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border, #3a342a); }
+.dm-pile-slot { position: relative; }
+.dm-disc {
+  position: absolute; top: -7px; right: -4px; background: var(--gold, #c9a84c);
+  color: #1a1408; border-radius: 8px; font-size: 10px; padding: 1px 6px; font-weight: 700;
+}
+
+/* ── the card face (rides the shared .card frame) ── */
+.dm-card {
+  position: relative; display: flex; flex-direction: column;
+  background: #221d15; overflow: hidden; text-align: left;
+  /* the shared frame animates transition:all — narrow it so container-query
+     resizes don't animate as a shrink on load (the Duel lesson) */
+  transition: border-color .15s, transform .15s, box-shadow .15s, opacity .15s;
+}
+.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 74px); min-height: calc(var(--card-w-s, 74px) * 1.15); }
+.dm-clickable { cursor: pointer; }
+.dm-clickable:hover { transform: translateY(-2px); }
+.dm-sel { outline: 2px solid var(--gold-light, #e8c96a); transform: translateY(-3px); }
+.dm-hl { border-color: var(--gold, #c9a84c); box-shadow: 0 0 8px rgba(201, 168, 76, .35); }
+.dm-dis { opacity: .55; }
+.dm-card-name {
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
+  font-size: clamp(9px, calc(var(--card-h, 120px) * .105), 14px);
+  padding: 4px 5px 2px; letter-spacing: .3px; line-height: 1.1;
+}
+.dm-card-text {
+  flex: 1; font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 11px);
+  color: var(--text-dim, #8a7d6a); padding: 0 5px; white-space: pre-line;
+  overflow: hidden; line-height: 1.25;
+}
+.dm-card-bottom {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 5px 4px; gap: 4px;
+}
+.dm-cost {
+  background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
+  color: #221a05; font-weight: 800; border-radius: 50%;
+  width: clamp(15px, calc(var(--card-h, 120px) * .16), 22px);
+  height: clamp(15px, calc(var(--card-h, 120px) * .16), 22px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
+}
+.dm-type {
+  font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 9px);
+  text-transform: uppercase; letter-spacing: .4px; color: #cfc4a6;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dm-f-action .dm-card-name { color: #e8dfc8; }
+.dm-f-treasure { background: #2a2410; }
+.dm-f-treasure .dm-card-name { color: #f0cf72; }
+.dm-f-victory { background: #1c2417; }
+.dm-f-victory .dm-card-name { color: #9fd57e; }
+.dm-f-curse { background: #241a2b; }
+.dm-f-curse .dm-card-name { color: #c79bdd; }
+.dm-edge { position: absolute; top: 0; bottom: 0; width: 3px; }
+.dm-edge-atk { left: 0; background: var(--red-gem, #dc4040); }
+.dm-edge-rx { right: 0; background: var(--blue-gem, #4257ff); }
+.dm-pile-count {
+  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+  background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
+  border-radius: 10px; font-size: 11px; padding: 0 8px; color: var(--text, #e8dfc8);
+}
+.dm-card-badge {
+  position: absolute; top: -7px; right: -7px; background: var(--gold, #c9a84c);
+  color: #1a1408; width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px;
+}
+
+/* ── prompts ── */
+.dm-waitbar {
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  border-radius: 8px; padding: 8px 14px; text-align: center; color: var(--text-dim, #8a7d6a);
+}
+.dm-dots { margin-left: 4px; }
+.dm-prompt {
+  background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
+  border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  --card-w-s: 84px;
+}
+.dm-prompt-hd { font-weight: 700; margin-bottom: 8px; }
+.dm-prompt-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.dm-prompt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
+.dm-names { max-height: 180px; overflow-y: auto; }
+
+/* ── my area ── */
+.dm-me {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+  --card-w: 96px; --card-h: 134px;
+}
+.dm-inplay {
+  display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-items: center;
+  border-bottom: 1px dashed var(--border, #3a342a); padding-bottom: 8px; margin-bottom: 8px;
+  --card-w-s: 66px;
+}
+.dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 12px; font-style: italic; }
+.dm-handrow { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.dm-mystats { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim, #8a7d6a); font-size: 12px; min-width: 92px; }
+.dm-hand { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+.dm-turnbtns { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── modals ── */
+.dm-backdrop {
+  position: fixed; inset: 0; background: rgba(10, 8, 5, .72);
+  display: flex; align-items: center; justify-content: center; z-index: 70;
+}
+.dm-modal {
+  background: var(--surface, #1a1814); border: 1px solid var(--gold, #c9a84c);
+  border-radius: var(--radius-lg, 14px); padding: 22px 26px; max-width: 460px; width: calc(100% - 40px);
+}
+.dm-modal h2 { font-family: 'Cinzel','Cinzel Fallback',serif; margin: 0 0 8px; }
+.dm-winline { color: var(--gold-light, #e8c96a); }
+.dm-scores { width: 100%; border-collapse: collapse; margin: 12px 0 16px; }
+.dm-scores th, .dm-scores td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border, #3a342a); }
+.dm-scores .dm-win td { color: var(--gold-light, #e8c96a); font-weight: 700; }
+.dm-rules p { margin: 8px 0; line-height: 1.5; }
+
+/* ── mobile (single column; every override .dm-prefixed — cascade-order rule) ── */
+@media (max-width: 980px) {
+  .dm .dm-main { grid-template-columns: minmax(0, 1fr); }
+  .dm .dm-side { order: 2; }
+  .dm .dm-center-col { order: 1; }
+  .dm .dm-log { max-height: 180px; }
+  .dm .dm-lobby-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .dm .dm-me { --card-w: 78px; --card-h: 109px; }
+  .dm .dm-handrow { gap: 8px; }
+  .dm .dm-mystats { flex-direction: row; min-width: 0; gap: 10px; }
+  .dm .dm-turnbtns { flex-direction: row; width: 100%; }
+  .dm .dm-hud span { font-size: 12px; }
+}
