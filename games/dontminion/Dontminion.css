@@ -253,7 +253,9 @@
   .dm .dm-kgrid { gap: 8px; row-gap: 24px; }
   .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
   .dm .dm-resbar b { font-size: 17px; }
-  .dm .dm-handrow { gap: 8px; }
+  /* stack stats above the hand so the hand row spans the FULL width — with the
+     stats beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
+  .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 8px; }
   .dm .dm-mystats { flex-direction: row; min-width: 0; gap: 10px; }
   .dm .dm-turnbtns { flex-direction: row; width: 100%; }
   .dm .dm-hud span { font-size: 12px; }
