@@ -17,6 +17,8 @@ const GAMES = [
 	{ id: "coc", name: "Castles of Crimson", tagline: "A realm of conquest and intrigue", status: "ready", screen: "coc", accent: "#d6454b", players: "1–4 players" },
 	{ id: "wherewolf", name: "Where Wolf", tagline: "A village of secrets and lies", status: "ready", screen: "werewolf", accent: "#6f86d6", players: "3–10 players" },
 	{ id: "duel", name: "Spender Duel", tagline: "A two-player battle of gems and crowns", status: "ready", screen: "duel", accent: "#bf6fd0", players: "1–2 players" },
+	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
+	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", accent: "#b08d57", players: "1–4 players" },
 ];
 
 // Inline SVG rather than an icon font or image set: they inherit currentColor for the
@@ -26,6 +28,8 @@ const GAME_EMBLEM = {
 	coc: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 20V10H7V7H10V10H14V7H17V10H20V20Z" /><path d="M10 20V15H14V20" /></svg>),
 	wherewolf: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M20 15A8 8 0 1 1 11 4A6.5 6.5 0 0 0 20 15Z" /><circle cx="17.5" cy="6" r=".9" fill="currentColor" stroke="none" /></svg>),
 	duel: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><path d="M4 9L7 16H17L20 9L15.5 12.5L12 6L8.5 12.5Z" /><path d="M7.5 19H16.5" /></svg>),
+	// A splayed hand of three cards — the deck-builder.
+	dontminion: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="9" y="4" width="7" height="10" rx="1" transform="rotate(8 12.5 9)" /><rect x="4" y="6" width="7" height="10" rx="1" transform="rotate(-12 7.5 11)" /><rect x="8.5" y="9" width="7" height="10" rx="1" /><path d="M10.5 12H14M10.5 14.5H14" /></svg>),
 };
 
 export { SITE_NAME, GAMES, GAME_EMBLEM };
