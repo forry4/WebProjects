@@ -524,6 +524,84 @@ def test_throne_room_with_no_actions_or_skip():
     assert "Smithy" in g["seats"][A]["hand"]
 
 
+# --- turn undo (reveal-gated — the Duel model) --------------------------------
+# give_hand changes the state AFTER new_game armed the snapshot, so these tests
+# re-arm with engine._arm_undo once the position is staged.
+
+def test_undo_restores_treasures_and_buys():
+    g = fresh()
+    give_hand(g, A, ["Gold", "Copper"])
+    engine._arm_undo(g)
+    mv(g, A, {"type": "end_phase"})
+    mv(g, A, {"type": "play_all_treasures"})
+    assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
+    assert g["supply"]["Silver"] == 39
+    ok, err = mv(g, A, {"type": "undo_turn"})
+    assert ok, err
+    assert g["phase"] == "action" and g["coins"] == 0
+    assert sorted(g["seats"][A]["hand"]) == ["Copper", "Gold"]
+    assert g["seats"][A]["in_play"] == [] and g["seats"][A]["discard"] == []
+    assert g["supply"]["Silver"] == 40
+    assert g["log"][-1]["event"] == "undo"
+    assert mv(g, A, {"type": "end_phase"})[0]       # play continues after an undo
+
+
+def test_undo_ok_for_no_reveal_actions_blocked_after_draw():
+    g = fresh()
+    give_hand(g, A, ["Festival"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Festival"})[0]
+    assert g["coins"] == 2
+    assert mv(g, A, {"type": "undo_turn"})[0]        # +actions/+buys/+$: no reveal
+    assert "Festival" in g["seats"][A]["hand"] and g["coins"] == 0
+    give_hand(g, A, ["Smithy"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Smithy"})[0]
+    ok, err = mv(g, A, {"type": "undo_turn"})        # a draw can't be un-seen
+    assert not ok and "revealed" in err
+
+
+def test_undo_before_opponent_answers_but_not_after():
+    g = fresh()
+    give_hand(g, A, ["Militia", "Militia"])
+    give_hand(g, B, ["Copper"] * 5)
+    g["actions"] = 2
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
+    assert g["pending_pid"] == B
+    assert mv(g, A, {"type": "undo_turn"})[0]        # B revealed nothing yet
+    assert g["pending_pid"] is None
+    assert g["seats"][A]["hand"].count("Militia") == 2
+    assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
+    assert decide(g, B, cards=g["seats"][B]["hand"][:2])[0]
+    ok, err = mv(g, A, {"type": "undo_turn"})        # B's choice = new information
+    assert not ok and "revealed" in err
+
+
+def test_undo_with_own_pending_open_and_after_self_reveal():
+    g = fresh()
+    give_hand(g, A, ["Workshop"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Workshop"})[0]
+    assert g["pending_kind"] == "choose_pile"
+    assert mv(g, A, {"type": "undo_turn"})[0]        # own unrevealed pending: fine
+    assert g["pending_pid"] is None and "Workshop" in g["seats"][A]["hand"]
+    give_hand(g, A, ["Shanty Town", "Moat"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Shanty Town"})[0]
+    ok, err = mv(g, A, {"type": "undo_turn"})        # revealed OWN hand to others
+    assert not ok and "revealed" in err
+
+
+def test_undo_gates_and_wire_shape():
+    g = fresh()
+    assert mv(g, B, {"type": "undo_turn"}) == (False, "not your turn")
+    assert all(m["type"] != "undo_turn" for m in engine.legal_moves(g, A))
+    v = engine.player_view(g, A)
+    assert "turn_undo" not in v
+    assert v["turn_revealed"] is False
+
+
 # --- redaction ---------------------------------------------------------------
 
 def test_player_view_redaction():

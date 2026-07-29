@@ -147,6 +147,35 @@ def _drive(game):
     raise RuntimeError("dontminion: _drive exceeded iteration cap (runaway auto frames)")
 
 
+# --- turn undo (the Duel model: gated on HIDDEN INFORMATION, not on actions) --
+
+def _mark_revealed(game):
+    """This turn exposed information that can't be un-seen (a draw, a look, a
+    reveal, a pass, an opponent's choice) — undo is refused from here on."""
+    game["turn_revealed"] = True
+
+
+def _arm_undo(game):
+    """Snapshot the whole game at turn start. Stripped from player_view (it
+    holds every hidden zone); JSON-safe so it survives save/reconnect."""
+    game["turn_revealed"] = False
+    game["turn_undo"] = None
+    game["turn_undo"] = copy.deepcopy({k: v for k, v in game.items() if k != "turn_undo"})
+
+
+def _undo_turn(game, pid):
+    if pid != game["turn"]:
+        return False, "not your turn"
+    if game.get("turn_revealed") or not game.get("turn_undo"):
+        return False, "can't undo — new information was revealed this turn"
+    snap = copy.deepcopy(game["turn_undo"])
+    game.clear()
+    game.update(snap)
+    _arm_undo(game)
+    _log(game, pid, "undo")
+    return True, None
+
+
 # --- kernel zone helpers (importable by card modules) ------------------------
 
 def draw(game, pid, n):
@@ -167,6 +196,7 @@ def draw(game, pid, n):
         drawn.append(seat["deck"].pop(0))
     seat["hand"].extend(drawn)
     if drawn:
+        _mark_revealed(game)
         _log(game, pid, "draw", n=len(drawn))
     return drawn
 
@@ -192,6 +222,8 @@ def look_top(game, pid, n):
             _log(game, pid, "shuffle")
         moved.append(seat["deck"].pop(0))
     seat["aside"].extend(moved)
+    if moved:
+        _mark_revealed(game)
     return moved
 
 
@@ -265,6 +297,7 @@ def topdeck(game, pid, card, zone="hand", public=False):
 
 def reveal(game, pid, cards, source):
     """Reveals are information events only — cards stay where they are."""
+    _mark_revealed(game)
     _log(game, pid, "reveal", cards=list(cards), source=source)
 
 
@@ -301,6 +334,7 @@ def deck_insert(game, pid, card, position, zone="hand"):
 
 def pass_card(game, giver, receiver, card):
     """Masquerade hand-to-hand pass: identity visible only to giver+receiver."""
+    _mark_revealed(game)
     game["seats"][giver]["hand"].remove(card)
     game["seats"][receiver]["hand"].append(card)
     _log(game, giver, "pass", private_to=[giver, receiver], card=card, to=receiver)
@@ -574,6 +608,7 @@ def _end_turn(game, pid):
     game["coins"] = 0
     game["turn_ctx"] = _fresh_turn_ctx()
     _log(game, nxt, "turn_start", turn=game["turn_number"])
+    _arm_undo(game)
 
 
 def _finish_game(game):
@@ -597,6 +632,15 @@ def apply_move(game, pid, move):
     if not isinstance(move, dict):
         return False, "bad move"
     mt = move.get("type")
+    if mt == "undo_turn":
+        # BEFORE the pending gate — an unrevealed turn is undoable even with a
+        # frame open (yours: a Workshop pile pick; an opponent's: a Militia they
+        # haven't answered yet). legal_moves deliberately never offers this, so
+        # the random bot can't take it back.
+        ok, err = _undo_turn(game, pid)
+        if ok:
+            _post_move(game)
+        return ok, err
     if game["pending_pid"] is not None:
         if pid != game["pending_pid"]:
             return False, "not your decision"
@@ -623,6 +667,10 @@ def _resolve_decision(game, pid, move):
     ok, err = _validate_choice(top, move)
     if not ok:
         return False, err
+    if pid != game["turn"]:
+        # An opponent's choice (attack response, Masquerade pick, window
+        # decline) is information the turn player didn't have — no undo after.
+        _mark_revealed(game)
     frame = _pop_frame(game)
     _stage_fn(frame["card"], frame["stage"])(game, pid, frame, move)
     return True, None
@@ -831,8 +879,10 @@ def winners(game):
 def player_view(game, viewer):
     """Build (not filter) the wire view. Deck order NEVER ships; hands only to
     their owner; discard = top + count; the raw pending stack (frame data!) is
-    replaced by pending_view; rng_state/seed popped. Everything reveals at over."""
-    g = copy.deepcopy(game)
+    replaced by pending_view; rng_state/seed popped; the turn_undo snapshot
+    (every hidden zone!) never leaves the server. Everything reveals at over.
+    turn_revealed stays ON the wire — it drives the client's Undo button."""
+    g = copy.deepcopy({k: v for k, v in game.items() if k != "turn_undo"})
     g.pop("rng_state", None)
     g.pop("seed", None)
     pend = g.pop("pending")
@@ -928,4 +978,6 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
         draw(game, pid, 5)
     _log(game, players[0], "turn_start", turn=1)
     _post_move(game)
+    # The setup draws marked "revealed" — arm the FIRST turn's undo cleanly.
+    _arm_undo(game)
     return game

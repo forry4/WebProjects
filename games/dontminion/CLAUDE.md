@@ -96,8 +96,14 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   `opponents` give that order).
 - Shuffle only when short (2E rule); reveals/looks go through `aside` so mid-look shuffles
   exclude them; treasures can't be played after a buy (`turn_ctx["bought"]`).
-- No undo (deliberate: Dominion reveals hidden info nearly every move — Duel's reveal-gated undo
-  would never be legal here).
+- **Turn undo is gated on HIDDEN INFORMATION, not on which actions you took** (the Duel model):
+  `_arm_undo` snapshots the whole game at turn start (`turn_undo`, stripped from `player_view` —
+  it holds every hidden zone; `turn_revealed` DOES ship, driving the client button);
+  `_mark_revealed` fires on draw / look_top / reveal / pass_card and on any decision resolved by
+  a non-turn player. `{"type":"undo_turn"}` is handled BEFORE the pending gate (an unrevealed
+  Militia can be taken back before the opponent answers) and `legal_moves` never offers it (keeps
+  the bot honest). Treasures, buys, end_phase, and no-reveal actions (Festival, Chapel, Workshop…)
+  are all undoable; anything that draws or reveals is not.
 
 ## Hidden information / wire view
 

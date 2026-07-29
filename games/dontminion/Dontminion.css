@@ -38,15 +38,15 @@
   position: sticky; top: 0; z-index: 20;
 }
 .dm-hud { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
-.dm-hud span { color: var(--text-dim, #8a7d6a); font-size: 14px; }
+.dm-hud span { color: var(--text-dim, #8a7d6a); font-size: 15px; }
 .dm-phase { color: var(--text, #e8dfc8) !important; font-weight: 600; }
 .dm-phase-mine { color: var(--gold-light, #e8c96a) !important; }
 .dm-reconn { margin-left: auto; color: var(--red-gem, #dc4040); font-size: 13px; }
 
 .dm-main {
-  display: grid; grid-template-columns: 300px minmax(0, 1fr);
-  gap: 14px; padding: 12px 14px 26px; flex: 1; align-items: start;
-  max-width: 1500px; margin: 0 auto; width: 100%;
+  display: grid; grid-template-columns: 340px minmax(0, 1fr);
+  gap: 16px; padding: 14px 18px 30px; flex: 1; align-items: start;
+  width: 100%;   /* fill the whole screen — no max-width */
 }
 .dm-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dm-center-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -57,9 +57,9 @@
   border-radius: var(--radius-lg, 14px); padding: 10px 12px;
 }
 .dm-opp-acting { border-color: var(--gold, #c9a84c); }
-.dm-opp-name { font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.dm-opp-stats { display: flex; gap: 12px; color: var(--text-dim, #8a7d6a); font-size: 13px; margin-top: 4px; }
-.dm-opp-discard { color: var(--text-dim, #8a7d6a); font-size: 12px; margin-top: 3px; }
+.dm-opp-name { font-weight: 600; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dm-opp-stats { display: flex; gap: 16px; color: var(--text-dim, #8a7d6a); font-size: 16px; margin-top: 6px; }
+.dm-opp-discard { color: var(--text-dim, #8a7d6a); font-size: 14px; margin-top: 4px; }
 .dm-trash {
   background: var(--surface, #1a1814); border: 1px dashed var(--border, #3a342a);
   border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
@@ -68,23 +68,25 @@
 .dm-trash-list { margin-top: 6px; color: var(--text, #e8dfc8); font-size: 12px; }
 .dm-log {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
-  border-radius: var(--radius-lg, 14px); padding: 8px 10px;
-  font-size: 12px; line-height: 1.5; overflow-y: auto; max-height: 320px;
-  display: flex; flex-direction: column-reverse;
+  border-radius: var(--radius-lg, 14px); padding: 8px 12px;
+  font-size: 13px; line-height: 1.6; overflow-y: auto; max-height: 380px;
 }
+/* newest entry is the FIRST child (the JSX reverses) — scroll stays pinned there */
 .dm-log-line { color: var(--text-dim, #8a7d6a); }
-.dm-log-line:last-child { color: var(--text, #e8dfc8); }
+.dm-log-line:first-child { color: var(--text, #e8dfc8); }
 
 /* ── supply ── */
 .dm-supply {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
-  border-radius: var(--radius-lg, 14px); padding: 12px;
+  border-radius: var(--radius-lg, 14px); padding: 14px 14px 6px;
   container-type: inline-size;
-  --card-w: clamp(64px, calc((100cqw - 8 * 8px - 24px) / 8.5), 118px);
-  --card-h: calc(var(--card-w) * 1.4);
+  /* supply piles render as SMALL card faces, which size from --card-w-s;
+     10 kingdom piles across on a wide screen, wrapping below that */
+  --card-w-s: clamp(88px, calc((100cqw - 9 * 10px - 30px) / 10), 180px);
+  --card-h: calc(var(--card-w-s) * 1.18);   /* drives the face font clamps */
 }
-.dm-supply-row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.dm-basics { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border, #3a342a); }
+.dm-supply-row { display: flex; flex-wrap: wrap; gap: 10px; row-gap: 24px; justify-content: center; padding-bottom: 14px; }
+.dm-basics { margin-bottom: 8px; border-bottom: 1px solid var(--border, #3a342a); }
 .dm-pile-slot { position: relative; }
 .dm-disc {
   position: absolute; top: -7px; right: -4px; background: var(--gold, #c9a84c);
@@ -99,7 +101,8 @@
      resizes don't animate as a shrink on load (the Duel lesson) */
   transition: border-color .15s, transform .15s, box-shadow .15s, opacity .15s;
 }
-.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 74px); min-height: calc(var(--card-w-s, 74px) * 1.15); }
+.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); min-height: calc(var(--card-w-s, 84px) * 1.15); }
+.dm-card-name.dm-name-long { font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 12px); letter-spacing: 0; }
 .dm-clickable { cursor: pointer; }
 .dm-clickable:hover { transform: translateY(-2px); }
 .dm-sel { outline: 2px solid var(--gold-light, #e8c96a); transform: translateY(-3px); }
@@ -143,9 +146,11 @@
 .dm-edge-atk { left: 0; background: var(--red-gem, #dc4040); }
 .dm-edge-rx { right: 0; background: var(--blue-gem, #4257ff); }
 .dm-pile-count {
-  position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%);
+  /* sits on the SLOT (not inside the overflow-hidden card), so it never clips */
+  position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
   background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
-  border-radius: 10px; font-size: 11px; padding: 0 8px; color: var(--text, #e8dfc8);
+  border-radius: 10px; font-size: 13px; padding: 1px 10px; color: var(--text, #e8dfc8);
+  white-space: nowrap; z-index: 2;
 }
 .dm-card-badge {
   position: absolute; top: -7px; right: -7px; background: var(--gold, #c9a84c);
@@ -173,17 +178,24 @@
 /* ── my area ── */
 .dm-me {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
-  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
-  --card-w: 96px; --card-h: 134px;
+  border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  --card-w: 120px; --card-h: 168px;
 }
+.dm-resbar {
+  display: flex; flex-wrap: wrap; gap: 26px; align-items: baseline;
+  background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
+  border-radius: 10px; padding: 10px 18px; margin-bottom: 10px;
+  font-size: 16px; color: var(--text-dim, #8a7d6a);
+}
+.dm-resbar b { color: var(--gold-light, #e8c96a); font-size: 21px; margin-left: 4px; }
 .dm-inplay {
-  display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px; align-items: center;
-  border-bottom: 1px dashed var(--border, #3a342a); padding-bottom: 8px; margin-bottom: 8px;
-  --card-w-s: 66px;
+  display: flex; flex-wrap: wrap; gap: 8px; min-height: 38px; align-items: center;
+  border-bottom: 1px dashed var(--border, #3a342a); padding-bottom: 10px; margin-bottom: 10px;
+  --card-w-s: 82px;
 }
-.dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 12px; font-style: italic; }
-.dm-handrow { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-.dm-mystats { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim, #8a7d6a); font-size: 12px; min-width: 92px; }
+.dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
+.dm-handrow { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+.dm-mystats { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim, #8a7d6a); font-size: 15px; min-width: 116px; }
 .dm-hand { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
 .dm-turnbtns { display: flex; flex-direction: column; gap: 8px; }
 
@@ -203,6 +215,18 @@
 .dm-scores .dm-win td { color: var(--gold-light, #e8c96a); font-weight: 700; }
 .dm-rules p { margin: 8px 0; line-height: 1.5; }
 
+/* ── kingdom browser modal ── */
+.dm-kingdom-modal {
+  max-width: min(1200px, calc(100vw - 48px)); width: calc(100% - 48px);
+  max-height: 86vh; overflow-y: auto;
+  --card-w: 158px; --card-h: 220px;
+}
+.dm-kingdom-modal h3 { font-family: 'Cinzel','Cinzel Fallback',serif; margin: 6px 0; }
+/* full faces here: let the card grow so long rules text never clips */
+.dm-kingdom-modal .dm-card { height: auto; min-height: var(--card-h); }
+.dm-kingdom-modal .dm-card-text { overflow: visible; }
+.dm-kgrid { display: flex; flex-wrap: wrap; gap: 14px; row-gap: 28px; margin: 12px 0 20px; }
+
 /* ── mobile (single column; every override .dm-prefixed — cascade-order rule) ── */
 @media (max-width: 980px) {
   .dm .dm-main { grid-template-columns: minmax(0, 1fr); }
@@ -212,7 +236,9 @@
   .dm .dm-lobby-cols { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
-  .dm .dm-me { --card-w: 78px; --card-h: 109px; }
+  .dm .dm-me { --card-w: 82px; --card-h: 115px; }
+  .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
+  .dm .dm-resbar b { font-size: 17px; }
   .dm .dm-handrow { gap: 8px; }
   .dm .dm-mystats { flex-direction: row; min-width: 0; gap: 10px; }
   .dm .dm-turnbtns { flex-direction: row; width: 100%; }

@@ -57,7 +57,7 @@ const faceClass = (types) => {
   return "dm-f-action";
 };
 
-function DmCardFace({ name, card, count, onClick, selected, disabled, highlight, small, badge }) {
+function DmCardFace({ name, card, onClick, selected, disabled, highlight, small, badge }) {
   const types = card?.types || [];
   const cls = ["card", "dm-card", faceClass(types),
     small ? "dm-card-small" : "",
@@ -67,13 +67,12 @@ function DmCardFace({ name, card, count, onClick, selected, disabled, highlight,
     <div className={cls} onClick={disabled ? undefined : onClick} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
-      <div className="dm-card-name">{name}</div>
+      <div className={"dm-card-name" + (name.length > 9 ? " dm-name-long" : "")}>{name}</div>
       {!small && <div className="dm-card-text">{card?.text || ""}</div>}
       <div className="dm-card-bottom">
         <span className="dm-cost">{card ? card.cost : ""}</span>
         <span className="dm-type">{typeBanner(types)}</span>
       </div>
-      {count != null && <span className="dm-pile-count">{count}</span>}
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
   );
@@ -156,6 +155,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
+  const [showKingdom, setShowKingdom] = useState(false);
+  // Did I do anything this turn? Gates the Undo button's visibility so it
+  // doesn't tempt with nothing to take back. Declared with the other state
+  // (ABOVE all effects — the TDZ rule).
+  const [actedThisTurn, setActedThisTurn] = useState(false);
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -197,6 +201,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const kingdomPiles = game?.kingdom || [];
   const seatOrder = game?.players || Object.keys(names);
   const oppOrder = seatOrder.filter((p) => p !== myId);
+  // Undo: the server refuses once hidden information was revealed this turn
+  // (draws, looks, reveals, an opponent's answer). turn_revealed ships in the
+  // view precisely to drive this button; `actedThisTurn` / phase-buy / coins /
+  // an open pending are the "something to take back" signals (the ORs cover a
+  // reconnect mid-turn, where the local flag starts false).
+  const turnRevealed = !!game?.turn_revealed;
+  const canUndo = !!game && !over && game.turn === myId && !turnRevealed
+    && (actedThisTurn || game.phase === "buy" || game.coins > 0 || game.pending_pid != null);
 
   // ── socket plumbing ──
   const handleMessage = useCallback((msg) => {
@@ -323,9 +335,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setPickIdx([]); setPickOpts([]); setOrderIdx([]);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
   useEffect(() => { setGameOverDismissed(false); }, [roomId]);
+  useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.turn_number]);
 
   // ── actions ──
-  const mv = (move) => send({ action: "move", move });
+  const mv = (move) => {
+    setActedThisTurn(move?.type !== "undo_turn");
+    send({ action: "move", move });
+  };
 
   const createGame = () => {
     const rid = roomCode();
@@ -533,9 +549,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const disabled = promptPiles ? !promptPiles.includes(name) : count === 0;
     return (
       <div key={name} className="dm-pile-slot">
-        <DmCardFace name={name} card={cardData} small count={count}
+        <DmCardFace name={name} card={cardData} small
           highlight={highlight} disabled={disabled && !highlight}
           onClick={() => pileClick(name)} />
+        {/* the count sits OUTSIDE the card (the card clips its overflow) */}
+        <span className="dm-pile-count">{count}</span>
         {bridges > 0 && cardData && effCost(name) !== cardData.cost
           && <span className="dm-disc">now {effCost(name)}</span>}
       </div>
@@ -789,12 +807,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <span className={"dm-phase" + (myTurn ? " dm-phase-mine" : "")}>
             {over ? "game over" : myTurn ? (game.pending_pid ? "your decision" : `your ${game.phase} phase`) : `${names[game.turn] || game.turn}'s turn`}
           </span>
-          <span title="Actions">A {game.actions}</span>
-          <span title="Buys">B {game.buys}</span>
-          <span title="Coins">$ {game.coins}</span>
-          {bridges > 0 && <span title="Bridge discount">−{bridges} cost</span>}
-          <span title="Your victory points">🛡 {game.vp?.[myId] ?? 0}</span>
+          {bridges > 0 && <span title="Bridge discount">cards cost −{bridges}</span>}
         </div>
+        <button className="btn btn-ghost btn-sm" onClick={() => setShowKingdom(true)}>🃏 Kingdom</button>
+        {canUndo && (
+          <button className="btn btn-outline btn-sm" title="Take back this turn (allowed until new information is revealed)"
+            onClick={() => mv({ type: "undo_turn" })}>↩ Undo turn</button>
+        )}
         {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
       </div>
 
@@ -810,7 +829,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
             )}
           </div>
           <div className="dm-log">
-            {(game.log || []).slice(-60).map((e) => {
+            {/* newest first, pinned at the top — matches the other games' logs */}
+            {[...(game.log || [])].reverse().slice(0, 100).map((e) => {
               const line = fmtLog(e, names);
               return line ? <div key={e.n} className="dm-log-line">{line}</div> : null;
             })}
@@ -824,6 +844,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-supply-row dm-kingdom">{kingdomPiles.map(renderPile)}</div>
           </div>
           <div className="dm-me">
+            {!over && game.turn === myId && (
+              <div className="dm-resbar">
+                <span>Actions <b>{game.actions}</b></span>
+                <span>Buys <b>{game.buys}</b></span>
+                <span>Money <b>${game.coins}</b></span>
+                {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
+                <span>Your VP <b>{game.vp?.[myId] ?? 0}</b></span>
+              </div>
+            )}
             <div className="dm-inplay">
               {(mySeat?.in_play || []).map((c, i) => (
                 <DmCardFace key={i} name={c} card={cards[c]} small />
@@ -869,6 +898,34 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-prompt-actions">
               <button className="btn btn-danger" onClick={abandonGame}>Abandon</button>
               <button className="btn btn-outline" onClick={() => setConfirmAbandon(false)}>Keep playing</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showKingdom && (
+        <div className="dm-backdrop" onClick={() => setShowKingdom(false)}>
+          <div className="dm-modal dm-kingdom-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>This game's Kingdom</h2>
+            <p className="dm-wait-note">{(roomData?.expansions || []).map((e) => EXPANSIONS.find((x) => x.id === e)?.name || e).join(" + ")}</p>
+            <div className="dm-kgrid">
+              {kingdomPiles.map((n) => (
+                <div key={n} className="dm-pile-slot">
+                  <DmCardFace name={n} card={cards[n]} />
+                  <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
+                </div>
+              ))}
+            </div>
+            <h3>Basic supply</h3>
+            <div className="dm-kgrid">
+              {BASIC_ROW.map((n) => (
+                <div key={n} className="dm-pile-slot">
+                  <DmCardFace name={n} card={cards[n]} />
+                  <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
+                </div>
+              ))}
+            </div>
+            <div className="dm-prompt-actions">
+              <button className="btn btn-gold" onClick={() => setShowKingdom(false)}>Close</button>
             </div>
           </div>
         </div>
