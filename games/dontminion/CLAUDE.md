@@ -114,6 +114,31 @@ honor `private_to`, `rng_state`/`seed` popped. Everything reveals at game over. 
 `_make_rng`/`_save_rng` and logs an engine record; same seed + same moves ⇒ byte-identical game
 (pinned by `test_soak.py::test_soak_determinism_same_seed_same_game`).
 
+## Room server (main.py)
+
+Structural mirror of Duel's (per-recipient `broadcast_state`, WS seat binding, single-thread DB
+write executor, SELECT-then-DELETE) with the three Dontminion differences: 2–4 players
+(`dontminion_games` has player1..player4 columns), validated create-time options (`expansions` /
+`max_players` / `num_bots` / `ai_difficulty`, kept in sync across create → save blob → load →
+`mk_room_state` — extend ALL FOUR when adding one), and MULTIPLE bot seats: `room["ai_players"]`
+is a list (`bot1..bot3`, names "Bot N", NO meta entry ⇒ unjoinable), and `_schedule_bots` is a
+single-flighted finisher loop that recomputes `_bot_to_act` EVERY iteration — that is what drains
+chained decisions across different bots and lets bots answer a human's Militia mid-human-turn.
+Every tier is `bot.choose` (random-legal) in v1 — no executor, nothing heavy under ROOM_LOCK; the
+tier is validated + persisted anyway so a future strength ladder needs no migration. All entropy
+runs through `_new_rng()` (the test seam). vs-AI rooms start at create (never "open"); friend
+rooms are host-started with shuffled seat order.
+
+## Frontend (Dontminion.jsx)
+
+Peer contract `{myId, authUser, onExit}`; root class `.dm` on every branch (the screens.mjs
+marker). Because engine constraints are generic, the decision UI is SIX renderers over
+`game.pending_view` — no per-card frontend code anywhere; everyone else gets a
+"Waiting for <name>" bar. Cards are text-only faces (no art) on the shared `.card` frame via
+`--card-w/--card-h`. The create modal's expansion picker is a game-local `DmChecks` (the shared
+kit has no multi-select; promote it if a second game needs one). Supply affordance mirrors
+`engine.cost` via `turn_ctx.bridges` — display only, the server stays authoritative.
+
 ## Tests
 
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation

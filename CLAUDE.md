@@ -1,6 +1,6 @@
 # Forrest Games — Claude Context
 
-A four-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
+A five-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
 layer, and frontend shell. Real-time play over WebSockets, server-authoritative game state,
 and per-game AI opponents that range from simple heuristics to client-side neural nets
 compiled to WASM.
@@ -14,6 +14,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/castles_of_crimson/CLAUDE.md`](games/castles_of_crimson/CLAUDE.md) | CoC engine contract, AI tiers, frontend layout maths |
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
+| [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -34,8 +35,9 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   validates every move through the engine. Client-side AI is safe because tampering only weakens
   the tamperer's own opponent (the move is still validated server-side before it's applied).
 - **Games**: Spender (Splendor), Castles of Crimson (Castles of Burgundy), Where Wolf? (One Night
-  Ultimate Werewolf), Spender Duel (Splendor Duel). Plus **Books** (a ranking/suggestions page)
-  and **WWSD** (a browser autoplayer for a friend's external Splendor site).
+  Ultimate Werewolf), Spender Duel (Splendor Duel), Dontminion (Dominion, Base 2E + Intrigue 2E).
+  Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
+  external Splendor site).
 
 ### Run it locally
 - Backend: `python -m uvicorn app:app --reload --port 8000` (the composition-root app at repo root).
@@ -71,6 +73,8 @@ games/
   castles_of_crimson/  # CoC — engine.py + ai.py + main.py (coc_app @ /coc) + CastlesOfCrimson.jsx
   wherewolf/           # Where Wolf? — engine.py + main.py (werewolf_app @ /werewolf) + WhereWolf.jsx
   spender_duel/        # Spender Duel — engine.py + ai.py + main.py (duel_app @ /duel) + SpenderDuel.jsx
+  dontminion/          # Dontminion (Dominion) — engine.py + effects_*.py + main.py (dontminion_app
+                       #   @ /dontminion) + Dontminion.jsx; expansion picker, 2-4p, multi-bot rooms
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
