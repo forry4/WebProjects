@@ -190,6 +190,13 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--val-frac", type=float, default=0.08)
+    ap.add_argument("--val-data", default=None,
+                    help="Hold out a FIXED external val set (comma-globs) instead of carving val_frac "
+                         "out of --data. Required to compare runs trained on DIFFERENT data: the "
+                         "default split is drawn from --data itself, so two data sizes get two "
+                         "different val sets and their metrics are not comparable (the 2026-07-28 "
+                         "data-scaling question). With this set, val_frac is ignored and every point "
+                         "on a scaling curve is scored on the same held-out games.")
     ap.add_argument("--patience", type=int, default=12)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
@@ -199,6 +206,27 @@ def main():
     print(f"device {dev}  freeze_trunk {a.freeze}  policy_target {a.policy_target}@{a.target_temp}", flush=True)
 
     feats, out, rootval, flags, gid, idx_pad, q_pad, n_pad, maxleg = load(a.data)
+    n_train_rows = len(out)
+    if a.val_data:
+        # Fixed external holdout: concatenate it after the training rows and remember the boundary.
+        # gid is offset so a val game can never collide with a train game id.
+        vf, vo, vrv, vfl, vg, vip, vqp, vnp, vmax = load(a.val_data)
+        if vf.shape[1] != feats.shape[1]:
+            sys.exit(f"--val-data feature width {vf.shape[1]} != --data {feats.shape[1]}")
+        pad = max(maxleg, vmax)
+        def rpad(arr, want):  # right-pad the per-move arrays to a common width
+            if arr.shape[1] == want:
+                return arr
+            z = np.zeros((arr.shape[0], want - arr.shape[1]), dtype=arr.dtype)
+            return np.concatenate([arr, z], axis=1)
+        idx_pad, q_pad, n_pad = (rpad(x, pad) for x in (idx_pad, q_pad, n_pad))
+        vip, vqp, vnp = (rpad(x, pad) for x in (vip, vqp, vnp))
+        feats = np.concatenate([feats, vf]); out = np.concatenate([out, vo])
+        rootval = np.concatenate([rootval, vrv]); flags = np.concatenate([flags, vfl])
+        gid = np.concatenate([gid, vg + gid.max() + 1])
+        idx_pad = np.concatenate([idx_pad, vip]); q_pad = np.concatenate([q_pad, vqp])
+        n_pad = np.concatenate([n_pad, vnp]); maxleg = pad
+        print(f"FIXED holdout: {len(vo):,} val rows from --val-data (val_frac ignored)", flush=True)
     pol_valid = (flags & 1).astype(bool)
     rv_valid = (flags & 2).astype(bool)
     print(f"total {len(out):,} rows ({pol_valid.sum():,} policy-valid), {len(np.unique(gid)):,} games, maxleg {maxleg}", flush=True)
@@ -216,9 +244,14 @@ def main():
     qp = torch.tensor(q_pad, device=dev)
     np_t = torch.tensor(n_pad, device=dev)
 
-    uniq = np.unique(gid); rng = np.random.default_rng(0); rng.shuffle(uniq)
-    val_games = set(uniq[: max(1, int(len(uniq) * a.val_frac))].tolist())  # >=1 val game (NaN guard)
-    is_val = torch.tensor(np.fromiter((g in val_games for g in gid), bool, len(gid)), device=dev)
+    if a.val_data:
+        # Everything past the training block is the fixed holdout.
+        mask = np.zeros(len(gid), bool); mask[n_train_rows:] = True
+        is_val = torch.tensor(mask, device=dev)
+    else:
+        uniq = np.unique(gid); rng = np.random.default_rng(0); rng.shuffle(uniq)
+        val_games = set(uniq[: max(1, int(len(uniq) * a.val_frac))].tolist())  # >=1 val game (NaN guard)
+        is_val = torch.tensor(np.fromiter((g in val_games for g in gid), bool, len(gid)), device=dev)
     idx_tr = torch.nonzero(~is_val).squeeze(1)
     idx_val = torch.nonzero(is_val).squeeze(1)
     # Freeze mode trains only the policy head -> policy-invalid rows carry no gradient; drop them.

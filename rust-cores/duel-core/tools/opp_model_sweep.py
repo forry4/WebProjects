@@ -78,12 +78,23 @@ def main():
         note("!! CONTROL FAILED — the knob is not inert at its default. Stopping.")
         return
 
+    # POINTS is a LADDER in opponent-node concentration (low = hard minimax -> high = expectimax),
+    # not an unordered argmax over independent options, so the campaign's early-stop rule applies:
+    # once the ladder turns down, further points go further in the losing direction. Retrofitted
+    # 2026-07-28 after the first run measured 0.3=0.540 and would have spent ~35min on 10.0 anyway.
     results = {}
+    prev = None
     for p in POINTS:
         v, lo, hi = gate(["--opp-c", str(p)], GAMES, SIMS)
         results[p] = v
         kind = "harder minimax" if p < 1.0 else "softer / expectimax-ish"
         note(f"  opp_c={p:<5} ({kind:<22}) = {v} [{lo}, {hi}]  ({GAMES}g @{SIMS} sims, K=1)")
+        if v is not None and prev is not None and v < prev:
+            note(f"  EARLY STOP: the ladder turned down ({v:.4f} < {prev:.4f}) — "
+                 f"remaining points go further in the losing direction, not running them")
+            break
+        if v is not None:
+            prev = v
 
     valid = {p: v for p, v in results.items() if v is not None}
     if not valid:

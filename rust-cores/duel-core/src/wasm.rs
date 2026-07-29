@@ -123,6 +123,21 @@ pub fn duel_search_expert(state_json: &str, budget_ms: f64, max_sims: u32, seed:
         // policy head — EXPERT_NET carries one, so this entry point ONLY. Edge decays with per-world
         // depth (0.535 @4000 sims), so re-verify if the sims/worker budget moves a lot.
         net_policy_temp: Some(2.0),
+        // OPPONENT MODEL: c_puct at OPPONENT nodes only. Low = hard minimax (commit to the single
+        // best reply); high = visits stay spread so what propagates up approximates an average over
+        // replies (expectimax). The full ladder, champion-net self-A/B, control 0.5000 exact:
+        //   3.0 = 0.4875 | 1.0 (was shipped) | 0.3 = 0.5400 | 0.1 = 0.5970 | 0.03 = 0.5913
+        //   0.0 = 0.4412 COLLAPSE
+        // An interior optimum with a plateau at 0.03-0.1. The collapse at 0.0 is the instructive
+        // end: signed Q flips sign with who is ahead, so when the ROOT IS LOSING a visited reply
+        // carries positive Q and beats an unvisited move's neutral-0 FPU — with no U term there is
+        // nothing left to reconsider, and the node locks onto whichever reply it explored first.
+        // Some exploration at opponent nodes is load-bearing, not slack.
+        // The edge GROWS with depth (0.5970 @1500/world K=1 -> 0.6233 @pool4x1200 ->
+        // 0.6900 [0.643, 0.733] @pool4x5000 = PRODUCTION shape, n=400, mirror 0.5000). Measured at
+        // FPU neutral-0, which E3 confirmed as best (0.2 = 0.4938, 0.5 = 0.5200, both wash) — if FPU
+        // ever changes, this whole ladder must be re-read, since the two knobs interact.
+        opp_c: Some(0.1),
         ..Default::default()
     };
     let mut rng = Rng::new(seed.max(0.0) as u64);

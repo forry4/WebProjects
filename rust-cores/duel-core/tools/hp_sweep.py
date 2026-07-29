@@ -66,13 +66,41 @@ def gate(a_extra, b_extra, games, sims):
     return float(m.group(1)), float(m.group(2)), float(m.group(3))
 
 
+def measured(name, p):
+    """A point already in the summary from an earlier (interrupted) run, or None.
+
+    RESUMABILITY (2026-07-28): these 6000-sim gates cost 70-95 MINUTES each and the run was
+    interrupted twice in one day, each time re-measuring points that were already banked. The
+    gates are deterministic — same seed base, same binary, same config — so a logged value is
+    exactly what a re-run would produce. Only adopt REAL numbers: the 2026-07-27 invalidation
+    wrote 'None' rows for killed gates, and re-adopting those would relaunch that whole disaster.
+    """
+    try:
+        prior = open(RUN + "/summary.txt").read()
+    except OSError:
+        return None
+    m = re.search(rf"^\s*{re.escape(name)}={re.escape(str(p))}\s+vs default = ([0-9.]+)",
+                  prior, re.M)
+    return float(m.group(1)) if m else None
+
+
 def ladder(name, points, mk_extra, games, sims):
     """Directional sweep with the early-stop rule. Returns {point: winrate}."""
     results, prev, best_v, best_p, declines = {}, None, -1.0, None, 0
     for p in points:
-        v, lo, hi = gate(mk_extra(p), [], games, sims)
+        done = measured(name, p)
+        if done is not None:
+            v, lo, hi = done, None, None
+            note(f"  {name}={p:<4} ADOPTED from an earlier run = {v}  (deterministic gate, not re-run)")
+        else:
+            v, lo, hi = gate(mk_extra(p), [], games, sims)
+            note(f"  {name}={p:<4} vs default = {v} [{lo}, {hi}]  ({games}g @{sims} sims)")
+        # BUG FIX 2026-07-29: the adoption edit dropped this line, so `results` came back EMPTY and
+        # main()'s winner detection saw nothing — it printed "no knob cleared 0.53" while rollout=0
+        # had just measured 0.6100. Exactly the same failure shape as the 2026-07-27 taskkill: a
+        # confident no-winner verdict synthesised from an empty set. The measured numbers were in
+        # the summary the whole time; only the machine-readable path was severed.
         results[p] = v
-        note(f"  {name}={p:<4} vs default = {v} [{lo}, {hi}]  ({games}g @{sims} sims)")
         if v is None:
             continue
         declines = declines + 1 if (prev is not None and v < prev) else 0
@@ -105,11 +133,19 @@ def main():
         BASE_MM["on"] = bool(vals) and max(vals) >= 0.53
         note(f"E0/E1 already run early (E1a={early_val('E1a')} E1b={early_val('E1b')}) — "
              f"adopting minimax={'ON' if BASE_MM['on'] else 'OFF'} as the BASE for the remaining knobs")
-        if BASE_MM["on"]:
+        if BASE_MM["on"] and "base sanity" not in prior:
             # With BASE_MM on the plain gate is already minimax-vs-minimax — a symmetric sanity
             # (must straddle 0.5) doubling as the E1 depth-confirm's mirror at DEEP sims.
+            # RESUMABLE (2026-07-28): this gate cost 165 MINUTES measured, and it is a property of
+            # the HARNESS, not of any knob — re-running it on every restart is pure overhead. Once
+            # the summary carries it, adopt it. (The run was interrupted twice today; without this
+            # guard each restart pays 2h45m before measuring anything.)
             vc, loc, _ = gate([], [], 150, DEEP_SIMS)
             note(f"  base sanity minimax-vs-minimax @{DEEP_SIMS} sims = {vc} [{loc}, ..] (must straddle 0.5)")
+        elif BASE_MM["on"]:
+            m = re.search(r"base sanity[^=]*= ([0-9.]+)", prior)
+            note(f"  base sanity ADOPTED from a previous run = {m.group(1) if m else '?'} "
+                 f"(harness property, already measured @{DEEP_SIMS} sims — not re-run)")
     else:
         # E0 — noise floor: identical configs must read ~0.5; the yardstick for everything below.
         v, lo, hi = gate([], [], GAMES, SIMS)
@@ -130,7 +166,12 @@ def main():
 
     # E2 — in-tree depth cap ladder at DEEP sims (the 14-ply cap binds only when the tree is deep).
     note(f"E2 DEPTH cap (default 14) @{DEEP_SIMS} sims:")
-    dres = ladder("max-depth", [24, 40], lambda d: ["--max-depth", str(d)], 150, DEEP_SIMS)
+    # 40 DROPPED 2026-07-28: max-depth 24 measured EXACTLY 0.5000 [0.444, 0.556] over 300 plays.
+    # An exact 0.5 with a symmetric CI means the two sides played identically, i.e. the default
+    # 14-ply cap never binds even at 6000 sims — so raising it changed nothing. A cap that does
+    # not bind at 24 cannot bind at 40; the point costs ~80 min to re-confirm a tautology. If the
+    # sim count ever rises far enough that trees genuinely exceed 14 plies, restore it.
+    dres = ladder("max-depth", [24], lambda d: ["--max-depth", str(d)], 150, DEEP_SIMS)
     dbest = max((p for p, v in dres.items() if v is not None), key=lambda p: dres[p], default=None)
     if dbest is not None and dres[dbest] >= 0.53:
         winners.append((["--max-depth", str(dbest)], f"max-depth {dbest}", dres[dbest]))
