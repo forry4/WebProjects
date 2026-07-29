@@ -121,3 +121,12 @@ try:
     LOG.info("mounted Spender Duel at /duel")
 except Exception as _duel_err:  # pragma: no cover - optional package
     LOG.warning("Spender Duel not mounted: %s", _duel_err)
+
+# Dontminion — its self-contained sub-app mounted under /dontminion. Same
+# defensive guard: an import error here must not take down the rest of the backend.
+try:
+    from games.dontminion.main import dontminion_app
+    app.mount("/dontminion", dontminion_app)
+    LOG.info("mounted Dontminion at /dontminion")
+except Exception as _dm_err:  # pragma: no cover - optional package
+    LOG.warning("Dontminion not mounted: %s", _dm_err)
