@@ -77,6 +77,31 @@ def test_soak_full_games(players, seed):
         assert game["scores"][p]["turns"] == game["seats"][p]["turns_taken"]
 
 
+def _all52():
+    from games.dontminion.cards import KINGDOM
+    return sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"])
+
+
+@pytest.mark.parametrize("chunk", [0, 1, 2, 3, 4, 5])
+def test_soak_forced_kingdoms_cover_all_cards(chunk):
+    """Six fixed kingdoms that together cover all 52 kingdom cards — every card
+    effect runs inside full random games under the conservation census."""
+    cards = _all52()
+    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 5 else cards[42:52]
+    game = engine.new_game([A, B, C], ["base", "intrigue"], seed=1234 + chunk,
+                           kingdom=kingdom)
+    baseline = _census(game)
+    rng = random.Random(4321 + chunk)
+    for _ in range(MOVE_CAP):
+        if game["over"]:
+            break
+        pid = _actor(game)
+        ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
+        assert ok, f"random legal move rejected: {err}"
+        _assert_invariants(game, baseline)
+    assert game["over"], "game did not terminate under the move cap"
+
+
 def test_soak_determinism_same_seed_same_game():
     def run():
         game = engine.new_game([A, B], ["base"], seed=11, kingdom=K7)
