@@ -48,7 +48,6 @@ const TYPE_LABEL = {
   action: "Action", treasure: "Treasure", victory: "Victory", curse: "Curse",
   attack: "Attack", reaction: "Reaction",
 };
-const typeBanner = (types) => (types || []).map((t) => TYPE_LABEL[t] || t).join(" – ");
 const faceClass = (types) => {
   if (!types) return "";
   if (types.includes("curse")) return "dm-f-curse";
@@ -71,7 +70,9 @@ function DmCardFace({ name, card, onClick, selected, disabled, highlight, small,
       {!small && <div className="dm-card-text">{card?.text || ""}</div>}
       <div className="dm-card-bottom">
         <span className="dm-cost">{card ? card.cost : ""}</span>
-        <span className="dm-type">{typeBanner(types)}</span>
+        <div className="dm-types">
+          {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
+        </div>
       </div>
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
@@ -156,10 +157,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [showKingdom, setShowKingdom] = useState(false);
-  // Did I do anything this turn? Gates the Undo button's visibility so it
-  // doesn't tempt with nothing to take back. Declared with the other state
-  // (ABOVE all effects — the TDZ rule).
-  const [actedThisTurn, setActedThisTurn] = useState(false);
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -201,14 +198,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const kingdomPiles = game?.kingdom || [];
   const seatOrder = game?.players || Object.keys(names);
   const oppOrder = seatOrder.filter((p) => p !== myId);
-  // Undo: the server refuses once hidden information was revealed this turn
-  // (draws, looks, reveals, an opponent's answer). turn_revealed ships in the
-  // view precisely to drive this button; `actedThisTurn` / phase-buy / coins /
-  // an open pending are the "something to take back" signals (the ORs cover a
-  // reconnect mid-turn, where the local flag starts false).
+  // Undo walks back ONE move per press. undo_depth (how many snapshots the
+  // server holds) and turn_revealed ship in the view precisely to drive this;
+  // the server refuses once hidden information was revealed this turn.
   const turnRevealed = !!game?.turn_revealed;
   const canUndo = !!game && !over && game.turn === myId && !turnRevealed
-    && (actedThisTurn || game.phase === "buy" || game.coins > 0 || game.pending_pid != null);
+    && (game.undo_depth || 0) > 0;
 
   // ── socket plumbing ──
   const handleMessage = useCallback((msg) => {
@@ -335,13 +330,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setPickIdx([]); setPickOpts([]); setOrderIdx([]);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
   useEffect(() => { setGameOverDismissed(false); }, [roomId]);
-  useEffect(() => { setActedThisTurn(false); }, [game?.turn, game?.turn_number]);
 
   // ── actions ──
-  const mv = (move) => {
-    setActedThisTurn(move?.type !== "undo_turn");
-    send({ action: "move", move });
-  };
+  const mv = (move) => send({ action: "move", move });
 
   const createGame = () => {
     const rid = roomCode();
@@ -811,8 +802,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => setShowKingdom(true)}>🃏 Kingdom</button>
         {canUndo && (
-          <button className="btn btn-outline btn-sm" title="Take back this turn (allowed until new information is revealed)"
-            onClick={() => mv({ type: "undo_turn" })}>↩ Undo turn</button>
+          <button className="btn btn-outline btn-sm"
+            title="Take back your last action — press again to keep stepping back (until the turn started or new information was revealed)"
+            onClick={() => mv({ type: "undo_turn" })}>↩ Undo{(game.undo_depth || 0) > 1 ? ` (${game.undo_depth})` : ""}</button>
         )}
         {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
       </div>

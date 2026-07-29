@@ -70,7 +70,7 @@ def _assert_room_redacted(room_payload, viewer):
     if not game:
         return
     assert "rng_state" not in game and "seed" not in game
-    assert "turn_undo" not in game, "the undo snapshot (every hidden zone!) on the wire"
+    assert "undo_stack" not in game, "the undo snapshots (every hidden zone!) on the wire"
     assert "pending" not in game, "raw pending stack (frame data!) on the wire"
     pv = game.get("pending_view")
     if pv is not None:

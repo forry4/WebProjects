@@ -96,14 +96,15 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   `opponents` give that order).
 - Shuffle only when short (2E rule); reveals/looks go through `aside` so mid-look shuffles
   exclude them; treasures can't be played after a buy (`turn_ctx["bought"]`).
-- **Turn undo is gated on HIDDEN INFORMATION, not on which actions you took** (the Duel model):
-  `_arm_undo` snapshots the whole game at turn start (`turn_undo`, stripped from `player_view` —
-  it holds every hidden zone; `turn_revealed` DOES ship, driving the client button);
-  `_mark_revealed` fires on draw / look_top / reveal / pass_card and on any decision resolved by
-  a non-turn player. `{"type":"undo_turn"}` is handled BEFORE the pending gate (an unrevealed
-  Militia can be taken back before the opponent answers) and `legal_moves` never offers it (keeps
-  the bot honest). Treasures, buys, end_phase, and no-reveal actions (Festival, Chapel, Workshop…)
-  are all undoable; anything that draws or reveals is not.
+- **Undo is per-MOVE and gated on HIDDEN INFORMATION** (the Duel model, one step at a time):
+  `apply_move` pushes a snapshot onto `game["undo_stack"]` before each of the TURN PLAYER's own
+  moves (popped back off if the move is rejected); `{"type":"undo_turn"}` pops one — press
+  repeatedly to walk back to the start of the turn ("nothing to undo"). `_mark_revealed` (draw /
+  look_top / reveal / pass_card / any non-turn player's decision) locks AND clears the stack —
+  nothing this turn is undoable once information was exposed. Snapshots exclude the stack itself
+  (no nesting), never ship (`player_view` sends only `undo_depth` + `turn_revealed`, which drive
+  the client button), and undo is handled BEFORE the pending gate (an unrevealed Militia can be
+  taken back before the opponent answers). `legal_moves` never offers it (keeps the bot honest).
 
 ## Hidden information / wire view
 

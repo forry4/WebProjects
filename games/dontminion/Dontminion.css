@@ -101,7 +101,7 @@
      resizes don't animate as a shrink on load (the Duel lesson) */
   transition: border-color .15s, transform .15s, box-shadow .15s, opacity .15s;
 }
-.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); min-height: calc(var(--card-w-s, 84px) * 1.15); }
+.dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); min-height: calc(var(--card-w-s, 84px) * 1.3); }
 .dm-card-name.dm-name-long { font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 12px); letter-spacing: 0; }
 .dm-clickable { cursor: pointer; }
 .dm-clickable:hover { transform: translateY(-2px); }
@@ -119,9 +119,11 @@
   overflow: hidden; line-height: 1.25;
 }
 .dm-card-bottom {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 3px 5px 4px; gap: 4px;
+  /* cost coin first, then the type lines UNDER it — one line per type */
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 3px 5px 5px; gap: 3px; margin-top: auto;
 }
+.dm-types { display: flex; flex-direction: column; gap: 1px; }
 .dm-cost {
   background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
   color: #221a05; font-weight: 800; border-radius: 50%;
@@ -131,9 +133,10 @@
   font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
 }
 .dm-type {
-  font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 9px);
+  display: block;
+  font-size: clamp(8px, calc(var(--card-h, 120px) * .075), 11px);
   text-transform: uppercase; letter-spacing: .4px; color: #cfc4a6;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  white-space: nowrap;
 }
 .dm-f-action .dm-card-name { color: #e8dfc8; }
 .dm-f-treasure { background: #2a2410; }
@@ -167,6 +170,7 @@
 .dm-prompt {
   background: var(--surface2, #242018); border: 1px solid var(--gold, #c9a84c);
   border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  container-type: inline-size;
   --card-w-s: 84px;
 }
 .dm-prompt-hd { font-weight: 700; margin-bottom: 8px; }
@@ -179,6 +183,7 @@
 .dm-me {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
   border-radius: var(--radius-lg, 14px); padding: 12px 14px;
+  container-type: inline-size;   /* mobile sizes the hand off 100cqw */
   --card-w: 120px; --card-h: 168px;
 }
 .dm-resbar {
@@ -236,7 +241,16 @@
   .dm .dm-lobby-cols { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
-  .dm .dm-me { --card-w: 82px; --card-h: 115px; }
+  /* THREE cards per row, filling it — the supply, the hand, and prompt cards
+     all size off their own container's width (100cqw) minus the gaps */
+  .dm .dm-supply { --card-w-s: calc((100cqw - 20px) / 3); }
+  .dm .dm-supply-row { gap: 10px; row-gap: 22px; justify-content: flex-start; }
+  .dm .dm-me { --card-w: calc((100cqw - 16px) / 3); --card-h: calc(var(--card-w) * 1.4); }
+  .dm .dm-hand { gap: 8px; }
+  .dm .dm-prompt { --card-w-s: calc((100cqw - 16px) / 3); }
+  .dm .dm-prompt-cards { gap: 8px; }
+  .dm .dm-kingdom-modal { --card-w: calc((100vw - 110px) / 3); --card-h: calc(var(--card-w) * 1.4); }
+  .dm .dm-kgrid { gap: 8px; row-gap: 24px; }
   .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
   .dm .dm-resbar b { font-size: 17px; }
   .dm .dm-handrow { gap: 8px; }

@@ -147,31 +147,49 @@ def _drive(game):
     raise RuntimeError("dontminion: _drive exceeded iteration cap (runaway auto frames)")
 
 
-# --- turn undo (the Duel model: gated on HIDDEN INFORMATION, not on actions) --
+# --- undo (one MOVE at a time; gated on HIDDEN INFORMATION, the Duel model) ---
+# A snapshot is pushed before each of the turn player's own moves, so undo can
+# be pressed repeatedly — walking back move by move until the start of the turn
+# ("nothing to undo") or until something revealed information that can't be
+# un-seen, which locks AND clears the whole stack.
+
+_UNDO_CAP = 30  # snapshots per turn — a runaway backstop, far above real turns
+
 
 def _mark_revealed(game):
     """This turn exposed information that can't be un-seen (a draw, a look, a
-    reveal, a pass, an opponent's choice) — undo is refused from here on."""
+    reveal, a pass, an opponent's choice) — undo is dead from here on."""
     game["turn_revealed"] = True
+    game["undo_stack"] = []
 
 
 def _arm_undo(game):
-    """Snapshot the whole game at turn start. Stripped from player_view (it
-    holds every hidden zone); JSON-safe so it survives save/reconnect."""
     game["turn_revealed"] = False
-    game["turn_undo"] = None
-    game["turn_undo"] = copy.deepcopy({k: v for k, v in game.items() if k != "turn_undo"})
+    game["undo_stack"] = []
 
 
-def _undo_turn(game, pid):
+def _push_undo(game):
+    """Snapshot the game before a (turn player's) move. Snapshots exclude the
+    stack itself (else they'd nest); JSON-safe so they survive save/reconnect;
+    stripped from player_view (they hold every hidden zone)."""
+    snap = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
+    game["undo_stack"].append(snap)
+    if len(game["undo_stack"]) > _UNDO_CAP:
+        game["undo_stack"].pop(0)
+
+
+def _undo_move(game, pid):
     if pid != game["turn"]:
         return False, "not your turn"
-    if game.get("turn_revealed") or not game.get("turn_undo"):
+    if game.get("turn_revealed"):
         return False, "can't undo — new information was revealed this turn"
-    snap = copy.deepcopy(game["turn_undo"])
+    stack = game.get("undo_stack") or []
+    if not stack:
+        return False, "nothing to undo"
+    snap = stack.pop()
     game.clear()
     game.update(snap)
-    _arm_undo(game)
+    game["undo_stack"] = stack   # the remaining, earlier snapshots
     _log(game, pid, "undo")
     return True, None
 
@@ -633,19 +651,23 @@ def apply_move(game, pid, move):
         return False, "bad move"
     mt = move.get("type")
     if mt == "undo_turn":
-        # BEFORE the pending gate — an unrevealed turn is undoable even with a
+        # BEFORE the pending gate — an unrevealed move is undoable even with a
         # frame open (yours: a Workshop pile pick; an opponent's: a Militia they
         # haven't answered yet). legal_moves deliberately never offers this, so
         # the random bot can't take it back.
-        ok, err = _undo_turn(game, pid)
+        ok, err = _undo_move(game, pid)
         if ok:
             _post_move(game)
         return ok, err
+    pushed = False
     if game["pending_pid"] is not None:
         if pid != game["pending_pid"]:
             return False, "not your decision"
         if mt != "decision":
             return False, f"must resolve {game['pending_kind']} first"
+        if pid == game["turn"] and not game.get("turn_revealed"):
+            _push_undo(game)
+            pushed = True
         ok, err = _resolve_decision(game, pid, move)
     elif mt == "decision":
         return False, "nothing to decide"
@@ -655,10 +677,15 @@ def apply_move(game, pid, move):
         handler = _HANDLERS.get(mt)
         if handler is None:
             return False, f"unknown move: {mt}"
+        if not game.get("turn_revealed"):
+            _push_undo(game)
+            pushed = True
         ok, err = handler(game, pid, move)
     if ok:
         _drive(game)
         _post_move(game)
+    elif pushed and game.get("undo_stack"):
+        game["undo_stack"].pop()   # a rejected move mutated nothing
     return ok, err
 
 
@@ -879,10 +906,12 @@ def winners(game):
 def player_view(game, viewer):
     """Build (not filter) the wire view. Deck order NEVER ships; hands only to
     their owner; discard = top + count; the raw pending stack (frame data!) is
-    replaced by pending_view; rng_state/seed popped; the turn_undo snapshot
-    (every hidden zone!) never leaves the server. Everything reveals at over.
-    turn_revealed stays ON the wire — it drives the client's Undo button."""
-    g = copy.deepcopy({k: v for k, v in game.items() if k != "turn_undo"})
+    replaced by pending_view; rng_state/seed popped; the undo snapshots (every
+    hidden zone!) never leave the server — only their COUNT ships (undo_depth),
+    which with turn_revealed drives the client's Undo button. Everything
+    reveals at over."""
+    g = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
+    g["undo_depth"] = len(game.get("undo_stack") or [])
     g.pop("rng_state", None)
     g.pop("seed", None)
     pend = g.pop("pending")

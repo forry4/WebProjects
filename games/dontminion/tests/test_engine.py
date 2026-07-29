@@ -528,22 +528,42 @@ def test_throne_room_with_no_actions_or_skip():
 # give_hand changes the state AFTER new_game armed the snapshot, so these tests
 # re-arm with engine._arm_undo once the position is staged.
 
-def test_undo_restores_treasures_and_buys():
+def test_undo_steps_back_one_move_at_a_time():
     g = fresh()
     give_hand(g, A, ["Gold", "Copper"])
     engine._arm_undo(g)
     mv(g, A, {"type": "end_phase"})
     mv(g, A, {"type": "play_all_treasures"})
     assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
-    assert g["supply"]["Silver"] == 39
-    ok, err = mv(g, A, {"type": "undo_turn"})
-    assert ok, err
-    assert g["phase"] == "action" and g["coins"] == 0
-    assert sorted(g["seats"][A]["hand"]) == ["Copper", "Gold"]
-    assert g["seats"][A]["in_play"] == [] and g["seats"][A]["discard"] == []
-    assert g["supply"]["Silver"] == 40
+    assert g["supply"]["Silver"] == 39 and g["coins"] == 1
+    # 1st undo: just the buy comes back
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["supply"]["Silver"] == 40 and g["coins"] == 4
+    assert g["phase"] == "buy" and sorted(g["seats"][A]["in_play"]) == ["Copper", "Gold"]
     assert g["log"][-1]["event"] == "undo"
-    assert mv(g, A, {"type": "end_phase"})[0]       # play continues after an undo
+    # 2nd undo: the treasures return to hand
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["coins"] == 0 and sorted(g["seats"][A]["hand"]) == ["Copper", "Gold"]
+    assert g["phase"] == "buy" and g["seats"][A]["in_play"] == []
+    # 3rd undo: back to the action phase — the start of the turn
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["phase"] == "action"
+    ok, err = mv(g, A, {"type": "undo_turn"})
+    assert not ok and err == "nothing to undo"
+    assert mv(g, A, {"type": "end_phase"})[0]       # play continues after undos
+
+
+def test_undo_depth_ships_and_rejected_moves_dont_count():
+    g = fresh()
+    give_hand(g, A, ["Gold"])
+    engine._arm_undo(g)
+    mv(g, A, {"type": "end_phase"})
+    mv(g, A, {"type": "play_all_treasures"})
+    v = engine.player_view(g, A)
+    assert v["undo_depth"] == 2 and "undo_stack" not in v
+    ok, _ = mv(g, A, {"type": "buy", "card": "Province"})   # can't afford: rejected
+    assert not ok
+    assert engine.player_view(g, A)["undo_depth"] == 2      # no phantom snapshot
 
 
 def test_undo_ok_for_no_reveal_actions_blocked_after_draw():
@@ -559,6 +579,7 @@ def test_undo_ok_for_no_reveal_actions_blocked_after_draw():
     assert mv(g, A, {"type": "play_action", "card": "Smithy"})[0]
     ok, err = mv(g, A, {"type": "undo_turn"})        # a draw can't be un-seen
     assert not ok and "revealed" in err
+    assert engine.player_view(g, A)["undo_depth"] == 0   # the reveal clears the stack
 
 
 def test_undo_before_opponent_answers_but_not_after():
@@ -593,13 +614,29 @@ def test_undo_with_own_pending_open_and_after_self_reveal():
     assert not ok and "revealed" in err
 
 
+def test_undo_walks_back_through_own_decisions():
+    """A decision by the turn player (Throne Room's pick) is its own undo step."""
+    g = fresh()
+    give_hand(g, A, ["Throne Room", "Militia"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert g["pending_kind"] == "choose_cards"
+    assert decide(g, A, cards=[])[0]                 # declined the pick
+    assert engine.player_view(g, A)["undo_depth"] == 2
+    assert mv(g, A, {"type": "undo_turn"})[0]        # back to the open pick
+    assert g["pending_kind"] == "choose_cards" and g["pending_pid"] == A
+    assert mv(g, A, {"type": "undo_turn"})[0]        # back before Throne Room
+    assert g["pending_pid"] is None
+    assert "Throne Room" in g["seats"][A]["hand"] and g["actions"] == 1
+
+
 def test_undo_gates_and_wire_shape():
     g = fresh()
     assert mv(g, B, {"type": "undo_turn"}) == (False, "not your turn")
     assert all(m["type"] != "undo_turn" for m in engine.legal_moves(g, A))
     v = engine.player_view(g, A)
-    assert "turn_undo" not in v
-    assert v["turn_revealed"] is False
+    assert "undo_stack" not in v and "turn_undo" not in v
+    assert v["turn_revealed"] is False and v["undo_depth"] == 0
 
 
 # --- redaction ---------------------------------------------------------------
