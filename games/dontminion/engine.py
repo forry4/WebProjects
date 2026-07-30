@@ -592,6 +592,22 @@ def manual_treasures():
     return getattr(effects, "MANUAL_TREASURES", set())
 
 
+def autoplay_last():
+    """Treasures play_all_treasures must play AFTER the rest, because their
+    value depends on what is already in play (Bank: +$1 per Treasure in play,
+    counting itself). Hand order is arbitrary from the player's side, so
+    leaving Bank where it fell silently cost up to 40% of a turn's coins —
+    measured $6 vs $10 on the same five-card hand.
+
+    Membership means "later is never worse", so the button needs no judgement
+    from the player. A treasure where playing EARLY might genuinely be right
+    belongs in MANUAL_TREASURES instead — the button must not choose for them.
+    (Highwayman-class effects, where the choice depends on game STATE rather
+    than the card, need a predicate; see the ledger in EXPANSIONS.md.)"""
+    from . import effects
+    return getattr(effects, "AUTOPLAY_LAST", set())
+
+
 def coins_of(game, card):
     """Printed coin value under game rules (Charlatan's Curse plays for $1)."""
     if card == "Curse" and game["curse_is_treasure"]:
@@ -1187,6 +1203,10 @@ def _h_play_all_treasures(game, pid, move):
     if not auto:
         # a no-op that reported success is what let a bot livelock here
         return False, "no treasures to autoplay"
+    # order-sensitive treasures go last; stable, so everything else keeps
+    # hand order (which is what determinism/replay compares on)
+    last = autoplay_last()
+    auto.sort(key=lambda c: c in last)
     for card in auto:
         _play_one_treasure(game, pid, card)
     return True, None

@@ -204,6 +204,27 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   `opponents` give that order).
 - Shuffle only when short (2E rule); reveals/looks go through `aside` so mid-look shuffles
   exclude them; treasures can't be played after a buy (`turn_ctx["bought"]`).
+- **`play_all_treasures` classifies every Treasure into one of three buckets** — adding a
+  Treasure with an ability means picking one, and "has an effect" is NOT the criterion:
+  1. **`MANUAL_TREASURES`** — playing it pushes a DECISION frame (Anvil, Crystal Ball,
+     Investment, Tiara, War Chest), which can't be answered mid-autoplay. Also the bucket for a
+     Treasure where playing EARLY might genuinely be right: the button must not choose for the
+     player.
+  2. **`AUTOPLAY_LAST`** — its value depends on what is already in play, and later is NEVER
+     worse (Bank: +$1 per Treasure in play counting itself). Autoplayed, but sorted after the
+     rest. Hand order is arbitrary from the player's side, so leaving Bank where it fell cost up
+     to 40% of a turn's coins — measured $6 vs $10 on one five-card hand. The sort is STABLE, so
+     everything else keeps hand order (replay determinism compares on it).
+  3. **autoplayed** — everything else, including Treasures whose rider lands later anyway
+     (Collection, Hoard, Quarry, Astrolabe: their effects fire at buy time or next turn, so
+     ordering can't matter). These are exactly the cards players want one-clicked; do NOT make
+     them manual.
+
+  A fourth case exists and is NOT built: suppression that depends on GAME STATE rather than the
+  card (Allies' Highwayman negates the first Treasure its victim plays, so which one goes first
+  becomes a real choice — and the block LIFTS once spent). A card list cannot express that; it
+  needs an `autoplay_block(game, pid)` predicate shipped in `player_view`, not `/catalog`. See
+  the ledger in EXPANSIONS.md — build it at the first set that needs it.
 - **A move that changes nothing must be REJECTED, and `legal_moves` must not offer it.** The
   interactive treasures (`effects.MANUAL_TREASURES` — War Chest, Anvil) are skipped by
   `play_all_treasures` because they'd push a decision frame mid-autoplay; `legal_moves` offered

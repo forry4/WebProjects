@@ -144,6 +144,30 @@ def test_bank_counts_duration_zone_treasures():
     assert g["coins"] == 2                              # Bank + Astrolabe
 
 
+def test_play_all_treasures_plays_bank_last_whatever_hand_order():
+    """Bank's value depends on what is already in play, and hand order is
+    arbitrary from the player's side — leaving it where it fell silently cost
+    up to 40% of the turn's coins ($6 vs $10 on this hand)."""
+    hand = ["Bank", "Copper", "Copper", "Copper", "Silver"]
+    for order in (hand, list(reversed(hand))):
+        g = fresh()
+        give_hand(g, A, order)
+        to_buy(g)
+        assert mv(g, A, {"type": "play_all_treasures"})[0]
+        assert g["seats"][A]["in_play"][-1] == "Bank"    # always last
+        assert g["coins"] == 10                          # 3 + 2 + $5 Bank
+    # and the non-order-sensitive treasures keep hand order (replay stability)
+    assert g["seats"][A]["in_play"][:-1] == ["Silver", "Copper", "Copper", "Copper"]
+
+
+def test_autoplay_last_membership_is_justified():
+    """Membership means "later is never worse". A treasure that might want to
+    go EARLY belongs in MANUAL_TREASURES instead — the button must not choose
+    for the player. Guards the two registries against overlap too."""
+    assert engine.autoplay_last() == {"Bank"}
+    assert not (engine.autoplay_last() & engine.manual_treasures())
+
+
 # --- Anvil -------------------------------------------------------------------
 
 def test_anvil_discard_treasure_to_gain_up_to_4():

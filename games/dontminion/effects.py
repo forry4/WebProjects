@@ -20,6 +20,11 @@ COST_MODS = {}
 DYN_COSTS = {}          # card -> fn(game) -> reduction on the card's OWN cost (Peddler)
 BUY_GATES = {}          # card -> fn(game, pid) -> error string | None (Grand Market)
 MANUAL_TREASURES = set()  # treasures play_all must skip (interactive: Anvil-class)
+# Treasures whose VALUE depends on what else is already in play, so play_all
+# must play them AFTER the rest (Bank). Membership means "later is never
+# worse" — a card where the player might genuinely want it early belongs in
+# MANUAL_TREASURES instead, since the button must not choose for them.
+AUTOPLAY_LAST = set()
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -48,3 +53,5 @@ for _m in _MODULES:
         BUY_GATES[_name] = _fn
     for _name in getattr(_m, "MANUAL_TREASURES", ()):
         MANUAL_TREASURES.add(_name)
+    for _name in getattr(_m, "AUTOPLAY_LAST", ()):
+        AUTOPLAY_LAST.add(_name)

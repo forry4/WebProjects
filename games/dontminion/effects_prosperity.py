@@ -782,3 +782,7 @@ MANUAL_TREASURES = {
 "Anvil", "War Chest",
 "Crystal Ball", "Investment", "Tiara",
 }
+
+# Bank counts the Treasures already in play (including itself), so playing it
+# later is never worse — play_all_treasures plays it after the rest.
+AUTOPLAY_LAST = {"Bank"}
