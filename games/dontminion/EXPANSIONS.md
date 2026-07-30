@@ -103,6 +103,14 @@ and the audit agent re-runs on the phase.
 8. **Gates + ship**: package suite, full repo suite, screens, smoke, e2e sanity with the
    new expansion toggled on, push, verify BOTH deploys by SHA, prod spot-check, update
    CLAUDE.md/memory/this file.
+9. **Replay every REAL prod save** (Turso creds `~/.spender_turso` → `/v2/pipeline`): run
+   each blob through `engine.migrate` exactly as `load_game_to_memory` does, then play it
+   forward with the bot under the soak's invariants. This is NOT redundant with the suite
+   — `migrate`'s input is HISTORY, not the current tree, so tests built by downgrading a
+   current game cannot synthesize what prod actually holds. It caught both bugs 75f2900
+   shipped: a schema stamp that didn't partition shapes (two live games would have
+   KeyError'd) and a bot livelock on a no-op move (two live games stuck). ~30 lines,
+   ~2 min; run it whenever the game dict's shape or the move surface changes.
 
 Cost note: a phase runs 4-6 subagents (~0.8-1.2M tokens). The audit step is the cheapest
 insurance in the pipeline — do not skip it to save a run.
