@@ -21,11 +21,8 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-const BOT_TIERS = [
-  { id: "easy", name: "Easy", desc: "Plays random legal moves" },
-  { id: "normal", name: "Normal", desc: "Plays random legal moves (for now)" },
-  { id: "hard", name: "Hard", desc: "Plays random legal moves (for now)" },
-];
+// No difficulty picker yet: every bot plays random legal moves. Re-add tiers
+// here (and the CmRow in the create modal) when a stronger bot actually ships.
 const EXPANSIONS = [
   { id: "base", name: "Base Set" },
   { id: "intrigue", name: "Intrigue" },
@@ -72,13 +69,14 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       <div className={"dm-card-name" + (name.length > 9 ? " dm-name-long" : "")}>{name}</div>
       <div className="dm-card-body">
         {!small && <div className="dm-card-text">{card?.text || ""}</div>}
-        {/* cost directly below the name on the RIGHT, each type on its own line under it */}
+        {/* cost directly below the name on the RIGHT */}
         <div className="dm-card-side">
           <span className="dm-cost">{card ? card.cost : ""}</span>
-          <div className="dm-types">
-            {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
-          </div>
         </div>
+      </div>
+      {/* type lines at the BOTTOM-LEFT, one per line */}
+      <div className="dm-types">
+        {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
       </div>
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
@@ -153,10 +151,16 @@ function fmtLog(e, names) {
     case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
     case "trash": return `${who} trashes ${listCards(e.cards || [])}`;
     case "supply_trash": return `${who} trashes ${art(e.card)} from the Supply`;
-    case "discard": return e.cards ? `${who} discards ${listCards(e.cards)}`
-      : `${who} discards ${e.n} card${e.n === 1 ? "" : "s"}`;
-    case "draw": return e.cards ? `${who} draws ${listCards(e.cards)}`
-      : `${who} draws ${e.n} card${e.n === 1 ? "" : "s"}`;
+    case "discard": {
+      if (e.cards) return `${who} discards ${listCards(e.cards)}`;
+      const k = e.count ?? e.n;                    // pre-fix entries kept it in n
+      return `${who} discards ${k} card${k === 1 ? "" : "s"}`;
+    }
+    case "draw": {
+      if (e.cards) return `${who} draws ${listCards(e.cards)}`;
+      const k = e.count ?? e.n;
+      return `${who} draws ${k} card${k === 1 ? "" : "s"}`;
+    }
     case "shuffle": return `${who} shuffles their deck`;
     case "reveal": return `${who} reveals ${listCards(e.cards || [])}`;
     case "topdeck": return e.card ? `${who} puts ${art(e.card)} onto their deck`
@@ -184,7 +188,10 @@ function buildLogLines(log, names) {
       if (p.event === "buy" && p.pid === e.pid && p.card === e.card) continue;
     }
     const text = fmtLog(e, names);
-    if (text) out.push({ n: e.n, d: Math.min(e.d || 0, 3), turn: e.event === "turn_start", text });
+    // key = position in the (append-only) view log — e.n is NOT safe as a React
+    // key: entries written before the count/sequence fix share n values, and
+    // duplicate keys made React visibly scramble the list.
+    if (text) out.push({ key: i, d: Math.min(e.d || 0, 3), turn: e.event === "turn_start", text });
   }
   return out;
 }
@@ -228,7 +235,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
-  const [createDiff, setCreateDiff] = useState("normal");
   const [createBots, setCreateBots] = useState(1);
   const [createPlayers, setCreatePlayers] = useState(4);
   const [createExps, setCreateExps] = useState(["base", "intrigue"]);
@@ -425,7 +431,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     };
     if (createOpp === "ai") {
       msg.num_bots = createBots;
-      msg.ai_difficulty = createDiff;
+      msg.ai_difficulty = "easy";   // the only real tier today (random-legal)
     } else {
       msg.max_players = createPlayers;
     }
@@ -634,21 +640,37 @@ export default function Dontminion({ myId, authUser, onExit }) {
     );
   };
 
-  // Opponent box (top strip): face-DOWN backs for the hand, face-UP cards for
-  // what they've played, real deck/discard piles, VP in the box.
-  const renderOppBox = (pid) => {
+  // Sidebar player box (one per seat, above the Trash): identity + score only —
+  // name, VP, turns taken, and whose turn it is. Card zones live in play boxes.
+  const renderPlayerBox = (pid) => {
     const s = seats[pid] || {};
     const isBot = (roomData?.ai_players || []).includes(pid);
+    const acting = !over && (game.pending_pid || game.turn) === pid;
+    return (
+      <div key={pid} className={"dm-pbox" + (acting ? " dm-pbox-acting" : "")}>
+        <span className="dm-pbox-name">
+          {names[pid] || pid}{isBot ? " 🤖" : ""}{pid === myId ? " (you)" : ""}
+        </span>
+        {acting && (
+          <TurnBadge mine={pid === myId}>
+            {game.pending_pid === pid ? "deciding" : pid === myId ? "your turn" : "their turn"}
+          </TurnBadge>
+        )}
+        <span className="dm-vp" title="victory points">🛡 {game.vp?.[pid] ?? 0} VP</span>
+        <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
+      </div>
+    );
+  };
+
+  // Opponent PLAY box (center column, same width as mine): face-DOWN backs for
+  // the hand, face-UP cards for what they've played, real deck/discard piles.
+  const renderOppPlay = (pid) => {
+    const s = seats[pid] || {};
     const acting = !over && (game.pending_pid || game.turn) === pid;
     const handN = Math.min(s.hand_count ?? 0, 12);
     return (
       <div key={pid} className={"dm-opp" + (acting ? " dm-opp-acting" : "")}>
-        <div className="dm-opp-name">
-          {names[pid] || pid}{isBot ? " 🤖" : ""}
-          {acting && <TurnBadge mine={false}>{game.pending_pid === pid ? "deciding" : "their turn"}</TurnBadge>}
-          <span className="dm-vp" title="victory points">🛡 {game.vp?.[pid] ?? 0} VP</span>
-          <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
-        </div>
+        <div className="dm-opp-name">{names[pid] || pid}</div>
         <div className="dm-opp-zones">
           <DmPile kind="deck" label="deck" count={s.deck_count ?? 0} />
           <DmPile kind="discard" label="discard" count={s.discard_view?.count ?? 0}
@@ -734,16 +756,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 value={createOpp} onChange={setCreateOpp} />
             </CmRow>
             {createOpp === "ai" ? (
-              <>
-                <CmRow label="Bots">
-                  <CmSeg options={[1, 2, 3].map((n) => ({ value: n, label: String(n) }))}
-                    value={createBots} onChange={setCreateBots} />
-                </CmRow>
-                <CmRow label="Difficulty">
-                  <CmSeg options={BOT_TIERS.map((t) => ({ value: t.id, label: t.name, title: t.desc }))}
-                    value={createDiff} onChange={setCreateDiff} />
-                </CmRow>
-              </>
+              <CmRow label="Bots">
+                <CmSeg options={[1, 2, 3].map((n) => ({ value: n, label: String(n) }))}
+                  value={createBots} onChange={setCreateBots} />
+              </CmRow>
             ) : (
               <CmRow label="Players">
                 <CmSeg options={[2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
@@ -769,7 +785,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="cm-hint">10 kingdom piles are dealt at random from the enabled expansions.</div>
             <div className="cm-footer">
               <span className="cm-summary">
-                {createOpp === "ai" ? `You + ${createBots} bot${createBots > 1 ? "s" : ""} (${createDiff})` : `Up to ${createPlayers} players`}
+                {createOpp === "ai" ? `You + ${createBots} bot${createBots > 1 ? "s" : ""}` : `Up to ${createPlayers} players`}
                 {" · "}{createExps.map((e) => EXPANSIONS.find((x) => x.id === e)?.name).join(" + ")}
               </span>
               <button className="btn btn-gold cm-create" onClick={createGame}>Create</button>
@@ -909,10 +925,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
       </div>
 
-      <div className="dm-opps">{oppOrder.map(renderOppBox)}</div>
-
       <div className="dm-main">
         <div className="dm-side">
+          <div className="dm-pboxes">{seatOrder.map(renderPlayerBox)}</div>
           <div className="dm-trash" onClick={() => setShowTrash((s) => !s)}>
             Trash ({(game.trash || []).length}) {showTrash ? "▾" : "▸"}
             {showTrash && (
@@ -924,7 +939,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-log">
             {/* newest first, pinned at the top — matches the other games' logs */}
             {buildLogLines(game.log || [], names).reverse().slice(0, 200).map((l) => (
-              <div key={l.n}
+              <div key={l.key}
                 className={"dm-log-line" + (l.d ? ` dm-log-d${l.d}` : "") + (l.turn ? " dm-log-turn" : "")}>
                 {l.text}
               </div>
@@ -933,17 +948,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
         </div>
 
         <div className="dm-center-col">
+          {oppOrder.map(renderOppPlay)}
           {renderPrompt()}
           <div className="dm-supply">
             <div className="dm-supply-row dm-basics">{BASIC_ROW.map(renderPile)}</div>
             <div className="dm-supply-row dm-kingdom">{kingdomPiles.map(renderPile)}</div>
           </div>
           <div className="dm-me">
-            <div className="dm-me-head">
-              <span className="dm-me-name">{names[myId] || "You"}{myTurn && <TurnBadge mine>your turn</TurnBadge>}</span>
-              <span className="dm-vp" title="victory points">🛡 {game.vp?.[myId] ?? 0} VP</span>
-              <span className="dm-opp-turns" title="turns taken">⏱ {mySeat?.turns_taken ?? 0}</span>
-            </div>
             {!over && game.turn === myId && (
               <div className="dm-resbar">
                 <span>Actions <b>{game.actions}</b></span>

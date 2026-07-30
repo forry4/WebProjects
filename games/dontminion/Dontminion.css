@@ -51,20 +51,28 @@
 .dm-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dm-center-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-/* ── opponents (TOP strip): backs for their hand, faces for what they played ── */
-.dm-opps {
-  display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 18px 0; width: 100%;
-  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
+/* ── sidebar PLAYER boxes (identity + score; one per seat, above the Trash) ── */
+.dm-pboxes { display: flex; flex-direction: column; gap: 8px; }
+.dm-pbox {
+  background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
+  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
-.dm-opps .dm-opp { flex: 1 1 340px; min-width: 0; }
+.dm-pbox-acting { border-color: var(--gold, #c9a84c); }
+.dm-pbox-name { font-weight: 600; font-size: 16px; }
+.dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
+.dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
+
+/* ── opponent PLAY box (center column, same width as your area): backs for
+      their hand, faces for what they played, real piles ── */
 .dm-opp {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
   border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
+  container-type: inline-size;
 }
 .dm-opp-acting { border-color: var(--gold, #c9a84c); }
-.dm-opp-name { font-weight: 600; font-size: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
-.dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
+.dm-opp-name { font-weight: 600; font-size: 14px; color: var(--text-dim, #8a7d6a); }
 .dm-opp-zones {
   display: flex; gap: 18px; align-items: flex-start; margin-top: 8px; padding-bottom: 14px;
 }
@@ -162,14 +170,17 @@
   color: var(--text-dim, #8a7d6a); padding: 0 5px; white-space: pre-line;
   overflow: hidden; line-height: 1.25;
 }
-/* Under the name: rules text on the left, and on the RIGHT a column of the
-   cost coin with the type lines directly below it (one line per type). */
+/* Under the name: rules text on the left, the cost coin on the RIGHT; the type
+   lines sit at the card's BOTTOM-LEFT (one line per type). */
 .dm-card-body { display: flex; flex: 1; min-height: 0; }
 .dm-card-side {
   margin-left: auto; display: flex; flex-direction: column; align-items: flex-end;
-  gap: 3px; padding: 2px 5px 5px;
+  padding: 2px 5px 5px;
 }
-.dm-types { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; text-align: right; }
+.dm-types {
+  display: flex; flex-direction: column; gap: 1px; align-items: flex-start;
+  text-align: left; margin-top: auto; padding: 0 5px 5px;
+}
 .dm-cost {
   background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
   color: #221a05; font-weight: 800; border-radius: 50%;
@@ -246,7 +257,6 @@
 }
 .dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
 .dm-handrow { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
-.dm-me-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-weight: 600; font-size: 16px; margin-bottom: 10px; }
 .dm-mypiles {
   display: flex; gap: 16px; align-items: flex-start; flex: none; padding-bottom: 14px;
   --card-w-s: 84px; --card-h: calc(var(--card-w-s) * 1.3);
@@ -322,9 +332,8 @@
   .dm .dm-mypiles { --card-w-s: 72px; gap: 12px; }
   .dm .dm-turnbtns { flex-direction: row; width: 100%; }
   .dm .dm-hud span { font-size: 12px; }
-  /* opponent boxes swipe sideways instead of burying the board */
-  .dm .dm-opps { flex-wrap: nowrap; overflow-x: auto; padding: 8px 12px 4px; }
-  .dm .dm-opps .dm-opp { flex: 1 0 300px; }
-  .dm .dm-opp-zones { gap: 12px; }
+  /* opponent zones swipe sideways instead of burying the board */
+  .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
+  .dm .dm-opp-inplay { flex-wrap: nowrap; }
   .dm .dm-cardinfo-cols { flex-direction: column; align-items: center; }
 }

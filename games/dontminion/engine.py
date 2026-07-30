@@ -49,13 +49,19 @@ def _save_rng(game, rng):
 # --- logging -----------------------------------------------------------------
 
 def _log(game, pid, event, private_to=None, **kw):
-    entry = {"n": len(game["log"]), "pid": pid, "event": event}
+    entry = dict(kw)
     d = game.get("log_depth", 0)
     if d:
         entry["d"] = min(d, 3)
     if private_to is not None:
         entry["private_to"] = list(private_to)
-    entry.update(kw)
+    # Core fields are set LAST so an event kwarg can never clobber them. A
+    # draw kwarg named n= used to overwrite the SEQUENCE n with the card count
+    # — every draw entry shared n, the client keyed lines on it, and React's
+    # reconciler visibly scrambled the log. Counts are the `count` kwarg now.
+    entry["n"] = len(game["log"])
+    entry["pid"] = pid
+    entry["event"] = event
     game["log"].append(entry)
 
 
@@ -236,7 +242,7 @@ def draw(game, pid, n):
     if drawn:
         _mark_revealed(game)
         # card names are per-field redacted in player_view (owner-only pre-over)
-        _log(game, pid, "draw", n=len(drawn), cards=list(drawn))
+        _log(game, pid, "draw", count=len(drawn), cards=list(drawn))
     return drawn
 
 
@@ -319,7 +325,7 @@ def discard(game, pid, cards, zone="hand", public=False):
         seat[zone].remove(c)
         seat["discard"].append(c)
     if cards:
-        _log(game, pid, "discard", cards=list(cards), n=len(cards))
+        _log(game, pid, "discard", cards=list(cards), count=len(cards))
 
 
 def topdeck(game, pid, card, zone="hand", public=False):

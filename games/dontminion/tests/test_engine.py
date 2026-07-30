@@ -723,13 +723,14 @@ def test_log_draw_names_are_owner_only_until_over():
     g = fresh()
     engine.draw(g, A, 2)
     e = [x for x in g["log"] if x["event"] == "draw"][-1]
-    assert e["pid"] == A and len(e["cards"]) == e["n"] == 2
+    assert e["pid"] == A and len(e["cards"]) == e["count"] == 2
+    assert e["n"] == len(g["log"]) - 1          # the SEQUENCE n — never the count
     va = engine.player_view(g, A)
     vb = engine.player_view(g, B)
     ea = [x for x in va["log"] if x["event"] == "draw" and x["pid"] == A][-1]
     eb = [x for x in vb["log"] if x["event"] == "draw" and x["pid"] == A][-1]
     assert ea["cards"] == e["cards"]
-    assert "cards" not in eb and eb["n"] == 2     # count public, names private
+    assert "cards" not in eb and eb["count"] == 2  # count public, names private
     g["over"] = True
     eb = [x for x in engine.player_view(g, B)["log"]
           if x["event"] == "draw" and x["pid"] == A][-1]
@@ -745,5 +746,17 @@ def test_log_discards_are_named_and_opponent_effects_indent():
     ok, err = decide(g, B, cards=["Estate", "Estate"])
     assert ok, err
     disc = [e for e in g["log"] if e["event"] == "discard" and e["pid"] == B][-1]
-    assert disc["cards"] == ["Estate", "Estate"] and disc["n"] == 2
+    assert disc["cards"] == ["Estate", "Estate"] and disc["count"] == 2
     assert disc.get("d", 0) >= 1                  # indents under the Militia
+
+
+def test_log_sequence_n_is_unique_and_ordered():
+    # regression: the draw/discard count kwarg used to CLOBBER the sequence n
+    g = fresh()
+    give_hand(g, A, ["Smithy", "Copper", "Copper"])
+    mv(g, A, {"type": "play_action", "card": "Smithy"})
+    mv(g, A, {"type": "end_phase"})
+    mv(g, A, {"type": "play_all_treasures"})
+    mv(g, A, {"type": "end_phase"})           # cleanup draws + next turn
+    ns = [e["n"] for e in g["log"]]
+    assert ns == list(range(len(ns)))
