@@ -861,6 +861,70 @@ def test_undo_after_a_start_of_turn_duration_draw():
     assert g["coins"] == 3 and "Silver" not in g["seats"][A]["discard"]
 
 
+def _autoplayed_treasures():
+    """Every Treasure play_all_treasures would autoplay — read from the
+    REGISTRIES, so a future expansion's treasure is covered the day it lands."""
+    manual = engine.manual_treasures()
+    return sorted(n for n, d in CARDS.items()
+                  if "treasure" in d["types"] and n not in manual)
+
+
+@pytest.mark.parametrize("card", _autoplayed_treasures())
+def test_every_autoplayed_treasure_leaves_the_bulk_play_undoable(card):
+    """play_all_treasures is ONE move, so one reveal anywhere inside it clears
+    the undo stack and takes the WHOLE bulk down with it — including the
+    treasures that were perfectly reversible. Playing one at a time, you'd
+    still be able to take back everything up to the revealing card, so the
+    button would strictly REDUCE what you can undo. A Treasure that draws,
+    looks or reveals therefore belongs in MANUAL_TREASURES, where the player
+    chooses when to burn their undo.
+
+    Registry-driven on purpose: this fails the day a set adds a revealing
+    treasure to the autoplay bucket, which is exactly when it's easy to fix."""
+    g = fresh(kingdom=K7, expansions=("base",))
+    g["supply"].setdefault(card, 10)
+    assert mv(g, A, {"type": "end_phase"})[0]          # -> buy phase
+    give_hand(g, A, ["Copper", card])
+    engine._post_move(g)            # give_hand changes VP; resync before baselining
+    engine._arm_undo(g)                                 # as a fresh turn arms it
+
+    before = _state(g)
+    assert mv(g, A, {"type": "play_all_treasures"})[0]
+    assert g["seats"][A]["in_play"], f"{card}: nothing was played"
+
+    ok, err = mv(g, A, {"type": "undo_turn"})
+    assert ok, f"{card} made the bulk treasure play un-undoable: {err}"
+    assert _state(g) == before, f"{card}: undo did not fully restore the state"
+
+
+def test_the_autoplay_undo_guard_actually_bites(monkeypatch):
+    """Proves the invariant above isn't vacuous. Crystal Ball looks at the top
+    of the deck, so it's MANUAL; demote it to the autoplay bucket and the bulk
+    play stops being undoable — which is what the guard exists to catch."""
+    from games.dontminion import effects
+    monkeypatch.setattr(effects, "MANUAL_TREASURES",
+                        effects.MANUAL_TREASURES - {"Crystal Ball"})
+    g = fresh()
+    g["supply"].setdefault("Crystal Ball", 10)
+    assert mv(g, A, {"type": "end_phase"})[0]
+    give_hand(g, A, ["Copper", "Crystal Ball"])
+    engine._post_move(g)
+    engine._arm_undo(g)
+
+    assert mv(g, A, {"type": "play_all_treasures"})[0]      # now autoplays it
+    assert g["turn_revealed"] is True                       # it looked at the deck
+    ok, _err = mv(g, A, {"type": "undo_turn"})
+    assert not ok, "guard is vacuous — a revealing treasure stayed undoable"
+
+
+def _state(g):
+    """Everything undo must restore — coins/buys, zones, watchers, turn_ctx,
+    duration set-ups. Excludes the log (truncated by design) and the stack."""
+    return json.dumps({k: v for k, v in g.items()
+                       if k not in ("undo_stack", "log", "turn_revealed")},
+                      sort_keys=True)
+
+
 def test_undo_snapshots_do_not_copy_the_log():
     """HYGIENE: the log is append-only, so a snapshot stores only its LENGTH
     and undo restores by truncation. Copying it put up to _UNDO_CAP copies of

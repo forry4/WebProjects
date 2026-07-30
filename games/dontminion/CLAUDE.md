@@ -208,8 +208,8 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   Treasure with an ability means picking one, and "has an effect" is NOT the criterion:
   1. **`MANUAL_TREASURES`** — playing it pushes a DECISION frame (Anvil, Crystal Ball,
      Investment, Tiara, War Chest), which can't be answered mid-autoplay. Also the bucket for a
-     Treasure where playing EARLY might genuinely be right: the button must not choose for the
-     player.
+     Treasure where playing EARLY might genuinely be right (the button must not choose for the
+     player), **and for any Treasure that DRAWS, LOOKS or REVEALS** — see the undo rule below.
   2. **`AUTOPLAY_LAST`** — its value depends on what is already in play, and later is NEVER
      worse (Bank: +$1 per Treasure in play counting itself). Autoplayed, but sorted after the
      rest. Hand order is arbitrary from the player's side, so leaving Bank where it fell cost up
@@ -219,6 +219,18 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
      (Collection, Hoard, Quarry, Astrolabe: their effects fire at buy time or next turn, so
      ordering can't matter). These are exactly the cards players want one-clicked; do NOT make
      them manual.
+
+  **The bulk play MUST stay undoable, and that constrains bucket 3.** `play_all_treasures` is
+  ONE move with ONE undo snapshot, so a single reveal anywhere inside it clears the stack and
+  takes the WHOLE bulk down — including the treasures that were perfectly reversible. Played one
+  at a time the player could still rewind everything up to the revealing card, so autoplaying it
+  would strictly REDUCE what they can undo, on a bulk action whose riders (Hoard/Collection
+  watchers, Bank's total) they may not have anticipated. A drawing/looking/revealing Treasure
+  therefore goes in bucket 1, where the player chooses when to burn their undo.
+  `test_every_autoplayed_treasure_leaves_the_bulk_play_undoable` enumerates the autoplay bucket
+  FROM THE REGISTRIES and asserts undo both succeeds and fully restores state (zones, coins,
+  buys, watchers, turn_ctx, durations), so a future set's treasure is covered the day it lands;
+  a companion test demotes Crystal Ball to prove the guard isn't vacuous.
 
   A fourth case exists and is NOT built: suppression that depends on GAME STATE rather than the
   card (Allies' Highwayman negates the first Treasure its victim plays, so which one goes first
