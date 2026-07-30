@@ -50,8 +50,7 @@ def _isolate(monkeypatch):
     monkeypatch.setattr(m, "_kick_bots", lambda room_id: None)
     # Zero the pacing so scheduler tests run in milliseconds. Any NEW pacing
     # constant must be zeroed here too (the Duel test_server rule).
-    monkeypatch.setattr(m, "_BOT_MOVE_DELAY", 0.0)
-    monkeypatch.setattr(m, "_MIN_BOT_THINK", 0.0)
+    monkeypatch.setattr(m, "_BOT_THINK", 0.0)
     monkeypatch.setattr(m, "_new_rng", lambda: random.Random(1234))
     yield
     loop.close()

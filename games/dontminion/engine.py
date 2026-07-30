@@ -646,6 +646,22 @@ _HANDLERS = {
 }
 
 
+def _maybe_auto_buy(game):
+    """Auto-advance action -> buy once the turn player can't act any further:
+    effects fully resolved (no pending) and either no Actions left or no
+    Action card in hand. Evaluated only inside apply_move (after _drive) and
+    at the hand-off in _end_turn — never at new_game, so test fixtures that
+    stage a hand post-deal still start in the action phase. Because it folds
+    into the CAUSING move, that move's undo snapshot restores the pre-move
+    action phase (no separate skip to unwind)."""
+    if game["over"] or game["phase"] != "action" or game["pending"]:
+        return
+    hand = game["seats"][game["turn"]]["hand"]
+    if game["actions"] <= 0 or not any("action" in CARDS[c]["types"] for c in hand):
+        game["phase"] = "buy"
+        _log(game, game["turn"], "phase", phase="buy", auto=True)
+
+
 def _end_turn(game, pid):
     seat = game["seats"][pid]
     seat["discard"].extend(seat["in_play"])
@@ -668,6 +684,7 @@ def _end_turn(game, pid):
     game["turn_ctx"] = _fresh_turn_ctx()
     _log(game, nxt, "turn_start", turn=game["turn_number"])
     _arm_undo(game)
+    _maybe_auto_buy(game)   # a hand with no Action cards skips straight to buy
 
 
 def _finish_game(game):
@@ -724,6 +741,7 @@ def apply_move(game, pid, move):
         ok, err = handler(game, pid, move)
     if ok:
         _drive(game)
+        _maybe_auto_buy(game)
         _post_move(game)
     elif pushed and game.get("undo_stack"):
         game["undo_stack"].pop()   # a rejected move mutated nothing

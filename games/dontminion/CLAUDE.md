@@ -97,6 +97,12 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   `opponents` give that order).
 - Shuffle only when short (2E rule); reveals/looks go through `aside` so mid-look shuffles
   exclude them; treasures can't be played after a buy (`turn_ctx["bought"]`).
+- **Action→buy AUTO-ADVANCES** (`_maybe_auto_buy`): once effects are fully resolved (no
+  pending) and the turn player has no Actions left or no Action card in hand, the phase flips
+  to buy. Evaluated after each move (inside apply_move) and at the `_end_turn` hand-off —
+  NEVER at new_game, so test fixtures that stage a hand post-deal still start in the action
+  phase. It folds into the causing move, so that move's undo snapshot restores the pre-move
+  action phase.
 - **Undo is per-MOVE and gated on HIDDEN INFORMATION** (the Duel model, one step at a time):
   `apply_move` pushes a snapshot onto `game["undo_stack"]` before each of the TURN PLAYER's own
   moves (popped back off if the move is rejected); `{"type":"undo_turn"}` pops one — press

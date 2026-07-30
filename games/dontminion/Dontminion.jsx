@@ -62,18 +62,21 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     small ? "dm-card-small" : "",
     selected ? "dm-sel" : "", highlight ? "dm-hl" : "",
     disabled ? "dm-dis" : "", click ? "dm-clickable" : ""].filter(Boolean).join(" ");
+  // long names shrink (tiered) so the name and the cost coin share one row
+  const nameCls = name.length > 9 ? " dm-name-xl" : name.length > 6 ? " dm-name-long" : "";
+  // long rules text shrinks to fit — the card itself NEVER grows
+  const text = card?.text || "";
+  const textCls = text.length > 200 ? " dm-text-xxl" : text.length > 130 ? " dm-text-xl"
+    : text.length > 80 ? " dm-text-l" : "";
   return (
     <div className={cls} onClick={click} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
-      <div className={"dm-card-name" + (name.length > 9 ? " dm-name-long" : "")}>{name}</div>
-      <div className="dm-card-body">
-        {!small && <div className="dm-card-text">{card?.text || ""}</div>}
-        {/* cost directly below the name on the RIGHT */}
-        <div className="dm-card-side">
-          <span className="dm-cost">{card ? card.cost : ""}</span>
-        </div>
+      <div className="dm-card-hd">
+        <div className={"dm-card-name" + nameCls}>{name}</div>
+        <span className="dm-cost">{card ? card.cost : ""}</span>
       </div>
+      {!small && <div className={"dm-card-text" + textCls}>{text}</div>}
       {/* type lines at the BOTTOM-LEFT, one per line */}
       <div className="dm-types">
         {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
@@ -283,7 +286,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const constraint = iAmActor ? pv.constraint : null;
   const kingdomPiles = game?.kingdom || [];
   const seatOrder = game?.players || Object.keys(names);
-  const oppOrder = seatOrder.filter((p) => p !== myId);
+  // The single opponent play box tracks the ACTION: the opponent whose turn it
+  // is — or, on your turn, whoever plays next. (2p: always the one opponent.)
+  const focusOpp = !game ? null
+    : game.turn !== myId ? game.turn
+    : seatOrder[(seatOrder.indexOf(myId) + 1) % Math.max(seatOrder.length, 1)];
   // Undo walks back ONE move per press. undo_depth (how many snapshots the
   // server holds) and turn_revealed ship in the view precisely to drive this;
   // the server refuses once hidden information was revealed this turn.
@@ -416,6 +423,21 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setPickIdx([]); setPickOpts([]); setOrderIdx([]);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
   useEffect(() => { setGameOverDismissed(false); }, [roomId]);
+
+  // The engine auto-advances action->buy after moves and at turn hand-offs, but
+  // deliberately not at game CREATION (test fixtures stage hands post-deal). The
+  // client covers that one case: an action phase with no Action card in hand is
+  // skipped, once per turn (never re-fired after an undo).
+  const autoSkipRef = useRef("");
+  useEffect(() => {
+    if (!game || over || game.turn !== myId || game.phase !== "action" || game.pending_pid) return;
+    const hand = mySeat?.hand || [];
+    if (hand.some((c) => cards[c]?.types?.includes("action"))) return;
+    const key = `${roomId}:${game.turn_number || 0}`;
+    if (autoSkipRef.current === key) return;
+    autoSkipRef.current = key;
+    send({ action: "move", move: { type: "end_phase" } });
+  }, [game, roomId, myId, over, mySeat, cards, send]);
 
   // ── actions ──
   const mv = (move) => send({ action: "move", move });
@@ -670,7 +692,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const handN = Math.min(s.hand_count ?? 0, 12);
     return (
       <div key={pid} className={"dm-opp" + (acting ? " dm-opp-acting" : "")}>
-        <div className="dm-opp-name">{names[pid] || pid}</div>
         <div className="dm-opp-zones">
           <DmPile kind="deck" label="deck" count={s.deck_count ?? 0} />
           <DmPile kind="discard" label="discard" count={s.discard_view?.count ?? 0}
@@ -941,7 +962,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         </div>
 
         <div className="dm-center-col">
-          {oppOrder.map(renderOppPlay)}
+          {focusOpp && renderOppPlay(focusOpp)}
           {renderPrompt()}
           <div className="dm-supply">
             <div className="dm-supply-row dm-basics">{BASIC_ROW.map(renderPile)}</div>
@@ -969,16 +990,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   top={mySeat?.discard_view?.top} card={cards[mySeat?.discard_view?.top]}
                   onInfo={() => setCardInfo(mySeat?.discard_view?.top)} />
               </div>
-              <div className="dm-hand">
-                {(mySeat?.hand || []).map((c, i) => {
-                  const t = cards[c]?.types || [];
-                  const playable = !iAmActor && ((inAction && t.includes("action") && game.actions > 0)
-                    || (inBuy && t.includes("treasure") && !bought));
-                  return <DmCardFace key={i} name={c} card={cards[c]}
-                    highlight={playable} disabled={!playable && !over}
-                    onClick={() => handClick(c)} onInfo={() => setCardInfo(c)} />;
-                })}
-                {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
+              <div className="dm-pile-slot dm-myhand">
+                <div className="dm-hand">
+                  {(mySeat?.hand || []).map((c, i) => {
+                    const t = cards[c]?.types || [];
+                    const playable = !iAmActor && ((inAction && t.includes("action") && game.actions > 0)
+                      || (inBuy && t.includes("treasure") && !bought));
+                    return <DmCardFace key={i} name={c} card={cards[c]}
+                      highlight={playable} disabled={!playable && !over}
+                      onClick={() => handClick(c)} onInfo={() => setCardInfo(c)} />;
+                  })}
+                  {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
+                </div>
+                <span className="dm-pile-count">hand {(mySeat?.hand || []).length}</span>
               </div>
               <div className="dm-turnbtns">
                 {!over && (

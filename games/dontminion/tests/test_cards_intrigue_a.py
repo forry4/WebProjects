@@ -145,7 +145,7 @@ def test_bridge_stacks_and_buy_discount():
     assert engine.apply_move(g, A, {"type": "play_action", "card": "Bridge"})[0]
     assert g["coins"] == 2 and g["buys"] == 3
     assert engine.cost(g, "Smithy") == 2 and engine.cost(g, "Copper") == 0
-    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert g["phase"] == "buy"      # actions ran dry -> auto-advanced
     assert engine.apply_move(g, A, {"type": "buy", "card": "Smithy"})[0]
     assert g["coins"] == 0                            # paid the reduced 2
 

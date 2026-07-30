@@ -183,6 +183,10 @@ def test_action_phase_gates():
     ok, err = mv(g, A, {"type": "play_action", "card": "Witch"})
     assert not ok and err == "card not in hand"
     assert mv(g, A, {"type": "play_action", "card": "Smithy"})[0]
+    assert g["phase"] == "buy"          # last Action spent -> auto-advanced
+    # the no-actions gate still guards direct submissions (fixture-forced state)
+    g["phase"] = "action"
+    g["actions"] = 0
     give_hand(g, A, ["Smithy"] + g["seats"][A]["hand"])
     ok, err = mv(g, A, {"type": "play_action", "card": "Smithy"})
     assert not ok and err == "no actions left"
@@ -230,17 +234,19 @@ def test_cleanup_and_turn_advance():
     g = fresh()
     give_hand(g, A, ["Smithy"])
     assert mv(g, A, {"type": "play_action", "card": "Smithy"})[0]
+    assert g["phase"] == "buy"      # no actions left -> auto-advanced
     # big enough deck that the cleanup draw needs no reshuffle (Smithy must
     # still be sitting in the discard afterwards)
     g["seats"][A]["deck"] = ["Copper"] * 6 + g["seats"][A]["deck"]
-    mv(g, A, {"type": "end_phase"})
     g["turn_ctx"]["bridges"] = 2
     g["coins"] = 5
     assert mv(g, A, {"type": "end_phase"})[0]
     sa = g["seats"][A]
     assert sa["in_play"] == [] and len(sa["hand"]) == 5
     assert "Smithy" in sa["discard"]
-    assert g["turn"] == B and g["phase"] == "action"
+    # B's dealt hand decides B's starting phase now (no Action cards -> buy)
+    b_has_action = any("action" in CARDS[c]["types"] for c in g["seats"][B]["hand"])
+    assert g["turn"] == B and g["phase"] == ("action" if b_has_action else "buy")
     assert g["actions"] == 1 and g["buys"] == 1 and g["coins"] == 0
     assert g["turn_ctx"]["bridges"] == 0
     assert g["seats"][A]["turns_taken"] == 1 and g["seats"][B]["turns_taken"] == 0
@@ -690,7 +696,8 @@ def test_wire_view_is_json_safe():
 
 def test_log_plus_events_and_depth_under_a_play():
     g = fresh(kingdom=K7 + ["Festival"])
-    give_hand(g, A, ["Festival"])
+    # the second action card keeps the phase from auto-advancing after the play
+    give_hand(g, A, ["Festival", "Smithy"])
     n0 = len(g["log"])
     ok, err = mv(g, A, {"type": "play_action", "card": "Festival"})
     assert ok, err
@@ -760,3 +767,29 @@ def test_log_sequence_n_is_unique_and_ordered():
     mv(g, A, {"type": "end_phase"})           # cleanup draws + next turn
     ns = [e["n"] for e in g["log"]]
     assert ns == list(range(len(ns)))
+
+
+# --- auto-advance to the buy phase --------------------------------------------
+
+def test_auto_advance_to_buy_and_undo_restores_action_phase():
+    g = fresh(kingdom=K7 + ["Festival"])
+    give_hand(g, A, ["Festival"])
+    assert mv(g, A, {"type": "play_action", "card": "Festival"})[0]
+    # actions remain (+2) but no Action card is left in hand -> advanced
+    assert g["phase"] == "buy" and g["actions"] == 2
+    # the skip folded into the play's snapshot: one undo restores the pre-play
+    # ACTION phase, not a dangling phase change
+    ok, err = mv(g, A, {"type": "undo_turn"})
+    assert ok, err
+    assert g["phase"] == "action" and g["actions"] == 1
+    assert "Festival" in g["seats"][A]["hand"]
+
+
+def test_auto_advance_waits_for_pending_effects():
+    g = fresh()
+    give_hand(g, A, ["Militia"])
+    give_hand(g, B, ["Copper"] * 5)
+    assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
+    assert g["phase"] == "action"          # opponent still resolving the attack
+    assert decide(g, B, cards=["Copper", "Copper"])[0]
+    assert g["phase"] == "buy"             # effects done, no actions -> advanced

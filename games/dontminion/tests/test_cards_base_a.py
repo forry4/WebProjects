@@ -136,7 +136,7 @@ def test_merchant_then_silver_end_to_end():
     g["seats"][A]["deck"] = ["Copper", "Copper"]
     assert mv(g, A, {"type": "play_action", "card": "Merchant"})[0]
     assert g["actions"] == 1 and g["turn_ctx"]["merchants"] == 1
-    assert mv(g, A, {"type": "end_phase"})[0]
+    assert g["phase"] == "buy"      # no action cards left -> auto-advanced
     assert mv(g, A, {"type": "play_treasure", "card": "Silver"})[0]
     assert g["coins"] == 3                    # $2 + the Merchant bonus
     assert mv(g, A, {"type": "play_treasure", "card": "Silver"})[0]
@@ -150,7 +150,7 @@ def test_two_merchants_bonus_first_silver_only():
     assert mv(g, A, {"type": "play_action", "card": "Merchant"})[0]
     assert mv(g, A, {"type": "play_action", "card": "Merchant"})[0]
     assert g["turn_ctx"]["merchants"] == 2
-    assert mv(g, A, {"type": "end_phase"})[0]
+    assert g["phase"] == "buy"      # auto-advanced once the actions ran dry
     assert mv(g, A, {"type": "play_treasure", "card": "Silver"})[0]
     assert g["coins"] == 4                    # $2 + $2 bonus, on the first only
     assert mv(g, A, {"type": "play_treasure", "card": "Silver"})[0]

@@ -46,19 +46,9 @@ from core.build_info import build_info
 
 LOG = logging.getLogger("games.dontminion")
 
-# Pause between individual bot moves so the client animates each one. Dominion
-# moves are more granular than Duel's (0.9 there would make three bot turns feel
-# like a minute), hence the shorter delay.
-_BOT_MOVE_DELAY = 0.5
-# A bot's FIRST move never lands sooner than this after it became the bot's
-# decision — an instant reply feels robotic. A floor, not an added delay.
-_MIN_BOT_THINK = 0.7
-
-
-async def _floor_bot_move(t0: float) -> None:
-    remaining = _MIN_BOT_THINK - (time.monotonic() - t0)
-    if remaining > 0:
-        await asyncio.sleep(remaining)
+# The bot pauses this long BEFORE every move (its "think"), so the client reads
+# each move as it lands — an instant reply feels robotic, a burst is unreadable.
+_BOT_THINK = 0.7
 
 
 # Every tier is the random-legal bot in v1 (stronger tiers are a later campaign).
@@ -412,10 +402,9 @@ async def _schedule_bots(room_id: str) -> None:
         if not room or room.get("_bot_running") or _bot_to_act(room) is None:
             return
         room["_bot_running"] = True
-    t0 = time.monotonic()
-    first = True
     try:
         for _ in range(300):
+            await asyncio.sleep(_BOT_THINK)      # think BEFORE each move
             async with ROOM_LOCK:
                 room = ROOMS.get(room_id)
                 if not room:
@@ -431,14 +420,10 @@ async def _schedule_bots(room_id: str) -> None:
                     return
                 _sync_status_from_game(room)
                 more = _bot_to_act(room) is not None
-            if first:
-                await _floor_bot_move(t0)
-                first = False
             await broadcast_state(room_id)
             save_game(room_id)
             if not more:
                 return
-            await asyncio.sleep(_BOT_MOVE_DELAY)
         LOG.warning("dontminion: bot iteration cap hit in %s", room_id)
     finally:
         async with ROOM_LOCK:
