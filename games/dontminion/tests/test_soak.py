@@ -103,9 +103,26 @@ def test_soak_full_games(players, seed):
 
 
 def _all_kingdom_cards():
+    """NOTE: the chunks below are cut from this SORTED list, so renaming a card
+    reshuffles which cards share a kingdom and the soak plays different games.
+    Total coverage is unaffected (the assertion below pins it), but wall-clock
+    can move a lot — the Harem->Farm rename cut this file from ~19s to ~4s
+    purely by changing the alphabetical cut points. Don't read a speed change
+    here as lost coverage, and don't read it as a regression either."""
     from games.dontminion.cards import KINGDOM
     return (sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"])
             + sorted(KINGDOM["seaside"]) + sorted(KINGDOM["prosperity"]))
+
+
+def test_the_forced_kingdom_chunks_really_cover_every_card():
+    """The chunking is derived, so an off-by-one or a roster change could drop
+    cards from coverage silently. Pin it."""
+    cards = _all_kingdom_cards()
+    covered = set()
+    for chunk in range(11):
+        covered |= set(cards[chunk * 10: chunk * 10 + 10] if chunk < 10
+                       else cards[-10:])
+    assert covered == set(cards), sorted(set(cards) - covered)
 
 
 @pytest.mark.parametrize("chunk", list(range(11)))

@@ -620,7 +620,8 @@ def _treasury(game, pid):
     E.add_coins(game, 1)
 
 
-def _treasury_prompt(game, pid):
+def _treasury_prompt(game, pid, ctx=None):
+    # ctx = the buy_phase_end event context; Treasury needs nothing from it
     tr = [c for c in game["seats"][pid]["in_play"] if c == "Treasury"]
     E.push_choose_cards(game, pid, "Treasury", "topdeck",
                         cards=tr, mn=0, mx=len(tr), purpose="topdeck")

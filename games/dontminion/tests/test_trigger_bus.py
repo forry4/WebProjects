@@ -138,19 +138,20 @@ def test_buy_event_reaches_in_play_triggers(g, synthetic):
     trigger, _, _ = synthetic
     hits = []
     trigger("Smithy", {"on": "buy", "from": "in_play",
-                       "push": lambda game, pid: hits.append(pid)})
+                       "push": lambda game, pid, ctx: hits.append((pid, ctx["subject"]))})
     g["seats"][A]["in_play"] = ["Smithy"]
     g["phase"] = "buy"
     g["coins"] = 3
     ok, err = engine.apply_move(g, A, {"type": "buy", "card": "Silver"})
     assert ok, err
-    assert hits == [A]
+    # the push receives WHAT WAS BOUGHT — Haggler is useless without it
+    assert hits == [(A, "Silver")]
     # not fired for a seat without the card in play
     g2 = engine.new_game([A, B], ["base"], seed=4, kingdom=K7)
     g2["phase"] = "buy"
     g2["coins"] = 3
     assert engine.apply_move(g2, A, {"type": "buy", "card": "Silver"})[0]
-    assert hits == [A]
+    assert hits == [(A, "Silver")]
 
 
 def test_cost_mods_apply_per_copy_on_any_table(g, synthetic):

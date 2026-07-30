@@ -923,7 +923,12 @@ def emit(game, event, actor=None, subject=None, **extra):
             elif src == "in_play":
                 if actor is not None and card in game["seats"][actor]["in_play"] \
                         and (when is None or when(game, actor, ctx)):
-                    spec["push"](game, actor)
+                    # ctx carries actor/subject + the emit's extras. Treasury
+                    # ignores it, but a "while this is in play, when you buy a
+                    # card, gain a cheaper one" card (Haggler) is useless
+                    # without knowing WHAT was bought — the push used to get
+                    # only (game, pid).
+                    spec["push"](game, actor, ctx)
             elif src == "self":
                 if subject == card and (when is None or when(game, actor, ctx)):
                     # **extra carries the emit's context (gain's via_buy/dest,

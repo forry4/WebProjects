@@ -86,7 +86,26 @@ contents. **26 = 17 kept + 9 new.**
   a REACTION THAT PLAYS ITSELF and may be revealed multiple times to one attack; Souk has
   VARIABLE PRODUCTION that can deduct more than it gives). Mine these per card at build.
 
-⚠ **SOURCING CONSTRAINT (affects every future phase).** The compendium carries RULINGS,
+### SOURCES OF TRUTH — and which one wins (settled 2026-07-30)
+
+| Question | Authority |
+|---|---|
+| Roster / which edition a card is in | wiki chart's **Set** column (`Hinterlands, 2E` vs `, 1E`), cross-checked against the compendium's "Not included in the 2022 Second Edition" markers |
+| Name, cost, types | **wiki chart** — accuracy-gated at 112/113 against our own verified cards |
+| Printed card TEXT | wiki chart, **except where the compendium quotes the card** — the chart can be stale (it shows Mill as "If you do, +$2"; compendium p19 quotes the current card as "You may discard 2 cards, for +$"). Compendium wins on any conflict |
+| Behaviour, timing, edge cases, version history | **compendium**, always |
+| Any NUMBER | wiki chart. The compendium's coin/VP digits are inline images its text layer DROPS — never take a number from extracted PDF text |
+
+The chart lives at `wiki.dominionstrategy.com/index.php/List_of_cards`, unreachable live (Anubis
+wall on the page AND `action=raw`). Read it from the **Wayback Machine**; the newest usable
+capture is **2025-10-17** (later ones archived the wall itself). Parse with the scratchpad
+`parse_wiki.py`: 836 rows × 14 cols, and coin icons carry `alt="$5"` so costs read cleanly.
+
+⚠ Our stored card texts appear to be DERIVED from this same wiki source, so a near-zero
+text-diff against it is weaker evidence than it looks. The compendium sweep is the independent
+axis — it is what rules out a Highway-class bug (code following a superseded version).
+
+⚠ **EARLIER SOURCING CONSTRAINT (now solved by the chart, kept for context).** The compendium carries RULINGS,
 not printed card text — Bank's own text does not appear in it — and its coin/VP digits are
 inline images the text layer drops (rasterize pages to read numbers). The dominionstrategy
 card lists predate all 2E rosters, the wiki is Anubis-walled, and transcription sites

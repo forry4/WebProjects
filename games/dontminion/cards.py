@@ -64,7 +64,8 @@ CARDS = {
 
     # --- Base Set kingdom (2E, 26) -----------------------------------------
     "Cellar":   {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
-                 "text": "+1 Action\nDiscard any number of cards, then draw that many.",
+                 "text": "+1 Action\nDiscard any number of cards.\n"
+                         "+1 Card per card discarded.",
                  "expansion": "base", "kingdom": True},
     "Chapel":   {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
                  "text": "Trash up to 4 cards from your hand.",
