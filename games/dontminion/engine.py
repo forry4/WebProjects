@@ -40,27 +40,62 @@ SCHEMA = 3
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
 
 
+# Every key new_game creates that the kernel later reads by direct index, with
+# the value an OLD save should inherit. migrate fills these by PRESENCE, not by
+# schema version — see the comment in migrate() for why the version gate can't
+# be trusted for fills. Factories keep the defaults unshared.
+_GAME_FILLS = {
+    "turn_number": lambda g: 1,
+    "log_depth": lambda g: 0,
+    "undo_stack": lambda g: [],
+    # Seaside
+    "watchers": lambda g: [],
+    "last_turn_pid": lambda g: None,
+    "last_turn_gains": lambda g: {},
+    "extra_turn": lambda g: False,
+    # Prosperity
+    "vp_tokens": lambda g: {p: 0 for p in g.get("players", [])},
+    "colony": lambda g: False,
+    "curse_is_treasure": lambda g: False,
+}
+_SEAT_FILLS = {
+    "aside": list,
+    # Seaside zones + mats
+    "duration": list, "dur_aside": list,
+    "island": list, "village_mat": list,
+}
+
+
 def migrate(game):
     """Bring a persisted game up to SCHEMA, in place. Called by the server on
     every load; live prod games predate every later phase, so each phase's new
-    keys need a step here (and a test in test_migrate.py)."""
+    keys need an entry in _GAME_FILLS/_SEAT_FILLS (and a test in test_migrate.py).
+
+    Fills are UNCONDITIONAL, deliberately — do not put them behind `v < N`.
+    A stamp only partitions shapes if it was bumped in the same commit that
+    added the key, and ours wasn't: prod carries `schema = 2` games written
+    across the whole Seaside AND Prosperity eras, some predating keys added
+    later under that same stamp (found by replaying real prod saves: two live
+    games had schema 2 and no `last_turn_gains`, which a version-gated migrate
+    skips and the kernel then KeyErrors on at end of turn). setdefault is
+    idempotent, so an unconditional fill is never wrong and costs one lookup.
+    The version gate is reserved for genuine TRANSFORMS — a key whose meaning
+    or value shape changed, where re-running the step would corrupt a current
+    game. There are none yet; add them under `if v < N:` when there are.
+    """
     if not isinstance(game, dict) or "seats" not in game:
         return game
-    v = game.get("schema", 1)
-    if v < 2:                                   # pre-Seaside
-        for seat in game["seats"].values():
-            seat.setdefault("duration", [])
-            seat.setdefault("dur_aside", [])
-            seat.setdefault("island", [])
-            seat.setdefault("village_mat", [])
-        game.setdefault("watchers", [])
-        game.setdefault("last_turn_pid", None)
-        game.setdefault("extra_turn", False)
-        game.setdefault("last_turn_gains", {})
-    if v < 3:                                   # pre-Prosperity
-        game.setdefault("vp_tokens", {p: 0 for p in game.get("players", [])})
-        game.setdefault("colony", False)
-        game.setdefault("curse_is_treasure", False)
+    v = game.get("schema", 1)          # noqa: F841 - for future transform steps
+    for key, factory in _GAME_FILLS.items():
+        if key not in game:
+            game[key] = factory(game)
+    for seat in game["seats"].values():
+        for key, factory in _SEAT_FILLS.items():
+            if key not in seat:
+                seat[key] = factory()
+    ctx = game.setdefault("turn_ctx", _fresh_turn_ctx())
+    for key, val in _fresh_turn_ctx().items():
+        ctx.setdefault(key, val)
     game["schema"] = SCHEMA
     return game
 
@@ -543,6 +578,18 @@ def types_of(game, card):
 
 def has_type(game, card, t):
     return t in types_of(game, card)
+
+
+def manual_treasures():
+    """Treasures play_all_treasures must SKIP — the interactive ones (Anvil,
+    War Chest) that push a decision frame, so they'd have to be answered
+    mid-autoplay. THE reader of the registry: legal_moves, the handler, and
+    the catalog all go through here so they can never disagree (they did:
+    legal_moves offered play_all for a hand of nothing but manual treasures,
+    which the handler then no-op'd, and the bot preferring that move spun the
+    scheduler's whole iteration cap)."""
+    from . import effects
+    return getattr(effects, "MANUAL_TREASURES", set())
 
 
 def coins_of(game, card):
@@ -1131,13 +1178,16 @@ def _h_play_all_treasures(game, pid, move):
         return False, "treasures are played in your buy phase"
     if game["turn_ctx"]["bought"]:
         return False, "can't play treasures after buying"
-    from . import effects
-    manual = getattr(effects, "MANUAL_TREASURES", set())
+    manual = manual_treasures()
     hand = game["seats"][pid]["hand"]
     # interactive treasures (Anvil-class decisions) are never autoplayed —
     # they stay in hand for individual plays
-    for card in [c for c in list(hand)
-                 if has_type(game, c, "treasure") and c not in manual]:
+    auto = [c for c in list(hand)
+            if has_type(game, c, "treasure") and c not in manual]
+    if not auto:
+        # a no-op that reported success is what let a bot livelock here
+        return False, "no treasures to autoplay"
+    for card in auto:
         _play_one_treasure(game, pid, card)
     return True, None
 
@@ -1443,7 +1493,10 @@ def legal_moves(game, pid):
             treasures = sorted({c for c in hand if has_type(game, c, "treasure")})
             for c in treasures:
                 mv.append({"type": "play_treasure", "card": c})
-            if treasures:
+            # only when play_all would actually PLAY something — it skips the
+            # interactive MANUAL_TREASURES (War Chest/Anvil), so a hand holding
+            # nothing else makes it a no-op, and a bot that prefers it loops.
+            if any(c not in manual_treasures() for c in treasures):
                 mv.append({"type": "play_all_treasures"})
         if game["buys"] > 0:
             for pile in sorted(game["supply"]):
@@ -1526,7 +1579,7 @@ def sample_decision(game, pid, rng):
 def _all_cards(game, pid):
     s = game["seats"][pid]
     owned = s["deck"] + s["hand"] + s["discard"] + s["in_play"] + s["aside"]
-    # Seaside zones (absent on pre-Seaside saves — .get keeps them loadable)
+    # Seaside zones + mats (migrate guarantees these on every loaded save)
     owned += s["dur_aside"] + s["island"] + s["village_mat"]
     for entry in s["duration"]:
         owned.append(entry["card"])

@@ -400,8 +400,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
-  const handTreasures = (mySeat?.hand || []).some((c) => cards[c]?.types?.includes("treasure")
-    || (c === "Curse" && game?.curse_is_treasure));
+  // "Play all treasures" SKIPS the interactive ones (War Chest/Anvil), so a
+  // hand holding only those must not offer the button — it would do nothing.
+  const manualTreasures = catalog?.manual_treasures || [];
+  const handTreasures = (mySeat?.hand || []).some((c) => (cards[c]?.types?.includes("treasure")
+    || (c === "Curse" && game?.curse_is_treasure)) && !manualTreasures.includes(c));
   const constraint = iAmActor ? pv.constraint : null;
   const kingdomPiles = game?.kingdom || [];
   const kingdomByCost = [...kingdomPiles].sort((a, b) =>

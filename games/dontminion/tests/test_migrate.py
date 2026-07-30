@@ -104,6 +104,47 @@ def test_migrate_tolerates_junk():
         engine.migrate(junk)          # must not raise
 
 
+@pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME)
+def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
+    """THE prod shape that broke this. `schema = 2` was stamped across the whole
+    Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys
+    added later under that same stamp (two live games had schema 2 and no
+    last_turn_gains). A version-GATED fill skips them and the kernel then
+    KeyErrors at end of turn — so fills must go by presence, not by version."""
+    g = _fresh()
+    g["schema"] = 2
+    g.pop(missing)
+    engine.migrate(g)
+    assert missing in g
+    _drive(g, moves=60)          # the KeyError landed at the next end of turn
+
+
+@pytest.mark.parametrize("missing", ["duration", "island", "aside"])
+def test_a_stamped_blob_missing_a_seat_zone_is_still_filled(missing):
+    g = _fresh()
+    g["schema"] = 2
+    for seat in g["seats"].values():
+        seat.pop(missing)
+    engine.migrate(g)
+    assert all(missing in s for s in g["seats"].values())
+    _drive(g, moves=60)
+
+
+def test_migrate_fills_a_partial_turn_ctx():
+    """A save caught MID-TURN carries whatever turn_ctx the older engine wrote;
+    the kernel indexes its keys directly."""
+    g = _fresh()
+    g["turn_ctx"].pop("bought")
+    engine.migrate(g)
+    assert g["turn_ctx"]["bought"] is False
+    _drive(g, moves=60)
+
+    g2 = _fresh()
+    g2.pop("turn_ctx")
+    engine.migrate(g2)
+    assert g2["turn_ctx"] == engine._fresh_turn_ctx()
+
+
 def test_v3_keys_survive_a_v3_blob_untouched():
     g = _fresh(expansions=("base", "prosperity"),
                kingdom=["Charlatan", "Peddler", "Quarry", "Monument", "Bishop",

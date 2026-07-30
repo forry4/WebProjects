@@ -47,8 +47,27 @@ def _random_move(game, pid, rng):
     return rng.choice(engine.legal_moves(game, pid))
 
 
-def _assert_invariants(game, baseline):
+def _fingerprint(game):
+    """State identity for the progress check — and the JSON-safety assertion,
+    since it round-trips the whole dict with no coercion. undo_stack is excluded
+    because it grows on its own and would mask a move that changed nothing
+    else; it holds nothing but past copies of these same keys."""
+    return json.dumps({k: v for k, v in game.items() if k != "undo_stack"},
+                      sort_keys=True)
+
+
+def _assert_invariants(game, baseline, before=None):
+    """Returns the post-move fingerprint so the caller can feed it back in as
+    the next move's `before` — one dump per move rather than two."""
     assert _census(game) == baseline, "card conservation broken"
+    # An accepted move must CHANGE something. A no-op that reported success is
+    # what let a bot livelock on prod: play_all_treasures with only
+    # MANUAL_TREASURES in hand played nothing, and the bot prefers that move.
+    # (Note a decision may legitimately log nothing — declining a reaction,
+    # choosing zero cards — but it still pops its frame, so the state moves.)
+    after = _fingerprint(game)
+    if before is not None:
+        assert after != before, "accepted move changed nothing"
     if game["pending"]:
         top = game["pending"][-1]
         assert top["kind"] != "auto", "auto frame visible at rest"
@@ -59,7 +78,7 @@ def _assert_invariants(game, baseline):
     if not game["over"]:
         assert engine.legal_moves(game, _actor(game)), "actor stranded"
     assert game["vp"] == {p: s["vp"] for p, s in engine.score_game(game).items()}
-    json.dumps(game)
+    return after
 
 
 @pytest.mark.parametrize("players,seed", [
@@ -68,6 +87,7 @@ def _assert_invariants(game, baseline):
 def test_soak_full_games(players, seed):
     game = engine.new_game(players, ["base"], seed=seed, kingdom=K7)
     baseline = _census(game)
+    before = _fingerprint(game)
     rng = random.Random(seed * 1000 + 7)
     for _ in range(MOVE_CAP):
         if game["over"]:
@@ -75,7 +95,7 @@ def test_soak_full_games(players, seed):
         pid = _actor(game)
         ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
         assert ok, f"random legal move rejected: {err}"
-        _assert_invariants(game, baseline)
+        before = _assert_invariants(game, baseline, before)
     assert game["over"], "game did not terminate under the move cap"
     assert game["scores"] and game["winners"]
     for p in players:
@@ -98,6 +118,7 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
     game = engine.new_game([A, B, C], ["base", "intrigue", "seaside", "prosperity"],
                            seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)
+    before = _fingerprint(game)
     rng = random.Random(4321 + chunk)
     for _ in range(MOVE_CAP):
         if game["over"]:
@@ -105,7 +126,7 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
         pid = _actor(game)
         ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
         assert ok, f"random legal move rejected: {err}"
-        _assert_invariants(game, baseline)
+        before = _assert_invariants(game, baseline, before)
     assert game["over"], "game did not terminate under the move cap"
 
 

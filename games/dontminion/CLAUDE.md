@@ -33,9 +33,25 @@ kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `
 guarantees** (28 of them were retired when this landed). Genuinely lazy transients
 (`dur_setup`, `_turn_gains`, `_cur_dur`) stay lazy.
 
-**Every phase that adds a key the kernel reads owes: a `SCHEMA` bump, a step in `migrate`, and
-a case in `tests/test_migrate.py`** (which downgrades a CURRENT game to each old shape, so the
-tests stay honest as the dict grows). Live prod games predate every later phase.
+**Every phase that adds a key the kernel reads owes: a `SCHEMA` bump, an entry in
+`_GAME_FILLS`/`_SEAT_FILLS`, and a case in `tests/test_migrate.py`** (which downgrades a CURRENT
+game to each old shape, so the tests stay honest as the dict grows). Live prod games predate
+every later phase.
+
+**Fills are UNCONDITIONAL — never put a key-fill behind `if v < N:`.** A stamp only partitions
+shapes if it was bumped in the same commit that added the key, and ours wasn't: prod carries
+`schema = 2` blobs written across the whole Seaside AND Prosperity eras, including games that
+predate keys added later under that same stamp. Replaying all 26 real prod saves found two live
+games at `schema = 2` with no `last_turn_gains` — a version-gated fill skips them and the kernel
+(no longer defensive) `KeyError`s at the next end of turn. `setdefault` is idempotent, so an
+unconditional fill can never be wrong and costs one lookup. The version gate is reserved for
+genuine **transforms** — a key whose meaning or value shape changed, where re-running the step
+would corrupt a current game. There are none yet.
+
+**Replaying prod saves is the migration gate.** `migrate` is the one piece of code whose input
+is history rather than the current tree, so tests built from a current game can't fully cover it
+— pull the real blobs (Turso creds in `~/.spender_turso`, query `/v2/pipeline`) and play each
+one forward before shipping a shape change.
 
 **Undo snapshots exclude the LOG.** The log is append-only, so a snapshot stores `_log_len` and
 `_undo_move` restores by truncating (`n` stays == index). Copying it put up to `_UNDO_CAP`
@@ -188,6 +204,16 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   `opponents` give that order).
 - Shuffle only when short (2E rule); reveals/looks go through `aside` so mid-look shuffles
   exclude them; treasures can't be played after a buy (`turn_ctx["bought"]`).
+- **A move that changes nothing must be REJECTED, and `legal_moves` must not offer it.** The
+  interactive treasures (`effects.MANUAL_TREASURES` — War Chest, Anvil) are skipped by
+  `play_all_treasures` because they'd push a decision frame mid-autoplay; `legal_moves` offered
+  that move for a hand holding *only* those, the handler played none and returned ok, and the
+  bot (which prefers it unconditionally) burned the scheduler's whole 300-iteration cap on
+  no-op broadcasts + DB saves, leaving two live prod games stuck. Read the registry through
+  `engine.manual_treasures()` — the enumerator, the handler, and `/catalog` (which the frontend
+  uses to hide the button) all go through it so they can't disagree. The soak now asserts every
+  accepted move changes the game dict; a decision that logs nothing is fine, since it still pops
+  its frame.
 - **Action→buy AUTO-ADVANCES** (`_maybe_auto_buy`): once effects are fully resolved (no
   pending) and the turn player has no Actions left or no Action card in hand, the phase flips
   to buy. Evaluated after each move (inside apply_move) and at the `_end_turn` hand-off —
@@ -259,6 +285,7 @@ kit has no multi-select; promote it if a second game needs one). Supply affordan
 
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp
-recompute, JSON-safety, termination, determinism), `test_cards.py` (WP1 data), per-batch
-`test_cards_*.py`, `test_server.py`/`test_ws_auth.py`/`test_view_wire.py` (WP5). Any test module
-driving the WS loop MUST reset `core.rooms._ws_connect_limiter` per test (repo rule).
+recompute, JSON-safety, per-move progress, termination, determinism), `test_cards.py` (WP1
+data), per-batch `test_cards_*.py`, `test_migrate.py` (every historical save shape),
+`test_server.py`/`test_ws_auth.py`/`test_view_wire.py` (WP5). Any test module driving the WS
+loop MUST reset `core.rooms._ws_connect_limiter` per test (repo rule).

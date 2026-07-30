@@ -23,7 +23,11 @@ def choose(game, pid, rng=None):
     for m in moves:
         if m["type"] == "play_all_treasures":
             return m
-    active = [m for m in moves if m["type"] not in ("end_phase", "play_treasure")]
+    # We only get here with no play_all_treasures on offer, so any remaining
+    # play_treasure is an INTERACTIVE one (War Chest/Anvil) that play_all
+    # skips — it has to be played individually or the turn ends holding
+    # unspent coins. Each play removes a card from hand, so this can't loop.
+    active = [m for m in moves if m["type"] != "end_phase"]
     if active:
         return r.choice(active)
     return {"type": "end_phase"}

@@ -693,6 +693,9 @@ async def catalog():
         "cards": cards.CARDS,
         "kingdom": cards.KINGDOM,
         "expansions": list(KNOWN_EXPANSIONS),
+        # treasures "Play all treasures" skips — the button must not offer
+        # itself for a hand holding only these (it would do nothing)
+        "manual_treasures": sorted(engine.manual_treasures()),
     }
 
 

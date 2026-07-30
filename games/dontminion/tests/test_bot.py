@@ -60,6 +60,38 @@ def test_bot_plays_treasures_then_buys_then_ends():
     assert bot.choose(g, A, random.Random(4)) == {"type": "end_phase"}
 
 
+def test_a_hand_of_only_manual_treasures_does_not_livelock():
+    """Found by replaying real prod saves. play_all_treasures SKIPS the
+    interactive treasures (War Chest/Anvil), but legal_moves offered it for a
+    hand holding nothing else and the handler then no-op'd with ok=True — and
+    the bot prefers that move unconditionally. Two live prod games spun the
+    scheduler's entire iteration cap on it, ~4000 no-op moves in the replay."""
+    manual = sorted(engine.manual_treasures())
+    assert manual, "registry empty — this test would prove nothing"
+    card = manual[0]
+    g = engine.new_game([A, B], ["base", "prosperity"], seed=7,
+                        kingdom=[card] + ["Smithy", "Village", "Moat", "Militia",
+                                          "Witch", "Throne Room", "Gardens",
+                                          "Market", "Cellar"])
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    give_hand(g, A, [card])
+
+    moves = engine.legal_moves(g, A)
+    assert {"type": "play_all_treasures"} not in moves      # it would do nothing
+    ok, err = engine.apply_move(g, A, {"type": "play_all_treasures"})
+    assert not ok and "autoplay" in err                     # and it's rejected
+
+    # the bot plays it individually instead of looping / ending on unspent coins
+    mv = bot.choose(g, A, random.Random(1))
+    assert mv == {"type": "play_treasure", "card": card}
+
+    # a mixed hand still autoplays, leaving only the manual one behind
+    give_hand(g, A, [card, "Copper", "Silver"])
+    assert {"type": "play_all_treasures"} in engine.legal_moves(g, A)
+    assert engine.apply_move(g, A, {"type": "play_all_treasures"})[0]
+    assert g["seats"][A]["hand"] == [card]
+
+
 def test_play_turn_stops_at_foreign_pending():
     g = fresh()
     give_hand(g, A, ["Militia"])
