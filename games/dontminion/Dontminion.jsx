@@ -72,14 +72,14 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     <div className={cls} onClick={click} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
-      <div className="dm-card-hd">
-        <div className={"dm-card-name" + nameCls}>{name}</div>
-        <span className="dm-cost">{card ? card.cost : ""}</span>
-      </div>
+      <div className={"dm-card-name" + nameCls}>{name}</div>
       {!small && <div className={"dm-card-text" + textCls}>{text}</div>}
-      {/* type lines at the BOTTOM-LEFT, one per line */}
-      <div className="dm-types">
-        {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
+      {/* foot row: type lines bottom-LEFT, the cost coin bottom-RIGHT */}
+      <div className="dm-card-foot">
+        <div className="dm-types">
+          {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
+        </div>
+        <span className="dm-cost">{card ? card.cost : ""}</span>
       </div>
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
@@ -297,6 +297,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const turnRevealed = !!game?.turn_revealed;
   const canUndo = !!game && !over && game.turn === myId && !turnRevealed
     && (game.undo_depth || 0) > 0;
+  // What-you-can-do hint, shown at the right of the resource bar. Board-driven
+  // prompts (choose_pile) live HERE instead of in their own prompt box.
+  const promptCardName = pv?.card === "__attack" ? "Attack" : pv?.card;
+  const resHint = (() => {
+    if (!game || over || game.turn !== myId) return "";
+    if (iAmActor) {
+      return pv.kind === "choose_pile" ? `${promptCardName}: pick a highlighted Supply pile` : "";
+    }
+    if (game.pending_pid) return "";               // waiting bar covers it
+    if (game.phase === "action") return "you may play Action cards";
+    if (game.buys > 0) return bought ? "you may buy cards" : "you may play Treasures and buy cards";
+    return "no buys left — end your turn";
+  })();
 
   // ── socket plumbing ──
   const handleMessage = useCallback((msg) => {
@@ -585,6 +598,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
       );
     }
     if (kindOfPrompt === "choose_pile") {
+      // the resource-bar hint carries this on your own turn — no box needed
+      if (game.turn === myId) return null;
       return (
         <div className="dm-prompt">
           <div className="dm-prompt-hd">{promptCard}: pick a highlighted Supply pile</div>
@@ -975,6 +990,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 <span>Buys <b>{game.buys}</b></span>
                 <span>Money <b>${game.coins}</b></span>
                 {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
+                {resHint && <span className="dm-reshint">{resHint}</span>}
               </div>
             )}
             <div className="dm-inplay">
