@@ -316,6 +316,14 @@ kit has no multi-select; promote it if a second game needs one). Supply affordan
 
 ## Tests
 
+**`test_wire_contract.py` guards the server↔client seam** — it reads `Dontminion.jsx` and asserts
+every `game.X` / `seat.X` / `catalog.X` field it consumes is actually shipped by `player_view` /
+`/catalog`. Both frontend bugs found in live play were drift here, and NEITHER suite sees it: the
+Python tests never render, and `npm run screens` mounts the route without playing a game. It is a
+NAME check only — it proves the server still sends a field, not that the client uses it right —
+but that is precisely how both bugs failed. Verified against both by simulating each regression.
+Keep its allowlists short; a growing allowlist means the check is being worked around.
+
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp
 recompute, JSON-safety, per-move progress, termination, determinism), `test_cards.py` (WP1
