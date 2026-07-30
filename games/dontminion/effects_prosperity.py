@@ -253,13 +253,21 @@ def _rabble_order(game, pid, frame, choice):
 
 # --- Vault -------------------------------------------------------------------
 # +2 Cards; discard any number for +$1 each; THEN each other player may
-# discard EXACTLY 2 to draw 1 (both discards required — a 0/1-card hand
-# can't do it at all; not an attack).
+# discard 2 to draw 1 (not an attack — no Moat window).
+#
+# The offer is NOT feasibility-filtered, even for a 0/1-card hand. Compendium,
+# under the same DISCARD-THEN-GET-FROM-DECK heading Vault is filed at, ruling
+# on Capital City: "If you choose to discard 2 cards with only 1 card in your
+# hand, you discard that card but do not get any +". So a 1-card hand may take
+# the option, discards its one card, and does NOT draw ("if you do" needs the
+# full first effect). That discard is real and observable — with Hinterlands it
+# can BE a Tunnel, which reveals for a Gold. Filtering the offer silently
+# denied that.
 
 def _vault(game, pid):
     E.draw(game, pid, 2)
     for o in reversed(E.opponents(game, pid)):
-        if len(game["seats"][o]["hand"]) >= 2:
+        if game["seats"][o]["hand"]:
             E.push_choose_option(game, o, "Vault", "opp_opt",
                                  options=[{"id": "discard", "label": "Discard 2 cards to draw 1"},
                                           {"id": "decline", "label": "Don't discard"}])
@@ -278,13 +286,15 @@ def _vault_opp_opt(game, pid, frame, choice):
     if choice["ids"][0] != "discard":
         return
     hand = game["seats"][pid]["hand"]
+    # push_choose_cards clamps to availability, so a 1-card hand is asked for 1
     E.push_choose_cards(game, pid, "Vault", "opp_discard",
                         cards=list(hand), mn=2, mx=2, purpose="discard")
 
 
 def _vault_opp_discard(game, pid, frame, choice):
     E.discard(game, pid, choice["cards"])
-    E.draw(game, pid, 1)
+    if len(choice["cards"]) == 2:      # "if you do" needs BOTH discards
+        E.draw(game, pid, 1)
 
 
 # --- War Chest (Treasure $0, manual) -----------------------------------------

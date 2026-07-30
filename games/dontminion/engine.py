@@ -461,13 +461,28 @@ def trash_from_supply(game, card):
 def discard(game, pid, cards, zone="hand", public=False):
     """Discard named cards from a zone. Names are logged for every discard —
     faithful to the table, where cards land face-up on the pile one at a time
-    (the pile can't be browsed later, but the event itself is public)."""
+    (the pile can't be browsed later, but the event itself is public).
+
+    Emits `discard` per card AFTER the whole batch has moved, not inline per
+    card. That ordering is load-bearing under the 2022 rules change (you now
+    discard all at once rather than one at a time), and the compendium's
+    Tunnel ruling turns on it: discarding your hand to Minion while holding
+    Tunnel + Watchtower lets you reveal the Tunnel for its Gold, but the
+    Watchtower has already left your hand by the time you do.
+
+    Clean-up does NOT come through here — `_end_turn` moves in_play and hand
+    to the discard pile directly — so the when-discard reactions
+    (Tunnel/Trail/Weaver, all "other than during a Clean-up phase") correctly
+    cannot fire there. Scheme, which triggers ON the Clean-up discard, will
+    need its own emit at that site."""
     seat = game["seats"][pid]
     for c in cards:
         seat[zone].remove(c)
         seat["discard"].append(c)
     if cards:
         _log(game, pid, "discard", cards=list(cards), count=len(cards))
+        for c in cards:
+            emit(game, "discard", actor=pid, subject=c, zone=zone)
 
 
 def topdeck(game, pid, card, zone="hand", public=False):
@@ -851,8 +866,13 @@ def emit(game, event, actor=None, subject=None, **extra):
                     spec["push"](game, actor)
             elif src == "self":
                 if subject == card and (when is None or when(game, actor, ctx)):
+                    # **extra carries the emit's context (gain's via_buy/dest,
+                    # discard's zone). It used to be dropped here, so a self
+                    # trigger could only ever see actor+subject — which blocks
+                    # a when-BUY-this card (Farmland) from telling a buy from
+                    # any other gain. actor/subject stay authoritative.
                     push_auto(game, actor, card, spec["stage"],
-                              data={"actor": actor, "subject": subject})
+                              data={**extra, "actor": actor, "subject": subject})
 
 
 def attack_protected(game, pid):

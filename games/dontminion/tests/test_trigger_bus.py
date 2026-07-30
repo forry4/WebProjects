@@ -69,6 +69,71 @@ def test_trash_event_reaches_self_triggers(g, synthetic):
     assert hits == ["Copper"]
 
 
+def test_self_triggers_receive_the_emit_context(g, synthetic):
+    """A self trigger must see the emit's extra context, not just
+    actor+subject — it used to be dropped, which would stop a when-BUY-this
+    card (Farmland) distinguishing a buy from any other gain."""
+    trigger, stage, _ = synthetic
+    seen = []
+    trigger("Silver", {"on": "gain", "from": "self", "stage": "ctx"})
+    stage(("Silver", "ctx"), lambda game, pid, frame, choice:
+          seen.append(frame["data"].get("via_buy")))
+    engine.gain(g, A, "Silver")                       # a plain gain
+    engine._drive(g)
+    g["coins"] = 99
+    engine.apply_move(g, A, {"type": "end_phase"})
+    engine.apply_move(g, A, {"type": "buy", "card": "Silver"})   # a BUY
+    engine._drive(g)
+    assert seen == [False, True] or seen == [None, True], seen
+
+
+def test_discard_event_reaches_self_triggers(g, synthetic):
+    """The `discard` emit point, paid as ph.3 pre-work for Tunnel/Trail/Weaver
+    before any consumer exists."""
+    trigger, stage, _ = synthetic
+    hits = []
+    trigger("Estate", {"on": "discard", "from": "self", "stage": "on_self_discard"})
+    stage(("Estate", "on_self_discard"), lambda game, pid, frame, choice:
+          hits.append((pid, frame["data"]["subject"], frame["data"]["zone"])))
+    g["seats"][A]["hand"] = ["Estate", "Copper"]
+    engine.discard(g, A, ["Estate", "Copper"])
+    engine._drive(g)
+    assert hits == [(A, "Estate", "hand")]      # only the registered subject
+
+
+def test_discard_event_fires_after_the_WHOLE_batch_has_moved(g, synthetic):
+    """2022 rules change: you discard all at once, not one at a time. The
+    compendium's Tunnel ruling turns on it — discarding your hand while
+    holding Tunnel + Watchtower lets you reveal Tunnel, but the Watchtower has
+    already left your hand by then. So when the event fires, NO discarded card
+    may still be in hand."""
+    trigger, stage, _ = synthetic
+    seen = []
+    trigger("Estate", {"on": "discard", "from": "self", "stage": "on_batch"})
+    stage(("Estate", "on_batch"), lambda game, pid, frame, choice:
+          seen.append(list(game["seats"][pid]["hand"])))
+    g["seats"][A]["hand"] = ["Estate", "Copper", "Silver"]
+    engine.discard(g, A, ["Estate", "Copper"])
+    engine._drive(g)
+    assert seen == [["Silver"]], "the batch was not fully discarded before the emit"
+
+
+def test_cleanup_discards_do_not_fire_when_discard(g, synthetic):
+    """Tunnel/Trail/Weaver are all "other than during a Clean-up phase".
+    _end_turn moves the cards directly rather than through discard(), so the
+    event correctly never fires there. Pinned because routing Clean-up through
+    discard() later (Scheme wants a Clean-up hook) would silently break it."""
+    trigger, stage, _ = synthetic
+    hits = []
+    trigger("Copper", {"on": "discard", "from": "self", "stage": "on_cleanup"})
+    stage(("Copper", "on_cleanup"), lambda game, pid, frame, choice: hits.append(1))
+    g["seats"][A]["hand"] = ["Copper", "Copper"]
+    g["seats"][A]["in_play"] = []
+    engine.apply_move(g, A, {"type": "end_phase"})     # -> buy
+    engine.apply_move(g, A, {"type": "end_phase"})     # -> clean-up + next turn
+    assert hits == [], "a Clean-up discard fired a when-discard reaction"
+
+
 def test_buy_event_reaches_in_play_triggers(g, synthetic):
     trigger, _, _ = synthetic
     hits = []

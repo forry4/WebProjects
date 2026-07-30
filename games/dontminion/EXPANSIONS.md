@@ -14,7 +14,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 |---|---|---|---|
 | 1 | **Seaside 2E** (27) | Durations, turn-start frames, cross-player watchers, gain reactions, protection, mats, duration set-aside, extra turns, interruptible clean-up | **SHIPPED** 2026-07-30 + audited |
 | 2 | **Prosperity 2E** (25 + Platinum/Colony) | VP tokens, would-gain protocol, via_buy, buy gates, dynamic self-costs, game-aware type queries (Charlatan), treasure-throne, Platinum/Colony setup | **SHIPPED** 2026-07-30 + audited |
-| 3 | Hinterlands 2E (26) | when-gain everywhere (bus-ready); NEW: `discard` emit point (Tunnel) + unfiltered offers (Vault row), reactions from NON-hand zones (Trail: gain/trash/discard from anywhere), attack-reaction that PLAYS (Guard Dog), on-gain deck insertion (Inn), when-buy remodel (Farmland), Highway (first real `COST_MODS` consumer) | next |
+| 3 | Hinterlands 2E (26) | when-gain everywhere (bus-ready); ~~`discard` emit point~~ + ~~unfiltered offers (Vault)~~ + ~~self-trigger emit context~~ **PAID**; still to build: reactions from NON-hand zones (Trail: gain/trash/discard from anywhere), attack-reaction that PLAYS (Guard Dog), on-gain deck insertion (Inn), when-buy remodel (Farmland — needs the self-trigger `via_buy` just paid), Clean-up discard hook (Scheme), in-play trigger SUBJECT (Haggler — see ledger), turn-scoped cost reduction (Highway 2022 — **NOT** `COST_MODS`, see below) | roster verified, pre-work paid |
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | planned |
 | 4 | Cornucopia & Guilds 2E (26 + Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (needs 3H), Young Witch's Bane (11th pile + marker) | planned |
 | 5 | Alchemy (12 + Potion) | cost VECTOR dimension 1 (Potion) — lands inside cost_le/cost_eq; Potion production/payment in the buy flow. ⚠ **Possession is phase-sized on its own** (take a turn controlling another player's cards) — budget it like a kernel system, not a card | planned |
@@ -55,6 +55,46 @@ into Dark Ages' 35 cards:
   (ledger row below). Census/soak extended to the new zones. Frontend renderPile reads
   tops from the view instead of assuming pile==card.
 
+## Phase 3 — Hinterlands 2E: VERIFIED roster + rules findings (2026-07-30)
+
+Roster confirmed from TWO independent sources that agree exactly: the compendium's
+per-card "❖ Not included in the 2022 Second Edition" markers, and the Update Pack
+contents. **26 = 17 kept + 9 new.**
+
+- **Kept (17)**: Crossroads, Fool's Gold, Develop, Oasis, Scheme, Tunnel, Jack of All
+  Trades, Spice Merchant, Trader, Cartographer, Haggler, Highway, Inn, Margrave, Stables,
+  Border Village, Farmland.
+- **New in 2E (9)**: Berserker, Cauldron, Guard Dog, Nomads, Souk, Trail, Weaver,
+  Wheelwright, Witch's Hut.
+- **Removed, do NOT implement (9)**: Cache, Duchess, Embassy, Ill-Gotten Gains, Mandarin,
+  Noble Brigand, Nomad Camp, Oracle, Silk Road.
+
+**Rules findings that change the plan** (from the compendium, not memory):
+- **Highway 2022 is NOT a `COST_MODS` card.** "The cost reduction is now caused by PLAYING
+  the Highway… (Pre-2022 version:) WHILE THIS IS IN PLAY". So it is turn-scoped and
+  cumulative per play, exactly Quarry's 2022 shape (`turn_ctx` counter + `engine.cost`) —
+  it survives the Highway leaving play. The old roadmap row calling it "the first real
+  COST_MODS consumer" described the 1E card.
+- **Vault's opponent offer** (paid): the compendium's Capital City ruling under the same
+  DISCARD-THEN-GET-FROM-DECK heading — "if you choose to discard 2 cards with only 1 card
+  in your hand, you discard that card but do not get any +".
+- **When-discard fires after the WHOLE batch** (2022 change, was one-at-a-time). The Tunnel
+  ruling depends on it: discarding your hand to Minion with Tunnel + Watchtower lets you
+  reveal the Tunnel, but the Watchtower has already left your hand.
+- **Berserker/Cauldron/Souk/Guard Dog/Trail** each have compendium entries with real
+  edge-case rulings (Cauldron counts only Actions gained AFTER it was played; Guard Dog is
+  a REACTION THAT PLAYS ITSELF and may be revealed multiple times to one attack; Souk has
+  VARIABLE PRODUCTION that can deduct more than it gives). Mine these per card at build.
+
+⚠ **SOURCING CONSTRAINT (affects every future phase).** The compendium carries RULINGS,
+not printed card text — Bank's own text does not appear in it — and its coin/VP digits are
+inline images the text layer drops (rasterize pages to read numbers). The dominionstrategy
+card lists predate all 2E rosters, the wiki is Anubis-walled, and transcription sites
+refuse verbatim text on copyright. So **exact cost/types/text for the 9 new cards must come
+from the physical cards or an owned digital copy**; the compendium then verifies every
+behavior, threshold and version. Do not fill this gap from memory — that is risk #2 in the
+original plan, and the audit step cannot catch it if the audit runs from the same memory.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |
@@ -65,7 +105,11 @@ into Dark Ages' 35 cards:
 | ~~Undo/save bloat~~ **PAID (pre-ph. 3)** — snapshots store `_log_len` and undo truncates; measured 487 KB → 150 KB on a late-game blob, per save-write | was live | done |
 | ~~Versioned save migration~~ **PAID (pre-ph. 3)** — `SCHEMA`=3 + `engine.migrate()` at load; 28 defensive gets retired; `test_migrate.py` downgrades a CURRENT game to each old shape. EVERY PHASE OWES: bump + migrate step + test | was growing | done |
 | ~~Unknown-log-event fallback~~ **PAID (pre-ph. 3)** — fmtLog renders a readable fallback for events it doesn't know yet, so a new engine event is never silent | was live | done |
-| **Vault's opponent offer is feasibility-filtered** (0-1-card hands never asked) | Tunnel's when-discard (ph. 3) | ph. 3, WITH the `discard` emit point |
+| ~~Vault's opponent offer is feasibility-filtered~~ **PAID (pre-ph.3)** — offered to any non-empty hand; 1 card discards 1 and draws nothing (Capital City ruling) | Tunnel's when-discard (ph. 3) | done |
+| ~~No `discard` emit point~~ **PAID (pre-ph.3)** — `discard()` emits per card AFTER the whole batch (the 2022 all-at-once change the Tunnel ruling needs); Clean-up bypasses `discard()` so when-discard correctly can't fire there, pinned by a test | Tunnel/Trail/Weaver (ph. 3) | done |
+| ~~`self` triggers couldn't see the emit context~~ **PAID (pre-ph.3)** — `**extra` now reaches self-trigger data, so a when-BUY-this card can tell a buy from any other gain | Farmland (ph. 3) | done |
+| **`in_play` triggers get no SUBJECT** — the bus calls `spec["push"](game, actor)` with no bought/gained card, so a "while this is in play, when you buy a card, gain a cheaper one" card can't see what was bought | Haggler (ph. 3) | ph. 3 kernel work |
+| **No Clean-up discard hook** — `_end_turn` moves cards directly, so nothing can trigger on the Clean-up discard (correct for Tunnel/Trail/Weaver, wrong for Scheme) | Scheme (ph. 3) | ph. 3 kernel work |
 | **Non-supply gain sources** | Rewards (ph. 4) | **ph. 3H** |
 | **Pile abstraction** (ordered/split/rotating piles, per-pile attachments) | Ruins/Knights (ph. 6), but scheduled early deliberately | **ph. 3H** |
 | **Move-surface trio**: generic `spend` (Coffers/Villagers/Favors/Debt-payoff + a counters row in the resbar UI), `buy_landscape` (Events/Projects), `call` (Reserves). Design each ONCE at first need; every later consumer is registry + data | spend: ph. 4 · buy_landscape/call: ph. 7 | ph. 4 / ph. 7 pre-work |

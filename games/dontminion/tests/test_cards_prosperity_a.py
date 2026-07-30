@@ -476,15 +476,41 @@ def test_vault_opponent_decline_and_short_hand():
     assert decide(g, B, ids=["decline"])[0]
     assert g["pending_pid"] is None
     assert sorted(g["seats"][B]["hand"]) == ["Copper", "Copper"]
-    # a hand smaller than 2 can't pay both discards -> no prompt at all
+    # an EMPTY hand has nothing to discard -> no prompt
     g = fresh()
     give_hand(g, A, ["Vault"])
     g["seats"][A]["deck"] = ["Copper", "Copper"]
-    give_hand(g, B, ["Copper"])
+    give_hand(g, B, [])
     assert mv(g, A, {"type": "play_action", "card": "Vault"})[0]
     assert decide(g, A, cards=[])[0]
     assert g["pending_pid"] is None
-    assert g["seats"][B]["hand"] == ["Copper"]
+
+
+def test_vault_offer_is_not_feasibility_filtered_for_a_one_card_hand():
+    """LEDGER (paid pre-ph.3): the offer used to be skipped below 2 cards.
+    Compendium, on Capital City under the same DISCARD-THEN-GET-FROM-DECK
+    heading Vault is filed at: "If you choose to discard 2 cards with only 1
+    card in your hand, you discard that card but do not get any +". So the
+    option IS offered, the one card IS discarded, and no card is drawn ("if
+    you do" needs the full first effect). That discard is observable — under
+    Hinterlands it can be a Tunnel, which reveals for a Gold."""
+    g = fresh()
+    give_hand(g, A, ["Vault"])
+    g["seats"][A]["deck"] = ["Copper", "Copper"]
+    give_hand(g, B, ["Estate"])
+    g["seats"][B]["deck"] = ["Gold"]
+    assert mv(g, A, {"type": "play_action", "card": "Vault"})[0]
+    assert decide(g, A, cards=[])[0]
+
+    assert g["pending_pid"] == B, "the 1-card hand must still be offered"
+    assert decide(g, B, ids=["discard"])[0]
+    c = g["pending"][-1]["constraint"]
+    assert c["min"] == 1 and c["max"] == 1        # clamped to availability
+    assert decide(g, B, cards=["Estate"])[0]
+    assert g["seats"][B]["discard"] == ["Estate"]  # the discard really happened
+    assert g["seats"][B]["hand"] == []             # ...and NO card was drawn
+    assert g["seats"][B]["deck"] == ["Gold"]
+    assert g["pending_pid"] is None
 
 
 # --- War Chest ---------------------------------------------------------------
