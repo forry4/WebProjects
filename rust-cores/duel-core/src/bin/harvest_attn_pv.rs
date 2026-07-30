@@ -152,6 +152,7 @@ fn play_game(
     matchup: bool,
     net_policy_temp: Option<f64>,
     minimax: bool,
+    opp_c: Option<f64>,
 ) -> Vec<Row> {
     let mut rng = Rng::new(seed);
     let mut st = new_game(&mut rng);
@@ -179,6 +180,11 @@ fn play_game(
             coherent: true,
             prior_c: Some(cpuct),
             minimax,
+            // Opponent-model sharpening, matching what serving now flies (shipped e355d23,
+            // 2026-07-29). The teacher improved at BOTH shapes — 0.5970 at K=1 x1500 (which is
+            // this harvest's shape) and 0.6900 at pool=4 x5000 — so a sharper opponent model makes
+            // strictly better targets here, independent of the pooling question.
+            opp_c,
             ..Default::default()
         };
         let stats = match root_search_with_leaf(&st, mover, "hard", &opts, leaf, &mut rng) {
@@ -376,6 +382,9 @@ struct Args {
     leaf_b: String,
     net_policy_temp: Option<f64>,
     minimax: bool,
+    /// c_puct at OPPONENT nodes only (see `Opts::opp_c`). Serving flies 0.1 (shipped e355d23);
+    /// leave unset to inherit `--cpuct`, which is what every harvest before 2026-07-30 did.
+    opp_c: Option<f64>,
 }
 
 fn parse_args() -> Args {
@@ -394,6 +403,7 @@ fn parse_args() -> Args {
         leaf_b: String::new(),
         net_policy_temp: None,
         minimax: false,
+        opp_c: None,
     };
     let argv: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -418,6 +428,7 @@ fn parse_args() -> Args {
             "--leaf-b" => a.leaf_b = next(),
             "--net-policy-temp" => a.net_policy_temp = Some(next().parse().expect("--net-policy-temp T")),
             "--minimax" => a.minimax = true,
+            "--opp-c" => a.opp_c = Some(next().parse().expect("--opp-c C")),
             other => panic!("unknown arg: {}", other),
         }
         i += 1;
@@ -471,6 +482,7 @@ fn main() {
         let rows = play_game(
             g, args.sims, args.temp_plies, args.temp, args.target_temp, args.cpuct, gseed, args.cap,
             a_seat, leaf_a, leaf_b, matchup, args.net_policy_temp, args.minimax,
+            args.opp_c,
         );
         if rows.is_empty() {
             discarded_games += 1;

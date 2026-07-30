@@ -58,6 +58,13 @@ GUIDE = _env("AZ_GUIDE", 1)                      # F1 kill-switch
 PTARGET = os.environ.get("AZ_PTARGET", "qsoftmax")
 TTEMP = _env("AZ_TTEMP", 0.03, float)
 MINIMAX = _env("AZ_MINIMAX", 0)
+# Opponent-model sharpness at OPPONENT nodes (Opts::opp_c). Serving ships 0.1 (e355d23, 2026-07-29):
+# the ladder ran 3.0 = 0.4875 | 1.0 = old default | 0.3 = 0.5400 | 0.1 = 0.5970 | 0.03 = 0.5913 |
+# 0.0 = 0.4412 COLLAPSE, and confirmed 0.6900 [0.643, 0.733] at pool=4 x5000 on the served net.
+# It improves the TEACHER at this loop's own K=1 shape too (0.5970 @1500), so it makes strictly
+# better targets AND keeps harvest/gates/serving on one search. Empty string = inherit --cpuct
+# (what every harvest before 2026-07-30 did).
+OPPC = os.environ.get("AZ_OPPC", "0.1").strip()
 PROMOTE = 0.53
 
 os.makedirs(RUN, exist_ok=True)
@@ -89,6 +96,8 @@ def harvest(idir, champ, pool, it):
                "--seed", str(it * 10007 + s), "--out", out]
         if MINIMAX:
             cmd += ["--minimax"]
+        if OPPC:
+            cmd += ["--opp-c", OPPC]
         if guided:
             cmd += ["--net-policy-temp", str(PRIOR_TEMP)]
         if SELF_SHARDS <= s < SELF_SHARDS + POOL_SHARDS:
@@ -143,6 +152,11 @@ def gate(a, b, heur=False, npt_a=None, npt_b=None):
            "--sims", str(GATE_SIMS), "--games", str(GATE_GAMES)]
     if MINIMAX:
         cmd += ["--minimax", "--minimax-b"]
+    if OPPC:
+        # BOTH sides — the gate asks "is this NET better", so the search must be identical across
+        # it. Putting opp_c on one side only would measure the (already-shipped) search knob again.
+        # heur side B has no opp_c knob of its own, so skip it there.
+        cmd += ["--opp-c", OPPC] + ([] if heur else ["--opp-c-b", OPPC])
     cmd += (["--leaf-b", "heur"] if heur else ["--leaf-b", "attnfile2", "--attn-file-b", b])
     if npt_a is not None:
         cmd += ["--net-policy-temp", str(npt_a)]
@@ -192,6 +206,19 @@ def main():
         mins = (time.time() - t0) / 60
         log(f"iter {it}: pos={rows} | cand-vs-champ={vs_champ} | vs-champion1={vs_c0} | vs-heur={vs_h} | {mins:.0f}m"
             f" | guided={int(guided)} top1={top1} ratio={ratio} argmax={argmax}")
+        # HARD STOP on a dead gate. Three times this campaign a None-returning gate has been
+        # absorbed silently and let a run continue producing nothing: the 2026-07-27 taskkill (which
+        # then wrote "no knob cleared 0.53" as a verdict from an empty set), the hp_sweep results-dict
+        # bug, and 2026-07-30 iters 1-4 here — five hours of harvest with EVERY gate panicking on
+        # `unknown arg: --opp-c`, because this loop points at target/release/gate_netleaf.exe while
+        # the freshly-built gate lived in target-pool/release. A gate that cannot run is a broken
+        # harness, not a bad candidate, and the two must never look alike in a log.
+        if vs_champ is None:
+            log(f"iter {it}: !! GATE RETURNED None — the harness is broken, not the candidate. "
+                f"Check that {GATE} is current (a stale binary panics on newer flags). ABORTING; "
+                f"harvested shards are kept and --resume will reuse them.")
+            save_state(it, champ, pool)
+            raise SystemExit(2)
         # F1 tripwires: near-uniform target or search-pick divergence.
         if ratio is not None and ratio >= 0.85:
             log(f"iter {it}: !! TRIPWIRE entropy ratio {ratio} >= 0.85 (near-uniform target)")
