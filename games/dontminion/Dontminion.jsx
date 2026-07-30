@@ -74,8 +74,6 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     small ? "dm-card-small" : "",
     selected ? "dm-sel" : "", highlight ? "dm-hl" : "",
     disabled ? "dm-dis" : "", click ? "dm-clickable" : ""].filter(Boolean).join(" ");
-  // long names shrink (tiered) so the name and the cost coin share one row
-  const nameCls = name.length > 9 ? " dm-name-xl" : name.length > 6 ? " dm-name-long" : "";
   // long rules text shrinks to fit — the card itself NEVER grows
   const text = card?.text || "";
   const textCls = text.length > 200 ? " dm-text-xxl" : text.length > 130 ? " dm-text-xl"
@@ -85,7 +83,7 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
       {types.includes("duration") && !types.includes("attack") && <span className="dm-edge dm-edge-dur" />}
-      <div className={"dm-card-name" + nameCls}>{name}</div>
+      <FitText text={name} className="dm-card-name" />
       {!small && <div className={"dm-card-text" + textCls}>{text}</div>}
       {/* foot row: type lines bottom-LEFT, the cost coin bottom-RIGHT */}
       <div className="dm-card-foot">
@@ -113,6 +111,60 @@ function FitLabel({ children }) {
     }
   }, [children]);
   return <span ref={ref} className="dm-fitlabel">{children}</span>;
+}
+
+// Text that shrinks ONLY as far as it must to fit its box's full width (and
+// never below `min`). Replaces the old length-tiered name classes, which were
+// compensation for a layout where the cost coin shared the name's row — the
+// coin moved to the foot, so "Tide Pools" was rendering at ~60% of the width
+// it had available. Re-fits when the box's WIDTH changes (container queries,
+// rotation); height changes are ignored so shrinking can't feed itself.
+function FitText({ text, className, min = 8 }) {
+  const box = useRef(null);
+  const span = useRef(null);
+  useLayoutEffect(() => {
+    const b = box.current, s = span.current;
+    if (!b || !s) return;
+    let lastW = -1;
+    const fit = () => {
+      b.style.fontSize = "";
+      const avail = b.clientWidth - 1;
+      if (avail <= 0) return;
+      const natural = s.scrollWidth;
+      if (natural > avail) {
+        const base = parseFloat(getComputedStyle(b).fontSize) || 12;
+        b.style.fontSize = Math.max(min, base * (avail / natural)) + "px";
+      }
+    };
+    fit();
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver((entries) => {
+        const w = entries[0].contentRect.width;
+        if (Math.abs(w - lastW) < 0.5) return;   // width only — never height
+        lastW = w;
+        fit();
+      });
+      ro.observe(b);
+    }
+    return () => { if (ro) ro.disconnect(); };
+  }, [text, min]);
+  return (
+    <div ref={box} className={className}>
+      <span ref={span} className="dm-fitspan">{text}</span>
+    </div>
+  );
+}
+
+// Keys that stay stable as a zone changes: the Nth copy of a card keeps its
+// key when other cards leave, so only genuinely NEW cards mount (and animate).
+// The turn prefix makes a fresh hand at turn start count as new.
+function zoneKeys(list, prefix) {
+  const seen = {};
+  return list.map((name) => {
+    seen[name] = (seen[name] || 0) + 1;
+    return `${prefix}:${name}#${seen[name]}`;
+  });
 }
 
 // Selection toggle for the pick-N prompts. Clicking a NEW item when the quota
@@ -145,13 +197,20 @@ function DmPile({ kind, label, count, top, card, onInfo }) {
           ? <div className={"dm-pilewrap" + stacked}><DmCardBack /></div>
           : <div className="dm-empty-slot" />)
         : (top
-          ? <div className={"dm-pilewrap" + stacked}>
+          // keyed on the face + depth: a new top card remounts and flips over
+          ? <div key={top + ":" + count} className={"dm-pilewrap" + stacked}>
               <DmCardFace name={top} card={card} small onInfo={onInfo} />
             </div>
           : <div className="dm-empty-slot" />)}
-      <span className="dm-pile-count">{label} {count}</span>
+      <span className="dm-pile-count">{label} <Pop n={count} /></span>
     </div>
   );
+}
+
+// A number that pops when it changes: the key remount is what replays the
+// CSS animation (a re-render alone would not).
+function Pop({ n }) {
+  return <span key={n} className="dm-count-pop">{n}</span>;
 }
 
 // ─── Log formatting (the Dominion-online look: full sentences, articles,
@@ -341,6 +400,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // moves made after a reveal are undoable again.
   const canUndo = !!game && !over && game.turn === myId
     && (game.undo_depth || 0) > 0;
+  // Stable per-card keys so ONLY genuinely new cards mount — that mount is
+  // what plays the entrance animation (drawn, played, gained).
+  const handKeys = zoneKeys(mySeat?.hand || [], "h" + (game?.turn_number || 0));
+  const inPlayKeys = zoneKeys(mySeat?.in_play || [], "p" + (game?.turn_number || 0));
   // What-you-can-do hint, shown at the right of the resource bar. Board-driven
   // prompts (choose_pile) live HERE instead of in their own prompt box.
   const promptCardName = pv?.card === "__attack" ? "Attack" : pv?.card;
@@ -756,7 +819,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     );
   };
 
-  const renderPile = (name) => {
+  const renderPile = (name, idx = 0) => {
     const cardData = cards[name];
     const count = game.supply[name] ?? 0;
     const promptPiles = iAmActor && constraint?.piles ? constraint.piles : null;
@@ -764,12 +827,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
       : (inBuy && game.buys > 0 && count > 0 && effCost(name) <= game.coins);
     const disabled = promptPiles ? !promptPiles.includes(name) : count === 0;
     return (
-      <div key={name} className="dm-pile-slot">
+      <div key={name} className="dm-pile-slot"
+        style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
         <DmCardFace name={name} card={cardData} small
           highlight={highlight} disabled={disabled && !highlight}
           onClick={() => pileClick(name)} onInfo={() => pileClick(name)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
-        <span className="dm-pile-count">{count}</span>
+        <span className="dm-pile-count"><Pop n={count} /></span>
         {bridges > 0 && cardData && effCost(name) !== cardData.cost
           && <span className="dm-disc">now {effCost(name)}</span>}
       </div>
@@ -792,9 +856,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {game.pending_pid === pid ? "deciding" : pid === myId ? "your turn" : "their turn"}
           </TurnBadge>
         )}
-        <span className="dm-vp" title="victory points">🛡 {game.vp?.[pid] ?? 0} VP</span>
+        <span className="dm-vp" title="victory points">🛡 <Pop n={game.vp?.[pid] ?? 0} /> VP</span>
         {(game.vp_tokens?.[pid] || 0) > 0 && (
-          <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ {game.vp_tokens[pid]}</span>
+          <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ <Pop n={game.vp_tokens[pid]} /></span>
         )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
       </div>
@@ -820,7 +884,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 ? Array.from({ length: handN }, (_, i) => <DmCardBack key={i} />)
                 : <div className="dm-empty-slot" />}
             </div>
-            <span className="dm-pile-count">hand {s.hand_count ?? 0}</span>
+            <span className="dm-pile-count">hand <Pop n={s.hand_count ?? 0} /></span>
           </div>
           <div className="dm-opp-inplay">
             {(s.duration_view || []).flatMap((e, i) => [
@@ -833,9 +897,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
               )),
             ])}
-            {(s.in_play || []).map((c, i) => (
-              <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
-            ))}
+            {(() => {
+              const ip = s.in_play || [];
+              const ks = zoneKeys(ip, "o" + pid + (game.turn_number || 0));
+              return ip.map((c, i) => (
+                <DmCardFace key={ks[i]} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
+              ));
+            })()}
             {(s.in_play || []).length === 0 && (s.duration_view || []).length === 0
               && <span className="dm-zone-hint">nothing in play</span>}
             {(s.island || []).length > 0 && (
@@ -1109,10 +1177,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-me">
             {!over && game.turn === myId && (
               <div className="dm-resbar">
-                <span>Actions <b>{game.actions}</b></span>
-                <span>Buys <b>{game.buys}</b></span>
-                <span>Money <b>${game.coins}</b></span>
-                {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
+                <span>Actions <b><Pop n={game.actions} /></b></span>
+                <span>Buys <b><Pop n={game.buys} /></b></span>
+                <span>Money <b>$<Pop n={game.coins} /></b></span>
+                {bridges > 0 && <span>Cards cost <b>−<Pop n={bridges} /></b></span>}
                 {hasModalPrompt && promptMin
                   ? <button className="btn btn-gold btn-sm dm-reshint-btn"
                       onClick={() => setPromptMin(false)}><FitLabel>{promptCardName}: make your choice ▸</FitLabel></button>
@@ -1137,7 +1205,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 )),
               ])}
               {(mySeat?.in_play || []).map((c, i) => (
-                <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
+                <DmCardFace key={inPlayKeys[i]} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
               ))}
               {(mySeat?.in_play || []).length === 0 && (mySeat?.duration_view || []).length === 0
                 && <span className="dm-zone-hint">in play</span>}
@@ -1172,13 +1240,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
                     const t = typesFor(c);
                     const playable = !iAmActor && ((inAction && t.includes("action") && game.actions > 0)
                       || (inBuy && t.includes("treasure") && !bought));
-                    return <DmCardFace key={i} name={c} card={cards[c]}
+                    return <DmCardFace key={handKeys[i]} name={c} card={cards[c]}
                       highlight={playable} disabled={!playable && !over}
                       onClick={() => handClick(c)} onInfo={() => setCardInfo(c)} />;
                   })}
                   {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
                 </div>
-                <span className="dm-pile-count">hand {(mySeat?.hand || []).length}</span>
+                <span className="dm-pile-count">hand <Pop n={(mySeat?.hand || []).length} /></span>
               </div>
               <div className="dm-turnbtns">
                 {!over && (

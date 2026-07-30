@@ -161,20 +161,20 @@
   transition: border-color .15s, transform .15s, box-shadow .15s, opacity .15s;
 }
 .dm-card-small, .dm-card.dm-card-small { width: var(--card-w-s, 84px); height: calc(var(--card-w-s, 84px) * 1.3); }
-.dm-card-name.dm-name-long { font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 12px); letter-spacing: 0; }
 .dm-clickable { cursor: pointer; }
 .dm-clickable:hover { transform: translateY(-2px); }
 .dm-sel { outline: 2px solid var(--gold-light, #e8c96a); transform: translateY(-3px); }
 .dm-hl { border-color: var(--gold, #c9a84c); box-shadow: 0 0 8px rgba(201, 168, 76, .35); }
 .dm-dis { opacity: .55; }
-/* Name on top (long names shrink, never overlap); rules text shrinks to fit —
-   the card never grows; foot row = types bottom-left + cost coin bottom-right. */
+/* Name on top — FitText shrinks it only as far as the card's full width
+   demands; rules text shrinks to fit and the card never grows; foot row =
+   types bottom-left + cost coin bottom-right. */
 .dm-card-name {
   font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
   font-size: clamp(9px, calc(var(--card-h, 120px) * .105), 14px);
   letter-spacing: .3px; line-height: 1.1; padding: 4px 5px 2px;
 }
-.dm-card-name.dm-name-xl { font-size: clamp(7px, calc(var(--card-h, 120px) * .068), 10px); letter-spacing: 0; }
+.dm-fitspan { display: inline-block; white-space: nowrap; }
 .dm-card-text {
   flex: 1; font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 11px);
   color: var(--text-dim, #8a7d6a); padding: 0 5px; white-space: pre-line;
@@ -396,4 +396,53 @@
   .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
   .dm .dm-opp-inplay { flex-wrap: nowrap; }
   .dm .dm-cardinfo-cols { flex-direction: column; align-items: center; }
+}
+
+/* ── motion ────────────────────────────────────────────────────────────────
+   Entrance animations use fill-mode BACKWARDS, never BOTH: an animation's
+   retained final value outranks normal declarations, so BOTH would freeze
+   transform:none onto cards and kill the hover lift / .dm-sel offset. */
+@keyframes dm-enter {
+  from { opacity: 0; transform: translateY(10px) scale(.94); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-flip {
+  from { opacity: 0; transform: perspective(340px) rotateY(72deg); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.32); }
+  100% { transform: scale(1); }
+}
+@keyframes dm-logline {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes dm-ring {
+  from { box-shadow: 0 0 0 0 rgba(232, 201, 106, .7); }
+  to   { box-shadow: 0 0 0 14px rgba(232, 201, 106, 0); }
+}
+
+/* cards arriving in a zone: drawn into hand, played, gained into an area */
+.dm-hand .dm-card,
+.dm-inplay .dm-card,
+.dm-opp-inplay .dm-card,
+.dm-prompt-cards .dm-card { animation: dm-enter .3s cubic-bezier(.2, .8, .3, 1) backwards; }
+/* the supply deals in with a short cascade the first time the board mounts */
+.dm-supply .dm-pile-slot { animation: dm-enter .34s ease-out backwards; }
+/* a pile's face changing (new discard top, deck emptying) flips over */
+.dm-zpile .dm-pilewrap { animation: dm-flip .38s ease-out backwards; }
+/* any counter that changed value this render (keyed remount) */
+.dm-count-pop { display: inline-block; animation: dm-pop .42s ease-out; }
+.dm-vp .dm-count-pop { animation: dm-pop .55s ease-out; }
+/* newest log entry slides in; decision modal and order badges pop */
+.dm-log-line:first-child { animation: dm-logline .3s ease-out; }
+.dm-modal.dm-prompt-modal { animation: dm-enter .22s ease-out backwards; }
+.dm-card-badge { animation: dm-pop .3s ease-out; }
+/* a bought/gained pile flashes a gold ring */
+.dm-pile-slot.dm-just-gained .dm-card { animation: dm-ring .6s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dm *, .dm *::before, .dm *::after { animation: none !important; }
 }
