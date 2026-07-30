@@ -177,14 +177,23 @@ def _drive(game):
 # A snapshot is pushed before each of the turn player's own moves, so undo can
 # be pressed repeatedly — walking back move by move until the start of the turn
 # ("nothing to undo") or until something revealed information that can't be
-# un-seen, which locks AND clears the whole stack.
+# un-seen.
+#
+# The gate is the STACK ITSELF, not a sticky flag: a reveal CLEARS the stack
+# (you can never rewind across new information), but moves made AFTER it are
+# snapshotted again and stay undoable. A sticky "this turn revealed something"
+# flag used to block every later snapshot, so one +1 Card (Upgrade, Laboratory,
+# a start-of-turn Duration draw...) killed undo for the WHOLE turn — including
+# ordinary, fully-reversible buys.
 
 _UNDO_CAP = 30  # snapshots per turn — a runaway backstop, far above real turns
 
 
 def _mark_revealed(game):
     """This turn exposed information that can't be un-seen (a draw, a look, a
-    reveal, a pass, an opponent's choice) — undo is dead from here on."""
+    reveal, a pass, an opponent's choice): nothing before this point may be
+    rewound. Later moves are undoable again — the empty stack is the gate.
+    `turn_revealed` stays as a display/telemetry signal only."""
     game["turn_revealed"] = True
     game["undo_stack"] = []
 
@@ -207,8 +216,6 @@ def _push_undo(game):
 def _undo_move(game, pid):
     if pid != game["turn"]:
         return False, "not your turn"
-    if game.get("turn_revealed"):
-        return False, "can't undo — new information was revealed this turn"
     stack = game.get("undo_stack") or []
     if not stack:
         return False, "nothing to undo"
@@ -1270,8 +1277,8 @@ def apply_move(game, pid, move):
             return False, "not your decision"
         if mt != "decision":
             return False, f"must resolve {game['pending_kind']} first"
-        if pid == game["turn"] and not game.get("turn_revealed"):
-            _push_undo(game)
+        if pid == game["turn"]:
+            _push_undo(game)      # a reveal inside the move clears it again
             pushed = True
         ok, err = _resolve_decision(game, pid, move)
     elif mt == "decision":
@@ -1282,9 +1289,8 @@ def apply_move(game, pid, move):
         handler = _HANDLERS.get(mt)
         if handler is None:
             return False, f"unknown move: {mt}"
-        if not game.get("turn_revealed"):
-            _push_undo(game)
-            pushed = True
+        _push_undo(game)          # a reveal inside the move clears it again
+        pushed = True
         ok, err = handler(game, pid, move)
     if ok:
         _drive(game)

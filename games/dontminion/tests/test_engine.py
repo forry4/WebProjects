@@ -584,8 +584,16 @@ def test_undo_ok_for_no_reveal_actions_blocked_after_draw():
     engine._arm_undo(g)
     assert mv(g, A, {"type": "play_action", "card": "Smithy"})[0]
     ok, err = mv(g, A, {"type": "undo_turn"})        # a draw can't be un-seen
-    assert not ok and "revealed" in err
+    assert not ok and err == "nothing to undo"
     assert engine.player_view(g, A)["undo_depth"] == 0   # the reveal clears the stack
+    # ...but the reveal only bars rewinding PAST it: later moves in the same
+    # turn are undoable again (a sticky flag used to kill the whole turn)
+    assert g["phase"] == "buy"                      # Smithy emptied the hand
+    g["coins"] = 5
+    assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
+    assert engine.player_view(g, A)["undo_depth"] == 1
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["coins"] == 5 and "Silver" not in g["seats"][A]["discard"]
 
 
 def test_undo_before_opponent_answers_but_not_after():
@@ -602,7 +610,11 @@ def test_undo_before_opponent_answers_but_not_after():
     assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
     assert decide(g, B, cards=g["seats"][B]["hand"][:2])[0]
     ok, err = mv(g, A, {"type": "undo_turn"})        # B's choice = new information
-    assert not ok and "revealed" in err
+    assert not ok and err == "nothing to undo"
+    # A's OWN later moves stay undoable (only the rewind PAST B's answer is barred)
+    assert mv(g, A, {"type": "end_phase"})[0]
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["phase"] == "action"
 
 
 def test_undo_with_own_pending_open_and_after_self_reveal():
@@ -617,7 +629,7 @@ def test_undo_with_own_pending_open_and_after_self_reveal():
     engine._arm_undo(g)
     assert mv(g, A, {"type": "play_action", "card": "Shanty Town"})[0]
     ok, err = mv(g, A, {"type": "undo_turn"})        # revealed OWN hand to others
-    assert not ok and "revealed" in err
+    assert not ok and err == "nothing to undo"
 
 
 def test_undo_walks_back_through_own_decisions():
@@ -793,3 +805,57 @@ def test_auto_advance_waits_for_pending_effects():
     assert g["phase"] == "action"          # opponent still resolving the attack
     assert decide(g, B, cards=["Copper", "Copper"])[0]
     assert g["phase"] == "buy"             # effects done, no actions -> advanced
+
+
+def test_undo_survives_a_drawing_card_and_the_auto_advance_to_buy():
+    """USER-REPORTED REGRESSION: a sticky 'something was revealed this turn'
+    flag used to kill undo for the REST of the turn, so after any +1 Card
+    (Upgrade, Laboratory, a start-of-turn Duration draw) every later buy /
+    treasure play / decision was permanently un-undoable — including the
+    moves that follow the auto-advance into the buy phase."""
+    g = fresh(kingdom=K7 + ["Upgrade", "Laboratory"])
+    give_hand(g, A, ["Upgrade", "Estate"])
+    g["seats"][A]["deck"] = ["Copper"] * 8
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_action", "card": "Upgrade"})[0]
+    # Upgrade drew (+1 Card): nothing before this point may be rewound
+    assert engine.player_view(g, A)["undo_depth"] == 0
+    # its trash choice is a move of MINE — undoable again
+    assert g["pending_kind"] == "choose_cards"
+    assert decide(g, A, cards=["Estate"])[0]
+    assert engine.player_view(g, A)["undo_depth"] == 1
+    assert g["pending_kind"] == "choose_pile"       # gain a card costing exactly $3
+    assert decide(g, A, pile="Silver")[0]
+    assert "Silver" in g["seats"][A]["discard"]
+    assert g["phase"] == "buy"                      # auto-advanced (no actions left)
+    # the gain + auto-advance are still reversible
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["phase"] == "action" and g["pending_kind"] == "choose_pile"
+    assert "Silver" not in g["seats"][A]["discard"]
+    # and so is a buy made after all of it
+    assert decide(g, A, pile="Silver")[0]
+    g["coins"] = 6
+    assert mv(g, A, {"type": "buy", "card": "Gold"})[0]
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["coins"] == 6 and "Gold" not in g["seats"][A]["discard"]
+
+
+def test_undo_after_a_start_of_turn_duration_draw():
+    """The same lockout hit any turn that OPENED with a Duration draw."""
+    g = fresh(kingdom=K7 + ["Caravan"], expansions=("base", "seaside"))
+    give_hand(g, A, ["Caravan"])
+    g["seats"][A]["deck"] = ["Copper"] * 12
+    assert mv(g, A, {"type": "play_action", "card": "Caravan"})[0]
+    assert mv(g, A, {"type": "end_phase"})[0]
+    if g["turn"] == A:
+        assert mv(g, A, {"type": "end_phase"})[0]
+    while g["turn"] == B:
+        assert mv(g, B, {"type": "end_phase"})[0]
+    # A's turn opened with Caravan's +1 Card
+    assert g["turn"] == A and engine.player_view(g, A)["undo_depth"] == 0
+    if g["phase"] == "action":
+        assert mv(g, A, {"type": "end_phase"})[0]
+    g["coins"] = 3
+    assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
+    assert mv(g, A, {"type": "undo_turn"})[0]        # still undoable
+    assert g["coins"] == 3 and "Silver" not in g["seats"][A]["discard"]

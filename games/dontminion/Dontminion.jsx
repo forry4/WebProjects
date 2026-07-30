@@ -115,6 +115,17 @@ function FitLabel({ children }) {
   return <span ref={ref} className="dm-fitlabel">{children}</span>;
 }
 
+// Selection toggle for the pick-N prompts. Clicking a NEW item when the quota
+// is full swaps rather than doing nothing: with max 1 it replaces outright,
+// otherwise the oldest pick makes room. (Having to deselect first was a
+// reported annoyance — every click should change something.)
+function pickToggle(sel, item, max) {
+  if (sel.includes(item)) return sel.filter((x) => x !== item);
+  if (sel.length < max) return [...sel, item];
+  if (max === 1) return [item];
+  return [...sel.slice(1), item];
+}
+
 function DmCardBack() {
   return (
     <div className="card dm-card dm-card-small dm-card-back">
@@ -325,18 +336,36 @@ export default function Dontminion({ myId, authUser, onExit }) {
     : game.turn !== myId ? game.turn
     : seatOrder[(seatOrder.indexOf(myId) + 1) % Math.max(seatOrder.length, 1)];
   // Undo walks back ONE move per press. undo_depth (how many snapshots the
-  // server holds) and turn_revealed ship in the view precisely to drive this;
-  // the server refuses once hidden information was revealed this turn.
-  const turnRevealed = !!game?.turn_revealed;
-  const canUndo = !!game && !over && game.turn === myId && !turnRevealed
+  // server holds) is the WHOLE gate: a reveal empties the server's stack, so
+  // depth 0 means "nothing reversible since the last new information" — and
+  // moves made after a reveal are undoable again.
+  const canUndo = !!game && !over && game.turn === myId
     && (game.undo_depth || 0) > 0;
   // What-you-can-do hint, shown at the right of the resource bar. Board-driven
   // prompts (choose_pile) live HERE instead of in their own prompt box.
   const promptCardName = pv?.card === "__attack" ? "Attack" : pv?.card;
+  // A pile prompt describes what the CARD does ("gain a card costing up to
+  // $4") rather than the mechanically obvious "pick a highlighted pile". The
+  // text comes from the catalog, minus its vanilla +Card/+Action/+Buy/+$ lines;
+  // when every eligible pile shares one cost (Upgrade, Swindler) the exact
+  // target cost is appended, since the card text can't name it.
+  const VANILLA_LINE = /^\+(\d+\s*(Cards?|Actions?|Buys?)|\$\d+)$/i;
+  const effectText = (name) => (cards[name]?.text || "")
+    .split("\n").map((s) => s.trim())
+    .filter((s) => s && !VANILLA_LINE.test(s)).join(" ");
+  const pileHint = (name, piles) => {
+    const body = effectText(name);
+    const parts = body.split(/\.\s+/).map((s, i, a) => (i < a.length - 1 ? s + "." : s));
+    const clause = parts.find((s) => /gain|trash|name/i.test(s)) || body;
+    const costs = (piles || []).map(effCost);
+    const band = costs.length && Math.min(...costs) === Math.max(...costs)
+      ? ` (piles costing $${costs[0]})` : "";
+    return `${name}: ${clause || "pick a highlighted Supply pile"}${band}`;
+  };
   const resHint = (() => {
     if (!game || over || game.turn !== myId) return "";
     if (iAmActor) {
-      return pv.kind === "choose_pile" ? `${promptCardName}: pick a highlighted Supply pile` : "";
+      return pv.kind === "choose_pile" ? pileHint(promptCardName, pv.constraint?.piles) : "";
     }
     if (game.pending_pid) return "";               // waiting bar covers it
     if (game.phase === "action") return "you may play Action cards";
@@ -601,7 +630,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {c.cards.map((n, i) => (
               <DmCardFace key={i} name={n} card={cards[n]} small
                 selected={pickIdx.includes(i)}
-                onClick={() => setPickIdx((s) => s.includes(i) ? s.filter((x) => x !== i) : (s.length < c.max ? [...s, i] : s))} />
+                onClick={() => setPickIdx((s) => pickToggle(s, i, c.max))} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -632,7 +661,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {c.options.map((o) => (
             <button key={o.id}
               className={"btn " + (pickOpts.includes(o.id) ? "btn-gold" : "btn-outline")}
-              onClick={() => setPickOpts((s) => s.includes(o.id) ? s.filter((x) => x !== o.id) : (s.length < pick ? [...s, o.id] : s))}>
+              onClick={() => setPickOpts((s) => pickToggle(s, o.id, pick))}>
               <FitLabel>{o.label}</FitLabel>
             </button>
           ))}
@@ -650,7 +679,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               <DmCardFace key={i} name={n} card={cards[n]} small
                 selected={orderIdx.includes(i)}
                 badge={orderIdx.includes(i) ? orderIdx.indexOf(i) + 1 : null}
-                onClick={() => setOrderIdx((s) => s.includes(i) ? s : [...s, i])} />
+                onClick={() => setOrderIdx((s) => s.includes(i) ? s.filter((x) => x !== i) : [...s, i])} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -703,7 +732,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     if (iAmActor && kindOfPrompt === "choose_pile" && game.turn !== myId) {
       return (
         <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCardName}: pick a highlighted Supply pile</div>
+          <div className="dm-prompt-hd">{pileHint(promptCardName, constraint?.piles)}</div>
         </div>
       );
     }
@@ -715,7 +744,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const renderPromptModal = () => {
     if (!hasModalPrompt || promptMin || over) return null;
     return (
-      <div className="dm-backdrop" onClick={() => setPromptMin(true)}>
+      <div className="dm-backdrop dm-backdrop-top" onClick={() => setPromptMin(true)}>
         <div className="dm-modal dm-prompt dm-prompt-modal" onClick={(e) => e.stopPropagation()}>
           <div className="dm-prompt-hdrow">
             <div className="dm-prompt-hd">{promptTitle()}</div>

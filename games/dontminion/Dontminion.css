@@ -253,7 +253,7 @@
    double-class beats the later plain .dm-modal sizing */
 .dm-modal.dm-prompt-modal {
   max-width: min(760px, calc(100vw - 32px)); width: auto; min-width: min(420px, calc(100vw - 32px));
-  max-height: 84vh; overflow-y: auto;
+  max-height: calc(100vh - 24px); overflow-y: auto;
 }
 .dm-prompt-hdrow {
   display: flex; gap: 12px; align-items: baseline; justify-content: space-between;
@@ -323,6 +323,9 @@
   position: fixed; inset: 0; background: rgba(10, 8, 5, .72);
   display: flex; align-items: center; justify-content: center; z-index: 70;
 }
+/* decision prompts open at the TOP — the board stays readable underneath and
+   the modal lands where the eye already is (the phase bar) */
+.dm-backdrop-top { align-items: flex-start; padding-top: 12px; }
 .dm-modal {
   background: var(--surface, #1a1814); border: 1px solid var(--gold, #c9a84c);
   border-radius: var(--radius-lg, 14px); padding: 22px 26px; max-width: 460px; width: calc(100% - 40px);
