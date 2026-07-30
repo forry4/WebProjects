@@ -39,6 +39,20 @@ frozen-API notes in `CLAUDE.md`: `add_duration_fx`, `add_watcher`, `watcher_data
 `remove_watcher`, `mark_duration_rider`, `set_aside_duration`, `take_dur_aside`,
 `to_island`, `to_village_mat`, `take_village_mat`, `request_extra_turn`, `duration_in_play`.
 
+## Structural-debt ledger (what the bus does NOT yet cover — pay these ON TIME)
+
+| Debt | First bitten by | Pay when |
+|---|---|---|
+| **Replacement effects** ("when you WOULD gain, instead…") — the bus is after-the-fact only | Trader (Hinterlands, ph. 3); shape it against Watchtower (ph. 2) | design during Phase 2 |
+| **cost() -> int becomes a vector** (Potion, Debt) — batches write raw `cost(g,p) <= n` comparisons everywhere | Alchemy (ph. 5) / Empires (ph. 8) | add `cost_le()`-style helpers at the START of Phase 2 and migrate batches; the vector change then touches one function |
+| **Non-supply gain sources** (Rewards/Spoils/Horses/Loot) — gain() only knows the supply | Cornucopia & Guilds (ph. 4) | Phase 4 kernel work |
+| **Landscape cards** (Events/Landmarks/Projects/Ways…) + the bus's "global" trigger source + a frontend row | Adventures (ph. 7) | Phase 7 kernel+UI work |
+| **Pile abstraction** — `supply={name:count}` can't do split/rotating piles | Dark Ages Knights (ph. 6) | Phase 6 kernel work |
+| **Turn structure** — Night phase breaks the action/buy enum + auto-advance + frontend phase logic | Nocturne (ph. 11) | Phase 11 |
+
+Rule: when a phase's spec hits one of these, the KERNEL work comes first (stop-the-line, like
+Phase 1's durations), the ledger row gets deleted, and the audit agent re-runs on the phase.
+
 **THE TRIGGER BUS (post-Phase-1 hardening):** all off-turn/triggered abilities now flow
 through ONE event system — kernel `emit()` (events: gain / buy / play_treasure / trash /
 buy_phase_end) consumed by dynamic watchers + the static `TRIGGERS` registry (sources:
