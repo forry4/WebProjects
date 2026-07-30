@@ -56,22 +56,28 @@ const faceClass = (types) => {
   return "dm-f-action";
 };
 
-function DmCardFace({ name, card, onClick, selected, disabled, highlight, small, badge }) {
+function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight, small, badge }) {
   const types = card?.types || [];
+  // A card that isn't actionable right now still answers a click with its
+  // detail modal (onInfo) — nothing on the board is a dead click.
+  const click = (!disabled && onClick) ? onClick : onInfo;
   const cls = ["card", "dm-card", faceClass(types),
     small ? "dm-card-small" : "",
     selected ? "dm-sel" : "", highlight ? "dm-hl" : "",
-    disabled ? "dm-dis" : "", onClick && !disabled ? "dm-clickable" : ""].filter(Boolean).join(" ");
+    disabled ? "dm-dis" : "", click ? "dm-clickable" : ""].filter(Boolean).join(" ");
   return (
-    <div className={cls} onClick={disabled ? undefined : onClick} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
+    <div className={cls} onClick={click} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
       <div className={"dm-card-name" + (name.length > 9 ? " dm-name-long" : "")}>{name}</div>
-      {!small && <div className="dm-card-text">{card?.text || ""}</div>}
-      <div className="dm-card-bottom">
-        <span className="dm-cost">{card ? card.cost : ""}</span>
-        <div className="dm-types">
-          {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
+      <div className="dm-card-body">
+        {!small && <div className="dm-card-text">{card?.text || ""}</div>}
+        {/* cost directly below the name on the RIGHT, each type on its own line under it */}
+        <div className="dm-card-side">
+          <span className="dm-cost">{card ? card.cost : ""}</span>
+          <div className="dm-types">
+            {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
+          </div>
         </div>
       </div>
       {badge != null && <span className="dm-card-badge">{badge}</span>}
@@ -79,35 +85,108 @@ function DmCardFace({ name, card, onClick, selected, disabled, highlight, small,
   );
 }
 
-// ─── Log formatting ─────────────────────────────────────────────────────────
+function DmCardBack() {
+  return (
+    <div className="card dm-card dm-card-small dm-card-back">
+      <span className="dm-back-emblem">D</span>
+    </div>
+  );
+}
+
+// A real pile: deck = face-down back with a count badge; discard = its top card
+// face up. Sizing rides the surrounding container's --card-w-s.
+function DmPile({ kind, label, count, top, card, onInfo }) {
+  const stacked = count > 1 ? " dm-pile-stacked" : "";
+  return (
+    <div className="dm-pile-slot dm-zpile">
+      {kind === "deck"
+        ? (count > 0
+          ? <div className={"dm-pilewrap" + stacked}><DmCardBack /></div>
+          : <div className="dm-empty-slot" />)
+        : (top
+          ? <div className={"dm-pilewrap" + stacked}>
+              <DmCardFace name={top} card={card} small onInfo={onInfo} />
+            </div>
+          : <div className="dm-empty-slot" />)}
+      <span className="dm-pile-count">{label} {count}</span>
+    </div>
+  );
+}
+
+// ─── Log formatting (the Dominion-online look: full sentences, articles,
+//     grouped card lists, sub-effects indented under the play that caused them) ──
+const art = (name) => (/^[AEIOU]/.test(name) ? "an" : "a") + " " + name;
+function pluralCard(name, k) {
+  if (k === 1) return art(name);
+  if (name.endsWith("s")) return `${k} ${name}`;
+  if (name.endsWith("y")) return `${k} ${name.slice(0, -1)}ies`;
+  return `${k} ${name}s`;
+}
+function listCards(cards) {
+  const counts = [];
+  for (const c of cards) {
+    const hit = counts.find((x) => x[0] === c);
+    if (hit) hit[1] += 1; else counts.push([c, 1]);
+  }
+  const parts = counts.map(([c, k]) => pluralCard(c, k));
+  if (parts.length <= 1) return parts.join("");
+  return parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1];
+}
 function fmtLog(e, names) {
   const who = e.pid ? (names[e.pid] || e.pid) : "";
   switch (e.event) {
     case "turn_start": return `— ${who}'s turn (${e.turn}) —`;
-    case "phase": return `${who} moves to the buy phase`;
-    case "play": return `${who} plays ${e.card}`;
-    case "buy": return `${who} buys ${e.card}`;
+    case "phase": return null;                       // pure plumbing, not an event
+    case "play": return `${who} plays ${art(e.card)}${e.coins != null ? ` (+$${e.coins})` : ""}`;
+    case "plus": {
+      const bits = [];
+      if (e.coins) bits.push(`+$${e.coins}`);
+      if (e.actions) bits.push(`+${e.actions} Action${e.actions > 1 ? "s" : ""}`);
+      if (e.buys) bits.push(`+${e.buys} Buy${e.buys > 1 ? "s" : ""}`);
+      if (!bits.length) return null;
+      return `${who} gets ${bits.join(", ")}${e.why ? ` (${e.why})` : ""}`;
+    }
+    case "buy": return `${who} buys and gains ${art(e.card)}`;
     case "gain": return e.dest && e.dest !== "discard"
-      ? `${who} gains ${e.card} (to ${e.dest})` : `${who} gains ${e.card}`;
-    case "gain_from_trash": return `${who} gains ${e.card} from the trash`;
-    case "trash": return `${who} trashes ${(e.cards || []).join(", ")}`;
-    case "supply_trash": return `${who} trashes ${e.card} from the Supply`;
-    case "discard": return e.cards ? `${who} discards ${e.cards.join(", ")}`
+      ? `${who} gains ${art(e.card)} (to ${e.dest === "deck" ? "their deck" : e.dest})`
+      : `${who} gains ${art(e.card)}`;
+    case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
+    case "trash": return `${who} trashes ${listCards(e.cards || [])}`;
+    case "supply_trash": return `${who} trashes ${art(e.card)} from the Supply`;
+    case "discard": return e.cards ? `${who} discards ${listCards(e.cards)}`
       : `${who} discards ${e.n} card${e.n === 1 ? "" : "s"}`;
-    case "draw": return `${who} draws ${e.n} card${e.n === 1 ? "" : "s"}`;
+    case "draw": return e.cards ? `${who} draws ${listCards(e.cards)}`
+      : `${who} draws ${e.n} card${e.n === 1 ? "" : "s"}`;
     case "shuffle": return `${who} shuffles their deck`;
-    case "reveal": return `${who} reveals ${(e.cards || []).join(", ")}`;
-    case "topdeck": return e.card ? `${who} puts ${e.card} onto their deck`
+    case "reveal": return `${who} reveals ${listCards(e.cards || [])}`;
+    case "topdeck": return e.card ? `${who} puts ${art(e.card)} onto their deck`
       : `${who} puts a card onto their deck`;
     case "deck_insert": return `${who} slips a card into their deck`;
     case "secret_passage": return `${who} places it ${e.position === 0 ? "on top" : e.position >= (e.depth - 1) ? "on the bottom" : `${e.position} deep`}`;
     case "named": return `${who} names ${e.card}`;
-    case "pass": return `${who} passes ${e.card} to ${names[e.to] || e.to}`;
+    case "pass": return `${who} passes ${art(e.card)} to ${names[e.to] || e.to}`;
     case "pass_public": return `${who} passes a card to ${names[e.to] || e.to}`;
+    case "undo": return `${who} takes back a move`;
     case "abandon": return `${who} abandoned the game`;
     case "game_over": return `Game over — ${(e.winners || []).map((w) => names[w] || w).join(" & ")} win${(e.winners || []).length > 1 ? "" : "s"}!`;
     default: return null;
   }
+}
+
+// The buy handler logs "buy" and the gain it causes logs "gain" back-to-back —
+// fold the pair into the single "buys and gains" line.
+function buildLogLines(log, names) {
+  const out = [];
+  for (let i = 0; i < log.length; i++) {
+    const e = log[i];
+    if (e.event === "gain" && i > 0) {
+      const p = log[i - 1];
+      if (p.event === "buy" && p.pid === e.pid && p.card === e.card) continue;
+    }
+    const text = fmtLog(e, names);
+    if (text) out.push({ n: e.n, d: Math.min(e.d || 0, 3), turn: e.event === "turn_start", text });
+  }
+  return out;
 }
 
 // ─── Socket hook ─────────────────────────────────────────────────────────────
@@ -157,6 +236,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [showKingdom, setShowKingdom] = useState(false);
+  const [cardInfo, setCardInfo] = useState(null);    // card name → detail modal
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -385,20 +465,23 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
   const abandonGame = () => { send({ action: "abandon" }); setConfirmAbandon(false); };
 
+  // Every click lands somewhere: playable → play, buyable → buy, anything
+  // else → the card-detail modal (never a dead click).
   const handClick = (card) => {
-    if (iAmActor) return;                       // prompts own the clicks
     const t = cards[card]?.types || [];
-    if (inAction && t.includes("action") && game.actions > 0) mv({ type: "play_action", card });
-    else if (inBuy && t.includes("treasure") && !bought) mv({ type: "play_treasure", card });
+    if (!iAmActor && inAction && t.includes("action") && game.actions > 0) mv({ type: "play_action", card });
+    else if (!iAmActor && inBuy && t.includes("treasure") && !bought) mv({ type: "play_treasure", card });
+    else setCardInfo(card);
   };
   const pileClick = (pile) => {
     if (iAmActor && constraint?.piles) {
-      if (constraint.piles.includes(pile)) mv({ type: "decision", pile });
-      return;
+      if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
+      setCardInfo(pile); return;
     }
     if (inBuy && game.buys > 0 && (game.supply[pile] || 0) > 0 && effCost(pile) <= game.coins) {
-      mv({ type: "buy", card: pile });
+      mv({ type: "buy", card: pile }); return;
     }
+    setCardInfo(pile);
   };
 
   // ── render helpers ──
@@ -542,7 +625,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       <div key={name} className="dm-pile-slot">
         <DmCardFace name={name} card={cardData} small
           highlight={highlight} disabled={disabled && !highlight}
-          onClick={() => pileClick(name)} />
+          onClick={() => pileClick(name)} onInfo={() => pileClick(name)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
         <span className="dm-pile-count">{count}</span>
         {bridges > 0 && cardData && effCost(name) !== cardData.cost
@@ -551,25 +634,40 @@ export default function Dontminion({ myId, authUser, onExit }) {
     );
   };
 
-  const renderSeatStrip = (pid) => {
+  // Opponent box (top strip): face-DOWN backs for the hand, face-UP cards for
+  // what they've played, real deck/discard piles, VP in the box.
+  const renderOppBox = (pid) => {
     const s = seats[pid] || {};
     const isBot = (roomData?.ai_players || []).includes(pid);
     const acting = !over && (game.pending_pid || game.turn) === pid;
+    const handN = Math.min(s.hand_count ?? 0, 12);
     return (
       <div key={pid} className={"dm-opp" + (acting ? " dm-opp-acting" : "")}>
         <div className="dm-opp-name">
           {names[pid] || pid}{isBot ? " 🤖" : ""}
           {acting && <TurnBadge mine={false}>{game.pending_pid === pid ? "deciding" : "their turn"}</TurnBadge>}
+          <span className="dm-vp" title="victory points">🛡 {game.vp?.[pid] ?? 0} VP</span>
+          <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
         </div>
-        <div className="dm-opp-stats">
-          <span title="cards in hand">✋ {s.hand_count ?? "?"}</span>
-          <span title="cards in deck">🂠 {s.deck_count ?? "?"}</span>
-          <span title="victory points">🛡 {game.vp?.[pid] ?? 0}</span>
-          <span title="turns taken">⏱ {s.turns_taken ?? 0}</span>
-        </div>
-        <div className="dm-opp-discard">
-          discard: {s.discard_view?.top
-            ? <b title={cards[s.discard_view.top]?.text}>{s.discard_view.top}</b> : "—"} ({s.discard_view?.count ?? 0})
+        <div className="dm-opp-zones">
+          <DmPile kind="deck" label="deck" count={s.deck_count ?? 0} />
+          <DmPile kind="discard" label="discard" count={s.discard_view?.count ?? 0}
+            top={s.discard_view?.top} card={cards[s.discard_view?.top]}
+            onInfo={() => setCardInfo(s.discard_view?.top)} />
+          <div className="dm-opp-hand dm-pile-slot" title={`${s.hand_count ?? 0} cards in hand`}>
+            <div className="dm-fan">
+              {handN > 0
+                ? Array.from({ length: handN }, (_, i) => <DmCardBack key={i} />)
+                : <div className="dm-empty-slot" />}
+            </div>
+            <span className="dm-pile-count">hand {s.hand_count ?? 0}</span>
+          </div>
+          <div className="dm-opp-inplay">
+            {(s.in_play || []).map((c, i) => (
+              <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
+            ))}
+            {(s.in_play || []).length === 0 && <span className="dm-zone-hint">nothing in play</span>}
+          </div>
         </div>
       </div>
     );
@@ -801,17 +899,20 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {bridges > 0 && <span title="Bridge discount">cards cost −{bridges}</span>}
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => setShowKingdom(true)}>🃏 Kingdom</button>
-        {canUndo && (
-          <button className="btn btn-outline btn-sm"
-            title="Take back your last action — press again to keep stepping back (until the turn started or new information was revealed)"
-            onClick={() => mv({ type: "undo_turn" })}>↩ Undo{(game.undo_depth || 0) > 1 ? ` (${game.undo_depth})` : ""}</button>
+        {!over && (
+          <button className="btn btn-outline btn-sm dm-undo" disabled={!canUndo}
+            title={canUndo
+              ? "Take back your last action — press again to keep stepping back (until the turn started or new information was revealed)"
+              : "Nothing to undo — undo unlocks after a move of yours that revealed no new information"}
+            onClick={() => canUndo && mv({ type: "undo_turn" })}>↩ Undo{(game.undo_depth || 0) > 1 ? ` (${game.undo_depth})` : ""}</button>
         )}
         {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
       </div>
 
+      <div className="dm-opps">{oppOrder.map(renderOppBox)}</div>
+
       <div className="dm-main">
         <div className="dm-side">
-          {oppOrder.map(renderSeatStrip)}
           <div className="dm-trash" onClick={() => setShowTrash((s) => !s)}>
             Trash ({(game.trash || []).length}) {showTrash ? "▾" : "▸"}
             {showTrash && (
@@ -822,10 +923,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </div>
           <div className="dm-log">
             {/* newest first, pinned at the top — matches the other games' logs */}
-            {[...(game.log || [])].reverse().slice(0, 100).map((e) => {
-              const line = fmtLog(e, names);
-              return line ? <div key={e.n} className="dm-log-line">{line}</div> : null;
-            })}
+            {buildLogLines(game.log || [], names).reverse().slice(0, 200).map((l) => (
+              <div key={l.n}
+                className={"dm-log-line" + (l.d ? ` dm-log-d${l.d}` : "") + (l.turn ? " dm-log-turn" : "")}>
+                {l.text}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -836,25 +939,31 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-supply-row dm-kingdom">{kingdomPiles.map(renderPile)}</div>
           </div>
           <div className="dm-me">
+            <div className="dm-me-head">
+              <span className="dm-me-name">{names[myId] || "You"}{myTurn && <TurnBadge mine>your turn</TurnBadge>}</span>
+              <span className="dm-vp" title="victory points">🛡 {game.vp?.[myId] ?? 0} VP</span>
+              <span className="dm-opp-turns" title="turns taken">⏱ {mySeat?.turns_taken ?? 0}</span>
+            </div>
             {!over && game.turn === myId && (
               <div className="dm-resbar">
                 <span>Actions <b>{game.actions}</b></span>
                 <span>Buys <b>{game.buys}</b></span>
                 <span>Money <b>${game.coins}</b></span>
                 {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
-                <span>Your VP <b>{game.vp?.[myId] ?? 0}</b></span>
               </div>
             )}
             <div className="dm-inplay">
               {(mySeat?.in_play || []).map((c, i) => (
-                <DmCardFace key={i} name={c} card={cards[c]} small />
+                <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
               ))}
               {(mySeat?.in_play || []).length === 0 && <span className="dm-zone-hint">in play</span>}
             </div>
             <div className="dm-handrow">
-              <div className="dm-mystats">
-                <span title="deck">🂠 {mySeat?.deck_count ?? 0}</span>
-                <span title="discard">{mySeat?.discard_view?.top || "—"} ({mySeat?.discard_view?.count ?? 0})</span>
+              <div className="dm-mypiles">
+                <DmPile kind="deck" label="deck" count={mySeat?.deck_count ?? 0} />
+                <DmPile kind="discard" label="discard" count={mySeat?.discard_view?.count ?? 0}
+                  top={mySeat?.discard_view?.top} card={cards[mySeat?.discard_view?.top]}
+                  onInfo={() => setCardInfo(mySeat?.discard_view?.top)} />
               </div>
               <div className="dm-hand">
                 {(mySeat?.hand || []).map((c, i) => {
@@ -863,7 +972,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                     || (inBuy && t.includes("treasure") && !bought));
                   return <DmCardFace key={i} name={c} card={cards[c]}
                     highlight={playable} disabled={!playable && !over}
-                    onClick={playable ? () => handClick(c) : undefined} />;
+                    onClick={() => handClick(c)} onInfo={() => setCardInfo(c)} />;
                 })}
                 {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
               </div>
@@ -918,6 +1027,30 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
             <div className="dm-prompt-actions">
               <button className="btn btn-gold" onClick={() => setShowKingdom(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cardInfo && cards[cardInfo] && (
+        <div className="dm-backdrop" onClick={() => setCardInfo(null)}>
+          <div className="dm-modal dm-cardinfo" onClick={(e) => e.stopPropagation()}>
+            <div className="dm-cardinfo-cols">
+              <div className="dm-cardinfo-face">
+                <DmCardFace name={cardInfo} card={cards[cardInfo]} />
+              </div>
+              <div className="dm-cardinfo-detail">
+                <h2>{cardInfo}</h2>
+                <p className="dm-cardinfo-meta">
+                  Cost ${cards[cardInfo].cost}
+                  {bridges > 0 && effCost(cardInfo) !== cards[cardInfo].cost ? ` (now $${effCost(cardInfo)})` : ""}
+                  {" · "}{(cards[cardInfo].types || []).map((t) => TYPE_LABEL[t] || t).join(" – ")}
+                  {game.supply?.[cardInfo] != null ? ` · ${game.supply[cardInfo]} left in the Supply` : ""}
+                </p>
+                <p className="dm-cardinfo-text">{cards[cardInfo].text}</p>
+              </div>
+            </div>
+            <div className="dm-prompt-actions">
+              <button className="btn btn-gold" onClick={() => setCardInfo(null)}>Close</button>
             </div>
           </div>
         </div>

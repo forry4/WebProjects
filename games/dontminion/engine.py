@@ -50,10 +50,26 @@ def _save_rng(game, rng):
 
 def _log(game, pid, event, private_to=None, **kw):
     entry = {"n": len(game["log"]), "pid": pid, "event": event}
+    d = game.get("log_depth", 0)
+    if d:
+        entry["d"] = min(d, 3)
     if private_to is not None:
         entry["private_to"] = list(private_to)
     entry.update(kw)
     game["log"].append(entry)
+
+
+# log_depth tracks how deep inside a card's resolution we are, so the client can
+# indent sub-effects under the play that caused them (the Dominion-online look).
+# Incremented around every effect/stage dispatch; always 0 at rest (try/finally),
+# so snapshots/saves never carry a stale depth.
+
+def _push_depth(game):
+    game["log_depth"] = game.get("log_depth", 0) + 1
+
+
+def _pop_depth(game):
+    game["log_depth"] = max(0, game.get("log_depth", 1) - 1)
 
 
 # --- frame machinery ---------------------------------------------------------
@@ -143,7 +159,11 @@ def _drive(game):
         if not game["pending"] or game["pending"][-1]["kind"] != "auto":
             return
         frame = _pop_frame(game)
-        _stage_fn(frame["card"], frame["stage"])(game, frame["pid"], frame, None)
+        _push_depth(game)
+        try:
+            _stage_fn(frame["card"], frame["stage"])(game, frame["pid"], frame, None)
+        finally:
+            _pop_depth(game)
     raise RuntimeError("dontminion: _drive exceeded iteration cap (runaway auto frames)")
 
 
@@ -215,7 +235,8 @@ def draw(game, pid, n):
     seat["hand"].extend(drawn)
     if drawn:
         _mark_revealed(game)
-        _log(game, pid, "draw", n=len(drawn))
+        # card names are per-field redacted in player_view (owner-only pre-over)
+        _log(game, pid, "draw", n=len(drawn), cards=list(drawn))
     return drawn
 
 
@@ -290,17 +311,15 @@ def trash_from_supply(game, card):
 
 
 def discard(game, pid, cards, zone="hand", public=False):
-    """Discard named cards from a zone. Hand discards log count only (top of the
-    discard pile is public via state); already-public sources pass public=True."""
+    """Discard named cards from a zone. Names are logged for every discard —
+    faithful to the table, where cards land face-up on the pile one at a time
+    (the pile can't be browsed later, but the event itself is public)."""
     seat = game["seats"][pid]
     for c in cards:
         seat[zone].remove(c)
         seat["discard"].append(c)
     if cards:
-        if public:
-            _log(game, pid, "discard", cards=list(cards))
-        else:
-            _log(game, pid, "discard", n=len(cards))
+        _log(game, pid, "discard", cards=list(cards), n=len(cards))
 
 
 def topdeck(game, pid, card, zone="hand", public=False):
@@ -359,16 +378,25 @@ def pass_card(game, giver, receiver, card):
     _log(game, giver, "pass_public", to=receiver)
 
 
+# The +X counters always belong to the turn player (they're turn-scoped), so the
+# "plus" log lines carry game["turn"] no matter which card path granted them.
+
 def add_actions(game, n):
     game["actions"] += n
+    if n > 0:
+        _log(game, game["turn"], "plus", actions=n)
 
 
 def add_buys(game, n):
     game["buys"] += n
+    if n > 0:
+        _log(game, game["turn"], "plus", buys=n)
 
 
 def add_coins(game, n):
     game["coins"] += n
+    if n > 0:
+        _log(game, game["turn"], "plus", coins=n)
 
 
 def opponents(game, pid):
@@ -407,7 +435,11 @@ def play_action_card(game, pid, card, from_zone="hand"):
             if opts:
                 _push_window(game, o, opts)
     else:
-        _effect_fn(card)(game, pid)
+        _push_depth(game)
+        try:
+            _effect_fn(card)(game, pid)
+        finally:
+            _pop_depth(game)
 
 
 def _reaction_options(game, o, immune, moat_ok=True):
@@ -535,10 +567,13 @@ def _play_one_treasure(game, pid, card):
     seat["hand"].remove(card)
     seat["in_play"].append(card)
     game["coins"] += CARDS[card]["coins"]
+    _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
     if card == "Silver" and not game["turn_ctx"]["silver_played"]:
         game["turn_ctx"]["silver_played"] = True
-        game["coins"] += game["turn_ctx"]["merchants"]
-    _log(game, pid, "play", card=card)
+        m = game["turn_ctx"]["merchants"]
+        if m:
+            game["coins"] += m
+            _log(game, pid, "plus", coins=m, why="Merchant")
 
 
 def _h_play_treasure(game, pid, move):
@@ -699,7 +734,11 @@ def _resolve_decision(game, pid, move):
         # decline) is information the turn player didn't have — no undo after.
         _mark_revealed(game)
     frame = _pop_frame(game)
-    _stage_fn(frame["card"], frame["stage"])(game, pid, frame, move)
+    _push_depth(game)
+    try:
+        _stage_fn(frame["card"], frame["stage"])(game, pid, frame, move)
+    finally:
+        _pop_depth(game)
     return True, None
 
 
@@ -937,7 +976,16 @@ def player_view(game, viewer):
             seat.pop("aside")
             if p != viewer:
                 seat.pop("hand")
-    g["log"] = [e for e in g["log"] if "private_to" not in e or viewer in e["private_to"]]
+    log = []
+    for e in g["log"]:
+        if "private_to" in e and viewer not in e["private_to"]:
+            continue
+        # draw entries carry the drawn card names — owner-only until game over
+        # (per-field redaction; the count n stays public)
+        if not over and e.get("event") == "draw" and e.get("pid") != viewer and "cards" in e:
+            e = {k: v for k, v in e.items() if k != "cards"}
+        log.append(e)
+    g["log"] = log
     return g
 
 
@@ -989,6 +1037,7 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
         "pending_kind": None,
         "vp": {},
         "log": [],
+        "log_depth": 0,
         "over": False,
         "winners": [],
         "scores": {},

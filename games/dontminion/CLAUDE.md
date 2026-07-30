@@ -57,7 +57,8 @@ revealed hand cards STAY in hand) · `play_action_card(game,pid,card,from_zone="
 `deck_from_aside(game,pid,order)` (aside → top of deck, order[0] on top: Sentry/Patrol) ·
 `deck_insert(game,pid,card,position,zone="hand")` (Secret Passage; 0 = top) ·
 `pass_card(game,giver,receiver,card)` (Masquerade; logs privately to the pair) ·
-`add_actions/add_buys/add_coins` ·
+`add_actions/add_buys/add_coins` (each logs a public `plus` line — the client's
+"gets +$2 / +1 Action" sub-effect lines come from these, so don't bypass them) ·
 `opponents(game,pid)` (turn order) · `count_empty_piles` ·
 `attack_opponents(game,pid,card,per_opp_stage,data=None,immune=None)` (a card whose attack part
 runs in a LATER stage — Minion, Replace — must capture `list(game["_atk_immune"])` into its frame
@@ -112,7 +113,15 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
 only — showing deck/discard counts to everyone is a documented convenience; officially they're
 not open info), hands only to their owner, discard = top + count, `aside` = count, raw `pending`
 replaced by `pending_view` (actor: kind+card+constraint; others: card + waiting_on), log entries
-honor `private_to`, `rng_state`/`seed` popped. Everything reveals at game over. Live VP totals
+honor `private_to`, `rng_state`/`seed` popped. Everything reveals at game over.
+
+**The log is VERBOSE by design** (the Dominion-online look): every `draw` entry carries the
+drawn card NAMES — per-field redacted to the owner until game over (count `n` stays public);
+`discard`/`trash`/`reveal` log names publicly (faithful — those cards land face-up at the
+table); `add_*` emit public `plus` lines; treasure `play` entries carry `coins`; entries logged
+inside a card's resolution carry `d` (depth 1–3, set around every effect/stage dispatch,
+always 0 at rest) which the client renders as indentation. The client folds the adjacent
+`buy`+`gain` pair into one "buys and gains" line. Live VP totals
 (`game["vp"]`) are public by product decision.
 
 ## Replay discipline (replay.py is a follow-up; the discipline is NOT)

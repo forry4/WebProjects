@@ -684,3 +684,66 @@ def test_wire_view_is_json_safe():
     mv(g, A, {"type": "play_action", "card": "Witch"})
     for viewer in (A, B, C, None):
         json.dumps(engine.player_view(g, viewer))
+
+
+# --- verbose log (round-3 UI: effect lines, depth, draw-name privacy) ----------
+
+def test_log_plus_events_and_depth_under_a_play():
+    g = fresh(kingdom=K7 + ["Festival"])
+    give_hand(g, A, ["Festival"])
+    n0 = len(g["log"])
+    ok, err = mv(g, A, {"type": "play_action", "card": "Festival"})
+    assert ok, err
+    new = g["log"][n0:]
+    assert [e["event"] for e in new] == ["play", "plus", "plus", "plus"]
+    assert "d" not in new[0]                      # the play itself is top-level
+    for e in new[1:]:
+        assert e["d"] == 1                        # its effects indent under it
+    assert {"actions": 2} .items() <= new[1].items()
+    assert {"buys": 1} .items() <= new[2].items()
+    assert {"coins": 2} .items() <= new[3].items()
+    assert g["log_depth"] == 0                    # always zero at rest
+
+
+def test_log_treasure_play_carries_coins_and_merchant_bonus():
+    g = fresh(kingdom=K7 + ["Merchant"])
+    g["phase"] = "buy"
+    g["turn_ctx"]["merchants"] = 1
+    give_hand(g, A, ["Silver"])
+    ok, _ = mv(g, A, {"type": "play_treasure", "card": "Silver"})
+    assert ok
+    play = [e for e in g["log"] if e["event"] == "play" and e.get("card") == "Silver"][-1]
+    assert play["coins"] == 2
+    bonus = [e for e in g["log"] if e["event"] == "plus" and e.get("why") == "Merchant"]
+    assert len(bonus) == 1 and bonus[0]["coins"] == 1
+    assert g["coins"] == 3
+
+
+def test_log_draw_names_are_owner_only_until_over():
+    g = fresh()
+    engine.draw(g, A, 2)
+    e = [x for x in g["log"] if x["event"] == "draw"][-1]
+    assert e["pid"] == A and len(e["cards"]) == e["n"] == 2
+    va = engine.player_view(g, A)
+    vb = engine.player_view(g, B)
+    ea = [x for x in va["log"] if x["event"] == "draw" and x["pid"] == A][-1]
+    eb = [x for x in vb["log"] if x["event"] == "draw" and x["pid"] == A][-1]
+    assert ea["cards"] == e["cards"]
+    assert "cards" not in eb and eb["n"] == 2     # count public, names private
+    g["over"] = True
+    eb = [x for x in engine.player_view(g, B)["log"]
+          if x["event"] == "draw" and x["pid"] == A][-1]
+    assert eb["cards"] == e["cards"]              # everything reveals at over
+
+
+def test_log_discards_are_named_and_opponent_effects_indent():
+    g = fresh(players=[A, B])
+    give_hand(g, A, ["Militia"])
+    give_hand(g, B, ["Copper", "Copper", "Estate", "Estate", "Gold"])
+    ok, _ = mv(g, A, {"type": "play_action", "card": "Militia"})
+    assert ok
+    ok, err = decide(g, B, cards=["Estate", "Estate"])
+    assert ok, err
+    disc = [e for e in g["log"] if e["event"] == "discard" and e["pid"] == B][-1]
+    assert disc["cards"] == ["Estate", "Estate"] and disc["n"] == 2
+    assert disc.get("d", 0) >= 1                  # indents under the Militia

@@ -51,15 +51,53 @@
 .dm-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .dm-center-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
-/* ── opponents / trash / log ── */
+/* ── opponents (TOP strip): backs for their hand, faces for what they played ── */
+.dm-opps {
+  display: flex; flex-wrap: wrap; gap: 12px; padding: 12px 18px 0; width: 100%;
+  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
+}
+.dm-opps .dm-opp { flex: 1 1 340px; min-width: 0; }
 .dm-opp {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
   border-radius: var(--radius-lg, 14px); padding: 10px 12px;
 }
 .dm-opp-acting { border-color: var(--gold, #c9a84c); }
-.dm-opp-name { font-weight: 600; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.dm-opp-stats { display: flex; gap: 16px; color: var(--text-dim, #8a7d6a); font-size: 16px; margin-top: 6px; }
-.dm-opp-discard { color: var(--text-dim, #8a7d6a); font-size: 14px; margin-top: 4px; }
+.dm-opp-name { font-weight: 600; font-size: 16px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.dm-vp { color: var(--gold-light, #e8c96a); font-weight: 700; margin-left: auto; white-space: nowrap; }
+.dm-opp-turns { color: var(--text-dim, #8a7d6a); font-size: 13px; font-weight: 400; white-space: nowrap; }
+.dm-opp-zones {
+  display: flex; gap: 18px; align-items: flex-start; margin-top: 8px; padding-bottom: 14px;
+}
+.dm-opp-hand { flex: none; }
+.dm-fan { display: flex; }
+.dm-fan .dm-card + .dm-card { margin-left: calc(var(--card-w-s, 56px) * -0.62); }
+.dm-opp-inplay {
+  display: flex; flex-wrap: wrap; gap: 6px; flex: 1; align-items: center;
+  min-height: calc(var(--card-w-s, 56px) * 1.3); min-width: 0;
+}
+
+/* ── real piles (deck face-down, discard top face-up) + card backs ── */
+.dm-zpile { flex: none; }
+.dm-pilewrap { position: relative; }
+.dm-pile-stacked .dm-card {
+  box-shadow: 2px 2px 0 #0e0c09, 2px 2px 0 1px #3a342a, 4px 4px 0 1px #0e0c09;
+}
+.dm-card-back {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(201, 168, 76, .16), transparent 58%),
+    repeating-linear-gradient(135deg, #2a2418 0 6px, #201b11 6px 12px);
+  border-color: #4a4030;
+  display: flex; align-items: center; justify-content: center;
+}
+.dm-back-emblem {
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
+  color: rgba(201, 168, 76, .55);
+  font-size: calc(var(--card-w-s, 84px) * .48); line-height: 1;
+}
+.dm-empty-slot {
+  width: var(--card-w-s, 84px); min-height: calc(var(--card-w-s, 84px) * 1.3);
+  border: 1px dashed var(--border, #3a342a); border-radius: 10px;
+}
 .dm-trash {
   background: var(--surface, #1a1814); border: 1px dashed var(--border, #3a342a);
   border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
@@ -69,11 +107,17 @@
 .dm-log {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
   border-radius: var(--radius-lg, 14px); padding: 8px 12px;
-  font-size: 13px; line-height: 1.6; overflow-y: auto; max-height: 380px;
+  font-size: 13px; line-height: 1.6; overflow-y: auto;
+  max-height: min(640px, calc(100vh - 300px));
 }
 /* newest entry is the FIRST child (the JSX reverses) — scroll stays pinned there */
 .dm-log-line { color: var(--text-dim, #8a7d6a); }
 .dm-log-line:first-child { color: var(--text, #e8dfc8); }
+/* sub-effects indent under the play that caused them (engine log depth) */
+.dm-log-d1 { padding-left: 16px; }
+.dm-log-d2 { padding-left: 32px; }
+.dm-log-d3 { padding-left: 48px; }
+.dm-log-turn { color: var(--text, #e8dfc8); font-weight: 600; margin-top: 6px; }
 
 /* ── supply ── */
 .dm-supply {
@@ -118,12 +162,14 @@
   color: var(--text-dim, #8a7d6a); padding: 0 5px; white-space: pre-line;
   overflow: hidden; line-height: 1.25;
 }
-.dm-card-bottom {
-  /* cost coin first, then the type lines UNDER it — one line per type */
-  display: flex; flex-direction: column; align-items: flex-start;
-  padding: 3px 5px 5px; gap: 3px; margin-top: auto;
+/* Under the name: rules text on the left, and on the RIGHT a column of the
+   cost coin with the type lines directly below it (one line per type). */
+.dm-card-body { display: flex; flex: 1; min-height: 0; }
+.dm-card-side {
+  margin-left: auto; display: flex; flex-direction: column; align-items: flex-end;
+  gap: 3px; padding: 2px 5px 5px;
 }
-.dm-types { display: flex; flex-direction: column; gap: 1px; }
+.dm-types { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; text-align: right; }
 .dm-cost {
   background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
   color: #221a05; font-weight: 800; border-radius: 50%;
@@ -199,8 +245,12 @@
   --card-w-s: 82px;
 }
 .dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
-.dm-handrow { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
-.dm-mystats { display: flex; flex-direction: column; gap: 6px; color: var(--text-dim, #8a7d6a); font-size: 15px; min-width: 116px; }
+.dm-handrow { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
+.dm-me-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-weight: 600; font-size: 16px; margin-bottom: 10px; }
+.dm-mypiles {
+  display: flex; gap: 16px; align-items: flex-start; flex: none; padding-bottom: 14px;
+  --card-w-s: 84px; --card-h: calc(var(--card-w-s) * 1.3);
+}
 .dm-hand { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
 .dm-turnbtns { display: flex; flex-direction: column; gap: 8px; }
 
@@ -219,6 +269,19 @@
 .dm-scores th, .dm-scores td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border, #3a342a); }
 .dm-scores .dm-win td { color: var(--gold-light, #e8c96a); font-weight: 700; }
 .dm-rules p { margin: 8px 0; line-height: 1.5; }
+
+/* ── card-detail modal (any card you can't act on right now) ── */
+.dm-cardinfo { max-width: 560px; --card-w: 180px; --card-h: 252px; }
+.dm-cardinfo-cols { display: flex; gap: 18px; margin-bottom: 8px; }
+.dm-cardinfo .dm-card { height: auto; min-height: var(--card-h); flex: none; }
+.dm-cardinfo .dm-card-text { overflow: visible; }
+.dm-cardinfo-detail { min-width: 0; }
+.dm-cardinfo-detail h2 { margin-top: 0; }
+.dm-cardinfo-meta { color: var(--text-dim, #8a7d6a); margin: 4px 0 10px; }
+.dm-cardinfo-text { white-space: pre-line; line-height: 1.5; margin: 0; }
+
+/* the Undo button is ALWAYS on the bar during a game — greyed when nothing to take back */
+.dm-undo[disabled] { opacity: .4; cursor: default; }
 
 /* ── kingdom browser modal ── */
 .dm-kingdom-modal {
@@ -253,10 +316,15 @@
   .dm .dm-kgrid { gap: 8px; row-gap: 24px; }
   .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
   .dm .dm-resbar b { font-size: 17px; }
-  /* stack stats above the hand so the hand row spans the FULL width — with the
-     stats beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
+  /* stack the piles above the hand so the hand row spans the FULL width — with
+     them beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
   .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 8px; }
-  .dm .dm-mystats { flex-direction: row; min-width: 0; gap: 10px; }
+  .dm .dm-mypiles { --card-w-s: 72px; gap: 12px; }
   .dm .dm-turnbtns { flex-direction: row; width: 100%; }
   .dm .dm-hud span { font-size: 12px; }
+  /* opponent boxes swipe sideways instead of burying the board */
+  .dm .dm-opps { flex-wrap: nowrap; overflow-x: auto; padding: 8px 12px 4px; }
+  .dm .dm-opps .dm-opp { flex: 1 0 300px; }
+  .dm .dm-opp-zones { gap: 12px; }
+  .dm .dm-cardinfo-cols { flex-direction: column; align-items: center; }
 }
