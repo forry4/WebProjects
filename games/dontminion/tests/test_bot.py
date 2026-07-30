@@ -1,7 +1,7 @@
 """Random-legal bot tests: full games terminate, foreign pendings are answered,
 and the anti-stall bias holds.
 
-Kingdom is pinned to the effects_core exemplars — the only cards guaranteed
+Kingdom is pinned to the six kernel exemplars — the only cards guaranteed
 implemented independent of the batch WPs. (Full-roster coverage lives in the
 forced-kingdom soak sweeps once all batches land.)
 """

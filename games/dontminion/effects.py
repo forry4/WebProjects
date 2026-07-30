@@ -1,19 +1,14 @@
 """Merged card-effect registries.
 
-Each effects_* module owns a disjoint set of cards and exports EFFECTS/STAGES
-(see effects_core.py for the contract). This module is the single lookup point
-the engine uses; a duplicate registration is a packaging bug and raises.
+ONE effects_* module per expansion, each owning a disjoint set of cards and
+exporting EFFECTS/STAGES (contract: games/dontminion/CLAUDE.md). This module is
+the single lookup point the engine uses; a duplicate registration across
+modules is a packaging bug and raises at import.
 """
 
-from . import (effects_core, effects_base_a, effects_base_b,
-               effects_intrigue_a, effects_intrigue_b,
-               effects_seaside_a, effects_seaside_b,
-               effects_prosperity_a, effects_prosperity_b)
+from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity)
 
-_MODULES = (effects_core, effects_base_a, effects_base_b,
-            effects_intrigue_a, effects_intrigue_b,
-            effects_seaside_a, effects_seaside_b,
-            effects_prosperity_a, effects_prosperity_b)
+_MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity)
 
 EFFECTS = {}
 STAGES = {}

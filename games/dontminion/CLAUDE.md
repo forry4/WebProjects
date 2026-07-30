@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base 2E + Intrigue 2E + Seaside 2E) — package notes
+# Dontminion (Dominion: Base 2E + Intrigue 2E + Seaside 2E + Prosperity 2E) — package notes
 
-2–4 players, 86 cards. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 113 cards. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -12,12 +12,17 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 |---|---|
 | `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
-| `effects_core.py` | WP2-owned exemplars: Smithy, Village, Moat, Militia, Witch, Throne Room |
-| `effects_base_a/b.py`, `effects_intrigue_a/b.py`, `effects_seaside_a/b.py` | card batches (each owns ONLY its module + its test file) |
+| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | random-legal bot (all difficulty tiers, v1) |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
 | `tests/` | engine, soak, per-batch card tests, server, ws-auth, wire-redaction |
+
+**Card batches are still written in two halves per expansion** (a simple half and a
+mechanically complex half) by two parallel agents that may touch only files they own — the
+halves are CONCATENATED into the one module when the phase lands. The `tests/test_cards_<set>_a/b.py`
+files stay split: each half's fixtures (`fresh`/`give_hand`/`decide`) differ, so merging them
+would silently let one definition win and change what the other half's tests exercise.
 
 ## THE FROZEN ENGINE API (stop-the-line to change — escalate, never edit the kernel from a batch)
 
@@ -81,7 +86,7 @@ cross-player trigger; events: `"gain"` (any player gains; stage data gets actor/
 `until="turn_end"` for this-turn triggers (Sailor) · `watcher_data(game,owner,card)` — the LIVE
 data dict (per-turn bookkeeping, e.g. Corsair's first-treasure-per-player) ·
 `remove_watcher(game,owner,card,n=1)` · `mark_duration_rider(game,pid,duration_card,rider)` —
-Throne Room stays out with a Duration it directly played (effects_core does this) ·
+Throne Room stays out with a Duration it directly played (effects_base does this) ·
 `set_aside_duration`/`take_dur_aside(game,pid,cards,dest)` — the owner-only `dur_aside` zone
 (Haven; Blockade gains straight there via `gain(...,dest="dur_aside")`) · `to_island(game,pid,
 cards,zone)` / `to_village_mat` / `take_village_mat(game,pid)` — the scoring mats ·
