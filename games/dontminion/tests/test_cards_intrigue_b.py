@@ -5,7 +5,7 @@ from games.dontminion import engine
 
 A, B, C = "alice", "bob", "carol"
 KIB = ["Lurker", "Masquerade", "Swindler", "Diplomat", "Secret Passage",
-       "Courtier", "Minion", "Patrol", "Replace", "Torturer", "Harem",
+       "Courtier", "Minion", "Patrol", "Replace", "Torturer", "Farm",
        "Moat", "Smithy"]
 
 
@@ -34,7 +34,7 @@ def test_lurker_both_branches():
     assert play(g, A, "Lurker")[0]
     assert decide(g, A, ids=["trash"])[0]
     piles = g["pending"][-1]["constraint"]["piles"]
-    assert "Smithy" in piles and "Harem" not in piles and "Silver" not in piles
+    assert "Smithy" in piles and "Farm" not in piles and "Silver" not in piles
     assert decide(g, A, pile="Smithy")[0]
     assert "Smithy" in g["trash"] and g["supply"]["Smithy"] == 9
     assert play(g, A, "Lurker")[0]
@@ -258,11 +258,11 @@ def test_patrol_pockets_victories_and_orders_rest():
 def test_patrol_single_leftover_needs_no_order():
     g = fresh()
     give_hand(g, A, ["Patrol"])
-    g["seats"][A]["deck"] = ["Copper", "Copper", "Copper", "Estate", "Curse", "Harem", "Silver"]
-    assert play(g, A, "Patrol")[0]                     # Harem is a victory too
+    g["seats"][A]["deck"] = ["Copper", "Copper", "Copper", "Estate", "Curse", "Farm", "Silver"]
+    assert play(g, A, "Patrol")[0]                     # Farm is a victory too
     assert g["pending_pid"] is None
     assert g["seats"][A]["deck"][0] == "Silver"
-    assert "Harem" in g["seats"][A]["hand"]
+    assert "Farm" in g["seats"][A]["hand"]
 
 
 # --- Replace ----------------------------------------------------------------------
@@ -288,12 +288,12 @@ def test_replace_topdecks_action_treasure_and_curses_on_victory():
 
 def test_replace_dual_type_harem_topdecks_and_curses():
     g = fresh()
-    give_hand(g, A, ["Replace", "Harem"])              # $6 -> cap 8
+    give_hand(g, A, ["Replace", "Farm"])              # $6 -> cap 8
     give_hand(g, B, ["Copper"] * 5)
     assert play(g, A, "Replace")[0]
-    assert decide(g, A, cards=["Harem"])[0]
-    assert decide(g, A, pile="Harem")[0]               # treasure+victory
-    assert g["seats"][A]["deck"][0] == "Harem"
+    assert decide(g, A, cards=["Farm"])[0]
+    assert decide(g, A, pile="Farm")[0]               # treasure+victory
+    assert g["seats"][A]["deck"][0] == "Farm"
     assert g["seats"][B]["discard"] == ["Curse"]
 
 

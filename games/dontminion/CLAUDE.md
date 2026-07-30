@@ -48,6 +48,18 @@ unconditional fill can never be wrong and costs one lookup. The version gate is 
 genuine **transforms** — a key whose meaning or value shape changed, where re-running the step
 would corrupt a current game. There are none yet.
 
+**CARD RENAMES go through `_RENAMES` + a SCHEMA bump.** We ship the publisher's CURRENT names
+(user directive) — Intrigue's Harem is **Farm** (renamed 2023). A rename is not a cosmetic
+edit: the string sits inside live prod decks, hands, discards, in-play, mats, duration entries
+and riders, trash, the supply's KEYS, the kingdom list, `last_turn_gains`, open pending frames'
+constraint/data, every undo snapshot (whole game dicts) and the log. `_apply_renames` therefore
+walks the entire structure rather than enumerating zones. It protects player identity
+POSITIONALLY — by which key holds it, never by comparing values — because a display name can
+legitimately equal a card name, and a value-blind guard would then refuse to rename the real
+card and leave the game holding one the kernel no longer knows. This is the FIRST genuine
+transform step, and its `v < 4` gate is sound precisely because SCHEMA was bumped in the same
+commit (the condition the unconditional fills above could not rely on).
+
 **Replaying prod saves is the migration gate.** `migrate` is the one piece of code whose input
 is history rather than the current tree, so tests built from a current game can't fully cover it
 — pull the real blobs (Turso creds in `~/.spender_turso`, query `/v2/pipeline`) and play each

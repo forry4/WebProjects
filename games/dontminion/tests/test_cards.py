@@ -87,7 +87,7 @@ EXPECTED = {
     "Torturer": (5, ["action", "attack"]),
     "Trading Post": (5, ["action"]),
     "Upgrade": (5, ["action"]),
-    "Harem": (6, ["treasure", "victory"]),
+    "Farm": (6, ["treasure", "victory"]),
     "Nobles": (6, ["action", "victory"]),
     # Seaside 2E kingdom (27)
     "Haven": (2, ["action", "duration"]),
@@ -228,7 +228,7 @@ def test_schema_field_completeness_and_validity():
 
 def test_static_vp_values():
     expected_vp = {"Estate": 1, "Duchy": 3, "Province": 6, "Curse": -1,
-                   "Harem": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10}
+                   "Farm": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10}
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0
@@ -241,7 +241,7 @@ def test_treasure_coin_values():
     assert cards.CARDS["Copper"]["coins"] == 1
     assert cards.CARDS["Silver"]["coins"] == 2
     assert cards.CARDS["Gold"]["coins"] == 3
-    assert cards.CARDS["Harem"]["coins"] == 2
+    assert cards.CARDS["Farm"]["coins"] == 2
     assert cards.CARDS["Astrolabe"]["coins"] == 1
     assert cards.CARDS["Platinum"]["coins"] == 5
 
@@ -260,7 +260,7 @@ def test_pile_sizes():
         assert cards.pile_size("Copper", n_players) == copper
         assert cards.pile_size("Curse", n_players) == curse
         # basic + kingdom victory-typed piles all use the victory size
-        for v in ("Estate", "Duchy", "Province", "Gardens", "Duke", "Harem", "Mill", "Nobles"):
+        for v in ("Estate", "Duchy", "Province", "Gardens", "Duke", "Farm", "Mill", "Nobles"):
             assert cards.pile_size(v, n_players) == victory, v
         assert cards.pile_size("Silver", n_players) == 40
         assert cards.pile_size("Gold", n_players) == 30

@@ -4,7 +4,7 @@ Baron, Bridge, Conspirator, Courtier, Courtyard, Diplomat (action side — its
 Reaction lives in the engine's __attack window), Ironworks, Lurker, Masquerade,
 Mill, Mining Village, Minion, Nobles, Patrol, Pawn, Replace, Secret Passage,
 Shanty Town, Steward, Swindler, Torturer, Trading Post, Upgrade, Wishing Well.
-(Duke and Harem are data-only.)
+(Duke and Farm are data-only.)
 
   Pawn/Courtier-style picks — "The choices must be different" (pick distinct).
   Mill / Baron / Mining Village — "do X, for +$" contingency: the bonus is paid

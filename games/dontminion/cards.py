@@ -5,8 +5,13 @@ errata p37-38 + ch. VII Card Reference) and the dominionstrategy.com card-list p
 Base 2E and Intrigue 2E (see .claude-plans/i-want-to-add-luminous-pebble.md par.2/par.5/par.9).
 Texts are the CURRENT card versions: ch. V lists Masquerade, Mine, Moneylender and Throne Room
 as functionally changed post-2016; their entries' "Current (2016) version" notes are reflected
-here. (Compendium trivia, no effect on us: Harem was renamed "Farm" in 2023 printings; the 2E
-roster name Harem is kept.)
+here.
+
+NAMES ARE THE CURRENT ONES (user directive: "the most updated names and rules"). Intrigue's
+"Harem" ships as **Farm** — compendium: "Harem ❖ In 2023 this card was renamed 'Farm'". An
+earlier phase logged the rename as trivia and kept the old name; that was wrong. A rename is
+NOT cosmetic here: the string lives inside live prod decks/supplies/trash, so every rename
+owes a `_RENAMES` entry + SCHEMA bump in engine.py, which rewrites persisted saves on load.
 
 Schema (frozen contract — see plan par.9):
   CARDS[name] = {
@@ -246,7 +251,8 @@ CARDS = {
                  "text": "+1 Card\n+1 Action\nTrash a card from your hand. Gain a card "
                          "costing exactly $1 more than it.",
                  "expansion": "intrigue", "kingdom": True},
-    "Harem":    {"cost": 6, "types": ["treasure", "victory"], "coins": 2, "vp": 2,
+    # renamed from "Harem" in 2023 — see the module docstring and engine._RENAMES
+    "Farm":     {"cost": 6, "types": ["treasure", "victory"], "coins": 2, "vp": 2,
                  "text": "$2\n2 VP", "expansion": "intrigue", "kingdom": True},
     "Nobles":   {"cost": 6, "types": ["action", "victory"], "coins": 0, "vp": 2,
                  "text": "Choose one: +3 Cards; or +2 Actions.\n2 VP",

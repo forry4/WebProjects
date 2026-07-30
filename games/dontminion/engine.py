@@ -34,10 +34,20 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 3
+SCHEMA = 4
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
+#   4 = card RENAMES (Harem -> Farm) — the first genuine TRANSFORM step
+
+# Cards renamed by the publisher, old -> current. We ship current names (user
+# directive), so a persisted save written under an old name must be rewritten
+# at load: the string lives inside real decks, hands, supplies, trash, pending
+# frames and undo snapshots, so nothing short of a deep rewrite is correct.
+# EVERY future rename adds a line here AND bumps SCHEMA.
+_RENAMES = {
+    "Harem": "Farm",      # compendium: "In 2023 this card was renamed 'Farm'"
+}
 
 
 # Every key new_game creates that the kernel later reads by direct index, with
@@ -79,13 +89,16 @@ def migrate(game):
     games had schema 2 and no `last_turn_gains`, which a version-gated migrate
     skips and the kernel then KeyErrors on at end of turn). setdefault is
     idempotent, so an unconditional fill is never wrong and costs one lookup.
-    The version gate is reserved for genuine TRANSFORMS — a key whose meaning
-    or value shape changed, where re-running the step would corrupt a current
-    game. There are none yet; add them under `if v < N:` when there are.
+    The version gate is reserved for genuine TRANSFORMS — a value whose meaning
+    or shape changed, where re-running the step could corrupt a current game.
+    The rename step below is the first, and it is gated soundly because SCHEMA
+    was bumped in the same commit that added it (the condition the fills above
+    could not rely on). It happens to be idempotent too, so a missed gate would
+    cost time, not correctness.
     """
     if not isinstance(game, dict) or "seats" not in game:
         return game
-    v = game.get("schema", 1)          # noqa: F841 - for future transform steps
+    v = game.get("schema", 1)
     for key, factory in _GAME_FILLS.items():
         if key not in game:
             game[key] = factory(game)
@@ -96,7 +109,54 @@ def migrate(game):
     ctx = game.setdefault("turn_ctx", _fresh_turn_ctx())
     for key, val in _fresh_turn_ctx().items():
         ctx.setdefault(key, val)
+    if v < 4:                                   # pre-rename saves
+        _apply_renames(game, _RENAMES)
     game["schema"] = SCHEMA
+    return game
+
+
+def _apply_renames(game, mapping):
+    """Rewrite renamed card names EVERYWHERE in a persisted game.
+
+    A card name is not confined to a tidy list of zones — it is a bare string
+    in decks, hands, discards, in-play, aside, mats, duration entries and their
+    riders, trash, the supply's KEYS, the kingdom list, last_turn_gains, every
+    open pending frame's constraint and data, every undo snapshot (which are
+    whole game dicts), and the log. Missing any one of them would leave a live
+    game holding a card the kernel no longer knows, so this walks the whole
+    structure instead of enumerating zones.
+
+    The one thing it must not touch is player identity — a DISPLAY NAME equal
+    to a renamed card is entirely possible (someone can call themselves "Farm").
+    Identity is protected POSITIONALLY, by which key holds it, not by comparing
+    against the pid set: a value-blind guard would also refuse to rename the
+    real card whenever a player shared its name, quietly leaving the game
+    holding a card the kernel no longer knows."""
+    # keys whose VALUE is a pid, or a list of pids — never a card
+    pid_valued = {"turn", "pid", "pending_pid", "last_turn_pid", "host", "owner",
+                  "actor", "gainer", "players", "winners", "private_to",
+                  "immune", "_outpost", "_cur_dur"}
+    # keys whose dict KEYS are pids (values still recursed — last_turn_gains
+    # maps pid -> cards). "names" is skipped WHOLESALE: user-chosen text.
+    pid_keyed = {"seats", "vp", "vp_tokens", "scores", "last_turn_gains", "meta"}
+
+    def walk(node, rename_keys=True):
+        if isinstance(node, str):
+            return mapping.get(node, node)
+        if isinstance(node, list):
+            return [walk(x) for x in node]
+        if isinstance(node, dict):
+            out = {}
+            for k, val in node.items():
+                nk = mapping.get(k, k) if rename_keys else k
+                if k == "names" or k in pid_valued:
+                    out[nk] = val                      # identity: untouched
+                else:
+                    out[nk] = walk(val, rename_keys=k not in pid_keyed)
+            return out
+        return node
+
+    game.update(walk(game))
     return game
 
 

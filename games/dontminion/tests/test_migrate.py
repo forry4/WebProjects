@@ -62,7 +62,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 3
+    assert _fresh()["schema"] == engine.SCHEMA == 4
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -143,6 +143,83 @@ def test_migrate_fills_a_partial_turn_ctx():
     g2.pop("turn_ctx")
     engine.migrate(g2)
     assert g2["turn_ctx"] == engine._fresh_turn_ctx()
+
+
+def _harem_game():
+    """A live, mid-turn v3 game with the OLD name in every place it can hide."""
+    g = _fresh(expansions=("base", "intrigue"),
+               kingdom=["Farm", "Courtyard", "Pawn", "Steward", "Baron", "Bridge",
+                        "Ironworks", "Mill", "Nobles", "Upgrade"])
+    _drive(g, moves=30)
+    A_ = A
+    g["seats"][A_]["hand"].append("Farm")
+    g["seats"][A_]["deck"].append("Farm")
+    g["seats"][A_]["discard"].append("Farm")
+    g["seats"][A_]["in_play"].append("Farm")
+    g["trash"].append("Farm")
+    g["last_turn_gains"].setdefault(A_, []).append("Farm")
+    blob = json.loads(json.dumps(g))
+    # downgrade: every "Farm" becomes the pre-2023 "Harem", schema back to 3
+    blob = json.loads(json.dumps(blob).replace('"Farm"', '"Harem"')
+                      .replace("Farm", "Harem"))
+    blob["schema"] = 3
+    return blob
+
+
+def test_the_harem_to_farm_rename_rewrites_a_whole_live_save():
+    """A rename is NOT cosmetic: the string sits in real decks, supplies, trash,
+    pending frames and undo snapshots, so a load that missed one would leave a
+    live game holding a card the kernel no longer knows."""
+    blob = _harem_game()
+    assert "Harem" in json.dumps(blob) and "Farm" not in json.dumps(blob)
+
+    engine.migrate(blob)
+    dumped = json.dumps(blob)
+    assert "Harem" not in dumped, "an old name survived the migration"
+    assert blob["schema"] == engine.SCHEMA
+
+    # it is the SAME card in every zone, under the new name
+    assert "Farm" in blob["supply"] and "Farm" in blob["kingdom"]
+    seat = blob["seats"][A]
+    for zone in ("hand", "deck", "discard", "in_play"):
+        assert "Farm" in seat[zone], zone
+    assert "Farm" in blob["trash"]
+    assert "Farm" in blob["last_turn_gains"][A]
+
+    # ...and the migrated game still plays and scores (Farm is 2 VP)
+    _drive(blob, moves=60)
+    for viewer in (A, B, None):
+        json.dumps(engine.player_view(blob, viewer))
+
+
+def test_the_rename_never_touches_a_players_display_name():
+    """Someone can call themselves after a card. Identity is protected by
+    POSITION (which key holds it), not by matching the value — a value-blind
+    guard would refuse to rename the real card whenever a player shared its
+    name, leaving the game holding a card the kernel no longer knows."""
+    blob = _harem_game()
+    blob["names"] = {A: "Harem", B: "bob"}         # a player called Harem
+    blob["turn"] = A
+
+    engine.migrate(blob)
+    assert blob["names"][A] == "Harem"             # display name untouched
+    assert blob["players"] == [A, B] and set(blob["seats"]) == {A, B}
+    assert blob["turn"] == A
+    assert "Farm" in blob["supply"]                # ...and the CARD still renamed
+    assert "Harem" not in blob["supply"]
+    assert "Farm" in blob["seats"][A]["hand"]
+    _drive(blob, moves=40)
+
+
+def test_rename_is_idempotent_on_an_already_current_save():
+    g = _fresh(expansions=("base", "intrigue"),
+               kingdom=["Farm", "Courtyard", "Pawn", "Steward", "Baron", "Bridge",
+                        "Ironworks", "Mill", "Nobles", "Upgrade"])
+    _drive(g, moves=20)
+    before = json.dumps(g, sort_keys=True)
+    engine.migrate(g)
+    engine.migrate(g)
+    assert json.dumps(g, sort_keys=True) == before
 
 
 def test_v3_keys_survive_a_v3_blob_untouched():
