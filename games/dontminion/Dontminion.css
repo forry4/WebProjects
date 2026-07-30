@@ -290,8 +290,10 @@
 .dm-cardinfo-meta { color: var(--text-dim, #8a7d6a); margin: 4px 0 10px; }
 .dm-cardinfo-text { white-space: pre-line; line-height: 1.5; margin: 0; }
 
-/* the Undo button is ALWAYS on the bar during a game — greyed when nothing to take back */
+/* the Undo button lives at the TOP of the play box's button stack during a
+   game — greyed when nothing to take back */
 .dm-undo[disabled] { opacity: .4; cursor: default; }
+.dm-kingdom-btn { width: 100%; border: 1px solid var(--border, #3a342a); }
 
 /* ── kingdom browser modal ── */
 .dm-kingdom-modal {

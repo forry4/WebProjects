@@ -914,19 +914,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </span>
           {bridges > 0 && <span title="Bridge discount">cards cost −{bridges}</span>}
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => setShowKingdom(true)}>🃏 Kingdom</button>
-        {!over && (
-          <button className="btn btn-outline btn-sm dm-undo" disabled={!canUndo}
-            title={canUndo
-              ? "Take back your last action — press again to keep stepping back (until the turn started or new information was revealed)"
-              : "Nothing to undo — undo unlocks after a move of yours that revealed no new information"}
-            onClick={() => canUndo && mv({ type: "undo_turn" })}>↩ Undo{(game.undo_depth || 0) > 1 ? ` (${game.undo_depth})` : ""}</button>
-        )}
         {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
       </div>
 
       <div className="dm-main">
         <div className="dm-side">
+          <button className="btn btn-ghost dm-kingdom-btn" onClick={() => setShowKingdom(true)}>🃏 Kingdom</button>
           <div className="dm-pboxes">{seatOrder.map(renderPlayerBox)}</div>
           <div className="dm-trash" onClick={() => setShowTrash((s) => !s)}>
             Trash ({(game.trash || []).length}) {showTrash ? "▾" : "▸"}
@@ -988,6 +981,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
               </div>
               <div className="dm-turnbtns">
+                {!over && (
+                  <button className="btn btn-outline dm-undo" disabled={!canUndo}
+                    title={canUndo
+                      ? "Take back your last action — press again to keep stepping back (until the turn started or new information was revealed)"
+                      : "Nothing to undo — undo unlocks after a move of yours that revealed no new information"}
+                    onClick={() => canUndo && mv({ type: "undo_turn" })}>↩ Undo{(game.undo_depth || 0) > 1 ? ` (${game.undo_depth})` : ""}</button>
+                )}
                 {inBuy && handTreasures && !bought && (
                   <button className="btn btn-gold" onClick={() => mv({ type: "play_all_treasures" })}>Play all treasures</button>
                 )}
