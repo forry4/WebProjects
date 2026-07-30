@@ -31,7 +31,13 @@
 .dm-wait-players li { padding: 6px 0; border-bottom: 1px solid var(--border, #3a342a); }
 
 /* ── game frame ── */
-.dm-gamescreen { min-height: 100vh; display: flex; flex-direction: column; }
+.dm-gamescreen {
+  min-height: 100vh; display: flex; flex-direction: column;
+  /* nothing may widen the page — iOS Safari zooms out to fit an overflowing
+     element and KEEPS that zoom until reload (clip ≠ hidden: no scroll
+     container, sticky top bar unaffected) */
+  overflow-x: clip;
+}
 .dm-top {
   display: flex; align-items: center; gap: 14px; padding: 8px 14px;
   border-bottom: 1px solid var(--border, #3a342a); background: var(--surface, #1a1814);
@@ -185,7 +191,11 @@
   flex-wrap: wrap; justify-content: flex-end;
 }
 .dm-types {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  /* incompressible: when the coin doesn't fit beside the labels it WRAPS
+     below them instead of overlapping (min-width: 0 let flex shrink the box
+     underneath the coin) */
+  flex: 1 1 auto; min-width: max-content;
+  display: flex; flex-direction: column; gap: 1px;
   align-items: flex-start; text-align: left;
 }
 .dm-cost {
@@ -198,7 +208,7 @@
 }
 .dm-type {
   display: block;
-  font-size: clamp(7px, calc(var(--card-h, 120px) * .068), 11px);
+  font-size: clamp(6px, calc(var(--card-h, 120px) * .068), 11px);
   text-transform: uppercase; letter-spacing: .3px; color: #cfc4a6;
   white-space: nowrap;
 }
@@ -344,7 +354,10 @@
      them beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
   .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 8px; }
   .dm .dm-mypiles { --card-w-s: 72px; gap: 12px; }
-  .dm .dm-turnbtns { flex-direction: row; width: 100%; }
+  /* three buttons (Undo / Play all treasures / End turn) don't fit one row on
+     a phone — WRAP; unwrapped rows were what iOS zoomed out for */
+  .dm .dm-turnbtns { flex-direction: row; flex-wrap: wrap; width: 100%; }
+  .dm .dm-turnbtns .btn { flex: 1 1 auto; }
   .dm .dm-hud span { font-size: 12px; }
   /* opponent zones swipe sideways instead of burying the board */
   .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
