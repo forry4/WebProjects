@@ -378,7 +378,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
     && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
   const botActing = !!game && !over && (roomData?.ai_players || []).includes(game.pending_pid || game.turn);
   const bridges = game?.turn_ctx?.bridges || 0;
-  const effCost = (name) => Math.max(0, (cards[name]?.cost ?? 0) - bridges);
+  // Prices come from the SERVER (engine.cost): Bridge, Quarry, Peddler's
+  // dynamic self-cost and anything a future set adds. The bridges-only
+  // fallback covers a pre-costs save being replayed by a cached client.
+  const effCost = (name) => game?.costs?.[name]
+    ?? Math.max(0, (cards[name]?.cost ?? 0) - bridges);
+  const printedCost = (name) => cards[name]?.cost ?? 0;
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -834,7 +839,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
           onClick={() => pileClick(name)} onInfo={() => pileClick(name)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
         <span className="dm-pile-count"><Pop n={count} /></span>
-        {bridges > 0 && cardData && effCost(name) !== cardData.cost
+        {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
+        {cardData && effCost(name) !== printedCost(name)
           && <span className="dm-disc">now {effCost(name)}</span>}
       </div>
     );
@@ -1322,7 +1328,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 <h2>{cardInfo}</h2>
                 <p className="dm-cardinfo-meta">
                   Cost ${cards[cardInfo].cost}
-                  {bridges > 0 && effCost(cardInfo) !== cards[cardInfo].cost ? ` (now $${effCost(cardInfo)})` : ""}
+                  {effCost(cardInfo) !== printedCost(cardInfo) ? ` (now $${effCost(cardInfo)})` : ""}
                   {" · "}{(cards[cardInfo].types || []).map((t) => TYPE_LABEL[t] || t).join(" – ")}
                   {game.supply?.[cardInfo] != null ? ` · ${game.supply[cardInfo]} left in the Supply` : ""}
                 </p>

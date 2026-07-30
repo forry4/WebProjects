@@ -147,3 +147,43 @@ def test_spectator_view_is_fully_redacted():
     _assert_room_redacted(payload, viewer=None)
     for seat in payload["game"]["seats"].values():
         assert "hand" not in seat
+
+
+# --- effective prices ride the wire (the client must not re-derive them) -----
+
+def test_player_view_ships_effective_costs_incl_peddler_and_quarry():
+    """USER-REPORTED: Peddler showed its printed $8 in the UI because the
+    client priced piles itself with only the Bridge discount — so a discounted
+    Peddler never lit up and the click handler refused to send the buy.
+    player_view now ships engine.cost for every supply pile."""
+    g = engine.new_game([A, B], ["base", "prosperity"], seed=11,
+                        kingdom=["Peddler", "Quarry", "Village", "Smithy", "Market",
+                                 "Militia", "Moat", "Bandit", "Monument", "Bishop"])
+    view = engine.player_view(g, A)
+    assert view["costs"]["Peddler"] == 8            # action phase: no discount
+    assert view["costs"]["Village"] == 3
+    assert set(view["costs"]) == set(g["supply"])   # every pile priced
+
+    # three Actions on the table during the buy phase -> Peddler costs $8-$6
+    g["phase"] = "buy"
+    g["seats"][A]["in_play"] = ["Village", "Smithy", "Market"]
+    view = engine.player_view(g, A)
+    assert engine.cost(g, "Peddler") == 2
+    assert view["costs"]["Peddler"] == 2, "the discount must reach the wire"
+    # opponents price it the same way (it is keyed to the ACTIVE player)
+    assert engine.player_view(g, B)["costs"]["Peddler"] == 2
+    assert engine.player_view(g, None)["costs"]["Peddler"] == 2
+
+    # Quarry's turn-scoped discount also shows: Actions cost $2 less
+    g["turn_ctx"]["quarries"] = 1
+    view = engine.player_view(g, A)
+    assert view["costs"]["Village"] == 1            # 3 - 2
+    assert view["costs"]["Smithy"] == 2             # 4 - 2
+    assert view["costs"]["Estate"] == 2             # not an Action: unchanged
+    assert view["costs"]["Peddler"] == 0            # 8 - 6 - 2, floored at 0
+
+    # and a Bridge stacks on top, still floored at 0
+    g["turn_ctx"]["bridges"] = 2
+    view = engine.player_view(g, A)
+    assert view["costs"]["Village"] == 0
+    assert view["costs"]["Province"] == 6           # 8 - 2

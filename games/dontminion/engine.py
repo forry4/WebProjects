@@ -1547,6 +1547,12 @@ def player_view(game, viewer):
     # resume info — ship only the visible identity
     g["watchers"] = [{"event": w["event"], "owner": w["owner"], "card": w["card"]}
                      for w in g.get("watchers", [])]
+    # EFFECTIVE prices, computed by THE cost function — the client must never
+    # re-derive them. It used to subtract only Bridge, so every other cost rule
+    # (Quarry's turn discount, Peddler's dynamic self-cost, and every future
+    # one) was invisible: the pile showed its printed price, never lit up as
+    # affordable, and the click handler refused to send the buy.
+    g["costs"] = {c: cost(game, c) for c in game["supply"]}
     pend = g.pop("pending")
     if pend:
         top = pend[-1]
