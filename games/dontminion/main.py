@@ -229,11 +229,16 @@ def load_game_to_memory(room_id: str) -> bool:
     state = load_game_state(room_id)
     if not state:
         return False
+    saved = state.get("game")
+    if isinstance(saved, dict):
+        # THE migration point: a live game may predate any number of phases;
+        # after this the kernel may assume the current game-dict shape.
+        saved = engine.migrate(saved)
     ROOMS[room_id] = {
         "players": state.get("players", {}),
         "host": state.get("host"),
         "status": state.get("status", "open"),
-        "game": state.get("game"),
+        "game": saved,
         "meta": state.get("meta", {}),
         "vs_ai": state.get("vs_ai", False),
         "ai_players": list(state.get("ai_players", [])),

@@ -859,3 +859,37 @@ def test_undo_after_a_start_of_turn_duration_draw():
     assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
     assert mv(g, A, {"type": "undo_turn"})[0]        # still undoable
     assert g["coins"] == 3 and "Silver" not in g["seats"][A]["discard"]
+
+
+def test_undo_snapshots_do_not_copy_the_log():
+    """HYGIENE: the log is append-only, so a snapshot stores only its LENGTH
+    and undo restores by truncation. Copying it put up to _UNDO_CAP copies of
+    a growing log in every save blob (and in the deepcopy on every move)."""
+    g = fresh()
+    give_hand(g, A, ["Copper", "Copper", "Copper", "Estate", "Estate"])
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "end_phase"})[0]
+    for _ in range(4):
+        assert mv(g, A, {"type": "play_treasure", "card": "Copper"})[0] or True
+    stack = g["undo_stack"]
+    assert stack, "snapshots were taken"
+    for snap in stack:
+        assert "log" not in snap                  # the whole point
+        assert isinstance(snap["_log_len"], int)
+    # the snapshots hold no copy of the log at all
+    assert json.dumps(stack).count('"event"') == 0
+    # ...and undo rewinds the log EXACTLY to the snapshot, then logs itself
+    depth = len(stack)
+    snap_len = stack[-1]["_log_len"]
+    before = [dict(e) for e in g["log"]]
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert len(g["log"]) == snap_len + 1          # truncated, plus the "undo" line
+    assert g["log"][-1]["event"] == "undo"
+    assert g["log"][:snap_len] == before[:snap_len]   # earlier lines untouched
+    assert len(g["undo_stack"]) == depth - 1
+    assert [e["n"] for e in g["log"]] == list(range(len(g["log"])))  # n stays == index
+    # replaying to the start of the turn leaves a consistent log
+    while g["undo_stack"]:
+        assert mv(g, A, {"type": "undo_turn"})[0]
+    assert [e["n"] for e in g["log"]] == list(range(len(g["log"])))
+    assert g["phase"] == "action" and g["coins"] == 0

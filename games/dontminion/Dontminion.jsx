@@ -275,7 +275,20 @@ function fmtLog(e, names) {
     case "undo": return `${who} takes back a move`;
     case "abandon": return `${who} abandoned the game`;
     case "game_over": return `Game over — ${(e.winners || []).map((w) => names[w] || w).join(" & ")} win${(e.winners || []).length > 1 ? "" : "s"}!`;
-    default: return null;
+    default: {
+      // An engine event this client doesn't know yet (every expansion adds
+      // some) must never be SILENT — a missing line reads as "the game did
+      // nothing". Render a plain readable fallback until it gets a case above.
+      if (!e.event) return null;
+      const skip = ["n", "pid", "event", "d", "private_to"];
+      const bits = Object.entries(e)
+        .filter(([k, v]) => !skip.includes(k) && (typeof v === "string" || typeof v === "number"))
+        .map(([k, v]) => (k === "card" || k === "count" ? String(v) : `${k} ${v}`));
+      const cards = Array.isArray(e.cards) ? listCards(e.cards) : "";
+      const detail = [cards, ...bits].filter(Boolean).join(", ");
+      const verb = e.event.replace(/_/g, " ");
+      return `${who ? who + " " : ""}${verb}${detail ? ": " + detail : ""}`.trim();
+    }
   }
 }
 

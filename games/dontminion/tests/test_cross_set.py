@@ -234,6 +234,8 @@ def test_pre_seaside_save_blob_plays_through_v2_kernel():
     for k in ("watchers", "last_turn_pid", "extra_turn", "schema"):
         g.pop(k, None)
     g = json.loads(json.dumps(g))                  # the save/load round-trip
+    g = engine.migrate(g)                          # ...and THE migration point
+    assert g["schema"] == engine.SCHEMA
     rng = random.Random(9)
     for _ in range(300):
         if g["over"]:

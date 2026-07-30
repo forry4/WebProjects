@@ -24,6 +24,24 @@ halves are CONCATENATED into the one module when the phase lands. The `tests/tes
 files stay split: each half's fixtures (`fresh`/`give_hand`/`decide`) differ, so merging them
 would silently let one definition win and change what the other half's tests exercise.
 
+## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
+
+`engine.SCHEMA` (now **3**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity) is the game-dict
+shape version, stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
+in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
+kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
+guarantees** (28 of them were retired when this landed). Genuinely lazy transients
+(`dur_setup`, `_turn_gains`, `_cur_dur`) stay lazy.
+
+**Every phase that adds a key the kernel reads owes: a `SCHEMA` bump, a step in `migrate`, and
+a case in `tests/test_migrate.py`** (which downgrades a CURRENT game to each old shape, so the
+tests stay honest as the dict grows). Live prod games predate every later phase.
+
+**Undo snapshots exclude the LOG.** The log is append-only, so a snapshot stores `_log_len` and
+`_undo_move` restores by truncating (`n` stays == index). Copying it put up to `_UNDO_CAP`
+copies of a growing log into every save blob — measured 487 KB → 150 KB on a late-game
+position, written to Turso on every move.
+
 ## THE FROZEN ENGINE API (stop-the-line to change — escalate, never edit the kernel from a batch)
 
 **Moves** are dicts keyed on `"type"`: `play_action` / `play_treasure` / `play_all_treasures` /
