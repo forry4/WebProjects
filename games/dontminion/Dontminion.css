@@ -261,6 +261,11 @@
 .dm-reshint-btn { margin-left: auto; white-space: nowrap; }
 .dm-prompt-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .dm-prompt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* a button never outgrows its box; FitLabel then shrinks the TEXT to fit */
+.dm-prompt-actions .btn, .dm-turnbtns .btn, .dm-reshint-btn {
+  max-width: 100%; min-width: 0; overflow: hidden;
+}
+.dm-fitlabel { display: block; white-space: nowrap; max-width: 100%; }
 .dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
 .dm-names { max-height: 180px; overflow-y: auto; }
 

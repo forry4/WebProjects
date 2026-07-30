@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss,
@@ -84,6 +84,22 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
   );
+}
+
+// Button label that SHRINKS its font until the text fits the button's width
+// (buttons themselves are capped at 100% of their box — never overflow it).
+function FitLabel({ children }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.fontSize = "";
+    const base = parseFloat(getComputedStyle(el).fontSize) || 15;
+    if (el.scrollWidth > el.clientWidth + 1) {
+      el.style.fontSize = Math.max(9, base * (el.clientWidth / el.scrollWidth) * 0.97) + "px";
+    }
+  }, [children]);
+  return <span ref={ref} className="dm-fitlabel">{children}</span>;
 }
 
 function DmCardBack() {
@@ -584,7 +600,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
         return (
           <div className="dm-prompt-actions">
             {c.options.map((o) => (
-              <button key={o.id} className="btn btn-gold" onClick={() => mv({ type: "decision", ids: [o.id] })}>{o.label}</button>
+              <button key={o.id} className="btn btn-gold" onClick={() => mv({ type: "decision", ids: [o.id] })}>
+                <FitLabel>{o.label}</FitLabel>
+              </button>
             ))}
           </div>
         );
@@ -595,7 +613,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <button key={o.id}
               className={"btn " + (pickOpts.includes(o.id) ? "btn-gold" : "btn-outline")}
               onClick={() => setPickOpts((s) => s.includes(o.id) ? s.filter((x) => x !== o.id) : (s.length < pick ? [...s, o.id] : s))}>
-              {o.label}
+              <FitLabel>{o.label}</FitLabel>
             </button>
           ))}
           <button className="btn btn-gold" disabled={pickOpts.length !== pick}
@@ -639,7 +657,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
       return (
         <div className="dm-prompt-actions dm-names">
           {c.cards.map((n) => (
-            <button key={n} className="btn btn-outline" onClick={() => mv({ type: "decision", card: n })}>{n}</button>
+            <button key={n} className="btn btn-outline" onClick={() => mv({ type: "decision", card: n })}>
+              <FitLabel>{n}</FitLabel>
+            </button>
           ))}
         </div>
       );
@@ -1022,14 +1042,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
                 {hasModalPrompt && promptMin
                   ? <button className="btn btn-gold btn-sm dm-reshint-btn"
-                      onClick={() => setPromptMin(false)}>{promptCardName}: make your choice ▸</button>
+                      onClick={() => setPromptMin(false)}><FitLabel>{promptCardName}: make your choice ▸</FitLabel></button>
                   : resHint ? <span className="dm-reshint">{resHint}</span> : null}
               </div>
             )}
             {!over && game.turn !== myId && hasModalPrompt && promptMin && (
               <div className="dm-resbar">
                 <button className="btn btn-gold btn-sm dm-reshint-btn"
-                  onClick={() => setPromptMin(false)}>{promptCardName}: make your choice ▸</button>
+                  onClick={() => setPromptMin(false)}><FitLabel>{promptCardName}: make your choice ▸</FitLabel></button>
               </div>
             )}
             <div className="dm-inplay">
