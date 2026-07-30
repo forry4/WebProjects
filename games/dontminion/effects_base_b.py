@@ -39,7 +39,7 @@ def _bureaucrat(game, pid):
 
 def _bureaucrat_hit(game, pid, frame, choice):
     hand = game["seats"][pid]["hand"]
-    victories = sorted({c for c in hand if "victory" in E.CARDS[c]["types"]})
+    victories = sorted({c for c in hand if E.has_type(game, c, "victory")})
     if not victories:
         E.reveal(game, pid, list(hand), "hand")
         return
@@ -72,7 +72,7 @@ def _bandit_hit(game, pid, frame, choice):
         return
     E.reveal(game, pid, list(moved), "deck")
     eligible = [c for c in moved
-                if "treasure" in E.CARDS[c]["types"] and c != "Copper"]
+                if E.has_type(game, c, "treasure") and c != "Copper"]
     if not eligible:
         E.discard(game, pid, list(moved), zone="aside", public=True)
         return
@@ -125,7 +125,7 @@ def _library_step(game, pid, frame, choice):
         _library_finish(game, pid)
         return
     c = moved[0]
-    if "action" in E.CARDS[c]["types"]:         # optional skip, per Action drawn
+    if E.has_type(game, c, "action"):         # optional skip, per Action drawn
         E.push_choose_option(
             game, pid, "Library", "choice",
             options=[{"id": "hand", "label": f"Put {c} in your hand"},
@@ -153,7 +153,7 @@ def _library_finish(game, pid):
 
 def _mine(game, pid):
     hand = game["seats"][pid]["hand"]
-    treasures = sorted({c for c in hand if "treasure" in E.CARDS[c]["types"]})
+    treasures = sorted({c for c in hand if E.has_type(game, c, "treasure")})
     if not treasures:                           # nothing to trash: nothing at all
         return
     E.push_choose_cards(game, pid, "Mine", "trash",
@@ -168,8 +168,8 @@ def _mine_trash(game, pid, frame, choice):
     E.trash(game, pid, [t])
     piles = [p for p in sorted(game["supply"])
              if game["supply"][p] > 0
-             and "treasure" in E.CARDS[p]["types"]
-             and E.cost(game, p) <= cap]
+             and E.has_type(game, p, "treasure")
+             and E.cost_le(game, p, cap)]
     if piles:
         E.push_choose_pile(game, pid, "Mine", "gain", piles=piles)
 
@@ -218,7 +218,7 @@ def _sentry_order(game, pid, frame, choice):
 
 def _artisan(game, pid):
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost(game, p) <= 5]
+             if game["supply"][p] > 0 and E.cost_le(game, p, 5)]
     if piles:
         E.push_choose_pile(game, pid, "Artisan", "gain", piles=piles)
     else:                                       # nothing gainable — topdeck anyway

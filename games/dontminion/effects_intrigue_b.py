@@ -39,11 +39,11 @@ def _lurker(game, pid):
 def _lurker_pick(game, pid, frame, choice):
     if choice["ids"][0] == "trash":
         piles = [p for p in sorted(game["supply"])
-                 if game["supply"][p] > 0 and "action" in E.CARDS[p]["types"]]
+                 if game["supply"][p] > 0 and E.has_type(game, p, "action")]
         if piles:
             E.push_choose_pile(game, pid, "Lurker", "trash_pile", piles=piles)
     else:
-        actions = sorted({c for c in game["trash"] if "action" in E.CARDS[c]["types"]})
+        actions = sorted({c for c in game["trash"] if E.has_type(game, c, "action")})
         if actions:
             E.push_choose_cards(game, pid, "Lurker", "gain_trash",
                                 cards=actions, mn=1, mx=1, purpose="gain")
@@ -123,7 +123,7 @@ def _swindler_hit(game, pid, frame, choice):
     attacker = game["turn"]
     target = E.cost(game, c)
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost(game, p) == target]
+             if game["supply"][p] > 0 and E.cost_eq(game, p, target)]
     if piles:
         E.push_choose_pile(game, attacker, "Swindler", "gain",
                            piles=piles, data={"victim": pid})
@@ -184,7 +184,7 @@ def _courtier(game, pid):
 def _courtier_reveal(game, pid, frame, choice):
     card = choice["cards"][0]
     E.reveal(game, pid, [card], "hand")
-    k = min(len(E.CARDS[card]["types"]), len(_COURTIER_OPTS))
+    k = min(len(E.types_of(game, card)), len(_COURTIER_OPTS))
     E.push_choose_option(game, pid, "Courtier", "pick",
                          options=list(_COURTIER_OPTS), pick=k, distinct=True)
 
@@ -241,7 +241,7 @@ def _patrol(game, pid):
         return
     E.reveal(game, pid, list(moved), "deck")
     pocket = [c for c in moved
-              if "victory" in E.CARDS[c]["types"] or "curse" in E.CARDS[c]["types"]]
+              if E.has_type(game, c, "victory") or E.has_type(game, c, "curse")]
     if pocket:
         E.take_aside(game, pid, pocket)           # into hand
     rest = list(game["seats"][pid]["aside"])
@@ -271,7 +271,7 @@ def _replace_trash(game, pid, frame, choice):
     cap = E.cost(game, trashed) + 2
     E.trash(game, pid, [trashed])
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost(game, p) <= cap]
+             if game["supply"][p] > 0 and E.cost_le(game, p, cap)]
     if piles:
         E.push_choose_pile(game, pid, "Replace", "gain",
                            piles=piles, data=dict(frame["data"]))
@@ -279,7 +279,7 @@ def _replace_trash(game, pid, frame, choice):
 
 def _replace_gain(game, pid, frame, choice):
     card = choice["pile"]
-    types = E.CARDS[card]["types"]
+    types = E.types_of(game, card)
     dest = "deck" if ("action" in types or "treasure" in types) else "discard"
     if not E.gain(game, pid, card, dest=dest):
         return

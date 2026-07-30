@@ -62,7 +62,7 @@ def _witch_curse(game, pid, frame, choice):
 
 def _throne_room(game, pid):
     hand = game["seats"][pid]["hand"]
-    actions = sorted({c for c in hand if "action" in E.CARDS[c]["types"]})
+    actions = sorted({c for c in hand if E.has_type(game, c, "action")})
     if not actions:
         return
     E.push_choose_cards(game, pid, "Throne Room", "pick",
@@ -86,7 +86,7 @@ def _throne_room_second(game, pid, frame, choice):
     E.play_action_card(game, pid, card, from_zone=None)
     # Duration rule: the Throne Room that played a persisting Duration stays
     # on the table with it (discarded together at that Duration's clean-up).
-    if "duration" in E.CARDS[card]["types"]:
+    if E.has_type(game, card, "duration"):
         E.mark_duration_rider(game, pid, card, "Throne Room")
 
 

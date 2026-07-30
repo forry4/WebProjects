@@ -254,6 +254,89 @@ CARDS = {
 }
 
 CARDS.update({
+    # --- Prosperity kingdom (2E, 25) + Platinum/Colony — spec: scratchpad
+    # prosperity-spec.md, verified against compendium ch. VII (current texts) ---
+    "Platinum": {"cost": 9, "types": ["treasure"], "coins": 5, "vp": 0,
+                 "text": "$5", "expansion": "prosperity", "kingdom": False},
+    "Colony": {"cost": 11, "types": ["victory"], "coins": 0, "vp": 10,
+               "text": "10 VP", "expansion": "prosperity", "kingdom": False},
+    "Anvil": {"cost": 3, "types": ["treasure"], "coins": 1, "vp": 0,
+              "text": "$1\nYou may discard a Treasure to gain a card costing up to $4.",
+              "expansion": "prosperity", "kingdom": True},
+    "Bank": {"cost": 7, "types": ["treasure"], "coins": 0, "vp": 0,
+             "text": "+$1 per Treasure card you have in play (counting this).",
+             "expansion": "prosperity", "kingdom": True},
+    "Bishop": {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+               "text": "+$1\n+1 VP\nTrash a card from your hand. +1 VP per $2 it costs (round down).\nEach other player may trash a card from their hand.",
+               "expansion": "prosperity", "kingdom": True},
+    "Charlatan": {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                  "text": "+$3\nEach other player gains a Curse.\nIn games using this, Curse is also a Treasure worth $1.",
+                  "expansion": "prosperity", "kingdom": True},
+    "City": {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+             "text": "+1 Card\n+2 Actions\nIf there are one or more empty Supply piles, +1 Card. If there are two or more, +1 Buy and +$1.",
+             "expansion": "prosperity", "kingdom": True},
+    "Clerk": {"cost": 4, "types": ["action", "reaction", "attack"], "coins": 0, "vp": 0,
+              "text": "+$2\nEach other player with 5 or more cards in hand puts one onto their deck.\nAt the start of your turn, you may play this from your hand.",
+              "expansion": "prosperity", "kingdom": True},
+    "Collection": {"cost": 5, "types": ["treasure"], "coins": 2, "vp": 0,
+                   "text": "$2\n+1 Buy\nThis turn, when you gain an Action card, +1 VP.",
+                   "expansion": "prosperity", "kingdom": True},
+    "Crystal Ball": {"cost": 5, "types": ["treasure"], "coins": 1, "vp": 0,
+                     "text": "$1\nLook at the top card of your deck. You may trash it, discard it, or, if it's an Action or Treasure, play it.",
+                     "expansion": "prosperity", "kingdom": True},
+    "Expand": {"cost": 7, "types": ["action"], "coins": 0, "vp": 0,
+               "text": "Trash a card from your hand. Gain a card costing up to $3 more than it.",
+               "expansion": "prosperity", "kingdom": True},
+    "Forge": {"cost": 7, "types": ["action"], "coins": 0, "vp": 0,
+              "text": "Trash any number of cards from your hand. Gain a card with cost exactly equal to the total cost in $ of the trashed cards.",
+              "expansion": "prosperity", "kingdom": True},
+    "Grand Market": {"cost": 6, "types": ["action"], "coins": 0, "vp": 0,
+                     "text": "+1 Card\n+1 Action\n+1 Buy\n+$2\nYou can't buy this if you have any Coppers in play.",
+                     "expansion": "prosperity", "kingdom": True},
+    "Hoard": {"cost": 6, "types": ["treasure"], "coins": 2, "vp": 0,
+              "text": "$2\nThis turn, when you gain a Victory card, if you bought it, gain a Gold.",
+              "expansion": "prosperity", "kingdom": True},
+    "Investment": {"cost": 4, "types": ["treasure"], "coins": 0, "vp": 0,
+                   "text": "Trash a card from your hand.\nChoose one: +$1; or trash this to reveal your hand for +1 VP per differently named Treasure there.",
+                   "expansion": "prosperity", "kingdom": True},
+    "King's Court": {"cost": 7, "types": ["action"], "coins": 0, "vp": 0,
+                     "text": "You may play an Action card from your hand three times.",
+                     "expansion": "prosperity", "kingdom": True},
+    "Magnate": {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                "text": "Reveal your hand. +1 Card per Treasure in it.",
+                "expansion": "prosperity", "kingdom": True},
+    "Mint": {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+             "text": "You may reveal a Treasure card from your hand. Gain a copy of it.\nWhen you gain this, trash all non-Duration Treasures you have in play.",
+             "expansion": "prosperity", "kingdom": True},
+    "Monument": {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                 "text": "+$2\n+1 VP", "expansion": "prosperity", "kingdom": True},
+    "Peddler": {"cost": 8, "types": ["action"], "coins": 0, "vp": 0,
+                "text": "+1 Card\n+1 Action\n+$1\nDuring a player's Buy phase, this costs $2 less per Action card they have in play.",
+                "expansion": "prosperity", "kingdom": True},
+    "Quarry": {"cost": 4, "types": ["treasure"], "coins": 1, "vp": 0,
+               "text": "$1\nThis turn, Actions cost $2 less.",
+               "expansion": "prosperity", "kingdom": True},
+    "Rabble": {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+               "text": "+3 Cards\nEach other player reveals the top 3 cards of their deck, discards the Actions and Treasures, and puts the rest back in any order they choose.",
+               "expansion": "prosperity", "kingdom": True},
+    "Tiara": {"cost": 4, "types": ["treasure"], "coins": 0, "vp": 0,
+              "text": "+1 Buy\nThis turn, when you gain a card, you may put it onto your deck.\nYou may play a Treasure from your hand twice.",
+              "expansion": "prosperity", "kingdom": True},
+    "Vault": {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+              "text": "+2 Cards\nDiscard any number of cards for +$1 each.\nEach other player may discard 2 cards, to draw a card.",
+              "expansion": "prosperity", "kingdom": True},
+    "War Chest": {"cost": 5, "types": ["treasure"], "coins": 0, "vp": 0,
+                  "text": "The player to your left names a card. Gain a card costing up to $5 that hasn't been named for War Chests this turn.",
+                  "expansion": "prosperity", "kingdom": True},
+    "Watchtower": {"cost": 3, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                   "text": "Draw until you have 6 cards in hand.\nWhen you gain a card, you may reveal this from your hand, to either trash that card or put it onto your deck.",
+                   "expansion": "prosperity", "kingdom": True},
+    "Worker's Village": {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                         "text": "+1 Card\n+2 Actions\n+1 Buy",
+                         "expansion": "prosperity", "kingdom": True},
+})
+
+CARDS.update({
     # --- Seaside kingdom (2E, 27) — spec: scratchpad seaside-spec.md, verified
     # against compendium ch. VII (current texts) + dominionstrategy card list ---
     "Astrolabe": {"cost": 3, "types": ["treasure", "duration"], "coins": 1, "vp": 0,
@@ -342,6 +425,7 @@ KINGDOM = {
     "base": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "base"],
     "intrigue": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "intrigue"],
     "seaside": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "seaside"],
+    "prosperity": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "prosperity"],
 }
 
 
@@ -356,6 +440,8 @@ def pile_size(name, n_players):
         return 30
     if name == "Curse":
         return 10 * (n_players - 1)
+    if name == "Platinum":
+        return 12                     # fixed at every player count
     if "victory" in card["types"]:
-        return 8 if n_players == 2 else 12
+        return 8 if n_players == 2 else 12   # includes Colony (8 at 2p)
     return 10

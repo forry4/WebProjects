@@ -272,8 +272,38 @@ def look_top(game, pid, n):
     return moved
 
 
-def gain(game, pid, card, dest="discard"):
-    """Gain from the supply; returns False (nothing happens) if the pile is empty."""
+def gain(game, pid, card, dest="discard", via_buy=False):
+    """Gain from the supply. Returns False (nothing happens) if the pile is
+    empty. WOULD-GAIN interception (the replacement protocol, Trader-class):
+    if any TRIGGERS entry with on="would_gain"/from="hand" matches for the
+    GAINER, the physical gain is parked as a __gain/resolve auto frame with
+    the reaction windows on top; a replacement stage calls
+    cancel_pending_gain() and performs its own effect instead. Callers see
+    True ("a gain is underway") — no current call site branches on the
+    difference, and new card code must not either."""
+    if game["supply"].get(card, 0) <= 0:
+        return False
+    from . import effects
+    would = [(rc, s) for rc, specs in getattr(effects, "TRIGGERS", {}).items()
+             for s in specs if s["on"] == "would_gain" and s.get("from") == "hand"]
+    for rcard, spec in would:
+        when = spec.get("when")
+        if rcard in game["seats"][pid]["hand"] and (when is None or when(game, pid,
+                {"actor": pid, "subject": card, "dest": dest, "via_buy": via_buy})):
+            verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
+            push_auto(game, pid, "__gain", "resolve",
+                      data={"pid": pid, "card": card, "dest": dest,
+                            "via_buy": via_buy, "cancelled": False})
+            push_choose_option(game, pid, rcard, spec["stage"],
+                               options=[{"id": "react", "label": f"{verb} {rcard} ({card} gain)"},
+                                        {"id": "decline", "label": "Don't react"}],
+                               data={"card": card, "gainer": pid, "dest": dest})
+            return True
+    return _gain_now(game, pid, card, dest, via_buy)
+
+
+def _gain_now(game, pid, card, dest, via_buy=False):
+    """The physical gain — pile decrement, placement, bookkeeping, emit."""
     if game["supply"].get(card, 0) <= 0:
         return False
     game["supply"][card] -= 1
@@ -291,11 +321,28 @@ def gain(game, pid, card, dest="discard"):
     if pid == game["turn"]:
         # Smugglers: what a player gained during THEIR OWN turn
         game.setdefault("_turn_gains", []).append(card)
-        if game["phase"] == "buy" and "victory" in CARDS[card]["types"]:
+        if game["phase"] == "buy" and has_type(game, card, "victory"):
             game["turn_ctx"]["gained_victory_in_buy"] = True   # Treasury's gate
     _log(game, pid, "gain", card=card, dest=dest)
-    emit(game, "gain", actor=pid, subject=card)
+    # via_buy rides the event: Hoard fires only on BOUGHT gains, Mint on any
+    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=via_buy)
     return True
+
+
+def cancel_pending_gain(game):
+    """A would-gain replacement stage (Trader's 'instead') cancels the parked
+    physical gain. Returns the parked frame's data (card/dest) or None."""
+    for f in reversed(game["pending"]):
+        if f["card"] == "__gain" and f["stage"] == "resolve" and not f["data"]["cancelled"]:
+            f["data"]["cancelled"] = True
+            return dict(f["data"])
+    return None
+
+
+def _k_gain_resolve(game, pid, frame, choice):
+    d = frame["data"]
+    if not d["cancelled"]:
+        _gain_now(game, d["pid"], d["card"], d["dest"], d.get("via_buy", False))
 
 
 def gain_from_trash(game, pid, card):
@@ -415,6 +462,14 @@ def add_coins(game, n):
         _log(game, game["turn"], "plus", coins=n)
 
 
+def add_vp_tokens(game, pid, n):
+    """VP tokens (Prosperity+): per-player, only ever gained, scored at game
+    end, public. The pool is unlimited."""
+    if n > 0:
+        game.setdefault("vp_tokens", {})[pid] = game.get("vp_tokens", {}).get(pid, 0) + n
+        _log(game, pid, "vp_tokens", count=n)
+
+
 def opponents(game, pid):
     """All other players, in turn order starting after pid."""
     order = game["players"]
@@ -426,13 +481,41 @@ def count_empty_piles(game):
     return sum(1 for v in game["supply"].values() if v == 0)
 
 
+def types_of(game, card):
+    """THE type query — card code must never read CARDS[x]["types"] directly
+    for a rules decision. Game-wide type injections live here: Charlatan in
+    the kingdom makes Curse also a Treasure for the whole game (2E rule)."""
+    types = CARDS[card]["types"]
+    if card == "Curse" and game.get("curse_is_treasure"):
+        return types + ["treasure"]
+    return types
+
+
+def has_type(game, card, t):
+    return t in types_of(game, card)
+
+
+def coins_of(game, card):
+    """Printed coin value under game rules (Charlatan's Curse plays for $1)."""
+    if card == "Curse" and game.get("curse_is_treasure"):
+        return 1
+    return CARDS[card]["coins"]
+
+
 def cost(game, card):
     """THE single cost function — Bridge reduction applies everywhere, min 0.
     effects.COST_MODS is the while-in-play modifier seam (Quarry-class,
     Prosperity+): {source_card: fn(game, priced_name) -> reduction per copy},
     summed over every copy on ANY table (cost changes are global)."""
     c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"]
+    # Quarry (2022): a TURN-scoped discount — survives the Quarry leaving play
+    if game["turn_ctx"].get("quarries") and "action" in CARDS[card]["types"]:
+        c -= 2 * game["turn_ctx"]["quarries"]
     from . import effects
+    # dynamic SELF-costs (Peddler-class): the priced card's own cost rule
+    dyn = getattr(effects, "DYN_COSTS", {}).get(card)
+    if dyn is not None:
+        c -= dyn(game)
     mods = getattr(effects, "COST_MODS", {})
     for src, fn in mods.items():
         n = 0
@@ -443,6 +526,19 @@ def cost(game, card):
         if n:
             c -= fn(game, card) * n
     return max(0, c)
+
+
+def cost_le(game, card, coins):
+    """'costing up to $coins' — the ONLY way card code may bound a cost.
+    This boundary is what makes the future cost VECTOR cheap: when Potion
+    (Alchemy) and Debt (Empires) arrive, a card with a non-coin component is
+    never 'up to $n' — that rule lands HERE, not in thirty batch call sites."""
+    return cost(game, card) <= coins
+
+
+def cost_eq(game, card, coins):
+    """'costing exactly $coins' (Upgrade's +1, Swindler's same-cost)."""
+    return cost(game, card) == coins
 
 
 # --- the DURATION kernel (Seaside; reused by later expansions) ----------------
@@ -501,7 +597,12 @@ def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn
         entry = {"card": card, "fx": [], "watchers": 0, "riders": []}
         _dur_setup_list(game, pid).append(entry)
         game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
-    entry["watchers"] += 1
+    if until != "turn_end":
+        # only CROSS-TURN watchers keep the card on the table; a this-turn
+        # watcher (Collection/Hoard/Tiara's 2022 "this turn, when..." class)
+        # dies with the turn — the card discards at its own clean-up, and may
+        # even be trashed from play mid-turn without stranding the entry
+        entry["watchers"] += 1
     # A watcher registered during an Attack's play ability carries that play's
     # immunity set: a player who Moat-revealed (or was Lighthouse-protected)
     # when Corsair/Blockade was PLAYED is immune to its delayed effects too —
@@ -610,7 +711,7 @@ def emit(game, event, actor=None, subject=None, **extra):
         if actor is not None and actor in w.get("immune", []):
             continue          # immune to the attack PLAY that set this watcher
         push_auto(game, w["owner"], w["card"], w["stage"],
-                  data={**w["data"], "actor": actor, "subject": subject,
+                  data={**w["data"], **extra, "actor": actor, "subject": subject,
                         "owner": w["owner"]})
     from . import effects
     for card, specs in getattr(effects, "TRIGGERS", {}).items():
@@ -622,12 +723,15 @@ def emit(game, event, actor=None, subject=None, **extra):
             if src == "hand":
                 order = game["players"]
                 i = order.index(game["turn"]) if game["turn"] in order else 0
+                verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
                 for p in reversed(order[i:] + order[:i]):
+                    if spec.get("who") == "actor" and p != actor:
+                        continue          # when-YOU-x reactions (Watchtower-class)
                     if card in game["seats"][p]["hand"] and (when is None or when(game, p, ctx)):
                         push_choose_option(game, p, card, spec["stage"],
-                                           options=[{"id": "play", "label": f"Play {card} from your hand"},
+                                           options=[{"id": "play", "label": f"{verb} {card} from your hand"},
                                                     {"id": "decline", "label": "Don't react"}],
-                                           data={"gained": subject, "gainer": actor})
+                                           data={**extra, "gained": subject, "gainer": actor})
             elif src == "in_play":
                 if actor is not None and card in game["seats"][actor]["in_play"] \
                         and (when is None or when(game, actor, ctx)):
@@ -705,6 +809,7 @@ def _start_of_turn(game, pid):
     for card, fx in reversed(fx_batch):
         push_auto(game, pid, card, fx["stage"], data=dict(fx["data"]))
     game["watchers"] = [w for w in game.get("watchers", []) if w["owner"] != pid]
+    emit(game, "turn_start", actor=pid)   # Clerk-class start-of-turn reactions
 
 
 def _cleanup_durations(game, pid):
@@ -752,7 +857,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
         seat[from_zone].remove(card)
         seat["in_play"].append(card)
         game["_cur_dur"] = None          # a new physical play gets a fresh entry
-        if "duration" in CARDS[card]["types"]:
+        if has_type(game, card, "duration"):
             # eager entry: later stages (Haven's pick) and Throne Room's rider
             # marking both need the physical card's entry to already exist
             _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
@@ -765,16 +870,16 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
             if lst[i]["card"] == card:
                 game["_cur_dur"] = [pid, i]
                 break
-    if count and "action" in CARDS[card]["types"]:
+    if count and has_type(game, card, "action"):
         game["turn_ctx"]["actions_played"] += 1   # Conspirator counts ACTIONS only
-    if "treasure" in CARDS[card]["types"]:
+    if has_type(game, card, "treasure"):
         # a Treasure played out-of-band (Sailor playing a gained Astrolabe)
         # still produces its printed $ — and the Merchant/first-Silver hook
-        _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
+        _log(game, pid, "play", card=card, coins=coins_of(game, card))
         _treasure_coins(game, pid, card)
     else:
         _log(game, pid, "play", card=card)
-    if "attack" in CARDS[card]["types"]:
+    if has_type(game, card, "attack"):
         # Lighthouse protection (until-their-next-turn watcher) = unaffected,
         # no window needed (public, so it's logged rather than asked)
         immune0 = [o for o in opponents(game, pid) if attack_protected(game, o)]
@@ -790,7 +895,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
     else:
         from . import effects as _fx
         fn = _fx.EFFECTS.get(card)
-        if fn is None and "treasure" not in CARDS[card]["types"]:
+        if fn is None and not has_type(game, card, "treasure"):
             raise KeyError(f"dontminion: no effect registered for {card!r}")
         if fn is not None:
             _push_depth(game)
@@ -798,7 +903,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
                 fn(game, pid)
             finally:
                 _pop_depth(game)
-        if "treasure" in CARDS[card]["types"]:
+        if has_type(game, card, "treasure"):
             emit(game, "play_treasure", actor=pid, subject=card)
 
 
@@ -914,7 +1019,7 @@ def _h_play_action(game, pid, move):
     card = move.get("card")
     if card not in game["seats"][pid]["hand"]:
         return False, "card not in hand"
-    if "action" not in CARDS[card]["types"]:
+    if not has_type(game, card, "action"):
         return False, "not an action card"
     if game["actions"] <= 0:
         return False, "no actions left"
@@ -926,7 +1031,7 @@ def _h_play_action(game, pid, move):
 def _treasure_coins(game, pid, card):
     """The printed $ of a played Treasure + the Merchant first-Silver hook —
     shared by the buy-phase handler and out-of-band plays (play_action_card)."""
-    game["coins"] += CARDS[card]["coins"]
+    game["coins"] += coins_of(game, card)
     if card == "Silver" and not game["turn_ctx"]["silver_played"]:
         game["turn_ctx"]["silver_played"] = True
         m = game["turn_ctx"]["merchants"]
@@ -941,10 +1046,10 @@ def _play_one_treasure(game, pid, card):
     seat["hand"].remove(card)
     seat["in_play"].append(card)
     game["_cur_dur"] = None
-    if "duration" in CARDS[card]["types"]:
+    if has_type(game, card, "duration"):
         _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
         game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
-    _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
+    _log(game, pid, "play", card=card, coins=coins_of(game, card))
     _treasure_coins(game, pid, card)
     # treasures with abilities (Astrolabe's duration half) run their effect too
     fn = effects.EFFECTS.get(card)
@@ -965,7 +1070,7 @@ def _h_play_treasure(game, pid, move):
     card = move.get("card")
     if card not in game["seats"][pid]["hand"]:
         return False, "card not in hand"
-    if "treasure" not in CARDS[card]["types"]:
+    if not has_type(game, card, "treasure"):
         return False, "not a treasure"
     _play_one_treasure(game, pid, card)
     return True, None
@@ -976,8 +1081,13 @@ def _h_play_all_treasures(game, pid, move):
         return False, "treasures are played in your buy phase"
     if game["turn_ctx"]["bought"]:
         return False, "can't play treasures after buying"
+    from . import effects
+    manual = getattr(effects, "MANUAL_TREASURES", set())
     hand = game["seats"][pid]["hand"]
-    for card in [c for c in list(hand) if "treasure" in CARDS[c]["types"]]:
+    # interactive treasures (Anvil-class decisions) are never autoplayed —
+    # they stay in hand for individual plays
+    for card in [c for c in list(hand)
+                 if has_type(game, c, "treasure") and c not in manual]:
         _play_one_treasure(game, pid, card)
     return True, None
 
@@ -992,6 +1102,9 @@ def _h_buy(game, pid, move):
         return False, "pile is empty"
     if game["buys"] <= 0:
         return False, "no buys left"
+    err = buy_gate(game, pid, card)
+    if err:
+        return False, err
     c = cost(game, card)
     if c > game["coins"]:
         return False, "can't afford it"
@@ -999,9 +1112,18 @@ def _h_buy(game, pid, move):
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
     _log(game, pid, "buy", card=card)
-    gain(game, pid, card)
+    gain(game, pid, card, via_buy=True)
     emit(game, "buy", actor=pid, subject=card)   # Prosperity's on-buy seam
     return True, None
+
+
+def buy_gate(game, pid, card):
+    """Pile-specific BUY restrictions (Grand Market's no-Copper-in-play).
+    effects.BUY_GATES = {card: fn(game, pid) -> error string | None}. Gaining
+    bypasses gates — they bind buying only."""
+    from . import effects
+    fn = getattr(effects, "BUY_GATES", {}).get(card)
+    return fn(game, pid) if fn is not None else None
 
 
 def _h_end_phase(game, pid, move):
@@ -1032,6 +1154,7 @@ def _k_turn_finish(game, pid, frame, choice):
 
 
 KERNEL_STAGES[("__turn", "finish")] = _k_turn_finish
+KERNEL_STAGES[("__gain", "resolve")] = _k_gain_resolve
 
 
 _HANDLERS = {
@@ -1054,7 +1177,7 @@ def _maybe_auto_buy(game):
     if game["over"] or game["phase"] != "action" or game["pending"]:
         return
     hand = game["seats"][game["turn"]]["hand"]
-    if game["actions"] <= 0 or not any("action" in CARDS[c]["types"] for c in hand):
+    if game["actions"] <= 0 or not any(has_type(game, c, "action") for c in hand):
         game["phase"] = "buy"
         _log(game, game["turn"], "phase", phase="buy", auto=True)
 
@@ -1091,7 +1214,8 @@ def _end_turn(game, pid):
     draw(game, pid, 3 if outpost_played else 5)
     seat["turns_taken"] += 1
     game["last_turn_pid"] = pid
-    if game["supply"].get("Province", 0) <= 0 or count_empty_piles(game) >= 3:
+    if game["supply"].get("Province", 0) <= 0 or count_empty_piles(game) >= 3 \
+            or (game.get("colony") and game["supply"].get("Colony", 1) <= 0):
         _finish_game(game)
         return
     order = game["players"]
@@ -1263,18 +1387,19 @@ def legal_moves(game, pid):
     if game["phase"] == "action":
         if game["actions"] > 0:
             for c in sorted(set(hand)):
-                if "action" in CARDS[c]["types"]:
+                if has_type(game, c, "action"):
                     mv.append({"type": "play_action", "card": c})
     else:
         if not game["turn_ctx"]["bought"]:
-            treasures = sorted({c for c in hand if "treasure" in CARDS[c]["types"]})
+            treasures = sorted({c for c in hand if has_type(game, c, "treasure")})
             for c in treasures:
                 mv.append({"type": "play_treasure", "card": c})
             if treasures:
                 mv.append({"type": "play_all_treasures"})
         if game["buys"] > 0:
             for pile in sorted(game["supply"]):
-                if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"]:
+                if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"] \
+                        and buy_gate(game, pid, pile) is None:
                     mv.append({"type": "buy", "card": pile})
     mv.append({"type": "end_phase"})
     return mv
@@ -1376,12 +1501,16 @@ def _vp_of(game, pid):
     return total
 
 
+def _total_vp(game, pid):
+    return _vp_of(game, pid) + game.get("vp_tokens", {}).get(pid, 0)
+
+
 def _post_move(game):
-    game["vp"] = {p: _vp_of(game, p) for p in game["players"]}
+    game["vp"] = {p: _total_vp(game, p) for p in game["players"]}
 
 
 def score_game(game):
-    return {p: {"vp": _vp_of(game, p), "turns": game["seats"][p]["turns_taken"]}
+    return {p: {"vp": _total_vp(game, p), "turns": game["seats"][p]["turns_taken"]}
             for p in game["players"]}
 
 
@@ -1486,6 +1615,16 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
     supply = {c: pile_size(c, n) for c in BASIC_CARDS}
     for c in kingdom:
         supply[c] = pile_size(c, n)
+    # Prosperity: Platinum/Colony join the Supply with probability equal to
+    # the Prosperity proportion of the kingdom (official randomizer rule);
+    # both piles or neither. Colony-empty becomes a game-end condition.
+    prosperity_n = sum(1 for c in kingdom if CARDS[c]["expansion"] == "prosperity")
+    colony = prosperity_n > 0 and rng.random() < prosperity_n / 10
+    if colony:
+        supply["Platinum"] = pile_size("Platinum", n)
+        supply["Colony"] = pile_size("Colony", n)
+    # Charlatan's game-wide rule: Curse is also a Treasure worth $1
+    curse_is_treasure = "Charlatan" in kingdom
     game = {
         "game": "dontminion",
         "schema": 2,               # v2: Seaside (durations/mats/watchers/extra turns)
@@ -1509,6 +1648,9 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
         "watchers": [],            # cross-player triggers (Monkey/Corsair/Blockade)
         "last_turn_pid": None,     # who took the previous turn (Outpost's gate)
         "extra_turn": False,       # the CURRENT turn is an Outpost extra turn
+        "colony": colony,          # Platinum/Colony game (Prosperity setup rule)
+        "curse_is_treasure": curse_is_treasure,   # Charlatan's game-wide rule
+        "vp_tokens": {p: 0 for p in players},
         "vp": {},
         "log": [],
         "log_depth": 0,

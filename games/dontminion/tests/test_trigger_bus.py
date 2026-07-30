@@ -115,3 +115,59 @@ def test_hand_reaction_window_shape(g, synthetic):
     assert taken == [(B, "play")]
     engine.gain(g, A, "Gold")                       # `when` filters it out
     assert g["pending_pid"] is None
+
+
+# --- the WOULD-GAIN replacement protocol (Trader-class; built ahead of its
+#     first real consumer so Hinterlands lands on proven machinery) ------------
+
+def _register_traderx(trigger, stage):
+    """Synthetic Trader: when you would gain a card costing >= 3, you may
+    reveal to instead gain a Silver... (here: instead gain a Copper, so the
+    replacement is observable against a Silver original)."""
+    def react(game, pid, frame, choice):
+        if choice["ids"][0] != "react":
+            return                              # declined: the parked gain resolves
+        parked = engine.cancel_pending_gain(game)
+        assert parked is not None
+        engine.gain(game, pid, "Copper")        # the replacement gain
+    trigger("Moat", {"on": "would_gain", "from": "hand", "mode": "reveal",
+                     "stage": "would", "when": lambda g, p, ctx: ctx["subject"] == "Silver"})
+    stage(("Moat", "would"), react)
+
+
+def test_would_gain_replacement_path(g, synthetic):
+    trigger, stage, _ = synthetic
+    _register_traderx(trigger, stage)
+    g["seats"][A]["hand"] = ["Moat"]
+    silver0, copper0 = g["supply"]["Silver"], g["supply"]["Copper"]
+    assert engine.gain(g, A, "Silver")           # "a gain is underway"
+    assert g["pending_pid"] == A and g["pending_kind"] == "choose_option"
+    assert "Reveal Moat" in g["pending"][-1]["constraint"]["options"][0]["label"]
+    ok, err = engine.apply_move(g, A, {"type": "decision", "ids": ["react"]})
+    assert ok, err
+    assert g["supply"]["Silver"] == silver0      # the original gain never happened
+    assert g["supply"]["Copper"] == copper0 - 1  # the replacement did
+    assert "Copper" in g["seats"][A]["discard"]
+    assert "Silver" not in g["seats"][A]["discard"]
+    assert g["pending_pid"] is None              # the parked frame resolved away
+
+
+def test_would_gain_decline_resolves_the_original(g, synthetic):
+    trigger, stage, _ = synthetic
+    _register_traderx(trigger, stage)
+    g["seats"][A]["hand"] = ["Moat"]
+    silver0 = g["supply"]["Silver"]
+    assert engine.gain(g, A, "Silver")
+    ok, err = engine.apply_move(g, A, {"type": "decision", "ids": ["decline"]})
+    assert ok, err
+    assert g["supply"]["Silver"] == silver0 - 1  # the parked gain resolved
+    assert "Silver" in g["seats"][A]["discard"]
+
+
+def test_would_gain_only_intercepts_the_gainer(g, synthetic):
+    trigger, stage, _ = synthetic
+    _register_traderx(trigger, stage)
+    g["seats"][B]["hand"] = ["Moat"]             # the OTHER player holds it
+    assert engine.gain(g, A, "Silver")
+    assert g["pending_pid"] is None              # no window: A gains directly
+    assert "Silver" in g["seats"][A]["discard"]

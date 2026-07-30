@@ -84,17 +84,19 @@ def test_soak_full_games(players, seed):
 
 def _all_kingdom_cards():
     from games.dontminion.cards import KINGDOM
-    return sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"]) + sorted(KINGDOM["seaside"])
+    return (sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"])
+            + sorted(KINGDOM["seaside"]) + sorted(KINGDOM["prosperity"]))
 
 
-@pytest.mark.parametrize("chunk", [0, 1, 2, 3, 4, 5, 6, 7])
+@pytest.mark.parametrize("chunk", list(range(11)))
 def test_soak_forced_kingdoms_cover_all_cards(chunk):
-    """Fixed kingdoms that together cover ALL kingdom cards (79 with Seaside) —
-    every card effect runs inside full random games under the census."""
+    """Fixed kingdoms that together cover ALL kingdom cards (104 with
+    Prosperity) — every card effect runs inside full random games under the
+    conservation census."""
     cards = _all_kingdom_cards()
-    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 7 else cards[-10:]
-    game = engine.new_game([A, B, C], ["base", "intrigue", "seaside"], seed=1234 + chunk,
-                           kingdom=kingdom)
+    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 10 else cards[-10:]
+    game = engine.new_game([A, B, C], ["base", "intrigue", "seaside", "prosperity"],
+                           seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)
     rng = random.Random(4321 + chunk)
     for _ in range(MOVE_CAP):

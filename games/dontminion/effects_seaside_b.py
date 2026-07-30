@@ -52,7 +52,7 @@ from .cards import CARDS
 
 def _blockade(game, pid):
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost(game, p) <= 4]
+             if game["supply"][p] > 0 and E.cost_le(game, p, 4)]
     if piles:                                  # no eligible pile: failed to set up
         # the attack part registers in a LATER stage — capture this play's
         # immunity set now (the documented immune= threading pattern)
@@ -201,8 +201,8 @@ def _pirate(game, pid):
 
 def _pirate_turn_start(game, pid, frame, choice):
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and "treasure" in E.CARDS[p]["types"]
-             and E.cost(game, p) <= 6]          # cost checked at fx time
+             if game["supply"][p] > 0 and E.has_type(game, p, "treasure")
+             and E.cost_le(game, p, 6)]       # cost checked at fx time
     if piles:
         E.push_choose_pile(game, pid, "Pirate", "gain_pick", piles=piles)
 
@@ -302,7 +302,7 @@ def _smugglers(game, pid):
     gained = game.get("last_turn_gains", {}).get(right, [])
     # Cost is checked NOW; empty-supply names stay eligible (you may choose an
     # unavailable one and gain nothing — the ruling).
-    names = sorted({c for c in gained if E.cost(game, c) <= 6})
+    names = sorted({c for c in gained if E.cost_le(game, c, 6)})
     if names:
         E.push_choose_pile(game, pid, "Smugglers", "pick", piles=names)
 

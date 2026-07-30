@@ -27,7 +27,18 @@ const EXPANSIONS = [
   { id: "base", name: "Base Set" },
   { id: "intrigue", name: "Intrigue" },
   { id: "seaside", name: "Seaside" },
+  { id: "prosperity", name: "Prosperity" },
 ];
+// Platinum/Colony slot into the basics row when the Prosperity setup rule
+// put them in this game's supply
+const basicsRowFor = (supply) => {
+  const row = ["Copper", "Silver", "Gold"];
+  if (supply && supply.Platinum != null) row.push("Platinum");
+  row.push("Estate", "Duchy", "Province");
+  if (supply && supply.Colony != null) row.push("Colony");
+  row.push("Curse");
+  return row;
+};
 const BASIC_ROW = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"];
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -301,7 +312,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
-  const handTreasures = (mySeat?.hand || []).some((c) => cards[c]?.types?.includes("treasure"));
+  const handTreasures = (mySeat?.hand || []).some((c) => cards[c]?.types?.includes("treasure")
+    || (c === "Curse" && game?.curse_is_treasure));
   const constraint = iAmActor ? pv.constraint : null;
   const kingdomPiles = game?.kingdom || [];
   const kingdomByCost = [...kingdomPiles].sort((a, b) =>
@@ -527,10 +539,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
   const abandonGame = () => { send({ action: "abandon" }); setConfirmAbandon(false); };
 
+  // Charlatan's game rule: Curse is also a Treasure (playable for $1)
+  const typesFor = (c) => {
+    const t = cards[c]?.types || [];
+    return c === "Curse" && game?.curse_is_treasure ? [...t, "treasure"] : t;
+  };
+
   // Every click lands somewhere: playable → play, buyable → buy, anything
   // else → the card-detail modal (never a dead click).
   const handClick = (card) => {
-    const t = cards[card]?.types || [];
+    const t = typesFor(card);
     if (!iAmActor && inAction && t.includes("action") && game.actions > 0) mv({ type: "play_action", card });
     else if (!iAmActor && inBuy && t.includes("treasure") && !bought) mv({ type: "play_treasure", card });
     else setCardInfo(card);
@@ -746,6 +764,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </TurnBadge>
         )}
         <span className="dm-vp" title="victory points">🛡 {game.vp?.[pid] ?? 0} VP</span>
+        {(game.vp_tokens?.[pid] || 0) > 0 && (
+          <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ {game.vp_tokens[pid]}</span>
+        )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
       </div>
     );
@@ -1053,7 +1074,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {focusOpp && renderOppPlay(focusOpp)}
           {renderPrompt()}
           <div className="dm-supply">
-            <div className="dm-supply-row dm-basics">{BASIC_ROW.map(renderPile)}</div>
+            <div className="dm-supply-row dm-basics">{basicsRowFor(game.supply).map(renderPile)}</div>
             <div className="dm-supply-row dm-kingdom">{kingdomByCost.map(renderPile)}</div>
           </div>
           <div className="dm-me">
@@ -1119,7 +1140,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               <div className="dm-pile-slot dm-myhand">
                 <div className="dm-hand">
                   {(mySeat?.hand || []).map((c, i) => {
-                    const t = cards[c]?.types || [];
+                    const t = typesFor(c);
                     const playable = !iAmActor && ((inAction && t.includes("action") && game.actions > 0)
                       || (inBuy && t.includes("treasure") && !bought));
                     return <DmCardFace key={i} name={c} card={cards[c]}
@@ -1179,7 +1200,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
             <h3>Basic supply</h3>
             <div className="dm-kgrid">
-              {BASIC_ROW.map((n) => (
+              {basicsRowFor(game.supply).map((n) => (
                 <div key={n} className="dm-pile-slot">
                   <DmCardFace name={n} card={cards[n]} />
                   <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>

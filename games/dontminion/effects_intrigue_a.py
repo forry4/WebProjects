@@ -70,7 +70,7 @@ def _shanty_town(game, pid):
     E.add_actions(game, 2)
     hand = game["seats"][pid]["hand"]
     E.reveal(game, pid, list(hand), "hand")
-    if not any("action" in E.CARDS[c]["types"] for c in hand):
+    if not any(E.has_type(game, c, "action") for c in hand):
         E.draw(game, pid, 2)
 
 
@@ -165,7 +165,7 @@ def _conspirator(game, pid):
 # --- Ironworks --------------------------------------------------------------------
 
 def _ironworks(game, pid):
-    piles = _gain_piles(game, lambda p: E.cost(game, p) <= 4)
+    piles = _gain_piles(game, lambda p: E.cost_le(game, p, 4))
     if piles:
         E.push_choose_pile(game, pid, "Ironworks", "gain", piles=piles)
 
@@ -174,7 +174,7 @@ def _ironworks_gain(game, pid, frame, choice):
     card = choice["pile"]
     if not E.gain(game, pid, card):
         return
-    types = E.CARDS[card]["types"]            # dual types grant multiple bonuses
+    types = E.types_of(game, card)            # dual types grant multiple bonuses
     if "action" in types:
         E.add_actions(game, 1)
     if "treasure" in types:
@@ -258,7 +258,7 @@ def _upgrade_trash(game, pid, frame, choice):
     trashed = choice["cards"][0]
     target = E.cost(game, trashed) + 1        # EXACTLY $1 more (Bridge-aware)
     E.trash(game, pid, [trashed])
-    piles = _gain_piles(game, lambda p: E.cost(game, p) == target)
+    piles = _gain_piles(game, lambda p: E.cost_eq(game, p, target))
     if piles:
         E.push_choose_pile(game, pid, "Upgrade", "gain", piles=piles)
 

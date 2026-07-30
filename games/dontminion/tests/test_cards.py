@@ -1,4 +1,4 @@
-"""WP1 card-data tests: the verified 86-card dataset (Base 2E + Intrigue 2E + Seaside 2E).
+"""WP1 card-data tests: the verified 113-card dataset (Base + Intrigue + Seaside + Prosperity, all 2E).
 
 Pure data tests — no engine import. The EXPECTED table below is the corruption tell:
 every (name, cost, types) triple was verified against the Knutsen compendium v11.1
@@ -9,7 +9,7 @@ from games.dontminion import cards
 
 
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction", "duration"}
-ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside"}
+ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 
 REMOVED_1E = [
@@ -20,6 +20,9 @@ REMOVED_1E = [
     # Seaside 1E -> 2E removals
     "Ambassador", "Embargo", "Explorer", "Ghost Ship", "Navigator", "Pearl Diver",
     "Pirate Ship", "Sea Hag",
+    # Prosperity 1E -> 2E removals
+    "Contraband", "Counting House", "Goons", "Loan", "Mountebank", "Royal Seal",
+    "Talisman", "Trade Route", "Venture",
 ]
 
 # The full verified (cost, types) table for all 59 cards.
@@ -114,6 +117,34 @@ EXPECTED = {
     "Tactician": (5, ["action", "duration"]),
     "Treasury": (5, ["action"]),
     "Wharf": (5, ["action", "duration"]),
+    # Prosperity 2E kingdom (25) + Platinum/Colony
+    "Platinum": (9, ["treasure"]),
+    "Colony": (11, ["victory"]),
+    "Anvil": (3, ["treasure"]),
+    "Watchtower": (3, ["action", "reaction"]),
+    "Bishop": (4, ["action"]),
+    "Clerk": (4, ["action", "reaction", "attack"]),
+    "Investment": (4, ["treasure"]),
+    "Monument": (4, ["action"]),
+    "Quarry": (4, ["treasure"]),
+    "Tiara": (4, ["treasure"]),
+    "Worker's Village": (4, ["action"]),
+    "Charlatan": (5, ["action", "attack"]),
+    "City": (5, ["action"]),
+    "Collection": (5, ["treasure"]),
+    "Crystal Ball": (5, ["treasure"]),
+    "Magnate": (5, ["action"]),
+    "Mint": (5, ["action"]),
+    "Rabble": (5, ["action", "attack"]),
+    "Vault": (5, ["action"]),
+    "War Chest": (5, ["treasure"]),
+    "Grand Market": (6, ["action"]),
+    "Hoard": (6, ["treasure"]),
+    "Bank": (7, ["treasure"]),
+    "Expand": (7, ["action"]),
+    "Forge": (7, ["action"]),
+    "King's Court": (7, ["action"]),
+    "Peddler": (8, ["action"]),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -128,20 +159,21 @@ def test_bandit_ruling_constant():
     assert cards.BANDIT_VICTIM_CHOOSES is True
 
 
-def test_86_cards_and_expansion_counts():
-    assert len(cards.CARDS) == 86
-    by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": []}
+def test_113_cards_and_expansion_counts():
+    assert len(cards.CARDS) == 113
+    by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [], "prosperity": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     assert len(by_exp["basic"]) == 7
     assert len(by_exp["base"]) == 26
     assert len(by_exp["intrigue"]) == 26
     assert len(by_exp["seaside"]) == 27
+    assert len(by_exp["prosperity"]) == 27      # 25 kingdom + Platinum + Colony
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
-    for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27)):
+    for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27), ("prosperity", 25)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -151,7 +183,7 @@ def test_kingdom_lists_match_flags_no_duplicates():
     # every kingdom-flagged card appears in exactly one KINGDOM list
     flagged = {n for n, c in cards.CARDS.items() if c["kingdom"]}
     listed = (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])
-              | set(cards.KINGDOM["seaside"]))
+              | set(cards.KINGDOM["seaside"]) | set(cards.KINGDOM["prosperity"]))
     assert flagged == listed
     assert not (set(cards.KINGDOM["base"]) & set(cards.KINGDOM["intrigue"]))
     assert not (set(cards.KINGDOM["seaside"]) & (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])))
@@ -170,7 +202,7 @@ def test_schema_field_completeness_and_validity():
     for name, c in cards.CARDS.items():
         assert set(c.keys()) == SCHEMA_FIELDS, name
         # cost
-        assert type(c["cost"]) is int and 0 <= c["cost"] <= 8, name
+        assert type(c["cost"]) is int and 0 <= c["cost"] <= 11, name   # Colony is $11
         # types
         assert isinstance(c["types"], list) and c["types"], name
         assert all(t in ALLOWED_TYPES for t in c["types"]), name
@@ -178,7 +210,8 @@ def test_schema_field_completeness_and_validity():
         # coins: treasures > 0, everything else exactly 0
         assert type(c["coins"]) is int, name
         if "treasure" in c["types"]:
-            assert c["coins"] > 0, name
+            # computed/zero producers (Bank, Tiara, Investment, War Chest) print no $
+            assert c["coins"] >= 0, name
         else:
             assert c["coins"] == 0, name
         # vp: int, or the two computed-rule strings
@@ -195,7 +228,7 @@ def test_schema_field_completeness_and_validity():
 
 def test_static_vp_values():
     expected_vp = {"Estate": 1, "Duchy": 3, "Province": 6, "Curse": -1,
-                   "Harem": 2, "Mill": 1, "Nobles": 2, "Island": 2}
+                   "Harem": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10}
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0
@@ -210,10 +243,11 @@ def test_treasure_coin_values():
     assert cards.CARDS["Gold"]["coins"] == 3
     assert cards.CARDS["Harem"]["coins"] == 2
     assert cards.CARDS["Astrolabe"]["coins"] == 1
+    assert cards.CARDS["Platinum"]["coins"] == 5
 
 
 def test_full_name_cost_types_table():
-    # The corruption tell: every one of the 86 (name, cost, types) triples, literally.
+    # The corruption tell: every one of the 113 (name, cost, types) triples, literally.
     assert set(cards.CARDS.keys()) == set(EXPECTED.keys())
     for name, (cost, types) in EXPECTED.items():
         c = cards.CARDS[name]

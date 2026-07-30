@@ -43,9 +43,10 @@ frozen-API notes in `CLAUDE.md`: `add_duration_fx`, `add_watcher`, `watcher_data
 
 | Debt | First bitten by | Pay when |
 |---|---|---|
-| **Replacement effects** ("when you WOULD gain, instead…") — the bus is after-the-fact only | Trader (Hinterlands, ph. 3); shape it against Watchtower (ph. 2) | design during Phase 2 |
-| **cost() -> int becomes a vector** (Potion, Debt) — batches write raw `cost(g,p) <= n` comparisons everywhere | Alchemy (ph. 5) / Empires (ph. 8) | add `cost_le()`-style helpers at the START of Phase 2 and migrate batches; the vector change then touches one function |
+| ~~Replacement effects~~ **PAID (Phase 2):** the would-gain protocol (park/window/cancel_pending_gain) is live with contract tests | Trader (ph. 3) lands on proven machinery | done |
+| **cost() -> int becomes a vector** (Potion, Debt) — *helpers PAID (Phase 2): all comparisons go through cost_le/cost_eq* | Alchemy (ph. 5) / Empires (ph. 8) | the vector change itself lands in those phases, now confined to two functions |
 | **Non-supply gain sources** (Rewards/Spoils/Horses/Loot) — gain() only knows the supply | Cornucopia & Guilds (ph. 4) | Phase 4 kernel work |
+| **Vault's opponent offer is feasibility-filtered** (0-1-card hands never asked) — harmless until a when-discard trigger exists | Tunnel (ph. 3!) | Phase 3, WITH the when-discard emit point |
 | **Landscape cards** (Events/Landmarks/Projects/Ways…) + the bus's "global" trigger source + a frontend row | Adventures (ph. 7) | Phase 7 kernel+UI work |
 | **Pile abstraction** — `supply={name:count}` can't do split/rotating piles | Dark Ages Knights (ph. 6) | Phase 6 kernel work |
 | **Turn structure** — Night phase breaks the action/buy enum + auto-advance + frontend phase logic | Nocturne (ph. 11) | Phase 11 |

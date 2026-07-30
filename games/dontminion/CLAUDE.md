@@ -95,7 +95,11 @@ owner-sequenced); the 2025 lose-track rule is approximated (fx die with the entr
 won't offer to play a Duration gained into the Blockade set-aside. Duration discard follows
 the OFFICIAL timing: done entries sweep at the next clean-up whoever's turn it is (a denied
 Outpost is marked done between turns). Play-time attack immunity (Moat/Lighthouse) is captured
-into watchers, so Corsair/Blockade delayed effects respect it.
+into watchers, so Corsair/Blockade delayed effects respect it. Vault skips the pointless
+0-1-card opponent discard offer (feasibility-filtered against the engine's own no-filter rule
+— MUST be unfiltered before a when-discard card ships; Tunnel is PHASE 3, see the ledger).
+Watchtower can trash but not topdeck a card gained to Blockade's set-aside (lose-track
+reading; cross-set corner).
 
 **THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
 single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
@@ -110,12 +114,30 @@ event's SUBJECT is this card — the whole Hinterlands when-gain theme and Dark 
 needs `stage`). `COST_MODS[card] = fn(game, priced_name) -> reduction` is the while-in-play
 cost-modifier seam (Quarry-class), summed per copy on ANY table inside `cost()`.
 
+**Kernel v3 (Prosperity):** `add_vp_tokens(game,pid,n)` (public, score-counted, never lost) ·
+`cost_le`/`cost_eq` are THE cost comparators (raw `cost() <= n` in card code is a review
+reject — the future Potion/Debt vector lands inside them) · `has_type`/`types_of`/`coins_of`
+are THE type/coin queries (game-wide injections live there: `game["curse_is_treasure"]`,
+Charlatan's rule, set at new_game from the kingdom) · `turn_ctx["quarries"]` (turn-scoped
+Action discount, applied inside cost()) · `buy_gate()` consults `BUY_GATES` in _h_buy AND
+legal_moves (gaining bypasses) · Peddler-class self-costs via `DYN_COSTS` · `MANUAL_TREASURES`
+are skipped by play_all_treasures (interactive treasures stay in hand for individual plays) ·
+the WOULD-GAIN protocol: `gain()` parks as __gain/resolve + reaction window when a
+`TRIGGERS on="would_gain"/from="hand"` matches the gainer; replacement stages call
+`cancel_pending_gain(game)`; gain events carry `via_buy` + `dest` (Hoard vs Mint) ·
+Platinum/Colony: probabilistic setup per the official randomizer-proportion rule
+(`game["colony"]`), Colony-empty ends the game · `_start_of_turn` emits `"turn_start"`
+(Clerk-class hand reactions) · hand-reaction specs take `mode:"reveal"` and `who:"actor"`.
+
 **Registration** — each effects module exports exactly:
 ```python
 EFFECTS: {card_name: on_play(game, pid)}
 STAGES:  {(card_name, stage): fn(game, pid, frame, choice)}   # choice None for auto frames
 TRIGGERS: {card: [spec, ...]}      # optional — trigger-bus entries (shape above)
 COST_MODS: {card: fn(game, name)}  # optional — while-in-play cost modifiers
+DYN_COSTS: {card: fn(game)}        # optional — the card's own dynamic cost (Peddler)
+BUY_GATES: {card: fn(game, pid)}   # optional — buy restrictions (Grand Market)
+MANUAL_TREASURES: {names}          # optional — treasures play_all must skip
 ```
 The resolver pops the frame BEFORE dispatching (stages never clean up). Treasures and pure
 Victory/Curse cards need NO entries (handlers + `cards.py` data cover them).

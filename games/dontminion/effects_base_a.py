@@ -13,7 +13,7 @@ from . import engine as E
 def _eligible_gain_piles(game, cap):
     """Non-empty supply piles costing <= cap — ALWAYS via engine.cost (Bridge)."""
     return [p for p in sorted(game["supply"])
-            if game["supply"][p] > 0 and E.cost(game, p) <= cap]
+            if game["supply"][p] > 0 and E.cost_le(game, p, cap)]
 
 
 def _cellar(game, pid):
@@ -76,7 +76,7 @@ def _vassal(game, pid):
     if not looked:
         return
     card = looked[0]
-    if "action" in E.CARDS[card]["types"]:
+    if E.has_type(game, card, "action"):
         E.push_choose_option(game, pid, "Vassal", "top_action",
                              options=[{"id": "play", "label": f"Play {card}"},
                                       {"id": "discard", "label": f"Discard {card}"}],
