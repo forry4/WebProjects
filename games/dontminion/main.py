@@ -65,10 +65,14 @@ def _valid_difficulty(value) -> str:
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
+KNOWN_EXPANSIONS = ("base", "intrigue", "seaside")
+
+
 def _valid_expansions(value) -> list[str]:
-    """Non-empty ordered subset of the known expansions; default = both."""
+    """Non-empty ordered subset of the known expansions; default = the classic
+    pair (Seaside is opt-in at create)."""
     if isinstance(value, (list, tuple)):
-        got = [e for e in ("base", "intrigue") if e in value]
+        got = [e for e in KNOWN_EXPANSIONS if e in value]
         if got:
             return got
     return ["base", "intrigue"]
@@ -683,7 +687,7 @@ async def catalog():
         "ok": True,
         "cards": cards.CARDS,
         "kingdom": cards.KINGDOM,
-        "expansions": ["base", "intrigue"],
+        "expansions": list(KNOWN_EXPANSIONS),
     }
 
 

@@ -82,7 +82,12 @@ def _throne_room_pick(game, pid, frame, choice):
 def _throne_room_second(game, pid, frame, choice):
     # from_zone=None: the card is already in play (or lost track of, e.g. a
     # trashed Mining Village) — it is played again without moving.
-    E.play_action_card(game, pid, frame["data"]["card"], from_zone=None)
+    card = frame["data"]["card"]
+    E.play_action_card(game, pid, card, from_zone=None)
+    # Duration rule: the Throne Room that played a persisting Duration stays
+    # on the table with it (discarded together at that Duration's clean-up).
+    if "duration" in E.CARDS[card]["types"]:
+        E.mark_duration_rider(game, pid, card, "Throne Room")
 
 
 EFFECTS = {

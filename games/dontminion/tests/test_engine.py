@@ -67,7 +67,7 @@ def test_setup_validation():
     with pytest.raises(ValueError):
         engine.new_game([A, B], [], kingdom=K7)
     with pytest.raises(ValueError):
-        engine.new_game([A, B], ["seaside"], kingdom=K7)
+        engine.new_game([A, B], ["hinterlands"], kingdom=K7)   # not ported yet
     with pytest.raises(ValueError):
         engine.new_game([A, B], ["base"], kingdom=["Nonsense"])
 

@@ -1,4 +1,4 @@
-"""WP1 card-data tests: the verified 59-card Dominion Base 2E + Intrigue 2E dataset.
+"""WP1 card-data tests: the verified 86-card dataset (Base 2E + Intrigue 2E + Seaside 2E).
 
 Pure data tests — no engine import. The EXPECTED table below is the corruption tell:
 every (name, cost, types) triple was verified against the Knutsen compendium v11.1
@@ -8,8 +8,8 @@ every (name, cost, types) triple was verified against the Knutsen compendium v11
 from games.dontminion import cards
 
 
-ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction"}
-ALLOWED_EXPANSIONS = {"basic", "base", "intrigue"}
+ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction", "duration"}
+ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 
 REMOVED_1E = [
@@ -17,6 +17,9 @@ REMOVED_1E = [
     "Adventurer", "Chancellor", "Feast", "Spy", "Thief", "Woodcutter",
     # Intrigue 1E -> 2E removals
     "Coppersmith", "Great Hall", "Saboteur", "Scout", "Secret Chamber", "Tribute",
+    # Seaside 1E -> 2E removals
+    "Ambassador", "Embargo", "Explorer", "Ghost Ship", "Navigator", "Pearl Diver",
+    "Pirate Ship", "Sea Hag",
 ]
 
 # The full verified (cost, types) table for all 59 cards.
@@ -83,6 +86,34 @@ EXPECTED = {
     "Upgrade": (5, ["action"]),
     "Harem": (6, ["treasure", "victory"]),
     "Nobles": (6, ["action", "victory"]),
+    # Seaside 2E kingdom (27)
+    "Haven": (2, ["action", "duration"]),
+    "Lighthouse": (2, ["action", "duration"]),
+    "Native Village": (2, ["action"]),
+    "Astrolabe": (3, ["treasure", "duration"]),
+    "Fishing Village": (3, ["action", "duration"]),
+    "Lookout": (3, ["action"]),
+    "Monkey": (3, ["action", "duration"]),
+    "Sea Chart": (3, ["action"]),
+    "Smugglers": (3, ["action"]),
+    "Warehouse": (3, ["action"]),
+    "Blockade": (4, ["action", "duration", "attack"]),
+    "Caravan": (4, ["action", "duration"]),
+    "Cutpurse": (4, ["action", "attack"]),
+    "Island": (4, ["action", "victory"]),
+    "Sailor": (4, ["action", "duration"]),
+    "Salvager": (4, ["action"]),
+    "Tide Pools": (4, ["action", "duration"]),
+    "Treasure Map": (4, ["action"]),
+    "Bazaar": (5, ["action"]),
+    "Corsair": (5, ["action", "duration", "attack"]),
+    "Merchant Ship": (5, ["action", "duration"]),
+    "Outpost": (5, ["action", "duration"]),
+    "Pirate": (5, ["action", "duration", "reaction"]),
+    "Sea Witch": (5, ["action", "duration", "attack"]),
+    "Tactician": (5, ["action", "duration"]),
+    "Treasury": (5, ["action"]),
+    "Wharf": (5, ["action", "duration"]),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -97,30 +128,33 @@ def test_bandit_ruling_constant():
     assert cards.BANDIT_VICTIM_CHOOSES is True
 
 
-def test_59_cards_and_expansion_counts():
-    assert len(cards.CARDS) == 59
-    by_exp = {"basic": [], "base": [], "intrigue": []}
+def test_86_cards_and_expansion_counts():
+    assert len(cards.CARDS) == 86
+    by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     assert len(by_exp["basic"]) == 7
     assert len(by_exp["base"]) == 26
     assert len(by_exp["intrigue"]) == 26
+    assert len(by_exp["seaside"]) == 27
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
-    for exp in ("base", "intrigue"):
+    for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27)):
         names = cards.KINGDOM[exp]
-        assert len(names) == 26
-        assert len(set(names)) == 26  # no duplicates
+        assert len(names) == want
+        assert len(set(names)) == want  # no duplicates
         for n in names:
             assert cards.CARDS[n]["kingdom"] is True
             assert cards.CARDS[n]["expansion"] == exp
     # every kingdom-flagged card appears in exactly one KINGDOM list
     flagged = {n for n, c in cards.CARDS.items() if c["kingdom"]}
-    listed = set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])
+    listed = (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])
+              | set(cards.KINGDOM["seaside"]))
     assert flagged == listed
     assert not (set(cards.KINGDOM["base"]) & set(cards.KINGDOM["intrigue"]))
+    assert not (set(cards.KINGDOM["seaside"]) & (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])))
     # basics are never kingdom cards
     for n in BASIC_7:
         assert cards.CARDS[n]["kingdom"] is False
@@ -161,7 +195,7 @@ def test_schema_field_completeness_and_validity():
 
 def test_static_vp_values():
     expected_vp = {"Estate": 1, "Duchy": 3, "Province": 6, "Curse": -1,
-                   "Harem": 2, "Mill": 1, "Nobles": 2}
+                   "Harem": 2, "Mill": 1, "Nobles": 2, "Island": 2}
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0
@@ -175,10 +209,11 @@ def test_treasure_coin_values():
     assert cards.CARDS["Silver"]["coins"] == 2
     assert cards.CARDS["Gold"]["coins"] == 3
     assert cards.CARDS["Harem"]["coins"] == 2
+    assert cards.CARDS["Astrolabe"]["coins"] == 1
 
 
 def test_full_name_cost_types_table():
-    # The corruption tell: every one of the 59 (name, cost, types) triples, literally.
+    # The corruption tell: every one of the 86 (name, cost, types) triples, literally.
     assert set(cards.CARDS.keys()) == set(EXPECTED.keys())
     for name, (cost, types) in EXPECTED.items():
         c = cards.CARDS[name]

@@ -222,6 +222,7 @@
 .dm-edge { position: absolute; top: 0; bottom: 0; width: 3px; }
 .dm-edge-atk { left: 0; background: var(--red-gem, #dc4040); }
 .dm-edge-rx { right: 0; background: var(--blue-gem, #4257ff); }
+.dm-edge-dur { left: 0; background: #b3762e; }   /* duration = the Seaside orange */
 .dm-pile-count {
   /* sits on the SLOT (not inside the overflow-hidden card), so it never clips */
   position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
@@ -295,6 +296,19 @@
   --card-w-s: 82px; --card-h: calc(var(--card-w-s) * 1.3);
 }
 .dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
+/* duration cards stay on the table — a warm halo marks them */
+.dm-durwrap { position: relative; }
+.dm-durwrap .dm-card { border-color: #b3762e; box-shadow: 0 0 7px rgba(219, 143, 60, .35); }
+.dm-durwrap::after {
+  content: "next turn"; position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
+  background: #b3762e; color: #1a1408; border-radius: 8px; font-size: 9px;
+  padding: 0 6px; font-weight: 700; white-space: nowrap;
+}
+.dm-mat-chip {
+  background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
+  border-radius: 10px; padding: 3px 10px; font-size: 13px; color: var(--text, #e8dfc8);
+  white-space: nowrap;
+}
 .dm-handrow { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
 .dm-mypiles {
   display: flex; gap: 16px; align-items: flex-start; flex: none; padding-bottom: 14px;

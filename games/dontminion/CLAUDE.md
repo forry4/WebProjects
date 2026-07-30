@@ -1,7 +1,8 @@
-# Dontminion (Dominion, Base 2E + Intrigue 2E) — package notes
+# Dontminion (Dominion: Base 2E + Intrigue 2E + Seaside 2E) — package notes
 
-2–4 players. Mounted at `/dontminion`. Plan + full domain spec:
-`.claude-plans/i-want-to-add-luminous-pebble.md`. Rules source of truth: the Knutsen
+2–4 players, 86 cards. Mounted at `/dontminion`. Plan + full domain spec:
+`.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
+sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
 rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 
@@ -12,7 +13,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 | `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
 | `effects_core.py` | WP2-owned exemplars: Smithy, Village, Moat, Militia, Witch, Throne Room |
-| `effects_base_a/b.py`, `effects_intrigue_a/b.py` | card batches (each owns ONLY its module + its test file) |
+| `effects_base_a/b.py`, `effects_intrigue_a/b.py`, `effects_seaside_a/b.py` | card batches (each owns ONLY its module + its test file) |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | random-legal bot (all difficulty tiers, v1) |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
@@ -66,10 +67,39 @@ data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
 private_to=None,**kw)`. Turn counters (`game["turn_ctx"]["bridges"/"merchants"]`) are incremented
 directly by the owning card's effect.
 
+**Kernel v2 — DURATIONS (Seaside; the contract for later expansions too):**
+`add_duration_fx(game,pid,card,stage,data=None)` — register a start-of-NEXT-turn ability on the
+duration card currently being played (callable from on_play or any later stage of the same play;
+the physical-card setup entry is created eagerly by `play_action_card`/`_play_one_treasure` for
+duration-typed cards, and Throne Room replays add to the SAME entry). At the owner's next turn
+start the fx run as auto frames (they may push decisions); the card (plus riders) then discards
+at that turn's clean-up. An effect that registers NOTHING = "failed to set up" → discarded
+normally · `add_watcher(game,pid,card,event,stage=None,data=None,until="owner_turn_start")` —
+cross-player trigger; events: `"gain"` (any player gains; stage data gets actor/subject/owner),
+`"play_treasure"`, `"protect"` (Lighthouse 2022 until-next-turn attack immunity — no stage;
+`attack_protected(game,pid)` consults it, auto-immunity is applied+logged by the attack wrap);
+`until="turn_end"` for this-turn triggers (Sailor) · `watcher_data(game,owner,card)` — the LIVE
+data dict (per-turn bookkeeping, e.g. Corsair's first-treasure-per-player) ·
+`remove_watcher(game,owner,card,n=1)` · `mark_duration_rider(game,pid,duration_card,rider)` —
+Throne Room stays out with a Duration it directly played (effects_core does this) ·
+`set_aside_duration`/`take_dur_aside(game,pid,cards,dest)` — the owner-only `dur_aside` zone
+(Haven; Blockade gains straight there via `gain(...,dest="dur_aside")`) · `to_island(game,pid,
+cards,zone)` / `to_village_mat` / `take_village_mat(game,pid)` — the scoring mats ·
+`request_extra_turn(game,pid)` — Outpost: clean-up draws 3 ALWAYS once played; the extra turn
+only if the previous turn wasn't also pid's · `duration_in_play(game,pid,card)` — "is it on the
+table" (in_play or persisting; Sea Chart's copy check). Kernel also records
+`game["last_turn_gains"][pid]` = cards pid gained during their own last completed turn
+(Smugglers) and `turn_ctx["gained_victory_in_buy"]` (Treasury's gate). KNOWN SIMPLIFICATIONS
+(documented, acceptable): duration discard happens at the OWNER's clean-up (a no-extra-turn
+Outpost sits one round longer than official); start-of-turn fx resolve in registration order
+(officially owner-sequenced); the 2025 lose-track rule is approximated (fx die with the entry).
+
 **Registration** — each effects module exports exactly:
 ```python
 EFFECTS: {card_name: on_play(game, pid)}
 STAGES:  {(card_name, stage): fn(game, pid, frame, choice)}   # choice None for auto frames
+GAIN_REACTIONS: {card: {"stage": s, "when": fn(gained_name) -> bool}}   # optional (Pirate)
+CLEANUP_PROMPTS: {card: {"when": fn(game,pid) -> bool, "push": fn(game,pid)}}  # optional (Treasury)
 ```
 The resolver pops the frame BEFORE dispatching (stages never clean up). Treasures and pure
 Victory/Curse cards need NO entries (handlers + `cards.py` data cover them).
@@ -119,7 +149,10 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
 only — showing deck/discard counts to everyone is a documented convenience; officially they're
 not open info), hands only to their owner, discard = top + count, `aside` = count, raw `pending`
 replaced by `pending_view` (actor: kind+card+constraint; others: card + waiting_on), log entries
-honor `private_to`, `rng_state`/`seed` popped. Everything reveals at game over.
+honor `private_to`, `rng_state`/`seed` popped. Seaside zones: `duration_view` (card+riders,
+public — fx/data stripped), `island` public, `dur_aside`/`village_mat` owner-only with public
+counts, watchers shipped as identity-only (event/owner/card; data may hold hidden resume info),
+`dur_setup` never ships. Everything reveals at game over.
 
 **The log is VERBOSE by design** (the Dominion-online look): every `draw` entry carries the
 drawn card NAMES — per-field redacted to the owner until game over (count `n` stays public);

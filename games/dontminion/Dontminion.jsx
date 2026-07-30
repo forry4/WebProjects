@@ -26,6 +26,7 @@ const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 const EXPANSIONS = [
   { id: "base", name: "Base Set" },
   { id: "intrigue", name: "Intrigue" },
+  { id: "seaside", name: "Seaside" },
 ];
 const BASIC_ROW = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"];
 
@@ -43,7 +44,7 @@ function timeAgo(ts) {
 // Card-face tinting by primary type (dual types show a split banner).
 const TYPE_LABEL = {
   action: "Action", treasure: "Treasure", victory: "Victory", curse: "Curse",
-  attack: "Attack", reaction: "Reaction",
+  attack: "Attack", reaction: "Reaction", duration: "Duration",
 };
 const faceClass = (types) => {
   if (!types) return "";
@@ -72,6 +73,7 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
     <div className={cls} onClick={click} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
+      {types.includes("duration") && !types.includes("attack") && <span className="dm-edge dm-edge-dur" />}
       <div className={"dm-card-name" + nameCls}>{name}</div>
       {!small && <div className={"dm-card-text" + textCls}>{text}</div>}
       {/* foot row: type lines bottom-LEFT, the cost coin bottom-RIGHT */}
@@ -771,10 +773,31 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <span className="dm-pile-count">hand {s.hand_count ?? 0}</span>
           </div>
           <div className="dm-opp-inplay">
+            {(s.duration_view || []).flatMap((e, i) => [
+              <div key={"d" + i} className="dm-durwrap" title="Duration — stays in play">
+                <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => setCardInfo(e.card)} />
+              </div>,
+              ...(e.riders || []).map((r, j) => (
+                <div key={"d" + i + "r" + j} className="dm-durwrap">
+                  <DmCardFace name={r} card={cards[r]} small onInfo={() => setCardInfo(r)} />
+                </div>
+              )),
+            ])}
             {(s.in_play || []).map((c, i) => (
               <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
             ))}
-            {(s.in_play || []).length === 0 && <span className="dm-zone-hint">nothing in play</span>}
+            {(s.in_play || []).length === 0 && (s.duration_view || []).length === 0
+              && <span className="dm-zone-hint">nothing in play</span>}
+            {(s.island || []).length > 0 && (
+              <span className="dm-mat-chip" title={"Island mat: " + s.island.join(", ")}>
+                🏝 {s.island.length}
+              </span>
+            )}
+            {(s.village_count || 0) > 0 && (
+              <span className="dm-mat-chip" title="Native Village mat (face down)">
+                🏕 {s.village_count}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1053,10 +1076,38 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             )}
             <div className="dm-inplay">
+              {(mySeat?.duration_view || []).flatMap((e, i) => [
+                <div key={"d" + i} className="dm-durwrap" title="Duration — stays in play">
+                  <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => setCardInfo(e.card)} />
+                </div>,
+                ...(e.riders || []).map((r, j) => (
+                  <div key={"d" + i + "r" + j} className="dm-durwrap">
+                    <DmCardFace name={r} card={cards[r]} small onInfo={() => setCardInfo(r)} />
+                  </div>
+                )),
+              ])}
               {(mySeat?.in_play || []).map((c, i) => (
                 <DmCardFace key={i} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
               ))}
-              {(mySeat?.in_play || []).length === 0 && <span className="dm-zone-hint">in play</span>}
+              {(mySeat?.in_play || []).length === 0 && (mySeat?.duration_view || []).length === 0
+                && <span className="dm-zone-hint">in play</span>}
+              {(mySeat?.island || []).length > 0 && (
+                <span className="dm-mat-chip" title={"Island mat: " + mySeat.island.join(", ")}>
+                  🏝 {mySeat.island.length}
+                </span>
+              )}
+              {(mySeat?.village_count || 0) > 0 && (
+                <span className="dm-mat-chip"
+                  title={"Native Village mat: " + ((mySeat.village_mat || []).join(", ") || "face down")}>
+                  🏕 {mySeat.village_count}
+                </span>
+              )}
+              {(mySeat?.dur_aside_count || 0) > 0 && (
+                <span className="dm-mat-chip"
+                  title={"Set aside: " + ((mySeat.dur_aside || []).join(", ") || "face down")}>
+                  ⏳ {mySeat.dur_aside_count}
+                </span>
+              )}
             </div>
             <div className="dm-handrow">
               <div className="dm-mypiles">

@@ -27,8 +27,13 @@ def _census(game):
     total = Counter(game["supply"])
     total.update(game["trash"])
     for seat in game["seats"].values():
-        for zone in ("deck", "hand", "discard", "in_play", "aside"):
-            total.update(seat[zone])
+        for zone in ("deck", "hand", "discard", "in_play", "aside",
+                     "dur_aside", "island", "village_mat"):
+            total.update(seat.get(zone, []))
+        # duration entries hold real cards; dur_setup cards are still in in_play
+        for entry in seat.get("duration", []):
+            total.update([entry["card"]])
+            total.update(entry.get("riders", []))
     return total
 
 
@@ -77,18 +82,18 @@ def test_soak_full_games(players, seed):
         assert game["scores"][p]["turns"] == game["seats"][p]["turns_taken"]
 
 
-def _all52():
+def _all_kingdom_cards():
     from games.dontminion.cards import KINGDOM
-    return sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"])
+    return sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"]) + sorted(KINGDOM["seaside"])
 
 
-@pytest.mark.parametrize("chunk", [0, 1, 2, 3, 4, 5])
+@pytest.mark.parametrize("chunk", [0, 1, 2, 3, 4, 5, 6, 7])
 def test_soak_forced_kingdoms_cover_all_cards(chunk):
-    """Six fixed kingdoms that together cover all 52 kingdom cards — every card
-    effect runs inside full random games under the conservation census."""
-    cards = _all52()
-    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 5 else cards[42:52]
-    game = engine.new_game([A, B, C], ["base", "intrigue"], seed=1234 + chunk,
+    """Fixed kingdoms that together cover ALL kingdom cards (79 with Seaside) —
+    every card effect runs inside full random games under the census."""
+    cards = _all_kingdom_cards()
+    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 7 else cards[-10:]
+    game = engine.new_game([A, B, C], ["base", "intrigue", "seaside"], seed=1234 + chunk,
                            kingdom=kingdom)
     baseline = _census(game)
     rng = random.Random(4321 + chunk)
