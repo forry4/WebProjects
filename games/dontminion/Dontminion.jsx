@@ -250,6 +250,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
   const [orderIdx, setOrderIdx] = useState([]);      // order_cards: click sequence of indices
+  const [promptMin, setPromptMin] = useState(false); // decision modal minimized (peek at board)
 
   // ── URL routing refs (segment 2 = room id; the shell owns "/dontminion") ──
   const screenRef = useRef(screen);
@@ -285,6 +286,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const handTreasures = (mySeat?.hand || []).some((c) => cards[c]?.types?.includes("treasure"));
   const constraint = iAmActor ? pv.constraint : null;
   const kingdomPiles = game?.kingdom || [];
+  const kingdomByCost = [...kingdomPiles].sort((a, b) =>
+    ((cards[a]?.cost ?? 0) - (cards[b]?.cost ?? 0)) || a.localeCompare(b));
   const seatOrder = game?.players || Object.keys(names);
   // The single opponent play box tracks the ACTION: the opponent whose turn it
   // is — or, on your turn, whoever plays next. (2p: always the one opponent.)
@@ -433,7 +436,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // clear decision-prompt state whenever the decision context changes
   useEffect(() => {
-    setPickIdx([]); setPickOpts([]); setOrderIdx([]);
+    setPickIdx([]); setPickOpts([]); setOrderIdx([]); setPromptMin(false);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
   useEffect(() => { setGameOverDismissed(false); }, [roomId]);
 
@@ -527,28 +530,37 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── render helpers ──
   const kindOfPrompt = iAmActor ? pv.kind : null;
+  // These decision kinds open as a minimizable MODAL; choose_pile stays a
+  // board hint, waiting-on stays an inline bar.
+  const hasModalPrompt = iAmActor
+    && ["choose_cards", "choose_option", "order_cards", "place_in_deck", "name_card"].includes(pv.kind);
 
-  const renderPrompt = () => {
-    if (!game || over) return null;
-    if (waitingOn) {
-      return (
-        <div className="dm-waitbar">
-          Waiting for <b>{names[waitingOn] || waitingOn}</b>
-          {pv?.card && pv.card !== "__attack" ? <> — {pv.card}</> : null}
-          {botActing ? <span className="dm-dots">…</span> : null}
-        </div>
-      );
-    }
-    if (!iAmActor) return null;
+  const promptTitle = () => {
     const c = constraint;
     const promptCard = pv.card === "__attack" ? "Attack" : pv.card;
+    switch (kindOfPrompt) {
+      case "choose_cards": {
+        const label = c.min === c.max ? `${c.purpose} ${c.min}` : c.min === 0 ? `${c.purpose} up to ${c.max}` : `${c.purpose} ${c.min}–${c.max}`;
+        return `${promptCard}: ${label}${pickIdx.length ? ` (${pickIdx.length} picked)` : ""}`;
+      }
+      case "choose_option": {
+        const pick = c.pick || 1;
+        return pick === 1 ? promptCard : `${promptCard}: choose ${pick} (different)`;
+      }
+      case "order_cards": return `${promptCard}: click cards in order (first = top of deck)`;
+      case "place_in_deck": return `Secret Passage: where in your deck? (${c.card})`;
+      case "name_card": return `${promptCard}: name a card`;
+      default: return promptCard;
+    }
+  };
+
+  const promptBody = () => {
+    const c = constraint;
     if (kindOfPrompt === "choose_cards") {
       const need = pickIdx.length;
-      const ok = need >= c.min && need <= c.max;
-      const label = c.min === c.max ? `${c.purpose} ${c.min}` : c.min === 0 ? `${c.purpose} up to ${c.max}` : `${c.purpose} ${c.min}–${c.max}`;
+      const okPick = need >= c.min && need <= c.max;
       return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCard}: {label} {need ? `(${need} picked)` : ""}</div>
+        <>
           <div className="dm-prompt-cards">
             {c.cards.map((n, i) => (
               <DmCardFace key={i} name={n} card={cards[n]} small
@@ -557,60 +569,44 @@ export default function Dontminion({ myId, authUser, onExit }) {
             ))}
           </div>
           <div className="dm-prompt-actions">
-            <button className="btn btn-gold" disabled={!ok}
+            <button className="btn btn-gold" disabled={!okPick}
               onClick={() => { mv({ type: "decision", cards: pickIdx.map((i) => c.cards[i]) }); }}>
               Confirm{c.purpose === "pass" ? " (kept secret)" : ""}
             </button>
             {c.min === 0 && <button className="btn btn-outline" onClick={() => mv({ type: "decision", cards: [] })}>None</button>}
           </div>
-        </div>
+        </>
       );
     }
     if (kindOfPrompt === "choose_option") {
       const pick = c.pick || 1;
       if (pick === 1) {
         return (
-          <div className="dm-prompt">
-            <div className="dm-prompt-hd">{promptCard}</div>
-            <div className="dm-prompt-actions">
-              {c.options.map((o) => (
-                <button key={o.id} className="btn btn-gold" onClick={() => mv({ type: "decision", ids: [o.id] })}>{o.label}</button>
-              ))}
-            </div>
+          <div className="dm-prompt-actions">
+            {c.options.map((o) => (
+              <button key={o.id} className="btn btn-gold" onClick={() => mv({ type: "decision", ids: [o.id] })}>{o.label}</button>
+            ))}
           </div>
         );
       }
       return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCard}: choose {pick} (different)</div>
-          <div className="dm-prompt-actions">
-            {c.options.map((o) => (
-              <button key={o.id}
-                className={"btn " + (pickOpts.includes(o.id) ? "btn-gold" : "btn-outline")}
-                onClick={() => setPickOpts((s) => s.includes(o.id) ? s.filter((x) => x !== o.id) : (s.length < pick ? [...s, o.id] : s))}>
-                {o.label}
-              </button>
-            ))}
-            <button className="btn btn-gold" disabled={pickOpts.length !== pick}
-              onClick={() => mv({ type: "decision", ids: pickOpts })}>Confirm</button>
-          </div>
-        </div>
-      );
-    }
-    if (kindOfPrompt === "choose_pile") {
-      // the resource-bar hint carries this on your own turn — no box needed
-      if (game.turn === myId) return null;
-      return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCard}: pick a highlighted Supply pile</div>
+        <div className="dm-prompt-actions">
+          {c.options.map((o) => (
+            <button key={o.id}
+              className={"btn " + (pickOpts.includes(o.id) ? "btn-gold" : "btn-outline")}
+              onClick={() => setPickOpts((s) => s.includes(o.id) ? s.filter((x) => x !== o.id) : (s.length < pick ? [...s, o.id] : s))}>
+              {o.label}
+            </button>
+          ))}
+          <button className="btn btn-gold" disabled={pickOpts.length !== pick}
+            onClick={() => mv({ type: "decision", ids: pickOpts })}>Confirm</button>
         </div>
       );
     }
     if (kindOfPrompt === "order_cards") {
       const remaining = c.cards.map((n, i) => i).filter((i) => !orderIdx.includes(i));
       return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCard}: click cards in order (first = top of deck)</div>
+        <>
           <div className="dm-prompt-cards">
             {c.cards.map((n, i) => (
               <DmCardFace key={i} name={n} card={cards[n]} small
@@ -624,37 +620,71 @@ export default function Dontminion({ myId, authUser, onExit }) {
               onClick={() => mv({ type: "decision", order: orderIdx.map((i) => c.cards[i]) })}>Confirm order</button>
             <button className="btn btn-outline" onClick={() => setOrderIdx([])}>Reset</button>
           </div>
-        </div>
+        </>
       );
     }
     if (kindOfPrompt === "place_in_deck") {
       return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">Secret Passage: where in your deck? ({c.card})</div>
-          <div className="dm-prompt-actions dm-slots">
-            {Array.from({ length: c.deck_len + 1 }, (_, p) => (
-              <button key={p} className="btn btn-outline"
-                onClick={() => mv({ type: "decision", position: p })}>
-                {p === 0 ? "Top" : p === c.deck_len ? "Bottom" : p}
-              </button>
-            ))}
-          </div>
+        <div className="dm-prompt-actions dm-slots">
+          {Array.from({ length: c.deck_len + 1 }, (_, p) => (
+            <button key={p} className="btn btn-outline"
+              onClick={() => mv({ type: "decision", position: p })}>
+              {p === 0 ? "Top" : p === c.deck_len ? "Bottom" : p}
+            </button>
+          ))}
         </div>
       );
     }
     if (kindOfPrompt === "name_card") {
       return (
-        <div className="dm-prompt">
-          <div className="dm-prompt-hd">{promptCard}: name a card</div>
-          <div className="dm-prompt-actions dm-names">
-            {c.cards.map((n) => (
-              <button key={n} className="btn btn-outline" onClick={() => mv({ type: "decision", card: n })}>{n}</button>
-            ))}
-          </div>
+        <div className="dm-prompt-actions dm-names">
+          {c.cards.map((n) => (
+            <button key={n} className="btn btn-outline" onClick={() => mv({ type: "decision", card: n })}>{n}</button>
+          ))}
         </div>
       );
     }
     return null;
+  };
+
+  // inline slot above the supply: only the waiting bar and the rare
+  // off-turn choose_pile keep living here
+  const renderPrompt = () => {
+    if (!game || over) return null;
+    if (waitingOn) {
+      return (
+        <div className="dm-waitbar">
+          Waiting for <b>{names[waitingOn] || waitingOn}</b>
+          {pv?.card && pv.card !== "__attack" ? <> — {pv.card}</> : null}
+          {botActing ? <span className="dm-dots">…</span> : null}
+        </div>
+      );
+    }
+    if (iAmActor && kindOfPrompt === "choose_pile" && game.turn !== myId) {
+      return (
+        <div className="dm-prompt">
+          <div className="dm-prompt-hd">{promptCardName}: pick a highlighted Supply pile</div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // decision MODAL — minimize to study the board; the restore button takes the
+  // hint slot in the resource bar
+  const renderPromptModal = () => {
+    if (!hasModalPrompt || promptMin || over) return null;
+    return (
+      <div className="dm-backdrop" onClick={() => setPromptMin(true)}>
+        <div className="dm-modal dm-prompt dm-prompt-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="dm-prompt-hdrow">
+            <div className="dm-prompt-hd">{promptTitle()}</div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setPromptMin(true)}>▾ Look at the board</button>
+          </div>
+          {promptBody()}
+        </div>
+      </div>
+    );
   };
 
   const renderPile = (name) => {
@@ -981,7 +1011,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {renderPrompt()}
           <div className="dm-supply">
             <div className="dm-supply-row dm-basics">{BASIC_ROW.map(renderPile)}</div>
-            <div className="dm-supply-row dm-kingdom">{kingdomPiles.map(renderPile)}</div>
+            <div className="dm-supply-row dm-kingdom">{kingdomByCost.map(renderPile)}</div>
           </div>
           <div className="dm-me">
             {!over && game.turn === myId && (
@@ -990,7 +1020,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 <span>Buys <b>{game.buys}</b></span>
                 <span>Money <b>${game.coins}</b></span>
                 {bridges > 0 && <span>Cards cost <b>−{bridges}</b></span>}
-                {resHint && <span className="dm-reshint">{resHint}</span>}
+                {hasModalPrompt && promptMin
+                  ? <button className="btn btn-gold btn-sm dm-reshint-btn"
+                      onClick={() => setPromptMin(false)}>{promptCardName}: make your choice ▸</button>
+                  : resHint ? <span className="dm-reshint">{resHint}</span> : null}
+              </div>
+            )}
+            {!over && game.turn !== myId && hasModalPrompt && promptMin && (
+              <div className="dm-resbar">
+                <button className="btn btn-gold btn-sm dm-reshint-btn"
+                  onClick={() => setPromptMin(false)}>{promptCardName}: make your choice ▸</button>
               </div>
             )}
             <div className="dm-inplay">
@@ -1060,7 +1099,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <h2>This game's Kingdom</h2>
             <p className="dm-wait-note">{(roomData?.expansions || []).map((e) => EXPANSIONS.find((x) => x.id === e)?.name || e).join(" + ")}</p>
             <div className="dm-kgrid">
-              {kingdomPiles.map((n) => (
+              {kingdomByCost.map((n) => (
                 <div key={n} className="dm-pile-slot">
                   <DmCardFace name={n} card={cards[n]} />
                   <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
@@ -1082,6 +1121,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </div>
         </div>
       )}
+      {renderPromptModal()}
       {cardInfo && cards[cardInfo] && (
         <div className="dm-backdrop" onClick={() => setCardInfo(null)}>
           <div className="dm-modal dm-cardinfo" onClick={(e) => e.stopPropagation()}>

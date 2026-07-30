@@ -248,6 +248,17 @@
   --card-w-s: 84px; --card-h: calc(var(--card-w-s) * 1.3);
 }
 .dm-prompt-hd { font-weight: 700; margin-bottom: 8px; }
+/* the decision modal (minimizable — the restore button takes the hint slot);
+   double-class beats the later plain .dm-modal sizing */
+.dm-modal.dm-prompt-modal {
+  max-width: min(760px, calc(100vw - 32px)); width: auto; min-width: min(420px, calc(100vw - 32px));
+  max-height: 84vh; overflow-y: auto;
+}
+.dm-prompt-hdrow {
+  display: flex; gap: 12px; align-items: baseline; justify-content: space-between;
+}
+.dm-prompt-hdrow .dm-prompt-hd { margin-bottom: 10px; }
+.dm-reshint-btn { margin-left: auto; white-space: nowrap; }
 .dm-prompt-cards { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .dm-prompt-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
