@@ -37,5 +37,14 @@ The landscape-card UI (Phase 7+) is the next big FRONTEND lift: a new board row 
 Kernel v2 (Phase 1) API additions — see `engine.py` "DURATION kernel" section and the
 frozen-API notes in `CLAUDE.md`: `add_duration_fx`, `add_watcher`, `watcher_data`,
 `remove_watcher`, `mark_duration_rider`, `set_aside_duration`, `take_dur_aside`,
-`to_island`, `to_village_mat`, `take_village_mat`, `request_extra_turn`,
-`duration_in_play`, plus the effects registries `GAIN_REACTIONS` and `CLEANUP_PROMPTS`.
+`to_island`, `to_village_mat`, `take_village_mat`, `request_extra_turn`, `duration_in_play`.
+
+**THE TRIGGER BUS (post-Phase-1 hardening):** all off-turn/triggered abilities now flow
+through ONE event system — kernel `emit()` (events: gain / buy / play_treasure / trash /
+buy_phase_end) consumed by dynamic watchers + the static `TRIGGERS` registry (sources:
+hand-reaction window, in-play prompt, self-trigger), plus the `COST_MODS` while-in-play
+cost seam. This is the load-bearing design for phases 2+: Prosperity's on-buy (`"buy"` +
+in_play), Hinterlands' when-gain (`"gain"` + self — the emit point already exists),
+Dark Ages' on-trash (`"trash"` + self), Quarry (`COST_MODS`). A future set should need at
+most a NEW EVENT NAME and registry entries — if a set seems to need a new bespoke kernel
+mechanism, stop and extend the bus instead.

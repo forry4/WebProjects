@@ -86,22 +86,22 @@ def test_blockade_curse_only_on_the_gainers_own_turn():
     assert g["supply"]["Curse"] == 9
 
 
-def test_blockade_moat_does_not_block_the_later_curses():
-    # Documented port simplification: immunity is per attack PLAY, but the
-    # curse lands later via the watcher — Moat's reveal doesn't reach it.
+def test_blockade_moat_reveal_blocks_the_later_curses():
+    # Play-time immunity (Moat's reveal) is captured into the watcher: the
+    # delayed curses respect it, per the official per-play attack semantics.
     g = fresh()
     give_hand(g, A, ["Blockade"])
     g["seats"][A]["deck"] = ["Copper"] * 10
     give_hand(g, B, ["Moat"] + ["Copper"] * 4)
     assert play(g, A, "Blockade")[0]
-    assert g["pending_pid"] == B                        # the window still opens
+    assert g["pending_pid"] == B                        # the window opens
     assert decide(g, B, ids=["reveal_moat"])[0]
     assert decide(g, A, pile="Silver")[0]
     assert mv(g, A, {"type": "end_phase"})[0]
     assert mv(g, B, {"type": "end_phase"})[0]           # B's hand has Moat: action phase
     g["coins"] = 3
     assert mv(g, B, {"type": "buy", "card": "Silver"})[0]
-    assert "Curse" in g["seats"][B]["discard"]          # cursed despite the Moat
+    assert "Curse" not in g["seats"][B]["discard"]      # the Moat held
 
 
 def test_blockade_no_eligible_pile_fails_to_set_up():

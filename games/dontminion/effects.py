@@ -15,8 +15,11 @@ _MODULES = (effects_core, effects_base_a, effects_base_b,
 
 EFFECTS = {}
 STAGES = {}
-GAIN_REACTIONS = {}    # card -> {"stage": str, "when": fn(gained_name) -> bool}
-CLEANUP_PROMPTS = {}   # card -> {"when": fn(game, pid) -> bool, "push": fn(game, pid)}
+# The trigger-bus registries (see engine.py "THE TRIGGER BUS" for the spec
+# shapes): TRIGGERS = {card: [{"on": event, "from": source, ...}, ...]};
+# COST_MODS = {card: fn(game, priced_name) -> reduction per in-play copy}.
+TRIGGERS = {}
+COST_MODS = {}
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -27,11 +30,11 @@ for _m in _MODULES:
         if _key in STAGES:
             raise RuntimeError(f"dontminion: duplicate STAGES entry {_key!r}")
         STAGES[_key] = _fn
-    for _name, _spec in getattr(_m, "GAIN_REACTIONS", {}).items():
-        if _name in GAIN_REACTIONS:
-            raise RuntimeError(f"dontminion: duplicate GAIN_REACTIONS entry {_name!r}")
-        GAIN_REACTIONS[_name] = _spec
-    for _name, _spec in getattr(_m, "CLEANUP_PROMPTS", {}).items():
-        if _name in CLEANUP_PROMPTS:
-            raise RuntimeError(f"dontminion: duplicate CLEANUP_PROMPTS entry {_name!r}")
-        CLEANUP_PROMPTS[_name] = _spec
+    for _name, _specs in getattr(_m, "TRIGGERS", {}).items():
+        if _name in TRIGGERS:
+            raise RuntimeError(f"dontminion: duplicate TRIGGERS entry {_name!r}")
+        TRIGGERS[_name] = _specs
+    for _name, _fn in getattr(_m, "COST_MODS", {}).items():
+        if _name in COST_MODS:
+            raise RuntimeError(f"dontminion: duplicate COST_MODS entry {_name!r}")
+        COST_MODS[_name] = _fn

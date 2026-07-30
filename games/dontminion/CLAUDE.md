@@ -90,16 +90,32 @@ only if the previous turn wasn't also pid's · `duration_in_play(game,pid,card)`
 table" (in_play or persisting; Sea Chart's copy check). Kernel also records
 `game["last_turn_gains"][pid]` = cards pid gained during their own last completed turn
 (Smugglers) and `turn_ctx["gained_victory_in_buy"]` (Treasury's gate). KNOWN SIMPLIFICATIONS
-(documented, acceptable): duration discard happens at the OWNER's clean-up (a no-extra-turn
-Outpost sits one round longer than official); start-of-turn fx resolve in registration order
-(officially owner-sequenced); the 2025 lose-track rule is approximated (fx die with the entry).
+(documented, acceptable): start-of-turn fx resolve in registration order (officially
+owner-sequenced); the 2025 lose-track rule is approximated (fx die with the entry); Sailor
+won't offer to play a Duration gained into the Blockade set-aside. Duration discard follows
+the OFFICIAL timing: done entries sweep at the next clean-up whoever's turn it is (a denied
+Outpost is marked done between turns). Play-time attack immunity (Moat/Lighthouse) is captured
+into watchers, so Corsair/Blockade delayed effects respect it.
+
+**THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
+single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
+`"buy_phase_end"` (all fired AFTER the change applies) — consumed by (1) dynamic WATCHERS
+(`add_watcher`, per-play instances) and (2) the static `TRIGGERS` registry. Adding a new set's
+timing = at most one new `emit()` call site plus registry entries; NEVER a new bespoke kernel
+mechanism. `TRIGGERS[card] = [{"on": event, "from": source, ...}]` with sources: `"hand"`
+(reaction window offered to each holder in turn order — Pirate; Watchtower/Sheepdog later;
+needs `stage`, optional `when(game,pid,ctx)`), `"in_play"` (runs `push(game, actor)` once if
+the actor has a copy in play — Treasury; Hoard/Goons-class later), `"self"` (fires when the
+event's SUBJECT is this card — the whole Hinterlands when-gain theme and Dark Ages on-trash;
+needs `stage`). `COST_MODS[card] = fn(game, priced_name) -> reduction` is the while-in-play
+cost-modifier seam (Quarry-class), summed per copy on ANY table inside `cost()`.
 
 **Registration** — each effects module exports exactly:
 ```python
 EFFECTS: {card_name: on_play(game, pid)}
 STAGES:  {(card_name, stage): fn(game, pid, frame, choice)}   # choice None for auto frames
-GAIN_REACTIONS: {card: {"stage": s, "when": fn(gained_name) -> bool}}   # optional (Pirate)
-CLEANUP_PROMPTS: {card: {"when": fn(game,pid) -> bool, "push": fn(game,pid)}}  # optional (Treasury)
+TRIGGERS: {card: [spec, ...]}      # optional — trigger-bus entries (shape above)
+COST_MODS: {card: fn(game, name)}  # optional — while-in-play cost modifiers
 ```
 The resolver pops the frame BEFORE dispatching (stages never clean up). Treasures and pure
 Victory/Curse cards need NO entries (handlers + `cards.py` data cover them).

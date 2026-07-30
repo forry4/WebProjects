@@ -294,8 +294,7 @@ def gain(game, pid, card, dest="discard"):
         if game["phase"] == "buy" and "victory" in CARDS[card]["types"]:
             game["turn_ctx"]["gained_victory_in_buy"] = True   # Treasury's gate
     _log(game, pid, "gain", card=card, dest=dest)
-    _fire_watchers(game, "gain", pid, card)
-    _offer_gain_reactions(game, pid, card)
+    emit(game, "gain", actor=pid, subject=card)
     return True
 
 
@@ -315,6 +314,8 @@ def trash(game, pid, cards, zone="hand"):
         game["trash"].append(c)
     if cards:
         _log(game, pid, "trash", cards=list(cards))
+        for c in cards:
+            emit(game, "trash", actor=pid, subject=c)   # Dark Ages' seam
 
 
 def trash_from_supply(game, card):
@@ -426,8 +427,22 @@ def count_empty_piles(game):
 
 
 def cost(game, card):
-    """THE single cost function — Bridge reduction applies everywhere, min 0."""
-    return max(0, CARDS[card]["cost"] - game["turn_ctx"]["bridges"])
+    """THE single cost function — Bridge reduction applies everywhere, min 0.
+    effects.COST_MODS is the while-in-play modifier seam (Quarry-class,
+    Prosperity+): {source_card: fn(game, priced_name) -> reduction per copy},
+    summed over every copy on ANY table (cost changes are global)."""
+    c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"]
+    from . import effects
+    mods = getattr(effects, "COST_MODS", {})
+    for src, fn in mods.items():
+        n = 0
+        for seat in game["seats"].values():
+            n += seat["in_play"].count(src)
+            n += sum(1 for e in seat.get("duration", [])
+                     if e["card"] == src or src in e.get("riders", []))
+        if n:
+            c -= fn(game, card) * n
+    return max(0, c)
 
 
 # --- the DURATION kernel (Seaside; reused by later expansions) ----------------
@@ -471,20 +486,30 @@ def add_duration_fx(game, pid, card, stage, data=None):
     entry["fx"].append({"stage": stage, "data": data or {}})
 
 
-def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn_start"):
+def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn_start",
+                immune=None):
     """Register a cross-player trigger. events: "gain" (any player gains),
     "play_treasure" (any treasure play), "protect" (Lighthouse — no stage, the
     attack wrap consults it). until: "owner_turn_start" (default, the Duration
     contract) or "turn_end" (this-turn triggers like Sailor's). The stage runs
-    as an auto frame with data + {"actor", "subject", "owner"} when fired."""
+    as an auto frame with data + {"actor", "subject", "owner"} when fired.
+    immune: explicit per-play immunity override for watchers registered from a
+    LATER stage of an attack play (Blockade) — by default the current play's
+    _atk_immune transient is captured."""
     entry = _current_dur_entry(game)
     if entry is None or entry["card"] != card:
         entry = {"card": card, "fx": [], "watchers": 0, "riders": []}
         _dur_setup_list(game, pid).append(entry)
         game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
     entry["watchers"] += 1
+    # A watcher registered during an Attack's play ability carries that play's
+    # immunity set: a player who Moat-revealed (or was Lighthouse-protected)
+    # when Corsair/Blockade was PLAYED is immune to its delayed effects too —
+    # emit() never fires the watcher for an immune actor.
     game["watchers"].append({"event": event, "owner": pid, "card": card,
-                             "stage": stage, "data": data or {}, "until": until})
+                             "stage": stage, "data": data or {}, "until": until,
+                             "immune": list(immune if immune is not None
+                                            else game.get("_atk_immune", []))})
 
 
 def mark_duration_rider(game, pid, duration_card, rider_card):
@@ -556,14 +581,61 @@ def request_extra_turn(game, pid):
     game["_outpost"] = pid
 
 
-def _fire_watchers(game, event, actor, card):
-    """Run watcher stages for an event. Fired AFTER the triggering change."""
+# --- THE TRIGGER BUS ----------------------------------------------------------
+# One event system for every ability that fires off another change. The kernel
+# emits a small vocabulary of events; two consumer layers answer:
+#   1. WATCHERS — dynamic per-play instances registered by card effects
+#      (add_watcher: Monkey, Corsair, Blockade, Sailor, Lighthouse-protect).
+#   2. effects.TRIGGERS — the STATIC registry: {card: [spec, ...]} where
+#      spec = {"on": event, "from": source, ...}:
+#        "hand"    — a reaction window (play/decline) offered to each holder in
+#                    turn order (Pirate; Watchtower/Sheepdog later);
+#                    needs "stage", optional "when"(game, pid, ctx).
+#        "in_play" — evaluated on the ACTOR's table; runs "push"(game, pid)
+#                    once if they have a copy in play (Treasury;
+#                    Hoard/Goons-class later); optional "when".
+#        "self"    — fires when the event's SUBJECT is this card ("when you
+#                    gain this" — the entire Hinterlands theme; Dark Ages
+#                    on-trash); needs "stage", optional "when".
+# Emitted today: "gain", "buy", "play_treasure", "trash", "buy_phase_end".
+# Adding a future set's timing = new emit() call site (one line) + registry
+# entries — never another bespoke kernel mechanism.
+
+def emit(game, event, actor=None, subject=None, **extra):
+    """Fire an event AFTER the triggering change has been applied."""
+    ctx = {"actor": actor, "subject": subject, **extra}
     for w in list(game.get("watchers", [])):
         if w["event"] != event or not w.get("stage"):
             continue
+        if actor is not None and actor in w.get("immune", []):
+            continue          # immune to the attack PLAY that set this watcher
         push_auto(game, w["owner"], w["card"], w["stage"],
-                  data={**w["data"], "actor": actor, "subject": card,
+                  data={**w["data"], "actor": actor, "subject": subject,
                         "owner": w["owner"]})
+    from . import effects
+    for card, specs in getattr(effects, "TRIGGERS", {}).items():
+        for spec in specs:
+            if spec["on"] != event:
+                continue
+            src = spec.get("from", "hand")
+            when = spec.get("when")
+            if src == "hand":
+                order = game["players"]
+                i = order.index(game["turn"]) if game["turn"] in order else 0
+                for p in reversed(order[i:] + order[:i]):
+                    if card in game["seats"][p]["hand"] and (when is None or when(game, p, ctx)):
+                        push_choose_option(game, p, card, spec["stage"],
+                                           options=[{"id": "play", "label": f"Play {card} from your hand"},
+                                                    {"id": "decline", "label": "Don't react"}],
+                                           data={"gained": subject, "gainer": actor})
+            elif src == "in_play":
+                if actor is not None and card in game["seats"][actor]["in_play"] \
+                        and (when is None or when(game, actor, ctx)):
+                    spec["push"](game, actor)
+            elif src == "self":
+                if subject == card and (when is None or when(game, actor, ctx)):
+                    push_auto(game, actor, card, spec["stage"],
+                              data={"actor": actor, "subject": subject})
 
 
 def attack_protected(game, pid):
@@ -581,12 +653,22 @@ def watcher_data(game, owner, card):
     return None
 
 
+def watcher_datas(game, owner, card):
+    """ALL live data dicts for owner's copies of a watcher — per-INSTANCE
+    bookkeeping (two Sailors each grant their own once-per-turn play)."""
+    return [w["data"] for w in game.get("watchers", [])
+            if w["owner"] == owner and w["card"] == card]
+
+
 def duration_in_play(game, pid, card):
-    """Is `card` on pid's table (played this turn or persisting)?"""
+    """Is `card` on pid's table (played this turn or persisting)? Riders (a
+    Throne Room staying out with its Duration) are on the table too — Sea
+    Chart's copy check must see them."""
     seat = game["seats"][pid]
     if card in seat["in_play"]:
         return True
-    return any(e["card"] == card for e in seat.get("duration", []))
+    return any(e["card"] == card or card in e.get("riders", [])
+               for e in seat.get("duration", []))
 
 
 def remove_watcher(game, owner, card, n=1):
@@ -626,18 +708,24 @@ def _start_of_turn(game, pid):
 
 
 def _cleanup_durations(game, pid):
-    """At pid's clean-up: discard done entries; promote this turn's setup
-    entries (in_play -> duration zone). Returns the names (incl. riders) that
-    must NOT be discarded from in_play."""
+    """At pid's clean-up: discard done entries — for EVERY seat, not just the
+    turn player's (official timing: a Duration discards at the clean-up of the
+    turn its last ability resolved, and an ability that resolved BETWEEN turns
+    — a denied Outpost — means the following turn's clean-up, whoever's that
+    is). Then promote pid's setup entries (in_play -> duration zone). Returns
+    the names (incl. riders) that must NOT be discarded from pid's in_play."""
+    for p, s in game["seats"].items():
+        still_p = []
+        for entry in s.get("duration", []):
+            if entry.get("done"):
+                s["discard"].append(entry["card"])
+                s["discard"].extend(entry.get("riders", []))
+            else:
+                still_p.append(entry)
+        s["duration"] = still_p
     seat = game["seats"][pid]
     kept_out = []
-    still = []
-    for entry in seat.get("duration", []):
-        if entry.get("done"):
-            seat["discard"].append(entry["card"])
-            seat["discard"].extend(entry.get("riders", []))
-        else:
-            still.append(entry)
+    still = seat.get("duration", [])
     for entry in seat.pop("dur_setup", []):
         # fired = an off-turn play whose fx already resolved at this seat's own
         # turn start — spent, so it discards from in_play like any other card
@@ -677,9 +765,15 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
             if lst[i]["card"] == card:
                 game["_cur_dur"] = [pid, i]
                 break
-    if count:
-        game["turn_ctx"]["actions_played"] += 1
-    _log(game, pid, "play", card=card)
+    if count and "action" in CARDS[card]["types"]:
+        game["turn_ctx"]["actions_played"] += 1   # Conspirator counts ACTIONS only
+    if "treasure" in CARDS[card]["types"]:
+        # a Treasure played out-of-band (Sailor playing a gained Astrolabe)
+        # still produces its printed $ — and the Merchant/first-Silver hook
+        _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
+        _treasure_coins(game, pid, card)
+    else:
+        _log(game, pid, "play", card=card)
     if "attack" in CARDS[card]["types"]:
         # Lighthouse protection (until-their-next-turn watcher) = unaffected,
         # no window needed (public, so it's logged rather than asked)
@@ -694,11 +788,18 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
             if opts:
                 _push_window(game, o, opts)
     else:
-        _push_depth(game)
-        try:
-            _effect_fn(card)(game, pid)
-        finally:
-            _pop_depth(game)
+        from . import effects as _fx
+        fn = _fx.EFFECTS.get(card)
+        if fn is None and "treasure" not in CARDS[card]["types"]:
+            raise KeyError(f"dontminion: no effect registered for {card!r}")
+        if fn is not None:
+            _push_depth(game)
+            try:
+                fn(game, pid)
+            finally:
+                _pop_depth(game)
+        if "treasure" in CARDS[card]["types"]:
+            emit(game, "play_treasure", actor=pid, subject=card)
 
 
 def _reaction_options(game, o, immune, moat_ok=True):
@@ -722,25 +823,6 @@ def _current_attack_frame(game):
         if f["card"] == "__attack" and f["stage"] == "play_ability":
             return f
     return None
-
-
-def _offer_gain_reactions(game, actor, card):
-    """Hand reactions to a GAIN (Pirate). effects.GAIN_REACTIONS maps a
-    reaction card -> {"stage": s, "when": fn(gained_card_name) -> bool}; the
-    stage gets a choose_option window per holder, in turn order."""
-    from . import effects
-    regs = getattr(effects, "GAIN_REACTIONS", {})
-    if not regs:
-        return
-    order = game["players"]
-    i = order.index(game["turn"]) if game["turn"] in order else 0
-    for p in reversed(order[i:] + order[:i]):
-        for rcard, spec in regs.items():
-            if rcard in game["seats"][p]["hand"] and spec["when"](card):
-                push_choose_option(game, p, rcard, spec["stage"],
-                                   options=[{"id": "play", "label": f"Play {rcard} from your hand"},
-                                            {"id": "decline", "label": "Don't react"}],
-                                   data={"gained": card, "gainer": actor})
 
 
 def _k_window(game, pid, frame, choice):
@@ -841,20 +923,29 @@ def _h_play_action(game, pid, move):
     return True, None
 
 
-def _play_one_treasure(game, pid, card):
-    from . import effects
-    seat = game["seats"][pid]
-    seat["hand"].remove(card)
-    seat["in_play"].append(card)
-    game["_cur_dur"] = None
+def _treasure_coins(game, pid, card):
+    """The printed $ of a played Treasure + the Merchant first-Silver hook —
+    shared by the buy-phase handler and out-of-band plays (play_action_card)."""
     game["coins"] += CARDS[card]["coins"]
-    _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
     if card == "Silver" and not game["turn_ctx"]["silver_played"]:
         game["turn_ctx"]["silver_played"] = True
         m = game["turn_ctx"]["merchants"]
         if m:
             game["coins"] += m
             _log(game, pid, "plus", coins=m, why="Merchant")
+
+
+def _play_one_treasure(game, pid, card):
+    from . import effects
+    seat = game["seats"][pid]
+    seat["hand"].remove(card)
+    seat["in_play"].append(card)
+    game["_cur_dur"] = None
+    if "duration" in CARDS[card]["types"]:
+        _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
+        game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
+    _log(game, pid, "play", card=card, coins=CARDS[card]["coins"])
+    _treasure_coins(game, pid, card)
     # treasures with abilities (Astrolabe's duration half) run their effect too
     fn = effects.EFFECTS.get(card)
     if fn is not None:
@@ -863,7 +954,7 @@ def _play_one_treasure(game, pid, card):
             fn(game, pid)
         finally:
             _pop_depth(game)
-    _fire_watchers(game, "play_treasure", pid, card)
+    emit(game, "play_treasure", actor=pid, subject=card)
 
 
 def _h_play_treasure(game, pid, move):
@@ -907,10 +998,9 @@ def _h_buy(game, pid, move):
     game["coins"] -= c
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
-    if "victory" in CARDS[card]["types"]:
-        game["turn_ctx"]["bought_victory"] = True   # Treasury's clean-up gate
     _log(game, pid, "buy", card=card)
     gain(game, pid, card)
+    emit(game, "buy", actor=pid, subject=card)   # Prosperity's on-buy seam
     return True, None
 
 
@@ -924,19 +1014,17 @@ def _h_end_phase(game, pid, move):
 
 
 def _push_cleanup_choices(game, pid):
-    """Clean-up decisions (Treasury's may-topdeck). When any exist, the turn
-    end runs through frames: the parked __turn/finish continuation fires
-    _end_turn once the choices resolve. Returns True if frames were pushed."""
-    from . import effects
-    regs = getattr(effects, "CLEANUP_PROMPTS", {})
-    pushed = False
-    for card, spec in regs.items():
-        if card in game["seats"][pid]["in_play"] and spec["when"](game, pid):
-            if not pushed:
-                push_auto(game, pid, "__turn", "finish", data={})
-                pushed = True
-            spec["push"](game, pid)
-    return pushed
+    """End-of-buy-phase decisions (Treasury's may-topdeck) via the trigger
+    bus. When any fire, the turn end runs through frames: the parked
+    __turn/finish continuation fires _end_turn once the choices resolve.
+    Returns True if frames were pushed (else callers end the turn directly)."""
+    n0 = len(game["pending"])
+    push_auto(game, pid, "__turn", "finish", data={})
+    emit(game, "buy_phase_end", actor=pid)
+    if len(game["pending"]) == n0 + 1:
+        _pop_frame(game)          # nothing triggered — unpark the finish
+        return False
+    return True
 
 
 def _k_turn_finish(game, pid, frame, choice):
@@ -992,6 +1080,14 @@ def _end_turn(game, pid):
     prev = game.get("last_turn_pid")
     outpost_played = game.pop("_outpost", None) == pid
     extra = outpost_played and prev != pid
+    if outpost_played and not extra:
+        # the extra-turn ability resolved (denied) BETWEEN turns: the Outpost
+        # is spent now — mark done (dropping its parked no-op fx) so the next
+        # clean-up's all-seats sweep discards it, per official timing
+        for entry in seat.get("duration", []):
+            if entry["card"] == "Outpost" and not entry.get("done"):
+                entry["fx"] = []
+                entry["done"] = True
     draw(game, pid, 3 if outpost_played else 5)
     seat["turns_taken"] += 1
     game["last_turn_pid"] = pid

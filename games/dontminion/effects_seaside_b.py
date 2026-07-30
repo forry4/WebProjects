@@ -11,11 +11,9 @@ Design notes:
     lands when the gainer takes a copy on THEIR OWN turn, and it chains when
     the blockaded pile is Curse itself (the watcher fires again on the Curse
     it just handed out — correct per the compendium; gain() returning False
-    on the empty pile terminates the chain).
-    SIMPLIFICATION (documented, accepted): Moat's reveal marks per-PLAY
-    immunity, but Blockade's curses land later via the watcher, when that
-    play's immunity set is long gone — so Moat does not block Blockade's
-    curses in our port. No immunity threading.
+    on the empty pile terminates the chain). The play's immunity set (Moat
+    reveals / Lighthouse protection) is threaded through the pick frame into
+    the watcher, so immune players never receive the delayed curses.
   Corsair — an after-play "play_treasure" watcher; a trashed Silver/Gold
     already produced its $ (the kernel fires watchers after the play
     resolves). First-Silver/Gold-per-player-per-turn bookkeeping lives in the
@@ -30,8 +28,8 @@ Design notes:
   Outpost — request_extra_turn + a no-op next-turn fx: the kernel applies
     the 3-card draw and the no-3rd-turn gate; the no-op fx keeps Outpost on
     the table through the next turn per the duration lifecycle.
-  Pirate — the below-the-line Reaction is a GAIN_REACTIONS registration (the
-    kernel opens the play/decline window per holder); the stage plays Pirate
+  Pirate — the below-the-line Reaction is a TRIGGERS from-hand registration
+    (the bus opens the play/decline window per holder); the stage plays Pirate
     with count=False (an off-turn play must not count toward the turn
     player's actions_played) and re-offers while more Pirates remain in hand
     (several may react to the same gain).
@@ -40,10 +38,10 @@ Design notes:
     lives in the live watcher data; declining does not consume it. (With two
     Sailors out, watcher_data resolves to the first copy's dict, so the flag
     is shared — a second gained Duration can't be played. Accepted edge.)
-  Treasury — the CURRENT (2022) end-of-Buy-phase version via
-    CLEANUP_PROMPTS, NOT the pre-2022 on-discard trigger; gated on
-    turn_ctx["gained_victory_in_buy"] (gains, not buys, and only in the Buy
-    phase — the kernel sets the flag inside gain()).
+  Treasury — the CURRENT (2022) end-of-Buy-phase version via a TRIGGERS
+    "buy_phase_end"/"in_play" registration, NOT the pre-2022 on-discard
+    trigger; gated on turn_ctx["gained_victory_in_buy"] (gains, not buys, and
+    only in the Buy phase — the kernel sets the flag inside gain()).
 """
 
 from . import engine as E
@@ -56,7 +54,10 @@ def _blockade(game, pid):
     piles = [p for p in sorted(game["supply"])
              if game["supply"][p] > 0 and E.cost(game, p) <= 4]
     if piles:                                  # no eligible pile: failed to set up
-        E.push_choose_pile(game, pid, "Blockade", "pick", piles=piles)
+        # the attack part registers in a LATER stage — capture this play's
+        # immunity set now (the documented immune= threading pattern)
+        E.push_choose_pile(game, pid, "Blockade", "pick", piles=piles,
+                           data={"immune": list(game.get("_atk_immune", []))})
 
 
 def _blockade_pick(game, pid, frame, choice):
@@ -64,7 +65,7 @@ def _blockade_pick(game, pid, frame, choice):
     E.gain(game, pid, pile, dest="dur_aside")  # gained directly to the set-aside
     E.add_duration_fx(game, pid, "Blockade", "turn_start", data={"card": pile})
     E.add_watcher(game, pid, "Blockade", "gain", stage="curse_check",
-                  data={"card": pile})
+                  data={"card": pile}, immune=frame["data"]["immune"])
 
 
 def _blockade_turn_start(game, pid, frame, choice):
@@ -215,7 +216,10 @@ def _pirate_gain_react(game, pid, frame, choice):
         return
     if "Pirate" not in game["seats"][pid]["hand"]:
         return                                 # an earlier window already played it
-    E.play_action_card(game, pid, "Pirate", from_zone="hand", count=False)
+    # a reaction play on YOUR OWN turn is still an Action you played this turn
+    # (Conspirator counts it); off-turn plays must not touch the counter
+    E.play_action_card(game, pid, "Pirate", from_zone="hand",
+                       count=(pid == game["turn"]))
     if "Pirate" in game["seats"][pid]["hand"]:  # several may react to one gain
         E.push_choose_option(game, pid, "Pirate", "gain_react",
                              options=[{"id": "play",
@@ -234,15 +238,27 @@ def _sailor(game, pid):
     E.add_duration_fx(game, pid, "Sailor", "turn_start")
 
 
+def _sailor_zone(game, pid, card):
+    """Where the gain put the card, if we can still play it from there.
+    dur_aside (a Blockade set-aside) is deliberately NOT playable — don't
+    even prompt for it (a wasted prompt would burn nothing, but it's noise)."""
+    for zone in ("discard", "hand"):
+        if card in game["seats"][pid][zone]:
+            return zone
+    return None
+
+
 def _sailor_gained_dur(game, pid, frame, choice):
     d = frame["data"]
     if d["actor"] != d["owner"] or d["owner"] != game["turn"]:
         return
     if "duration" not in E.CARDS[d["subject"]]["types"]:
         return
-    live = E.watcher_data(game, d["owner"], "Sailor")
-    if live is None or live.get("used"):
-        return                                 # once this turn
+    # per-INSTANCE once-per-turn: each played Sailor grants its own play
+    if not any(not x.get("used") for x in E.watcher_datas(game, d["owner"], "Sailor")):
+        return
+    if _sailor_zone(game, pid, d["subject"]) is None:
+        return                                 # can't be played from where it went
     E.push_choose_option(game, pid, "Sailor", "play_gained",
                          options=[{"id": "play",
                                    "label": f"Play the gained {d['subject']}"},
@@ -253,14 +269,16 @@ def _sailor_gained_dur(game, pid, frame, choice):
 def _sailor_play_gained(game, pid, frame, choice):
     if choice["ids"][0] != "play":
         return                                 # declining does not consume the once
-    live = E.watcher_data(game, pid, "Sailor")
-    if live is not None:
-        live["used"] = True
     card = frame["data"]["card"]
-    # Play it from where the gain put it (discard for normal gains); if a
-    # when-gain effect already moved it, do nothing (lose track).
-    if card in game["seats"][pid]["discard"]:
-        E.play_action_card(game, pid, card, from_zone="discard")
+    zone = _sailor_zone(game, pid, card)
+    if zone is None:
+        return                                 # moved since the prompt: lose track
+    # burn ONE Sailor's flag, only now that the play actually happens
+    for live in E.watcher_datas(game, pid, "Sailor"):
+        if not live.get("used"):
+            live["used"] = True
+            break
+    E.play_action_card(game, pid, card, from_zone=zone)
 
 
 def _sailor_turn_start(game, pid, frame, choice):
@@ -385,15 +403,14 @@ STAGES = {
     ("Treasury", "topdeck"): _treasury_topdeck,
 }
 
-# When any player gains a Treasure, each Pirate holder may play it from hand.
-GAIN_REACTIONS = {
-    "Pirate": {"stage": "gain_react",
-               "when": lambda name: "treasure" in CARDS[name]["types"]},
-}
-
-# End of the Buy phase: may topdeck played Treasuries if no Victory card was
-# gained in it (the kernel sets gained_victory_in_buy inside gain()).
-CLEANUP_PROMPTS = {
-    "Treasury": {"when": lambda game, pid: not game["turn_ctx"].get("gained_victory_in_buy"),
-                 "push": _treasury_prompt},
+# Trigger-bus registrations (see engine.py "THE TRIGGER BUS"):
+# - Pirate: when any player gains a Treasure, each holder may play it from hand.
+# - Treasury: at the end of the Buy phase, may topdeck played Treasuries if no
+#   Victory card was gained in it (the kernel sets gained_victory_in_buy in gain()).
+TRIGGERS = {
+    "Pirate": [{"on": "gain", "from": "hand", "stage": "gain_react",
+                "when": lambda game, pid, ctx: "treasure" in CARDS[ctx["subject"]]["types"]}],
+    "Treasury": [{"on": "buy_phase_end", "from": "in_play",
+                  "when": lambda game, pid, ctx: not game["turn_ctx"].get("gained_victory_in_buy"),
+                  "push": _treasury_prompt}],
 }
