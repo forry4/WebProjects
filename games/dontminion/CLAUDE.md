@@ -118,6 +118,40 @@ data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
 private_to=None,**kw)`. Turn counters (`game["turn_ctx"]["bridges"/"merchants"]`) are incremented
 directly by the owning card's effect.
 
+**Kernel v3 — the phase-3 (Hinterlands) delta. FROZEN: batch agents build against this.**
+- `cost_lt(game,card,coins)` — "cheaper" / "costing less than" is STRICT, unlike `cost_le`.
+  Border Village, Berserker, Haggler. Like `cost_le`, this is where the future cost VECTOR lands.
+- `exchange(game,pid,card,into,zone="discard") -> bool` — return `card` to its pile, take `into`
+  from its pile into the DISCARD ("no matter where you gained the card to"). **Emits nothing**:
+  Trader's "you DID gain the card… you DIDN'T gain the Silver", so a `gain` here would
+  double-fire every when-gain watcher. False if `into`'s pile is empty or the card moved.
+- `shuffle_into_deck(game,pid,cards,zone="discard")` — Inn. Shuffles **even when `cards` is
+  empty** ("if you shuffle zero cards into your deck, you still shuffle"); marks revealed.
+- `find_card_zone(game,pid,card,zones=("discard","hand","trash")) -> zone|None` — the LOSE-TRACK
+  guard. A when-gain/trash/discard reaction fires after the card landed, but something may have
+  moved it since; "cards that are lost track of can't be played". Ask this instead of assuming a
+  zone, or you will `remove()` a card that isn't there.
+- `play_action_card(..., from_zone="trash")` now works (the shared pile, not a seat zone) — Trail.
+  Pass `count=(pid == game["turn"])` for any OFF-TURN play: an opponent's reaction must not bump
+  the turn player's `actions_played`.
+- **`add_actions/add_buys/add_coins` are actor-aware.** Card code still calls them with no pid;
+  the kernel binds `_actor` around every effect and stage, and a bonus earned on someone else's
+  turn EVAPORATES (logged `off_turn_bonus`) instead of landing in the turn player's pool — pools
+  are per-turn ("your money pool is empty" at turn start). `add_coins` also accepts a NEGATIVE n,
+  clamped at $0 (Souk: "you might lose more than $X when deducting").
+- **`ATTACK_REACTIONS`** — a module-level registry (merged like EFFECTS): `{card: {"label",
+  "when": fn(game,pid), "immunity": bool, "mode": "reveal"|"play", "stage": str|None,
+  "repeatable": bool}}`. `mode:"play"` is REACTION THAT PLAYS ITSELF (p53) — plays from hand, no
+  Action spent, no immunity, discarded in THAT turn's clean-up. A `stage` must call
+  `reopen_attack_window(game,pid)` when done; without a stage the kernel re-opens it for you.
+- Attack-typed **Treasures** open the reaction window too (Cauldron).
+- Clean-up discards EVERY seat's `in_play`, not just the turn player's.
+- `emit`s available: `gain` (via_buy/dest), `buy`, `play_treasure`, `trash`, `discard` (per card,
+  AFTER the whole batch moves), `cleanup_discard`, `buy_phase_end`, `turn_start`, `would_gain`.
+  ⚠ **`cleanup_discard` fires but `_end_turn` is NOT interruptible** — `emit` parks an auto frame
+  and the sweep doesn't drive frames, so a consumer cannot yet MOVE the card. Scheme needs that
+  built; do not assume it works.
+
 **Kernel v2 — DURATIONS (Seaside; the contract for later expansions too):**
 `add_duration_fx(game,pid,card,stage,data=None)` — register a start-of-NEXT-turn ability on the
 duration card currently being played (callable from on_play or any later stage of the same play;
