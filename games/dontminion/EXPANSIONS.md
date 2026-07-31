@@ -14,7 +14,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 |---|---|---|---|
 | 1 | **Seaside 2E** (27) | Durations, turn-start frames, cross-player watchers, gain reactions, protection, mats, duration set-aside, extra turns, interruptible clean-up | **SHIPPED** 2026-07-30 + audited |
 | 2 | **Prosperity 2E** (25 + Platinum/Colony) | VP tokens, would-gain protocol, via_buy, buy gates, dynamic self-costs, game-aware type queries (Charlatan), treasure-throne, Platinum/Colony setup | **SHIPPED** 2026-07-30 + audited |
-| 3 | Hinterlands 2E (26) | when-gain everywhere (bus-ready); ~~`discard` emit point~~ + ~~unfiltered offers (Vault)~~ + ~~self-trigger emit context~~ **PAID**; still to build: reactions from NON-hand zones (Trail: gain/trash/discard from anywhere), attack-reaction that PLAYS (Guard Dog), on-gain deck insertion (Inn), when-buy remodel (Farmland — needs the self-trigger `via_buy` just paid), Clean-up discard hook (Scheme), in-play trigger SUBJECT (Haggler — see ledger), turn-scoped cost reduction (Highway 2022 — **NOT** `COST_MODS`, see below) | roster verified, pre-work paid |
+| 3 | **Hinterlands 2E** (26) | `discard` emit, unfiltered offers, self-trigger context, registry-driven attack reactions + reaction-that-plays-itself (Guard Dog), attack-typed Treasures opening the window (Cauldron), plays from non-hand zones + lose-track (Trail), actor-aware resource pools, coin floor (Souk), `exchange` (Trader), `shuffle_into_deck` (Inn), `cost_lt`, all-seats clean-up sweep, `discard_then_putback` | **SHIPPED** 2026-07-30 + audited |
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | planned |
 | 4 | Cornucopia & Guilds 2E (26 + Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (needs 3H), Young Witch's Bane (11th pile + marker) | planned |
 | 5 | Alchemy (12 + Potion) | cost VECTOR dimension 1 (Potion) — lands inside cost_le/cost_eq; Potion production/payment in the buy flow. ⚠ **Possession is phase-sized on its own** (take a turn controlling another player's cards) — budget it like a kernel system, not a card | planned |
@@ -141,8 +141,9 @@ original plan, and the audit step cannot catch it if the audit runs from the sam
 | ~~`self` triggers couldn't see the emit context~~ **PAID (pre-ph.3)** — `**extra` now reaches self-trigger data, so a when-BUY-this card can tell a buy from any other gain | Farmland (ph. 3) | done |
 | ~~`in_play` triggers get no SUBJECT~~ **PAID, but the premise was WRONG.** Paid for Haggler — except Haggler 2022 "SETS UP A LATER ABILITY … for the rest of this turn", i.e. Hoard's per-play `until="turn_end"` watcher, NOT an `in_play` trigger. The row described the pre-2022 card. The fix (push receives `ctx`) is kept: a trigger seeing its own event's context is the right contract and Treasury ignores it. But nothing in ph. 3 needed it — a reminder that a ledger row written from a card's OLD text schedules the wrong work | (nothing — mis-scheduled) | done, not needed |
 | **HALF-PAID: `cleanup_discard` event exists, `_end_turn` is still NOT interruptible.** The event fires per in-play card before the sweep, and is deliberately separate from `discard` (Tunnel/Trail/Weaver are all "other than during a Clean-up phase" and must not see it) — but `emit` parks an AUTO FRAME and `_end_turn` never drives frames, so a consumer cannot yet MOVE the card. Scheme needs `_end_turn` restructured to resolve a decision before the sweep and before the 5-card draw | Scheme (ph. 3) | ph. 3, WITH Scheme |
-| **Off-turn resource leak**: `add_actions`/`add_buys`/`add_coins` always credit the CURRENT TURN PLAYER, so a reaction resolving on someone else's turn hands its bonus to the attacker. Latent today (no shipped off-turn card grants resources); a real bug the moment one does | Trail (+1 Action), Nomads (+$2) — ph. 3 | ph. 3 kernel work |
-| **Clean-up doesn't sweep OTHER seats' `in_play`** — a reaction that plays itself on an opponent's turn stays on the table into its owner's next turn, where it wrongly counts for Bank/Peddler/Grand Market/Conspirator | Guard Dog/Trail/Weaver/Berserker (ph. 3) | ph. 3 kernel work |
+| ~~Off-turn resource leak~~ **PAID ph. 3** — the kernel binds `_actor` around every effect and stage, so card code still calls `add_*` with no pid and a bonus earned on someone else's turn EVAPORATES (logged `off_turn_bonus`) instead of landing in the turn player's pool. NB the first attempt (an optional `pid=` argument) did NOT work: card code never passes one | Trail, Nomads | done |
+| ~~Clean-up doesn't sweep OTHER seats' `in_play`~~ **PAID ph. 3** — every seat's table is swept at each clean-up; durations and riders protected | Guard Dog/Trail/Weaver/Berserker | done |
+| ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
 | **Non-supply gain sources** | Rewards (ph. 4) | **ph. 3H** |
 | **Pile abstraction** (ordered/split/rotating piles, per-pile attachments) | Ruins/Knights (ph. 6), but scheduled early deliberately | **ph. 3H** |
 | **Move-surface trio**: generic `spend` (Coffers/Villagers/Favors/Debt-payoff + a counters row in the resbar UI), `buy_landscape` (Events/Projects), `call` (Reserves). Design each ONCE at first need; every later consumer is registry + data | spend: ph. 4 · buy_landscape/call: ph. 7 | ph. 4 / ph. 7 pre-work |
@@ -193,6 +194,26 @@ and the audit agent re-runs on the phase.
 
 Cost note: a phase runs 4-6 subagents (~0.8-1.2M tokens). The audit step is the cheapest
 insurance in the pipeline — do not skip it to save a run.
+
+**What phase 3 added to this playbook** (each of these caught something no earlier step did):
+
+- **Step 6 is not optional, and it must test against OLD sets.** The cross-set batch found the
+  put-back/when-discard ordering bug in FOUR cards — three of them shipped sets. A batch agent had
+  flagged that ordering as ambiguous and resolved it by copying the shipped Rabble precedent,
+  which was itself wrong. **A batch can only ever be as correct as the precedent it copies**, so
+  per-set tests structurally cannot find this class.
+- **Give the auditor your own uncertain calls as explicit questions.** Two judgement calls
+  (off-turn bonuses evaporating, Scheme's timing) went to it as questions rather than being
+  quietly asserted. Both came back confirmed with citations, and the second correctly separated
+  the timing (fine) from the real defect next to it (the candidate set).
+- **New coverage has to reach the soak.** The forced-kingdom chunks were hardcoded to four
+  expansions, so all 26 new cards would have integrated green without ever running under the
+  conservation census. They derive from `KINGDOM` now — check this whenever a set lands.
+- **A batch's "no kernel gaps" is only as good as the frozen API.** Both halves reported zero
+  gaps, which is the return on doing step 3 fully before step 4 rather than patching mid-flight.
+- **Ask what the FRONTEND hardcodes.** The expansion picker mapped a literal list, so the set
+  would have been unpickable however correct the backend was — invisible to the wire-contract
+  test, because the field was being sent and merely never read.
 
 **THE TRIGGER BUS** (the extension contract): kernel `emit()` — events today: `gain`
 (with via_buy/dest), `buy`, `play_treasure`, `trash`, `buy_phase_end`, `turn_start`,

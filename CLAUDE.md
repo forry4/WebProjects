@@ -35,7 +35,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   validates every move through the engine. Client-side AI is safe because tampering only weakens
   the tamperer's own opponent (the move is still validated server-side before it's applied).
 - **Games**: Spender (Splendor), Castles of Crimson (Castles of Burgundy), Where Wolf? (One Night
-  Ultimate Werewolf), Spender Duel (Splendor Duel), Dontminion (Dominion, Base 2E + Intrigue 2E).
+  Ultimate Werewolf), Spender Duel (Splendor Duel), Dontminion (Dominion — Base, Intrigue,
+  Seaside, Prosperity and Hinterlands, all 2E; 139 cards, more sets landing per phase).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 
@@ -73,8 +74,10 @@ games/
   castles_of_crimson/  # CoC — engine.py + ai.py + main.py (coc_app @ /coc) + CastlesOfCrimson.jsx
   wherewolf/           # Where Wolf? — engine.py + main.py (werewolf_app @ /werewolf) + WhereWolf.jsx
   spender_duel/        # Spender Duel — engine.py + ai.py + main.py (duel_app @ /duel) + SpenderDuel.jsx
-  dontminion/          # Dontminion (Dominion) — engine.py + effects_*.py + main.py (dontminion_app
-                       #   @ /dontminion) + Dontminion.jsx; expansion picker, 2-4p, multi-bot rooms
+  dontminion/          # Dontminion (Dominion) — engine.py + ONE effects_<set>.py per expansion +
+                       #   main.py (dontminion_app @ /dontminion) + Dontminion.jsx; expansion
+                       #   picker, 2-4p, multi-bot rooms. tools/replay_prod_saves.py is the
+                       #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the

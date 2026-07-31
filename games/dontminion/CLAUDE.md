@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base 2E + Intrigue 2E + Seaside 2E + Prosperity 2E) — package notes
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands, all 2E)
 
-2–4 players, 113 cards. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 139 cards. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -12,11 +12,12 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 |---|---|
 | `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
-| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py` | ONE module per expansion, each owning a disjoint card set |
+| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | random-legal bot (all difficulty tiers, v1) |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
-| `tests/` | engine, soak, per-batch card tests, server, ws-auth, wire-redaction |
+| `tests/` | engine, soak, per-batch card tests, cross-set, migrate, server, ws-auth, wire-redaction, wire-contract |
+| `tools/replay_prod_saves.py` | THE migration gate — replays every real prod save (see below) |
 
 **Card batches are still written in two halves per expansion** (a simple half and a
 mechanically complex half) by two parallel agents that may touch only files they own — the
