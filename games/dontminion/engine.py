@@ -569,8 +569,10 @@ def trash(game, pid, cards, zone="hand"):
         game["trash"].append(c)
     if cards:
         _log(game, pid, "trash", cards=list(cards))
-        for c in cards:
-            emit(game, "trash", actor=pid, subject=c)   # Dark Ages' seam
+        # same simultaneity rule as discard (the Steward ruling: "both cards
+        # must be trashed simultaneously, and on-trash effects resolved
+        # afterwards") — one pool per player across the batch. Dark Ages' seam.
+        emit_batch(game, "trash", pid, cards)
 
 
 def trash_from_supply(game, card):
@@ -604,8 +606,10 @@ def discard(game, pid, cards, zone="hand", public=False):
         seat["discard"].append(c)
     if cards:
         _log(game, pid, "discard", cards=list(cards), count=len(cards))
-        for c in cards:
-            emit(game, "discard", actor=pid, subject=c, zone=zone)
+        # ONE batch, ONE pool: the cards were discarded simultaneously, so
+        # their when-discard abilities are concurrent and the owner orders
+        # them (Trail + Tunnel in one Militia discard) — never list order
+        emit_batch(game, "discard", pid, cards, zone=zone)
 
 
 def topdeck(game, pid, card, zone="hand", public=False):
@@ -1014,7 +1018,37 @@ def emit(game, event, actor=None, subject=None, **extra):
     are collected into ONE ability pool (p23 §2: THE PLAYER picks what resolves
     first, re-offered after each), and the pools are pushed in reversed turn
     order so the current player's resolves first, then each other player's in
-    turn order (p23 §3 — cross-player order is NOT a choice).
+    turn order (p23 §3 — cross-player order is NOT a choice)."""
+    pools = {}
+    _emit_collect(game, pools, event, actor, subject, **extra)
+    _park_pools(game, pools)
+
+
+def emit_batch(game, event, actor, subjects, **extra):
+    """One SIMULTANEOUS batch — a multi-card discard or trash. The cards moved
+    at once ("unless that effect is explicitly sequential, they are discarded
+    at the same time"), so every card's consumers trigger together and land in
+    ONE pool per player: with Trail + Tunnel discarded to a Militia, their
+    owner picks which reacts first. Per-card emit() here would order them by
+    LIST position instead — the pre-phase-3 accident (ledger B4) where the
+    order came from the player's clicks in the discard picker, reversed.
+    Gains stay per-emit on purpose: those resolve one at a time by rule."""
+    pools = {}
+    for subject in subjects:
+        _emit_collect(game, pools, event, actor, subject, **extra)
+    _park_pools(game, pools)
+
+
+def _park_pools(game, pools):
+    order = game["players"]
+    i = order.index(game["turn"]) if game["turn"] in order else 0
+    for p in reversed(order[i:] + order[:i]):
+        if p in pools:
+            park_abilities(game, p, [a for bucket in pools[p] for a in bucket])
+
+
+def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
+    """Collect one occurrence's consumers into per-player pools.
 
     Trigger conditions (in hand? in play? `when`?) are evaluated HERE, at the
     occurrence (p25 §3); the deferred runners re-check only card PRESENCE at
@@ -1024,7 +1058,6 @@ def emit(game, event, actor=None, subject=None, **extra):
     order of the pre-pool fixed-order engine, so the FIRST option is always the
     historical default and a single consumer behaves byte-identically."""
     ctx = {"actor": actor, "subject": subject, **extra}
-    pools = {}                       # pid -> [self...], [in_play...], [hand...], [watchers...]
 
     def add(pid, bucket, card, stage, data, commutes=False):
         d = {"card": card, "stage": stage, "data": data}
@@ -1079,12 +1112,6 @@ def emit(game, event, actor=None, subject=None, **extra):
         add(w["owner"], 3, w["card"], w["stage"],
             {**w["data"], **extra, "actor": actor, "subject": subject,
              "owner": w["owner"]}, commutes=w.get("commutes", False))
-
-    order = game["players"]
-    i = order.index(game["turn"]) if game["turn"] in order else 0
-    for p in reversed(order[i:] + order[:i]):
-        if p in pools:
-            park_abilities(game, p, [a for bucket in pools[p] for a in bucket])
 
 
 def _k_offer_window(game, pid, frame, choice):

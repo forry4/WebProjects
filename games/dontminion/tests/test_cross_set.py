@@ -1428,45 +1428,66 @@ def test_a_discarded_trail_that_stays_put_is_still_offered_twice():
     assert not any(e.get("event") == "lost_track" for e in g["log"])
 
 
-# --- batch discard: TWO reaction cards in one batch — the order is IMPLICIT ----
+# --- batch discard: TWO reaction cards in one batch — the player ORDERS them ---
 
-def test_batch_discard_reactions_surface_in_reverse_payload_order():
-    """Ledger row B4. Discarding Trail + Tunnel in ONE batch fires two
-    when-discard reactions, and the order they surface is currently an
-    ACCIDENT: per-card emits stack LIFO, so it is the REVERSE of the order the
-    cards appear in the decision payload — i.e. the order the player happened
-    to click them in the discard picker, backwards. The rules (p23 §2) say the
-    player chooses; we don't offer that choice yet.
-
-    This test pins the accident so a refactor (canonicalizing a card list,
-    reordering emits) changes it VISIBLY rather than silently. Phase 3 of
-    .claude-plans/concurrent-ability-ordering.md replaces the implicit order
-    with a real choice and deletes this test on purpose."""
-    def surfaced(payload):
+def test_batch_discard_reactions_are_the_players_choice_not_click_order():
+    """Phase 3 (retires the old B4 accident). A multi-card discard moves the
+    cards SIMULTANEOUSLY, so their when-discard abilities are concurrent and
+    the owner picks what resolves first (p23 §2). Before this, the order was
+    the reverse of the order the player happened to click the cards in the
+    discard picker — a pure LIFO accident pinned by this test's predecessor.
+    Now BOTH payload orders produce the same prompt, and the payload order is
+    irrelevant to resolution."""
+    def run(payload, pick_first):
         g = fresh(["Trail", "Tunnel", "Militia", "Village", "Smithy", "Moat",
                    "Market", "Festival", "Gardens", "Cellar"],
                   expansions=("base", "hinterlands"))
         g["seats"][B]["hand"] = ["Militia"]
         give_hand(g, A, ["Trail", "Tunnel", "Copper", "Copper", "Copper"])
+        g["seats"][A]["deck"] = ["Gold"] * 5          # Trail's draw won't shuffle
         g["turn"] = B
         g["phase"] = "action"
         g["actions"] = 1
         assert mv(g, B, {"type": "play_action", "card": "Militia"})[0]
         assert g["pending_pid"] == A and g["pending_kind"] == "choose_cards"
         assert mv(g, A, {"type": "decision", "cards": list(payload)})[0]
-        seq = []
-        while g["pending_pid"] == A and g["pending_kind"] == "choose_option":
+        opts = xs_pool(g, pick_first)                 # ONE pool, the owner picks
+        seq = []                                      # offers, in resolution order
+        while g["pending_pid"] == A:
             top = g["pending"][-1]
-            seq.append(top["card"])
-            # decline (the last option is always the don't-react branch)
-            assert decide(g, A, ids=[top["constraint"]["options"][-1]["id"]])[0]
-        return seq
+            if (top["card"], top["stage"]) == ("__abilities", "pick"):
+                xs_pool(g, top["constraint"]["options"][0]["label"])
+            else:
+                seq.append(top["card"])
+                # decline every offer (last option = the don't-react branch)
+                assert decide(g, A, ids=[top["constraint"]["options"][-1]["id"]])[0]
+        return opts, seq
 
-    # validation is sub-multiset, so BOTH payload orders are legal — and each
-    # yields the opposite reaction order, proving the order is player-click-
-    # driven rather than a rule
-    assert surfaced(["Trail", "Tunnel"]) == ["Tunnel", "Trail"]
-    assert surfaced(["Tunnel", "Trail"]) == ["Trail", "Tunnel"]
+    # both payload orders present the SAME choice, and the player's pick — not
+    # the click order — decides what resolves first
+    for payload in (["Trail", "Tunnel"], ["Tunnel", "Trail"]):
+        opts, seq = run(payload, "Tunnel")
+        assert opts == ["Trail", "Tunnel"], opts
+        assert seq == ["Tunnel", "Trail"], (payload, seq)
+        opts, seq = run(payload, "Trail")
+        assert seq == ["Trail", "Tunnel"], (payload, seq)
+
+
+def test_batch_trash_reactions_share_one_pool_too():
+    """The Steward ruling generalized: a multi-card trash is simultaneous, so
+    a Trail trashed WITH other cards reacts from one pool (a single on-trash
+    consumer: no prompt, exactly the old behaviour)."""
+    g = fresh(["Trail", "Tunnel", "Militia", "Village", "Smithy", "Moat",
+               "Market", "Festival", "Gardens", "Cellar"],
+              expansions=("base", "hinterlands"))
+    give_hand(g, A, ["Trail", "Copper"])
+    engine.trash(g, A, ["Trail", "Copper"])           # one batch
+    engine._drive(g)
+    assert g["pending_kind"] == "choose_option"       # straight to Trail's offer
+    assert g["pending"][-1]["card"] == "Trail"
+    assert decide(g, A, ids=["play"])[0]              # plays from the trash
+    assert "Trail" in g["seats"][A]["in_play"]
+    assert g["trash"] == ["Copper"]
 
 
 # --- Scheme x two copies of one Duration (the same-name, different-copy trap) --

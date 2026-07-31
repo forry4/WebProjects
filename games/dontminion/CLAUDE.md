@@ -227,8 +227,12 @@ supporting pieces, all load-bearing:
   Declare it only when resolving the stage can never change what any other pending ability does.
 Bucket order inside a pool = self, in_play, hand, watchers — the pre-pool engine's exact pop order,
 so the FIRST option is always the historical default and a single consumer is byte-identical to the
-old direct push. Phases 3-4 (batch discards, turn_start reactions) remain —
-`.claude-plans/concurrent-ability-ordering.md`; ledger row B4 tracks what's still fixed-order.
+old direct push. **Multi-card discard/trash batches go through `emit_batch(game, event, actor,
+subjects, **extra)`** (phase 3): the cards moved SIMULTANEOUSLY, so every card's consumers collect
+into one pool per player — never per-card emits in list order, which re-creates the retired
+reverse-click-order accident. Gains stay per-emit on purpose (gains resolve one at a time by rule).
+Phase 4 (turn_start reactions folding into the duration-fx pool) remains —
+`.claude-plans/concurrent-ability-ordering.md`; ledger row B4 tracks it.
 
 **THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
 single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
@@ -396,7 +400,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
 | B5 | **Stop-moving rule: a card that moved away and BACK is still lost track of** (wiki Stop moving rule; compendium p26 Example 6) | `find_card_zone` is PRESENCE-based — it can't tell "still there" from "left and returned", so a returned card would wrongly be movable/playable | Unreachable in the 139-card pool (no shipped sequence returns a card to its trigger zone inside one window; the official examples need Royal Carriage / Counterfeit-class cards). Revisit when a set ships a card that can round-trip a zone mid-window — the fix is a per-window move counter, not more zone checks. |
-| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2) | **Start-of-turn duration fx (phase 1) AND every emit-driven event — when-gain, when-trash, buy_phase_end (phase 2): IMPLEMENTED** via the ability pool. Still fixed-order: batch-discard reactions in **reverse decision-payload order** — the reverse of the player's click order in the discard picker, a pure LIFO accident nothing ever chose — and turn_start hand reactions (Clerk) pool separately from duration fx. | Phases 3-4 of `.claude-plans/concurrent-ability-ordering.md` retire the rest. Until then the discard accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
+| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2) | **IMPLEMENTED for start-of-turn duration fx (phase 1), every emit-driven event (phase 2), and multi-card discard/trash batches via `emit_batch` (phase 3 — Trail + Tunnel in one Militia discard is now the owner's choice; the old reverse-click-order accident is retired,** `test_batch_discard_reactions_are_the_players_choice_not_click_order` **pins the choice)**. Still fixed-order: turn_start hand reactions (Clerk) pool separately from duration fx. | Phase 4 of `.claude-plans/concurrent-ability-ordering.md` folds the turn_start emit into the duration-fx pool and closes this row. |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
 
