@@ -1334,6 +1334,12 @@ export default function SpenderApp() {
 						document.fonts.load('600 1rem Cinzel'),
 						document.fonts.load('400 1rem Cinzel'),
 						document.fonts.load('400 1rem "Crimson Pro"'),
+						// the ITALIC face is a separate file and a separate
+						// display:optional decision — leaving it out of the gate
+						// (and out of index.html's preloads) is what made every
+						// italic on the site render in the heavier Georgia
+						// fallback until a reload warmed the cache
+						document.fonts.load('italic 400 1rem "Crimson Pro"'),
 					]),
 					new Promise(r => setTimeout(r, 1500)),
 				]);

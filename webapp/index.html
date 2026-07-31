@@ -33,6 +33,15 @@
          dark bg avoids a white flash before the JS CSS loads. -->
     <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/cinzel.latin.woff2" crossorigin />
     <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/crimsonpro.latin.woff2" crossorigin />
+    <!-- ALL THREE faces must be here. display:optional means a face that isn't ready
+         within its ~100ms block period is dropped for the WHOLE page load — no swap
+         when it lands. The italic was the one face left un-preloaded, so it started
+         at first paint and finished after it (measured on prod: 6-264ms late on
+         every profile, cached and cold), and every italic on the site — hints,
+         empty states, log lines — rendered in Georgia italic, which is markedly
+         heavier than Crimson Pro's 300-400. It corrected itself on reload, once
+         the font was cached: exactly the "thicker font until I reload" report. -->
+    <link rel="preload" as="font" type="font/woff2" href="%BASE_URL%fonts/crimsonpro-italic.latin.woff2" crossorigin />
     <style>html,body{margin:0;background:#0f0e0c}</style>
     <title>Forrest Games</title>
   </head>

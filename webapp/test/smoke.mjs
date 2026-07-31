@@ -66,6 +66,31 @@ function checkCssBackticks() {
 	if (bad.length) throw new Error("CSS BACKTICK GUARD failed:\n  " + bad.join("\n  "));
 	console.log("css-backtick guard: OK (no stray backticks in any css template literal)");
 }
+
+// ── Static guard: EVERY @font-face file is preloaded in index.html ─────────────
+// font-display:optional drops a face that isn't ready within its ~100ms block
+// period for the WHOLE page load — it does not swap the font in when it lands.
+// So an un-preloaded face renders in the metric-matched Georgia fallback (same
+// widths, visibly heavier) until a reload warms the cache, and NO runtime check
+// sees it: CLS stays 0 by design, and the page has no errors. That shipped for
+// months on the Crimson Pro ITALIC face, which is used by every hint, empty
+// state and log line on the site. Adding a font means adding its preload.
+function checkFontPreloads() {
+	const css = readFileSync(path.join(repoRoot, "shared", "theme.base-css.css"), "utf8");
+	const html = readFileSync(path.join(webappDir, "index.html"), "utf8");
+	// only real webfont files — the `local()` fallback faces have nothing to fetch
+	const faces = [...css.matchAll(/url\(([^)]*?\.woff2)\)/g)].map((m) => m[1].split("/").pop());
+	const preloaded = new Set([...html.matchAll(/rel=["']preload["'][^>]*?href=["']([^"']+)["']/g)]
+		.map((m) => m[1].split("/").pop()));
+	const missing = [...new Set(faces)].filter((f) => !preloaded.has(f));
+	if (missing.length) {
+		throw new Error("FONT PRELOAD GUARD failed:\n  " + missing.map((f) =>
+			`${f} is an @font-face src but has no <link rel="preload"> in index.html — with ` +
+			`font-display:optional it will render as the heavier Georgia fallback until reload`
+		).join("\n  "));
+	}
+	console.log(`font-preload guard: OK (all ${faces.length} @font-face files preloaded)`);
+}
 const PORT = 4188;
 // Cumulative Layout Shift budget on load. Good CWV is < 0.1; our reflow bugs (font
 // swap reflowing the page, a resizing control) blow well past it. Keep it tight so
@@ -138,6 +163,7 @@ try {
 	// serves index.html for unknown paths (SPA-style), so the deep-link checks exercise
 	// the ROUTER, not the Pages 404.html fallback (that's prod-only; see deploy-pages.yml).
 	checkCssBackticks();   // source-level guard for the stray-css-backtick blank-page bug
+	checkFontPreloads();   // source-level guard for the un-preloaded-face fallback bug
 	await run("npx", ["vite", "build"], {});
 	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
 		{ cwd: webappDir, stdio: "ignore", shell: true });

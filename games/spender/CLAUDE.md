@@ -255,3 +255,15 @@ Self-hosted Cinzel/Crimson fonts (`webapp/public/fonts/`, `@font-face` in baseCs
 paint uses web fonts; `font-display:optional` + metric-matched `local('Georgia')` fallbacks (measured
 `size-adjust`) so an unloaded font never swaps. Inline dark `background` in `index.html` (the `--bg` token
 only exists in baseCss). The **CLS smoke gate** catches new shifts.
+
+**EVERY face needs BOTH a preload and a line in the `waitFonts()` gate — including italics.**
+`font-display:optional` gives a face ~100ms from first paint; miss it and that face is dropped for
+the WHOLE page load (it does not swap in when it lands), so the text renders in the metric-matched
+Georgia fallback — identical widths, visibly HEAVIER strokes — until a reload warms the cache. The
+italic Crimson Pro face was neither preloaded nor in the gate for months: measured on prod it began
+loading AT first paint and finished 6–264ms after it on every profile (warm, cold, throttled), so
+every hint, empty state and log line on the site rendered in Georgia italic on a first visit. **No
+runtime check could see it** — CLS stays 0 by design (that's what `size-adjust` is for) and the page
+throws nothing; it only shows up in the resource-timing-vs-FCP comparison. `smoke.mjs`'s
+**font-preload guard** now derives the face list from `theme.base-css.css` and fails if any
+`.woff2` lacks a preload.
