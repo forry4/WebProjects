@@ -604,22 +604,49 @@ def pass_card(game, giver, receiver, card):
 # The +X counters always belong to the turn player (they're turn-scoped), so the
 # "plus" log lines carry game["turn"] no matter which card path granted them.
 
-def add_actions(game, n):
-    game["actions"] += n
+# Actions/Buys/Coins are ONE set of counters, belonging to whoever's turn it
+# is: "each turn always starts like this: your Action pool has 1 Action, your
+# Buy pool has 1 Buy, and your money pool is empty" (compendium ch. II). So a
+# bonus earned OFF-TURN — a reaction that plays itself, a when-gain trigger on
+# an opponent's turn — has no pool to land in and is simply lost; the pools it
+# would join are reset before that player next acts.
+#
+# `pid` is therefore not optional bookkeeping: without it these credited the
+# CURRENT TURN PLAYER, i.e. an off-turn reaction handed its bonus to the
+# attacker. Latent until a card grants resources off-turn (Hinterlands' Trail
+# and Nomads are the first), and silently wrong the moment one does.
+def _grant(game, pid, key, n, log_key):
+    if n == 0:
+        return False
+    if pid is not None and pid != game["turn"]:
+        # earned on someone else's turn: no pool to add to
+        _log(game, pid, "off_turn_bonus", **{log_key: n})
+        return False
+    game[key] += n
     if n > 0:
-        _log(game, game["turn"], "plus", actions=n)
+        _log(game, game["turn"], "plus", **{log_key: n})
+    return True
 
 
-def add_buys(game, n):
-    game["buys"] += n
-    if n > 0:
-        _log(game, game["turn"], "plus", buys=n)
+def add_actions(game, n, pid=None):
+    _grant(game, pid, "actions", n, "actions")
 
 
-def add_coins(game, n):
-    game["coins"] += n
-    if n > 0:
-        _log(game, game["turn"], "plus", coins=n)
+def add_buys(game, n, pid=None):
+    _grant(game, pid, "buys", n, "buys")
+
+
+def add_coins(game, n, pid=None):
+    """n may be NEGATIVE (Souk deducts per card in hand). The money pool floors
+    at $0 — "your money pool can never go below $0, but if you had any $ before
+    playing Souk, you might lose more than $X when deducting"."""
+    if n < 0:
+        if pid is not None and pid != game["turn"]:
+            return
+        game["coins"] = max(0, game["coins"] + n)
+        _log(game, game["turn"], "minus", coins=-n)
+        return
+    _grant(game, pid, "coins", n, "coins")
 
 
 def add_vp_tokens(game, pid, n):

@@ -861,6 +861,40 @@ def test_undo_after_a_start_of_turn_duration_draw():
     assert g["coins"] == 3 and "Silver" not in g["seats"][A]["discard"]
 
 
+def test_off_turn_bonuses_are_lost_not_given_to_the_turn_player():
+    """Actions/Buys/Coins are ONE set of pools belonging to whoever's turn it
+    is, and they reset each turn (compendium ch. II), so a bonus earned on an
+    opponent's turn has no pool to land in. Before `pid`, these credited the
+    CURRENT TURN PLAYER — an off-turn reaction handed its bonus to the
+    ATTACKER. Latent until a card grants resources off-turn; Hinterlands'
+    Trail (+1 Action) and Nomads (+$2) are the first."""
+    g = fresh()
+    assert g["turn"] == A
+    before = (g["actions"], g["buys"], g["coins"])
+
+    engine.add_actions(g, 1, pid=B)          # B reacting on A's turn
+    engine.add_buys(g, 1, pid=B)
+    engine.add_coins(g, 2, pid=B)
+    assert (g["actions"], g["buys"], g["coins"]) == before, \
+        "an off-turn bonus leaked into the turn player's pools"
+    assert any(e.get("event") == "off_turn_bonus" for e in g["log"])
+
+    # the turn player's own bonuses still land, with or without an explicit pid
+    engine.add_coins(g, 3)
+    engine.add_coins(g, 1, pid=A)
+    assert g["coins"] == before[2] + 4
+
+
+def test_coins_can_be_deducted_and_floor_at_zero():
+    """Souk deducts $1 per card in hand and can take more than it gave."""
+    g = fresh()
+    engine.add_coins(g, 7)
+    engine.add_coins(g, -3)
+    assert g["coins"] == 4
+    engine.add_coins(g, -99)
+    assert g["coins"] == 0, "the money pool must never go negative"
+
+
 def _autoplayed_treasures():
     """Every Treasure play_all_treasures would autoplay — read from the
     REGISTRIES, so a future expansion's treasure is covered the day it lands."""

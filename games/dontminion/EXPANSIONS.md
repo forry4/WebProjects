@@ -69,7 +69,19 @@ contents. **26 = 17 kept + 9 new.**
 - **Removed, do NOT implement (9)**: Cache, Duchess, Embassy, Ill-Gotten Gains, Mandarin,
   Noble Brigand, Nomad Camp, Oracle, Silk Road.
 
-**Rules findings that change the plan** (from the compendium, not memory):
+**Rules findings that change the plan** (each verified in the compendium, not taken on trust):
+- **Trader is an EXCHANGE, not a would-gain replacement.** "Trader's Reaction is now a
+  when-gain ability that exchanges the gained card for a Silver… Even if you exchanged it, you
+  DID gain the card (and triggered any when-gain ability). You didn't gain the Silver." So it
+  registers as a Watchtower-shaped hand reaction on `gain` and needs a new `exchange()`
+  primitive — return to pile, take from pile, and **no `gain` emit**. The would-gain protocol
+  paid in ph. 2 was built for Trader (1V) and is NOT what this card wants.
+- **Haggler 2022 is a per-play `until="turn_end"` watcher** (Hoard's exact shape): "SETS UP A
+  LATER ABILITY … for the rest of this turn: It triggers when you gain a card instead of when
+  you buy it, but only a card that you bought… cumulative if played with a throne-room."
+- **Highway needs no new counter — it IS `turn_ctx["bridges"]`.** Its current text is
+  word-for-word Bridge ("This turn, cards cost $1 less"), so it reuses the existing turn-scoped
+  reduction: no kernel change, no frontend change, and the cost banner stays correct.
 - **Highway 2022 is NOT a `COST_MODS` card.** "The cost reduction is now caused by PLAYING
   the Highway… (Pre-2022 version:) WHILE THIS IS IN PLAY". So it is turn-scoped and
   cumulative per play, exactly Quarry's 2022 shape (`turn_ctx` counter + `engine.cost`) —
@@ -127,8 +139,10 @@ original plan, and the audit step cannot catch it if the audit runs from the sam
 | ~~Vault's opponent offer is feasibility-filtered~~ **PAID (pre-ph.3)** — offered to any non-empty hand; 1 card discards 1 and draws nothing (Capital City ruling) | Tunnel's when-discard (ph. 3) | done |
 | ~~No `discard` emit point~~ **PAID (pre-ph.3)** — `discard()` emits per card AFTER the whole batch (the 2022 all-at-once change the Tunnel ruling needs); Clean-up bypasses `discard()` so when-discard correctly can't fire there, pinned by a test | Tunnel/Trail/Weaver (ph. 3) | done |
 | ~~`self` triggers couldn't see the emit context~~ **PAID (pre-ph.3)** — `**extra` now reaches self-trigger data, so a when-BUY-this card can tell a buy from any other gain | Farmland (ph. 3) | done |
-| **`in_play` triggers get no SUBJECT** — the bus calls `spec["push"](game, actor)` with no bought/gained card, so a "while this is in play, when you buy a card, gain a cheaper one" card can't see what was bought | Haggler (ph. 3) | ph. 3 kernel work |
-| **No Clean-up discard hook** — `_end_turn` moves cards directly, so nothing can trigger on the Clean-up discard (correct for Tunnel/Trail/Weaver, wrong for Scheme) | Scheme (ph. 3) | ph. 3 kernel work |
+| ~~`in_play` triggers get no SUBJECT~~ **PAID, but the premise was WRONG.** Paid for Haggler — except Haggler 2022 "SETS UP A LATER ABILITY … for the rest of this turn", i.e. Hoard's per-play `until="turn_end"` watcher, NOT an `in_play` trigger. The row described the pre-2022 card. The fix (push receives `ctx`) is kept: a trigger seeing its own event's context is the right contract and Treasury ignores it. But nothing in ph. 3 needed it — a reminder that a ledger row written from a card's OLD text schedules the wrong work | (nothing — mis-scheduled) | done, not needed |
+| **No Clean-up discard hook** — `_end_turn` moves cards directly, so nothing can trigger on the Clean-up discard (correct for Tunnel/Trail/Weaver, wrong for Scheme). Needs a NEW event name, not `discard`, plus an interruptible `_end_turn` (decision before the sweep and before the 5-card draw) | Scheme (ph. 3) | ph. 3 kernel work |
+| **Off-turn resource leak**: `add_actions`/`add_buys`/`add_coins` always credit the CURRENT TURN PLAYER, so a reaction resolving on someone else's turn hands its bonus to the attacker. Latent today (no shipped off-turn card grants resources); a real bug the moment one does | Trail (+1 Action), Nomads (+$2) — ph. 3 | ph. 3 kernel work |
+| **Clean-up doesn't sweep OTHER seats' `in_play`** — a reaction that plays itself on an opponent's turn stays on the table into its owner's next turn, where it wrongly counts for Bank/Peddler/Grand Market/Conspirator | Guard Dog/Trail/Weaver/Berserker (ph. 3) | ph. 3 kernel work |
 | **Non-supply gain sources** | Rewards (ph. 4) | **ph. 3H** |
 | **Pile abstraction** (ordered/split/rotating piles, per-pile attachments) | Ruins/Knights (ph. 6), but scheduled early deliberately | **ph. 3H** |
 | **Move-surface trio**: generic `spend` (Coffers/Villagers/Favors/Debt-payoff + a counters row in the resbar UI), `buy_landscape` (Events/Projects), `call` (Reserves). Design each ONCE at first need; every later consumer is registry + data | spend: ph. 4 · buy_landscape/call: ph. 7 | ph. 4 / ph. 7 pre-work |
