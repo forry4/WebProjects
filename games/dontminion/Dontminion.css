@@ -14,11 +14,17 @@
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
   color: var(--text, #e8dfc8); padding: 10px 18px; border-radius: 8px; z-index: 60;
 }
-.dm-checks { display: flex; gap: 8px; }
+/* the expansion list scrolls ITSELF (CoC's board strip), so adding a set never
+   pushes the Create button out of the modal */
+.dm-checks {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 148px; overflow-y: auto; padding: 2px 4px 2px 0; min-width: 0;
+}
+.dm-check-all { margin-top: 2px; border-style: dashed; }
 .dm-check {
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
   color: var(--text-dim, #8a7d6a); border-radius: 8px; padding: 8px 14px;
-  cursor: pointer; font: inherit;
+  cursor: pointer; font: inherit; flex: none; text-align: left;
 }
 .dm-check-on { color: var(--gold-light, #e8c96a); border-color: var(--gold, #c9a84c); }
 
@@ -43,11 +49,16 @@
   border-bottom: 1px solid var(--border, #3a342a); background: var(--surface, #1a1814);
   position: sticky; top: 0; z-index: 20;
 }
-.dm-hud { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
-.dm-hud span { color: var(--text-dim, #8a7d6a); font-size: 15px; }
-.dm-phase { color: var(--text, #e8dfc8) !important; font-weight: 600; }
-.dm-phase-mine { color: var(--gold-light, #e8c96a) !important; }
-.dm-reconn { margin-left: auto; color: var(--red-gem, #dc4040); font-size: 13px; }
+/* equal-flex side slots (basis 0, not auto) — the title centres on the PAGE and
+   doesn't drift when the menu label or the reconnect notice changes width */
+.dm-top-side { flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+.dm-top-right { justify-content: flex-end; }
+.dm-title {
+  font-family: 'Cinzel', 'Cinzel Fallback', serif;
+  font-size: 1.05rem; font-weight: 700; letter-spacing: .07em;
+  color: var(--text, #e8dfc8); margin: 0; white-space: nowrap;
+}
+.dm-reconn { color: var(--red-gem, #dc4040); font-size: 13px; }
 
 .dm-main {
   display: grid; grid-template-columns: 340px minmax(0, 1fr);
@@ -73,13 +84,15 @@
       their hand, faces for what they played, real piles ── */
 .dm-opp {
   background: var(--surface, #1a1814); border: 1px solid var(--border, #3a342a);
-  border-radius: var(--radius-lg, 14px); padding: 10px 12px;
+  border-radius: var(--radius-lg, 14px); padding: 6px 12px;
   --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
   container-type: inline-size;
 }
 .dm-opp-acting { border-color: var(--gold, #c9a84c); }
+/* The box holds nothing but this row, so its own margin/padding was pure dead
+   space above and below the cards — the count labels already sit inside it. */
 .dm-opp-zones {
-  display: flex; gap: 18px; align-items: flex-start; margin-top: 8px; padding-bottom: 14px;
+  display: flex; gap: 18px; align-items: flex-start; margin-top: 0; padding-bottom: 4px;
 }
 .dm-opp-hand { flex: none; }
 .dm-fan { display: flex; }
@@ -267,6 +280,11 @@
   max-width: 100%; min-width: 0; overflow: hidden;
 }
 .dm-fitlabel { display: block; white-space: nowrap; max-width: 100%; }
+/* the two-row form: FitLabel adds this when one row can't hold the label, and
+   the button grows with it (no fixed height anywhere on these buttons) */
+.dm-fitlabel-wrap {
+  white-space: normal; line-height: 1.16; overflow-wrap: anywhere;
+}
 .dm-slots button, .dm-names button { padding: 6px 10px; font-size: 13px; }
 .dm-names { max-height: 180px; overflow-y: auto; }
 
@@ -292,8 +310,11 @@
 .dm-inplay {
   display: flex; flex-wrap: wrap; gap: 8px; min-height: 38px; align-items: center;
   border-bottom: 1px dashed var(--border, #3a342a); padding-bottom: 10px; margin-bottom: 10px;
-  /* small faces: --card-h must follow, or fonts size for the big hand cards */
-  --card-w-s: 82px; --card-h: calc(var(--card-w-s) * 1.3);
+  /* small faces: --card-h must follow, or fonts size for the big hand cards.
+     Same 56px as the opponents' play row — one card size for "in play" on
+     BOTH sides of the table, so a played card doesn't change size depending
+     on who played it. */
+  --card-w-s: 56px; --card-h: calc(var(--card-w-s) * 1.3);
 }
 .dm-zone-hint { color: var(--text-muted, #5a5248); font-size: 13px; font-style: italic; }
 /* duration cards stay on the table — a warm halo marks them */
@@ -391,7 +412,7 @@
      a phone — WRAP; unwrapped rows were what iOS zoomed out for */
   .dm .dm-turnbtns { flex-direction: row; flex-wrap: wrap; width: 100%; }
   .dm .dm-turnbtns .btn { flex: 1 1 auto; }
-  .dm .dm-hud span { font-size: 12px; }
+  .dm .dm-title { font-size: .92rem; }
   /* opponent zones swipe sideways instead of burying the board */
   .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
   .dm .dm-opp-inplay { flex-wrap: nowrap; }

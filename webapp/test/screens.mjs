@@ -445,6 +445,75 @@ try {
 		await joinCtx.close();
 	}
 
+	// ── Dontminion's expansion picker ─────────────────────────────────────────
+	// Three contracts that regress SILENTLY (a one-word edit to a useState, a CSS
+	// rule that stops the list scrolling) and that nothing else here would catch:
+	// Base Set alone is the default, the LIST scrolls rather than the modal, and
+	// Select all toggles both ways. The set count grows every expansion phase, so
+	// the picker is the part of that modal most likely to be touched.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "picker-harness", name: "Picker", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		const opened = await page.waitForSelector(".dm-checks", { timeout: 15_000 })
+			.then(() => true).catch(() => false);
+		check("Dontminion's create modal opens", opened);
+
+		if (opened) {
+			const p = await page.evaluate(() => {
+				const list = document.querySelector(".dm-checks");
+				const panel = document.querySelector(".cm-panel");
+				return {
+					on: [...list.querySelectorAll(".dm-check-on")].map((b) => b.textContent.trim()),
+					total: list.querySelectorAll(".dm-check").length,
+					listScrolls: list.scrollHeight > list.clientHeight + 1,
+					panelScrolls: panel.scrollHeight > panel.clientHeight + 1,
+				};
+			});
+			check("...with Base Set the only expansion selected",
+				p.on.length === 1 && /Base/.test(p.on[0]), JSON.stringify(p.on));
+			// The list only NEEDS to scroll once it outgrows its cap; assert the
+			// modal doesn't, which is the property the cap exists to preserve.
+			check("...the expansion LIST scrolls, not the whole modal",
+				!p.panelScrolls && (p.total < 4 || p.listScrolls),
+				`list=${p.listScrolls} panel=${p.panelScrolls} of ${p.total}`);
+
+			await page.click(".dm-check-all");
+			const all = await page.evaluate(() => ({
+				on: document.querySelectorAll(".dm-checks .dm-check-on").length,
+				total: document.querySelectorAll(".dm-checks .dm-check").length,
+				disabled: document.querySelector(".cm-create").disabled,
+			}));
+			check("Select all turns every expansion on",
+				all.total > 1 && all.on === all.total && !all.disabled, JSON.stringify(all));
+
+			await page.click(".dm-check-all");
+			const none = await page.evaluate(() => ({
+				on: document.querySelectorAll(".dm-checks .dm-check-on").length,
+				disabled: document.querySelector(".cm-create").disabled,
+			}));
+			// Empty is a REACHABLE state, so Create must refuse it — the server
+			// rejects an empty expansion set and the error would be opaque.
+			check("...and pressing it again clears them, disabling Create",
+				none.on === 0 && none.disabled, JSON.stringify(none));
+		}
+		check("no page errors in the expansion picker", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

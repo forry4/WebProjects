@@ -402,9 +402,22 @@ Peer contract `{myId, authUser, onExit}`; root class `.dm` on every branch (the 
 marker). Because engine constraints are generic, the decision UI is SIX renderers over
 `game.pending_view` — no per-card frontend code anywhere; everyone else gets a
 "Waiting for <name>" bar. Cards are text-only faces (no art) on the shared `.card` frame via
-`--card-w/--card-h`. The create modal's expansion picker is a game-local `DmChecks` (the shared
-kit has no multi-select; promote it if a second game needs one). Supply affordance mirrors
+`--card-w/--card-h`; in-play cards use ONE size for both your box and the opponents' (56px), so
+a played card doesn't change size depending on who played it. Supply affordance mirrors
 `engine.cost` via `turn_ctx.bridges` — display only, the server stays authoritative.
+
+**The create modal's expansion picker is a game-local `DmChecks`** (the shared kit has no
+multi-select; promote it if a second game needs one). It defaults to **Base Set alone**, and the
+LIST scrolls inside its own cap rather than the modal growing — the set count rises every phase,
+and the failure mode is Create sliding below the fold. Select all toggles both ways, so **empty
+is reachable**: Create is disabled for it (the server rejects an empty expansion set and the
+error would be opaque). `screens.mjs` pins all three; verified non-vacuous by regressing the
+default and watching it fail.
+
+**Prompt-button labels wrap to a SECOND row rather than clipping** (`FitLabel`): one line if it
+fits, otherwise the label wraps and the button grows, shrinking the type only as far as two rows
+actually need. Minion's "discard your hand, +4 Cards…" option forced this — no font size fits it
+on one row of a prompt button, so the old shrink-only version clipped it.
 
 ## Tests
 

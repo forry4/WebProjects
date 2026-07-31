@@ -102,17 +102,29 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
   );
 }
 
-// Button label that SHRINKS its font until the text fits the button's width
-// (buttons themselves are capped at 100% of their box — never overflow it).
+// Button label that fits itself to the button's width (buttons themselves are
+// capped at 100% of their box — never overflow it). One line if it fits; if it
+// doesn't, the label WRAPS to a second row and the button grows to two rows
+// rather than shrinking the text into illegibility or clipping it. Minion's
+// "discard your hand, +4 Cards, …" option is the case that forced this: no font
+// size makes that fit one row of a prompt button.
+const FIT_MIN_PX = 9;
 function FitLabel({ children }) {
   const ref = useRef(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.fontSize = "";
+    el.classList.remove("dm-fitlabel-wrap");
+    if (el.scrollWidth <= el.clientWidth + 1) return;      // fits on one row
+    // Two rows. Shrink only as far as two rows actually need — most labels
+    // wrap at full size and never lose a pixel of type.
+    el.classList.add("dm-fitlabel-wrap");
     const base = parseFloat(getComputedStyle(el).fontSize) || 15;
-    if (el.scrollWidth > el.clientWidth + 1) {
-      el.style.fontSize = Math.max(9, base * (el.clientWidth / el.scrollWidth) * 0.97) + "px";
+    for (let size = base; size >= FIT_MIN_PX; size -= 0.5) {
+      el.style.fontSize = size + "px";
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || size * 1.2;
+      if (el.scrollHeight <= lh * 2 + 1) return;
     }
   }, [children]);
   return <span ref={ref} className="dm-fitlabel">{children}</span>;
@@ -387,7 +399,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [createOpp, setCreateOpp] = useState("ai");
   const [createBots, setCreateBots] = useState(1);
   const [createPlayers, setCreatePlayers] = useState(4);
-  const [createExps, setCreateExps] = useState(["base", "intrigue"]);
+  // Base Set only by default — the newcomer's game, and the set every Dominion
+  // player knows. Everything else is opt-in through the picker.
+  const [createExps, setCreateExps] = useState(["base"]);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
@@ -422,8 +436,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const pv = game?.pending_view || null;
   const iAmActor = !!pv && !over && game?.pending_pid === myId && !!pv.constraint;
   const waitingOn = pv && !iAmActor ? pv.waiting_on : null;
-  const myTurn = !!game && !over
-    && (game.pending_pid ? game.pending_pid === myId : game.turn === myId);
   const botActing = !!game && !over && (roomData?.ai_players || []).includes(game.pending_pid || game.turn);
   const bridges = game?.turn_ctx?.bridges || 0;
   // Prices come from the SERVER (engine.cost): Bridge, Quarry, Peddler's
@@ -446,6 +458,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
     name: EXPANSIONS.find((e) => e.id === id)?.name
       || id.charAt(0).toUpperCase() + id.slice(1),
   }));
+  const allExpsOn = expansionOptions.length > 0
+    && expansionOptions.every((e) => createExps.includes(e.id));
   const manualTreasures = catalog?.manual_treasures || [];
   const handTreasures = (mySeat?.hand || []).some((c) => (cards[c]?.types?.includes("treasure")
     || (c === "Curse" && game?.curse_is_treasure)) && !manualTreasures.includes(c));
@@ -646,6 +660,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const mv = (move) => send({ action: "move", move });
 
   const createGame = () => {
+    // The server rejects an empty expansion set; the Create button is disabled
+    // for it, and this is the belt to that suspenders (a stale click, a keyboard
+    // submit) so the failure can never be an opaque socket error.
+    if (!createExps.length) { setToast("Pick at least one expansion."); return; }
     const rid = roomCode();
     setRoomId(rid);
     setRoomData(null);
@@ -1060,6 +1078,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </CmRow>
             )}
             <CmRow label="Expansions">
+              {/* The LIST scrolls, not the modal — the set count grows every
+                  phase, and a picker that pushes Create below the fold is the
+                  thing that breaks first. Select all is a plain toggle. */}
               <div className="dm-checks">
                 {expansionOptions.map((ex) => {
                   const on = createExps.includes(ex.id);
@@ -1067,21 +1088,33 @@ export default function Dontminion({ myId, authUser, onExit }) {
                     <button key={ex.id} type="button"
                       className={"dm-check" + (on ? " dm-check-on" : "")}
                       onClick={() => setCreateExps((s) => on
-                        ? (s.length > 1 ? s.filter((x) => x !== ex.id) : s)   // at least one stays on
+                        ? s.filter((x) => x !== ex.id)
                         : [...s, ex.id])}>
                       {on ? "☑" : "☐"} {ex.name}
                     </button>
                   );
                 })}
               </div>
+              <button type="button"
+                className={"dm-check dm-check-all" + (allExpsOn ? " dm-check-on" : "")}
+                onClick={() => setCreateExps(allExpsOn ? [] : expansionOptions.map((e) => e.id))}>
+                {allExpsOn ? "☑" : "☐"} Select all
+              </button>
             </CmRow>
-            <div className="cm-hint">10 kingdom piles are dealt at random from the enabled expansions.</div>
+            <div className="cm-hint">
+              {createExps.length
+                ? "10 kingdom piles are dealt at random from the enabled expansions."
+                : "Pick at least one expansion to deal a Kingdom from."}
+            </div>
             <div className="cm-footer">
               <span className="cm-summary">
                 {createOpp === "ai" ? `You + ${createBots} bot${createBots > 1 ? "s" : ""}` : `Up to ${createPlayers} players`}
-                {" · "}{createExps.map((e) => expansionOptions.find((x) => x.id === e)?.name || e).join(" + ")}
+                {createExps.length
+                  ? " · " + createExps.map((e) => expansionOptions.find((x) => x.id === e)?.name || e).join(" + ")
+                  : ""}
               </span>
-              <button className="btn btn-gold cm-create" onClick={createGame}>Create</button>
+              <button className="btn btn-gold cm-create" disabled={!createExps.length}
+                onClick={createGame}>Create</button>
             </div>
           </CreateModal>
         )}
@@ -1195,19 +1228,23 @@ export default function Dontminion({ myId, authUser, onExit }) {
   return (
     <div className="app dm dm-gamescreen" style={{ "--lby-accent": "#b08d57" }}>
       <style>{dmStyles}</style>
+      {/* Title bar only — the game's NAME, centred, like every other game on the
+          site. Whose turn it is and which phase you're in are already carried by
+          the seat boxes (acting badge) and the resource bar's hint. The two side
+          slots are equal-flex so the title centres on the PAGE, not merely in
+          the gap left over by the menu. */}
       <div className="dm-top">
-        <GameMenu items={[
-          { label: "Back to lobby", onClick: leaveToLobby },
-          !over && { label: "Abandon game", onClick: () => setConfirmAbandon(true), danger: true },
-          { label: "Rules", onClick: () => setShowRules(true) },
-        ].filter(Boolean)} label="Menu" />
-        <div className="dm-hud">
-          <span className={"dm-phase" + (myTurn ? " dm-phase-mine" : "")}>
-            {over ? "game over" : myTurn ? (game.pending_pid ? "your decision" : `your ${game.phase} phase`) : `${names[game.turn] || game.turn}'s turn`}
-          </span>
-          {bridges > 0 && <span title="Bridge discount">cards cost −{bridges}</span>}
+        <div className="dm-top-side">
+          <GameMenu items={[
+            { label: "Back to lobby", onClick: leaveToLobby },
+            !over && { label: "Abandon game", onClick: () => setConfirmAbandon(true), danger: true },
+            { label: "Rules", onClick: () => setShowRules(true) },
+          ].filter(Boolean)} label="Menu" />
         </div>
-        {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
+        <h1 className="dm-title">Dontminion</h1>
+        <div className="dm-top-side dm-top-right">
+          {reconnecting && !connected && <span className="dm-reconn">reconnecting…</span>}
+        </div>
       </div>
 
       <div className="dm-main">
