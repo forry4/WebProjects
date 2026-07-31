@@ -202,6 +202,142 @@ def test_a_frame_written_by_the_pre_registry_kernel_still_resolves(g):
     assert atk is None or B in atk["data"]["immune"], "legacy Moat id lost its immunity"
 
 
+def test_an_attack_TREASURE_opens_the_reaction_window(g):
+    """Cauldron is an Attack Treasure. The treasure play path never wrapped
+    attacks, so no window opened and `_atk_immune` was never set — the attack
+    would have been unblockable by Moat, silently. An attack is an attack
+    whichever way it reached the table."""
+    from games.dontminion.cards import CARDS
+    from games.dontminion import effects
+    CARDS["Silver"]["types"] = ["treasure", "attack"]      # stand in for Cauldron
+    effects.EFFECTS["Silver"] = lambda game, pid: None
+    try:
+        g["seats"][A]["hand"] = ["Silver"]
+        g["seats"][B]["hand"] = ["Moat"] + ["Copper"] * 4
+        assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+        assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Silver"})[0]
+        assert g["pending_pid"] == B, "an Attack Treasure opened no window"
+        ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
+        assert "react:Moat" in ids
+        assert engine.apply_move(g, B, {"type": "decision", "ids": ["react:Moat"]})[0]
+        atk = engine._current_attack_frame(g)
+        assert atk is None or B in atk["data"]["immune"]
+    finally:
+        CARDS["Silver"]["types"] = ["treasure"]
+        effects.EFFECTS.pop("Silver", None)
+
+
+def test_cleanup_sweeps_a_reaction_played_on_someone_elses_turn(g):
+    """"You discard the card in THAT turn's Clean-up phase" (p53) — the
+    attacker's. Left in the reactor's in_play it would still be on the table
+    on their own next turn, wrongly counting as a card in play for
+    Bank/Peddler/Grand Market/Conspirator."""
+    from games.dontminion import effects
+    effects.ATTACK_REACTIONS["Village"] = {
+        "label": "Play Village", "mode": "play", "repeatable": False}
+    try:
+        g["seats"][A]["hand"] = ["Militia"]
+        g["seats"][B]["hand"] = ["Village", "Copper", "Copper", "Copper", "Copper"]
+        assert engine.apply_move(g, A, {"type": "play_action", "card": "Militia"})[0]
+        assert engine.apply_move(g, B, {"type": "decision", "ids": ["react:Village"]})[0]
+        assert "Village" in g["seats"][B]["in_play"]
+        # B answers the Militia, then A ends the turn
+        if g["pending_pid"] == B:
+            c = g["pending"][-1]["constraint"]
+            engine.apply_move(g, B, {"type": "decision",
+                                     "cards": c["cards"][:c["min"]]})
+        while g["turn"] == A and not g["over"]:
+            assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+        assert g["seats"][B]["in_play"] == [], \
+            "the off-turn reaction survived into its owner's turn"
+        assert "Village" in g["seats"][B]["discard"]
+    finally:
+        effects.ATTACK_REACTIONS.pop("Village", None)
+
+
+def test_exchange_is_not_a_gain(g):
+    """Trader: "you DID gain the card... you DIDN'T gain the Silver." So an
+    exchange must fire no `gain` event, or every when-gain watcher on the
+    returned card double-fires."""
+    seen = []
+    from games.dontminion import effects
+    effects.TRIGGERS.setdefault("Silver", []).append(
+        {"on": "gain", "from": "self", "stage": "boom"})
+    effects.STAGES[("Silver", "boom")] = lambda game, pid, frame, choice: seen.append(1)
+    try:
+        g["seats"][A]["discard"] = ["Estate"]
+        before_estate = g["supply"]["Estate"]
+        before_silver = g["supply"]["Silver"]
+        assert engine.exchange(g, A, "Estate", "Silver") is True
+        engine._drive(g)
+        assert g["seats"][A]["discard"] == ["Silver"]
+        assert g["supply"]["Estate"] == before_estate + 1    # returned to its pile
+        assert g["supply"]["Silver"] == before_silver - 1
+        assert seen == [], "exchange fired a gain event"
+        # empty target pile: nothing happens at all
+        g["supply"]["Silver"] = 0
+        g["seats"][A]["discard"] = ["Estate"]
+        assert engine.exchange(g, A, "Estate", "Silver") is False
+        assert g["seats"][A]["discard"] == ["Estate"]
+    finally:
+        effects.TRIGGERS.pop("Silver", None)
+        effects.STAGES.pop(("Silver", "boom"), None)
+
+
+def test_shuffle_into_deck_shuffles_even_with_zero_cards(g):
+    """Inn: "if you shuffle zero cards into your deck, you still shuffle" —
+    the shuffle itself randomises deck order, which is the point."""
+    g["seats"][A]["deck"] = [f"Copper{i}" for i in range(0)] or ["Copper"] * 6
+    g["seats"][A]["deck"] = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province"]
+    g["seats"][A]["discard"] = ["Militia", "Moat"]
+    before = list(g["seats"][A]["deck"])
+    engine.shuffle_into_deck(g, A, ["Militia"])
+    seat = g["seats"][A]
+    assert "Militia" in seat["deck"] and "Militia" not in seat["discard"]
+    assert seat["discard"] == ["Moat"]
+    assert sorted(seat["deck"]) == sorted(before + ["Militia"])
+
+    # zero cards still shuffles (order changes for a deck this size)
+    g2 = engine.new_game([A, B], ["base"], seed=11, kingdom=K7)
+    g2["seats"][A]["deck"] = [f"C{i}" for i in range(20)]
+    snap = list(g2["seats"][A]["deck"])
+    engine.shuffle_into_deck(g2, A, [])
+    assert sorted(g2["seats"][A]["deck"]) == sorted(snap)
+    assert g2["seats"][A]["deck"] != snap, "a zero-card shuffle did not shuffle"
+
+
+def test_cleanup_discard_is_a_SEPARATE_event_from_discard(g, synthetic):
+    """Scheme triggers on the Clean-up discard from play. It must be its own
+    event: Tunnel/Trail/Weaver are all "other than during a Clean-up phase" and
+    must NOT see it.
+
+    LIMITATION, pinned deliberately: the event fires, but `emit` parks an AUTO
+    FRAME and `_end_turn` does not drive frames before sweeping the table, so a
+    consumer cannot yet MOVE the card (Scheme topdecking it). Implementing
+    Scheme needs the interruptible `_end_turn` — see the ledger."""
+    trigger, stage, _ = synthetic
+    cleanup_hits, discard_hits = [], []
+    trigger("Copper", [{"on": "cleanup_discard", "from": "self", "stage": "cu"}][0])
+    stage(("Copper", "cu"), lambda game, pid, frame, choice:
+          cleanup_hits.append(frame["data"]["subject"]))
+    trigger("Silver", {"on": "discard", "from": "self", "stage": "d"})
+    stage(("Silver", "d"), lambda game, pid, frame, choice: discard_hits.append(1))
+
+    g["seats"][A]["hand"] = ["Copper", "Silver"]
+    g["seats"][A]["in_play"] = []
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]     # -> buy
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Copper"})[0]
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]     # clean-up
+
+    assert cleanup_hits == ["Copper"], "the in-play card fired no cleanup_discard"
+    assert discard_hits == [], "a Clean-up discard fired the ordinary discard event"
+
+
+def test_cost_lt_is_strict(g):
+    assert engine.cost_lt(g, "Estate", 3) and not engine.cost_lt(g, "Estate", 2)
+    assert engine.cost_le(g, "Estate", 2)          # le includes equal, lt doesn't
+
+
 def test_buy_event_reaches_in_play_triggers(g, synthetic):
     trigger, _, _ = synthetic
     hits = []

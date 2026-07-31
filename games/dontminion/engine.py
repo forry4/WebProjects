@@ -512,6 +512,47 @@ def gain_from_trash(game, pid, card):
     return True
 
 
+def exchange(game, pid, card, into, zone="discard"):
+    """Return `card` to its pile and take `into` from ITS pile — Trader's 2020
+    reaction. NOT a gain: "even if you exchanged it, you DID gain the card (and
+    triggered any when-gain ability). You DIDN'T gain the Silver." So this
+    emits nothing; a `gain` event here would double-fire every when-gain
+    watcher on the card being handed back.
+
+    "You return the card to its pile no matter where you gained it from. You
+    place the Silver in your discard pile no matter where you gained the card
+    to." Returns False if `into` is empty (nothing happens) or the card isn't
+    where we expect (lose-track)."""
+    if game["supply"].get(into, 0) <= 0:
+        return False
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False                    # lost track of it; the exchange fails
+    seat[zone].remove(card)
+    game["supply"][card] = game["supply"].get(card, 0) + 1
+    game["supply"][into] -= 1
+    seat["discard"].append(into)         # always the discard pile
+    _log(game, pid, "exchange", card=card, into=into)
+    return True
+
+
+def shuffle_into_deck(game, pid, cards, zone="discard"):
+    """Shuffle `cards` from a zone into the deck (Inn's on-gain). Shuffles the
+    deck EVEN WHEN `cards` IS EMPTY — "if you shuffle zero cards into your
+    deck, you still shuffle" — which matters because the shuffle itself
+    randomises deck order."""
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+    seat["deck"].extend(cards)
+    rng = _make_rng(game)
+    rng.shuffle(seat["deck"])
+    _save_rng(game, rng)
+    _mark_revealed(game)                 # deck order changed under the player
+    _log(game, pid, "shuffle_into_deck", count=len(cards))
+    return list(cards)
+
+
 def trash(game, pid, cards, zone="hand"):
     seat = game["seats"][pid]
     for c in cards:
@@ -779,6 +820,15 @@ def cost_le(game, card, coins):
 def cost_eq(game, card, coins):
     """'costing exactly $coins' (Upgrade's +1, Swindler's same-cost)."""
     return cost(game, card) == coins
+
+
+def cost_lt(game, card, coins):
+    """'costing LESS than' / 'a cheaper card' — Border Village, Berserker,
+    Haggler. Distinct from cost_le: "cheaper" excludes an equal cost, and the
+    compendium's "lower cost" is strict. Same reason cost_le exists: when the
+    cost VECTOR arrives (Potion, Debt), 'lower' means at least one component
+    lower and none higher, and that rule lands HERE, not in card code."""
+    return cost(game, card) < coins
 
 
 # --- the DURATION kernel (Seaside; reused by later expansions) ----------------
@@ -1095,6 +1145,20 @@ def _cleanup_durations(game, pid):
 
 # --- playing action cards + the attack/reaction kernel -----------------------
 
+def find_card_zone(game, pid, card, zones=("discard", "hand", "trash")):
+    """Where is `card` right now — or None if it has MOVED (the lose-track
+    rule). A when-gain/trash/discard reaction fires after the card landed, but
+    another ability may have moved it in between; "cards that are lost track of
+    can't be played" (2021 expanded rule). Card code must ask this rather than
+    assume the zone it expects, or it will remove() a card that isn't there."""
+    seat = game["seats"][pid]
+    for z in zones:
+        pile = game["trash"] if z == "trash" else seat.get(z)
+        if pile and card in pile:
+            return z
+    return None
+
+
 def play_action_card(game, pid, card, from_zone="hand", count=True):
     """Move the card to in_play (from_zone=None for throne-room replays), count the
     play, and run its effect. Attack-typed plays are wrapped: reaction windows for
@@ -1104,7 +1168,10 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
     turn player's actions_played counter."""
     seat = game["seats"][pid]
     if from_zone is not None:
-        seat[from_zone].remove(card)
+        # "trash" is the shared public pile, not a seat zone — Trail reacts to
+        # being TRASHED and plays itself from there.
+        src = game["trash"] if from_zone == "trash" else seat[from_zone]
+        src.remove(card)
         seat["in_play"].append(card)
         game["_cur_dur"] = None          # a new physical play gets a fresh entry
         if has_type(game, card, "duration"):
@@ -1130,18 +1197,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
     else:
         _log(game, pid, "play", card=card)
     if has_type(game, card, "attack"):
-        # Lighthouse protection (until-their-next-turn watcher) = unaffected,
-        # no window needed (public, so it's logged rather than asked)
-        immune0 = [o for o in opponents(game, pid) if attack_protected(game, o)]
-        for o in immune0:
-            _log(game, o, "lighthouse")
-        push_auto(game, pid, "__attack", "play_ability", data={"card": card, "immune": list(immune0)})
-        for o in reversed(opponents(game, pid)):
-            if o in immune0:
-                continue
-            opts = _reaction_options(game, o, immune=[])
-            if opts:
-                _push_window(game, o, opts)
+        _open_attack_window(game, pid, card)
     else:
         from . import effects as _fx
         fn = _fx.EFFECTS.get(card)
@@ -1204,6 +1260,28 @@ def _reaction_options(game, o, immune, used=()):
     return opts
 
 
+def _open_attack_window(game, pid, card):
+    """Park the attack's play ability and offer every eligible opponent their
+    reaction window FIRST — the compendium's timing: reactions resolve when the
+    Attack is PLAYED, before its ability does anything.
+
+    Shared by the Action and TREASURE play paths; an attack is an attack
+    whichever way it reached the table (Cauldron is an Attack Treasure)."""
+    # Lighthouse protection (until-their-next-turn watcher) = unaffected,
+    # no window needed (public, so it's logged rather than asked)
+    immune0 = [o for o in opponents(game, pid) if attack_protected(game, o)]
+    for o in immune0:
+        _log(game, o, "lighthouse")
+    push_auto(game, pid, "__attack", "play_ability",
+              data={"card": card, "immune": list(immune0)})
+    for o in reversed(opponents(game, pid)):
+        if o in immune0:
+            continue
+        opts = _reaction_options(game, o, immune=[])
+        if opts:
+            _push_window(game, o, opts)
+
+
 def _push_window(game, o, opts):
     push_choose_option(game, o, "__attack", "window", options=opts, pick=1)
 
@@ -1258,7 +1336,10 @@ def _k_window(game, pid, frame, choice):
         # Action from your Action pool. You discard the card in THAT TURN'S
         # Clean-up phase" — i.e. the attacker's, which is why clean-up has to
         # sweep every seat's in_play, not just the turn player's.
-        play_action_card(game, pid, card, from_zone="hand")
+        # count only on your OWN turn: an opponent's reaction must not bump the
+        # turn player's actions_played (Conspirator counts ACTIONS YOU played).
+        play_action_card(game, pid, card, from_zone="hand",
+                         count=(pid == game["turn"]))
     else:
         reveal(game, pid, [card], "hand")
 
@@ -1368,14 +1449,30 @@ def _play_one_treasure(game, pid, card):
         game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
     _log(game, pid, "play", card=card, coins=coins_of(game, card))
     _treasure_coins(game, pid, card)
+    if has_type(game, card, "attack"):
+        # An ATTACK-typed Treasure (Cauldron) opens the reaction window exactly
+        # like an Attack Action: the compendium's reaction window "triggers
+        # whenever an Attack card is PLAYED". This path never wrapped attacks,
+        # so `_atk_immune` was never set and a watcher registered from the play
+        # captured an EMPTY immune list — i.e. the attack would have been
+        # unblockable by Moat, silently.
+        _open_attack_window(game, pid, card)
+        emit(game, "play_treasure", actor=pid, subject=card)
+        return
     # treasures with abilities (Astrolabe's duration half) run their effect too
     fn = effects.EFFECTS.get(card)
     if fn is not None:
+        prev = game.get("_actor")
+        game["_actor"] = pid
         _push_depth(game)
         try:
             fn(game, pid)
         finally:
             _pop_depth(game)
+            if prev is None:
+                game.pop("_actor", None)
+            else:
+                game["_actor"] = prev
     emit(game, "play_treasure", actor=pid, subject=card)
 
 
@@ -1513,10 +1610,47 @@ def _end_turn(game, pid):
     inplay = list(seat["in_play"])
     for name in kept_out:
         inplay.remove(name)
+    # "when you discard this FROM PLAY" during Clean-up (Scheme). A distinct
+    # event from `discard`, deliberately: the when-discard reactions
+    # (Tunnel/Trail/Weaver) are all "other than during a Clean-up phase" and
+    # must NOT see this. Fired BEFORE the cards move, so a consumer can still
+    # find them in in_play; it may relocate a card, so the mover re-reads.
+    if inplay:
+        for c in list(inplay):
+            emit(game, "cleanup_discard", actor=pid, subject=c)
+        # a consumer may have MOVED a card off the table (Scheme topdecks it),
+        # so re-read what is actually still in play rather than trusting the
+        # snapshot. kept_out (Durations + their riders) is accounted for in the
+        # duration zone, so it must not also be discarded — or counted twice.
+        inplay = list(seat["in_play"])
+        for name in kept_out:
+            if name in inplay:
+                inplay.remove(name)
     seat["discard"].extend(inplay)
     seat["in_play"] = []
     seat["discard"].extend(seat["hand"])
     seat["hand"] = []
+    # OTHER seats' in_play too: a REACTION THAT PLAYS ITSELF was played during
+    # THIS turn and "you discard the card in that turn's Clean-up phase" —
+    # this turn's, not the reactor's. Left behind it would still be on the
+    # table when its owner's turn came round, wrongly counting as a card in
+    # play for Bank / Peddler / Grand Market / Conspirator. Durations and
+    # their riders are protected: _cleanup_durations already promoted them out
+    # of in_play for every seat.
+    for other, s in game["seats"].items():
+        if other == pid or not s["in_play"]:
+            continue
+        held = [e["card"] for e in s["duration"]]
+        for e in s["duration"]:
+            held.extend(e.get("riders", []))
+        leaving = list(s["in_play"])
+        for name in held:
+            if name in leaving:
+                leaving.remove(name)
+        if leaving:
+            s["discard"].extend(leaving)
+            s["in_play"] = [c for c in s["in_play"] if c in held]
+            _log(game, other, "cleanup_off_turn", cards=leaving)
     # Sailor-class this-turn watchers die with the turn
     game["watchers"] = [w for w in game["watchers"]
                         if w.get("until") != "turn_end"]
