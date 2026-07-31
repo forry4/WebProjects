@@ -495,17 +495,56 @@ try {
 			// game (main.py coerces an unknown tier away silently, so a typo'd
 			// id here would look fine and quietly seat the random bot).
 			const bots = await page.evaluate(() => {
-				const row = [...document.querySelectorAll(".cm-row")]
-					.find((r) => /bot style/i.test(r.querySelector(".cm-label")?.textContent || ""));
+				const row = document.querySelector(".dm-cm-botstyle");
 				if (!row) return null;
 				return {
+					label: row.querySelector(".cm-label")?.textContent.trim(),
 					labels: [...row.querySelectorAll(".cm-seg-btn")].map((b) => b.textContent.trim()),
 					sel: [...row.querySelectorAll(".cm-seg-btn.sel")].map((b) => b.textContent.trim()),
+					// one line with the bot count, and its name must not wrap
+					oneLine: row.getBoundingClientRect().top
+						=== document.querySelector(".dm-cm-two > .dm-cm-col").getBoundingClientRect().top
+						&& [...row.querySelectorAll(".cm-seg-btn")]
+							.every((b) => b.getBoundingClientRect().height < 44),
 				};
 			});
 			check("...the bot style is pickable, defaulting to Big Money",
 				!!bots && bots.labels.length >= 2 && bots.sel.length === 1
 				&& /big money/i.test(bots.sel[0]), JSON.stringify(bots));
+			check("...sharing one line with the bot count, without wrapping",
+				!!bots && bots.oneLine, JSON.stringify(bots));
+
+			// The Require picker is built from /catalog, so an empty list means
+			// the server field is missing or misnamed — exactly the drift the
+			// wire-contract test can't see from the browser side.
+			const req = await page.evaluate(() => {
+				const list = document.querySelector(".dm-checks-req");
+				if (!list) return null;
+				return {
+					labels: [...list.querySelectorAll(".dm-check")].map((b) => b.textContent.trim()),
+					on: list.querySelectorAll(".dm-check-on").length,
+					scrolls: list.scrollHeight > list.clientHeight + 1,
+				};
+			});
+			check("...the Require picker offers all three bonuses, none preselected",
+				!!req && req.labels.length === 3 && req.on === 0
+				&& req.labels.some((l) => /\+2 Actions/.test(l))
+				&& req.labels.some((l) => /\+1 Buy/.test(l))
+				&& req.labels.some((l) => /\+2 Cards/.test(l)), JSON.stringify(req));
+			// three fixed entries always fit — a scrollbar here means it wrongly
+			// inherited the expansion list's cap
+			check("...and the Require list needs no scrollbar", !!req && !req.scrolls,
+				JSON.stringify(req));
+
+			await page.click(".dm-checks-req .dm-check");
+			const reqOn = await page.evaluate(() => ({
+				on: document.querySelectorAll(".dm-checks-req .dm-check-on").length,
+				hint: document.querySelector(".cm-hint")?.textContent || "",
+			}));
+			check("...checking one is reflected in the hint",
+				reqOn.on === 1 && /always including a card that gives/.test(reqOn.hint),
+				JSON.stringify(reqOn));
+			await page.click(".dm-checks-req .dm-check");   // back to none for the create below
 
 			await page.click(".dm-check-all");
 			const all = await page.evaluate(() => ({

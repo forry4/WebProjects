@@ -461,6 +461,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [createBots, setCreateBots] = useState(1);
   // Big Money by default: it's the tier that plays an actual game of Dominion.
   const [createBotKind, setCreateBotKind] = useState("bigmoney");
+  // Kingdom requirements — none by default, so a plain Create still deals the
+  // fully random 10 the game has always dealt.
+  const [createReqs, setCreateReqs] = useState([]);
   const [createPlayers, setCreatePlayers] = useState(4);
   // Base Set only by default — the newcomer's game, and the set every Dominion
   // player knows. Everything else is opt-in through the picker.
@@ -523,6 +526,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   }));
   const allExpsOn = expansionOptions.length > 0
     && expansionOptions.every((e) => createExps.includes(e.id));
+  // Kingdom requirements, from the server too (main.REQUIREMENT_ORDER) — the
+  // bar for each ("+2 Actions") is the SERVER's label, so the picker can never
+  // promise a threshold the dealer doesn't use.
+  const requireOptions = catalog?.requirements || [];
   const manualTreasures = catalog?.manual_treasures || [];
   const handTreasures = (mySeat?.hand || []).some((c) => (cards[c]?.types?.includes("treasure")
     || (c === "Curse" && game?.curse_is_treasure)) && !manualTreasures.includes(c));
@@ -733,7 +740,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setShowCreateModal(false);
     const msg = {
       action: "create", name: playerName, expansions: createExps,
-      vs_ai: createOpp === "ai",
+      requires: createReqs, vs_ai: createOpp === "ai",
     };
     if (createOpp === "ai") {
       msg.num_bots = createBots;
@@ -1133,16 +1140,22 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 value={createOpp} onChange={setCreateOpp} />
             </CmRow>
             {createOpp === "ai" ? (
-              <>
-                <CmRow label="Bots">
+              /* Two labelled segments on ONE line. Stacked they cost 126px of a
+                 modal that must not itself scroll, and the bot count is three
+                 single digits — it never needed a full row. The 1:2 split is
+                 what keeps "Big Money" on one line at phone width. */
+              <div className="cm-row dm-cm-two">
+                <div className="dm-cm-col">
+                  <span className="cm-label">Bots</span>
                   <CmSeg options={[1, 2, 3].map((n) => ({ value: n, label: String(n) }))}
                     value={createBots} onChange={setCreateBots} />
-                </CmRow>
-                <CmRow label="Bot style">
+                </div>
+                <div className="dm-cm-col dm-cm-botstyle">
+                  <span className="cm-label">Bot style</span>
                   <CmSeg options={BOTS.map((b) => ({ value: b.id, label: b.name }))}
                     value={createBotKind} onChange={setCreateBotKind} />
-                </CmRow>
-              </>
+                </div>
+              </div>
             ) : (
               <CmRow label="Players">
                 <CmSeg options={[2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
@@ -1173,10 +1186,39 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 {allExpsOn ? "☑" : "☐"} Select all
               </button>
             </CmRow>
+            {requireOptions.length > 0 && (
+              /* Not a plain CmRow: the label sits INLINE with the chips (see
+                 .dm-req-row) because the modal has no vertical budget for
+                 another stacked row. */
+              <div className="cm-row dm-req-row">
+                <span className="cm-label">Require</span>
+                {/* Guarantee the random 10 contains at least one card giving
+                    each checked bonus. Multi-select, none checked by default —
+                    an unchecked list deals exactly the board it always did. */}
+                <div className="dm-checks-req">
+                  {requireOptions.map((rq) => {
+                    const on = createReqs.includes(rq.id);
+                    return (
+                      <button key={rq.id} type="button"
+                        className={"dm-check" + (on ? " dm-check-on" : "")}
+                        onClick={() => setCreateReqs((s) => on
+                          ? s.filter((x) => x !== rq.id)
+                          : [...s, rq.id])}>
+                        {on ? "☑" : "☐"} {rq.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="cm-hint">
-              {createExps.length
-                ? "10 kingdom piles are dealt at random from the enabled expansions."
-                : "Pick at least one expansion to deal a Kingdom from."}
+              {!createExps.length
+                ? "Pick at least one expansion to deal a Kingdom from."
+                : createReqs.length
+                  ? `10 kingdom piles are dealt at random from the enabled expansions, always including a card that gives ${createReqs
+                      .map((r) => requireOptions.find((x) => x.id === r)?.label || r)
+                      .join(", ")}.`
+                  : "10 kingdom piles are dealt at random from the enabled expansions."}
             </div>
             <div className="cm-footer">
               <span className="cm-summary">

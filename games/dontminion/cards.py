@@ -28,6 +28,8 @@ Schema (frozen contract — see plan par.9):
   DATA_COMPLETE: bool — True only when all 59 cards are present and verified.
 """
 
+import re
+
 DATA_COMPLETE = True
 
 # Bandit ruling (VERIFIED): when an attacked player's two revealed cards are both
@@ -520,6 +522,48 @@ KINGDOM = {
     "prosperity": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "prosperity"],
     "hinterlands": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "hinterlands"],
 }
+
+
+# --- kingdom REQUIREMENTS (create-time "at least one card that gives ...") ----
+#
+# DERIVED FROM CARD TEXT, on purpose: a new expansion's villages and smithies
+# join these pools the day the set ships, the way KINGDOM above derives its
+# lists. `REQUIREMENT_ORDER` fixes the order the dealer honours them in so the
+# deal stays reproducible from (seed, options).
+#
+# The bar is the PRINTED bonus — "+2 Actions" and up, "+1 Buy" and up, "+2
+# Cards" and up. That deliberately EXCLUDES variable and draw-to-X cards:
+# Cellar ("discard any number, draw that many") and Library ("draw until you
+# have 7") are real draw, but a player who asks to be guaranteed a drawer wants
+# a Smithy, and counting a sifter would let the requirement be satisfied by a
+# card that doesn't satisfy it. Being narrow only ever adds a card the player
+# asked for; being broad breaks the guarantee. Multipliers (Throne Room) are
+# out of the Actions pool for the same reason — they play an Action twice, they
+# do not give you an extra Action.
+REQUIREMENTS = {
+    "actions": {"label": "+2 Actions", "word": "Action", "min": 2},
+    "buys": {"label": "+1 Buy", "word": "Buy", "min": 1},
+    "draw": {"label": "+2 Cards", "word": "Card", "min": 2},
+}
+REQUIREMENT_ORDER = ("actions", "buys", "draw")
+
+
+def _printed_bonus(text, word):
+    """The largest printed "+N <word>s" on a card (0 if it prints none)."""
+    return max([int(n) for n in re.findall(rf"\+(\d+) {word}s?\b", text)] or [0])
+
+
+def grants(name, requirement):
+    """Does `name` satisfy the named kingdom requirement?"""
+    spec = REQUIREMENTS[requirement]
+    return _printed_bonus(CARDS[name]["text"], spec["word"]) >= spec["min"]
+
+
+def cards_granting(requirement, pool=None):
+    """Sorted kingdom cards satisfying `requirement` (within `pool` if given)."""
+    names = sorted(pool) if pool is not None else sorted(
+        n for n, c in CARDS.items() if c["kingdom"])
+    return [n for n in names if grants(n, requirement)]
 
 
 def pile_size(name, n_players):

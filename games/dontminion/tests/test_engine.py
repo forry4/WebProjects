@@ -59,7 +59,61 @@ def test_setup_deal_and_supply():
         assert g["supply"]["Smithy"] == 10
 
 
+ALL_SETS = ["base", "intrigue", "seaside", "prosperity", "hinterlands"]
+
+
+def test_colony_only_ever_appears_with_a_prosperity_kingdom_card():
+    """The official randomizer rule: Platinum/Colony join the Supply with
+    probability equal to the Prosperity PROPORTION of the dealt 10 — so a
+    kingdom with none of the set can never be a Colony game. Both piles or
+    neither, always."""
+    seen_with, seen_without = 0, 0
+    for seed in range(400):
+        g = engine.new_game([A, B], ALL_SETS, seed=seed)
+        prosperity = sum(1 for c in g["kingdom"] if CARDS[c]["expansion"] == "prosperity")
+        assert ("Colony" in g["supply"]) is g["colony"]
+        assert ("Platinum" in g["supply"]) is g["colony"]     # never one alone
+        if prosperity == 0:
+            assert not g["colony"], f"seed {seed}: Colony with no Prosperity card"
+            seen_without += 1
+        elif g["colony"]:
+            seen_with += 1
+    assert seen_without and seen_with, "the sample never exercised both branches"
+    # and a game that can't deal a Prosperity card never deals the piles at all
+    for seed in range(60):
+        g = engine.new_game([A, B], ["base", "intrigue"], seed=seed)
+        assert not g["colony"] and "Colony" not in g["supply"] and "Platinum" not in g["supply"]
+
+
+def test_kingdom_requirements_are_honoured():
+    from games.dontminion.cards import grants, REQUIREMENT_ORDER
+    for exp in ALL_SETS:                    # every set can satisfy all three alone
+        for seed in range(12):
+            g = engine.new_game([A, B], [exp], seed=seed, requires=list(REQUIREMENT_ORDER))
+            assert len(g["kingdom"]) == len(set(g["kingdom"])) == 10
+            for req in REQUIREMENT_ORDER:
+                assert any(grants(c, req) for c in g["kingdom"]), (exp, seed, req)
+    # requesting one leaves the others to chance — the dealer forces the asked-for
+    # bonus and nothing else
+    forced = [engine.new_game([A, B], ALL_SETS, seed=s, requires=["buys"])["kingdom"]
+              for s in range(60)]
+    assert all(any(grants(c, "buys") for c in k) for k in forced)
+    assert not all(any(grants(c, "draw") for c in k) for k in forced)
+
+
+def test_no_requirements_deals_exactly_the_unconstrained_kingdom():
+    """The requirement dealer must not perturb the rng call sequence when
+    nothing is asked for, or every existing seed deals a different board."""
+    for seed in range(20):
+        plain = engine.new_game([A, B], ALL_SETS, seed=seed)["kingdom"]
+        for empty in (None, [], ()):
+            same = engine.new_game([A, B], ALL_SETS, seed=seed, requires=empty)
+            assert same["kingdom"] == plain, (seed, empty)
+
+
 def test_setup_validation():
+    with pytest.raises(ValueError):
+        engine.new_game([A, B], ["base"], requires=["cantrips"])   # unknown requirement
     with pytest.raises(ValueError):
         engine.new_game([A], ["base"], kingdom=K7)
     with pytest.raises(ValueError):

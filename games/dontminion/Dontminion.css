@@ -18,8 +18,31 @@
    pushes the Create button out of the modal */
 .dm-checks {
   display: flex; flex-direction: column; gap: 6px;
+  /* The cap is a BUDGET, not a look: .cm-panel is max-height 88vh — 633px on a
+     720px laptop — and the MODAL must never be the thing that scrolls (Create
+     slides below the fold). Adding a row means re-measuring the panel at 720px,
+     not guessing; the two side-by-side rows below are what buys this its 148px
+     back. */
   max-height: 148px; overflow-y: auto; padding: 2px 4px 2px 0; min-width: 0;
 }
+/* The Require picker is a FIXED three (one per bonus the dealer knows), so it
+   sits INLINE beside its label as a wrapping row of chips — three full-width
+   rows plus a label was 61px of a 56px overspend. It deliberately does NOT
+   carry `.dm-checks`: that class means "the expansion list" to the screens
+   gate, and sharing it made Select all count these buttons too. */
+/* Bots + Bot style share one line (see the JSX). Bots sizes to its three single
+   digits and Bot style takes the rest, so the two-word tier name never wraps.
+   BOTH selectors are `.cm-row.X`, not a bare `.X`: the shared kit's own
+   `.cm-row{flex-direction:column}` has EQUAL specificity, so a single class
+   loses on source order alone — these rows silently stayed stacked (measured:
+   119px instead of 56px) until the second class went on. */
+.cm-row.dm-cm-two { flex-direction: row; align-items: flex-start; gap: 12px; }
+.dm-cm-col { display: flex; flex-direction: column; gap: 7px; min-width: 0; flex: 0 0 auto; }
+.dm-cm-botstyle { flex: 1 1 0; }
+.cm-row.dm-req-row { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 10px; }
+.dm-req-row .cm-label { flex: none; }
+.dm-checks-req { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.dm-checks-req .dm-check { padding: 7px 10px; }
 .dm-check-all { margin-top: 2px; border-style: dashed; }
 .dm-check {
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);

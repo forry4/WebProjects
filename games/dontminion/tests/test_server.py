@@ -16,6 +16,7 @@ from games.dontminion import main as m
 # The real function objects, grabbed at import time — the autouse fixture stubs
 # the module attributes, and the persistence tests need the real ones back.
 _REAL_LOAD_TO_MEMORY = m.load_game_to_memory
+_REAL_SAVE_GAME = m.save_game
 
 
 class _FakeWS:
@@ -73,6 +74,51 @@ def test_create_coerces_bad_options():
     assert room["max_players"] == 4
     assert room["ai_difficulty"] == "normal"
     assert room["status"] == "open" and room["game"] is None
+
+
+class _InlineExec:
+    """Runs the DB write inline, so a test can capture the REAL save blob
+    instead of hand-rebuilding one (a rebuilt blob can't catch save_game
+    forgetting a key — which is the failure the four-way sync rule exists for)."""
+
+    def submit(self, fn, *a, **kw):
+        fn(*a, **kw)
+
+
+def test_kingdom_requirements_reach_the_deal_and_survive_the_blob(monkeypatch):
+    """The create option must be honoured AND stay in sync across create / save
+    blob / load / wire state — the four places every other option lives."""
+    from games.dontminion.cards import grants
+    assert _run(m._handle_create(_FakeWS(), "RQ", "host", {
+        "name": "Host", "vs_ai": True, "num_bots": 1, "expansions": ["base"],
+        # unordered, with a bogus entry: coerced to dealing order, junk dropped
+        "requires": ["draw", "nonsense", "actions"],
+    })) is True
+    room = m.ROOMS["RQ"]
+    assert room["requires"] == ["actions", "draw"]
+    for req in ("actions", "draw"):
+        assert any(grants(c, req) for c in room["game"]["kingdom"]), req
+    assert m.mk_room_state("RQ", viewer_pid="host")["requires"] == ["actions", "draw"]
+
+    blob = {}
+    monkeypatch.setattr(m, "_persist_row",
+                        lambda rid, st, seats, host, sj, now, made: blob.update(json.loads(sj)))
+    monkeypatch.setattr(m, "_DB_WRITE_EXEC", _InlineExec())
+    _REAL_SAVE_GAME("RQ")
+    assert blob["requires"] == ["actions", "draw"]     # save_game itself writes it
+
+    monkeypatch.setattr(m, "load_game_state", lambda rid: blob)
+    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    m.ROOMS.clear()
+    assert m.load_game_to_memory("RQ") is True
+    assert m.ROOMS["RQ"]["requires"] == ["actions", "draw"]
+
+    # a blob written before the option existed loads as "no requirement"
+    monkeypatch.setattr(m, "load_game_state",
+                        lambda rid: {k: v for k, v in blob.items() if k != "requires"})
+    m.ROOMS.clear()
+    assert m.load_game_to_memory("RQ") is True
+    assert m.ROOMS["RQ"]["requires"] == []
 
 
 def test_create_vs_ai_starts_immediately_with_bots():

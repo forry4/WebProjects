@@ -10,8 +10,9 @@ redacted broadcasts via ``engine.player_view``; the single-thread DB write
 executor; the stale-socket disconnect guard) with three differences:
 
 * 2-4 players (CoC-shaped table: player1..player4 columns) with create-time
-  options — max_players, enabled expansions, bot count, difficulty — validated
-  by coercers and kept in sync across create / save blob / load / wire state.
+  options — max_players, enabled expansions, kingdom requirements, bot count,
+  difficulty — validated by coercers and kept in sync across create / save blob
+  / load / wire state.
 * MULTIPLE bot seats (``room["ai_players"]`` is a list). The scheduler is a
   finisher loop only — both tiers (random-legal, Big Money) are cheap, so there
   is no executor and never heavy work under ROOM_LOCK. ``_bot_to_act`` recomputes the
@@ -84,6 +85,16 @@ def _valid_max_players(value) -> int:
         return max(2, min(4, int(value)))
     except (TypeError, ValueError):
         return 4
+
+
+def _valid_requires(value) -> list[str]:
+    """Kingdom requirements ("deal me a village / a +Buy / a drawer"). Ordered
+    by cards.REQUIREMENT_ORDER, not by what the client sent, so the same seed
+    and the same set always deal the same board. Empty = no constraint, which
+    is also where anything unrecognised lands."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [r for r in cards.REQUIREMENT_ORDER if r in value]
 
 
 def _valid_num_bots(value) -> int:
@@ -203,6 +214,7 @@ def save_game(room_id: str) -> None:
         "ai_players": room.get("ai_players", []),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "expansions": room.get("expansions", ["base", "intrigue"]),
+        "requires": room.get("requires", []),
         "max_players": room.get("max_players", 4),
     }
     now = int(time.time())
@@ -245,6 +257,7 @@ def load_game_to_memory(room_id: str) -> bool:
         "ai_players": list(state.get("ai_players", [])),
         "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
         "expansions": _valid_expansions(state.get("expansions")),
+        "requires": _valid_requires(state.get("requires")),
         "max_players": _valid_max_players(state.get("max_players")),
         "sockets": {},
     }
@@ -365,6 +378,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "ai_players": room.get("ai_players", []),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
         "expansions": room.get("expansions", ["base", "intrigue"]),
+        "requires": room.get("requires", []),
         "max_players": room.get("max_players", 4),
         "reconnect_tokens": (
             {viewer_pid: room.get("meta", {}).get(viewer_pid, {}).get("token")}
@@ -507,6 +521,7 @@ async def _handle_create(ws, room_id, pid, msg):
     vs_ai = bool(msg.get("vs_ai"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
     expansions = _valid_expansions(msg.get("expansions"))
+    requires = _valid_requires(msg.get("requires"))
     num_bots = _valid_num_bots(msg.get("num_bots"))
     max_players = _valid_max_players(msg.get("max_players"))
     async with ROOM_LOCK:
@@ -524,6 +539,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "ai_players": [],
             "ai_difficulty": difficulty,
             "expansions": expansions,
+            "requires": requires,
             "max_players": (1 + num_bots) if vs_ai else max_players,
         }
         ROOMS[room_id] = room
@@ -538,7 +554,8 @@ async def _handle_create(ws, room_id, pid, msg):
             _r.shuffle(seats)                          # random seat/turn order
             room["game"] = engine.new_game(seats, expansions,
                                            seed=_r.randrange(2**31),
-                                           names=dict(room["players"]))
+                                           names=dict(room["players"]),
+                                           requires=requires)
         save_game(room_id)
         bots_pending = vs_ai and _bot_to_act(room) is not None
     await _send(ws, {"type": "created", "room_id": room_id,
@@ -602,7 +619,8 @@ async def _handle_start(ws, room_id, pid):
         _r.shuffle(humans)                             # random seat/turn order
         room["game"] = engine.new_game(humans, room.get("expansions", ["base", "intrigue"]),
                                        seed=_r.randrange(2**31),
-                                       names=dict(room["players"]))
+                                       names=dict(room["players"]),
+                                       requires=room.get("requires", []))
         save_game(room_id)
     await broadcast_state(room_id)
 
@@ -695,6 +713,10 @@ async def catalog():
         "cards": cards.CARDS,
         "kingdom": cards.KINGDOM,
         "expansions": list(KNOWN_EXPANSIONS),
+        # kingdom requirements the create screen may ask for, in dealing order
+        # (the picker is built from THIS, so adding one needs no frontend edit)
+        "requirements": [{"id": r, "label": cards.REQUIREMENTS[r]["label"]}
+                         for r in cards.REQUIREMENT_ORDER],
         # treasures "Play all treasures" skips — the button must not offer
         # itself for a hand holding only these (it would do nothing)
         "manual_treasures": sorted(engine.manual_treasures()),

@@ -300,3 +300,49 @@ def test_pile_sizes():
         assert cards.pile_size("Silver", n_players) == 40
         assert cards.pile_size("Gold", n_players) == 30
         assert cards.pile_size("Smithy", n_players) == 10
+
+
+# --- kingdom requirements (create-time "guarantee me a village/+Buy/drawer") ---
+
+def test_requirement_pools_are_the_expected_cards():
+    """The pools are DERIVED from card text, so a regex slip would silently
+    change what "Require: +2 Actions" means. Pin the membership; a new set adds
+    names here on purpose."""
+    assert cards.REQUIREMENT_ORDER == ("actions", "buys", "draw")
+    assert set(cards.REQUIREMENTS) == set(cards.REQUIREMENT_ORDER)
+    assert cards.cards_granting("actions") == [
+        "Bazaar", "Border Village", "City", "Crossroads", "Diplomat", "Festival",
+        "Fishing Village", "Inn", "Mining Village", "Native Village", "Nobles",
+        "Shanty Town", "Village", "Worker's Village"]
+    assert cards.cards_granting("buys") == [
+        "Astrolabe", "Baron", "Bridge", "Cauldron", "City", "Collection",
+        "Council Room", "Courtier", "Festival", "Grand Market", "Margrave",
+        "Market", "Nomads", "Pawn", "Salvager", "Souk", "Spice Merchant",
+        "Tactician", "Tiara", "Wharf", "Worker's Village"]
+    assert cards.cards_granting("draw") == [
+        "Council Room", "Courtyard", "Diplomat", "Guard Dog", "Inn",
+        "Laboratory", "Margrave", "Masquerade", "Minion", "Moat", "Nobles",
+        "Patrol", "Rabble", "Sea Witch", "Secret Passage", "Shanty Town",
+        "Smithy", "Spice Merchant", "Stables", "Steward", "Tactician",
+        "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf", "Witch",
+        "Witch's Hut"]
+
+
+def test_requirement_bar_is_the_printed_bonus():
+    # the threshold really binds: a cantrip is not a village, a Moat is a drawer
+    assert cards.grants("Village", "actions") and not cards.grants("Market", "actions")
+    assert cards.grants("Market", "buys") and not cards.grants("Village", "buys")
+    assert cards.grants("Moat", "draw") and not cards.grants("Market", "draw")
+    # one card can answer two requirements (the dealer must not spend two slots)
+    assert cards.grants("Worker's Village", "actions") and cards.grants("Worker's Village", "buys")
+    # deliberate exclusions: variable / draw-to-X / multipliers are not counted
+    for name in ("Cellar", "Library", "Throne Room", "Harbinger"):
+        assert not any(cards.grants(name, r) for r in cards.REQUIREMENT_ORDER), name
+
+
+def test_every_expansion_alone_can_satisfy_every_requirement():
+    """A one-expansion game must never be able to ask for something the pool
+    can't give — that would be an unsatisfiable create the player can reach."""
+    for exp, pool in sorted(cards.KINGDOM.items()):
+        for req in cards.REQUIREMENT_ORDER:
+            assert cards.cards_granting(req, pool), f"{exp} has no {req} card"

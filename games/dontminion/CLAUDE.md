@@ -470,10 +470,41 @@ are pinned by `screens.mjs`:
   type label straight under it (7px of overlap on every supply pile). Any further change to the
   foot inset has to re-check the pill.
 
+**Kingdom REQUIREMENTS ("Require: +2 Actions / +1 Buy / +2 Cards")** — create-time options that
+guarantee the dealt 10 contains at least one card giving each checked bonus.
+- **The pools are DERIVED from card text** (`cards.REQUIREMENTS` + `grants`), like `KINGDOM` is
+  derived from the `expansion` flag — a new set's villages and smithies join the day it ships. The
+  bar is the **printed** bonus, which deliberately excludes variable/draw-to-X cards (Cellar,
+  Library) and multipliers (Throne Room): being narrow only ever adds a card the player asked for,
+  being broad would let the guarantee be satisfied by a card that doesn't satisfy it.
+- **`deal_kingdom` with nothing required is EXACTLY `rng.sample(pool, 10)`** — same rng call
+  sequence, so every existing seed still deals the same board (the determinism soak and every
+  forced-kingdom test rest on that). Requirements are honoured in `REQUIREMENT_ORDER`, never the
+  order the client sent them, so the deal stays reproducible from (seed, options); a card already
+  picked that covers a second requirement doesn't spend another slot.
+- Every expansion **alone** can satisfy all three (pinned by a test), so the option can't produce
+  an unsatisfiable create. `new_game` raises if a pool ever can't, rather than dealing a board that
+  quietly breaks the promise.
+- `requires` is a create-time option like the others: extend **all four** of create / save blob /
+  load / `mk_room_state` — `test_kingdom_requirements_reach_the_deal_and_survive_the_blob` captures
+  the REAL blob (inline write executor) rather than rebuilding one, so a `save_game` that forgot the
+  key fails instead of passing.
+
+**Platinum/Colony follow the official randomizer rule and need no option**: they join the Supply
+with probability equal to the Prosperity PROPORTION of the dealt 10, so a kingdom with none of the
+set is never a Colony game, and it is always both piles or neither
+(`test_colony_only_ever_appears_with_a_prosperity_kingdom_card`).
+
 **The create modal's expansion picker is a game-local `DmChecks`** (the shared kit has no
 multi-select; promote it if a second game needs one). It defaults to **Base Set alone**, and the
 LIST scrolls inside its own cap rather than the modal growing — the set count rises every phase,
-and the failure mode is Create sliding below the fold. Select all toggles both ways, so **empty
+and the failure mode is Create sliding below the fold. **That cap is a BUDGET: `.cm-panel` is
+`max-height:88vh` = 633px on a 720px laptop, so adding a row means MEASURING the panel there, not
+guessing.** The Require row cost 60px and Bot style another 56; the 148px cap survived only because
+Bots and Bot style were put side by side. Both side-by-side rows are selected as `.cm-row.dm-cm-two`
+/ `.cm-row.dm-req-row` — a bare `.dm-cm-two` has EQUAL specificity to the shared kit's
+`.cm-row{flex-direction:column}` and silently loses on source order, which left them stacked (119px
+instead of 56px) and looked like the flex rule simply not working. Select all toggles both ways, so **empty
 is reachable**: Create is disabled for it (the server rejects an empty expansion set and the
 error would be opaque). `screens.mjs` pins all three; verified non-vacuous by regressing the
 default and watching it fail.

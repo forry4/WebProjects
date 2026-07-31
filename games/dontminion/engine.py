@@ -24,7 +24,10 @@ import copy
 import itertools
 import random
 
-from .cards import CARDS, KINGDOM, pile_size
+from .cards import (
+    CARDS, KINGDOM, pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
+    grants as cards_grant,
+)
 
 BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
 _DRIVE_CAP = 500
@@ -2174,10 +2177,40 @@ def player_view(game, viewer):
 
 # --- setup -------------------------------------------------------------------
 
-def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
+def deal_kingdom(pool, requires, rng):
+    """The random 10, honouring create-time REQUIREMENTS (`cards.REQUIREMENTS`
+    keys — "give me a village / a +Buy / a drawer").
+
+    With nothing required this is EXACTLY `rng.sample(pool, 10)`: the rng call
+    sequence is unchanged, so every seed that already exists still deals the
+    same kingdom (the determinism soak and every forced-kingdom test depend on
+    that). Requirements are honoured in `REQUIREMENT_ORDER`, never set order,
+    so the deal stays reproducible from (seed, options) alone."""
+    reqs = [r for r in REQUIREMENT_ORDER if r in set(requires or ())]
+    if not reqs:
+        return rng.sample(pool, 10)
+    picked = []
+    for req in reqs:
+        # a card already picked may cover this one too — Worker's Village is a
+        # village AND a +Buy — so don't spend a second slot on it
+        if any(cards_grant(c, req) for c in picked):
+            continue
+        candidates = [c for c in pool if c not in picked and cards_grant(c, req)]
+        if not candidates:
+            raise ValueError(
+                f"no card in the chosen expansions gives {REQUIREMENTS[req]['label']}")
+        picked.append(rng.choice(candidates))
+    rest = [c for c in pool if c not in picked]
+    return picked + rng.sample(rest, 10 - len(picked))
+
+
+def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
+             requires=None):
     """players in seat/turn order (the caller shuffles seats); expansions a
     non-empty subset of KINGDOM's keys; kingdom overrides the random 10 (tests,
-    forced-kingdom soaks)."""
+    forced-kingdom soaks) and, being an explicit board, ignores `requires`;
+    requires a subset of cards.REQUIREMENTS naming bonuses the dealt kingdom
+    must contain at least one of."""
     players = list(player_ids)
     if not 2 <= len(players) <= 4:
         raise ValueError("dontminion needs 2-4 players")
@@ -2191,10 +2224,13 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None):
         if bad:
             raise ValueError(f"unknown kingdom cards: {bad}")
     else:
+        bad_req = sorted(set(requires or ()) - set(REQUIREMENTS))
+        if bad_req:
+            raise ValueError(f"unknown kingdom requirements: {bad_req}")
         pool = sorted({c for e in exps for c in KINGDOM[e]})
         if len(pool) < 10:
             raise ValueError("not enough kingdom cards in the enabled expansions")
-        kingdom = sorted(rng.sample(pool, 10))
+        kingdom = sorted(deal_kingdom(pool, requires, rng))
     n = len(players)
     supply = {c: pile_size(c, n) for c in BASIC_CARDS}
     for c in kingdom:
