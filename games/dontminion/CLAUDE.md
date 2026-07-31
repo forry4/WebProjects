@@ -492,25 +492,81 @@ ROOM_LOCK. An unknown tier coerces to the default, so the ladder grows without a
 entropy runs through `_new_rng()` (the test seam). vs-AI rooms start at create (never "open");
 friend rooms are host-started with shuffled seat order.
 
-## The bots (`bot.py`)
+## The bots (`bot.py` + `bot_traits`/`bot_decisions`/`bot_endgame`/`bot_plan`/`bot_champion`)
 
-Two strategies, selected by `ai_difficulty`. **easy/normal/hard are all still the same
-random-legal bot** — the frontend's picker therefore offers exactly two entries ("Random" =
-`easy`, "Big Money" = `bigmoney`, the default) rather than pretending to three tiers.
+**Shipped ladder** (`main.AI_DIFFICULTIES`, persisted per room; an unknown value coerces to
+`DEFAULT_DIFFICULTY`, which is how the ladder grows without a migration):
+`easy`/`normal`/`hard` (all still the one random-legal bot) · `bigmoney` · **`bmplus` (default)**.
+
+Full campaign, every number, and the negative results: `docs/ai-research-log.md`, session
+2026-07-31. Distilled strategy corpus: `.claude-plans/dontminion-bot-ladder.md`.
 
 **Big Money** is the classic buy ladder: Treasure and Victory only, greening on a Province-count
-clock. It is a real opponent — 238/238 against random-legal across both seats and all five
-expansions (median 30 turns). Three things about it are load-bearing:
+clock. Three things about it are load-bearing:
 - **`choose` is stateless** — the scheduler re-enters it per move, so the ladder re-reads the
   CURRENT coins every call. That is sound *because* there is exactly one buy a turn: the bot buys
   no Action, so nothing in its deck ever grants a second buy and no rung needs to plan a
   follow-up. Don't add a rung that wants two buys without giving the bot turn-scoped memory.
 - **All treasures go down before the ladder is read** — a buy decided mid-treasure reads the
   wrong rung.
-- **Deliberate gaps, both faithful to the ladder as specified**: Colony/Platinum are not in it
-  (in a Prosperity colony game it still buys Province at $10-12), and it plays no Actions at all —
-  it never buys one, so it only holds one an opponent handed it (Masquerade/Jester/Swindler), and
-  a random play of an unknown Action is as likely to hurt as help.
+- **Deliberate gaps, both faithful to the ladder as specified**: Colony/Platinum are not in it,
+  and it plays no Actions at all. `bmplus` closes both.
+
+**`bmplus`** = Big Money + three named skills, and it beats `bigmoney` **0.77** (base) / **0.73**
+(all sets): the kingdom's best terminal off `bot_traits.BM_TERMINALS` (with the <=2-copy budget
+and "second copy at ~16 cards"), the Colony/Platinum rungs, and `bot_endgame` on every buy. It
+also drops Big Money's "really early: Gold at $8" quirk once the game is ending — plain
+`bigmoney` keeps it, being faithful to the published ladder.
+
+**`bot_decisions.decide` replaces `engine.sample_decision` for every tier above `random`**, and is
+the cheapest strength in the ladder (**0.62** on the full card pool). Two value scales, kept
+separate on purpose — `hand_value` (worth for the coming turn; green is 0) and `deck_value`
+(worth of owning it; green flips once the game is ending). Conflating them is the classic bug: a
+Province is the best card you can own and the most useless one in hand. **Every branch falls
+through to `sample_decision` and answers are re-validated (`_clamp`)**, because this sits behind
+the scheduler's guaranteed turn-finisher — a policy bug must degrade to legal-but-silly, never to
+rejected.
+
+**`bot_traits` is half derived, half REVIEWED.** Derived (villages/drawers/cantrips) classify
+themselves from card text the day a set ships, like `cards.grants`. The rest cannot be derived —
+"trash up to 4" and "trash the top card of their deck" read identically to a regex — so they are
+hand-tagged, and **`test_every_kingdom_card_is_reviewed` fails on any kingdom card missing from
+`REVIEWED`. Every expansion phase owes its cards to those tables.** Two traits exist because
+their absence produced measured disasters: `PILE_GAINERS` (Bureaucrat "gains a Silver" is not a
+pile-drainer, and counting it fired a Gardens rush on boards with no rush) and `DRAW_TO_X`
+(Library prints no "+N Cards", so a text-derived classifier cannot see the board's best drawer).
+
+**`tools/bot_arena.py` is the gate.** CRN-paired: each pair plays one seed twice with the tiers
+swapped between seats, and **the rng is keyed on the SEAT, never the tier**, so a tier against
+itself produces two byte-identical games and `--mirror` reads exactly 0.5000. Anything else means
+the harness leaked state and every number it printed is suspect. Ship criterion for a new rung:
+>= 0.60 against the rung below, plus the pace anchors (pure BM reaches 4 Provinces ~turn 17,
+BM+Smithy ~14 — ours read 16.3 and 15.3, which is how we know the ladder is faithful).
+
+### NOT shipped — built, measured, and beaten by `bmplus` (do not relitigate as-is)
+
+`strategist` and `champion` exist in `bot.py` behind difficulty strings **the server refuses**
+(`_valid_difficulty` coerces them), pinned by a test. They are the research harness, not
+opponents.
+
+- **`strategist` (archetype board-read) = 0.35 vs bmplus.** Engine 0.231, minion 0.237,
+  cursing-money 0.381, rush 0.000; even its plain money plan reads 0.4667 over 120 games. This is
+  the corpus's own "a simple engine loses to Big Money", reproduced from the inside.
+- **`champion` (kingdom plan tournament + determinized rollout buys) = a wash, at ~160x the
+  cost.** An oracle picking the best hand-written plan per board only reaches ~0.596 (optimistic)
+  and picks plain money on 45 of 60 boards, so archetype selection is a small lever by
+  construction.
+- **The Rust simulation core was NOT built, on purpose.** Its justification is making rollout
+  search deep enough to pay; that premise is testable in Python first, and the rollout-count
+  ladder is the gate. Porting 139 cards (plus a recurring tax for ~13 more planned sets) for a
+  lever with no measured gain is the trade this campaign explicitly declined.
+
+Two harness bugs worth remembering, both of which look like "the search is weak": a "buy nothing"
+candidate that never ends the phase is really "let a fresh policy decide" and beats every real
+buy; and UNPAIRED rollouts put more noise on the estimate than the gap between the options
+(same buy, three batches of 12: 0.417 / 0.167 / 0.250). Rollouts are CRN-paired now. Also:
+**read tunable constants at CALL time** — `rollouts=ROLLOUTS` as a default argument binds once at
+def time, so a sweep patching the module constant silently measured one depth three times.
 
 `engine.owned_cards(game, pid)` (the scoring census, made public for this) is what the $8
 "really early" exception counts Golds and Silvers with — every zone, so a Silver in play or on a

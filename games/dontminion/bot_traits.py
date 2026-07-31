@@ -75,7 +75,7 @@ ATTACKS = {
 # Cards that answer an Attack from hand (the reaction window / immunity).
 DEFENSE = {"Moat", "Lighthouse", "Guard Dog", "Diplomat"}
 
-# Gains a card from the supply (not a buy) — the rush/pile-drain enablers.
+# Gains a card from the supply without buying it.
 GAINERS = {
     "Workshop", "Ironworks", "Artisan", "Smugglers", "Weaver", "Wheelwright",
     "Haggler", "Border Village", "Mint", "War Chest", "Anvil", "Tiara",
@@ -83,6 +83,17 @@ GAINERS = {
     "Expand", "Forge", "Farmland", "Bureaucrat", "Bandit", "Blockade",
     "Pirate", "Jack of All Trades", "Treasure Map", "Lurker", "Mine",
 }
+
+# The subset that can gain ANY pile of its own choosing, repeatably, without
+# spending a card to do it — i.e. the cards that can actually drain a pile.
+# This is the distinction a rush plan lives or dies on: Bureaucrat and Bandit
+# are in GAINERS (they gain a Silver, a Gold) but can no more empty the Gardens
+# pile than a Copper can, and a rush selector that counts them fires on boards
+# with no rush (measured: it bought 8 Gardens into a 25-card deck and lost at
+# 0.165). The remodel family is excluded for the same reason — each gain costs
+# a card from your hand, so the deck never grows.
+PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
+                "Haggler", "War Chest", "Anvil", "Tiara", "Smugglers"}
 
 # Looks at / discards / reorders cards to improve what you draw. The
 # reshuffle-control rules (R4: "don't overcartograph") key on these.
@@ -103,6 +114,13 @@ ALT_VP = {
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
 VP_TOKENS = {"Monument", "Bishop", "Collection", "Investment"}
+
+# Draws a variable number of cards, so it prints no "+N Cards" and the derived
+# `draw` flag misses it entirely. Library is a top-tier drawer that a
+# text-derived classifier cannot see — it was absent from the engine plan's
+# draw pool for exactly this reason.
+DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
+             "Cellar", "Crossroads", "Shanty Town", "Minion", "Tactician"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
@@ -174,6 +192,7 @@ def traits(name):
         "village": plus_actions >= 2,
         # The engine's / BM's draw. "+2 Cards or better" is the article's bar.
         "draw": plus_cards >= 2,
+        "draw_to_x": name in DRAW_TO_X,
         "terminal_draw": is_action and plus_actions == 0 and plus_cards >= 2,
         "plus_buy": plus_buys >= 1,
         # Coins this card puts in the pool: a Treasure's face value, or an
@@ -184,6 +203,7 @@ def traits(name):
         "curser": ATTACKS.get(name) == "curse",
         "defense": name in DEFENSE,
         "gainer": name in GAINERS,
+        "pile_gainer": name in PILE_GAINERS,
         "sifter": name in SIFTERS,
         "alt_vp": ALT_VP.get(name),
         "vp_tokens": name in VP_TOKENS,

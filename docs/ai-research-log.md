@@ -113,6 +113,31 @@ Tooling all on branch **`cob-mining`** (worktree `forrestm_projects-cobmining`):
 
 
 
+# ARCHIVE: Dontminion bot ladder — decision policies + endgame SHIPPED; archetypes and rollout search MEASURED NEGATIVE
+<!-- ===================================================================== -->
+
+### Session (2026-07-31) — built the ladder from the dominionstrategy corpus: two rungs SHIPPED with real gains, and the two "clever" tiers both LOST to Big Money+
+
+**Source material.** Every Basic/Intermediate/Advanced link on wiki.dominionstrategy.com/index.php/Strategy — 3 wiki pages, 7 blog articles, 12 forum threads (Deck Archetypes, Making It To Level 45, Every Day I'm Shuffling, First Player Advantage, Taking Risks From the P2 Seat, Post-Game Analysis, the four Level-X-vs-Y threads). Both sites sit behind an **Anubis proof-of-work challenge**: GET the page, parse the `anubis_challenge` JSON, find a nonce where `sha256(randomData + nonce)` has `difficulty` leading zero nibbles, then GET `/.within.website/x/cmd/anubis/api/pass-challenge?id&response&nonce&redir&elapsedTime` keeping cookies and the same UA. Distilled rules live in `.claude-plans/dontminion-bot-ladder.md` (self-contained appendix) so the articles never need re-scraping.
+
+**SHIPPED (both gates passed).**
+1. **`bot_decisions.py`** — policy answers for every frame kind, replacing `engine.sample_decision` for every tier above `random`. Both shipped bots answered EVERY prompt uniformly at random, so Big Money discarded its Gold to a Militia half the time. Worth **0.6219 on the full card pool** (significant), 0.5156 on Base alone where few cards push a decision worth getting right.
+2. **`bmplus`** — Big Money + the kingdom's best terminal off the published Terminal-Draw-BM ranking + the Colony rungs + `bot_endgame` (PPR with all four exceptions, take-the-win, pile control). **0.7708 vs `bigmoney` base-only, 0.7333 all sets**; pace to the 4th Province 16.3 → 15.3 turns. Now the DEFAULT tier.
+
+**MEASURED NEGATIVE — do not relitigate without a materially different approach.**
+3. **`strategist` (archetype board-read) LOST at 0.35 vs bmplus.** Per archetype: engine **0.231**, minion 0.237, cursing-money 0.381, rush **0.000**, and even forcing its plain money plan reads **0.4667 over 120 games** — i.e. the sequencing/menu machinery is neutral-to-negative on its own. This reproduces the corpus's own headline result ("a simple engine buying only Villages and Smithies loses to Big Money") from the other side: hand-writing archetype plans does not beat a well-tuned money ladder. Two real bugs were found and fixed along the way and the tier still lost, so the losses are not implementation slop: the rush selector counted Bureaucrat/Bandit as "gainers" (they gain one Silver/Gold and can no more empty a pile than a Copper can — now `PILE_GAINERS`), and the engine menu contained no money at all, buying five $6 Border Villages instead of Golds.
+4. **`champion` (per-kingdom plan tournament + determinized rollout buy search) is a WASH with bmplus at ~160x the cost.** Its first version LOST at 0.167, from two harness bugs that both look like "the search is weak":
+   * **"buy nothing" was never committed to.** `_score_buy(None)` skipped the buy but left the rollout in the buy phase, so the policy bought something anyway — "pass" was really "let a fresh policy decide", and it scored 0.75 against every real buy's 0.2. It must `end_phase`.
+   * **the rollouts were unpaired.** Three identical batches of 12 scored the same buy at 0.417 / 0.167 / 0.250 — the estimator's noise was wider than the gap between the options it was ranking, so the search overruled a well-tuned ladder with noise. Fixed with CRN: rollout *i* uses the same seed for every candidate.
+   Also: the tournament adopting any plan scoring >0.5 adopts a LOSING plan more often than it finds a winning one (see #3), so the bar is a margin (0.65) over the proven benchmark.
+
+**The oracle bound on per-board plan selection.** An oracle picking the best hand-written candidate per board beats bmplus by only **~0.596**, and that is optimistic (it selects on the same trials it scores on). It picks plain "money" on **45 of 60 boards**. Archetype selection is a small lever because money is simply the right answer on most boards *given these plans*.
+
+**CONSEQUENCE FOR THE RUST PORT — the phase order was inverted on purpose.** The plan had the Rust simulation core (a full 139-card port, plus a recurring per-expansion tax for ~13 more planned sets) landing BEFORE the champion. It was pulled forward instead, because the port's whole justification is making rollout search deep enough to pay, and that premise is testable in Python first. **Do not port 139 cards to Rust for a lever that shows no gain at the depths we can already reach.** The scaling ladder is the gate: if win rate is flat in rollout count, more simulations per second buys nothing and the bottleneck is the rollout POLICY or the search shape, not throughput.
+
+**METHOD NOTE (cost one wrong conclusion).** `best_buy(..., rollouts=ROLLOUTS)` binds the module constant as a DEFAULT ARGUMENT, evaluated once at def time — so a sweep that patched `C.ROLLOUTS` measured the same depth three times and printed 0.375 at 6, 24 and 96 rollouts. Identical to three decimals across a 16x range is the tell. Read tunable constants at CALL time.
+
+**Harness kept, tiers not shipped.** `strategist` and `champion` stay in `bot.py` behind difficulty strings the server refuses (`_valid_difficulty` coerces anything unknown to the default), pinned by `test_the_unshipped_tiers_are_not_offered_and_coerce_to_the_default`. `bot_plan.candidates()` is the reusable candidate generator; `bot_arena` is CRN-paired with a mirror that must read exactly 0.5000 (the rng is keyed on the SEAT, never the tier, so a tier against itself plays two byte-identical games).
 
 <!-- ===================================================================== -->
 # ARCHIVE: Spender Duel AI — heuristic MCTS → netval → card-set ATTENTION value net (SHIPPED)

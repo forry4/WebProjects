@@ -8,10 +8,28 @@
 * ``bmplus``   — Big Money that READS THE BOARD: it picks the kingdom's best
   terminal (the published Terminal-Draw-BM ranking), plays its Actions, buys
   Colonies/Platinum in a colony game, and hands every buy to `bot_endgame` for
-  the Penultimate Province Rule and pile control.
+  the Penultimate Province Rule and pile control. **The strongest tier we
+  have**, and the default.
 
 Each rung is the one below it plus a NAMED skill, so the ladder reads like
 playing better humans rather than different species.
+
+Two further tiers exist in code and are deliberately NOT in
+`main.AI_DIFFICULTIES`, because they were built, measured, and did not beat
+`bmplus`. They are kept as the research harness (see the numbers in
+docs/ai-research-log.md), not as opponents:
+
+* ``strategist``  — archetype board-read + action sequencing + reshuffle rules.
+  Measured 0.35 vs bmplus overall; per archetype engine 0.231, minion 0.237,
+  cursing-money 0.381, rush 0.000, and even its money plan reads 0.4667 over
+  120 games. This is the corpus's own headline result — "a simple engine loses
+  to Big Money" — reproduced.
+* ``champion``    — per-kingdom plan tournament + determinized rollout buy
+  search. Roughly a wash with bmplus at ~160x the cost.
+
+Reaching either needs an explicit difficulty string, which the server will not
+accept from a client (`_valid_difficulty` coerces anything unknown), so they
+are usable from the arena and tests only.
 
 `choose` is the server scheduler's guaranteed turn-finisher: for EVERY strategy
 it must return a valid move for ANY state where (pending_pid or turn) == pid,
@@ -20,13 +38,15 @@ and it must never consume the game's own rng_state (pass an explicit rng).
 
 import random
 
-from . import bot_decisions, bot_endgame, engine
+from . import bot_champion, bot_decisions, bot_endgame, bot_plan, engine
 from .bot_traits import best_bm_terminal, traits
 
 # ai_difficulty values that route to a real strategy. Everything else
 # (easy/normal/hard) is still the random-legal bot.
 BIG_MONEY = "bigmoney"
 BM_PLUS = "bmplus"
+STRATEGIST = "strategist"
+CHAMPION = "champion"
 
 
 def choose(game, pid, rng=None, difficulty=None):
@@ -35,6 +55,16 @@ def choose(game, pid, rng=None, difficulty=None):
         return choose_big_money(game, pid, rng)
     if difficulty == BM_PLUS:
         return choose_bm_plus(game, pid, rng)
+    if difficulty == STRATEGIST:
+        return choose_strategist(game, pid, rng)
+    if difficulty == CHAMPION:
+        return choose_champion(game, pid, rng)
+    # "strategist:<archetype>" forces one plan — the arena measures archetypes
+    # one at a time this way, and the champion applies its tournament result
+    # through the same seam.
+    if isinstance(difficulty, str) and difficulty.startswith(STRATEGIST + ":"):
+        return choose_strategist(game, pid, rng,
+                                 force=difficulty.split(":", 1)[1])
     return choose_random(game, pid, rng)
 
 
@@ -259,6 +289,202 @@ def choose_bm_plus(game, pid, rng=None):
         return r.choice(treasures)
 
     want = bot_endgame.override(game, pid, _bm_plus_buy(game, pid))
+    if want is not None and {"type": "buy", "card": want} in moves:
+        return {"type": "buy", "card": want}
+    return {"type": "end_phase"}
+
+
+# ── the Strategist ───────────────────────────────────────────────────────────
+# Tier 3. Three skills over Big Money+:
+#   * a board READ (bot_plan) — an archetype and a buy menu, not one terminal;
+#   * real action SEQUENCING, including the reshuffle rules;
+#   * deck knowledge. That one needs no module: a server-side bot legitimately
+#     holds the real game dict, so `seat["deck"]` IS the draw pile and its
+#     length is the exact distance to the next reshuffle. The "tracking" a
+#     human works years to approximate is free here, which is precisely what
+#     the level-45 thread predicts about a bot.
+
+def _plan(game, force=None):
+    return bot_plan.plan_for(tuple(game["kingdom"]), bool(game.get("colony")),
+                             len(game["players"]), force)
+
+
+# How much money we will leave on the table to take a plan card instead of the
+# money ladder's rung. Spending $6 on a $3 Village is how an engine bot ends up
+# with no economy — "every non-money buy costs a Silver", and overpaying costs
+# more than that.
+_MENU_SLACK = 1
+
+
+def _menu_buy(game, pid, force=None):
+    """The first menu entry we can afford whose cap is not yet reached.
+
+    Entries priced far below our coins are SKIPPED rather than bought: the
+    money ladder gets those turns instead. Without this the engine plan spends
+    every $6 and $7 hand on cheap pieces and never builds an economy — the
+    "Village Idiot" / durdle failure the corpus names.
+    """
+    plan = _plan(game, force)
+    owned = engine.owned_cards(game, pid)
+    coins = game["coins"]
+    for e in plan.menu:
+        card = e["card"]
+        if owned.count(card) >= e["count"]:
+            continue
+        if any(owned.count(pre) < n for pre, n in e["after"].items()):
+            continue
+        if game["supply"].get(card, 0) <= 0:
+            continue
+        cost = engine.cost(game, card)
+        if cost > coins or cost < coins - _MENU_SLACK:
+            continue
+        if engine.buy_gate(game, pid, card) is not None:
+            continue
+        return card
+    return None
+
+
+def _strategist_buy(game, pid, force=None):
+    plan = _plan(game, force)
+    owned = engine.owned_cards(game, pid)
+    coins = game["coins"]
+
+    # Points first once the plan's clock says the deck is ready. An engine
+    # greens late (it wants to draw itself first); money greens on the ladder.
+    ready = len(owned) >= plan.green_at.get("deck", 0)
+    if ready and bot_endgame.should_green(game, pid):
+        colony = _colony_rungs(game, pid)
+        if colony is not None:
+            return colony
+        if coins >= 8 and game["supply"].get("Province", 0) > 0:
+            return "Province"
+
+    # A rush plan buys its own green early and often — that IS the plan.
+    if plan.archetype.startswith("rush:"):
+        target = plan.archetype.split(":", 1)[1]
+        if game["supply"].get(target, 0) > 0 \
+                and engine.cost(game, target) <= coins \
+                and engine.buy_gate(game, pid, target) is None:
+            # keep building while the deck is still tiny, then flood
+            if len(owned) >= plan.green_at.get("deck", 0):
+                return target
+
+    want = _menu_buy(game, pid, force)
+    if want is not None:
+        return want
+    return _want(game, pid)                 # the money ladder underneath
+
+
+def _action_sort_key(game, pid, card):
+    """Play order. Non-terminals before terminals (they cost nothing and may
+    find more to do), draw before payload (drawing can find payload, payload
+    can never find draw), and cursers early so the split is contested."""
+    t = traits(card)
+    return (
+        t["terminal"],                      # False sorts first
+        not t["curser"],                    # cursers ahead of other terminals
+        -t["plus_actions"],
+        -t["plus_cards"],
+        -t["plus_coins"],
+    )
+
+
+def _would_reshuffle(game, pid, card):
+    """Would playing `card` draw past the end of the draw pile?
+
+    Rule R3 from the reshuffle-control article: before playing a drawer, check
+    `cards_needed > cards_left`. Free for us — `seat["deck"]` is the real draw
+    pile.
+    """
+    need = traits(card)["plus_cards"]
+    return need > 0 and need > len(game["seats"][pid]["deck"])
+
+
+def _skip_for_reshuffle(game, pid, card):
+    """Should we DECLINE to play this drawer to avoid a bad reshuffle?
+
+    Only in the narrow case the article actually endorses: we are already at a
+    buy threshold, the draw would trigger a reshuffle, and there is nothing the
+    extra cards could buy that we cannot buy now. Greening decks also want to
+    delay the shuffle so their green misses a pass.
+    """
+    if not _would_reshuffle(game, pid, card):
+        return False
+    if game["actions"] <= 1 and any(traits(c)["action"] and traits(c)["terminal"]
+                                    for c in game["seats"][pid]["hand"]
+                                    if c != card):
+        return False                        # nothing else to do with the turn
+    # already able to buy the best thing on our menu? then the draw is upside
+    # only, and the reshuffle cost is real
+    return bot_endgame.should_green(game, pid) and game["coins"] >= 8
+
+
+def choose_strategist(game, pid, rng=None, force=None):
+    """`force` names an archetype to play instead of the selector's pick — the
+    seam the champion's tournament result comes back through."""
+    r = rng or random.Random()
+    if game["pending_pid"] == pid:
+        return _decision(game, pid, r, policy=True)
+
+    moves = engine.legal_moves(game, pid)
+    if game["phase"] == "action":
+        plays = [m for m in moves if m["type"] == "play_action"]
+        if plays:
+            plays.sort(key=lambda m: _action_sort_key(game, pid, m["card"]))
+            for m in plays:
+                if not _skip_for_reshuffle(game, pid, m["card"]):
+                    return m
+        return {"type": "end_phase"}
+
+    for m in moves:
+        if m["type"] == "play_all_treasures":
+            return m
+    treasures = [m for m in moves if m["type"] == "play_treasure"]
+    if treasures:
+        return r.choice(treasures)
+
+    want = bot_endgame.override(game, pid, _strategist_buy(game, pid, force))
+    if want is not None and {"type": "buy", "card": want} in moves:
+        return {"type": "buy", "card": want}
+    return {"type": "end_phase"}
+
+
+# ── the Champion ─────────────────────────────────────────────────────────────
+# Tier 4: the strategist's play, a plan chosen by TOURNAMENT rather than by
+# rule, and buys decided by rollout search. See bot_champion for why the
+# tournament is the smaller of the two levers.
+
+def choose_champion(game, pid, rng=None):
+    r = rng or random.Random()
+    if game["pending_pid"] == pid:
+        return _decision(game, pid, r, policy=True)
+
+    force = bot_champion.pick_plan(tuple(game["kingdom"]),
+                                   bool(game.get("colony")),
+                                   len(game["players"]))
+    tier = f"{STRATEGIST}:{force}" if force else bot_champion.BENCHMARK
+
+    moves = engine.legal_moves(game, pid)
+    if game["phase"] != "buy":
+        return choose_strategist(game, pid, r, force=force)
+    for m in moves:
+        if m["type"] == "play_all_treasures":
+            return m
+    treasures = [m for m in moves if m["type"] == "play_treasure"]
+    if treasures:
+        return r.choice(treasures)
+
+    planned = _strategist_buy(game, pid, force)
+    # The endgame module is not a suggestion the search may overrule: its
+    # rules are exact (this buy wins now / this buy hands over the win), and a
+    # noisy rollout estimate has no business second-guessing arithmetic.
+    forced = bot_endgame.override(game, pid, planned)
+    if forced != planned or game["coins"] < bot_champion.SEARCH_FROM_COINS:
+        want = forced
+    else:
+        options = bot_champion.buy_candidates(game, pid, planned)
+        want, _score = bot_champion.best_buy(game, pid, options, tier, r) \
+            if len(options) > 1 else (planned, 0.0)
     if want is not None and {"type": "buy", "card": want} in moves:
         return {"type": "buy", "card": want}
     return {"type": "end_phase"}
