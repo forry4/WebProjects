@@ -137,16 +137,17 @@ def test_the_forced_kingdom_chunks_really_cover_every_card():
         sorted(set(_all_kingdom_cards()) - covered)
 
 
-@pytest.mark.parametrize("chunk", list(range(13)))
+# SELF-SIZING, deliberately. This was a hardcoded range(13) with a
+# pytest.skip() for the overshoot, which only guarded the roster SHRINKING —
+# the next expansion would have pushed _chunks() past 13 and those kingdoms
+# would simply never have been soaked, silently and with a green suite.
+@pytest.mark.parametrize("chunk", range(len(_chunks())))
 def test_soak_forced_kingdoms_cover_all_cards(chunk):
     """Fixed kingdoms that together cover EVERY kingdom card (130 across five
     expansions) — every card effect runs inside full random games under the
     conservation census."""
     from games.dontminion.cards import KINGDOM
-    chunks = _chunks()
-    if chunk >= len(chunks):
-        pytest.skip("fewer chunks than parameters")
-    kingdom = chunks[chunk]
+    kingdom = _chunks()[chunk]
     game = engine.new_game([A, B, C], sorted(KINGDOM),
                            seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)

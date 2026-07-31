@@ -145,7 +145,11 @@ def test_token_cap_forces_a_buy_at_ten():
         a = H.choose_action(s, seat)
         assert E.A_BUY_BOARD <= a < E.A_DISCARD, f"seed {seed}: expected a buy, got {a}"
         return
-    pytest.skip("no seed produced an affordable buy at 10 tokens")
+    # NOT a skip. If no board in 20 seeds offers an affordable buy at 10 tokens,
+    # the setup (or legal_actions) has drifted and this test asserts nothing —
+    # which has to fail loudly rather than opt out into a green tick.
+    raise AssertionError("no seed produced an affordable buy at 10 tokens — "
+                         "the fixture no longer reaches the rule under test")
 
 
 # ─── heuristic contract ─────────────────────────────────────────────────────────

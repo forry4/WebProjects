@@ -1195,6 +1195,18 @@ def persisting_in_play(game, pid):
     return kept
 
 
+def _in_play_leaving(game, pid):
+    """The in_play copies this clean-up will actually discard — in_play minus
+    the setups being promoted. A MULTISET subtraction, because zones hold
+    NAMES: a seat can hold a finishing Tide Pools and a freshly played one at
+    the same time, and only the count tells the two copies apart."""
+    out = list(game["seats"][pid]["in_play"])
+    for name in persisting_in_play(game, pid):
+        if name in out:
+            out.remove(name)
+    return out
+
+
 def leaving_play(game, pid):
     """Everything that WILL be discarded from pid's table at this clean-up.
 
@@ -1203,13 +1215,8 @@ def leaving_play(game, pid):
     it is every bit as much "discarded from play" as a card in in_play. Scheme
     may target it, and looking only at in_play silently hid finishing Durations
     (and their Throne-Room riders) from the offer."""
-    seat = game["seats"][pid]
-    keep = persisting_in_play(game, pid)
-    out = list(seat["in_play"])
-    for name in keep:
-        if name in out:
-            out.remove(name)
-    for e in seat["duration"]:
+    out = _in_play_leaving(game, pid)
+    for e in game["seats"][pid]["duration"]:
         if e.get("done"):
             out.append(e["card"])
             out.extend(e.get("riders", []))
@@ -1221,7 +1228,12 @@ def topdeck_from_play(game, pid, card):
     in_play, or a finished duration entry (its own card or one of its riders).
     Returns False if it isn't actually there (lose-track)."""
     seat = game["seats"][pid]
-    if card in seat["in_play"]:
+    # NOT `card in seat["in_play"]`: a Duration played THIS turn also sits in
+    # in_play and is not leaving, so with two copies of one Duration on the
+    # table — one finishing, one just played — a name match takes the wrong
+    # one. The persisting copy then vanishes from under _cleanup_durations,
+    # whose kept-out removal is unguarded, and _end_turn raised ValueError.
+    if card in _in_play_leaving(game, pid):
         topdeck(game, pid, card, zone="in_play", public=True)
         return True
     for e in seat["duration"]:
@@ -2036,7 +2048,10 @@ def sample_decision(game, pid, rng):
 
 # --- scoring -----------------------------------------------------------------
 
-def _all_cards(game, pid):
+def owned_cards(game, pid):
+    """Every card pid owns, across every zone — the scoring census, and also
+    what a deck-composition bot reads (bot.py's Big Money counts its Silvers
+    with this)."""
     s = game["seats"][pid]
     owned = s["deck"] + s["hand"] + s["discard"] + s["in_play"] + s["aside"]
     # Seaside zones + mats (migrate guarantees these on every loaded save)
@@ -2048,7 +2063,7 @@ def _all_cards(game, pid):
 
 
 def _vp_of(game, pid):
-    owned = _all_cards(game, pid)
+    owned = owned_cards(game, pid)
     n = len(owned)
     duchies = owned.count("Duchy")
     total = 0

@@ -61,7 +61,7 @@ def census(g):
     c = collections.Counter(g["supply"])
     c.update(g["trash"])
     for pid in g["players"]:
-        c.update(engine._all_cards(g, pid))
+        c.update(engine.owned_cards(g, pid))
     return c
 
 

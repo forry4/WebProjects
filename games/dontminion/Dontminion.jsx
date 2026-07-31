@@ -21,8 +21,13 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-// No difficulty picker yet: every bot plays random legal moves. Re-add tiers
-// here (and the CmRow in the create modal) when a stronger bot actually ships.
+// The bot tiers the SERVER actually distinguishes (main.AI_DIFFICULTIES): easy,
+// normal and hard are one and the same random-legal bot, so only one of them is
+// offered — the other option is the real one.
+const BOTS = [
+  { id: "easy", name: "Random" },
+  { id: "bigmoney", name: "Big Money" },
+];
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
 // "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
 // so a set the server ships without a label here still appears (under a
@@ -454,6 +459,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createBots, setCreateBots] = useState(1);
+  // Big Money by default: it's the tier that plays an actual game of Dominion.
+  const [createBotKind, setCreateBotKind] = useState("bigmoney");
   const [createPlayers, setCreatePlayers] = useState(4);
   // Base Set only by default — the newcomer's game, and the set every Dominion
   // player knows. Everything else is opt-in through the picker.
@@ -730,7 +737,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     };
     if (createOpp === "ai") {
       msg.num_bots = createBots;
-      msg.ai_difficulty = "easy";   // the only real tier today (random-legal)
+      msg.ai_difficulty = createBotKind;
     } else {
       msg.max_players = createPlayers;
     }
@@ -1126,10 +1133,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 value={createOpp} onChange={setCreateOpp} />
             </CmRow>
             {createOpp === "ai" ? (
-              <CmRow label="Bots">
-                <CmSeg options={[1, 2, 3].map((n) => ({ value: n, label: String(n) }))}
-                  value={createBots} onChange={setCreateBots} />
-              </CmRow>
+              <>
+                <CmRow label="Bots">
+                  <CmSeg options={[1, 2, 3].map((n) => ({ value: n, label: String(n) }))}
+                    value={createBots} onChange={setCreateBots} />
+                </CmRow>
+                <CmRow label="Bot style">
+                  <CmSeg options={BOTS.map((b) => ({ value: b.id, label: b.name }))}
+                    value={createBotKind} onChange={setCreateBotKind} />
+                </CmRow>
+              </>
             ) : (
               <CmRow label="Players">
                 <CmSeg options={[2, 3, 4].map((n) => ({ value: n, label: String(n) }))}
@@ -1167,7 +1180,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
             <div className="cm-footer">
               <span className="cm-summary">
-                {createOpp === "ai" ? `You + ${createBots} bot${createBots > 1 ? "s" : ""}` : `Up to ${createPlayers} players`}
+                {createOpp === "ai"
+                  ? `You + ${createBots} ${BOTS.find((b) => b.id === createBotKind)?.name || "bot"} bot${createBots > 1 ? "s" : ""}`
+                  : `Up to ${createPlayers} players`}
                 {createExps.length
                   ? " · " + createExps.map((e) => expansionOptions.find((x) => x.id === e)?.name || e).join(" + ")
                   : ""}

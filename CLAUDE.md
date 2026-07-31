@@ -246,6 +246,14 @@ family. Same shape in all four games, differing only in table name and columns.
 - **Rules/engine unit tests are the most valuable to protect** — each game has them (per-package
   `CLAUDE.md` lists what each covers), plus `core/tests/` (db/auth/ratelimit/retention, in-memory
   sqlite) and Books `tests/` (17, in-memory DB).
+- **ZERO conditional skips, repo-wide — keep it there** (`pytest.skip` / `skipif` / `xfail`). A test
+  that can't reach the state it means to exercise must FAIL, not opt out: a skip is a green tick over
+  a test that proved nothing, and the failure it hides looks like a pass in CI. All three that existed
+  were real holes — a guessed frame option id that skipped when the guess missed (it swallowed a live
+  engine regression during a fix), a hardcoded `range(13)` parametrize whose skip only guarded the
+  roster SHRINKING (the next expansion's kingdoms would have gone unsoaked in silence — derive the
+  count from the data instead), and a "no seed produced the position" bail. For a SAMPLED choice,
+  assert every branch rather than only the interesting one.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run smoke` AND `npm run screens`.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the

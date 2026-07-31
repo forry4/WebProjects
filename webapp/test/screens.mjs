@@ -490,6 +490,23 @@ try {
 				!p.panelScrolls && (p.total < 4 || p.listScrolls),
 				`list=${p.listScrolls} panel=${p.panelScrolls} of ${p.total}`);
 
+			// The bot tier is the one create option that changes who you PLAY —
+			// it must be pickable, and must default to the bot that plays a real
+			// game (main.py coerces an unknown tier away silently, so a typo'd
+			// id here would look fine and quietly seat the random bot).
+			const bots = await page.evaluate(() => {
+				const row = [...document.querySelectorAll(".cm-row")]
+					.find((r) => /bot style/i.test(r.querySelector(".cm-label")?.textContent || ""));
+				if (!row) return null;
+				return {
+					labels: [...row.querySelectorAll(".cm-seg-btn")].map((b) => b.textContent.trim()),
+					sel: [...row.querySelectorAll(".cm-seg-btn.sel")].map((b) => b.textContent.trim()),
+				};
+			});
+			check("...the bot style is pickable, defaulting to Big Money",
+				!!bots && bots.labels.length >= 2 && bots.sel.length === 1
+				&& /big money/i.test(bots.sel[0]), JSON.stringify(bots));
+
 			await page.click(".dm-check-all");
 			const all = await page.evaluate(() => ({
 				on: document.querySelectorAll(".dm-checks .dm-check-on").length,

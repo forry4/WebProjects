@@ -13,8 +13,8 @@ executor; the stale-socket disconnect guard) with three differences:
   options — max_players, enabled expansions, bot count, difficulty — validated
   by coercers and kept in sync across create / save blob / load / wire state.
 * MULTIPLE bot seats (``room["ai_players"]`` is a list). The scheduler is a
-  finisher loop only — every tier is the random-legal bot in v1, so there is no
-  executor and never heavy work under ROOM_LOCK. ``_bot_to_act`` recomputes the
+  finisher loop only — both tiers (random-legal, Big Money) are cheap, so there
+  is no executor and never heavy work under ROOM_LOCK. ``_bot_to_act`` recomputes the
   actor each iteration, which is what lets bot B answer during bot A's turn and
   lets bots answer a HUMAN's attack (Militia) mid-human-turn.
 * No client-side AI machinery at all.
@@ -51,11 +51,12 @@ LOG = logging.getLogger("games.dontminion")
 _BOT_THINK = 0.7
 
 
-# Every tier is the random-legal bot in v1 (stronger tiers are a later campaign).
-# The tier is still validated + persisted so a future strength ladder slots in
-# without a migration — and so a redeploy can't silently retier a live game
-# (the Spender ai_variant lesson).
-AI_DIFFICULTIES = ("easy", "normal", "hard")
+# easy/normal/hard are all still the v1 random-legal bot; "bigmoney" is the Big
+# Money buy ladder (bot.choose dispatches on this string). The tier is validated
+# + persisted so a live game can't be silently retiered by a redeploy (the
+# Spender ai_variant lesson) — which also means the ladder can grow without a
+# migration, since an unknown value falls back to the default.
+AI_DIFFICULTIES = ("easy", "normal", "hard", bot.BIG_MONEY)
 DEFAULT_DIFFICULTY = "normal"
 
 AI_PIDS = ("bot1", "bot2", "bot3")
@@ -405,7 +406,7 @@ async def _schedule_bots(room_id: str) -> None:
     single-flighted per room; recomputes the acting bot EVERY iteration so
     chained decisions across different bots — and bot responses during a
     human's turn — all drain in one pass. Never heavy work under ROOM_LOCK
-    (the random bot is O(legal moves))."""
+    (both bots are O(legal moves) — Big Money adds one deck census)."""
     async with ROOM_LOCK:
         room = ROOMS.get(room_id)
         if not room or room.get("_bot_running") or _bot_to_act(room) is None:
@@ -421,7 +422,8 @@ async def _schedule_bots(room_id: str) -> None:
                 pid = _bot_to_act(room)
                 if pid is None:
                     return
-                mv = bot.choose(room["game"], pid, _new_rng())
+                mv = bot.choose(room["game"], pid, _new_rng(),
+                                room.get("ai_difficulty", DEFAULT_DIFFICULTY))
                 ok, err = engine.apply_move(room["game"], pid, mv)
                 if not ok:
                     LOG.warning("dontminion: bot move rejected in %s (%s): %s",

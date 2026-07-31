@@ -76,6 +76,11 @@ def test_sailor_played_astrolabe_gives_its_coin_and_buy():
 
 # --- Vassal x Duration: a Duration played from the discard persists ------------
 
+# Vassal's frame, pinned: a test that picks its branch by "whichever id isn't
+# 'decline'" is guessing, and a guess that misses has to fail rather than opt out.
+VASSAL_OPTIONS = ["play", "discard"]
+
+
 def test_vassal_plays_a_duration_off_the_deck_and_it_persists():
     g = fresh(["Vassal", "Caravan", "Smithy", "Moat", "Village",
                "Militia", "Witch", "Gardens", "Warehouse", "Bazaar"])
@@ -85,12 +90,18 @@ def test_vassal_plays_a_duration_off_the_deck_and_it_persists():
     assert g["pending_pid"] == A                  # "play the discarded Caravan?"
     ok, err = decide(g, A, **engine.sample_decision(g, A, random.Random(1)))
     assert ok, err
-    if "Caravan" in g["seats"][A]["in_play"]:     # said yes
-        hand_after = len(g["seats"][A]["hand"])
+    # The choice is SAMPLED, so either branch is a legitimate outcome — but both
+    # have to land somewhere. Asserting only the play branch (as this once did)
+    # made a Vassal that plays nothing at all a silent pass.
+    assert g["seats"][A]["aside"] == []            # left the look-at zone either way
+    if "Caravan" in g["seats"][A]["in_play"]:      # chose "play"
         assert mv(g, A, {"type": "end_phase"})[0]
         if g["turn"] == A and g["phase"] == "buy":
             assert mv(g, A, {"type": "end_phase"})[0]
         assert engine.duration_in_play(g, A, "Caravan")
+    else:                                          # chose "discard"
+        assert "Caravan" in g["seats"][A]["discard"]
+        assert not engine.duration_in_play(g, A, "Caravan")
 
 
 def test_vassal_duration_full_cycle_forced_yes():
@@ -99,12 +110,14 @@ def test_vassal_duration_full_cycle_forced_yes():
     give_hand(g, A, ["Vassal"])
     g["seats"][A]["deck"] = ["Caravan"] + ["Copper"] * 8
     assert mv(g, A, {"type": "play_action", "card": "Vassal"})[0]
-    # force the yes branch
-    top = g["pending"][-1]
-    yes = [o["id"] for o in top["constraint"]["options"] if o["id"] != "decline"]
-    assert decide(g, A, ids=[yes[0] if yes else "decline"])[0]
-    if not engine.duration_in_play(g, A, "Caravan"):
-        pytest.skip("vassal option ids differ — covered by the sampled test above")
+    # Force the play branch BY ID. This used to take "the first id that isn't
+    # 'decline'" and pytest.skip() if the Caravan never reached play — which
+    # turned every regression in this path into a PASS, and did exactly that
+    # for a real duration_in_play breakage during the 2026-07-31 Scheme fix.
+    opts = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
+    assert opts == VASSAL_OPTIONS, opts
+    assert decide(g, A, ids=["play"])[0]
+    assert engine.duration_in_play(g, A, "Caravan")
     assert mv(g, A, {"type": "end_phase"})[0]
     assert engine.duration_in_play(g, A, "Caravan")
     hand0 = len(g["seats"][A]["hand"])
@@ -1285,3 +1298,57 @@ def test_player_view_leaks_no_new_hinterlands_state():
     own = engine.player_view(g, A)                # the owner does see their hand
     assert own["seats"][A]["hand"] == ["Souk"]
     assert "deck" not in own["seats"][A]
+
+
+# --- Scheme x two copies of one Duration (the same-name, different-copy trap) --
+
+def test_scheme_topdecks_the_finishing_duration_not_the_one_just_played():
+    """A seat can hold a Tide Pools finishing at THIS clean-up and a second one
+    just played, and the zones hold only NAMES. Scheme rightly offers the
+    finishing copy — but `topdeck_from_play` matched in_play by name and took
+    the fresh one, which then vanished from under `_cleanup_durations`' unguarded
+    kept-out removal: `_end_turn` raised ValueError and the game was unplayable.
+    Found by replaying bot games (the random-legal bot hits it in ~1.5% of games
+    on a Scheme + Tide Pools kingdom)."""
+    g = fresh(["Scheme", "Tide Pools", "Smithy", "Moat", "Village", "Militia",
+               "Witch", "Gardens", "Warehouse", "Bazaar"],
+              expansions=("base", "seaside", "hinterlands"))
+    # turn 1: A plays a Tide Pools, which finishes at the START of A's turn 2
+    give_hand(g, A, ["Tide Pools"])
+    assert mv(g, A, {"type": "play_action", "card": "Tide Pools"})[0]
+    assert mv(g, A, {"type": "end_phase"})[0]
+    assert mv(g, B, {"type": "end_phase"})[0]
+    drain_decisions(g)                      # A's turn start: discard 2
+    assert g["turn"] == A
+    entry = g["seats"][A]["duration"][0]
+    assert entry["card"] == "Tide Pools" and entry["done"]
+
+    # turn 2: Scheme, then a SECOND Tide Pools - two copies on the table at once
+    give_hand(g, A, ["Scheme", "Tide Pools"])
+    g["phase"] = "action"                   # the turn-start discard auto-advanced it
+    g["actions"] = 2
+    assert mv(g, A, {"type": "play_action", "card": "Scheme"})[0]
+    assert mv(g, A, {"type": "play_action", "card": "Tide Pools"})[0]
+    assert g["seats"][A]["in_play"].count("Tide Pools") == 1
+    assert engine.leaving_play(g, A).count("Tide Pools") == 1   # only the finishing one
+
+    assert g["phase"] == "buy"                       # auto-advanced (no Actions left)
+    assert mv(g, A, {"type": "end_phase"})[0]        # -> Scheme's offer
+    assert g["pending_kind"] == "choose_cards" and g["pending_pid"] == A
+    assert decide(g, A, cards=["Tide Pools"])[0]     # used to strand the fresh copy
+    drain_decisions(g)
+
+    # The finishing copy was topdecked (clean-up's draw-5 may have taken it
+    # straight back into hand); the one played this turn is still on the table,
+    # set up for A's next turn — and neither was discarded.
+    seat = g["seats"][A]
+    assert any(e.get("event") == "topdeck" and e.get("card") == "Tide Pools"
+               and e.get("pid") == A for e in g["log"])
+    assert seat["deck"].count("Tide Pools") + seat["hand"].count("Tide Pools") == 1
+    assert seat["discard"].count("Tide Pools") == 0
+    assert seat["in_play"] == []
+    assert engine.duration_in_play(g, A, "Tide Pools")
+    assert [e["card"] for e in seat["duration"]] == ["Tide Pools"]
+    assert not seat["duration"][0].get("done")
+    assert engine.owned_cards(g, A).count("Tide Pools") == 2   # nothing lost
+    assert g["turn"] == B                                      # the turn ENDED

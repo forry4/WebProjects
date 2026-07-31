@@ -14,7 +14,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
 | `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
-| `bot.py` | random-legal bot (all difficulty tiers, v1) |
+| `bot.py` | the bots: random-legal (easy/normal/hard) + the Big Money buy ladder (`bigmoney`) |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
 | `tests/` | engine, soak, per-batch card tests, cross-set, migrate, server, ws-auth, wire-redaction, wire-contract |
 | `tools/replay_prod_saves.py` | THE migration gate — replays every real prod save (see below) |
@@ -354,6 +354,13 @@ pinning the current behaviour, so changing your mind means changing a test on pu
   backwards; it is not a matter of taste.
 - **Highway is turn-scoped** (`turn_ctx["bridges"]`), not while-in-play. The 1E card was the
   other way; the roadmap described the 1E card for a while.
+- **A card name is not a card COPY.** Zones hold names, so a seat can have a Duration finishing at
+  this clean-up AND a fresh copy of the same Duration just played; only the count separates them.
+  `topdeck_from_play` matched `in_play` by name and took the wrong one, stranding the persisting
+  copy — `_end_turn`'s kept-out removal then raised `ValueError` and the game was unplayable
+  (~1.5% of random-bot games on a Scheme + Tide Pools kingdom, found by bot replay, fixed
+  2026-07-31). Both readers now go through `_in_play_leaving`, a MULTISET subtraction. Any new
+  code that picks a card off the table owes the same treatment.
 
 ## Hidden information / wire view
 
@@ -391,10 +398,35 @@ write executor, SELECT-then-DELETE) with the three Dontminion differences: 2–4
 is a list (`bot1..bot3`, names "Bot N", NO meta entry ⇒ unjoinable), and `_schedule_bots` is a
 single-flighted finisher loop that recomputes `_bot_to_act` EVERY iteration — that is what drains
 chained decisions across different bots and lets bots answer a human's Militia mid-human-turn.
-Every tier is `bot.choose` (random-legal) in v1 — no executor, nothing heavy under ROOM_LOCK; the
-tier is validated + persisted anyway so a future strength ladder needs no migration. All entropy
-runs through `_new_rng()` (the test seam). vs-AI rooms start at create (never "open"); friend
-rooms are host-started with shuffled seat order.
+The scheduler passes the room's persisted `ai_difficulty` into `bot.choose`, which dispatches on
+it — both tiers are O(legal moves), so there is still no executor and nothing heavy under
+ROOM_LOCK. An unknown tier coerces to the default, so the ladder grows without a migration. All
+entropy runs through `_new_rng()` (the test seam). vs-AI rooms start at create (never "open");
+friend rooms are host-started with shuffled seat order.
+
+## The bots (`bot.py`)
+
+Two strategies, selected by `ai_difficulty`. **easy/normal/hard are all still the same
+random-legal bot** — the frontend's picker therefore offers exactly two entries ("Random" =
+`easy`, "Big Money" = `bigmoney`, the default) rather than pretending to three tiers.
+
+**Big Money** is the classic buy ladder: Treasure and Victory only, greening on a Province-count
+clock. It is a real opponent — 238/238 against random-legal across both seats and all five
+expansions (median 30 turns). Three things about it are load-bearing:
+- **`choose` is stateless** — the scheduler re-enters it per move, so the ladder re-reads the
+  CURRENT coins every call. That is sound *because* there is exactly one buy a turn: the bot buys
+  no Action, so nothing in its deck ever grants a second buy and no rung needs to plan a
+  follow-up. Don't add a rung that wants two buys without giving the bot turn-scoped memory.
+- **All treasures go down before the ladder is read** — a buy decided mid-treasure reads the
+  wrong rung.
+- **Deliberate gaps, both faithful to the ladder as specified**: Colony/Platinum are not in it
+  (in a Prosperity colony game it still buys Province at $10-12), and it plays no Actions at all —
+  it never buys one, so it only holds one an opponent handed it (Masquerade/Jester/Swindler), and
+  a random play of an unknown Action is as likely to hurt as help.
+
+`engine.owned_cards(game, pid)` (the scoring census, made public for this) is what the $8
+"really early" exception counts Golds and Silvers with — every zone, so a Silver in play or on a
+mat still counts.
 
 ## Frontend (Dontminion.jsx)
 
@@ -460,6 +492,16 @@ Python tests never render, and `npm run screens` mounts the route without playin
 NAME check only — it proves the server still sends a field, not that the client uses it right —
 but that is precisely how both bugs failed. Verified against both by simulating each regression.
 Keep its allowlists short; a growing allowlist means the check is being worked around.
+
+**NO CONDITIONAL SKIPS — the suite has zero, keep it there.** A test that can't reach the state
+it means to test has to FAIL, not opt out: `test_vassal_duration_full_cycle_forced_yes` guessed
+its option id and `pytest.skip`'d when the Caravan didn't reach play, so every regression in that
+path was a green tick — and it swallowed a real `duration_in_play` breakage during the Scheme
+fix. Pin the frame's option ids and pick by name. Same for a sampled choice: assert BOTH branches
+(`test_vassal_plays_a_duration_off_the_deck_and_it_persists` asserted only the "play" branch, so a
+Vassal that played nothing passed). And derive parametrize counts from the data
+(`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
+the next expansion's kingdoms would have gone unsoaked in silence.
 
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp

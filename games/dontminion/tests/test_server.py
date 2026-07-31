@@ -171,6 +171,32 @@ def test_bots_answer_a_humans_attack_mid_turn():
         assert len(room["game"]["seats"][b]["hand"]) == 3
 
 
+def test_the_room_tier_reaches_the_bot():
+    """The scheduler must play the room's OWN tier — the two bots are told apart
+    by an Action in hand: random-legal plays it (anti-stall), Big Money never
+    does. Same forced position, one create option apart."""
+    def played_smithy(room_id, difficulty):
+        _run(m._handle_create(_FakeWS(), room_id, "human", {
+            "name": "H", "vs_ai": True, "num_bots": 1, "expansions": ["base"],
+            "ai_difficulty": difficulty}))
+        room = m.ROOMS[room_id]
+        assert room["ai_difficulty"] == difficulty     # validated, not coerced away
+        game = room["game"]
+        game["pending"].clear()
+        engine._sync_pending(game)
+        game["turn"] = "bot1"
+        game["phase"] = "action"
+        game["actions"] = 1
+        game["supply"].setdefault("Smithy", 10)
+        game["seats"]["bot1"]["hand"] = ["Smithy", "Copper"]
+        _run(m._schedule_bots(room_id))                # plays bot1's whole turn
+        return any(e.get("event") == "play" and e.get("card") == "Smithy"
+                   and e.get("pid") == "bot1" for e in room["game"]["log"])
+
+    assert played_smithy("R9a", "easy") is True
+    assert played_smithy("R9b", bot.BIG_MONEY) is False
+
+
 def test_scheduler_noops_when_no_bot_owes_a_move():
     _run(m._handle_create(_FakeWS(), "R7", "host", {"name": "Host"}))
     _run(m._schedule_bots("R7"))                       # open room, no game
