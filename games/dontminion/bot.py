@@ -13,7 +13,7 @@ and it must never consume the game's own rng_state (pass an explicit rng).
 
 import random
 
-from . import engine
+from . import bot_decisions, engine
 
 # ai_difficulty values that route to the Big Money buy ladder. Everything else
 # (easy/normal/hard) is still the random-legal bot.
@@ -27,6 +27,14 @@ def choose(game, pid, rng=None, difficulty=None):
     return choose_random(game, pid, rng)
 
 
+def _decision(game, pid, rng, policy):
+    """Answer the top frame. `policy` False = uniform sampling (the `random`
+    tier's defining weakness — it keeps its Gold to a Militia only by luck)."""
+    if policy:
+        return {"type": "decision", **bot_decisions.decide(game, pid, rng)}
+    return {"type": "decision", **engine.sample_decision(game, pid, rng)}
+
+
 def choose_random(game, pid, rng=None):
     """Uniform over legal moves with the sibling bots' anti-stall bias: never
     end a phase while something else is possible (an unbiased bot ends its turn
@@ -34,7 +42,7 @@ def choose_random(game, pid, rng=None):
     `engine.sample_decision` — uniform over the frame's valid payloads."""
     r = rng or random.Random()
     if game["pending_pid"] == pid:
-        return {"type": "decision", **engine.sample_decision(game, pid, r)}
+        return _decision(game, pid, r, policy=False)
     moves = engine.legal_moves(game, pid)
     for m in moves:
         if m["type"] == "play_all_treasures":
@@ -98,9 +106,10 @@ def _want(game, pid):
 def choose_big_money(game, pid, rng=None):
     r = rng or random.Random()
     if game["pending_pid"] == pid:
-        # No card-specific play, so a forced choice (an opponent's Militia, a
-        # Curse handed over) is answered uniformly, same as the random bot.
-        return {"type": "decision", **engine.sample_decision(game, pid, r)}
+        # Big Money buys no Action, but it is still ATTACKED: the Militia
+        # discard and the Torturer choice are most of what a human sees this
+        # bot decide, and answering them by policy costs nothing.
+        return _decision(game, pid, r, policy=True)
 
     if game["phase"] == "action":
         return {"type": "end_phase"}        # Big Money plays no Actions

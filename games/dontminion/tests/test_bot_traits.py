@@ -1,0 +1,91 @@
+"""Card-trait tests.
+
+The load-bearing one is `test_every_kingdom_card_is_reviewed`: traits are half
+derived and half hand-tagged, and an unreviewed card would be silently
+classified as "a plain terminal" — a wrong answer that looks like the bot
+playing badly rather than like missing data. Every expansion phase owes its
+cards to `REVIEWED`.
+"""
+
+from games.dontminion import bot_traits as T
+from games.dontminion.cards import CARDS, KINGDOM
+
+
+def test_every_kingdom_card_is_reviewed():
+    """A new set's cards MUST be added to the trait tables. Derived from the
+    data, so the next expansion fails here on the day it ships."""
+    every = {c for names in KINGDOM.values() for c in names}
+    missing = sorted(every - set(T.REVIEWED))
+    assert not missing, (
+        f"{len(missing)} kingdom cards have no reviewed traits: {missing}. "
+        "Add them to bot_traits.py's tables (trasher/attack/gainer/... as "
+        "applicable) and to REVIEWED.")
+
+
+def test_reviewed_names_all_exist():
+    """The reverse guard — a rename must not leave a dangling trait row."""
+    unknown = sorted(n for n in T.REVIEWED if n not in CARDS)
+    assert not unknown, f"trait rows for cards that do not exist: {unknown}"
+
+
+def test_hand_tagged_tables_only_name_real_cards():
+    for label, names in (("TRASHERS", T.TRASHERS), ("ATTACKS", T.ATTACKS),
+                         ("DEFENSE", T.DEFENSE), ("GAINERS", T.GAINERS),
+                         ("SIFTERS", T.SIFTERS), ("ALT_VP", T.ALT_VP),
+                         ("VP_TOKENS", T.VP_TOKENS),
+                         ("BM_TREASURES", T.BM_TREASURES),
+                         ("BM_TERMINALS", T.BM_TERMINALS)):
+        bad = sorted(n for n in names if n not in CARDS)
+        assert not bad, f"{label} names cards that do not exist: {bad}"
+
+
+def test_every_tagged_attack_is_actually_an_attack():
+    """ATTACKS classifies attack cards; a non-Attack in there means the
+    defensive read (do I need a Moat?) is answering about the wrong card."""
+    for name in T.ATTACKS:
+        assert "attack" in CARDS[name]["types"], f"{name} is not an Attack"
+
+
+def test_derived_classifications():
+    assert T.t("Smithy", "terminal_draw") and T.t("Smithy", "terminal")
+    assert T.t("Village", "village") and not T.t("Village", "terminal")
+    assert T.t("Laboratory", "cantrip") and not T.t("Laboratory", "terminal")
+    assert T.t("Market", "cantrip") and T.t("Market", "plus_buy")
+    assert T.t("Festival", "village") and T.t("Festival", "plus_buy")
+    assert T.t("Gold", "coins") == 3 and not T.t("Gold", "action")
+    # a payload Action's coins come from its printed +$N, not the data column
+    assert T.t("Militia", "coins") == 2
+    # Moat draws 2 but is not a BM-grade drawer bar; it is still terminal draw
+    assert T.t("Moat", "terminal_draw") and T.t("Moat", "defense")
+
+
+def test_reviewed_semantics():
+    assert T.t("Chapel", "trasher") == "mass"
+    assert T.t("Steward", "trasher") == "multi"
+    assert T.t("Remodel", "trasher") == "tfb"
+    assert T.t("Witch", "curser") and T.t("Witch", "attack_kind") == "curse"
+    assert T.t("Militia", "attack_kind") == "discard"
+    assert not T.t("Village", "curser")
+    assert T.t("Gardens", "alt_vp") == "per_10_cards"
+    assert T.t("Duke", "alt_vp") == "per_duchy"
+    assert T.t("Monument", "vp_tokens")
+
+
+def test_money_density_matches_the_articles_numbers():
+    """The published anchors: a fresh deck is 0.7, and 1.6 is the Province
+    threshold the strategy corpus measures decks against."""
+    assert round(T.density(["Copper"] * 7 + ["Estate"] * 3), 4) == 0.7
+    # cantrips are "virtual cards" — they leave the denominator alone
+    with_lab = ["Copper"] * 7 + ["Estate"] * 3 + ["Laboratory"]
+    assert round(T.density(with_lab), 4) == 0.7
+    rich = ["Gold"] * 4 + ["Silver"] * 4 + ["Copper"] * 2
+    assert T.density(rich) >= 1.6
+
+
+def test_best_bm_terminal_prefers_the_articles_ranking():
+    assert T.best_bm_terminal(["Smithy", "Wharf", "Village"]) == "Wharf"
+    assert T.best_bm_terminal(["Smithy", "Moat"]) == "Smithy"
+    assert T.best_bm_terminal(["Village", "Festival"]) is None      # no drawer
+    # an empty pile is not a terminal you can buy
+    assert T.best_bm_terminal(["Smithy", "Wharf"],
+                              supply={"Smithy": 10, "Wharf": 0}) == "Smithy"
