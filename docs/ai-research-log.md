@@ -11,6 +11,110 @@ Content below is preserved **verbatim** from the pre-split `CLAUDE.md` (git also
 
 
 <!-- ===================================================================== -->
+# CoC — BGA expert corpus: the SEAT-STRENGTH filter, and the scaling curve that finally sloped up
+<!-- ===================================================================== -->
+
+### Session (2026-07-31) — the July "BGA data is saturated" verdict is OVERTURNED at the @200 screen; per-seat ELO instrumented; depth re-gate PENDING at write time
+
+The July 19–22 line closed with "no reliable gain over the deployed Expert, data saturated ~36 games,
+tractable levers exhausted." Two things had changed by 2026-07-31: the daily cron had roughly tripled the
+clean corpus, and — the user's idea, and the larger effect — **nobody had ever checked how good the
+players in these games actually were.**
+
+1. **THE "BOTH SEATS ARE EXPERTS" PREMISE WAS FALSE, AND HAD NEVER BEEN MEASURED.** `cob_harvest.py`
+   recorded both seats of every game, justified in its own docstring as *"the opponent of a top-100 BGA
+   player is also far above our net — that's the whole premise."* New tool **`cob_elo.py`** attaches each
+   seat's post-game ELO; over 114/122 downloaded games:
+   - stronger seat (the seeded top player, present in EVERY game): min 1997, **median 2040**, max 2202
+   - weaker seat: min 1301, **median 1635**, max 2042
+   - **median gap 396 ELO** (p25 284, p75 514, max 753); one sampled pair was 2109 vs 1409
+   - at a 1900 bar only **9 of 114** games are pro-vs-pro; 105 are pro-vs-amateur
+   ⇒ ~46% of harvested decisions were a ~400-ELO-weaker player's moves, trained at equal weight with no
+   feature distinguishing them. `cob_harvest.py` now takes `min_elo` and keeps a decision only if **that
+   mover** cleared the bar (both seats of a pro-vs-pro game; only the strong side of a mismatch). An
+   unrated seat is DROPPED whenever `min_elo > 0` → re-run `cob_elo.py` after every download batch.
+2. **BGA API FOOTGUN (cost an hour): `gamestats/getGames`'s `start` parameter is SILENTLY IGNORED** —
+   every page returns the same first 10 tables, forever. It also reports `elo_after` only for the player
+   you *query*. So it cannot page back to an older game and cannot rate an opponent. This is also why
+   `cob_collect.py` caps at ~10 games/player regardless of its `cap` argument. **Use
+   `table/table/tableinfos.html?id=<tid>` instead — it returns `rank_after_game` for EVERY seat in one
+   call**, and it is table metadata, so it costs nothing against the ~10/day replay-download quota.
+   (Diagnostic tell: per-player hit rates were bimodal 0/N or N/N, which reads like throttling but was
+   pagination returning page 0 every time. A manual single-page probe succeeding is NOT evidence that
+   paging works.)
+3. **THE SCALING CURVE — the never-run July decision point — SLOPES UP.** Anchored fine-tune (BGA = 25%
+   of the mix, champion self-play the rest, warm from `pv_warm936`), gated vs that same champion,
+   `netval@30@1.0` @200 sims, seed 4242, **mirror sanity read 0.5000 exactly**:
+
+   | rows | seats | gate @200 |
+   |---|---|---|
+   | 4,490 (Jul 15) | all | 0.4875 ±0.063 |
+   | 8,641 (Jul 20) | all | ~0.52, CI included 0.5 |
+   | **14,601 (today, arm ALL)** | all | **0.5600 ±0.049 (n=400) seed 4242; 0.5300 ±0.049 (n=400) seed 7777 → POOLED ~0.545 ±0.035 (n=800), CI [0.510,0.580]** |
+
+   **The 0.5600 was HIGH-SIDE ON ONE SEED — quote the pooled 0.545, not the screen.** The depth
+   ladder's bottom rung was deliberately a fresh-seed re-read of the same comparison for exactly
+   this reason, and it moved the number 3pp. The finding survives (pooled CI still excludes 0.5)
+   but a single seed base is not a result here; this is the Duel "0.5288 blip" lesson repeating.
+
+   First time the CI has excluded 0.5. July's own framing was "flat ~0.49 ⇒ the corpus is a hypothesis
+   MAP, not training data; upward slope ⇒ the grind is justified." **It sloped. The corpus is training
+   data.** Corpus today: 84 replay-complete games + 32 salvaged mon6 prefixes (122/147 downloaded, ~3
+   days of quota left). Row yields: unfiltered 14,601 | ≥1700 10,106 | **≥1800 8,394** | ≥1900 7,633 —
+   note ≥1800 is *size-matched to the whole Jul-20 experiment*, which is what makes arm E1800 the clean
+   purity test rather than a volume test.
+3b. **AND THE PURITY FILTER DID NOT PAY OFF AT THIS SCALE — the honest negative.** Arm **E1800 (8,394
+   rows, mover ≥1800) = 0.5350 ±0.049 (n=400), margin +1.5, CI [0.486,0.584] — INCLUDES 0.5**, below
+   arm ALL's 0.5600. Read it carefully in both directions: the two arms' CIs overlap heavily and they
+   share a seed base, so this is **not** "volume beats purity" demonstrated — it is "**dropping 43% of
+   the rows is not repaid at 8.4k scale.**" Against its true size-matched control (Jul-20's 8,641
+   unfiltered rows → ~0.5217) E1800 is a hair better, which is the direction purity predicts, and
+   nowhere near significant. The ~400-ELO contamination is REAL and measured; it is simply not yet
+   worth what removing it costs. **The trade shifts as the corpus grows** — a ≥1800 cut on a 300-game
+   corpus would exceed today's unfiltered row count — so RE-TEST the filter at that point rather than
+   filing it as dead. The instrument (`cob_elo.py` + `min_elo`) is the durable asset here.
+4. **@200 IS A SCREEN, NOT A SHIP NUMBER — and this experiment is specifically vulnerable to that.** CoC
+   saturates **~4k sims** (`coc_run_simgate/ladder_log.txt`: 1024v512 0.5417, 2048v1024 0.5833,
+   4096v2048 0.5667, **8192v4096 0.5000 = knee**) and Expert SERVES at ~20k. At 200 sims the LEAF
+   dominates the result; deeper search washes leaf differences out — so a fine-tuned-**leaf** edge read
+   @200 is an **upper bound** on serving, never an estimate. The repo has this both ways: r2 shipped on
+   0.5250 @200 → 0.5500 @512 ("grows with depth"), while a steps=30 config read 0.583 @200 and softened
+   to 0.54 @1024 ("a low-sims win"); Spender's calibrated distilled leaf did the same (0.583@160 → ~0.5
+   by 1200) and was correctly not shipped. **`cob_depth_regate.sh`** re-gates 200 → 1024 → **4096** (the
+   knee — gating at 20k buys nothing past it but wall-clock) on a **FRESH seed 7777**, so the bottom rung
+   doubles as a seed-robustness re-read of the 0.5600. Written RUNG-MAJOR on purpose: a ~3.4h run may be
+   read before it finishes, and an arm-major interrupt would leave one arm measured and the other
+   untouched, answering nothing about purity-vs-volume.
+5. **DEPTH RE-GATE RESULT — the edge GROWS with search depth, in BOTH arms.** Fresh seed 7777, n=400/rung:
+
+   | arm | @200 | @1024 | Δ |
+   |---|---|---|---|
+   | **ALL** (14,601 rows) | 0.5300 ±0.049 | **0.5725 ±0.048, CI [0.524,0.621]** | **+0.043** |
+   | E1800 (8,394 rows) | 0.5225 ±0.049 | 0.5450 ±0.049, CI [0.496,0.594] | +0.023 |
+
+   This is the pattern that predicts transfer to ~20k serving (r2 itself shipped on 0.5250 @200 →
+   0.5500 @512), and it is the OPPOSITE of the low-sims leaf artifact that was the main reason to
+   doubt the screen. **That both arms move the same direction matters more than either number** — a
+   single arm rising is one seed's luck, two independent training sets rising together is a trend.
+   **CAVEAT, STATED PLAINLY: @4096 (the knee) WAS NOT MEASURED.** The user halted the ladder after
+   the @1024 rung, judging the upward trend sufficient. So "stronger at production depth" here is an
+   **extrapolation from two rising points below the knee, not a measurement at it.** If this net is
+   ever a ship candidate, run `cob_depth_regate.sh` to completion first — the rung exists and costs
+   ~70 min/arm.
+6. **Open, deliberately untested:** filtering fixes *whose moves we imitate*, not *what positions they
+   came from* — a 2040 playing a 1600 faces weak competition for tiles, so the position distribution
+   stays slightly off even when every retained move is strong. Isolating that needs pro-vs-pro-only,
+   and 9 games (≥1900) / 22 (≥1800) is far too few. Revisit if the corpus ever gets large enough.
+
+Tooling all on branch **`cob-mining`** (worktree `forrestm_projects-cobmining`): `cob_elo.py` (new),
+`cob_harvest.py` (`min_elo` filter), `cob_ft_ladder.sh`, `cob_depth_regate.sh`.
+
+---
+
+
+
+
+<!-- ===================================================================== -->
 # ARCHIVE: Spender Duel AI — heuristic MCTS → netval → card-set ATTENTION value net (SHIPPED)
 <!-- ===================================================================== -->
 

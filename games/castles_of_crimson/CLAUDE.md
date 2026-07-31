@@ -39,7 +39,7 @@ prod. **Now a 4-animal CoB port** (chicken added; monastery 6 = spend 1 silver â
 |---|---|---|---|
 | **Easy** | server determinized-MCTS bot at its strong config (`ai.play_turn_plan`) | server thread pool | sims/time budget |
 | **Hard** | the first netval champion net (`coc_pv_model_hard.bin`) | **client WASM** (`coc-core`, netval leaf) | which net bin |
-| **Expert** | the r2 champion net (`coc_pv_model.bin`) | **client WASM** (netval leaf, ~20k sims) | which net bin |
+| **Expert** | the r2 champion **fine-tuned on the BGA expert corpus** (`coc_pv_model.bin`) | **client WASM** (netval leaf, ~20k sims) | which net bin |
 
 - **netval leaf** = net policy prior + a short priority rollout + the net VALUE head at truncation
   (`NETVAL_ROLLOUT_STEPS=30`, `NETVAL_C_PUCT=1.0`). CoC is a delayed-payoff game, so a 0-step static leaf
