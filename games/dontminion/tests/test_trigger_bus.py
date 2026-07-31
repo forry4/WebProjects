@@ -4,6 +4,8 @@ on-trash), the "buy" event, the "in_play" source, and the COST_MODS seam.
 Synthetic registrations are injected into the merged effects registries and
 removed again (the bus reads them live)."""
 
+import random
+
 import pytest
 
 from games.dontminion import effects, engine
@@ -331,6 +333,114 @@ def test_cleanup_discard_is_a_SEPARATE_event_from_discard(g, synthetic):
 
     assert cleanup_hits == ["Copper"], "the in-play card fired no cleanup_discard"
     assert discard_hits == [], "a Clean-up discard fired the ordinary discard event"
+
+
+def test_a_protected_player_is_still_offered_a_non_immunity_reaction():
+    """AUDIT BUG: _open_attack_window skipped already-immune opponents entirely,
+    so a Lighthouse-protected Guard Dog holder was never asked — losing pure
+    upside on every attack. Compendium p53: the reaction "triggers whenever an
+    Attack card is played, no matter if the card would have any effect on you."
+    A protected player holding only a MOAT must still be offered nothing,
+    though: revealing it would gain them precisely nothing."""
+    from games.dontminion import effects
+    K = ["Guard Dog", "Margrave", "Lighthouse", "Moat", "Village", "Smithy",
+         "Militia", "Market", "Festival", "Laboratory"]
+
+    def protected_game(bob_hand):
+        gg = engine.new_game([A, B], ["base", "seaside", "hinterlands"],
+                             seed=5, kingdom=K)
+        gg["turn"] = B
+        gg["seats"][B]["hand"] = ["Lighthouse"]
+        engine.apply_move(gg, B, {"type": "play_action", "card": "Lighthouse"})
+        while gg["turn"] == B and not gg["over"]:
+            engine.apply_move(gg, B, {"type": "end_phase"})
+        assert engine.attack_protected(gg, B)
+        gg["turn"], gg["phase"], gg["actions"] = A, "action", 1
+        gg["seats"][B]["hand"] = list(bob_hand)
+        gg["seats"][A]["hand"] = ["Margrave"]
+        engine.apply_move(gg, A, {"type": "play_action", "card": "Margrave"})
+        return gg
+
+    g1 = protected_game(["Guard Dog", "Estate", "Estate"])
+    assert g1["pending_pid"] == B, "protected Guard Dog holder was never asked"
+    assert "react:Guard Dog" in [o["id"] for o
+                                 in g1["pending"][-1]["constraint"]["options"]]
+
+    g2 = protected_game(["Moat", "Estate", "Estate"])
+    ids = ([o["id"] for o in g2["pending"][-1]["constraint"]["options"]]
+           if g2["pending_pid"] == B else [])
+    assert "react:Moat" not in ids, "offered a pointless Moat to an immune player"
+
+
+@pytest.mark.parametrize("attack", ["Margrave", "Witch's Hut", "Berserker", "Militia"])
+def test_lighthouse_protection_blocks_every_attack(attack):
+    """AUDIT TEST-GAP: every immunity test in the card files used MOAT, so the
+    Lighthouse path (`immune0`, computed before any window opens) was untested
+    for all four attacks — which is how the protected-Guard-Dog bug hid. Moat
+    and Lighthouse reach immunity by DIFFERENT routes; both need pinning."""
+    K = ["Margrave", "Witch's Hut", "Berserker", "Lighthouse", "Guard Dog",
+         "Militia", "Village", "Smithy", "Market", "Laboratory"]
+    gg = engine.new_game([A, B], ["base", "seaside", "hinterlands"],
+                         seed=3, kingdom=K)
+    gg["turn"] = B
+    gg["seats"][B]["hand"] = ["Lighthouse"]
+    engine.apply_move(gg, B, {"type": "play_action", "card": "Lighthouse"})
+    while gg["turn"] == B and not gg["over"]:
+        engine.apply_move(gg, B, {"type": "end_phase"})
+    assert engine.attack_protected(gg, B)
+
+    gg["turn"], gg["phase"], gg["actions"] = A, "action", 1
+    gg["seats"][B]["hand"] = ["Estate", "Estate", "Estate", "Estate", "Estate"]
+    gg["seats"][B]["discard"] = []
+    hand_before = list(gg["seats"][B]["hand"])
+    curses_before = gg["supply"]["Curse"]
+    gg["seats"][A]["hand"] = [attack]
+    ok, err = engine.apply_move(gg, A, {"type": "play_action", "card": attack})
+    assert ok, err
+    # drive any decisions the ATTACKER owes (Berserker's gain, Witch's Hut's discard)
+    for _ in range(12):
+        if gg["pending_pid"] != A:
+            break
+        engine.apply_move(gg, A, {"type": "decision",
+                                  **engine.sample_decision(gg, A, random.Random(1))})
+
+    assert gg["seats"][B]["hand"] == hand_before, f"{attack} hit a protected player"
+    assert "Curse" not in gg["seats"][B]["discard"]
+    assert gg["supply"]["Curse"] == curses_before or attack == "Militia"
+
+
+def test_scheme_can_topdeck_a_duration_finishing_this_cleanup():
+    """AUDIT BUG: the candidate list read `in_play` only, so a Duration whose
+    last ability resolved — discarded from play by THIS clean-up, sitting in
+    the duration zone marked done — was never offered, though it is as much
+    "discarded from play" as anything in in_play."""
+    K = ["Scheme", "Fishing Village", "Village", "Smithy", "Market", "Festival",
+         "Laboratory", "Moat", "Militia", "Cellar"]
+    gg = engine.new_game([A, B], ["base", "seaside", "hinterlands"],
+                         seed=9, kingdom=K)
+    gg["seats"][A]["hand"] = ["Fishing Village"]
+    engine.apply_move(gg, A, {"type": "play_action", "card": "Fishing Village"})
+    while gg["turn"] == A and not gg["over"]:
+        engine.apply_move(gg, A, {"type": "end_phase"})
+    while gg["turn"] == B and not gg["over"]:
+        engine.apply_move(gg, B, {"type": "end_phase"})
+    assert [e["card"] for e in gg["seats"][A]["duration"]] == ["Fishing Village"]
+
+    gg["seats"][A]["hand"] = ["Scheme"]
+    gg["phase"], gg["actions"] = "action", 1
+    engine.apply_move(gg, A, {"type": "play_action", "card": "Scheme"})
+    engine.apply_move(gg, A, {"type": "end_phase"})       # buy_phase_end
+    assert gg["pending"][-1]["card"] == "Scheme"
+    assert "Fishing Village" in gg["pending"][-1]["constraint"]["cards"]
+
+    # ...and choosing it really moves it out of the duration zone onto the
+    # deck. Clean-up then draws the new hand off that deck, so the card lands
+    # in hand rather than sitting on top — which is the whole point of Scheme.
+    engine.apply_move(gg, A, {"type": "decision", "cards": ["Fishing Village"]})
+    seat = gg["seats"][A]
+    assert all(e["card"] != "Fishing Village" for e in seat["duration"])
+    assert "Fishing Village" not in seat["discard"], "it was discarded, not kept"
+    assert "Fishing Village" in seat["hand"] or seat["deck"][:1] == ["Fishing Village"]
 
 
 def test_cost_lt_is_strict(g):

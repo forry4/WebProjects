@@ -1063,26 +1063,13 @@ def _scheme(game, pid):
                   until="turn_end")
 
 
-def _persisting(game, pid):
-    """The in_play cards that will NOT be discarded at this clean-up — the
-    duration setups the kernel is about to promote, plus their riders. Mirrors
-    _cleanup_durations' own keep-out rule."""
-    kept = []
-    for e in game["seats"][pid].get("dur_setup", []):
-        if (e["fx"] or e["watchers"]) and not e.get("fired"):
-            kept.append(e["card"])
-            kept.extend(e.get("riders", []))
-    return kept
-
-
 def _scheme_cleanup(game, pid, frame, choice):
     if frame["data"].get("actor") != pid:
         return
-    leaving = list(game["seats"][pid]["in_play"])
-    for name in _persisting(game, pid):
-        if name in leaving:
-            leaving.remove(name)
-    cands = [c for c in leaving if E.has_type(game, c, "action")]
+    # E.leaving_play covers in_play AND a Duration finishing at THIS clean-up
+    # (plus its riders) — that Duration is being discarded from play too, so it
+    # is a legal Scheme target. Reading in_play alone hid it.
+    cands = [c for c in E.leaving_play(game, pid) if E.has_type(game, c, "action")]
     if cands:
         E.push_choose_cards(game, pid, "Scheme", "topdeck",
                             cards=cands, mn=0, mx=1,
@@ -1092,9 +1079,7 @@ def _scheme_cleanup(game, pid, frame, choice):
 def _scheme_topdeck(game, pid, frame, choice):
     if not choice["cards"]:
         return
-    card = choice["cards"][0]
-    if card in game["seats"][pid]["in_play"]:
-        E.topdeck(game, pid, card, zone="in_play", public=True)
+    E.topdeck_from_play(game, pid, choice["cards"][0])   # False = lost track
 
 
 # --- registration ---------------------------------------------------------

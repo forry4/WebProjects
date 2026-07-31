@@ -1146,6 +1146,65 @@ def _cleanup_durations(game, pid):
 
 # --- playing action cards + the attack/reaction kernel -----------------------
 
+def persisting_in_play(game, pid):
+    """Cards on pid's table that will NOT be discarded at this clean-up — the
+    duration setups about to be promoted, plus their riders. THE reader of
+    _cleanup_durations' keep-out rule, so card code never re-derives it."""
+    kept = []
+    for e in game["seats"][pid].get("dur_setup", []):
+        if (e["fx"] or e["watchers"]) and not e.get("fired"):
+            kept.append(e["card"])
+            kept.extend(e.get("riders", []))
+    return kept
+
+
+def leaving_play(game, pid):
+    """Everything that WILL be discarded from pid's table at this clean-up.
+
+    Not just `in_play`: a Duration whose last ability has resolved sits in the
+    `duration` zone marked done and is discarded from play by THIS clean-up, so
+    it is every bit as much "discarded from play" as a card in in_play. Scheme
+    may target it, and looking only at in_play silently hid finishing Durations
+    (and their Throne-Room riders) from the offer."""
+    seat = game["seats"][pid]
+    keep = persisting_in_play(game, pid)
+    out = list(seat["in_play"])
+    for name in keep:
+        if name in out:
+            out.remove(name)
+    for e in seat["duration"]:
+        if e.get("done"):
+            out.append(e["card"])
+            out.extend(e.get("riders", []))
+    return out
+
+
+def topdeck_from_play(game, pid, card):
+    """Topdeck a card that is leaving play this clean-up, wherever it sits —
+    in_play, or a finished duration entry (its own card or one of its riders).
+    Returns False if it isn't actually there (lose-track)."""
+    seat = game["seats"][pid]
+    if card in seat["in_play"]:
+        topdeck(game, pid, card, zone="in_play", public=True)
+        return True
+    for e in seat["duration"]:
+        if not e.get("done"):
+            continue
+        if e["card"] == card:
+            seat["duration"].remove(e)
+            seat["deck"].insert(0, card)
+            # riders lose their host and discard normally
+            seat["discard"].extend(e.get("riders", []))
+            _log(game, pid, "topdeck", card=card)
+            return True
+        if card in e.get("riders", []):
+            e["riders"].remove(card)
+            seat["deck"].insert(0, card)
+            _log(game, pid, "topdeck", card=card)
+            return True
+    return False
+
+
 def find_card_zone(game, pid, card, zones=("discard", "hand", "trash")):
     """Where is `card` right now — or None if it has MOVED (the lose-track
     rule). A when-gain/trash/discard reaction fires after the card landed, but
@@ -1276,9 +1335,15 @@ def _open_attack_window(game, pid, card):
     push_auto(game, pid, "__attack", "play_ability",
               data={"card": card, "immune": list(immune0)})
     for o in reversed(opponents(game, pid)):
-        if o in immune0:
-            continue
-        opts = _reaction_options(game, o, immune=[])
+        # An ALREADY-PROTECTED player still gets the window: "it triggers
+        # whenever an Attack card is played, no matter if the card would have
+        # any effect on you" (p53). Skipping them cost a Lighthouse-protected
+        # Guard Dog holder its +2/+4 Cards on every attack — Guard Dog is pure
+        # upside and grants no immunity of its own. Passing immune0 keeps the
+        # pointless options out: _reaction_options drops an immunity-granting
+        # reaction (Moat) for someone already unaffected, so a protected player
+        # holding only a Moat is still offered nothing.
+        opts = _reaction_options(game, o, immune=immune0)
         if opts:
             _push_window(game, o, opts)
 
