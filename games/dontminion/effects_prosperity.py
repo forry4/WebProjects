@@ -239,16 +239,8 @@ def _rabble_hit(game, pid, frame, choice):
     rest = list(looked)
     for c in hits:
         rest.remove(c)
-    if hits:
-        E.discard(game, pid, hits, zone="aside", public=True)
-    if len(rest) >= 2:
-        E.push_order_cards(game, pid, "Rabble", "order", cards=rest)
-    else:
-        E.deck_from_aside(game, pid, rest)
-
-
-def _rabble_order(game, pid, frame, choice):
-    E.deck_from_aside(game, pid, choice["order"])   # order[0] ends up on top
+    # "first discard, THEN put cards back" — the kernel helper owns that order
+    E.discard_then_putback(game, pid, "Rabble", hits, rest)
 
 
 # --- Vault -------------------------------------------------------------------
@@ -745,7 +737,6 @@ STAGES = {
     ("Forge", "trash"): _forge_trash,
     ("Forge", "gain"): _forge_gain,
     ("Rabble", "hit"): _rabble_hit,
-    ("Rabble", "order"): _rabble_order,
     ("Vault", "discard"): _vault_discard,
     ("Vault", "opp_opt"): _vault_opp_opt,
     ("Vault", "opp_discard"): _vault_opp_discard,

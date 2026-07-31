@@ -169,16 +169,8 @@ def _cartographer_discard(game, pid, frame, choice):
     rest = list(frame["data"]["looked"])
     for c in chosen:
         rest.remove(c)
-    if chosen:
-        E.discard(game, pid, chosen, zone="aside", public=True)
-    if len(rest) >= 2:
-        E.push_order_cards(game, pid, "Cartographer", "order", cards=rest)
-    else:
-        E.deck_from_aside(game, pid, rest)
-
-
-def _cartographer_order(game, pid, frame, choice):
-    E.deck_from_aside(game, pid, choice["order"])   # order[0] ends up on top
+    # "first discard, THEN put cards back" — the kernel helper owns that order
+    E.discard_then_putback(game, pid, "Cartographer", chosen, rest)
 
 
 # --- Margrave ----------------------------------------------------------------
@@ -1133,7 +1125,6 @@ STAGES = {
     ("Border Village", "on_gain"): _border_village_on_gain,
     ("Border Village", "gain"): _border_village_gain,
     ("Cartographer", "discard"): _cartographer_discard,
-    ("Cartographer", "order"): _cartographer_order,
     ("Cauldron", "count"): _cauldron_count,
     ("Cauldron", "curse"): _cauldron_curse,
     ("Develop", "trash"): _develop_trash,

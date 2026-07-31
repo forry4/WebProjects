@@ -199,10 +199,10 @@ def _lookout_trash(game, pid, frame, choice):
 
 
 def _lookout_discard(game, pid, frame, choice):
-    E.discard(game, pid, choice["cards"], zone="aside", public=True)
     rest = list(frame["data"]["rest"])
     rest.remove(choice["cards"][0])
-    E.deck_from_aside(game, pid, rest)
+    # "first discard, THEN put cards back" — the kernel helper owns that order
+    E.discard_then_putback(game, pid, "Lookout", list(choice["cards"]), rest)
 
 
 # --- Merchant Ship -----------------------------------------------------------

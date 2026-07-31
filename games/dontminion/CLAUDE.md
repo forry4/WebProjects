@@ -139,6 +139,16 @@ directly by the owning card's effect.
   turn EVAPORATES (logged `off_turn_bonus`) instead of landing in the turn player's pool — pools
   are per-turn ("your money pool is empty" at turn start). `add_coins` also accepts a NEGATIVE n,
   clamped at $0 (Souk: "you might lose more than $X when deducting").
+- **`discard_then_putback(game,pid,card,chosen,rest)`** — THE look-at-cards / discard-some /
+  put-the-rest-back shape (Sentry, Lookout, Rabble, Cartographer). It pushes the put-back FIRST
+  so it sits BELOW the discard's when-discard triggers, which the discard then stacks on top:
+  compendium, Sentry — "TRIGGERED ABILITY (first trash, then discard, **then put cards back**)".
+  Doing the obvious thing instead (push the put-back last) returned the kept cards to the deck
+  before a discarded Tunnel/Trail/Weaver could react, and a Trail's +1 Card then drew a card the
+  player was never allowed to see. Four cards each had their own copy of this ordering and all
+  four had it backwards, including a shipped one the new card was told to copy. Use the helper.
+  It relies on **kernel stages named `__*` being usable by ANY card** (`_stage_fn` falls back to
+  `("*", stage)`), so the frame still displays the card's own name.
 - **`ATTACK_REACTIONS`** — a module-level registry (merged like EFFECTS): `{card: {"label",
   "when": fn(game,pid), "immunity": bool, "mode": "reveal"|"play", "stage": str|None,
   "repeatable": bool}}`. `mode:"play"` is REACTION THAT PLAYS ITSELF (p53) — plays from hand, no

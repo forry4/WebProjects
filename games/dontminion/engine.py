@@ -290,6 +290,11 @@ def _run_stage(game, card, stage, pid, frame, choice):
 
 def _stage_fn(card, stage):
     fn = KERNEL_STAGES.get((card, stage))
+    if fn is None and stage.startswith("__"):
+        # a KERNEL stage usable by ANY card ("*"): the frame keeps the card's
+        # own name so the prompt still reads "Sentry", but the handler is the
+        # kernel's. Card-name-agnostic shared shapes live here.
+        fn = KERNEL_STAGES.get(("*", stage))
     if fn is None:
         from . import effects
         fn = effects.STAGES.get((card, stage))
@@ -1146,6 +1151,38 @@ def _cleanup_durations(game, pid):
 
 # --- playing action cards + the attack/reaction kernel -----------------------
 
+def discard_then_putback(game, pid, card, chosen, rest, zone="aside"):
+    """THE look-at-cards / discard-some / put-the-rest-back shape (Sentry,
+    Lookout, Rabble, Cartographer).
+
+    Order is load-bearing and easy to get backwards: the put-back is pushed
+    FIRST so it sits BELOW the discard's when-discard triggers, which the
+    discard then pushes on top of it. Compendium, Sentry: "See TRIGGERED
+    ABILITY (first trash, then discard, THEN PUT CARDS BACK)", and p54: the
+    kept cards "are kept aside… this matters if, for example, discarding or
+    trashing triggers an ability that lets you draw."
+
+    Pushing the put-back last (the obvious reading of LIFO) returned the kept
+    cards to the deck BEFORE a discarded Tunnel/Trail/Weaver could react — and
+    a Trail's +1 Card then drew a card the player had never been allowed to
+    see. Four cards had their own copy of this ordering; now they share one.
+    """
+    if len(rest) >= 2:
+        push_order_cards(game, pid, card, "__putback_order", cards=list(rest))
+    elif rest:
+        push_auto(game, pid, card, "__putback", data={"rest": list(rest)})
+    if chosen:
+        discard(game, pid, chosen, zone=zone, public=True)
+
+
+def _k_putback(game, pid, frame, choice):
+    deck_from_aside(game, pid, frame["data"]["rest"])
+
+
+def _k_putback_order(game, pid, frame, choice):
+    deck_from_aside(game, pid, choice["order"])     # order[0] ends up on top
+
+
 def persisting_in_play(game, pid):
     """Cards on pid's table that will NOT be discarded at this clean-up — the
     duration setups about to be promoted, plus their riders. THE reader of
@@ -1460,6 +1497,9 @@ def _k_next(game, pid, frame, choice):
 
 
 KERNEL_STAGES = {
+    # "*" = a kernel stage any card may push (see _stage_fn)
+    ("*", "__putback"): _k_putback,
+    ("*", "__putback_order"): _k_putback_order,
     ("__attack", "window"): _k_window,
     # legacy stage: a game paused mid-Diplomat across the deploy still holds a
     # frame naming it. Compatibility only — delete with _LEGACY_REACTION_IDS.

@@ -465,17 +465,13 @@ def _sentry_trash(game, pid, frame, choice):
 
 
 def _sentry_discard(game, pid, frame, choice):
-    if choice["cards"]:
-        E.discard(game, pid, choice["cards"], zone="aside", public=True)
-    rest = list(game["seats"][pid]["aside"])
-    if len(rest) >= 2:
-        E.push_order_cards(game, pid, "Sentry", "order", cards=rest)
-    elif rest:                                  # one card: only one possible order
-        E.deck_from_aside(game, pid, rest)
-
-
-def _sentry_order(game, pid, frame, choice):
-    E.deck_from_aside(game, pid, choice["order"])   # order[0] ends up on top
+    chosen = list(choice["cards"])
+    rest = [c for c in game["seats"][pid]["aside"]]
+    for c in chosen:
+        rest.remove(c)
+    # "first trash, then discard, THEN put cards back" — the kernel helper owns
+    # that order, so a discarded Tunnel/Trail reacts before the rest go back
+    E.discard_then_putback(game, pid, "Sentry", chosen, rest)
 
 
 # --- Artisan ------------------------------------------------------------------
@@ -569,7 +565,6 @@ STAGES = {
     ("Mine", "gain"): _mine_gain,
     ("Sentry", "trash"): _sentry_trash,
     ("Sentry", "discard"): _sentry_discard,
-    ("Sentry", "order"): _sentry_order,
     ("Artisan", "gain"): _artisan_gain,
     ("Artisan", "topdeck"): _artisan_topdeck,
 }
