@@ -1,10 +1,17 @@
-"""The bots. Two strategies today, selected by the room's `ai_difficulty`:
+"""The bots, one strategy per rung of the ladder, selected by `ai_difficulty`:
 
 * ``random``   — uniform over legal moves (v1; the easy/normal/hard tiers).
 * ``bigmoney`` — the classic Big Money buy ladder. Buys ONLY Treasure and
   Victory, never an Action, and greens on a Province-count clock. It is a real
   opponent: the random bot mostly buys Coppers and Curses and rarely finishes a
   Province.
+* ``bmplus``   — Big Money that READS THE BOARD: it picks the kingdom's best
+  terminal (the published Terminal-Draw-BM ranking), plays its Actions, buys
+  Colonies/Platinum in a colony game, and hands every buy to `bot_endgame` for
+  the Penultimate Province Rule and pile control.
+
+Each rung is the one below it plus a NAMED skill, so the ladder reads like
+playing better humans rather than different species.
 
 `choose` is the server scheduler's guaranteed turn-finisher: for EVERY strategy
 it must return a valid move for ANY state where (pending_pid or turn) == pid,
@@ -13,17 +20,21 @@ and it must never consume the game's own rng_state (pass an explicit rng).
 
 import random
 
-from . import bot_decisions, engine
+from . import bot_decisions, bot_endgame, engine
+from .bot_traits import best_bm_terminal, traits
 
-# ai_difficulty values that route to the Big Money buy ladder. Everything else
+# ai_difficulty values that route to a real strategy. Everything else
 # (easy/normal/hard) is still the random-legal bot.
 BIG_MONEY = "bigmoney"
+BM_PLUS = "bmplus"
 
 
 def choose(game, pid, rng=None, difficulty=None):
     """ONE move for pid. `difficulty` is the room's persisted tier."""
     if difficulty == BIG_MONEY:
         return choose_big_money(game, pid, rng)
+    if difficulty == BM_PLUS:
+        return choose_bm_plus(game, pid, rng)
     return choose_random(game, pid, rng)
 
 
@@ -127,6 +138,127 @@ def choose_big_money(game, pid, rng=None):
         return r.choice(treasures)
 
     want = _want(game, pid)
+    if want is not None and {"type": "buy", "card": want} in moves:
+        return {"type": "buy", "card": want}
+    return {"type": "end_phase"}
+
+
+# ── Big Money+ ───────────────────────────────────────────────────────────────
+# Big Money with the three skills the corpus adds first: a terminal off the
+# board, the Colony rungs, and endgame technique.
+#
+# It stays a MONEY deck on purpose. It buys one kind of Action (the kingdom's
+# best drawer/curser) and never a village, because the terminal budget is the
+# whole reason plain Big Money works: "<= 1 terminal per 5-6 cards, ~2 drawers
+# max, Envoy exactly 1".
+
+_MAX_TERMINALS = 2          # the published cap for a BM deck
+_SECOND_TERMINAL_DECK = 16  # "add the 2nd Smithy at ~16-18 cards"
+# Cards good enough to buy a second copy of; the article singles out the
+# 5-card drawers as the ones that collide too hard to double up.
+_SINGLE_COPY = {"Council Room", "Magnate", "Witch's Hut"}
+
+
+def _bm_terminal(game, pid):
+    """The kingdom's best Big Money terminal, or None on a board with none."""
+    return best_bm_terminal(game["kingdom"], game["supply"])
+
+
+def _terminals_owned(game, pid, card):
+    return engine.owned_cards(game, pid).count(card)
+
+
+def _wants_terminal(game, pid):
+    """Should we buy (another copy of) our terminal at these coins?"""
+    card = _bm_terminal(game, pid)
+    if card is None or engine.cost(game, card) > game["coins"]:
+        return None
+    if game["supply"].get(card, 0) <= 0:
+        return None
+    if engine.buy_gate(game, pid, card) is not None:
+        return None
+    have = _terminals_owned(game, pid, card)
+    if have == 0:
+        return card
+    cap = 1 if card in _SINGLE_COPY else _MAX_TERMINALS
+    if have >= cap:
+        return None
+    # the second copy waits for the deck to be big enough to absorb it
+    if len(engine.owned_cards(game, pid)) >= _SECOND_TERMINAL_DECK:
+        return card
+    return None
+
+
+def _colony_rungs(game, pid):
+    """Platinum/Colony, which plain Big Money deliberately ignores."""
+    if not game.get("colony"):
+        return None
+    coins = game["coins"]
+    if coins >= 11 and game["supply"].get("Colony", 0) > 0:
+        return "Colony"
+    if 9 <= coins <= 10 and game["supply"].get("Platinum", 0) > 0:
+        # a Platinum is worth more than the Gold this would otherwise buy, and
+        # 2.2 density is what a Colony game actually needs
+        return "Platinum"
+    return None
+
+
+def _bm_plus_buy(game, pid):
+    """What to buy this turn, before the endgame module gets a say.
+
+    Order matters and is the published one: the Colony rungs outrank
+    everything (a Colony game is a different economy), then the terminal that
+    makes the money work, then the plain ladder.
+    """
+    colony = _colony_rungs(game, pid)
+    if colony is not None:
+        return colony
+    terminal = _wants_terminal(game, pid)
+    if terminal is not None:
+        # the terminal competes with the money rung at the same price; the
+        # published order buys the drawer first (it is what makes the money
+        # work), except when a Province is on the table
+        if game["coins"] < 8 or game["supply"].get("Province", 0) <= 0:
+            return terminal
+    want = _want(game, pid)
+    # Big Money's "really early: take Gold at $8" exception must NOT fire once
+    # the game is ending — economy you will never get to spend is worth less
+    # than the points on the table. Plain Big Money keeps the quirk (it is
+    # faithful to the ladder as published); this rung is the one that reads a
+    # clock, so it is the one that fixes it.
+    if want == "Gold" and game["coins"] >= 8 \
+            and bot_endgame.should_green(game, pid) \
+            and game["supply"].get("Province", 0) > 0:
+        return "Province"
+    return want
+
+
+def choose_bm_plus(game, pid, rng=None):
+    r = rng or random.Random()
+    if game["pending_pid"] == pid:
+        return _decision(game, pid, r, policy=True)
+
+    moves = engine.legal_moves(game, pid)
+    if game["phase"] == "action":
+        # Unlike Big Money this tier OWNS Actions, so it plays them: villages
+        # and cantrips first (they cost nothing and may find more), terminals
+        # last. It only ever holds one kind of terminal, so no ordering
+        # question arises beyond that.
+        plays = [m for m in moves if m["type"] == "play_action"]
+        if plays:
+            plays.sort(key=lambda m: (traits(m["card"])["terminal"],
+                                      -traits(m["card"])["plus_cards"]))
+            return plays[0]
+        return {"type": "end_phase"}
+
+    for m in moves:
+        if m["type"] == "play_all_treasures":
+            return m
+    treasures = [m for m in moves if m["type"] == "play_treasure"]
+    if treasures:
+        return r.choice(treasures)
+
+    want = bot_endgame.override(game, pid, _bm_plus_buy(game, pid))
     if want is not None and {"type": "buy", "card": want} in moves:
         return {"type": "buy", "card": want}
     return {"type": "end_phase"}

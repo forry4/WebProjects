@@ -72,7 +72,9 @@ def test_create_coerces_bad_options():
     room = m.ROOMS["R1"]
     assert room["expansions"] == ["base", "intrigue"]
     assert room["max_players"] == 4
-    assert room["ai_difficulty"] == "normal"
+    # the contract is "unknown tier -> the default", not any particular tier:
+    # the ladder grows without a migration precisely because of this coercion
+    assert room["ai_difficulty"] == m.DEFAULT_DIFFICULTY
     assert room["status"] == "open" and room["game"] is None
 
 
@@ -360,6 +362,6 @@ def test_load_revalidates_difficulty(monkeypatch):
     monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
     assert m.load_game_to_memory("R9") is True
     r = m.ROOMS["R9"]
-    assert r["ai_difficulty"] == "normal"
+    assert r["ai_difficulty"] == m.DEFAULT_DIFFICULTY
     assert r["expansions"] == ["base", "intrigue"]
     assert r["max_players"] == 4

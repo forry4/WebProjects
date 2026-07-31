@@ -52,13 +52,15 @@ LOG = logging.getLogger("games.dontminion")
 _BOT_THINK = 0.7
 
 
-# easy/normal/hard are all still the v1 random-legal bot; "bigmoney" is the Big
-# Money buy ladder (bot.choose dispatches on this string). The tier is validated
-# + persisted so a live game can't be silently retiered by a redeploy (the
-# Spender ai_variant lesson) — which also means the ladder can grow without a
-# migration, since an unknown value falls back to the default.
-AI_DIFFICULTIES = ("easy", "normal", "hard", bot.BIG_MONEY)
-DEFAULT_DIFFICULTY = "normal"
+# The ladder, in strength order. easy/normal/hard are all still the v1
+# random-legal bot; "bigmoney" is the classic buy ladder; "bmplus" adds a
+# terminal read off the board, the Colony rungs and endgame technique
+# (bot.choose dispatches on this string). The tier is validated + persisted so
+# a live game can't be silently retiered by a redeploy (the Spender ai_variant
+# lesson) — which also means the ladder can grow without a migration, since an
+# unknown value falls back to the default.
+AI_DIFFICULTIES = ("easy", "normal", "hard", bot.BIG_MONEY, bot.BM_PLUS)
+DEFAULT_DIFFICULTY = bot.BM_PLUS
 
 AI_PIDS = ("bot1", "bot2", "bot3")
 

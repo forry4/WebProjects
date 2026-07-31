@@ -21,12 +21,13 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-// The bot tiers the SERVER actually distinguishes (main.AI_DIFFICULTIES): easy,
-// normal and hard are one and the same random-legal bot, so only one of them is
-// offered — the other option is the real one.
+// The bot tiers the SERVER actually distinguishes (main.AI_DIFFICULTIES), in
+// strength order. easy/normal/hard are one and the same random-legal bot, so
+// only one of them is offered rather than pretending to three tiers.
 const BOTS = [
   { id: "easy", name: "Random" },
   { id: "bigmoney", name: "Big Money" },
+  { id: "bmplus", name: "Big Money+" },
 ];
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
 // "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
@@ -485,8 +486,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createBots, setCreateBots] = useState(1);
-  // Big Money by default: it's the tier that plays an actual game of Dominion.
-  const [createBotKind, setCreateBotKind] = useState("bigmoney");
+  // Big Money+ by default: the strongest tier that still answers instantly,
+  // and the one that plays a recognisable game of Dominion (it reads the
+  // board for a terminal and knows how the game ends).
+  const [createBotKind, setCreateBotKind] = useState("bmplus");
   // Kingdom requirements — none by default, so a plain Create still deals the
   // fully random 10 the game has always dealt.
   const [createReqs, setCreateReqs] = useState([]);
