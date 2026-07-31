@@ -3,14 +3,21 @@
 Feeds every clean expert decision to coc-core's harvest_bga (which finds the micro-action
 chain and emits one row per micro-decision, one-hot on the expert's action).
 
-BOTH SEATS are recorded, not just the top player: the opponent of a top-100 BGA player is
-also far above our net (that's the whole premise), and doubling the rows matters when the
-corpus is this small. Each row carries that mover's own label/margin.
+SEAT STRENGTH IS A FILTER (`min_elo`). The original premise here -- "the opponent of a
+top-100 BGA player is also far above our net, so record BOTH seats" -- is FALSE for this
+corpus, and cob_elo.py measures it: every game has a ~2000+ seeded top player, but the
+median opponent is ~1635, a **median 396-ELO gap** (p75 514, max 753). At a 1900 bar only
+9 of 114 rated games are pro-vs-pro. Harvesting both seats therefore trains the net to
+imitate a ~400-ELO-weaker player on roughly half its rows, with no way to tell them apart.
+So: a decision is harvested only if THAT MOVER cleared `min_elo`. Both seats of a
+pro-vs-pro game still qualify; in a mismatch only the strong side is taken. Rating comes
+from {CORP}/elo.json -- an unrated seat is DROPPED whenever min_elo > 0 (we cannot vouch
+for it), which is why cob_elo.py should be re-run after every download batch.
 
 mon6 games: harvested only up to the phase where a mon6 tile is DRAWN (cob_replay.max_phase).
 Those phases are untainted -- nobody could see the tile, so no decision accounts for it.
 
-Usage: python cob_harvest.py <out.csv>
+Usage: python cob_harvest.py <out.csv> [min_elo]
 """
 import contextlib
 import glob
@@ -37,9 +44,18 @@ EXE = "C:/Users/Forrest/forrestm_projects-cobmining/coc-core/target/release/harv
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "C:/Users/Forrest/CoB_corpus/bga_rows.csv"
+    min_elo = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0
+    elo_path = CORP + "/elo.json"
+    elos = json.load(open(elo_path)) if os.path.exists(elo_path) else {}
+    if min_elo and not elos:
+        print(f"FATAL: min_elo={min_elo:.0f} but no {elo_path} — run cob_elo.py first.")
+        return 2
+    print(f"min_elo {min_elo:.0f} | ratings for {len(elos)} games", flush=True)
+
     proc = subprocess.Popen([EXE, out], stdin=subprocess.PIPE, text=True, bufsize=1,
                             encoding="utf-8")
     sent = [0]
+    skipped = [0]
     games = 0
 
     for p in sorted(glob.glob(LOGS + "/*.json")):
@@ -109,21 +125,30 @@ def main():
             scores = {order[0]: int(rec[order[0]]), order[1]: int(rec[order[1]])}
 
         vals = [scores[order[0]], scores[order[1]]]
+        seat_elo = elos.get(tid, {})
+        kept_here = 0
         for proj, cm, seat in pending:
+            if min_elo:
+                r = seat_elo.get(str(order[seat]))
+                if r is None or r < min_elo:
+                    skipped[0] += 1
+                    continue
             mine, theirs = vals[seat], vals[1 - seat]
+            kept_here += 1
             proc.stdin.write(json.dumps(
                 {"proj": proj, "move": cm, "label": 1 if mine > theirs else 0,
                  "margin": mine - theirs, "gid": int(tid) % 1000000},
                 separators=(",", ":")) + "\n")
             sent[0] += 1
-        games += 1
-        print(f"  {tid}: {len(pending)} decisions "
+        games += 1 if kept_here else 0
+        print(f"  {tid}: {kept_here}/{len(pending)} decisions "
               f"({'full' if max_phase is None else 'phases A-'+'ABCDE'[max_phase]})", flush=True)
 
     proc.stdin.close()
     proc.wait()
-    print(f"\ngames harvested: {games} | decisions sent: {sent[0]} -> {out}")
+    print(f"\ngames contributing: {games} | decisions sent: {sent[0]} "
+          f"(below the {min_elo:.0f} bar / unrated: {skipped[0]}) -> {out}")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)
