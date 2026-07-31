@@ -23,11 +23,16 @@ const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
 // No difficulty picker yet: every bot plays random legal moves. Re-add tiers
 // here (and the CmRow in the create modal) when a stronger bot actually ships.
+// Display NAMES only. The SERVER decides which expansions exist (/catalog
+// "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
+// so a set the server ships without a label here still appears (under a
+// title-cased id) instead of being silently unpickable.
 const EXPANSIONS = [
   { id: "base", name: "Base Set" },
   { id: "intrigue", name: "Intrigue" },
   { id: "seaside", name: "Seaside" },
   { id: "prosperity", name: "Prosperity" },
+  { id: "hinterlands", name: "Hinterlands" },
 ];
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
@@ -402,6 +407,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const bought = !!game?.turn_ctx?.bought;
   // "Play all treasures" SKIPS the interactive ones (War Chest/Anvil), so a
   // hand holding only those must not offer the button — it would do nothing.
+  // built from what the SERVER offers, so shipping a set needs no frontend edit
+  const expansionOptions = (catalog?.expansions?.length
+    ? catalog.expansions
+    : EXPANSIONS.map((e) => e.id)
+  ).map((id) => ({
+    id,
+    name: EXPANSIONS.find((e) => e.id === id)?.name
+      || id.charAt(0).toUpperCase() + id.slice(1),
+  }));
   const manualTreasures = catalog?.manual_treasures || [];
   const handTreasures = (mySeat?.hand || []).some((c) => (cards[c]?.types?.includes("treasure")
     || (c === "Curse" && game?.curse_is_treasure)) && !manualTreasures.includes(c));
@@ -1017,7 +1031,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             )}
             <CmRow label="Expansions">
               <div className="dm-checks">
-                {EXPANSIONS.map((ex) => {
+                {expansionOptions.map((ex) => {
                   const on = createExps.includes(ex.id);
                   return (
                     <button key={ex.id} type="button"
@@ -1035,7 +1049,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="cm-footer">
               <span className="cm-summary">
                 {createOpp === "ai" ? `You + ${createBots} bot${createBots > 1 ? "s" : ""}` : `Up to ${createPlayers} players`}
-                {" · "}{createExps.map((e) => EXPANSIONS.find((x) => x.id === e)?.name).join(" + ")}
+                {" · "}{createExps.map((e) => expansionOptions.find((x) => x.id === e)?.name || e).join(" + ")}
               </span>
               <button className="btn btn-gold cm-create" onClick={createGame}>Create</button>
             </div>

@@ -65,7 +65,7 @@ def _valid_difficulty(value) -> str:
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
-KNOWN_EXPANSIONS = ("base", "intrigue", "seaside", "prosperity")
+KNOWN_EXPANSIONS = ("base", "intrigue", "seaside", "prosperity", "hinterlands")
 
 
 def _valid_expansions(value) -> list[str]:

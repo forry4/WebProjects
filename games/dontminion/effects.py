@@ -6,9 +6,11 @@ the single lookup point the engine uses; a duplicate registration across
 modules is a packaging bug and raises at import.
 """
 
-from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity)
+from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
+               effects_hinterlands)
 
-_MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity)
+_MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
+            effects_hinterlands)
 
 EFFECTS = {}
 STAGES = {}

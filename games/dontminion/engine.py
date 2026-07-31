@@ -34,11 +34,12 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 4
+SCHEMA = 5
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
 #   4 = card RENAMES (Harem -> Farm) — the first genuine TRANSFORM step
+#   5 = Hinterlands  (per-turn counters for Crossroads/Fool's Gold/Cauldron)
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten

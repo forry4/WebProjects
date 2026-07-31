@@ -110,29 +110,44 @@ def _all_kingdom_cards():
     purely by changing the alphabetical cut points. Don't read a speed change
     here as lost coverage, and don't read it as a regression either."""
     from games.dontminion.cards import KINGDOM
-    return (sorted(KINGDOM["base"]) + sorted(KINGDOM["intrigue"])
-            + sorted(KINGDOM["seaside"]) + sorted(KINGDOM["prosperity"]))
+    # EVERY expansion, derived — a new set joins the soak the moment it ships,
+    # instead of needing this list edited (and silently going unsoaked if not).
+    out = []
+    for exp in sorted(KINGDOM):
+        out.extend(sorted(KINGDOM[exp]))
+    return out
+
+
+def _chunks():
+    """Ten-card kingdoms covering the whole roster; the last one back-fills."""
+    cards = _all_kingdom_cards()
+    n = (len(cards) + 9) // 10
+    return [cards[i * 10: i * 10 + 10] if i * 10 + 10 <= len(cards)
+            else cards[-10:] for i in range(n)]
 
 
 def test_the_forced_kingdom_chunks_really_cover_every_card():
     """The chunking is derived, so an off-by-one or a roster change could drop
     cards from coverage silently. Pin it."""
-    cards = _all_kingdom_cards()
     covered = set()
-    for chunk in range(11):
-        covered |= set(cards[chunk * 10: chunk * 10 + 10] if chunk < 10
-                       else cards[-10:])
-    assert covered == set(cards), sorted(set(cards) - covered)
+    for k in _chunks():
+        assert len(k) == 10, k
+        covered |= set(k)
+    assert covered == set(_all_kingdom_cards()), \
+        sorted(set(_all_kingdom_cards()) - covered)
 
 
-@pytest.mark.parametrize("chunk", list(range(11)))
+@pytest.mark.parametrize("chunk", list(range(13)))
 def test_soak_forced_kingdoms_cover_all_cards(chunk):
-    """Fixed kingdoms that together cover ALL kingdom cards (104 with
-    Prosperity) — every card effect runs inside full random games under the
+    """Fixed kingdoms that together cover EVERY kingdom card (130 across five
+    expansions) — every card effect runs inside full random games under the
     conservation census."""
-    cards = _all_kingdom_cards()
-    kingdom = cards[chunk * 10: chunk * 10 + 10] if chunk < 10 else cards[-10:]
-    game = engine.new_game([A, B, C], ["base", "intrigue", "seaside", "prosperity"],
+    from games.dontminion.cards import KINGDOM
+    chunks = _chunks()
+    if chunk >= len(chunks):
+        pytest.skip("fewer chunks than parameters")
+    kingdom = chunks[chunk]
+    game = engine.new_game([A, B, C], sorted(KINGDOM),
                            seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)
     before = _fingerprint(game)

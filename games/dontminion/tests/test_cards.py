@@ -1,4 +1,5 @@
-"""WP1 card-data tests: the verified 113-card dataset (Base + Intrigue + Seaside + Prosperity, all 2E).
+"""Card-data tests: the verified 139-card dataset (Base + Intrigue + Seaside +
+Prosperity + Hinterlands, all 2E).
 
 Pure data tests — no engine import. The EXPECTED table below is the corruption tell:
 every (name, cost, types) triple was verified against the Knutsen compendium v11.1
@@ -9,7 +10,7 @@ from games.dontminion import cards
 
 
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction", "duration"}
-ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity"}
+ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity", "hinterlands"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 
 REMOVED_1E = [
@@ -145,6 +146,33 @@ EXPECTED = {
     "Forge": (7, ["action"]),
     "King's Court": (7, ["action"]),
     "Peddler": (8, ["action"]),
+    # Hinterlands 2E kingdom (26) - 17 kept from 1E + 9 new in 2E
+    "Crossroads": (2, ['action']),
+    "Fool's Gold": (2, ['treasure', 'reaction']),
+    "Develop": (3, ['action']),
+    "Guard Dog": (3, ['action', 'reaction']),
+    "Oasis": (3, ['action']),
+    "Scheme": (3, ['action']),
+    "Tunnel": (3, ['victory', 'reaction']),
+    "Jack of All Trades": (4, ['action']),
+    "Nomads": (4, ['action']),
+    "Spice Merchant": (4, ['action']),
+    "Trader": (4, ['action', 'reaction']),
+    "Trail": (4, ['action', 'reaction']),
+    "Weaver": (4, ['action', 'reaction']),
+    "Berserker": (5, ['action', 'attack']),
+    "Cartographer": (5, ['action']),
+    "Cauldron": (5, ['treasure', 'attack']),
+    "Haggler": (5, ['action']),
+    "Highway": (5, ['action']),
+    "Inn": (5, ['action']),
+    "Margrave": (5, ['action', 'attack']),
+    "Souk": (5, ['action']),
+    "Stables": (5, ['action']),
+    "Wheelwright": (5, ['action']),
+    "Witch's Hut": (5, ['action', 'attack']),
+    "Border Village": (6, ['action']),
+    "Farmland": (6, ['victory']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -159,9 +187,10 @@ def test_bandit_ruling_constant():
     assert cards.BANDIT_VICTIM_CHOOSES is True
 
 
-def test_113_cards_and_expansion_counts():
-    assert len(cards.CARDS) == 113
-    by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [], "prosperity": []}
+def test_card_count_and_expansion_counts():
+    assert len(cards.CARDS) == 139
+    by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
+              "prosperity": [], "hinterlands": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     assert len(by_exp["basic"]) == 7
@@ -169,11 +198,13 @@ def test_113_cards_and_expansion_counts():
     assert len(by_exp["intrigue"]) == 26
     assert len(by_exp["seaside"]) == 27
     assert len(by_exp["prosperity"]) == 27      # 25 kingdom + Platinum + Colony
+    assert len(by_exp["hinterlands"]) == 26     # 17 kept from 1E + 9 new in 2E
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
-    for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27), ("prosperity", 25)):
+    for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27),
+                      ("prosperity", 25), ("hinterlands", 26)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -182,11 +213,14 @@ def test_kingdom_lists_match_flags_no_duplicates():
             assert cards.CARDS[n]["expansion"] == exp
     # every kingdom-flagged card appears in exactly one KINGDOM list
     flagged = {n for n, c in cards.CARDS.items() if c["kingdom"]}
-    listed = (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])
-              | set(cards.KINGDOM["seaside"]) | set(cards.KINGDOM["prosperity"]))
+    listed = set().union(*(set(v) for v in cards.KINGDOM.values()))
     assert flagged == listed
-    assert not (set(cards.KINGDOM["base"]) & set(cards.KINGDOM["intrigue"]))
-    assert not (set(cards.KINGDOM["seaside"]) & (set(cards.KINGDOM["base"]) | set(cards.KINGDOM["intrigue"])))
+    # the expansion lists are pairwise disjoint — a card belongs to exactly one
+    names = list(cards.KINGDOM)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            overlap = set(cards.KINGDOM[a]) & set(cards.KINGDOM[b])
+            assert not overlap, f"{a}/{b} share {sorted(overlap)}"
     # basics are never kingdom cards
     for n in BASIC_7:
         assert cards.CARDS[n]["kingdom"] is False
@@ -228,7 +262,8 @@ def test_schema_field_completeness_and_validity():
 
 def test_static_vp_values():
     expected_vp = {"Estate": 1, "Duchy": 3, "Province": 6, "Curse": -1,
-                   "Farm": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10}
+                   "Farm": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10,
+                   "Farmland": 2, "Tunnel": 2}          # Hinterlands
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0

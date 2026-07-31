@@ -62,7 +62,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 4
+    assert _fresh()["schema"] == engine.SCHEMA == 5
 
 
 @pytest.mark.parametrize("version", [1, 2])
