@@ -759,6 +759,32 @@ try {
 			await closeInfo();
 			check("a short tap still buys, and opens nothing",
 				c2 !== c3 && !tapOpened, JSON.stringify({ c2, c3, tapOpened }));
+
+			// Phone width stacks your piles / hand / buttons into one column, and the
+			// count pills hang BELOW their slot — so "hand N" landed on top of the
+			// buttons (measured 6px into them). Nothing in the column may overlap.
+			await page.setViewportSize({ width: 390, height: 844 });
+			await sleep(600);
+			const mob = await page.evaluate(() => {
+				const pill = document.querySelector(".dm-myhand .dm-pile-count");
+				const btns = document.querySelector(".dm-turnbtns");
+				if (!pill || !btns) return { missing: true };
+				const p = pill.getBoundingClientRect(), b = btns.getBoundingClientRect();
+				// ...and lifting it must not push it onto a card's own text
+				let onCard = null;
+				for (const el of document.querySelectorAll(".dm-me .dm-types, .dm-me .dm-cost")) {
+					if (!el.textContent.trim()) continue;
+					const r = el.getBoundingClientRect();
+					if (p.top < r.bottom && p.bottom > r.top && p.left < r.right && p.right > r.left) {
+						onCard = el.className; break;
+					}
+				}
+				return { overlapWithButtons: +(p.bottom - b.top).toFixed(1), onCard };
+			});
+			check("on a phone the hand count clears the buttons and the cards",
+				!mob.missing && mob.overlapWithButtons < 0 && !mob.onCard, JSON.stringify(mob));
+			await page.setViewportSize({ width: 1280, height: 900 });
+			await sleep(300);
 		}
 		check("no page errors while rendering the board", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");

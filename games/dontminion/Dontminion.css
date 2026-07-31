@@ -431,6 +431,13 @@
      them beside it, three (100cqw/3)-wide cards can't fit and it wraps at 2 */
   .dm .dm-handrow { flex-direction: column; align-items: stretch; gap: 8px; }
   .dm .dm-mypiles { --card-w-s: 72px; gap: 12px; }
+  /* The count pills hang 14px BELOW their slot, which is fine when the piles sit
+     beside the hand — but this breakpoint stacks the row, so "hand N" landed 6px
+     into the buttons underneath it (measured). Lift the pills in your own area
+     and widen the stack gap: the pill still clears the card's own foot content
+     (it stops ~2px into the card's bottom padding, where nothing is drawn). */
+  .dm .dm-me .dm-pile-count { bottom: -4px; }
+  .dm .dm-handrow { gap: 12px; }
   /* three buttons (Undo / Play all treasures / End turn) don't fit one row on
      a phone — WRAP; unwrapped rows were what iOS zoomed out for */
   .dm .dm-turnbtns { flex-direction: row; flex-wrap: wrap; width: 100%; }

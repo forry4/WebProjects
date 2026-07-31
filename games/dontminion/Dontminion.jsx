@@ -1436,7 +1436,6 @@ export default function Dontminion({ myId, authUser, onExit }) {
         <div className="dm-backdrop" onClick={() => setConfirmAbandon(false)}>
           <div className="dm-modal" onClick={(e) => e.stopPropagation()}>
             <h2>Abandon this game?</h2>
-            <p>The other players win.</p>
             <div className="dm-prompt-actions">
               <button className="btn btn-danger" onClick={abandonGame}>Abandon</button>
               <button className="btn btn-outline" onClick={() => setConfirmAbandon(false)}>Keep playing</button>
