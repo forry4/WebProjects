@@ -145,7 +145,13 @@ function FitText({ text, className, min = 8 }) {
     let lastW = -1;
     const fit = () => {
       b.style.fontSize = "";
-      const avail = b.clientWidth - 1;
+      // clientWidth is the PADDING box, so measuring against it let the name
+      // grow into (and past) its own right inset — the title sat visibly
+      // closer to the right edge than the left, on every card. Fit to the
+      // CONTENT box instead, and the two insets match by construction.
+      const cs0 = getComputedStyle(b);
+      const avail = b.clientWidth - parseFloat(cs0.paddingLeft)
+        - parseFloat(cs0.paddingRight) - 1;
       if (avail <= 0) return;
       const natural = s.scrollWidth;
       if (natural > avail) {

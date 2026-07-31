@@ -92,7 +92,7 @@
 /* The box holds nothing but this row, so its own margin/padding was pure dead
    space above and below the cards — the count labels already sit inside it. */
 .dm-opp-zones {
-  display: flex; gap: 18px; align-items: flex-start; margin-top: 0; padding-bottom: 4px;
+  display: flex; gap: 18px; align-items: flex-start; margin-top: 0; padding-bottom: 8px;
 }
 .dm-opp-hand { flex: none; }
 .dm-fan { display: flex; }
@@ -167,6 +167,12 @@
 .dm-card {
   position: relative; display: flex; flex-direction: column;
   background: #221d15; overflow: hidden; text-align: left;
+  /* ONE inset for the whole face. The shared .card frame's own 8/6/6 padding
+     stacked on top of each row's 5px and made the real buffer 12px on every
+     side — a fifth of a 56px card's width, per side. The face owns its layout,
+     so it takes the padding off the frame and applies --cf-pad itself: every
+     row now sits the SAME distance from the edge (border + --cf-pad). */
+  --cf-pad: 4px; padding: 0;
   /* FIXED height — a card never grows for its content; the text shrinks */
   height: var(--card-h, 120px); min-height: 0;
   /* the shared frame animates transition:all — narrow it so container-query
@@ -185,20 +191,21 @@
 .dm-card-name {
   font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
   font-size: clamp(9px, calc(var(--card-h, 120px) * .105), 14px);
-  letter-spacing: .3px; line-height: 1.1; padding: 4px 5px 2px;
+  letter-spacing: .3px; line-height: 1.1;
+  padding: var(--cf-pad) var(--cf-pad) 2px;
 }
 .dm-fitspan { display: inline-block; white-space: nowrap; }
 .dm-card-text {
   flex: 1; font-size: clamp(8px, calc(var(--card-h, 120px) * .082), 11px);
-  color: var(--text-dim, #8a7d6a); padding: 0 5px; white-space: pre-line;
+  color: var(--text-dim, #8a7d6a); padding: 0 var(--cf-pad); white-space: pre-line;
   overflow: hidden; line-height: 1.25; min-height: 0;
 }
 .dm-card-text.dm-text-l { font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 10px); line-height: 1.2; }
 .dm-card-text.dm-text-xl { font-size: clamp(6px, calc(var(--card-h, 120px) * .06), 9px); line-height: 1.18; }
 .dm-card-text.dm-text-xxl { font-size: clamp(6px, calc(var(--card-h, 120px) * .05), 8px); line-height: 1.15; }
 .dm-card-foot {
-  margin-top: auto; display: flex; align-items: flex-end; gap: 2px 4px;
-  padding: 0 5px 5px;
+  margin-top: auto; display: flex; align-items: flex-end; gap: 2px 2px;
+  padding: 0 var(--cf-pad) var(--cf-pad);
   /* tiny faces (56px opponent piles) can't fit label + coin side by side —
      the coin wraps under the types instead of overlapping them */
   flex-wrap: wrap; justify-content: flex-end;
@@ -214,14 +221,14 @@
 .dm-cost {
   background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
   color: #221a05; font-weight: 800; border-radius: 50%;
-  width: clamp(15px, calc(var(--card-h, 120px) * .16), 22px);
-  height: clamp(15px, calc(var(--card-h, 120px) * .16), 22px);
+  width: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
+  height: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
   display: flex; align-items: center; justify-content: center;
   font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
 }
 .dm-type {
   display: block;
-  font-size: clamp(6px, calc(var(--card-h, 120px) * .068), 11px);
+  font-size: clamp(5.5px, calc(var(--card-h, 120px) * .068), 11px);
   text-transform: uppercase; letter-spacing: .3px; color: #cfc4a6;
   white-space: nowrap;
 }
@@ -238,9 +245,13 @@
 .dm-edge-dur { left: 0; background: #b3762e; }   /* duration = the Seaside orange */
 .dm-pile-count {
   /* sits on the SLOT (not inside the overflow-hidden card), so it never clips */
-  position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%);
+  /* Sits BELOW the face, clear of it. The foot row now ends --cf-pad from the
+     card's bottom edge, so a pill that reached back up into the card covered
+     the type label (measured: 7px of overlap on every supply pile). */
+  position: absolute; bottom: -14px; left: 50%; transform: translateX(-50%);
   background: var(--surface3, #2c2820); border: 1px solid var(--border, #3a342a);
-  border-radius: 10px; font-size: 13px; padding: 1px 10px; color: var(--text, #e8dfc8);
+  border-radius: 10px; font-size: 12px; line-height: 1.15; padding: 1px 9px;
+  color: var(--text, #e8dfc8);
   white-space: nowrap; z-index: 2;
 }
 .dm-card-badge {

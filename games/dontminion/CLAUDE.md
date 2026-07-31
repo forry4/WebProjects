@@ -406,6 +406,21 @@ marker). Because engine constraints are generic, the decision UI is SIX renderer
 a played card doesn't change size depending on who played it. Supply affordance mirrors
 `engine.cost` via `turn_ctx.bridges` — display only, the server stays authoritative.
 
+**The card face has ONE inset token, `--cf-pad`** (on `.dm-card`, used by the name, rules text
+and foot). The face also zeroes the shared `.card` frame's own padding — the two stacked, so the
+real buffer was 12px per side, a fifth of a 56px card's width. Three things follow and all three
+are pinned by `screens.mjs`:
+- **All four insets must stay equal.** `FitText` measured `clientWidth`, which is the PADDING
+  box, so a name it had to shrink grew into (and past) its own right inset — the title sat
+  visibly closer to the right edge than the left. It fits to the CONTENT box now.
+- **The foot must fit `[types][coin]` on ONE row at 56px**, which is what `--cf-pad: 4px` plus a
+  13px coin floor, a 2px gap and a 5.5px type-label floor buy: the widest label we ship
+  ("Duration", 28.5px) clears the 31px available. `flex-wrap` stays on the foot as the net —
+  if a future set's type word is longer, the coin wraps under rather than overlapping.
+- **The pile-count pill straddles the card's bottom edge**, so tightening the foot walked the
+  type label straight under it (7px of overlap on every supply pile). Any further change to the
+  foot inset has to re-check the pill.
+
 **The create modal's expansion picker is a game-local `DmChecks`** (the shared kit has no
 multi-select; promote it if a second game needs one). It defaults to **Base Set alone**, and the
 LIST scrolls inside its own cap rather than the modal growing — the set count rises every phase,

@@ -514,6 +514,162 @@ try {
 		await ctx.close();
 	}
 
+	// ── Dontminion's card face ────────────────────────────────────────────────
+	// The first check here that actually PLAYS Dontminion — the route test above
+	// mounts the lobby and never renders a card. Two geometry contracts, both of
+	// which a one-line CSS edit can break silently:
+	//   1. all four text insets are EQUAL. They were 12px (the shared .card
+	//      frame's padding stacked on each row's own), and the title's right
+	//      inset was smaller still because FitText measured the PADDING box.
+	//   2. on the smallest face (56px, the in-play rows) the cost coin sits
+	//      BESIDE the type labels, not wrapped under them.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "cardface-harness", name: "Face", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`${`http://localhost:${PORT}`}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-panel", { timeout: 15_000 }).catch(() => {});
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("a Dontminion game deals a board", dealt);
+
+		if (dealt) {
+			const g = await page.evaluate(() => {
+				const c = document.querySelector(".dm-supply .dm-card");
+				const cb = c.getBoundingClientRect();
+				const span = c.querySelector(".dm-fitspan").getBoundingClientRect();
+				const nameBox = c.querySelector(".dm-card-name");
+				const ncs = getComputedStyle(nameBox);
+				const types = c.querySelector(".dm-types").getBoundingClientRect();
+				const cost = c.querySelector(".dm-cost").getBoundingClientRect();
+				const r = (n) => +n.toFixed(1);
+				return {
+					titleLeft: r(span.left - cb.left),
+					titleRight: r(cb.right - span.right),
+					typesLeft: r(types.left - cb.left),
+					costRight: r(cb.right - cost.right),
+					costBottom: r(cb.bottom - cost.bottom),
+					// the FitText bug: the name grew into its own right inset
+					nameOverflow: r(span.width - (nameBox.clientWidth
+						- parseFloat(ncs.paddingLeft) - parseFloat(ncs.paddingRight))),
+				};
+			});
+			// The title is left-aligned and usually shorter than the card, so its
+			// RIGHT gap is only meaningful as "at least the inset" — the bug made
+			// it smaller than the left one.
+			check("card insets are the same on every side",
+				Math.abs(g.typesLeft - g.costRight) < 1 && Math.abs(g.typesLeft - g.costBottom) < 1
+				&& Math.abs(g.typesLeft - g.titleLeft) < 1, JSON.stringify(g));
+			// FitText only misbehaves on a name it has to SHRINK, and no supply name
+			// shrinks at any sane width — asserting at desktop size PASSED with the
+			// bug still in (verified, which is why this block exists).
+			//
+			// So narrow the viewport until the always-present Province pile is forced
+			// to shrink. Narrow it TOO far and the required size drops under FitText's
+			// own 8px floor, where the text overflows no matter how it was measured —
+			// a real limit, but not this bug, and asserting there fails on correct
+			// code. The rig therefore sweeps down and stops at the first width that
+			// shrinks the name while staying ABOVE the floor. Geometry is
+			// deterministic, so this picks the same width every run; if no width
+			// qualifies the check FAILS rather than passing unexercised.
+			let rig = null;
+			for (const w of [320, 300, 280, 260, 250, 245, 240, 235]) {
+				await page.setViewportSize({ width: w, height: 900 });
+				await sleep(500);
+				const r = await page.evaluate(() => {
+					const card = [...document.querySelectorAll(".dm-supply .dm-card")]
+						.find((c) => c.querySelector(".dm-fitspan")?.textContent === "Province");
+					if (!card) return null;
+					const box = card.querySelector(".dm-card-name");
+					const span = card.querySelector(".dm-fitspan");
+					const cs = getComputedStyle(box);
+					const content = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+					const cb = card.getBoundingClientRect(), sb = span.getBoundingClientRect();
+					return {
+						shrank: !!box.style.fontSize,
+						fontPx: +parseFloat(cs.fontSize).toFixed(2),
+						overflow: +(sb.width - content).toFixed(1),
+						gapLeft: +(sb.left - cb.left).toFixed(1),
+						gapRight: +(cb.right - sb.right).toFixed(1),
+					};
+				});
+				if (r?.shrank && r.fontPx > 8.05) { rig = { w, ...r }; break; }
+			}
+			check("...and a title it must shrink still respects its right inset",
+				!!rig && rig.overflow <= 0.5 && Math.abs(rig.gapLeft - rig.gapRight) < 1.5,
+				JSON.stringify(rig));
+			await page.setViewportSize({ width: 1280, height: 900 });
+			await sleep(400);
+
+			// Longest type label on the SMALLEST face: clone a real card into the
+			// 56px in-play context rather than trusting a computed estimate.
+			const fit = await page.evaluate(() => {
+				const host = document.querySelector(".dm-opp-inplay");
+				const clone = document.querySelector(".dm-supply .dm-card").cloneNode(true);
+				const t = clone.querySelectorAll(".dm-type");
+				[...t].slice(1).forEach((x) => x.remove());
+				t[0].textContent = "Duration";          // the widest label we ship
+				host.appendChild(clone);
+				const types = clone.querySelector(".dm-types").getBoundingClientRect();
+				const cost = clone.querySelector(".dm-cost").getBoundingClientRect();
+				const out = {
+					faceW: +clone.getBoundingClientRect().width.toFixed(1),
+					wrapped: cost.top >= types.bottom - 0.5,
+					slack: +(cost.left - types.right).toFixed(1),
+				};
+				clone.remove();
+				return out;
+			});
+			check("the cost coin shares a row with the types on the 56px face",
+				!fit.wrapped && fit.slack >= 0, JSON.stringify(fit));
+
+			// The count pill straddles the card's bottom edge, so tightening the
+			// foot's inset walked the type label straight under it — 7px of overlap
+			// on every supply pile, which is how this check earned its place.
+			const pills = await page.evaluate(() => {
+				const bad = [];
+				for (const slot of document.querySelectorAll(".dm-pile-slot")) {
+					// Fan slots (your hand, an opponent's hand) hold a ROW of cards under
+					// one centred pill, so "the slot's card" is meaningless there — the
+					// pill is not labelling the card it happens to sit over. Only
+					// single-card slots have the pill-labels-this-card relationship.
+					if (slot.matches(".dm-myhand, .dm-opp-hand")) continue;
+					const card = slot.querySelector(".dm-card");
+					const pill = slot.querySelector(".dm-pile-count");
+					if (!card || !pill) continue;
+					const pb = pill.getBoundingClientRect();
+					for (const [what, el] of [["types", card.querySelector(".dm-types")],
+						["cost", card.querySelector(".dm-cost")]]) {
+						if (!el || !el.textContent.trim()) continue;
+						const b = el.getBoundingClientRect();
+						if (pb.top < b.bottom && pb.bottom > b.top && pb.left < b.right && pb.right > b.left) {
+							bad.push({ card: card.querySelector(".dm-fitspan")?.textContent, what,
+								by: +(b.bottom - pb.top).toFixed(1) });
+						}
+					}
+				}
+				return bad.slice(0, 5);
+			});
+			check("the pile count never covers a card's type or cost",
+				pills.length === 0, JSON.stringify(pills));
+		}
+		check("no page errors while rendering the board", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;
