@@ -1294,11 +1294,20 @@ def _start_of_turn(game, pid):
             fx_batch.append((entry["card"], fx))
         entry["fx"] = []
         entry["fired"] = True
-    park_abilities(game, pid, [
-        {"card": card, "stage": fx["stage"], "data": dict(fx["data"])}
-        for card, fx in fx_batch])
     game["watchers"] = [w for w in game["watchers"] if w["owner"] != pid]
-    emit(game, "turn_start", actor=pid)   # Clerk-class start-of-turn reactions
+    # ONE concurrent set (phase 4): pid's duration fx AND every turn_start
+    # consumer (Clerk's own-turn hand reaction; any future turn_start watcher)
+    # pool together — "the start of turn is considered to be part of the
+    # Action phase" and all its abilities are simultaneous, so a Wharf and a
+    # Clerk in hand are the player's ordering choice, not the engine's. Also
+    # fixes the cross-player order: pools park current-player-FIRST (p23 §3),
+    # where the old separate emit made reactions cut ahead of the fx.
+    pools = {}
+    for card, fx in fx_batch:
+        pools.setdefault(pid, ([], [], [], []))[0].append(
+            {"card": card, "stage": fx["stage"], "data": dict(fx["data"])})
+    _emit_collect(game, pools, "turn_start", actor=pid)
+    _park_pools(game, pools)
 
 
 def _cleanup_durations(game, pid):

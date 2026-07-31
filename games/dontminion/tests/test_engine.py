@@ -1209,3 +1209,38 @@ def test_pool_is_answerable_by_the_bot_path():
         ok, err = engine.apply_move(g, A, mv)
         assert ok, err
     assert g["pending_pid"] is None
+
+
+def test_turn_start_reaction_and_duration_fx_share_one_pool():
+    """Phase 4: ALL start-of-turn abilities are one concurrent set — a Clerk in
+    hand and a Wharf finishing pool together, and the player may resolve the
+    Wharf's draw BEFORE deciding whether to play the Clerk (before the fold,
+    Clerk's window always cut ahead of the fx with no choice)."""
+    g = engine.new_game([A, B], ["base", "seaside", "prosperity"], seed=4,
+                        kingdom=["Wharf", "Clerk", "Tide Pools", "Smithy", "Village",
+                                 "Moat", "Militia", "Witch", "Gardens", "Bazaar"])
+    g["seats"][A]["hand"] = ["Wharf"]
+    ok, err = engine.apply_move(g, A, {"type": "play_action", "card": "Wharf"})
+    assert ok, err
+    if g["phase"] == "action":
+        assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    # A's next hand was already drawn at A's own clean-up — put the Clerk
+    # straight into it (and refill the deck so Wharf's +2 Cards can land)
+    g["seats"][A]["hand"].append("Clerk")
+    g["seats"][A]["deck"] = ["Copper"] * 6
+    assert engine.apply_move(g, B, {"type": "end_phase"})[0]
+    if g["turn"] == B:
+        assert engine.apply_move(g, B, {"type": "end_phase"})[0]
+    assert g["turn"] == A and "Clerk" in g["seats"][A]["hand"]
+    labels = _pool_labels(g)
+    assert set(labels) == {"Wharf", "Clerk"}
+    # resolve the Wharf first — the choice the old fixed order never offered
+    hand0 = len(g["seats"][A]["hand"])
+    assert engine.apply_move(g, A, {"type": "decision", "ids": [labels["Wharf"]]})[0]
+    assert len(g["seats"][A]["hand"]) == hand0 + 2       # Wharf's +2 Cards landed
+    # ONE ability left: Clerk's window opens directly, no second prompt
+    assert g["pending_kind"] == "choose_option" and g["pending"][-1]["card"] == "Clerk"
+    assert engine.apply_move(g, A, {"type": "decision", "ids": ["play"]})[0]
+    assert "Clerk" in g["seats"][A]["in_play"]
+    assert g["pending_pid"] == B                         # Clerk's attack hits B

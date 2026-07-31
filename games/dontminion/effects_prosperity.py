@@ -381,7 +381,8 @@ def _clerk_start_react(game, pid, frame, choice):
     if choice["ids"][0] != "play":
         return
     if "Clerk" not in game["seats"][pid]["hand"]:
-        return                                 # moved since the window opened
+        E.lost_track(game, pid, "Clerk", "played")   # moved since the window
+        return
     E.play_action_card(game, pid, "Clerk", from_zone="hand")
     if "Clerk" in game["seats"][pid]["hand"]:  # several may play, one at a time
         E.push_choose_option(game, pid, "Clerk", "start_react",
