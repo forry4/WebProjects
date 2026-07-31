@@ -15,6 +15,7 @@ uses a field correctly, only that the server still sends it. That is exactly
 the failure both bugs had — the client asking for something that wasn't there.
 """
 
+import pathlib
 import re
 
 import pytest
@@ -92,6 +93,31 @@ def test_every_catalog_field_the_client_reads_is_shipped():
     assert not missing, (
         f"Dontminion.jsx reads catalog.{{{', '.join(sorted(missing))}}} but "
         f"/catalog does not return it")
+
+
+def test_every_log_event_the_engine_emits_has_a_fmtLog_case():
+    """The unknown-event FALLBACK exists so a new event is never silent — but
+    it renders raw field names, which can actively mislead: `off_turn_bonus`
+    came out as "bob off turn bonus: coins 2", reading as though he got the
+    coins when the point is that he lost them. So the fallback is the safety
+    net, not the destination: every event the engine actually emits owes a
+    case. (A future set may add an event before its UI wording — that is what
+    the fallback covers, and this test is what stops it staying that way.)"""
+    events = set()
+    for path in pathlib.Path("games/dontminion").glob("*.py"):
+        src = path.read_text(encoding="utf-8")
+        events |= set(re.findall(r'_log\(\s*game\s*,\s*[^,]+,\s*"([a-z_]+)"', src))
+        events |= set(re.findall(r'"event":\s*"([a-z_]+)"', src))
+
+    jsx = _src(JSX)
+    body = jsx[jsx.find("function fmtLog"):][:12000]
+    cased = set(re.findall(r'case "([a-z_]+)"', body))
+
+    assert len(events) > 20, "the emit scan found almost nothing — regex rotted"
+    missing = sorted(events - cased)
+    assert not missing, (
+        f"engine emits {missing} with no fmtLog case — they will render as raw "
+        f"field names in the game log")
 
 
 def test_the_contract_check_actually_resolves_fields():

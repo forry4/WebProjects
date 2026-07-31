@@ -251,6 +251,36 @@ function fmtLog(e, names) {
       if (!bits.length) return null;
       return `${who} gets ${bits.join(", ")}${e.why ? ` (${e.why})` : ""}`;
     }
+    case "minus": {
+      if (!e.coins) return null;
+      return `${who} loses $${e.coins}`;
+    }
+    case "off_turn_bonus": {
+      // earned on someone else's turn, so there is no pool to put it in and it
+      // is LOST. Without this case the generic fallback rendered it as
+      // "bob off turn bonus: coins 2", which reads as though he got it.
+      const bits = [];
+      if (e.coins) bits.push(`$${e.coins}`);
+      if (e.actions) bits.push(`${e.actions} Action${e.actions > 1 ? "s" : ""}`);
+      if (e.buys) bits.push(`${e.buys} Buy${e.buys > 1 ? "s" : ""}`);
+      if (!bits.length) return null;
+      return `${who} can't use ${bits.join(", ")} — not their turn`;
+    }
+    case "cleanup_off_turn":
+      return `${who} discards ${listCards(e.cards)} (played on another turn)`;
+    // Seaside/Prosperity events that had been falling through to the generic
+    // fallback since their phases shipped
+    case "lighthouse": return `${who} is protected by Lighthouse`;
+    case "vp_tokens": return `${who} takes ${e.count} VP token${e.count === 1 ? "" : "s"}`;
+    case "island": return `${who} sets ${listCards(e.cards)} aside on their Island mat`;
+    case "village_mat":
+      return `${who} sets ${e.count} card${e.count === 1 ? "" : "s"} aside on their Native Village mat`;
+    case "village_take":
+      return `${who} takes ${e.count} card${e.count === 1 ? "" : "s"} from their Native Village mat`;
+    case "exchange":
+      return `${who} exchanges ${art(e.card)} for ${art(e.into)}`;
+    case "shuffle_into_deck":
+      return `${who} shuffles ${e.count || 0} card${e.count === 1 ? "" : "s"} into their deck`;
     case "buy": return `${who} buys and gains ${art(e.card)}`;
     case "gain": return e.dest && e.dest !== "discard"
       ? `${who} gains ${art(e.card)} (to ${e.dest === "deck" ? "their deck" : e.dest})`
