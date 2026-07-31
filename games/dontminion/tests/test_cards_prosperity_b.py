@@ -497,6 +497,15 @@ def test_mint_gain_trashes_played_treasures_but_quarry_discount_stays():
     assert engine.cost(g, "Smithy") == 2
 
 
+def pool_pick(g, pid, label):
+    """Answer the p23 §2 what-resolves-first prompt by option label."""
+    f = g["pending"][-1]
+    assert (f["card"], f["stage"]) == ("__abilities", "pick"), (f["card"], f["stage"])
+    opts = {o["label"]: o["id"] for o in f["constraint"]["options"]}
+    ok, err = engine.apply_move(g, pid, {"type": "decision", "ids": [opts[label]]})
+    assert ok, err
+
+
 def test_mint_when_gain_fires_on_non_buy_gains_too():
     g = fresh()
     g["seats"][A]["in_play"] = ["Copper"]
@@ -509,8 +518,10 @@ def test_watchtower_trashing_a_gained_mint_still_trashes_treasures():
     g = fresh()
     give_hand(g, A, ["Watchtower"])
     g["seats"][A]["in_play"] = ["Copper", "Copper"]
-    engine.gain(g, A, "Mint")
-    # Watchtower's reveal window resolves first...
+    engine.gain(g, A, "Mint"); engine._drive(g)
+    # Mint's own when-gain and Watchtower are CONCURRENT: the player picks
+    # what resolves first (p23 §2) — take Watchtower first, the old order
+    pool_pick(g, A, "Watchtower")
     assert g["pending_pid"] == A and g["pending"][-1]["card"] == "Watchtower"
     assert decide(g, A, ids=["play"])[0]
     assert decide(g, A, ids=["trash"])[0]
@@ -660,7 +671,9 @@ def test_watchtower_moves_first_and_tiara_loses_track():
     assert g["pending_pid"] is None                     # Watchtower isn't a Treasure
     g["coins"] = 3
     assert mv(g, A, {"type": "buy", "card": "Silver"})[0]
-    # Watchtower's window is on top: it topdecks the Silver first
+    # Tiara's may-topdeck and Watchtower are concurrent — pick Watchtower
+    # first (whichever moves the Silver first, the other loses track)
+    pool_pick(g, A, "Watchtower")
     assert g["pending"][-1]["card"] == "Watchtower"
     assert decide(g, A, ids=["play"])[0]
     assert decide(g, A, ids=["topdeck"])[0]
@@ -689,7 +702,7 @@ def test_watchtower_draws_up_to_six():
 def test_watchtower_reacts_to_every_separate_gain_from_hand():
     g = fresh()
     give_hand(g, A, ["Watchtower"])
-    engine.gain(g, A, "Silver")
+    engine.gain(g, A, "Silver"); engine._drive(g)      # one consumer: no prompt
     assert g["pending"][-1]["card"] == "Watchtower"
     assert "Reveal" in g["pending"][-1]["constraint"]["options"][0]["label"]
     assert decide(g, A, ids=["play"])[0]
@@ -697,12 +710,12 @@ def test_watchtower_reacts_to_every_separate_gain_from_hand():
     assert "Silver" in g["trash"]
     assert g["supply"]["Silver"] == 39                  # the gain still happened
     assert "Watchtower" in g["seats"][A]["hand"]        # revealed, never left hand
-    engine.gain(g, A, "Gold")                           # a second, separate gain
+    engine.gain(g, A, "Gold"); engine._drive(g)         # a second, separate gain
     assert g["pending"][-1]["card"] == "Watchtower"
     assert decide(g, A, ids=["play"])[0]
     assert decide(g, A, ids=["topdeck"])[0]
     assert g["seats"][A]["deck"][0] == "Gold"
-    engine.gain(g, A, "Copper")                         # declining leaves it be
+    engine.gain(g, A, "Copper"); engine._drive(g)       # declining leaves it be
     assert decide(g, A, ids=["decline"])[0]
     assert "Copper" in g["seats"][A]["discard"]
     # someone else's gain never opens A's window ("when YOU gain")
@@ -728,12 +741,12 @@ def test_watchtower_reacts_on_the_attackers_turn():
 def test_watchtower_deck_and_hand_destination_gains():
     g = fresh()
     give_hand(g, A, ["Watchtower"])
-    engine.gain(g, A, "Silver", dest="deck")
+    engine.gain(g, A, "Silver", dest="deck"); engine._drive(g)
     assert decide(g, A, ids=["play"])[0]
     assert decide(g, A, ids=["topdeck"])[0]             # already there: a no-op
     assert g["seats"][A]["deck"][0] == "Silver"
     assert g["seats"][A]["deck"].count("Silver") == 1
-    engine.gain(g, A, "Gold", dest="hand")
+    engine.gain(g, A, "Gold", dest="hand"); engine._drive(g)
     assert decide(g, A, ids=["play"])[0]
     assert decide(g, A, ids=["trash"])[0]               # trashed out of hand
     assert "Gold" in g["trash"]

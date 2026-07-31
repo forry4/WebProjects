@@ -413,6 +413,17 @@ def xs_piles(g):
     return g["pending"][-1]["constraint"]["piles"]
 
 
+def xs_pool(g, label):
+    """Answer the p23 §2 what-resolves-first prompt by option label."""
+    f = xs_top(g)
+    assert (f["card"], f["stage"]) == ("__abilities", "pick"), (f["card"], f["stage"])
+    opts = {o["label"]: o["id"] for o in f["constraint"]["options"]}
+    assert label in opts, (label, sorted(opts))
+    ok, err = mv(g, f["pid"], {"type": "decision", "ids": [opts[label]]})
+    assert ok, err
+    return sorted(opts)
+
+
 def xs_play(g, pid, card):
     return mv(g, pid, {"type": "play_action", "card": card})
 
@@ -664,17 +675,19 @@ def test_cartographer_still_fires_the_when_discard_trigger_at_all():
 # 3. WATCHTOWER x the new when-gain cards
 # ---------------------------------------------------------------------------
 
-def test_watchtower_loses_track_of_an_inn_that_shuffled_itself_in():
-    """The compendium's own worked example (p26, Example 1): 'If you do Inn's
-    first, the Inn is shuffled into your deck. Watchtower has now lost track of
-    the Inn, so you can't reveal Watchtower to move the Inn.' The engine always
-    resolves the gained card's own when-gain first — the compendium lets the
-    player choose the order, and this is one of the two legal orders."""
+def test_watchtower_and_inn_the_player_chooses_and_each_order_differs():
+    """The compendium's own worked example (p26, Example 1), now implemented as
+    the rules write it: the player CHOOSES which when-gain resolves first, and
+    the two orders genuinely differ — Inn first shuffles itself in and the
+    Watchtower loses track; Watchtower first can trash the Inn before its own
+    ability ever runs."""
+    # Branch A: Inn first — Watchtower then holds a dead trash option
     g = xs_fresh()
     xs_hand(g, A, ["Watchtower"])
     g["seats"][A]["discard"] = ["Village"]
     assert engine.gain(g, A, "Inn")
     engine._drive(g)
+    assert xs_pool(g, "Inn") == ["Inn", "Watchtower"]
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Inn", "shuffle")
     assert decide(g, A, cards=["Inn", "Village"])[0]      # Inn shuffles itself in
     assert "Inn" not in g["seats"][A]["discard"]
@@ -684,6 +697,23 @@ def test_watchtower_loses_track_of_an_inn_that_shuffled_itself_in():
     assert decide(g, A, ids=["trash"])[0]
     assert g["trash"] == []                              # lost track: a no-op
     assert "Inn" in g["seats"][A]["deck"]
+    assert any(e.get("event") == "lost_track" and e.get("card") == "Inn"
+               for e in g["log"])                        # ...and it SAYS so
+
+    # Branch B: Watchtower first — the Inn is trashed, then Inn's own ability
+    # still resolves ("effects are immediate"), just without the Inn in it
+    g = xs_fresh()
+    xs_hand(g, A, ["Watchtower"])
+    g["seats"][A]["discard"] = ["Village"]
+    assert engine.gain(g, A, "Inn")
+    engine._drive(g)
+    xs_pool(g, "Watchtower")
+    assert decide(g, A, ids=["play"])[0]
+    assert decide(g, A, ids=["trash"])[0]
+    assert "Inn" in g["trash"]                           # tracked: the trash lands
+    assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Inn", "shuffle")
+    assert decide(g, A, cards=["Village"])[0]            # Inn itself is gone
+    assert "Village" in g["seats"][A]["deck"]
 
 
 def test_watchtower_trashes_a_gained_farmland_after_its_when_gain_resolved():
@@ -693,6 +723,7 @@ def test_watchtower_trashes_a_gained_farmland_after_its_when_gain_resolved():
     xs_hand(g, A, ["Watchtower", "Estate"])
     assert engine.gain(g, A, "Farmland")
     engine._drive(g)
+    xs_pool(g, "Farmland")                               # resolve its when-gain first
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Farmland", "trash")
     assert decide(g, A, cards=["Estate"])[0]             # Estate ($2) -> a $4
     gained = xs_piles(g)[0]
@@ -719,6 +750,7 @@ def test_watchtower_gets_a_window_for_the_border_village_and_its_cheaper_card():
     xs_hand(g, A, ["Watchtower"])
     assert engine.gain(g, A, "Border Village")
     engine._drive(g)
+    xs_pool(g, "Border Village")                         # its when-gain first
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Border Village", "gain")
     assert decide(g, A, pile="Village")[0]
     windows = 0
@@ -744,6 +776,7 @@ def test_watchtower_topdecking_a_gained_souk_keeps_the_souk_trash():
     xs_hand(g, A, ["Watchtower", "Estate", "Estate"])
     assert engine.gain(g, A, "Souk")
     engine._drive(g)
+    xs_pool(g, "Souk")                                   # its when-gain first
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Souk", "trash")
     assert decide(g, A, cards=["Estate", "Estate"])[0]
     assert g["trash"] == ["Estate", "Estate"]
@@ -766,6 +799,7 @@ def test_trader_exchanging_a_border_village_still_gains_the_cheaper_card():
     g["coins"] = 6
     n0 = g["supply"]["Border Village"]
     assert mv(g, A, {"type": "buy", "card": "Border Village"})[0]
+    xs_pool(g, "Trader")                                 # exchange it FIRST
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Trader", "react")
     assert decide(g, A, ids=["play"])[0]
     assert g["supply"]["Border Village"] == n0           # handed straight back
@@ -786,11 +820,14 @@ def test_trader_exchange_fires_no_when_gain_for_the_silver():
     assert engine.gain(g, A, "Gold")
     engine._drive(g)
     windows = 0
-    for _ in range(6):
+    for _ in range(8):
         f = xs_top(g)
         if f is None:
             break
-        if (f["card"], f["stage"]) == ("Watchtower", "react"):
+        if (f["card"], f["stage"]) == ("__abilities", "pick"):
+            xs_pool(g, "Trader" if "Trader" in {o["label"] for o in
+                                                f["constraint"]["options"]} else "Watchtower")
+        elif (f["card"], f["stage"]) == ("Watchtower", "react"):
             windows += 1
             assert decide(g, A, ids=["decline"])[0]
         elif (f["card"], f["stage"]) == ("Trader", "react"):
@@ -808,6 +845,7 @@ def test_trader_exchanging_a_farmland_still_trashes_and_upgrades():
     n0 = g["supply"]["Farmland"]
     assert engine.gain(g, A, "Farmland")
     engine._drive(g)
+    xs_pool(g, "Trader")                                 # exchange it FIRST
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Trader", "react")
     assert decide(g, A, ids=["play"])[0]
     assert g["supply"]["Farmland"] == n0
@@ -1483,3 +1521,50 @@ def test_scheme_topdecks_the_finishing_duration_not_the_one_just_played():
     assert not seat["duration"][0].get("done")
     assert engine.owned_cards(g, A).count("Tide Pools") == 2   # nothing lost
     assert g["turn"] == B                                      # the turn ENDED
+
+
+# ---------------------------------------------------------------------------
+# 9. THE ABILITY POOL on one gain (p23 §2) — join filters and commuters
+# ---------------------------------------------------------------------------
+
+def test_pool_offers_only_abilities_that_would_actually_fire():
+    """A watcher whose ability would no-op for THIS occurrence (a Haggler on a
+    non-buy gain) must not join the pool — a prompt ordering a no-op against a
+    real ability implies the no-op will do something. WATCHER_WHENS is the
+    join-time filter; the stage keeps its own guard as the resolve-time
+    re-check."""
+    g = xs_fresh()
+    xs_hand(g, A, ["Watchtower"])
+    g["seats"][A]["in_play"] = ["Haggler"]
+    from games.dontminion import engine as E2
+    E2.add_watcher(g, A, "Haggler", "gain", stage="gain_check", until="turn_end")
+    # a NON-buy gain: Haggler's when reads via_buy=False -> it never joins, so
+    # the only consumer is Watchtower and there is NO pool prompt at all
+    assert engine.gain(g, A, "Inn")
+    engine._drive(g)
+    f = xs_top(g)
+    assert (f["card"], f["stage"]) == ("__abilities", "pick")
+    labels = {o["label"] for o in f["constraint"]["options"]}
+    assert labels == {"Inn", "Watchtower"}, labels        # no Haggler option
+
+
+def test_commuting_abilities_never_prompt_and_still_pay():
+    """Collection's +1 VP is decision-free and order-independent: it runs
+    automatically, FIRST, and never appears in the what-resolves-first prompt —
+    but it must still pay. Inn's own when-gain vs Watchtower remains a real
+    choice on the same gain."""
+    g = xs_fresh()
+    xs_hand(g, A, ["Watchtower"])
+    from games.dontminion import engine as E2
+    E2.add_watcher(g, A, "Collection", "gain", stage="vp_check",
+                   until="turn_end", commutes=True)
+    assert engine.gain(g, A, "Inn")                       # an Action: VP due
+    engine._drive(g)
+    assert g["vp_tokens"][A] == 1                         # paid, no prompt for it
+    f = xs_top(g)
+    assert (f["card"], f["stage"]) == ("__abilities", "pick")
+    labels = {o["label"] for o in f["constraint"]["options"]}
+    assert labels == {"Inn", "Watchtower"}, labels        # Collection absent
+    xs_pool2 = {o["label"]: o["id"] for o in f["constraint"]["options"]}
+    assert decide(g, A, ids=[xs_pool2["Inn"]])[0]
+    assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Inn", "shuffle")

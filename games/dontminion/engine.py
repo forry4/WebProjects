@@ -882,7 +882,7 @@ def add_duration_fx(game, pid, card, stage, data=None):
 
 
 def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn_start",
-                immune=None):
+                immune=None, commutes=False):
     """Register a cross-player trigger. events: "gain" (any player gains),
     "play_treasure" (any treasure play), "protect" (Lighthouse — no stage, the
     attack wrap consults it). until: "owner_turn_start" (default, the Duration
@@ -890,7 +890,11 @@ def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn
     as an auto frame with data + {"actor", "subject", "owner"} when fired.
     immune: explicit per-play immunity override for watchers registered from a
     LATER stage of an attack play (Blockade) — by default the current play's
-    _atk_immune transient is captured."""
+    _atk_immune transient is captured.
+    commutes: this watcher's stage is decision-free AND order-independent
+    (Collection's +1 VP) — the ability pool auto-runs it instead of offering
+    it in the what-resolves-first prompt. Declare it only when resolving the
+    stage can never change what any other pending ability does."""
     entry = _current_dur_entry(game)
     if entry is None or entry["card"] != card:
         entry = {"card": card, "fx": [], "watchers": 0, "riders": []}
@@ -908,6 +912,7 @@ def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn
     # emit() never fires the watcher for an immune actor.
     game["watchers"].append({"event": event, "owner": pid, "card": card,
                              "stage": stage, "data": data or {}, "until": until,
+                             **({"commutes": True} if commutes else {}),
                              "immune": list(immune if immune is not None
                                             else game.get("_atk_immune", []))})
 
@@ -1002,53 +1007,111 @@ def request_extra_turn(game, pid):
 # entries — never another bespoke kernel mechanism.
 
 def emit(game, event, actor=None, subject=None, **extra):
-    """Fire an event AFTER the triggering change has been applied."""
+    """Fire an event AFTER the triggering change has been applied.
+
+    ONE occurrence can hand a player several abilities — the gained card's own
+    when-gain, a reaction in hand, a standing watcher. Each player's consumers
+    are collected into ONE ability pool (p23 §2: THE PLAYER picks what resolves
+    first, re-offered after each), and the pools are pushed in reversed turn
+    order so the current player's resolves first, then each other player's in
+    turn order (p23 §3 — cross-player order is NOT a choice).
+
+    Trigger conditions (in hand? in play? `when`?) are evaluated HERE, at the
+    occurrence (p25 §3); the deferred runners re-check only card PRESENCE at
+    resolution (the lose-track rule) and log `lost_track` when it fails.
+
+    Bucket order inside a pool = self, in_play, hand, watchers — the exact pop
+    order of the pre-pool fixed-order engine, so the FIRST option is always the
+    historical default and a single consumer behaves byte-identically."""
     ctx = {"actor": actor, "subject": subject, **extra}
+    pools = {}                       # pid -> [self...], [in_play...], [hand...], [watchers...]
+
+    def add(pid, bucket, card, stage, data, commutes=False):
+        d = {"card": card, "stage": stage, "data": data}
+        if commutes:
+            d["commutes"] = True     # decision-free + order-independent: the
+        pools.setdefault(pid, ([], [], [], []))[bucket].append(d)   # pool auto-runs it
+
+    from . import effects
+    for card, specs in getattr(effects, "TRIGGERS", {}).items():
+        for si, spec in enumerate(specs):
+            if spec["on"] != event:
+                continue
+            src = spec.get("from", "hand")
+            when = spec.get("when")
+            if src == "self":
+                if subject == card and (when is None or when(game, actor, ctx)):
+                    # **extra carries the emit's context (gain's via_buy/dest,
+                    # discard's zone) — actor/subject stay authoritative.
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
+            elif src == "in_play":
+                if actor is not None and card in game["seats"][actor]["in_play"] \
+                        and (when is None or when(game, actor, ctx)):
+                    # deferred: the pool may resolve other abilities first, so
+                    # the push runs via __inplay_push, which re-finds THIS spec
+                    # (by index) and re-checks the card is still on the table
+                    add(actor, 1, card, "__inplay_push",
+                        {"event": event, "spec": si, "ctx": ctx})
+            elif src == "hand":
+                verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
+                for p in game["players"]:
+                    if spec.get("who") == "actor" and p != actor:
+                        continue          # when-YOU-x reactions (Watchtower-class)
+                    if card in game["seats"][p]["hand"] and (when is None or when(game, p, ctx)):
+                        add(p, 2, card, "__offer_window",
+                            {"stage": spec["stage"], "verb": verb,
+                             "extra": {**extra, "gained": subject, "gainer": actor}})
+    whens = getattr(effects, "WATCHER_WHENS", {})
     for w in list(game["watchers"]):
         if w["event"] != event or not w.get("stage"):
             continue
         if actor is not None and actor in w.get("immune", []):
             continue          # immune to the attack PLAY that set this watcher
-        push_auto(game, w["owner"], w["card"], w["stage"],
-                  data={**w["data"], **extra, "actor": actor, "subject": subject,
-                        "owner": w["owner"]})
+        # a watcher whose ability would no-op for THIS occurrence (Monkey on
+        # anyone but the right-hand neighbour) never joins the pool — a prompt
+        # ordering a no-op against a real ability is worse than noise, it
+        # implies the no-op will do something
+        when = whens.get((w["card"], w["stage"]))
+        if when is not None and not when(game, w, ctx):
+            continue
+        add(w["owner"], 3, w["card"], w["stage"],
+            {**w["data"], **extra, "actor": actor, "subject": subject,
+             "owner": w["owner"]}, commutes=w.get("commutes", False))
+
+    order = game["players"]
+    i = order.index(game["turn"]) if game["turn"] in order else 0
+    for p in reversed(order[i:] + order[:i]):
+        if p in pools:
+            park_abilities(game, p, [a for bucket in pools[p] for a in bucket])
+
+
+def _k_offer_window(game, pid, frame, choice):
+    """Deferred hand-reaction window (a pooled `from:"hand"` trigger). The card
+    was in hand at the OCCURRENCE; by the time the player picks this ability an
+    earlier pick may have moved it — lose track, and say so."""
+    card, d = frame["card"], frame["data"]
+    if card not in game["seats"][pid]["hand"]:
+        lost_track(game, pid, card, f"{d['verb'].lower()}ed")
+        return
+    push_choose_option(game, pid, card, d["stage"],
+                       options=[{"id": "play",
+                                 "label": f"{d['verb']} {card} from your hand"},
+                                {"id": "decline", "label": "Don't react"}],
+                       data=d["extra"])
+
+
+def _k_inplay_push(game, pid, frame, choice):
+    """Deferred `from:"in_play"` trigger: re-find the registered spec (by index
+    — frames are short-lived, so a registry reorder across a deploy is the only
+    hazard, accepted) and run its push if the card is still on the table."""
     from . import effects
-    for card, specs in getattr(effects, "TRIGGERS", {}).items():
-        for spec in specs:
-            if spec["on"] != event:
-                continue
-            src = spec.get("from", "hand")
-            when = spec.get("when")
-            if src == "hand":
-                order = game["players"]
-                i = order.index(game["turn"]) if game["turn"] in order else 0
-                verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
-                for p in reversed(order[i:] + order[:i]):
-                    if spec.get("who") == "actor" and p != actor:
-                        continue          # when-YOU-x reactions (Watchtower-class)
-                    if card in game["seats"][p]["hand"] and (when is None or when(game, p, ctx)):
-                        push_choose_option(game, p, card, spec["stage"],
-                                           options=[{"id": "play", "label": f"{verb} {card} from your hand"},
-                                                    {"id": "decline", "label": "Don't react"}],
-                                           data={**extra, "gained": subject, "gainer": actor})
-            elif src == "in_play":
-                if actor is not None and card in game["seats"][actor]["in_play"] \
-                        and (when is None or when(game, actor, ctx)):
-                    # ctx carries actor/subject + the emit's extras. Treasury
-                    # ignores it, but a "while this is in play, when you buy a
-                    # card, gain a cheaper one" card (Haggler) is useless
-                    # without knowing WHAT was bought — the push used to get
-                    # only (game, pid).
-                    spec["push"](game, actor, ctx)
-            elif src == "self":
-                if subject == card and (when is None or when(game, actor, ctx)):
-                    # **extra carries the emit's context (gain's via_buy/dest,
-                    # discard's zone). It used to be dropped here, so a self
-                    # trigger could only ever see actor+subject — which blocks
-                    # a when-BUY-this card (Farmland) from telling a buy from
-                    # any other gain. actor/subject stay authoritative.
-                    push_auto(game, actor, card, spec["stage"],
-                              data={**extra, "actor": actor, "subject": subject})
+    card, d = frame["card"], frame["data"]
+    if card not in game["seats"][pid]["in_play"]:
+        lost_track(game, pid, card)
+        return
+    effects.TRIGGERS[card][d["spec"]]["push"](game, pid, d["ctx"])
 
 
 def attack_protected(game, pid):
@@ -1143,26 +1206,33 @@ def _pool_groups(abilities):
 
 def _k_ability_pool(game, pid, frame, choice):
     abilities = frame["data"]["abilities"]
-    groups = _pool_groups(abilities)
-    if not groups:
-        return
-    if len(groups) == 1:
-        # no real choice — run them all, first-parked first (reversed push:
+    # An ability marked "commutes" is decision-free AND order-independent
+    # (Collection's +1 VP, Nomads' +$2): resolving it never changes what any
+    # other pending ability does, so offering it in the prompt is pure noise —
+    # it runs automatically, first, and never spends the player's choice.
+    # The marker is declared at REGISTRATION (spec/add_watcher), never inferred.
+    auto = [a for a in abilities if a.get("commutes")]
+    rest = [a for a in abilities if not a.get("commutes")]
+    groups = _pool_groups(rest)
+    if len(groups) <= 1:
+        # no real choice — run everything, first-parked first (reversed push:
         # the stack pops last-pushed first). Two Tide Pools never prompt.
-        for a in reversed(abilities):
+        for a in reversed(rest):
             push_auto(game, pid, a["card"], a["stage"], data=a["data"])
-        return
-    names = [k[0] for k, _ in groups]
-    options = []
-    for key, idxs in groups:
-        label = key[0]
-        if names.count(key[0]) > 1:                 # same card, different stage
-            label += f" ({abilities[idxs[0]]['stage']})"
-        if len(idxs) > 1:
-            label += f" ×{len(idxs)}"               # "Tide Pools ×2"
-        options.append({"id": str(idxs[0]), "label": label})
-    push_choose_option(game, pid, "__abilities", "pick", options=options,
-                       pick=1, data={"abilities": abilities})
+    else:
+        names = [k[0] for k, _ in groups]
+        options = []
+        for key, idxs in groups:
+            label = key[0]
+            if names.count(key[0]) > 1:             # same card, different stage
+                label += f" ({rest[idxs[0]]['stage']})"
+            if len(idxs) > 1:
+                label += f" ×{len(idxs)}"           # "Tide Pools ×2"
+            options.append({"id": str(idxs[0]), "label": label})
+        push_choose_option(game, pid, "__abilities", "pick", options=options,
+                           pick=1, data={"abilities": rest})
+    for a in reversed(auto):                        # on top: commuters run first
+        push_auto(game, pid, a["card"], a["stage"], data=a["data"])
 
 
 def _k_ability_pick(game, pid, frame, choice):
@@ -1806,6 +1876,8 @@ KERNEL_STAGES[("__turn", "finish")] = _k_turn_finish
 KERNEL_STAGES[("__gain", "resolve")] = _k_gain_resolve
 KERNEL_STAGES[("__abilities", "pool")] = _k_ability_pool
 KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
+KERNEL_STAGES[("*", "__offer_window")] = _k_offer_window
+KERNEL_STAGES[("*", "__inplay_push")] = _k_inplay_push
 
 
 _HANDLERS = {

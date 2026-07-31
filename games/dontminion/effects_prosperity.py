@@ -325,12 +325,17 @@ def _workers_village(game, pid):
 # prosperity_b batch
 # ==========================================================================
 
-def _this_turn_gain_watcher(game, pid, card, stage):
+def _this_turn_gain_watcher(game, pid, card, stage, commutes=False):
     """add_watcher(until="turn_end") for the 2022 "this turn, when you gain"
     treasures. The kernel counts only CROSS-TURN watchers toward duration
     persistence, so the card discards at its own clean-up (and may be trashed
-    from play mid-turn) while the live watcher keeps firing until turn end."""
-    E.add_watcher(game, pid, card, "gain", stage=stage, until="turn_end")
+    from play mid-turn) while the live watcher keeps firing until turn end.
+    commutes: Collection only — +1 VP is decision-free and order-independent,
+    so the ability pool must auto-run it rather than prompt. NOT Hoard (its
+    Gold gain emits a fresh event other abilities can order against) and NOT
+    Tiara (a may-topdeck decision)."""
+    E.add_watcher(game, pid, card, "gain", stage=stage, until="turn_end",
+                  commutes=commutes)
 
 
 # --- Charlatan ---------------------------------------------------------------
@@ -393,7 +398,7 @@ def _clerk_start_react(game, pid, frame, choice):
 
 def _collection(game, pid):
     E.add_buys(game, 1)
-    _this_turn_gain_watcher(game, pid, "Collection", "vp_check")
+    _this_turn_gain_watcher(game, pid, "Collection", "vp_check", commutes=True)
 
 
 def _collection_vp_check(game, pid, frame, choice):
@@ -790,3 +795,16 @@ MANUAL_TREASURES = {
 # Bank counts the Treasures already in play (including itself), so playing it
 # later is never worse — play_all_treasures plays it after the rest.
 AUTOPLAY_LAST = {"Bank"}
+
+# Join-time watcher filters for the ability pool (contract in effects.py) —
+# each mirrors its stage's own resolve-time guard.
+WATCHER_WHENS = {
+    ("Collection", "vp_check"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"] == game["turn"]
+        and E.has_type(game, ctx["subject"], "action")),
+    ("Hoard", "gold_check"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"] and bool(ctx.get("via_buy"))
+        and E.has_type(game, ctx["subject"], "victory")),
+    ("Tiara", "gain_check"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"] == game["turn"]),
+}

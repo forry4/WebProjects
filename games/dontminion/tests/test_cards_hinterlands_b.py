@@ -833,6 +833,13 @@ def test_trail_watchtower_trashing_a_gained_trail_still_plays_it_only_once():
     g["seats"][A]["deck"] = ["Gold"] * 3
     assert engine.gain(g, A, "Trail")
     engine._drive(g)
+    # Trail's own when-gain and Watchtower are concurrent (p23 §2): the pool
+    # asks; take the Trail offer first — the old fixed order — and decline it
+    f = g["pending"][-1]
+    assert (f["card"], f["stage"]) == ("__abilities", "pick")
+    opts = {o["label"]: o["id"] for o in f["constraint"]["options"]}
+    assert set(opts) == {"Trail", "Watchtower"}
+    assert decide(g, A, ids=[opts["Trail"]])[0]
     assert g["pending"][-1]["card"] == "Trail"
     assert decide(g, A, ids=["decline"])[0]      # leave it for the Watchtower
     assert g["pending"][-1]["card"] == "Watchtower"
@@ -1015,6 +1022,12 @@ def test_berserker_that_played_itself_is_lost_track_of_by_watchtower():
     g["seats"][A]["in_play"] = ["Village"]
     assert engine.gain(g, A, "Berserker")
     engine._drive(g)
+    # Berserker's self-play and Watchtower are concurrent: play it FIRST, so
+    # the Watchtower window that follows has lost track of it (the ruling)
+    f = g["pending"][-1]
+    assert (f["card"], f["stage"]) == ("__abilities", "pick")
+    opts = {o["label"]: o["id"] for o in f["constraint"]["options"]}
+    assert decide(g, A, ids=[opts["Berserker"]])[0]
     assert g["seats"][A]["in_play"] == ["Village", "Berserker"]
     assert decide(g, A, pile="Silver")[0]          # its own gain
     assert g["pending"][-1]["data"]["gained"] == "Silver"   # that gain's window

@@ -718,3 +718,25 @@ TRIGGERS = {
                   "when": lambda game, pid, ctx: not game["turn_ctx"].get("gained_victory_in_buy"),
                   "push": _treasury_prompt}],
 }
+
+# (card, stage) -> does this WATCHER fire for this occurrence? Join-time
+# filters for the ability pool (engine emit; contract in effects.py). Each
+# mirrors its stage's own guard — the stage keeps it as the resolve-time
+# re-check, so drift between the two shows up as a lost_track/no-op, not a
+# wrong resolution.
+WATCHER_WHENS = {
+    ("Monkey", "peek"): lambda game, w, ctx: (
+        ctx["actor"] == game["players"][game["players"].index(w["owner"]) - 1]),
+    ("Blockade", "curse_check"): lambda game, w, ctx: (
+        ctx["actor"] not in (None, w["owner"])
+        and ctx["subject"] == w["data"]["card"]
+        and ctx["actor"] == game["turn"]),
+    ("Corsair", "hit"): lambda game, w, ctx: (
+        ctx["actor"] not in (None, w["owner"])
+        and ctx["subject"] in ("Silver", "Gold")
+        and w["data"].get("hit", {}).get(ctx["actor"]) != game["turn_number"]),
+    ("Sailor", "gained_dur"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"] == game["turn"]
+        and "duration" in CARDS[ctx["subject"]]["types"]
+        and not w["data"].get("used")),
+}

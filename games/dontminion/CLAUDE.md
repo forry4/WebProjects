@@ -209,9 +209,26 @@ never order-the-list-up-front, so later picks can react to what earlier resoluti
 interleaving (p24 §3) falls out naturally. Because it's a plain choose_option, legal_moves /
 sample_decision / both bots / redaction / all six renderers work untouched. **CONTRACT: any code
 path pushing ≥2 same-player frames from one occurrence must route through park_abilities.** Wired
-today: `_start_of_turn` duration fx (phase 1). Phases 2-4 (when-gain/emit, batch discards,
-turn_start reactions) are `.claude-plans/concurrent-ability-ordering.md`; ledger row B4 tracks
-what's still fixed-order.
+today: `_start_of_turn` duration fx (phase 1) and **`emit()` itself** (phase 2) — every event's
+consumers (watcher autos, `self` triggers, `in_play` pushes, `hand` windows) are collected into ONE
+pool per player, pushed in reversed turn order (current player's resolves first, p23 §3). Three
+supporting pieces, all load-bearing:
+- **Deferral runners**: a pooled hand window parks as `("*", "__offer_window")` and an in_play push
+  as `("*", "__inplay_push")` — each re-checks card PRESENCE at resolution and logs `lost_track` if
+  an earlier pick moved it (the spec index rides in the frame for `__inplay_push`).
+- **`WATCHER_WHENS`** (per-module registry, merged like STAGES): `(card, stage) -> fn(game, w, ctx)`
+  — does this WATCHER actually fire for this occurrence? Evaluated at JOIN time (p25 §3), so a
+  watcher whose ability would no-op (Monkey on anyone but the right-hand neighbour, a spent Sailor,
+  Haggler on a non-buy gain) never enters the pool — a prompt ordering a no-op against a real
+  ability implies the no-op will do something. **A new watcher with an internal no-op condition
+  OWES a WATCHER_WHENS entry**; the stage keeps its own guard as the resolve-time re-check.
+- **`commutes`** (add_watcher kwarg / TRIGGERS spec key): decision-free AND order-independent
+  abilities (Collection's +1 VP, Nomads' +$2) auto-run first and never appear in the prompt.
+  Declare it only when resolving the stage can never change what any other pending ability does.
+Bucket order inside a pool = self, in_play, hand, watchers — the pre-pool engine's exact pop order,
+so the FIRST option is always the historical default and a single consumer is byte-identical to the
+old direct push. Phases 3-4 (batch discards, turn_start reactions) remain —
+`.claude-plans/concurrent-ability-ordering.md`; ledger row B4 tracks what's still fixed-order.
 
 **THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
 single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
@@ -250,6 +267,9 @@ COST_MODS: {card: fn(game, name)}  # optional — while-in-play cost modifiers
 DYN_COSTS: {card: fn(game)}        # optional — the card's own dynamic cost (Peddler)
 BUY_GATES: {card: fn(game, pid)}   # optional — buy restrictions (Grand Market)
 MANUAL_TREASURES: {names}          # optional — treasures play_all must skip
+WATCHER_WHENS: {(card, stage): fn(game, watcher, ctx)}  # optional — join-time
+                                   # pool filters for watchers (see the
+                                   # concurrent-ability section above)
 ```
 The resolver pops the frame BEFORE dispatching (stages never clean up). Treasures and pure
 Victory/Curse cards need NO entries (handlers + `cards.py` data cover them).
@@ -365,8 +385,8 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | # | Question | What we do | Why it's open |
 |---|---|---|---|
 | A1 | A **throne-roomed Attack**: one reaction window, or one per replay? | One window **per replay** — a Moat holder is asked twice and must reveal twice; immunity is per-play. | p53 says a reaction triggers "whenever an Attack card is *played*" and Cultist 3 wants a reveal per play; but Moat reads "unaffected by **it**" and Reckless 8 says one reveal covers both resolutions of a single play. Not settled either way. Pinned by `test_throne_room_on_a_new_attack_opens_a_reaction_window_per_play` + its decline twin. |
-| A2 | A gained card's **own when-gain** vs a **hand-reaction window** (Watchtower/Trader) firing on the same gain | The gained card's own ability resolves **first**. | The compendium (p26) explicitly lets the PLAYER choose the order; we don't model that choice. Ours is one of the two legal orders, and is exactly the branch the compendium's worked Example 1 walks through (Inn shuffles itself in, Watchtower then loses track). |
-| A3 | Two of the player's **own triggers** firing simultaneously | Registration order wins — and because `effects.py` merges modules in `_MODULES` order with the newest last, the newest set's `self` trigger always resolves first. | Same p26 player's-choice rule as A2. Concretely: gaining a Trail or Berserker while holding a Watchtower always self-plays first, never the reverse. |
+| ~~A2~~ | ~~A gained card's own when-gain vs a hand reaction on the same gain~~ | **RETIRED (phase 2 of the ability pool)** — the player now chooses, per p23 §2. `test_watchtower_and_inn_the_player_chooses_and_each_order_differs` plays the compendium's worked Example 1 down BOTH branches. | — |
+| ~~A3~~ | ~~Two of the player's own triggers firing simultaneously~~ | **RETIRED (phase 2)** — same pool. Registration order survives only as the pool's OPTION order (the first option is the historical default). | — |
 
 **B. Deliberate simplifications — the rules are clear, we do something simpler**
 
@@ -375,7 +395,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). Neither exists yet. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
-| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2) | **Start-of-turn duration fx: IMPLEMENTED** (the ability pool, phase 1 — see the frozen-API section). Still fixed-order: a gained card's own when-gain first (A2); registration order between own triggers (A3); batch-discard reactions in **reverse decision-payload order** — the reverse of the player's click order in the discard picker, a pure LIFO accident nothing ever chose | Phases 2-4 of `.claude-plans/concurrent-ability-ordering.md` retire the rest of this row plus A2/A3. Until then the discard accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
+| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2) | **Start-of-turn duration fx (phase 1) AND every emit-driven event — when-gain, when-trash, buy_phase_end (phase 2): IMPLEMENTED** via the ability pool. Still fixed-order: batch-discard reactions in **reverse decision-payload order** — the reverse of the player's click order in the discard picker, a pure LIFO accident nothing ever chose — and turn_start hand reactions (Clerk) pool separately from duration fx. | Phases 3-4 of `.claude-plans/concurrent-ability-ordering.md` retire the rest. Until then the discard accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
 

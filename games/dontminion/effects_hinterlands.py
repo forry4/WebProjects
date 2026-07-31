@@ -1203,8 +1203,10 @@ TRIGGERS = {
     # fire on your own turn if you made an opponent gain a Province.
     "Fool's Gold": [{"on": "gain", "from": "hand", "mode": "reveal",
                      "stage": "react", "when": _fools_gold_when}],
-    "Nomads": [{"on": "gain", "from": "self", "stage": "bonus"},
-               {"on": "trash", "from": "self", "stage": "bonus"}],
+    # commutes: the +$2 is decision-free and order-independent, so the ability
+    # pool auto-runs it instead of offering "Nomads first or Watchtower first?"
+    "Nomads": [{"on": "gain", "from": "self", "stage": "bonus", "commutes": True},
+               {"on": "trash", "from": "self", "stage": "bonus", "commutes": True}],
     "Souk": [{"on": "gain", "from": "self", "stage": "on_gain"}],
     # Watchtower's exact shape — an EXCHANGE on a completed gain, never the
     # would-gain replacement protocol (see the module docstring).
@@ -1225,3 +1227,14 @@ ATTACK_REACTIONS = {
 
 MANUAL_TREASURES = {"Cauldron"}
 
+
+# Join-time watcher filters for the ability pool (contract in effects.py) —
+# each mirrors its stage's own resolve-time guard.
+WATCHER_WHENS = {
+    ("Haggler", "gain_check"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"] == game["turn"] and bool(ctx.get("via_buy"))),
+    ("Scheme", "cleanup"): lambda game, w, ctx: (
+        ctx["actor"] == w["owner"]
+        and any(E.has_type(game, c, "action")
+                for c in E.leaving_play(game, w["owner"]))),
+}

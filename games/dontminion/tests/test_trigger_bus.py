@@ -489,6 +489,9 @@ def test_hand_reaction_window_shape(g, synthetic):
           taken.append((pid, choice["ids"][0])))
     g["seats"][B]["hand"] = ["Moat"]
     engine.gain(g, A, "Silver")
+    # emit() parks consumers as an ability-pool auto; a real move drives it via
+    # apply_move, a direct engine.gain in a test drives it here
+    engine._drive(g)
     assert g["pending_pid"] == B and g["pending_kind"] == "choose_option"
     ok, err = engine.apply_move(g, B, {"type": "decision", "ids": ["play"]})
     assert ok, err

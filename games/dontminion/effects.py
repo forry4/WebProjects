@@ -29,6 +29,13 @@ MANUAL_TREASURES = set()  # treasures play_all must skip (interactive: Anvil-cla
 AUTOPLAY_LAST = set()
 # card -> reaction spec for the attack window (see engine.attack_reactions)
 ATTACK_REACTIONS = {}
+# (card, stage) -> fn(game, watcher, ctx) -> bool: does this WATCHER actually
+# fire for this occurrence? Evaluated by emit() at JOIN time (p25 §3 — triggers
+# are based on the actual occurrence), so a watcher whose ability would no-op
+# (Monkey on anyone but the right-hand neighbour, a spent Sailor) never enters
+# the ability pool and never pollutes the what-resolves-first prompt. The stage
+# keeps its own guard as the resolve-time re-check.
+WATCHER_WHENS = {}
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -63,3 +70,7 @@ for _m in _MODULES:
         if _name in ATTACK_REACTIONS:
             raise RuntimeError(f"dontminion: duplicate ATTACK_REACTIONS entry {_name!r}")
         ATTACK_REACTIONS[_name] = _spec
+    for _key, _fn in getattr(_m, "WATCHER_WHENS", {}).items():
+        if _key in WATCHER_WHENS:
+            raise RuntimeError(f"dontminion: duplicate WATCHER_WHENS entry {_key!r}")
+        WATCHER_WHENS[_key] = _fn
