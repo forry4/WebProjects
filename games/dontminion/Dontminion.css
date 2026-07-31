@@ -173,6 +173,11 @@
      so it takes the padding off the frame and applies --cf-pad itself: every
      row now sits the SAME distance from the edge (border + --cf-pad). */
   --cf-pad: 4px; padding: 0;
+  /* press-and-hold opens the detail modal, so the OS must not answer the hold
+     first: iOS pops a selection callout / magnifier over the card otherwise,
+     and a text selection would swallow the gesture on every platform */
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  touch-action: manipulation;
   /* FIXED height — a card never grows for its content; the text shrinks */
   height: var(--card-h, 120px); min-height: 0;
   /* the shared frame animates transition:all — narrow it so container-query

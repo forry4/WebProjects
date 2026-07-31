@@ -695,6 +695,70 @@ try {
 			});
 			check("the pile count never covers a card's type or cost",
 				pills.length === 0, JSON.stringify(pills));
+
+			// Right-click / press-and-hold opens the card's detail modal without
+			// firing the card's PRIMARY action. Tested on an affordable Copper in
+			// the buy phase, because that is the case where a plain click really
+			// does buy — the pile count is the witness that it didn't.
+			await page.locator(".dm-turnbtns .btn", { hasText: /to buy phase/i })
+				.click({ timeout: 10_000 }).catch(() => {});
+			await sleep(800);
+			const copperCount = () => page.evaluate(() => {
+				const el = [...document.querySelectorAll(".dm-supply .dm-pile-slot")]
+					.find((x) => x.querySelector(".dm-fitspan")?.textContent === "Copper");
+				return el?.querySelector(".dm-pile-count")?.textContent ?? null;
+			});
+			const infoOpen = () => page.locator(".dm-cardinfo").count().then((n) => n > 0);
+			const closeInfo = async () => {
+				if (await infoOpen()) {
+					await page.locator(".dm-backdrop").first().click({ position: { x: 5, y: 5 } });
+					await sleep(250);
+				}
+			};
+			const copper = page.locator(".dm-supply .dm-card").filter({ hasText: "Copper" }).first();
+			const c0 = await copperCount();
+			await copper.click({ button: "right" });
+			await sleep(350);
+			const rc = { opened: await infoOpen(), title: await page.locator(".dm-cardinfo-detail h2")
+				.textContent().catch(() => null) };
+			await closeInfo();
+			const c1 = await copperCount();
+			check("right-click opens the card detail without buying",
+				rc.opened && rc.title === "Copper" && c0 === c1 && c0 !== null,
+				JSON.stringify({ ...rc, c0, c1 }));
+
+			// Synthetic touch hold — Playwright has no press-and-hold, and the iOS
+			// path is a timer rather than a `contextmenu`, so dispatch the real
+			// pointer sequence with pointerType "touch".
+			const bb = await copper.boundingBox();
+			const hold = (ms) => page.evaluate(async ([x, y, dur]) => {
+				const el = document.elementFromPoint(x, y).closest(".dm-card");
+				const mk = (type) => new PointerEvent(type, { bubbles: true, cancelable: true,
+					composed: true, pointerId: 1, pointerType: "touch", isPrimary: true,
+					clientX: x, clientY: y });
+				el.dispatchEvent(mk("pointerdown"));
+				await new Promise((r) => setTimeout(r, dur));
+				el.dispatchEvent(mk("pointerup"));
+				el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true,
+					clientX: x, clientY: y }));
+			}, [bb.x + bb.width / 2, bb.y + bb.height / 2, ms]);
+
+			await hold(650);
+			await sleep(350);
+			const heldOpen = await infoOpen();
+			await closeInfo();
+			const c2 = await copperCount();
+			check("press-and-hold opens the card detail without buying",
+				heldOpen && c1 === c2, JSON.stringify({ heldOpen, c1, c2 }));
+
+			// ...and the gesture must not eat an ordinary tap.
+			await hold(80);
+			await sleep(800);
+			const c3 = await copperCount();
+			const tapOpened = await infoOpen();
+			await closeInfo();
+			check("a short tap still buys, and opens nothing",
+				c2 !== c3 && !tapOpened, JSON.stringify({ c2, c3, tapOpened }));
 		}
 		check("no page errors while rendering the board", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");

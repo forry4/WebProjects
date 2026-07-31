@@ -70,8 +70,57 @@ const faceClass = (types) => {
   return "dm-f-action";
 };
 
+// Right-click (desktop) / press-and-hold (touch) opens the card's detail modal,
+// WHATEVER the plain click is wired to do — a card you can buy, play or pick is
+// exactly the card you most want to read first, and its click is already taken.
+//
+// Android fires `contextmenu` on a long press, but iOS Safari does not (it runs
+// its own selection callout instead), so touch gets a real timer rather than
+// relying on the event. Both paths funnel through one `fired` flag: whichever
+// wins, the other is a no-op and the tap that follows is swallowed, so holding a
+// card can never also play it.
+const LONG_PRESS_MS = 450;
+const LONG_PRESS_SLOP = 10;      // finger drift still counted as a hold, not a scroll
+function useCardInfoGesture(onInfo) {
+  const timer = useRef(null);
+  const fired = useRef(false);
+  const from = useRef(null);
+  const clear = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  }, []);
+  useEffect(() => clear, [clear]);          // never leave a timer behind on unmount
+  if (!onInfo) return {};
+  const open = () => { clear(); fired.current = true; onInfo(); };
+  return {
+    onContextMenu: (e) => {
+      e.preventDefault(); e.stopPropagation();   // no browser menu on a card
+      if (!fired.current) open();
+    },
+    onPointerDown: (e) => {
+      fired.current = false;                     // a fresh press re-arms the click
+      if (e.pointerType === "mouse") return;     // right-click already covers a mouse
+      from.current = { x: e.clientX, y: e.clientY };
+      clear();
+      timer.current = setTimeout(open, LONG_PRESS_MS);
+    },
+    onPointerMove: (e) => {
+      if (!timer.current || !from.current) return;
+      if (Math.abs(e.clientX - from.current.x) > LONG_PRESS_SLOP
+        || Math.abs(e.clientY - from.current.y) > LONG_PRESS_SLOP) clear();   // they're scrolling
+    },
+    onPointerUp: clear,
+    onPointerCancel: clear,
+    onPointerLeave: clear,
+    onClickCapture: (e) => {
+      // the hold already answered — don't let the release ALSO play the card
+      if (fired.current) { e.preventDefault(); e.stopPropagation(); fired.current = false; }
+    },
+  };
+}
+
 function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight, small, badge }) {
   const types = card?.types || [];
+  const infoGesture = useCardInfoGesture(onInfo);
   // A card that isn't actionable right now still answers a click with its
   // detail modal (onInfo) — nothing on the board is a dead click.
   const click = (!disabled && onClick) ? onClick : onInfo;
@@ -84,7 +133,8 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
   const textCls = text.length > 200 ? " dm-text-xxl" : text.length > 130 ? " dm-text-xl"
     : text.length > 80 ? " dm-text-l" : "";
   return (
-    <div className={cls} onClick={click} title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
+    <div className={cls} onClick={click} {...infoGesture}
+      title={card ? `${name} (${card.cost}) — ${card.text}` : name}>
       {types.includes("attack") && <span className="dm-edge dm-edge-atk" />}
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
       {types.includes("duration") && !types.includes("attack") && <span className="dm-edge dm-edge-dur" />}
@@ -782,7 +832,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {c.cards.map((n, i) => (
               <DmCardFace key={i} name={n} card={cards[n]} small
                 selected={pickIdx.includes(i)}
-                onClick={() => setPickIdx((s) => pickToggle(s, i, c.max))} />
+                onClick={() => setPickIdx((s) => pickToggle(s, i, c.max))}
+                onInfo={() => setCardInfo(n)} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -831,7 +882,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
               <DmCardFace key={i} name={n} card={cards[n]} small
                 selected={orderIdx.includes(i)}
                 badge={orderIdx.includes(i) ? orderIdx.indexOf(i) + 1 : null}
-                onClick={() => setOrderIdx((s) => s.includes(i) ? s.filter((x) => x !== i) : [...s, i])} />
+                onClick={() => setOrderIdx((s) => s.includes(i) ? s.filter((x) => x !== i) : [...s, i])}
+                onInfo={() => setCardInfo(n)} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -920,7 +972,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
         <DmCardFace name={name} card={cardData} small
           highlight={highlight} disabled={disabled && !highlight}
-          onClick={() => pileClick(name)} onInfo={() => pileClick(name)} />
+          onClick={() => pileClick(name)} onInfo={() => setCardInfo(name)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
         <span className="dm-pile-count"><Pop n={count} /></span>
         {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
@@ -1054,6 +1106,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         <p><b>Buy phase</b> — play Treasures for coins, then buy cards from the Supply into your discard pile. No Treasures after you buy.</p>
         <p>The game ends when the Province pile — or any three piles — empty. Most victory points in your whole deck wins.</p>
         <p>Attack cards hit the other players; a Moat (revealed from hand) blocks an attack against you.</p>
+        <p><b>Reading a card</b> — right-click it (or press and hold on a touch screen) to see its full text, any time, anywhere on the board. A plain click does whatever the card is for right now: play it, buy it, or pick it.</p>
       </div>
     </CreateModal>
   );
@@ -1399,7 +1452,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-kgrid">
               {kingdomByCost.map((n) => (
                 <div key={n} className="dm-pile-slot">
-                  <DmCardFace name={n} card={cards[n]} />
+                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
                   <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
                 </div>
               ))}
@@ -1408,7 +1461,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-kgrid">
               {basicsRowFor(game.supply).map((n) => (
                 <div key={n} className="dm-pile-slot">
-                  <DmCardFace name={n} card={cards[n]} />
+                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
                   <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
                 </div>
               ))}

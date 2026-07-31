@@ -406,6 +406,18 @@ marker). Because engine constraints are generic, the decision UI is SIX renderer
 a played card doesn't change size depending on who played it. Supply affordance mirrors
 `engine.cost` via `turn_ctx.bridges` — display only, the server stays authoritative.
 
+**Reading a card is its own gesture: right-click, or press-and-hold on touch.** A plain click is
+always the card's PRIMARY action (play / buy / pick), and the card you most want to read is the
+one whose click is already taken — so info can't be the click. `useCardInfoGesture` handles both:
+`contextmenu` (which Android also fires on a long press) and, because iOS Safari does NOT fire it
+and runs its own selection callout instead, a real 450ms timer on touch pointers with a 10px
+slop so a scroll isn't a hold. Both paths share one `fired` flag, so whichever wins the other
+no-ops and the release is swallowed — holding a card can never also play it. The face sets
+`-webkit-touch-callout: none` + `user-select: none` or iOS answers the hold first. **Every
+`DmCardFace` needs an `onInfo` that is PURE info** — the supply's used to be `pileClick`, which
+buys when the pile is affordable. `screens.mjs` pins all three behaviours (right-click opens
+without buying, hold opens without buying, a short tap still buys and opens nothing).
+
 **The card face has ONE inset token, `--cf-pad`** (on `.dm-card`, used by the name, rules text
 and foot). The face also zeroes the shared `.card` frame's own padding — the two stacked, so the
 real buffer was 12px per side, a fifth of a 56px card's width. Three things follow and all three
