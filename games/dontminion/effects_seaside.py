@@ -524,7 +524,12 @@ def _sailor_gained_dur(game, pid, frame, choice):
     if not any(not x.get("used") for x in E.watcher_datas(game, d["owner"], "Sailor")):
         return
     if _sailor_zone(game, pid, d["subject"]) is None:
-        return                                 # can't be played from where it went
+        # NOT literally a move — the gain put it somewhere Sailor was never
+        # able to play from (a Blockade set-aside), so `why` is spelled out
+        # rather than claiming it moved
+        E.lost_track(game, pid, d["subject"], "played",
+                     why="it was gained somewhere it can't be played from")
+        return
     E.push_choose_option(game, pid, "Sailor", "play_gained",
                          options=[{"id": "play",
                                    "label": f"Play the gained {d['subject']}"},
@@ -538,7 +543,8 @@ def _sailor_play_gained(game, pid, frame, choice):
     card = frame["data"]["card"]
     zone = _sailor_zone(game, pid, card)
     if zone is None:
-        return                                 # moved since the prompt: lose track
+        E.lost_track(game, pid, card, "played")   # moved since the prompt
+        return
     # burn ONE Sailor's flag, only now that the play actually happens
     for live in E.watcher_datas(game, pid, "Sailor"):
         if not live.get("used"):

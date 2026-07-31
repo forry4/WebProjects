@@ -601,7 +601,7 @@ def _offer_self_play(game, pid, card, frame, stage, label):
         # walks through exactly this), but silently skipping the second prompt
         # reads as the trigger having failed to fire. Reported as a bug from a
         # real game; the log line is the whole fix.
-        E._log(game, pid, "lost_track", card=card)
+        E.lost_track(game, pid, card, "played")
         return
     E.push_choose_option(game, pid, card, stage,
                          options=[{"id": "play", "label": label},
@@ -614,7 +614,8 @@ def _resolve_self_play(game, pid, card, frame, choice):
         return
     zone = E.find_card_zone(game, pid, card, (frame["data"]["zone"],))
     if zone is None:
-        return                       # moved since the window opened: lost track
+        E.lost_track(game, pid, card, "played")   # moved since the window opened
+        return
     # REACTION THAT PLAYS ITSELF: no Action is spent, and an off-turn play must
     # not count toward the TURN player's actions_played (Conspirator's counter)
     E.play_action_card(game, pid, card, from_zone=zone,
@@ -761,7 +762,8 @@ def _jack_trash(game, pid, frame, choice):
 
 def _tunnel_on_discard(game, pid, frame, choice):
     if E.find_card_zone(game, pid, "Tunnel", ("discard",)) is None:
-        return                       # lost track of it; nothing to reveal
+        E.lost_track(game, pid, "Tunnel", "revealed")   # nothing left to reveal
+        return
     E.push_choose_option(game, pid, "Tunnel", "reveal",
                          options=[{"id": "reveal",
                                    "label": "Reveal Tunnel to gain a Gold"},
@@ -773,6 +775,7 @@ def _tunnel_reveal(game, pid, frame, choice):
     if choice["ids"][0] != "reveal":
         return
     if E.find_card_zone(game, pid, "Tunnel", ("discard",)) is None:
+        E.lost_track(game, pid, "Tunnel", "revealed")
         return
     E.reveal(game, pid, ["Tunnel"], "discard")
     E.gain(game, pid, "Gold")        # empty pile: the reveal still happened
@@ -1033,7 +1036,8 @@ def _berserker_on_gain(game, pid, frame, choice):
         return                               # read AT RESOLUTION, not at gain
     zone = E.find_card_zone(game, pid, "Berserker", (_self_zone(frame),))
     if zone is None:
-        return                               # a Watchtower moved/trashed it
+        E.lost_track(game, pid, "Berserker", "played")   # a Watchtower moved it
+        return
     E.play_action_card(game, pid, "Berserker", from_zone=zone,
                        count=(pid == game["turn"]))
 

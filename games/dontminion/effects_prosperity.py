@@ -689,7 +689,10 @@ def _watchtower_act(game, pid, frame, choice):
     seat = game["seats"][pid]
     if dest not in ("discard", "hand", "deck", "dur_aside") \
             or card not in seat.get(dest, []):
-        return                                 # lose track: someone moved it
+        # no verb: Watchtower's ability is trash-OR-topdeck, so the client says
+        # "the ability is skipped" rather than naming one of them
+        E.lost_track(game, pid, card)          # someone moved the gained card
+        return
     if cid == "trash":
         E.trash(game, pid, [card], zone=dest)
     elif dest != "deck":                       # gained to the deck: already there

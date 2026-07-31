@@ -1390,6 +1390,47 @@ def test_a_discarded_trail_that_stays_put_is_still_offered_twice():
     assert not any(e.get("event") == "lost_track" for e in g["log"])
 
 
+# --- batch discard: TWO reaction cards in one batch — the order is IMPLICIT ----
+
+def test_batch_discard_reactions_surface_in_reverse_payload_order():
+    """Ledger row B4. Discarding Trail + Tunnel in ONE batch fires two
+    when-discard reactions, and the order they surface is currently an
+    ACCIDENT: per-card emits stack LIFO, so it is the REVERSE of the order the
+    cards appear in the decision payload — i.e. the order the player happened
+    to click them in the discard picker, backwards. The rules (p23 §2) say the
+    player chooses; we don't offer that choice yet.
+
+    This test pins the accident so a refactor (canonicalizing a card list,
+    reordering emits) changes it VISIBLY rather than silently. Phase 3 of
+    .claude-plans/concurrent-ability-ordering.md replaces the implicit order
+    with a real choice and deletes this test on purpose."""
+    def surfaced(payload):
+        g = fresh(["Trail", "Tunnel", "Militia", "Village", "Smithy", "Moat",
+                   "Market", "Festival", "Gardens", "Cellar"],
+                  expansions=("base", "hinterlands"))
+        g["seats"][B]["hand"] = ["Militia"]
+        give_hand(g, A, ["Trail", "Tunnel", "Copper", "Copper", "Copper"])
+        g["turn"] = B
+        g["phase"] = "action"
+        g["actions"] = 1
+        assert mv(g, B, {"type": "play_action", "card": "Militia"})[0]
+        assert g["pending_pid"] == A and g["pending_kind"] == "choose_cards"
+        assert mv(g, A, {"type": "decision", "cards": list(payload)})[0]
+        seq = []
+        while g["pending_pid"] == A and g["pending_kind"] == "choose_option":
+            top = g["pending"][-1]
+            seq.append(top["card"])
+            # decline (the last option is always the don't-react branch)
+            assert decide(g, A, ids=[top["constraint"]["options"][-1]["id"]])[0]
+        return seq
+
+    # validation is sub-multiset, so BOTH payload orders are legal — and each
+    # yields the opposite reaction order, proving the order is player-click-
+    # driven rather than a rule
+    assert surfaced(["Trail", "Tunnel"]) == ["Tunnel", "Trail"]
+    assert surfaced(["Tunnel", "Trail"]) == ["Trail", "Tunnel"]
+
+
 # --- Scheme x two copies of one Duration (the same-name, different-copy trap) --
 
 def test_scheme_topdecks_the_finishing_duration_not_the_one_just_played():

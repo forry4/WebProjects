@@ -250,6 +250,22 @@ per-opponent stage for non-immune opponents, each fully resolving before the nex
 "intrigue":[26]}`; `pile_size(name,n)` (Copper 60−7n, Silver 40, Gold 30, Curse 10(n−1),
 victory-typed 8/12, else 10); `DATA_COMPLETE`.
 
+**A SKIPPED ABILITY MUST NEVER BE SILENT — call `lost_track(game, pid, card[, verb][, why])`.**
+The lose-track rule ("cards that are lost track of can't be played") means a prompt correctly never
+opens, and from the player's seat that is indistinguishable from a trigger that failed to fire —
+which is exactly how Trail × Tide Pools got reported as a bug. There is NO runtime signal either:
+the correct behaviour and a genuinely broken trigger leave identical game state, so it is guarded at
+SOURCE level by `test_every_find_card_zone_guard_logs_lost_track`, which walks the effects modules'
+AST and fails on any `find_card_zone` guard that returns without logging. It covers both guard
+shapes (inline `if find_card_zone(...) is None:` and `zone = …` / `if zone is None:`) — an earlier
+regex version scanned a 6-line window and comments pushed two real sites out of it, so it passed
+while checking 5 of 7. **It found an 8th site the manual sweep had missed** (Sailor's offer). Today's
+eight: Trail/Weaver (offer + answer), Tunnel (offer + answer), Berserker, Sailor (offer + answer),
+and Watchtower — whose membership-test guard is NOT mechanically detectable and is on you.
+`verb` is what can't happen ("played"/"revealed"; omit for Watchtower's trash-or-topdeck), `why`
+replaces the default "it moved" where nothing actually moved (Sailor's gain landing somewhere it was
+never playable from).
+
 ## Rules the engine enforces globally (don't re-implement per card)
 
 - Choices are never feasibility-filtered (a player may pick an option they can't fully do);
@@ -343,6 +359,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). Neither exists yet. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
+| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2 — start-of-turn fx, when-gain vs hand reactions, batch-discard reactions) | Fixed orders everywhere: duration fx in play order; a gained card's own when-gain first (A2); registration order (A3); and batch-discard reactions in **reverse decision-payload order** — i.e. the reverse of the order the player clicked the cards in the discard picker, a pure LIFO accident nothing ever chose | The plan to implement the real choice (an ability POOL: pick one → resolve → re-offer) is `.claude-plans/concurrent-ability-ordering.md`; its phases retire this row and A2/A3. Until then the accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
 
@@ -359,7 +376,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
   discard pile — Trail #2 with it — into the deck, and "cards that are lost track of can't be
   played", so the second offer never opens. The compendium walks through this very sequence in the
   Witch's Hut ruling (p168). Reported from a real game (GQVIQY) and confirmed against the live save.
-  The actual defect was that it happened in SILENCE, so `_offer_self_play` now logs `lost_track`.
+  The actual defect was that it happened in SILENCE, so every lose-track guard now logs `lost_track`.
   Pinned both ways: `test_playing_the_first_discarded_trail_can_lose_track_of_the_second` plus a
   control with a deep deck where both Trails ARE offered (without it, a Trail trigger that simply
   stopped firing would pass).

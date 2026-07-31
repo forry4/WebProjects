@@ -380,10 +380,13 @@ function fmtLog(e, names) {
     case "named": return `${who} names ${e.card}`;
     case "pass": return `${who} passes ${art(e.card)} to ${names[e.to] || e.to}`;
     case "pass_public": return `${who} passes a card to ${names[e.to] || e.to}`;
-    // "you may play it" for a card that moved before the offer could open —
-    // most often a second discarded Trail that the first one's draw shuffled
-    // back into the deck. Without this line the prompt just never appears.
-    case "lost_track": return `${who} loses track of ${art(e.card)} — it moved, so it can't be played`;
+    // An ability skipped because its card moved (the lose-track rule) — most
+    // often a second discarded Trail that the first one's draw shuffled back
+    // into the deck. Without this line the prompt simply never appears, which
+    // is indistinguishable from a broken trigger. `verb` is absent for
+    // abilities that aren't one word (Watchtower's trash-or-topdeck).
+    case "lost_track": return `${who} loses track of ${art(e.card)} — ${e.why || "it moved"}, so `
+      + (e.verb ? `it can't be ${e.verb}` : "the ability is skipped");
     case "undo": return `${who} takes back a move`;
     case "abandon": return `${who} abandoned the game`;
     case "game_over": return `Game over — ${(e.winners || []).map((w) => names[w] || w).join(" & ")} win${(e.winners || []).length > 1 ? "" : "s"}!`;

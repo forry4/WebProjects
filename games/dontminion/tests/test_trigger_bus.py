@@ -551,3 +551,69 @@ def test_would_gain_only_intercepts_the_gainer(g, synthetic):
     assert engine.gain(g, A, "Silver")
     assert g["pending_pid"] is None              # no window: A gains directly
     assert "Silver" in g["seats"][A]["discard"]
+
+
+# --- lose-track must never be SILENT -------------------------------------------
+
+def _calls(node, name):
+    import ast
+    return any(isinstance(n, ast.Call)
+               and getattr(n.func, "attr", getattr(n.func, "id", None)) == name
+               for n in ast.walk(node))
+
+
+def test_every_find_card_zone_guard_logs_lost_track():
+    """A lose-track guard that just `return`s makes a prompt vanish with no
+    explanation — indistinguishable from a broken trigger, which is exactly how
+    the Trail x Tide Pools interaction got reported as a bug. Source-level,
+    because there is NO runtime signal: correct behaviour and the silent-skip
+    bug leave identical game state.
+
+    AST, not a regex over a line window — the first version of this test used a
+    6-line window and comments pushed two real call sites out of it, so it
+    passed while checking 5 of 7 guards.
+
+    Scope is exactly `find_card_zone(...)` guards. A lose-track check written
+    another way (Watchtower's `card not in seat[dest]`) is not mechanically
+    detectable; those are covered by their own tests.
+    """
+    import ast
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    guards, offenders = 0, []
+
+    def is_zone_finder(call):
+        fn = getattr(call.func, "attr", getattr(call.func, "id", ""))
+        return fn == "find_card_zone" or fn.endswith("_zone")
+
+    for path in sorted(root.glob("effects_*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            # BOTH guard shapes are in use and the first version of this test
+            # only saw one: `if find_card_zone(...) is None:` inline, and
+            # `zone = find_card_zone(...)` followed by `if zone is None:`.
+            zone_names = {t.id for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                          for t in n.targets if isinstance(t, ast.Name)
+                          if isinstance(n.value, ast.Call) and is_zone_finder(n.value)}
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.If):
+                    continue
+                inline = any(is_zone_finder(c) for c in ast.walk(node.test)
+                             if isinstance(c, ast.Call))
+                via_name = any(isinstance(n, ast.Name) and n.id in zone_names
+                               for n in ast.walk(node.test))
+                if not (inline or via_name):
+                    continue
+                # only the "bail out" shape — a guard that goes on to USE the
+                # zone it found isn't skipping anything
+                if not any(isinstance(n, ast.Return) for n in ast.walk(node)):
+                    continue
+                guards += 1
+                if not _calls(node, "lost_track"):
+                    offenders.append(f"{path.name}:{node.lineno}")
+    assert guards >= 6, f"only found {guards} guards — the scan stopped working"
+    assert not offenders, (
+        "silent lose-track guard(s) — call E.lost_track(game, pid, card[, verb]) "
+        "so the player is told why the ability was skipped: " + ", ".join(offenders))

@@ -1271,6 +1271,30 @@ def find_card_zone(game, pid, card, zones=("discard", "hand", "trash")):
     return None
 
 
+def lost_track(game, pid, card, verb=None, why=None):
+    """LOG that an ability was skipped because its card moved.
+
+    **Every lose-track guard that silently returns owes one of these.** The
+    ability not happening is correct; happening in SILENCE is not — a prompt
+    that never opens is indistinguishable from a trigger that failed to fire,
+    which is exactly how a real game (two Trails discarded, the first one's
+    draw shuffling the second back into the deck) got reported as a bug. The
+    player cannot see the zone the rule is talking about, so the engine has to
+    say it.
+
+    `verb` is what can't happen to it — "played", "revealed"; omit it where the
+    ability isn't one word (Watchtower's trash-or-topdeck) and the client says
+    "the ability is skipped" instead. `why` overrides the default "it moved"
+    for the cases that aren't literally a move — Sailor's gained Duration
+    landing somewhere it was never playable from."""
+    extra = {}
+    if verb:
+        extra["verb"] = verb
+    if why:
+        extra["why"] = why
+    _log(game, pid, "lost_track", card=card, **extra)
+
+
 def play_action_card(game, pid, card, from_zone="hand", count=True):
     """Move the card to in_play (from_zone=None for throne-room replays), count the
     play, and run its effect. Attack-typed plays are wrapped: reaction windows for
