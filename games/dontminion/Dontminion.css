@@ -190,7 +190,10 @@
    types bottom-left + cost coin bottom-right. */
 .dm-card-name {
   font-family: 'Cinzel','Cinzel Fallback',serif; font-weight: 700;
-  font-size: clamp(9px, calc(var(--card-h, 120px) * .105), 14px);
+  /* +15% over the original .105/14/9 — the title is the card's identity and
+     had room to spare on every face. FitText still shrinks any name that
+     needs it, so a bigger base only helps the names that already fit. */
+  font-size: clamp(10.35px, calc(var(--card-h, 120px) * .12075), 16.1px);
   letter-spacing: .3px; line-height: 1.1;
   padding: var(--cf-pad) var(--cf-pad) 2px;
 }
@@ -228,7 +231,11 @@
 }
 .dm-type {
   display: block;
-  font-size: clamp(5.5px, calc(var(--card-h, 120px) * .068), 11px);
+  /* +15% on the SCALE and the cap (.068/11). The FLOOR stays 5.5px on purpose:
+     it is what the 56px play face lands on, and raising it there pushes the
+     widest label past the coin and wraps the foot — the thing we just fixed.
+     Above ~70px card height the scale term wins and the full +15% applies. */
+  font-size: clamp(5.5px, calc(var(--card-h, 120px) * .0782), 12.65px);
   text-transform: uppercase; letter-spacing: .3px; color: #cfc4a6;
   white-space: nowrap;
 }

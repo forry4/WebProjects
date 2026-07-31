@@ -587,7 +587,21 @@ try {
 			let rig = null;
 			for (const w of [320, 300, 280, 260, 250, 245, 240, 235]) {
 				await page.setViewportSize({ width: w, height: 900 });
-				await sleep(500);
+				// FitText refits from a ResizeObserver, so the reading right after a
+				// resize can be the PREVIOUS width's. Poll until two consecutive
+				// samples agree instead of trusting one fixed sleep — an
+				// intermittently-failing shared gate is worse than no gate.
+				let prev = null;
+				for (let i = 0; i < 12; i++) {
+					await sleep(150);
+					const now = await page.evaluate(() => {
+						const c = [...document.querySelectorAll(".dm-supply .dm-card")]
+							.find((x) => x.querySelector(".dm-fitspan")?.textContent === "Province");
+						return c ? getComputedStyle(c.querySelector(".dm-card-name")).fontSize : null;
+					});
+					if (now && now === prev) break;
+					prev = now;
+				}
 				const r = await page.evaluate(() => {
 					const card = [...document.querySelectorAll(".dm-supply .dm-card")]
 						.find((c) => c.querySelector(".dm-fitspan")?.textContent === "Province");
@@ -618,22 +632,39 @@ try {
 			const fit = await page.evaluate(() => {
 				const host = document.querySelector(".dm-opp-inplay");
 				const clone = document.querySelector(".dm-supply .dm-card").cloneNode(true);
+				// The in-play rows animate cards in (dm-enter scales them up), and a
+				// freshly appended clone is measured MID-ANIMATION: rects come back
+				// ~6% small. A uniform scale doesn't change whether the foot wrapped,
+				// so the verdict held — but the reported widths were fiction. Kill the
+				// animation and assert we measured settled layout, so a future
+				// geometry surprise fails loudly instead of printing numbers that
+				// don't reconcile.
+				clone.style.animation = "none";
 				const t = clone.querySelectorAll(".dm-type");
 				[...t].slice(1).forEach((x) => x.remove());
 				t[0].textContent = "Duration";          // the widest label we ship
 				host.appendChild(clone);
+				const foot = clone.querySelector(".dm-card-foot");
+				const costEl = clone.querySelector(".dm-cost");
+				const fcs = getComputedStyle(foot);
+				const avail = foot.clientWidth - parseFloat(fcs.paddingLeft) - parseFloat(fcs.paddingRight)
+					- costEl.getBoundingClientRect().width - parseFloat(fcs.columnGap || "0");
+				const label = t[0].getBoundingClientRect().width;
 				const types = clone.querySelector(".dm-types").getBoundingClientRect();
-				const cost = clone.querySelector(".dm-cost").getBoundingClientRect();
+				const cost = costEl.getBoundingClientRect();
 				const out = {
 					faceW: +clone.getBoundingClientRect().width.toFixed(1),
+					cssW: +parseFloat(getComputedStyle(clone).width).toFixed(1),
+					avail: +avail.toFixed(1), label: +label.toFixed(1),
+					slack: +(avail - label).toFixed(1),
 					wrapped: cost.top >= types.bottom - 0.5,
-					slack: +(cost.left - types.right).toFixed(1),
 				};
 				clone.remove();
 				return out;
 			});
 			check("the cost coin shares a row with the types on the 56px face",
-				!fit.wrapped && fit.slack >= 0, JSON.stringify(fit));
+				!fit.wrapped && fit.slack > 0 && Math.abs(fit.faceW - fit.cssW) < 0.5,
+				JSON.stringify(fit));
 
 			// The count pill straddles the card's bottom edge, so tightening the
 			// foot's inset walked the type label straight under it — 7px of overlap

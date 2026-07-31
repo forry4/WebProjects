@@ -414,9 +414,14 @@ are pinned by `screens.mjs`:
   box, so a name it had to shrink grew into (and past) its own right inset — the title sat
   visibly closer to the right edge than the left. It fits to the CONTENT box now.
 - **The foot must fit `[types][coin]` on ONE row at 56px**, which is what `--cf-pad: 4px` plus a
-  13px coin floor, a 2px gap and a 5.5px type-label floor buy: the widest label we ship
-  ("Duration", 28.5px) clears the 31px available. `flex-wrap` stays on the foot as the net —
-  if a future set's type word is longer, the coin wraps under rather than overlapping.
+  13px coin floor and a 2px gap buy: the widest label we ship ("Duration") measures 29.4px
+  against 31px available. `flex-wrap` stays on the foot as the net — if a future set's type word
+  is longer, the coin wraps under rather than overlapping. **That 1.6px is the budget any type
+  font increase spends.** The name and type scales carry a deliberate +15% (`.12075`/`16.1px`
+  and `.0782`/`12.65px`), but the type FLOOR stays 5.5px: at 56px the scale term lands on 5.69px
+  and the floor never binds, so raising it would buy nothing and cost the fit. Above ~70px card
+  height the full +15% applies. The title can be raised freely — FitText shrinks any name that
+  needs it, so a bigger base only helps names that already fit.
 - **The pile-count pill straddles the card's bottom edge**, so tightening the foot walked the
   type label straight under it (7px of overlap on every supply pile). Any further change to the
   foot inset has to re-check the pill.
