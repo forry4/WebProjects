@@ -1097,3 +1097,115 @@ def test_undo_snapshots_do_not_copy_the_log():
         assert mv(g, A, {"type": "undo_turn"})[0]
     assert [e["n"] for e in g["log"]] == list(range(len(g["log"])))
     assert g["phase"] == "action" and g["coins"] == 0
+
+
+# --- concurrent-ability ordering: the START-OF-TURN pool (p23 §2) ---------------
+
+KSEA = ["Wharf", "Tide Pools", "Smithy", "Village", "Moat", "Militia",
+        "Witch", "Gardens", "Warehouse", "Bazaar"]
+
+
+def _to_turn2_with(durations, seed=5):
+    """Play `durations` from A's hand on turn 1, cycle through B, and stop at
+    the moment A's turn 2 begins (the pool, if any, is on the stack)."""
+    g = engine.new_game([A, B], ["base", "seaside"], seed=seed, kingdom=KSEA)
+    g["seats"][A]["hand"] = list(durations)
+    g["actions"] = len(durations)
+    for i, c in enumerate(durations):
+        ok, err = engine.apply_move(g, A, {"type": "play_action", "card": c})
+        assert ok, err
+        if i < len(durations) - 1:
+            g["phase"] = "action"                # auto-advance flips it per play
+    if g["phase"] == "action":
+        assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, B, {"type": "end_phase"})[0]
+    if g["turn"] == B:
+        assert engine.apply_move(g, B, {"type": "end_phase"})[0]
+    assert g["turn"] == A
+    return g
+
+
+def _pool_labels(g):
+    assert g["pending_kind"] == "choose_option", g["pending_kind"]
+    assert g["pending"][-1]["card"] == "__abilities"
+    return {o["label"]: o["id"] for o in g["pending"][-1]["constraint"]["options"]}
+
+
+def test_two_distinct_durations_prompt_for_resolution_order():
+    g = _to_turn2_with(["Wharf", "Tide Pools"])
+    labels = _pool_labels(g)
+    assert set(labels) == {"Wharf", "Tide Pools"}
+    # the frame is a plain choose_option: enumerable, sampleable, JSON-safe
+    assert {"type": "decision", "ids": [labels["Tide Pools"]]} in engine.legal_moves(g, A)
+    json.dumps(g)
+    hand0 = len(g["seats"][A]["hand"])
+    # pick Tide Pools first -> its discard decision comes up next
+    assert engine.apply_move(g, A, {"type": "decision", "ids": [labels["Tide Pools"]]})[0]
+    assert g["pending_kind"] == "choose_cards" and g["pending"][-1]["card"] == "Tide Pools"
+    picks = g["pending"][-1]["constraint"]["cards"][:2]
+    assert engine.apply_move(g, A, {"type": "decision", "cards": picks})[0]
+    # ONE ability left -> Wharf runs directly, no second prompt
+    assert g["pending_pid"] is None
+    assert len(g["seats"][A]["hand"]) == hand0 - 2 + 2    # -2 discard, +2 Wharf
+    assert g["buys"] == 2                                  # Wharf's +1 Buy landed
+
+
+def test_identical_durations_collapse_no_prompt():
+    """Two Tide Pools are interchangeable — the pool must NOT nag (the exact
+    real game that motivated the lose-track work saw no prompt, correctly)."""
+    g = _to_turn2_with(["Tide Pools", "Tide Pools"], seed=6)
+    assert g["pending_kind"] == "choose_cards"             # straight to discard #1
+    assert g["pending"][-1]["card"] == "Tide Pools"
+    picks = g["pending"][-1]["constraint"]["cards"][:2]
+    assert engine.apply_move(g, A, {"type": "decision", "cards": picks})[0]
+    assert g["pending_kind"] == "choose_cards"             # then discard #2
+    picks = g["pending"][-1]["constraint"]["cards"][:2]
+    assert engine.apply_move(g, A, {"type": "decision", "cards": picks})[0]
+    assert g["pending_pid"] is None
+
+
+def test_pool_reoffers_after_each_pick_and_interleaves():
+    """2x Tide Pools + Wharf: the copies share ONE option ("Tide Pools ×2");
+    picking it resolves ONE copy, then the pool re-offers — so Wharf can
+    resolve BETWEEN the two Tide Pools, the interleaving p24 §3 requires."""
+    g = _to_turn2_with(["Tide Pools", "Wharf", "Tide Pools"], seed=7)
+    labels = _pool_labels(g)
+    assert set(labels) == {"Tide Pools ×2", "Wharf"}
+    assert engine.apply_move(g, A, {"type": "decision", "ids": [labels["Tide Pools ×2"]]})[0]
+    picks = g["pending"][-1]["constraint"]["cards"][:2]
+    assert engine.apply_move(g, A, {"type": "decision", "cards": picks})[0]
+    labels = _pool_labels(g)                               # re-offered, re-grouped
+    assert set(labels) == {"Tide Pools", "Wharf"}
+    assert engine.apply_move(g, A, {"type": "decision", "ids": [labels["Wharf"]]})[0]
+    # Wharf resolved between the two Tide Pools; the last one runs directly
+    assert g["pending_kind"] == "choose_cards" and g["pending"][-1]["card"] == "Tide Pools"
+    picks = g["pending"][-1]["constraint"]["cards"][:2]
+    assert engine.apply_move(g, A, {"type": "decision", "cards": picks})[0]
+    assert g["pending_pid"] is None
+    assert g["buys"] == 2
+
+
+def test_pool_prompt_redacts_and_reconnects_like_any_decision():
+    g = _to_turn2_with(["Wharf", "Tide Pools"], seed=8)
+    mine = engine.player_view(g, A)
+    theirs = engine.player_view(g, B)
+    assert mine["pending_view"]["kind"] == "choose_option"
+    assert {o["label"] for o in mine["pending_view"]["constraint"]["options"]} \
+        == {"Wharf", "Tide Pools"}
+    assert theirs["pending_view"]["waiting_on"] == A
+    assert "constraint" not in theirs["pending_view"]
+    # save/load mid-prompt round-trips (frames are plain JSON)
+    g2 = json.loads(json.dumps(g))
+    assert g2["pending"][-1] == g["pending"][-1]
+
+
+def test_pool_is_answerable_by_the_bot_path():
+    g = _to_turn2_with(["Wharf", "Tide Pools"], seed=9)
+    for _ in range(6):                                     # drain via sampling
+        if g["pending_pid"] != A:
+            break
+        mv = {"type": "decision", **engine.sample_decision(g, A, random.Random(3))}
+        ok, err = engine.apply_move(g, A, mv)
+        assert ok, err
+    assert g["pending_pid"] is None

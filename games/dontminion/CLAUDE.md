@@ -197,6 +197,22 @@ into watchers, so Corsair/Blockade delayed effects respect it. Vault skips the p
 Watchtower can trash but not topdeck a card gained to Blockade's set-aside (lose-track
 reading; cross-set corner).
 
+**CONCURRENT-ABILITY ORDERING (p23 §2 — the ability POOL):** when ONE occurrence hands a player
+several abilities, the player chooses what resolves first — `park_abilities(game, pid,
+[{card, stage, data}, ...])`. It parks a `("__abilities", "pool")` auto frame; the pool groups
+interchangeable copies (same card+stage — two Tide Pools never prompt; a per-pair `ORDER_MATTERS`
+opt-out exists for a future card whose copies differ), runs a single group directly in the
+historical order, and otherwise pushes a plain `choose_option` (card `"__abilities"`, mapped to a
+display string client-side like `"__attack"`). Picking resolves ONE instance fully on top of the
+stack (atomicity for free), then the remainder pool re-surfaces and RE-OFFERS — sequential choice,
+never order-the-list-up-front, so later picks can react to what earlier resolutions revealed and
+interleaving (p24 §3) falls out naturally. Because it's a plain choose_option, legal_moves /
+sample_decision / both bots / redaction / all six renderers work untouched. **CONTRACT: any code
+path pushing ≥2 same-player frames from one occurrence must route through park_abilities.** Wired
+today: `_start_of_turn` duration fx (phase 1). Phases 2-4 (when-gain/emit, batch discards,
+turn_start reactions) are `.claude-plans/concurrent-ability-ordering.md`; ledger row B4 tracks
+what's still fixed-order.
+
 **THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
 single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
 `"buy_phase_end"` (all fired AFTER the change applies) — consumed by (1) dynamic WATCHERS
@@ -359,7 +375,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). Neither exists yet. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
-| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2 — start-of-turn fx, when-gain vs hand reactions, batch-discard reactions) | Fixed orders everywhere: duration fx in play order; a gained card's own when-gain first (A2); registration order (A3); and batch-discard reactions in **reverse decision-payload order** — i.e. the reverse of the order the player clicked the cards in the discard picker, a pure LIFO accident nothing ever chose | The plan to implement the real choice (an ability POOL: pick one → resolve → re-offer) is `.claude-plans/concurrent-ability-ordering.md`; its phases retire this row and A2/A3. Until then the accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
+| B4 | **Concurrent same-player abilities: the player chooses resolution order** (p23 §2) | **Start-of-turn duration fx: IMPLEMENTED** (the ability pool, phase 1 — see the frozen-API section). Still fixed-order: a gained card's own when-gain first (A2); registration order between own triggers (A3); batch-discard reactions in **reverse decision-payload order** — the reverse of the player's click order in the discard picker, a pure LIFO accident nothing ever chose | Phases 2-4 of `.claude-plans/concurrent-ability-ordering.md` retire the rest of this row plus A2/A3. Until then the discard accident is pinned by `test_batch_discard_reactions_surface_in_reverse_payload_order` so a refactor that reorders emits or canonicalizes a card list changes game behaviour visibly, not silently. |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
 

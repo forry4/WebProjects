@@ -51,6 +51,12 @@ const basicsRowFor = (supply) => {
 };
 const BASIC_ROW = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"];
 
+// Kernel pseudo-card names (frames the engine owns, not real cards) → what the
+// player reads. "__abilities" is the p23 §2 concurrency prompt: several of your
+// own abilities triggered at once and YOU pick what resolves first.
+const PSEUDO_CARDS = { __attack: "Attack", __abilities: "Choose what resolves first" };
+const displayCard = (name) => PSEUDO_CARDS[name] || name;
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
 function timeAgo(ts) {
@@ -576,7 +582,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const inPlayKeys = zoneKeys(mySeat?.in_play || [], "p" + (game?.turn_number || 0));
   // What-you-can-do hint, shown at the right of the resource bar. Board-driven
   // prompts (choose_pile) live HERE instead of in their own prompt box.
-  const promptCardName = pv?.card === "__attack" ? "Attack" : pv?.card;
+  const promptCardName = displayCard(pv?.card);
   // A pile prompt describes what the CARD does ("gain a card costing up to
   // $4") rather than the mechanically obvious "pick a highlighted pile". The
   // text comes from the catalog, minus its vanilla +Card/+Action/+Buy/+$ lines;
@@ -859,7 +865,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   const promptTitle = () => {
     const c = constraint;
-    const promptCard = pv.card === "__attack" ? "Attack" : pv.card;
+    const promptCard = displayCard(pv.card);
     switch (kindOfPrompt) {
       case "choose_cards": {
         const label = c.min === c.max ? `${c.purpose} ${c.min}` : c.min === 0 ? `${c.purpose} up to ${c.max}` : `${c.purpose} ${c.min}–${c.max}`;
@@ -983,7 +989,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       return (
         <div className="dm-waitbar">
           Waiting for <b>{names[waitingOn] || waitingOn}</b>
-          {pv?.card && pv.card !== "__attack" ? <> — {pv.card}</> : null}
+          {pv?.card && pv.card !== "__attack" ? <> — {displayCard(pv.card)}</> : null}
           {botActing ? <span className="dm-dots">…</span> : null}
         </div>
       );

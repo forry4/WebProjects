@@ -1096,9 +1096,91 @@ def remove_watcher(game, owner, card, n=1):
     game["watchers"] = kept
 
 
+# --- concurrent-ability ordering (compendium p23 §2) ---------------------------
+# "When a player has several concurrent abilities to resolve, they choose which
+# to resolve first. After resolving it, they choose which to resolve next."
+# The pool is that rule's shape: pick ONE, resolve it FULLY (its frames stack on
+# top — atomicity for free), then the remainder pool re-surfaces and re-offers.
+# Sequential re-offer, NEVER an order-the-list-up-front prompt: later picks may
+# react to what earlier resolutions revealed, abilities that died mid-window
+# drop out, and interleaving (p24 §3) falls out naturally.
+#
+# CONTRACT: any code path that would push >=2 same-player frames from ONE
+# triggering occurrence must route them through park_abilities. One ability
+# skips every prompt and behaves exactly like a direct push.
+
+# (card, stage) pairs whose COPIES must not collapse into one option. Empty
+# today, deliberately: every shipped duplicate is interchangeable (two Tide
+# Pools, a throne-roomed Caravan's two draws, two Havens each returning their
+# own set-aside), so offering "which copy first?" would be pure noise. A future
+# card whose copies genuinely differ adds its pair here — and a ledger row.
+ORDER_MATTERS = set()
+
+
+def park_abilities(game, pid, abilities):
+    """Queue same-player abilities born of one occurrence.
+    abilities = [{"card", "stage", "data"}] in the order they would have
+    resolved historically — the order a no-prompt collapse preserves."""
+    if not abilities:
+        return
+    push_auto(game, pid, "__abilities", "pool", data={"abilities": list(abilities)})
+
+
+def _pool_groups(abilities):
+    """[(key, [indices])] in first-appearance order; interchangeable copies
+    share a group (one option), ORDER_MATTERS pairs get one group each."""
+    groups, by_key = [], {}
+    for i, a in enumerate(abilities):
+        key = (a["card"], a["stage"])
+        if key in ORDER_MATTERS:
+            key = (a["card"], a["stage"], i)
+        if key not in by_key:
+            by_key[key] = []
+            groups.append((key, by_key[key]))
+        by_key[key].append(i)
+    return groups
+
+
+def _k_ability_pool(game, pid, frame, choice):
+    abilities = frame["data"]["abilities"]
+    groups = _pool_groups(abilities)
+    if not groups:
+        return
+    if len(groups) == 1:
+        # no real choice — run them all, first-parked first (reversed push:
+        # the stack pops last-pushed first). Two Tide Pools never prompt.
+        for a in reversed(abilities):
+            push_auto(game, pid, a["card"], a["stage"], data=a["data"])
+        return
+    names = [k[0] for k, _ in groups]
+    options = []
+    for key, idxs in groups:
+        label = key[0]
+        if names.count(key[0]) > 1:                 # same card, different stage
+            label += f" ({abilities[idxs[0]]['stage']})"
+        if len(idxs) > 1:
+            label += f" ×{len(idxs)}"               # "Tide Pools ×2"
+        options.append({"id": str(idxs[0]), "label": label})
+    push_choose_option(game, pid, "__abilities", "pick", options=options,
+                       pick=1, data={"abilities": abilities})
+
+
+def _k_ability_pick(game, pid, frame, choice):
+    abilities = frame["data"]["abilities"]
+    i = int(choice["ids"][0])                       # ids validated vs options
+    chosen = abilities[i]
+    rest = abilities[:i] + abilities[i + 1:]
+    if rest:
+        # remainder BELOW the chosen ability: it re-surfaces (and re-groups)
+        # only after the chosen one has fully resolved
+        push_auto(game, pid, "__abilities", "pool", data={"abilities": rest})
+    push_auto(game, pid, chosen["card"], chosen["stage"], data=chosen["data"])
+
+
 def _start_of_turn(game, pid):
-    """Resolve pid's duration entries: queue their fx (LIFO push so the first
-    registered resolves first), expire pid's watchers, mark entries done.
+    """Resolve pid's duration entries: park their fx as ONE ability pool (the
+    player picks what resolves first when the cards differ — p23 §2), expire
+    pid's watchers, mark entries done.
     ALSO sweeps pid's own dur_setup entries — a Duration played OFF-TURN
     (Pirate's reaction) never went through pid's clean-up, but its next-turn
     ability still belongs to THIS turn start; its card then discards from
@@ -1115,8 +1197,9 @@ def _start_of_turn(game, pid):
             fx_batch.append((entry["card"], fx))
         entry["fx"] = []
         entry["fired"] = True
-    for card, fx in reversed(fx_batch):
-        push_auto(game, pid, card, fx["stage"], data=dict(fx["data"]))
+    park_abilities(game, pid, [
+        {"card": card, "stage": fx["stage"], "data": dict(fx["data"])}
+        for card, fx in fx_batch])
     game["watchers"] = [w for w in game["watchers"] if w["owner"] != pid]
     emit(game, "turn_start", actor=pid)   # Clerk-class start-of-turn reactions
 
@@ -1721,6 +1804,8 @@ def _k_turn_finish(game, pid, frame, choice):
 
 KERNEL_STAGES[("__turn", "finish")] = _k_turn_finish
 KERNEL_STAGES[("__gain", "resolve")] = _k_gain_resolve
+KERNEL_STAGES[("__abilities", "pool")] = _k_ability_pool
+KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
 
 
 _HANDLERS = {
