@@ -159,9 +159,12 @@
   font-size: 13px; line-height: 1.6; overflow-y: auto;
   max-height: min(640px, calc(100vh - 300px));
 }
-/* newest entry is the FIRST child (the JSX reverses) — scroll stays pinned there */
+/* CHRONOLOGICAL: the newest entry is the LAST child, and the JSX auto-scrolls
+   to it. Both the highlight and the entry animation below key off :last-child —
+   they were :first-child while the list was reversed, so leaving them there
+   would have brightened and re-animated the OLDEST line on every move. */
 .dm-log-line { color: var(--text-dim, #8a7d6a); }
-.dm-log-line:first-child { color: var(--text, #e8dfc8); }
+.dm-log-line:last-child { color: var(--text, #e8dfc8); }
 /* sub-effects indent under the play that caused them (engine log depth) */
 .dm-log-d1 { padding-left: 16px; }
 .dm-log-d2 { padding-left: 32px; }
@@ -510,8 +513,8 @@
 /* any counter that changed value this render (keyed remount) */
 .dm-count-pop { display: inline-block; animation: dm-pop .42s ease-out; }
 .dm-vp .dm-count-pop { animation: dm-pop .55s ease-out; }
-/* newest log entry slides in; decision modal and order badges pop */
-.dm-log-line:first-child { animation: dm-logline .3s ease-out; }
+/* newest log entry slides in (LAST child — the log is chronological) */
+.dm-log-line:last-child { animation: dm-logline .3s ease-out; }
 .dm-modal.dm-prompt-modal { animation: dm-enter .22s ease-out backwards; }
 .dm-card-badge { animation: dm-pop .3s ease-out; }
 /* a bought/gained pile flashes a gold ring */

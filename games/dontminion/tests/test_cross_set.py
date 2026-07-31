@@ -1300,6 +1300,96 @@ def test_player_view_leaks_no_new_hinterlands_state():
     assert "deck" not in own["seats"][A]
 
 
+# --- Tide Pools x two discarded Trails: the second is SHUFFLED AWAY -----------
+
+def test_playing_the_first_discarded_trail_can_lose_track_of_the_second():
+    """Reported from a real game as "I discarded two Trails and was only offered
+    one". It is the lose-track rule, not a missed trigger: playing Trail #1
+    draws, the draw finds an empty deck and SHUFFLES, and the shuffle sweeps the
+    discard pile — Trail #2 with it — into the deck. "Cards that are lost track
+    of can't be played", so its offer correctly never opens. The compendium
+    walks through this very sequence in the Witch's Hut ruling (p168).
+
+    What WAS wrong is that it happened in silence, so it is now logged."""
+    g = fresh(["Trail", "Tide Pools", "Sea Chart", "Bazaar", "Nobles", "Market",
+               "Festival", "Bishop", "Anvil", "Blockade"],
+              expansions=("base", "seaside", "hinterlands"))
+    # two Tide Pools played on turn 1 both finish at the start of turn 2
+    give_hand(g, A, ["Tide Pools", "Tide Pools"])
+    g["actions"] = 2
+    assert mv(g, A, {"type": "play_action", "card": "Tide Pools"})[0]
+    g["phase"] = "action"
+    assert mv(g, A, {"type": "play_action", "card": "Tide Pools"})[0]
+    drain_decisions(g)
+    if g["phase"] == "action":
+        assert mv(g, A, {"type": "end_phase"})[0]
+    assert mv(g, A, {"type": "end_phase"})[0]
+    drain_decisions(g)
+    assert mv(g, B, {"type": "end_phase"})[0]
+    if g["turn"] == B:
+        assert mv(g, B, {"type": "end_phase"})[0]
+    assert g["turn"] == A
+    assert [e.get("done") for e in g["seats"][A]["duration"]] == [True, True]
+
+    # turn 2: two Trails in hand and an EMPTY deck, so Trail's +1 Card must shuffle
+    mark = len(g["log"])
+    give_hand(g, A, ["Trail", "Trail", "Copper", "Nobles", "Bazaar"])
+    g["seats"][A]["deck"] = []
+    g["seats"][A]["discard"] = []
+    g["pending"][-1]["constraint"]["cards"] = list(g["seats"][A]["hand"])
+
+    assert decide(g, A, cards=["Trail", "Trail"])[0]        # Tide Pools #1
+    assert g["pending_kind"] == "choose_option" and g["pending"][-1]["card"] == "Trail"
+    assert g["seats"][A]["discard"].count("Trail") == 2
+    assert decide(g, A, ids=["play"])[0]                    # play the first one
+
+    events = [e["event"] for e in g["log"][mark:]]
+    assert "shuffle" in events, events                      # the draw emptied the deck
+    assert g["seats"][A]["discard"].count("Trail") == 0     # #2 left the discard pile
+    assert g["seats"][A]["in_play"].count("Trail") == 1     # only one was played
+    # no second offer — and the log now SAYS why
+    assert g["pending"][-1]["card"] == "Tide Pools"         # straight on to the next fx
+    assert any(e.get("event") == "lost_track" and e.get("card") == "Trail"
+               for e in g["log"][mark:]), g["log"][mark:]
+
+
+def test_a_discarded_trail_that_stays_put_is_still_offered_twice():
+    """The control: with cards left in the deck there is no shuffle, so BOTH
+    discarded Trails keep their offer. Without this the test above would pass on
+    a Trail trigger that had simply stopped firing."""
+    g = fresh(["Trail", "Tide Pools", "Sea Chart", "Bazaar", "Nobles", "Market",
+               "Festival", "Bishop", "Anvil", "Blockade"],
+              expansions=("base", "seaside", "hinterlands"))
+    give_hand(g, A, ["Tide Pools"])
+    assert mv(g, A, {"type": "play_action", "card": "Tide Pools"})[0]
+    drain_decisions(g)
+    if g["phase"] == "action":
+        assert mv(g, A, {"type": "end_phase"})[0]
+    assert mv(g, A, {"type": "end_phase"})[0]
+    drain_decisions(g)
+    assert mv(g, B, {"type": "end_phase"})[0]
+    if g["turn"] == B:
+        assert mv(g, B, {"type": "end_phase"})[0]
+    assert g["turn"] == A
+
+    give_hand(g, A, ["Trail", "Trail", "Copper"])
+    g["seats"][A]["deck"] = ["Copper"] * 10        # deep enough that no draw shuffles
+    g["seats"][A]["discard"] = []
+    g["pending"][-1]["constraint"]["cards"] = list(g["seats"][A]["hand"])
+
+    assert decide(g, A, cards=["Trail", "Trail"])[0]
+    offers = 0
+    for _ in range(6):
+        if g["pending_kind"] == "choose_option" and g["pending"][-1]["card"] == "Trail":
+            offers += 1
+            assert decide(g, A, ids=["play"])[0]
+        else:
+            break
+    assert offers == 2, f"both Trails must be offered, got {offers}"
+    assert g["seats"][A]["in_play"].count("Trail") == 2
+    assert not any(e.get("event") == "lost_track" for e in g["log"])
+
+
 # --- Scheme x two copies of one Duration (the same-name, different-copy trap) --
 
 def test_scheme_topdecks_the_finishing_duration_not_the_one_just_played():

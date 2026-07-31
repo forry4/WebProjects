@@ -752,6 +752,25 @@ try {
 			check("the pile count never covers a card's type or cost",
 				pills.length === 0, JSON.stringify(pills));
 
+			// The log reads CHRONOLOGICALLY — oldest at the top, newest at the
+			// bottom — and follows the newest line. Both the brightened line and
+			// the slide-in animation key off :last-child, so a flip back to
+			// newest-first would highlight and animate the wrong end silently.
+			const readLog = () => page.evaluate(() => {
+				const box = document.querySelector(".dm-log");
+				if (!box) return null;
+				const lines = [...box.querySelectorAll(".dm-log-line")].map((l) => l.textContent.trim());
+				return {
+					lines,
+					atBottom: box.scrollHeight - box.scrollTop - box.clientHeight < 80,
+					// the turn-1 marker is the OLDEST turn event, so chronological
+					// order puts it near the top, never at the very end
+					firstTurnIdx: [...box.querySelectorAll(".dm-log-line")]
+						.findIndex((l) => l.classList.contains("dm-log-turn")),
+				};
+			});
+			const logBefore = await readLog();
+
 			// Right-click / press-and-hold opens the card's detail modal without
 			// firing the card's PRIMARY action. Tested on an affordable Copper in
 			// the buy phase, because that is the case where a plain click really
@@ -759,6 +778,7 @@ try {
 			await page.locator(".dm-turnbtns .btn", { hasText: /to buy phase/i })
 				.click({ timeout: 10_000 }).catch(() => {});
 			await sleep(800);
+
 			const copperCount = () => page.evaluate(() => {
 				const el = [...document.querySelectorAll(".dm-supply .dm-pile-slot")]
 					.find((x) => x.querySelector(".dm-fitspan")?.textContent === "Copper");
@@ -815,6 +835,21 @@ try {
 			await closeInfo();
 			check("a short tap still buys, and opens nothing",
 				c2 !== c3 && !tapOpened, JSON.stringify({ c2, c3, tapOpened }));
+
+			// That buy ALWAYS logs (unlike the phase click, which logs nothing the
+			// client renders — anchoring here instead of there is what makes this
+			// deterministic rather than deal-dependent). Chronological order means
+			// the log only ever grows at the END, so everything on screen before
+			// the buy must still be there, in order, as a PREFIX of the new list.
+			// Asserting a specific "newest line" can't work — the bot moves too.
+			const logAfter = await readLog();
+			const grewAtEnd = !!logBefore && !!logAfter
+				&& logAfter.lines.length > logBefore.lines.length
+				&& logBefore.lines.every((t, i) => logAfter.lines[i] === t);
+			check("the log runs oldest-to-newest — new lines are APPENDED at the bottom",
+				grewAtEnd, JSON.stringify({
+					before: logBefore?.lines.slice(-3), after: logAfter?.lines.slice(-5),
+				}));
 
 			// Phone width stacks your piles / hand / buttons into one column, and the
 			// count pills hang BELOW their slot — so "hand N" landed on top of the

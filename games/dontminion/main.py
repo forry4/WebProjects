@@ -342,15 +342,26 @@ def list_user_history(user_id: str) -> list[dict]:
         if not isinstance(g, dict) or not g.get("players"):
             continue
         scores = g.get("scores") or {}
+        winners = g.get("winners") or []
         out.append({
             "id": r["id"],
             "players": list(players.values()),
             "opponents": [n for p, n in players.items() if p != user_id],
             "your_vp": (scores.get(user_id) or {}).get("vp"),
+            # Keyed by NAME, so two players sharing one collapses. Kept for
+            # bundles cached before `standings` shipped; read that instead.
             "scores": {players.get(p, p): (s or {}).get("vp")
                        for p, s in scores.items()},
-            "you_won": user_id in (g.get("winners") or []),
-            "winners": [players.get(p, p) for p in (g.get("winners") or [])],
+            # Final standings in SEAT order, you first — the history line needs
+            # every score, and a pid-keyed list is the only shape that survives
+            # two players with the same display name.
+            "standings": sorted(
+                ({"name": players.get(p, p), "vp": (scores.get(p) or {}).get("vp"),
+                  "you": p == user_id, "won": p in winners}
+                 for p in g["players"]),
+                key=lambda s: not s["you"]),
+            "you_won": user_id in winners,
+            "winners": [players.get(p, p) for p in winners],
             "updated_at": r["updated_at"],
         })
     return out

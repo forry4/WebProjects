@@ -2177,31 +2177,54 @@ def player_view(game, viewer):
 
 # --- setup -------------------------------------------------------------------
 
+_REQUIRE_TRIES = 500
+
+
 def deal_kingdom(pool, requires, rng):
     """The random 10, honouring create-time REQUIREMENTS (`cards.REQUIREMENTS`
     keys — "give me a village / a +Buy / a drawer").
 
+    REJECTION SAMPLING, deliberately: deal an ordinary random 10 and re-deal
+    until it satisfies every requirement. The result is the NORMAL kingdom
+    distribution conditioned on "has at least one of each", which is exactly
+    what the option promises — it deletes the boards with none of a checked
+    bonus and changes nothing else. In particular it does NOT reserve a slot
+    per requirement: ticking all three still yields boards where one Worker's
+    Village covers two of them, or where the ordinary fill already supplied a
+    Smithy, at the rates those boards occur naturally.
+
+    CONSTRUCTING the board instead (force one qualifying card per requirement,
+    fill the other seven at random) is the obvious implementation and it is
+    wrong for this: it guarantees three DIFFERENT qualifying cards whenever all
+    three are ticked, which over-represents +Action/+Buy/+Card cards badly —
+    measured, it pushed the mean number of villages from 1.58 to 1.95 and cut
+    exactly-one-village boards from 57% to 35%. That was the first
+    implementation; this replaced it.
+
     With nothing required this is EXACTLY `rng.sample(pool, 10)`: the rng call
     sequence is unchanged, so every seed that already exists still deals the
     same kingdom (the determinism soak and every forced-kingdom test depend on
-    that). Requirements are honoured in `REQUIREMENT_ORDER`, never set order,
-    so the deal stays reproducible from (seed, options) alone."""
+    that). Requirements are read in `REQUIREMENT_ORDER`, never client order, so
+    the deal stays reproducible from (seed, options) alone."""
     reqs = [r for r in REQUIREMENT_ORDER if r in set(requires or ())]
+    kingdom = rng.sample(pool, 10)
     if not reqs:
-        return rng.sample(pool, 10)
-    picked = []
+        return kingdom
+    # An unsatisfiable pool fails HERE with a usable message rather than after
+    # 500 doomed re-deals. (No shipped expansion can hit this — each one alone
+    # satisfies all three — but the option must not depend on that staying true.)
     for req in reqs:
-        # a card already picked may cover this one too — Worker's Village is a
-        # village AND a +Buy — so don't spend a second slot on it
-        if any(cards_grant(c, req) for c in picked):
-            continue
-        candidates = [c for c in pool if c not in picked and cards_grant(c, req)]
-        if not candidates:
+        if not any(cards_grant(c, req) for c in pool):
             raise ValueError(
                 f"no card in the chosen expansions gives {REQUIREMENTS[req]['label']}")
-        picked.append(rng.choice(candidates))
-    rest = [c for c in pool if c not in picked]
-    return picked + rng.sample(rest, 10 - len(picked))
+    for _ in range(_REQUIRE_TRIES):
+        if all(any(cards_grant(c, req) for c in kingdom) for req in reqs):
+            return kingdom
+        kingdom = rng.sample(pool, 10)
+    # Every requirement is individually satisfiable, so reaching here needs ~500
+    # unlucky draws in a row; the measured accept rate is ~0.55 on the full pool
+    # and ~0.46 on the smallest (Base alone, all three ticked).
+    raise ValueError("could not deal a kingdom meeting the chosen requirements")
 
 
 def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,

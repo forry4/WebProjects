@@ -101,6 +101,58 @@ def test_kingdom_requirements_are_honoured():
     assert not all(any(grants(c, "draw") for c in k) for k in forced)
 
 
+def _req_counts(kingdom):
+    from games.dontminion.cards import grants, REQUIREMENT_ORDER
+    return [sum(1 for c in kingdom if grants(c, r)) for r in REQUIREMENT_ORDER]
+
+
+def test_requirements_do_not_reserve_a_slot_each():
+    """Ticking all three must not FORCE three different qualifying cards. The
+    option only deletes the boards that have none of a checked bonus; a board
+    where one Worker's Village covers both the village and the +Buy is a
+    perfectly good answer and must still turn up at its natural rate."""
+    from games.dontminion.cards import grants, REQUIREMENT_ORDER
+    pool = sorted({c for e in ALL_SETS for c in engine.KINGDOM[e]})
+    rng = random.Random(11)
+    double_duty = 0
+    for _ in range(400):
+        kingdom = engine.deal_kingdom(pool, list(REQUIREMENT_ORDER), rng)
+        assert all(n >= 1 for n in _req_counts(kingdom))         # the promise
+        if any(sum(grants(c, r) for r in REQUIREMENT_ORDER) >= 2 for c in kingdom):
+            double_duty += 1
+    # a constructive dealer can still produce these by luck in the random fill,
+    # but never at this rate — it spends a dedicated slot per requirement
+    assert double_duty > 200, f"only {double_duty}/400 boards had a card doing double duty"
+
+
+def test_requirements_preserve_the_natural_distribution():
+    """The dealer is rejection sampling, so its output IS the ordinary kingdom
+    distribution conditioned on the requirements — not merely 'satisfies them'.
+    Compared against that conditional distribution computed independently.
+    Deterministic (fixed seeds), so this passes always or fails always."""
+    from games.dontminion.cards import REQUIREMENT_ORDER
+    pool = sorted({c for e in ALL_SETS for c in engine.KINGDOM[e]})
+    reqs = list(REQUIREMENT_ORDER)
+
+    rng = random.Random(21)                      # independent reference: plain
+    natural, tries = [], 0                       # deals, keeping the ones that pass
+    while len(natural) < 1500:
+        k = rng.sample(pool, 10)
+        tries += 1
+        counts = _req_counts(k)
+        if all(n >= 1 for n in counts):
+            natural.append(counts)
+    assert tries < 6000, "accept rate collapsed — rejection sampling would be slow"
+
+    rng = random.Random(22)
+    dealt = [_req_counts(engine.deal_kingdom(pool, reqs, rng)) for _ in range(1500)]
+
+    for i, req in enumerate(reqs):
+        want = sum(c[i] for c in natural) / len(natural)
+        got = sum(c[i] for c in dealt) / len(dealt)
+        assert abs(got - want) < 0.15, f"{req}: dealer mean {got:.2f} vs natural {want:.2f}"
+
+
 def test_no_requirements_deals_exactly_the_unconstrained_kingdom():
     """The requirement dealer must not perturb the rng call sequence when
     nothing is asked for, or every existing seed deals a different board."""

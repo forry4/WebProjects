@@ -380,6 +380,10 @@ function fmtLog(e, names) {
     case "named": return `${who} names ${e.card}`;
     case "pass": return `${who} passes ${art(e.card)} to ${names[e.to] || e.to}`;
     case "pass_public": return `${who} passes a card to ${names[e.to] || e.to}`;
+    // "you may play it" for a card that moved before the offer could open —
+    // most often a second discarded Trail that the first one's draw shuffled
+    // back into the deck. Without this line the prompt just never appears.
+    case "lost_track": return `${who} loses track of ${art(e.card)} — it moved, so it can't be played`;
     case "undo": return `${who} takes back a move`;
     case "abandon": return `${who} abandoned the game`;
     case "game_over": return `Game over — ${(e.winners || []).map((w) => names[w] || w).join(" & ")} win${(e.winners || []).length > 1 ? "" : "s"}!`;
@@ -398,6 +402,19 @@ function fmtLog(e, names) {
       return `${who ? who + " " : ""}${verb}${detail ? ": " + detail : ""}`.trim();
     }
   }
+}
+
+// "12–9" for a finished game (yours first, then each opponent), the way CoC's
+// history reads. Prefers the server's ordered `standings`, which survives two
+// players sharing a display name; falls back to the name-keyed `scores` for a
+// response cached before standings shipped. Renders nothing unless EVERY score
+// is present — a half-filled line reads as a wrong score.
+function historyScores(g) {
+  const vps = Array.isArray(g.standings) && g.standings.length
+    ? g.standings.map((s) => s.vp)
+    : [g.your_vp, ...(g.opponents || []).map((n) => (g.scores || {})[n])];
+  if (vps.length < 2 || vps.some((v) => v == null)) return "";
+  return vps.join("–");
 }
 
 // The buy handler logs "buy" and the gain it causes logs "gain" back-to-back —
@@ -489,6 +506,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const popHandlerRef = useRef(() => {});
   const reconnTimer = useRef(null);
   const reconnTries = useRef(0);
+  const logRef = useRef(null);
 
   const playerName = authUser?.name || "Player";
 
@@ -704,6 +722,26 @@ export default function Dontminion({ myId, authUser, onExit }) {
   }, [connected, inLiveGame, attemptReconnect]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
+
+  // The log reads oldest-at-top, so the newest line is at the BOTTOM and the
+  // view has to follow it. Only when the reader is already parked at the bottom
+  // though — scrolling up to re-read a turn must not be yanked away by the
+  // opponent's next move. Measured against the live scroll position, not a
+  // "user scrolled" flag, so it self-heals when they scroll back down.
+  const logLen = (game?.log || []).length;
+  const logPinRef = useRef("");
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const key = `${roomId}:${screen}`;
+    if (logPinRef.current !== key) {     // just opened this game: start at the newest
+      logPinRef.current = key;
+      el.scrollTop = el.scrollHeight;
+      return;
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 80) el.scrollTop = el.scrollHeight;
+  }, [logLen, screen, roomId]);
 
   // clear decision-prompt state whenever the decision context changes
   useEffect(() => {
@@ -1278,19 +1316,27 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </div>
           <div>
             <LobbySectionHd title="History" note="finished games" />
-            {history.map((g) => (
-              <div key={g.id} className="lby-card">
-                <div className="lby-card-info">
-                  <div className="lby-card-title">
-                    <span className={"hist-result " + (g.you_won ? "won" : "lost")}>{g.you_won ? "Won" : "Lost"}</span>
-                    {" "}vs {(g.opponents || []).join(", ")}
-                  </div>
-                  <div className="lby-card-meta">
-                    {g.your_vp != null ? `${g.your_vp} VP` : ""} · {timeAgo(g.updated_at)}
+            {history.map((g) => {
+              const line = historyScores(g);
+              // Dominion breaks a VP tie on fewer turns taken, so a shared win
+              // is rare but real — CoC's history has the same three states.
+              const tie = g.you_won && (g.winners || []).length > 1;
+              return (
+                <div key={g.id} className="lby-card">
+                  <div className="lby-card-info">
+                    <div className="lby-card-title">
+                      <span className={"hist-result " + (tie ? "tie" : g.you_won ? "won" : "lost")}>
+                        {tie ? "Tie" : g.you_won ? "Won" : "Lost"}
+                      </span>
+                      <span className="hist-scores"> vs {(g.opponents || []).join(", ")}
+                        {line ? <> <span className="hist-score-num">{line}</span></> : null}
+                      </span>
+                    </div>
+                    <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {history.length === 0 && <div className="lby-empty">No finished games yet.</div>}
           </div>
         </div>
@@ -1375,9 +1421,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
-          <div className="dm-log">
-            {/* newest first, pinned at the top — matches the other games' logs */}
-            {buildLogLines(game.log || [], names).reverse().slice(0, 200).map((l) => (
+          <div className="dm-log" ref={logRef}>
+            {/* CHRONOLOGICAL: oldest at the top, newest appended at the bottom,
+                and the view auto-scrolls to keep the newest line visible. Reads
+                the way the turn actually happened, which matters here because
+                sub-effects INDENT under the play that caused them — newest-first
+                showed every effect above its own cause. Capped to the most
+                recent 200 lines. */}
+            {buildLogLines(game.log || [], names).slice(-200).map((l) => (
               <div key={l.key}
                 className={"dm-log-line" + (l.d ? ` dm-log-d${l.d}` : "") + (l.turn ? " dm-log-turn" : "")}>
                 {l.text}

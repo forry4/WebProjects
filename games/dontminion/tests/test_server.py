@@ -249,6 +249,63 @@ def test_scheduler_noops_when_no_bot_owes_a_move():
     assert m.ROOMS["R7"].get("_bot_running") in (None, False)
 
 
+# --- lobby history shaping ---------------------------------------------------------
+
+def _fake_db(rows):
+    """Minimal stand-in for the dual sqlite/Turso connection: enough for
+    list_user_history's cursor/execute/fetchall + name-indexed rows."""
+    class _Cur:
+        def execute(self, *a, **kw): pass
+        def fetchall(self): return rows
+    class _Conn:
+        def cursor(self): return _Cur()
+        def close(self): pass
+    return lambda: _Conn()
+
+
+def test_history_reports_every_players_score(monkeypatch):
+    """The lobby line needs the OPPONENT's score, not just yours (the CoC
+    shape). `standings` is seat-ordered with you first and carries pids'
+    scores positionally, so two players sharing a display name can't collapse
+    into one entry the way the name-keyed `scores` map does."""
+    state = {
+        "players": {"me": "Dup", "them": "Dup", "bot1": "Bot 1"},
+        "game": {
+            "players": ["me", "them", "bot1"],
+            "winners": ["them"],
+            "scores": {"me": {"vp": 31}, "them": {"vp": 44}, "bot1": {"vp": 12}},
+        },
+    }
+    monkeypatch.setattr(m, "_db", _fake_db(
+        [{"id": "H1", "state_json": json.dumps(state), "updated_at": 99}]))
+    monkeypatch.setattr(m, "maybe_cleanup_games", lambda *a, **kw: None)
+
+    [row] = m.list_user_history("me")
+    assert [s["vp"] for s in row["standings"]] == [31, 44, 12]     # you first
+    assert row["standings"][0]["you"] is True
+    assert [s["you"] for s in row["standings"][1:]] == [False, False]
+    assert [s["won"] for s in row["standings"]] == [False, True, False]
+    assert row["your_vp"] == 31 and row["you_won"] is False
+    # the two "Dup" players collapse in the legacy name-keyed map — which is
+    # exactly why standings exists; the old field is kept for cached bundles
+    assert len(row["scores"]) == 2 and len(row["standings"]) == 3
+
+
+def test_history_marks_a_shared_win(monkeypatch):
+    state = {
+        "players": {"me": "Me", "bot1": "Bot 1"},
+        "game": {"players": ["me", "bot1"], "winners": ["me", "bot1"],
+                 "scores": {"me": {"vp": 20}, "bot1": {"vp": 20}}},
+    }
+    monkeypatch.setattr(m, "_db", _fake_db(
+        [{"id": "H2", "state_json": json.dumps(state), "updated_at": 1}]))
+    monkeypatch.setattr(m, "maybe_cleanup_games", lambda *a, **kw: None)
+    [row] = m.list_user_history("me")
+    # the client renders "Tie" from you_won + more than one winner
+    assert row["you_won"] is True and len(row["winners"]) == 2
+    assert [s["vp"] for s in row["standings"]] == [20, 20]
+
+
 # --- persistence blob round-trip ---------------------------------------------------
 
 def test_save_blob_round_trip_restores_options(monkeypatch):

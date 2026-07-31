@@ -595,6 +595,13 @@ def _offer_self_play(game, pid, card, frame, stage, label):
     the answering stage: "cards that are lost track of can't be played"."""
     zone = _self_zone(frame)
     if E.find_card_zone(game, pid, card, (zone,)) is None:
+        # SAY SO. Discard two Trails and play the first: its +1 Card can shuffle
+        # the discard pile — the second Trail with it — and that copy is now
+        # lost track of, so its offer never opens. Correct (compendium p168
+        # walks through exactly this), but silently skipping the second prompt
+        # reads as the trigger having failed to fire. Reported as a bug from a
+        # real game; the log line is the whole fix.
+        E._log(game, pid, "lost_track", card=card)
         return
     E.push_choose_option(game, pid, card, stage,
                          options=[{"id": "play", "label": label},

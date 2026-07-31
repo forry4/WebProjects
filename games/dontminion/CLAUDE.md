@@ -354,6 +354,15 @@ pinning the current behaviour, so changing your mind means changing a test on pu
   backwards; it is not a matter of taste.
 - **Highway is turn-scoped** (`turn_ctx["bridges"]`), not while-in-play. The 1E card was the
   other way; the roadmap described the 1E card for a while.
+- **Discarding two Trails offers only ONE of them when the first one's draw shuffles** — and that
+  is CORRECT, not a missed trigger. Playing Trail #1 draws; on an empty deck the draw shuffles the
+  discard pile — Trail #2 with it — into the deck, and "cards that are lost track of can't be
+  played", so the second offer never opens. The compendium walks through this very sequence in the
+  Witch's Hut ruling (p168). Reported from a real game (GQVIQY) and confirmed against the live save.
+  The actual defect was that it happened in SILENCE, so `_offer_self_play` now logs `lost_track`.
+  Pinned both ways: `test_playing_the_first_discarded_trail_can_lose_track_of_the_second` plus a
+  control with a deep deck where both Trails ARE offered (without it, a Trail trigger that simply
+  stopped firing would pass).
 - **A card name is not a card COPY.** Zones hold names, so a seat can have a Duration finishing at
   this clean-up AND a fresh copy of the same Duration just played; only the count separates them.
   `topdeck_from_play` matched `in_play` by name and took the wrong one, stranding the persisting
@@ -372,6 +381,25 @@ honor `private_to`, `rng_state`/`seed` popped. Seaside zones: `duration_view` (c
 public — fx/data stripped), `island` public, `dur_aside`/`village_mat` owner-only with public
 counts, watchers shipped as identity-only (event/owner/card; data may hold hidden resume info),
 `dur_setup` never ships. Everything reveals at game over.
+
+**The lobby History line carries every player's score** (`Won vs Bot 1  31–12`), matching CoC's.
+`list_user_history` ships `standings` — seat-ordered, YOU FIRST, `{name, vp, you, won}` per player —
+alongside the older `your_vp`/`scores`. The pid-derived list exists because the legacy `scores` map
+is keyed by display NAME, so two players sharing one collapse into a single entry and the line would
+show a wrong score; the old fields stay only for bundles cached before this shipped. The client
+renders nothing rather than a partial line if any score is missing.
+
+**The log renders CHRONOLOGICALLY** — oldest at the top, newest appended at the bottom, view
+auto-scrolled to follow it (and pinned to the bottom on entering a game). It reversed to
+newest-first until 2026-08; the ordering matters because sub-effects INDENT under the play that
+caused them (`d` depth), and newest-first put every effect ABOVE its own cause. The autoscroll only
+fires when the reader is already within 80px of the bottom, measured live, so scrolling up to
+re-read a turn isn't yanked away by the opponent's next move. **The brightened line and the
+slide-in animation key off `:last-child`** — they were `:first-child` under the old order, so
+flipping without moving them highlights the OLDEST line forever. The other four games are still
+newest-first. `screens.mjs` pins the order by asserting the on-screen lines before a BUY are a
+PREFIX of the lines after it (a buy always logs; the phase-change click renders nothing, which made
+an earlier version of this check deal-dependent and flaky).
 
 **The log is VERBOSE by design** (the Dominion-online look): every `draw` entry carries the
 drawn card NAMES — per-field redacted to the owner until game over (count `n` stays public);
@@ -477,11 +505,24 @@ guarantee the dealt 10 contains at least one card giving each checked bonus.
   bar is the **printed** bonus, which deliberately excludes variable/draw-to-X cards (Cellar,
   Library) and multipliers (Throne Room): being narrow only ever adds a card the player asked for,
   being broad would let the guarantee be satisfied by a card that doesn't satisfy it.
+- **It is REJECTION SAMPLING, and that is the whole point.** Deal an ordinary random 10, re-deal
+  until it satisfies every checked requirement. The output is therefore the normal kingdom
+  distribution CONDITIONED on "at least one of each" — the option deletes the boards with none of a
+  checked bonus and changes nothing else. **Do not "optimise" this into constructing the board**
+  (force one qualifying card per requirement, fill the rest): that guarantees three DIFFERENT
+  qualifying cards when all three are ticked and skews the game badly — measured, it moved the mean
+  village count 1.58 → 1.95 and cut exactly-one-village boards from 57% to 35%. It was the first
+  implementation and was replaced on that measurement. `test_requirements_preserve_the_natural_
+  distribution` compares the dealer against an independently rejection-sampled reference and fails
+  on the constructive version; `test_requirements_do_not_reserve_a_slot_each` pins that one card
+  doing double duty is still common.
+- Accept rates are comfortable (~0.55 on the full pool, ~0.46 on Base alone with all three), so the
+  500-try cap is unreachable in practice; an unsatisfiable POOL is detected up front instead, so it
+  fails with a usable message rather than after 500 doomed re-deals.
 - **`deal_kingdom` with nothing required is EXACTLY `rng.sample(pool, 10)`** — same rng call
   sequence, so every existing seed still deals the same board (the determinism soak and every
-  forced-kingdom test rest on that). Requirements are honoured in `REQUIREMENT_ORDER`, never the
-  order the client sent them, so the deal stays reproducible from (seed, options); a card already
-  picked that covers a second requirement doesn't spend another slot.
+  forced-kingdom test rest on that). Requirements are read in `REQUIREMENT_ORDER`, never the order
+  the client sent them, so the deal stays reproducible from (seed, options).
 - Every expansion **alone** can satisfy all three (pinned by a test), so the option can't produce
   an unsatisfiable create. `new_game` raises if a pool ever can't, rather than dealing a board that
   quietly breaks the promise.
