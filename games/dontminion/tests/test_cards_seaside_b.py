@@ -298,7 +298,12 @@ def test_outpost_extra_turn_three_cards_and_no_third_turn():
     assert mv(g, A, {"type": "end_phase"})[0]
     assert g["turn"] == B and g["extra_turn"] is False
     assert len(g["seats"][A]["hand"]) == 3              # the 3-draw still applied
-    assert g["seats"][A]["turns_taken"] == 2            # increments per turn
+    # "Extra turns do not add to a player's turn count, and are not used in
+    # breaking ties" (Turn rules; Outpost FAQ). This asserted == 2 for months —
+    # the count fed the fewest-turns tiebreaker AND the displayed turn totals,
+    # so an Outpost player could wrongly LOSE a VP tie. Found auditing against
+    # the dominionstrategy wiki rules pages.
+    assert g["seats"][A]["turns_taken"] == 1            # the extra turn is free
     # the first Outpost resolved and discarded; the second still on the table
     assert g["seats"][A]["discard"].count("Outpost") == 1
     assert engine.duration_in_play(g, A, "Outpost")

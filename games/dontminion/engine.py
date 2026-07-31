@@ -1972,7 +1972,13 @@ def _end_turn(game, pid):
                 entry["fx"] = []
                 entry["done"] = True
     draw(game, pid, 3 if outpost_played else 5)
-    seat["turns_taken"] += 1
+    # An EXTRA turn (Outpost) does not add to the player's turn count — the
+    # count exists for the fewest-turns tiebreaker, and "extra turns do not add
+    # to a player's turn count, and are not used in breaking ties" (wiki Turn
+    # page; Outpost's FAQ agrees). game["extra_turn"] still describes the turn
+    # now ENDING — it is reassigned for the next turn below.
+    if not game.get("extra_turn"):
+        seat["turns_taken"] += 1
     game["last_turn_pid"] = pid
     if game["supply"].get("Province", 0) <= 0 or count_empty_piles(game) >= 3 \
             or (game["colony"] and game["supply"].get("Colony", 1) <= 0):
