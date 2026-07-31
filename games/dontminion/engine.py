@@ -135,7 +135,7 @@ def _apply_renames(game, mapping):
     # keys whose VALUE is a pid, or a list of pids — never a card
     pid_valued = {"turn", "pid", "pending_pid", "last_turn_pid", "host", "owner",
                   "actor", "gainer", "players", "winners", "private_to",
-                  "immune", "_outpost", "_cur_dur"}
+                  "immune", "_outpost", "_cur_dur", "_actor"}
     # keys whose dict KEYS are pids (values still recursed — last_turn_gains
     # maps pid -> cards). "names" is skipped WHOLESALE: user-chosen text.
     pid_keyed = {"seats", "vp", "vp_tokens", "scores", "last_turn_gains", "meta"}
@@ -270,6 +270,23 @@ def push_auto(game, pid, card, stage, data=None):
                        "constraint": None, "data": data or {}})
 
 
+def _run_stage(game, card, stage, pid, frame, choice):
+    """THE stage entry point. Binds `_actor` so resource helpers credit the
+    player whose stage is running, not whoever's turn it is — the two differ
+    for any reaction resolving on an opponent's turn."""
+    prev = game.get("_actor")
+    game["_actor"] = pid
+    _push_depth(game)
+    try:
+        _stage_fn(card, stage)(game, pid, frame, choice)
+    finally:
+        _pop_depth(game)
+        if prev is None:
+            game.pop("_actor", None)
+        else:
+            game["_actor"] = prev
+
+
 def _stage_fn(card, stage):
     fn = KERNEL_STAGES.get((card, stage))
     if fn is None:
@@ -294,11 +311,7 @@ def _drive(game):
         if not game["pending"] or game["pending"][-1]["kind"] != "auto":
             return
         frame = _pop_frame(game)
-        _push_depth(game)
-        try:
-            _stage_fn(frame["card"], frame["stage"])(game, frame["pid"], frame, None)
-        finally:
-            _pop_depth(game)
+        _run_stage(game, frame["card"], frame["stage"], frame["pid"], frame, None)
     raise RuntimeError("dontminion: _drive exceeded iteration cap (runaway auto frames)")
 
 
@@ -615,10 +628,22 @@ def pass_card(game, giver, receiver, card):
 # CURRENT TURN PLAYER, i.e. an off-turn reaction handed its bonus to the
 # attacker. Latent until a card grants resources off-turn (Hinterlands' Trail
 # and Nomads are the first), and silently wrong the moment one does.
+def _acting(game, pid=None):
+    """WHO the resource is for. Card code says `add_actions(game, 2)` without a
+    pid, so the kernel has to know: `_actor` is the player whose effect/stage is
+    currently running, which is NOT always the turn player (a reaction that
+    plays itself runs during an opponent's turn). Falls back to the turn player
+    when nothing is running."""
+    if pid is not None:
+        return pid
+    return game.get("_actor") or game["turn"]
+
+
 def _grant(game, pid, key, n, log_key):
     if n == 0:
         return False
-    if pid is not None and pid != game["turn"]:
+    pid = _acting(game, pid)
+    if pid != game["turn"]:
         # earned on someone else's turn: no pool to add to
         _log(game, pid, "off_turn_bonus", **{log_key: n})
         return False
@@ -641,7 +666,7 @@ def add_coins(game, n, pid=None):
     at $0 — "your money pool can never go below $0, but if you had any $ before
     playing Souk, you might lose more than $X when deducting"."""
     if n < 0:
-        if pid is not None and pid != game["turn"]:
+        if _acting(game, pid) != game["turn"]:
             return
         game["coins"] = max(0, game["coins"] + n)
         _log(game, game["turn"], "minus", coins=-n)
@@ -1114,7 +1139,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
         for o in reversed(opponents(game, pid)):
             if o in immune0:
                 continue
-            opts = _reaction_options(game, o, immune=[], moat_ok=True)
+            opts = _reaction_options(game, o, immune=[])
             if opts:
                 _push_window(game, o, opts)
     else:
@@ -1123,22 +1148,57 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
         if fn is None and not has_type(game, card, "treasure"):
             raise KeyError(f"dontminion: no effect registered for {card!r}")
         if fn is not None:
+            prev = game.get("_actor")
+            game["_actor"] = pid            # see _acting: off-turn plays exist
             _push_depth(game)
             try:
                 fn(game, pid)
             finally:
                 _pop_depth(game)
+                if prev is None:
+                    game.pop("_actor", None)
+                else:
+                    game["_actor"] = prev
         if has_type(game, card, "treasure"):
             emit(game, "play_treasure", actor=pid, subject=card)
 
 
-def _reaction_options(game, o, immune, moat_ok=True):
+def attack_reactions():
+    """THE registry of cards that react to an Attack being played, merged from
+    the effects modules. Was hardcoded to Moat + Diplomat in the kernel, which
+    made every new reaction a kernel edit. Entry shape:
+
+        {"label": str,
+         "when":  fn(game, pid) -> bool | None,   # beyond "it's in your hand"
+         "immunity": bool,                        # Moat: unaffected by this play
+         "mode": "reveal" | "play",               # play = it plays ITSELF (p53)
+         "stage": str | None,                     # STAGES[(card, stage)] to run
+         "repeatable": bool}                      # may react again with a copy
+    """
+    from . import effects
+    return getattr(effects, "ATTACK_REACTIONS", {})
+
+
+def _reaction_options(game, o, immune, used=()):
+    """Options for one opponent's reaction window. `used` is what this player
+    already reacted with against THIS attack play — a non-repeatable reaction
+    isn't offered twice (you can't Moat the same attack again), while a
+    repeatable one is (the compendium allows several Guard Dogs per attack)."""
     hand = game["seats"][o]["hand"]
     opts = []
-    if moat_ok and "Moat" in hand and o not in immune:
-        opts.append({"id": "reveal_moat", "label": "Reveal Moat (unaffected by this attack)"})
-    if "Diplomat" in hand and len(hand) >= 5:
-        opts.append({"id": "reveal_diplomat", "label": "Reveal Diplomat (+2 cards, then discard 3)"})
+    for card, spec in sorted(attack_reactions().items()):
+        if card not in hand:
+            continue
+        if card in used and not spec.get("repeatable"):
+            continue
+        if spec.get("immunity") and o in immune:
+            continue                     # already unaffected; nothing to gain
+        when = spec.get("when")
+        if when is not None and not when(game, o):
+            continue
+        verb = "Play" if spec.get("mode") == "play" else "Reveal"
+        opts.append({"id": f"react:{card}",
+                     "label": spec.get("label") or f"{verb} {card}"})
     if opts:
         opts.append({"id": "decline", "label": "Don't react"})
     return opts
@@ -1148,6 +1208,19 @@ def _push_window(game, o, opts):
     push_choose_option(game, o, "__attack", "window", options=opts, pick=1)
 
 
+def reopen_attack_window(game, pid):
+    """Re-offer the current attack's window to pid — for a reaction whose own
+    stage pushed frames (Diplomat's discard, Guard Dog's play) and must let the
+    player react again afterwards. Safe to call when no attack is open."""
+    atk = _current_attack_frame(game)
+    if atk is None:
+        return
+    used = atk["data"].setdefault("used", {}).get(pid, [])
+    opts = _reaction_options(game, pid, atk["data"]["immune"], used)
+    if opts:
+        _push_window(game, pid, opts)
+
+
 def _current_attack_frame(game):
     for f in reversed(game["pending"]):
         if f["card"] == "__attack" and f["stage"] == "play_ability":
@@ -1155,34 +1228,51 @@ def _current_attack_frame(game):
     return None
 
 
+# Option ids the window used before the registry (they are PERSISTED inside an
+# open frame, so a game paused on an attack window survives a deploy holding
+# one). Compatibility only — delete once no live save can carry them.
+_LEGACY_REACTION_IDS = {"reveal_moat": "Moat", "reveal_diplomat": "Diplomat"}
+
+
 def _k_window(game, pid, frame, choice):
-    atk = _current_attack_frame(game)
-    immune = atk["data"]["immune"] if atk else []
     cid = choice["ids"][0]
     if cid == "decline":
         return
-    if cid == "reveal_moat":
-        reveal(game, pid, ["Moat"], "hand")
-        if pid not in immune:
-            immune.append(pid)
-        opts = _reaction_options(game, pid, immune, moat_ok=False)
-        if opts:
-            _push_window(game, pid, opts)
-    elif cid == "reveal_diplomat":
-        reveal(game, pid, ["Diplomat"], "hand")
-        draw(game, pid, 2)
-        hand = game["seats"][pid]["hand"]
-        push_choose_cards(game, pid, "__attack", "diplomat_discard",
-                          cards=list(hand), mn=3, mx=3, purpose="discard")
-
-
-def _k_diplomat_discard(game, pid, frame, choice):
-    discard(game, pid, choice["cards"])
+    if cid in _LEGACY_REACTION_IDS:
+        card = _LEGACY_REACTION_IDS[cid]
+    elif ":" in cid:
+        card = cid.split(":", 1)[1]
+    else:
+        return
+    spec = attack_reactions().get(card)
+    if spec is None:
+        return
     atk = _current_attack_frame(game)
-    immune = atk["data"]["immune"] if atk else []
-    opts = _reaction_options(game, pid, immune, moat_ok=True)
-    if opts:
-        _push_window(game, pid, opts)
+    if atk is not None:
+        atk["data"].setdefault("used", {}).setdefault(pid, []).append(card)
+        if spec.get("immunity") and pid not in atk["data"]["immune"]:
+            atk["data"]["immune"].append(pid)
+
+    if spec.get("mode") == "play":
+        # REACTION THAT PLAYS ITSELF (compendium p53): "this doesn't use up an
+        # Action from your Action pool. You discard the card in THAT TURN'S
+        # Clean-up phase" — i.e. the attacker's, which is why clean-up has to
+        # sweep every seat's in_play, not just the turn player's.
+        play_action_card(game, pid, card, from_zone="hand")
+    else:
+        reveal(game, pid, [card], "hand")
+
+    stage = spec.get("stage")
+    if stage is not None:
+        _run_stage(game, card, stage, pid, frame, None)
+        return          # the stage re-opens the window itself once it's done
+    reopen_attack_window(game, pid)
+
+
+def _k_legacy_diplomat_discard(game, pid, frame, choice):
+    """Resolves a Diplomat discard frame written by the pre-registry kernel."""
+    discard(game, pid, choice["cards"])
+    reopen_attack_window(game, pid)
 
 
 def _k_play_ability(game, pid, frame, choice):
@@ -1224,7 +1314,9 @@ def _k_next(game, pid, frame, choice):
 
 KERNEL_STAGES = {
     ("__attack", "window"): _k_window,
-    ("__attack", "diplomat_discard"): _k_diplomat_discard,
+    # legacy stage: a game paused mid-Diplomat across the deploy still holds a
+    # frame naming it. Compatibility only — delete with _LEGACY_REACTION_IDS.
+    ("__attack", "diplomat_discard"): _k_legacy_diplomat_discard,
     ("__attack", "play_ability"): _k_play_ability,
     ("__attack", "next"): _k_next,
     # ("__turn", "finish") registers below its definition
@@ -1536,11 +1628,7 @@ def _resolve_decision(game, pid, move):
         # decline) is information the turn player didn't have — no undo after.
         _mark_revealed(game)
     frame = _pop_frame(game)
-    _push_depth(game)
-    try:
-        _stage_fn(frame["card"], frame["stage"])(game, pid, frame, move)
-    finally:
-        _pop_depth(game)
+    _run_stage(game, frame["card"], frame["stage"], pid, frame, move)
     return True, None
 
 
@@ -1771,6 +1859,7 @@ def player_view(game, viewer):
     g.pop("seed", None)
     g.pop("_cur_dur", None)
     g.pop("_outpost", None)
+    g.pop("_actor", None)
     # watchers are public table state, but their data can reference hidden
     # resume info — ship only the visible identity
     g["watchers"] = [{"event": w["event"], "owner": w["owner"], "card": w["card"]}

@@ -78,7 +78,7 @@ def test_bureaucrat_empty_silver_still_attacks_and_moat_blocks():
     give_hand(g, B, ["Moat", "Estate", "Copper", "Copper", "Copper"])
     give_hand(g, C, ["Estate", "Copper", "Copper", "Copper", "Copper"])
     assert play(g, A, "Bureaucrat")[0]
-    assert decide(g, B, ids=["reveal_moat"])[0]      # window precedes the ability
+    assert decide(g, B, ids=["react:Moat"])[0]      # window precedes the ability
     assert g["seats"][A]["deck"][0] != "Silver"      # pile was empty
     assert g["pending_pid"] is None                  # C's single victory auto-resolved
     assert "Estate" in g["seats"][B]["hand"]         # B untouched (immune)

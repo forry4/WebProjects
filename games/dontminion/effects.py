@@ -25,6 +25,8 @@ MANUAL_TREASURES = set()  # treasures play_all must skip (interactive: Anvil-cla
 # worse" — a card where the player might genuinely want it early belongs in
 # MANUAL_TREASURES instead, since the button must not choose for them.
 AUTOPLAY_LAST = set()
+# card -> reaction spec for the attack window (see engine.attack_reactions)
+ATTACK_REACTIONS = {}
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -55,3 +57,7 @@ for _m in _MODULES:
         MANUAL_TREASURES.add(_name)
     for _name in getattr(_m, "AUTOPLAY_LAST", ()):
         AUTOPLAY_LAST.add(_name)
+    for _name, _spec in getattr(_m, "ATTACK_REACTIONS", {}).items():
+        if _name in ATTACK_REACTIONS:
+            raise RuntimeError(f"dontminion: duplicate ATTACK_REACTIONS entry {_name!r}")
+        ATTACK_REACTIONS[_name] = _spec

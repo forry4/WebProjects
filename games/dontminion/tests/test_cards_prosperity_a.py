@@ -435,7 +435,7 @@ def test_rabble_moat_immunity():
     sb["deck"], sb["discard"] = ["Copper", "Estate", "Duchy"], []
     assert mv(g, A, {"type": "play_action", "card": "Rabble"})[0]
     assert g["pending_pid"] == B and g["pending_kind"] == "choose_option"
-    assert decide(g, B, ids=["reveal_moat"])[0]
+    assert decide(g, B, ids=["react:Moat"])[0]
     # the play ability still ran for the attacker; B's deck is untouched
     assert len(g["seats"][A]["hand"]) == 3
     assert sb["deck"] == ["Copper", "Estate", "Duchy"]

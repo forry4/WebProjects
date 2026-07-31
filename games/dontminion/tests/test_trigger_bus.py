@@ -134,6 +134,74 @@ def test_cleanup_discards_do_not_fire_when_discard(g, synthetic):
     assert hits == [], "a Clean-up discard fired a when-discard reaction"
 
 
+def test_attack_reactions_come_from_the_registry_not_the_kernel(g):
+    """Moat and Diplomat used to be hardcoded inside _reaction_options, so
+    every new reaction was a kernel edit. They are registry entries now."""
+    from games.dontminion import effects
+    reg = engine.attack_reactions()
+    assert reg is effects.ATTACK_REACTIONS
+    assert reg["Moat"]["immunity"] is True
+    assert reg["Diplomat"].get("immunity") is not True      # NOT immunity
+    assert reg["Diplomat"]["repeatable"] is True
+
+    g["seats"][A]["hand"] = ["Militia"]
+    g["seats"][B]["hand"] = ["Moat"] + ["Copper"] * 4
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Militia"})[0]
+    ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
+    assert "react:Moat" in ids and "decline" in ids
+
+
+def test_a_registered_reaction_that_PLAYS_itself(g, synthetic):
+    """Guard Dog's shape (compendium p53 REACTION THAT PLAYS ITSELF): the card
+    is PLAYED from hand rather than revealed, costs no Action, grants no
+    immunity, and may be used again against the same attack."""
+    from games.dontminion import effects
+    played = []
+    effects.ATTACK_REACTIONS["Village"] = {
+        "label": "Play Village", "mode": "play", "repeatable": True}
+    trigger, stage, _ = synthetic          # only for its cleanup of STAGES
+    try:
+        g["seats"][A]["hand"] = ["Militia"]
+        g["seats"][B]["hand"] = ["Village", "Village", "Copper", "Copper", "Copper"]
+        g["seats"][B]["deck"] = ["Estate", "Estate", "Silver"]
+        assert engine.apply_move(g, A, {"type": "play_action", "card": "Militia"})[0]
+        actions_before = g["actions"]          # AFTER the Militia spent A's action
+        assert engine.apply_move(g, B, {"type": "decision", "ids": ["react:Village"]})[0]
+
+        # it really PLAYED: it is in B's in_play, not revealed-and-kept
+        assert "Village" in g["seats"][B]["in_play"]
+        assert g["seats"][B]["hand"].count("Village") == 1
+        # Village's +2 Actions belong to B, who has no pool on A's turn — so
+        # they evaporate rather than landing in the ATTACKER's pool (they did:
+        # this read 2 before `_actor` taught the resource helpers who is acting)
+        assert g["actions"] == actions_before
+        assert any(e.get("event") == "off_turn_bonus" for e in g["log"])
+        # repeatable: the second copy is offered again
+        ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
+        assert "react:Village" in ids
+        # ...and it granted no immunity — the Militia still hits
+        assert engine.apply_move(g, B, {"type": "decision", "ids": ["decline"]})[0]
+        assert g["pending_kind"] == "choose_cards"       # discard-to-3 prompt
+    finally:
+        effects.ATTACK_REACTIONS.pop("Village", None)
+
+
+def test_a_frame_written_by_the_pre_registry_kernel_still_resolves(g):
+    """The window's option ids are PERSISTED inside an open frame, so a game
+    paused on an attack window survives a deploy holding the OLD ids. Both the
+    legacy id and the legacy Diplomat stage must still resolve."""
+    g["seats"][A]["hand"] = ["Militia"]
+    g["seats"][B]["hand"] = ["Moat"] + ["Copper"] * 4
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Militia"})[0]
+    # forge the pre-registry option id into the open frame, as a save would hold
+    g["pending"][-1]["constraint"]["options"] = [
+        {"id": "reveal_moat", "label": "Reveal Moat"},
+        {"id": "decline", "label": "Don't react"}]
+    assert engine.apply_move(g, B, {"type": "decision", "ids": ["reveal_moat"]})[0]
+    atk = engine._current_attack_frame(g)
+    assert atk is None or B in atk["data"]["immune"], "legacy Moat id lost its immunity"
+
+
 def test_buy_event_reaches_in_play_triggers(g, synthetic):
     trigger, _, _ = synthetic
     hits = []

@@ -508,6 +508,14 @@ def _artisan_topdeck(game, pid, frame, choice):
 
 # --- registration ---------------------------------------------------------
 
+# Cards that react to an Attack being PLAYED. The kernel used to hardcode Moat
+# (and Diplomat) inside _reaction_options; they live with their own set now, so
+# a new reaction is a registry entry rather than a kernel edit.
+ATTACK_REACTIONS = {
+    "Moat": {"label": "Reveal Moat (unaffected by this attack)",
+             "immunity": True, "mode": "reveal", "repeatable": False},
+}
+
 EFFECTS = {
     "Smithy": _smithy,
     "Village": _village,

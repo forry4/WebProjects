@@ -220,7 +220,7 @@ def test_minion_discard_mode_window_first_and_immune_threading():
     assert play(g, A, "Minion")[0]
     # the reaction window comes BEFORE the mode choice
     assert g["pending_pid"] == B and g["pending"][-1]["card"] == "__attack"
-    assert decide(g, B, ids=["reveal_moat"])[0]
+    assert decide(g, B, ids=["react:Moat"])[0]
     assert g["pending_pid"] == A and g["pending"][-1]["card"] == "Minion"
     assert decide(g, A, ids=["discard"])[0]
     assert len(g["seats"][A]["hand"]) == 4             # discarded 2, drew 4
@@ -302,7 +302,7 @@ def test_replace_moat_blocks_the_curse():
     give_hand(g, A, ["Replace", "Smithy"])
     give_hand(g, B, ["Moat"] + ["Copper"] * 4)
     assert play(g, A, "Replace")[0]
-    assert decide(g, B, ids=["reveal_moat"])[0]        # window precedes everything
+    assert decide(g, B, ids=["react:Moat"])[0]        # window precedes everything
     assert decide(g, A, cards=["Smithy"])[0]
     assert decide(g, A, pile="Estate")[0]
     assert g["seats"][B]["discard"] == []              # immune threaded to the curse

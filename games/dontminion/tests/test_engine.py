@@ -434,8 +434,8 @@ def test_reaction_window_precedes_play_ability():
     # C holds Moat -> C's window opens BEFORE the attacker's own +$2
     assert g["coins"] == 0 and g["pending_pid"] == C
     ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
-    assert ids == ["reveal_moat", "decline"]
-    assert decide(g, C, ids=["reveal_moat"])[0]
+    assert ids == ["react:Moat", "decline"]
+    assert decide(g, C, ids=["react:Moat"])[0]
     assert g["coins"] == 2                       # ability resolved after windows
     assert g["pending_pid"] == B                 # B still discards
     assert decide(g, B, cards=g["seats"][B]["hand"][:2])[0]
@@ -462,7 +462,7 @@ def test_all_opponents_immune_attacker_still_benefits():
     give_hand(g, B, ["Moat"] + ["Copper"] * 4)
     hand_before = len(g["seats"][A]["hand"]) - 1     # Witch leaves the hand
     assert mv(g, A, {"type": "play_action", "card": "Witch"})[0]
-    assert decide(g, B, ids=["reveal_moat"])[0]
+    assert decide(g, B, ids=["react:Moat"])[0]
     assert len(g["seats"][A]["hand"]) == hand_before + 2   # attacker still draws
     assert g["seats"][B]["discard"] == []
 
@@ -474,8 +474,8 @@ def test_diplomat_reaction_chain():
     g["seats"][B]["deck"] = ["Silver", "Gold"] + g["seats"][B]["deck"]
     assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
     ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
-    assert ids == ["reveal_diplomat", "decline"]
-    assert decide(g, B, ids=["reveal_diplomat"])[0]
+    assert ids == ["react:Diplomat", "decline"]
+    assert decide(g, B, ids=["react:Diplomat"])[0]
     assert len(g["seats"][B]["hand"]) == 7           # drew Silver + Gold
     assert g["pending_kind"] == "choose_cards"
     assert decide(g, B, cards=["Copper", "Copper", "Copper"])[0]
@@ -505,11 +505,11 @@ def test_throne_room_doubles_and_double_attack():
     assert decide(g, A, cards=["Militia"])[0]
     # first play: B's window
     assert g["pending_pid"] == B
-    assert decide(g, B, ids=["reveal_moat"])[0]
+    assert decide(g, B, ids=["react:Moat"])[0]
     # second play: a NEW attack -> fresh window, Moat offerable again
     assert g["pending_pid"] == B
     ids = [o["id"] for o in g["pending"][-1]["constraint"]["options"]]
-    assert "reveal_moat" in ids
+    assert "react:Moat" in ids
     assert decide(g, B, ids=["decline"])[0]
     assert g["pending_pid"] == B and g["pending"][-1]["card"] == "Militia"
     assert decide(g, B, cards=g["seats"][B]["hand"][:3])[0]

@@ -95,7 +95,7 @@ def test_blockade_moat_reveal_blocks_the_later_curses():
     give_hand(g, B, ["Moat"] + ["Copper"] * 4)
     assert play(g, A, "Blockade")[0]
     assert g["pending_pid"] == B                        # the window opens
-    assert decide(g, B, ids=["reveal_moat"])[0]
+    assert decide(g, B, ids=["react:Moat"])[0]
     assert decide(g, A, pile="Silver")[0]
     assert mv(g, A, {"type": "end_phase"})[0]
     assert mv(g, B, {"type": "end_phase"})[0]           # B's hand has Moat: action phase

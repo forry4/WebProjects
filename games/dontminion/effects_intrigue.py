@@ -635,7 +635,31 @@ EFFECTS = {
     "Torturer": _torturer,
 }
 
+# Diplomat's REACTION half (its on-play half is _diplomat). Was hardcoded in
+# the kernel's attack window; now a registry entry like any other reaction.
+# "if you have 5 or more cards in hand" is checked when the window is offered.
+ATTACK_REACTIONS = {
+    "Diplomat": {"label": "Reveal Diplomat (+2 Cards, then discard 3)",
+                 "when": lambda game, pid: len(game["seats"][pid]["hand"]) >= 5,
+                 "mode": "reveal", "stage": "react", "repeatable": True},
+}
+
+
+def _diplomat_react(game, pid, frame, choice):
+    E.draw(game, pid, 2)
+    hand = game["seats"][pid]["hand"]
+    E.push_choose_cards(game, pid, "Diplomat", "react_discard",
+                        cards=list(hand), mn=3, mx=3, purpose="discard")
+
+
+def _diplomat_react_discard(game, pid, frame, choice):
+    E.discard(game, pid, choice["cards"])
+    E.reopen_attack_window(game, pid)      # may chain another reaction
+
+
 STAGES = {
+    ("Diplomat", "react"): _diplomat_react,
+    ("Diplomat", "react_discard"): _diplomat_react_discard,
     ("Courtyard", "topdeck"): _courtyard_topdeck,
     ("Pawn", "pick"): _pawn_pick,
     ("Steward", "pick"): _steward_pick,
