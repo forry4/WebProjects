@@ -319,6 +319,41 @@ victory-typed 8/12, else 10); `DATA_COMPLETE`.
   the client button), and undo is handled BEFORE the pending gate (an unrevealed Militia can be
   taken back before the opponent answers). `legal_moves` never offers it (keeps the bot honest).
 
+## OPEN AMBIGUITIES & DELIBERATE DEVIATIONS — the standing list
+
+Every entry here is a place where we made a CHOICE the rules didn't force. They are recorded so
+a future change is a visible decision rather than a silent drift, and so an auditor can tell
+"we picked a legal branch" apart from "this is a bug". **Add a row whenever you resolve a
+genuine ambiguity; delete one when a later source settles it (and say which).** Each has a test
+pinning the current behaviour, so changing your mind means changing a test on purpose.
+
+**A. Rules genuinely ambiguous — we picked one legal branch**
+
+| # | Question | What we do | Why it's open |
+|---|---|---|---|
+| A1 | A **throne-roomed Attack**: one reaction window, or one per replay? | One window **per replay** — a Moat holder is asked twice and must reveal twice; immunity is per-play. | p53 says a reaction triggers "whenever an Attack card is *played*" and Cultist 3 wants a reveal per play; but Moat reads "unaffected by **it**" and Reckless 8 says one reveal covers both resolutions of a single play. Not settled either way. Pinned by `test_throne_room_on_a_new_attack_opens_a_reaction_window_per_play` + its decline twin. |
+| A2 | A gained card's **own when-gain** vs a **hand-reaction window** (Watchtower/Trader) firing on the same gain | The gained card's own ability resolves **first**. | The compendium (p26) explicitly lets the PLAYER choose the order; we don't model that choice. Ours is one of the two legal orders, and is exactly the branch the compendium's worked Example 1 walks through (Inn shuffles itself in, Watchtower then loses track). |
+| A3 | Two of the player's **own triggers** firing simultaneously | Registration order wins — and because `effects.py` merges modules in `_MODULES` order with the newest last, the newest set's `self` trigger always resolves first. | Same p26 player's-choice rule as A2. Concretely: gaining a Trail or Berserker while holding a Watchtower always self-plays first, never the reverse. |
+
+**B. Deliberate simplifications — the rules are clear, we do something simpler**
+
+| # | Rule | What we do | Cost |
+|---|---|---|---|
+| B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). Neither exists yet. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
+| B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
+| B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
+
+**C. Settled — do NOT relitigate** (kept because each cost real time to establish)
+
+- **Off-turn bonuses EVAPORATE**, they are not banked: "on another player's turn you always start
+  with empty pools" (compendium pp. 48–49, which names Nomads and Trail explicitly). Independently
+  confirmed by the phase-3 audit.
+- **"Cheaper" is STRICT** (`cost_lt`), not "up to" — Border Village, Berserker, Haggler.
+- **First discard, THEN put cards back** — see `discard_then_putback`. Four cards had this
+  backwards; it is not a matter of taste.
+- **Highway is turn-scoped** (`turn_ctx["bridges"]`), not while-in-play. The 1E card was the
+  other way; the roadmap described the 1E card for a while.
+
 ## Hidden information / wire view
 
 `player_view` BUILDS the view (build-not-filter): deck order never exists on the wire (counts

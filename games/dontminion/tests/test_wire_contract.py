@@ -120,6 +120,27 @@ def test_every_log_event_the_engine_emits_has_a_fmtLog_case():
         f"field names in the game log")
 
 
+def test_every_pinned_ambiguity_names_a_test_that_exists():
+    """The OPEN AMBIGUITIES list in CLAUDE.md claims each entry is pinned by a
+    test. A list that cites a test which has been renamed or deleted is worse
+    than no list — it reads as "this is covered" when nothing is watching. So
+    every `test_...` name the section mentions must actually exist."""
+    doc = _src("games/dontminion/CLAUDE.md")
+    start = doc.find("## OPEN AMBIGUITIES")
+    assert start != -1, "the ambiguity list is gone from CLAUDE.md"
+    section = doc[start:doc.find("\n## ", start + 10)]
+    cited = set(re.findall(r"`(test_\w+)`", section))
+    assert cited, "the ambiguity list cites no tests at all"
+
+    defined = set()
+    for path in pathlib.Path("games/dontminion/tests").glob("test_*.py"):
+        defined |= set(re.findall(r"^def (test_\w+)",
+                                  path.read_text(encoding="utf-8"), re.M))
+    missing = sorted(cited - defined)
+    assert not missing, (
+        f"CLAUDE.md's ambiguity list cites tests that do not exist: {missing}")
+
+
 def test_the_contract_check_actually_resolves_fields():
     """Guard against the checks passing because the regex found nothing."""
     src = _src(JSX)
