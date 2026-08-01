@@ -644,7 +644,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const pileHint = (name, piles) => {
     const body = effectText(name);
     const parts = body.split(/\.\s+/).map((s, i, a) => (i < a.length - 1 ? s + "." : s));
-    const clause = parts.find((s) => /gain|trash|name/i.test(s)) || body;
+    // a choose_pile prompt is always a GAIN/TRASH action, so prefer that clause
+    // over a "names a card" one — War Chest reads "The player to your left names
+    // a card. Gain a card costing up to $5…", and we want the Gain clause, not
+    // the opponent's naming.
+    const clause = parts.find((s) => /\b(gain|trash)\b/i.test(s))
+      || parts.find((s) => /\bname/i.test(s)) || body;
     const costs = (piles || []).map(effCost);
     const band = costs.length && Math.min(...costs) === Math.max(...costs)
       ? ` (piles costing $${costs[0]})` : "";
