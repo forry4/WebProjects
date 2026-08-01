@@ -409,6 +409,10 @@
   border-radius: 10px; padding: 3px 10px; font-size: 13px; color: var(--text, #e8dfc8);
   white-space: nowrap;
 }
+/* a mat whose cards are known is tappable to open the viewer (touch has no
+   hover, so the title tooltip alone hid the contents on a phone) */
+.dm-mat-chip-view { cursor: pointer; border-color: var(--gold, #c9a84c); }
+.dm-mat-chip-view:hover { background: var(--surface2, #242018); color: var(--gold-light, #e8c96a); }
 .dm-handrow { display: flex; gap: 18px; align-items: flex-end; flex-wrap: wrap; }
 .dm-mypiles {
   display: flex; gap: 16px; align-items: flex-start; flex: none; padding-bottom: 14px;
@@ -481,6 +485,11 @@
   --card-w: 158px; --card-h: 220px;
 }
 .dm-kingdom-modal h3 { font-family: 'Cinzel','Cinzel Fallback',serif; margin: 6px 0; }
+/* the mat viewer reuses the kingdom grid's card sizing (incl. its mobile
+   3-per-row rules) but is narrower — a mat holds a few cards, not a whole
+   supply. Placed AFTER .dm-kingdom-modal so its max-width wins on desktop. */
+.dm-matview { max-width: min(560px, calc(100vw - 48px)); }
+.dm-matview .dm-kgrid { justify-content: center; }
 /* full faces at the FIXED card size — long text shrinks (dm-text-* tiers), the
    card never grows */
 .dm-kgrid { display: flex; flex-wrap: wrap; gap: 14px; row-gap: 28px; margin: 12px 0 20px; }
