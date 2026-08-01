@@ -306,6 +306,24 @@ function Pop({ n }) {
   return <span key={n} className="dm-count-pop">{n}</span>;
 }
 
+// A mat chip (Island / Native Village / Set-aside). When the cards on it are
+// KNOWN — your own mats, or any public one (Island) — it's tappable to open a
+// viewer; a hover title alone is invisible on touch, which is what hid the
+// Native Village contents on a phone. A face-down mat (an opponent's Native
+// Village / set-aside) shows the count only and isn't tappable.
+function DmMatChip({ emoji, count, label, cards, onView }) {
+  const canView = Array.isArray(cards) && cards.length > 0;
+  return (
+    <span className={"dm-mat-chip" + (canView ? " dm-mat-chip-view" : "")}
+      title={label + ": " + (canView ? cards.join(", ") : "face down")}
+      role={canView ? "button" : undefined} tabIndex={canView ? 0 : undefined}
+      onClick={canView ? () => onView({ label, cards }) : undefined}
+      onKeyDown={canView ? (e) => { if (e.key === "Enter" || e.key === " ") onView({ label, cards }); } : undefined}>
+      {emoji} {count}{canView ? " 👁" : ""}
+    </span>
+  );
+}
+
 // ─── Log formatting (the Dominion-online look: full sentences, articles,
 //     grouped card lists, sub-effects indented under the play that caused them) ──
 const art = (name) => (/^[AEIOU]/.test(name) ? "an" : "a") + " " + name;
@@ -528,6 +546,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showKingdom, setShowKingdom] = useState(false);
   const [cardInfo, setCardInfo] = useState(null);    // card name → detail modal
   const [deckView, setDeckView] = useState(null);    // game-over: whose final deck to show
+  const [matView, setMatView] = useState(null);      // {label, cards} for a mat viewer modal
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
@@ -786,7 +805,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   useEffect(() => {
     setPickIdx([]); setPickOpts([]); setOrderIdx([]); setPromptMin(false);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
-  useEffect(() => { setGameOverDismissed(false); setDeckView(null); }, [roomId]);
+  useEffect(() => { setGameOverDismissed(false); setDeckView(null); setMatView(null); }, [roomId]);
 
   // The engine auto-advances action->buy after moves and at turn hand-offs, but
   // deliberately not at game CREATION (test fixtures stage hands post-deal). The
@@ -1140,14 +1159,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {(s.in_play || []).length === 0 && (s.duration_view || []).length === 0
               && <span className="dm-zone-hint">nothing in play</span>}
             {(s.island || []).length > 0 && (
-              <span className="dm-mat-chip" title={"Island mat: " + s.island.join(", ")}>
-                🏝 {s.island.length}
-              </span>
+              <DmMatChip emoji="🏝" count={s.island.length} label="Island mat"
+                cards={s.island} onView={setMatView} />
             )}
             {(s.village_count || 0) > 0 && (
-              <span className="dm-mat-chip" title="Native Village mat (face down)">
-                🏕 {s.village_count}
-              </span>
+              /* face down — the opponent's mat contents are hidden, count only */
+              <DmMatChip emoji="🏕" count={s.village_count} label="Native Village mat"
+                cards={null} onView={setMatView} />
             )}
           </div>
         </div>
@@ -1566,21 +1584,16 @@ export default function Dontminion({ myId, authUser, onExit }) {
               {(mySeat?.in_play || []).length === 0 && (mySeat?.duration_view || []).length === 0
                 && <span className="dm-zone-hint">in play</span>}
               {(mySeat?.island || []).length > 0 && (
-                <span className="dm-mat-chip" title={"Island mat: " + mySeat.island.join(", ")}>
-                  🏝 {mySeat.island.length}
-                </span>
+                <DmMatChip emoji="🏝" count={mySeat.island.length} label="Island mat"
+                  cards={mySeat.island} onView={setMatView} />
               )}
               {(mySeat?.village_count || 0) > 0 && (
-                <span className="dm-mat-chip"
-                  title={"Native Village mat: " + ((mySeat.village_mat || []).join(", ") || "face down")}>
-                  🏕 {mySeat.village_count}
-                </span>
+                <DmMatChip emoji="🏕" count={mySeat.village_count} label="Native Village mat"
+                  cards={mySeat.village_mat} onView={setMatView} />
               )}
               {(mySeat?.dur_aside_count || 0) > 0 && (
-                <span className="dm-mat-chip"
-                  title={"Set aside: " + ((mySeat.dur_aside || []).join(", ") || "face down")}>
-                  ⏳ {mySeat.dur_aside_count}
-                </span>
+                <DmMatChip emoji="⏳" count={mySeat.dur_aside_count} label="Set aside"
+                  cards={mySeat.dur_aside} onView={setMatView} />
               )}
             </div>
             <div className="dm-handrow">
@@ -1666,6 +1679,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
         </div>
       )}
       {renderPromptModal()}
+      {matView && (
+        <div className="dm-backdrop" onClick={() => setMatView(null)}>
+          <div className="dm-modal dm-kingdom-modal dm-matview" onClick={(e) => e.stopPropagation()}>
+            <h2>{matView.label}</h2>
+            <p className="dm-wait-note">{matView.cards.length} card{matView.cards.length === 1 ? "" : "s"}</p>
+            <div className="dm-kgrid">
+              {matView.cards.map((n, i) => (
+                <div key={n + "#" + i} className="dm-pile-slot">
+                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
+                </div>
+              ))}
+            </div>
+            <div className="dm-prompt-actions">
+              <button className="btn btn-gold" onClick={() => setMatView(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
       {cardInfo && cards[cardInfo] && (
         <div className="dm-backdrop" onClick={() => setCardInfo(null)}>
           <div className={"dm-modal dm-cardinfo " + faceClass(cards[cardInfo].types)} onClick={(e) => e.stopPropagation()}>
