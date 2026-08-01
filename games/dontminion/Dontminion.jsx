@@ -21,18 +21,20 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-// The bot tiers the SERVER actually distinguishes (main.AI_DIFFICULTIES), in
-// strength order. easy/normal/hard are one and the same random-legal bot, so
-// only one of them is offered rather than pretending to three tiers.
+// The bot tiers OFFERED in the picker. The server still distinguishes more
+// (main.AI_DIFFICULTIES also has plain `bigmoney`), but only two are worth
+// surfacing: a barely-playing Random and the real opponent, Big Money+. Plain
+// Big Money was dropped from the UI — it is a strictly weaker bmplus, so it
+// only added a choice that no one should pick. A saved game still on `bigmoney`
+// keeps working; the server just no longer offers it here.
 //
 // LABELS ARE SHORT ON PURPOSE. These render as a `cm-seg` sharing one row with
 // the Bots counter (the side-by-side layout is what keeps the create modal
 // inside its 148px budget), and `.cm-seg-btn` is `white-space:nowrap` inside an
-// `overflow:hidden` track — a label too wide for its third of the track is
+// `overflow:hidden` track — a label too wide for its half of the track is
 // CLIPPED, not wrapped. The full name rides along as the button's title.
 const BOTS = [
   { id: "easy", name: "Random", title: "Random legal moves — barely plays" },
-  { id: "bigmoney", name: "Money", title: "Big Money — the classic buy ladder" },
   { id: "bmplus", name: "Money+", title: "Big Money+ — reads the board for a terminal, knows how the game ends" },
 ];
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
