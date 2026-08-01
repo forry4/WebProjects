@@ -59,7 +59,10 @@ def fetch_saves():
 
 
 def census(g):
-    c = collections.Counter(g["supply"])
+    # engine.pile_cards, not the supply index: it reaches the non-supply piles
+    # and unpacks an ORDERED pile into the real cards it holds (a pile's NAME
+    # is not a card anyone can own) — see THE PILE MODEL in engine.py
+    c = collections.Counter(engine.pile_cards(g))
     c.update(g["trash"])
     for pid in g["players"]:
         c.update(engine.owned_cards(g, pid))

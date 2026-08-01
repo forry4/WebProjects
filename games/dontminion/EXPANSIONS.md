@@ -15,7 +15,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 1 | **Seaside 2E** (27) | Durations, turn-start frames, cross-player watchers, gain reactions, protection, mats, duration set-aside, extra turns, interruptible clean-up | **SHIPPED** 2026-07-30 + audited |
 | 2 | **Prosperity 2E** (25 + Platinum/Colony) | VP tokens, would-gain protocol, via_buy, buy gates, dynamic self-costs, game-aware type queries (Charlatan), treasure-throne, Platinum/Colony setup | **SHIPPED** 2026-07-30 + audited |
 | 3 | **Hinterlands 2E** (26) | `discard` emit, unfiltered offers, self-trigger context, registry-driven attack reactions + reaction-that-plays-itself (Guard Dog), attack-typed Treasures opening the window (Cauldron), plays from non-hand zones + lose-track (Trail), actor-aware resource pools, coin floor (Souk), `exchange` (Trader), `shuffle_into_deck` (Inn), `cost_lt`, all-seats clean-up sweep, `discard_then_putback` | **SHIPPED** 2026-07-30 + audited |
-| 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | planned |
+| 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
 | 4 | Cornucopia & Guilds 2E (26 + Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (needs 3H), Young Witch's Bane (11th pile + marker) | planned |
 | 5 | Alchemy (12 + Potion) | cost VECTOR dimension 1 (Potion) — lands inside cost_le/cost_eq; Potion production/payment in the buy flow. ⚠ **Possession is phase-sized on its own** (take a turn controlling another player's cards) — budget it like a kernel system, not a card | planned |
 | 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), ⚠ **card identity / "play-as" system** (Band of Misfits — see ledger) | planned |
@@ -36,24 +36,42 @@ first set that cannot ship without it). Landscape UI (ph. 7) is the next big FRO
 lift; Nocturne (ph. 11) is the biggest single phase and must not be combined with
 anything else.
 
-## Phase 3H — the pile & source model (standalone hardening, no new cards)
+## Phase 3H — the pile & source model — SHIPPED 2026-07-31
 
-`supply = {name: count}` cannot represent what five later sets need, and non-supply
-gain sources appear in six. One behavior-preserving refactor pays both ledger rows with
-the full 344-test suite + soak as the net, instead of bundling the biggest schema change
-into Dark Ages' 35 cards:
+`supply = {name: count}` could not represent what five later sets need, and non-supply
+gain sources appear in six. One behaviour-preserving refactor paid both ledger rows with
+the whole suite + soak as the net, instead of bundling the biggest schema change into
+Dark Ages' 35 cards. **Full model + API: `CLAUDE.md`, "THE PILE MODEL".** What landed:
 
-- **Pile objects**: named piles with `count`, and where needed ORDERED `contents` +
-  visible `top` (Ruins and Knights ph. 6, split piles + Castles ph. 8, ROTATING piles
-  ph. 12, Traits attach per-pile ph. 13, Adventures tokens sit on piles ph. 7). Cost/type
-  of "the pile" = its top card. Uniform random-order redaction (pile order is hidden info).
-- **Gain sources beyond the supply**: one `gain_from(source, ...)` surface covering
-  Rewards (ph. 4), Spoils/Madman/Mercenary (ph. 6), Horses (ph. 10), Spirits (ph. 11),
-  Loot (ph. 13) — non-supply piles never count for empty-pile game end, never buyable.
-- Wire compatibility: keep `supply` counts + `costs` shape the client already reads;
-  add `pile_view` only for ordered piles. Save-blob migration via the versioned loader
-  (ledger row below). Census/soak extended to the new zones. Frontend renderPile reads
-  tops from the view instead of assuming pile==card.
+- **Pile objects** (`game["piles"]`): `face` / ORDERED `contents` / `members` / `attach`,
+  covering Ruins and Knights (ph. 6), split piles + Castles (ph. 8), ROTATING piles
+  (ph. 12), per-pile Traits (ph. 13) and Adventures tokens (ph. 7). Cost/type of "the
+  pile" = its top card, resolved inside `cost`/`types_of`/`coins_of` so every cost rule
+  the game has — and every one it grows — reaches an ordered pile for free. `contents`
+  never ships (pile order is hidden info).
+- **Gain sources beyond the supply**: `gain_from(game, pid, pile, dest=)` for Rewards
+  (ph. 4), Spoils/Madman/Mercenary (ph. 6), Horses (ph. 10), Spirits (ph. 11), Loot
+  (ph. 13), plus `return_to_pile` for the cards that go home. Non-supply piles live in
+  their own count index, so they are never buyable and never count toward the game end.
+- Wire compatibility held: `supply` and `costs` ship unchanged, `piles` is additive.
+  SCHEMA 6 + a presence-based fill; all 17 real prod saves (v1/v2/v5) replayed forward.
+  Census/soak extended; the frontend reads pile FACES instead of assuming pile==card.
+
+**The judgement call worth keeping.** The first cut put `count` on the pile object and made
+`game["supply"]` a kernel-maintained mirror. It broke 25 tests immediately — because ~110
+fixtures across 16 files set `g["supply"]["Curse"] = 0` by hand, and every card batch to
+come will write the same line. That is not test churn to be absorbed; it is a permanent
+trap where the familiar idiom silently desyncs the model. Inverting it — the count stays
+in a flat index, ORDERED piles alone keep a mirror written by two functions and asserted
+by the soak — cost one extra concept and zero call sites. **Prefer the shape the codebase
+already speaks; make the NEW thing carry the complexity.**
+
+Two things only the new tests could have caught, both invisible to "the suite still
+passes": `traits()` KeyErrors on a pile name, so `bmplus` crashed the moment a board held
+an ordered pile (scheduled to surface inside the server's turn-finisher, on a live game,
+in ph. 6); and `exchange` reached for `supply[card] = supply.get(card, 0) + 1`, which
+would have conjured a buyable pile out of a returned card's name. A hardening phase whose
+only evidence is a green suite has proved it changed nothing — which is half the job.
 
 ## Phase 3 — Hinterlands 2E: VERIFIED roster + rules findings (2026-07-30)
 
@@ -144,8 +162,8 @@ original plan, and the audit step cannot catch it if the audit runs from the sam
 | ~~Off-turn resource leak~~ **PAID ph. 3** — the kernel binds `_actor` around every effect and stage, so card code still calls `add_*` with no pid and a bonus earned on someone else's turn EVAPORATES (logged `off_turn_bonus`) instead of landing in the turn player's pool. NB the first attempt (an optional `pid=` argument) did NOT work: card code never passes one | Trail, Nomads | done |
 | ~~Clean-up doesn't sweep OTHER seats' `in_play`~~ **PAID ph. 3** — every seat's table is swept at each clean-up; durations and riders protected | Guard Dog/Trail/Weaver/Berserker | done |
 | ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
-| **Non-supply gain sources** | Rewards (ph. 4) | **ph. 3H** |
-| **Pile abstraction** (ordered/split/rotating piles, per-pile attachments) | Ruins/Knights (ph. 6), but scheduled early deliberately | **ph. 3H** |
+| ~~Non-supply gain sources~~ **PAID ph. 3H** — `gain_from` + a second count index, so "a card from the Supply" excludes them by construction rather than by remembering | Rewards (ph. 4) | done |
+| ~~Pile abstraction~~ **PAID ph. 3H** — `game["piles"]`: ordered `contents` + retained `face` + `members` + `attach`; cost/type resolve through the face, the census unpacks it, the wire never sees the order | Ruins/Knights (ph. 6), scheduled early deliberately | done |
 | **Move-surface trio**: generic `spend` (Coffers/Villagers/Favors/Debt-payoff + a counters row in the resbar UI), `buy_landscape` (Events/Projects), `call` (Reserves). Design each ONCE at first need; every later consumer is registry + data | spend: ph. 4 · buy_landscape/call: ph. 7 | ph. 4 / ph. 7 pre-work |
 | **Card identity / "play-as"**: a physical card played AS another (Band of Misfits ph. 6, Inheritance ph. 7, Ways ph. 10, Overlord). Needs `play_card_as(game, pid, physical, as_name)` where identity-vs-physicality is explicit (types/cost read from WHICH?— the compendium's lose-track rules decide). The Charlatan `types_of` seam is the foothold | Band of Misfits (ph. 6) | ph. 6 pre-work, DESIGN reviewed against ph. 7/10 consumers before freezing |
 | **`play_all_treasures` suppression must become a STATE predicate.** Today it's a static card list (`MANUAL_TREASURES` — treasures that push a decision). Highwayman negates the FIRST Treasure its victim plays, so which treasure goes first becomes a real choice and the button must not make it for them — a condition the card list cannot express, since it depends on game state and LIFTS once the negation is spent. Wanted: `autoplay_block(game, pid) -> reason \| None`, fed by both the static set and watcher-registered blocks, read by `legal_moves` + the handler + shipped in `player_view` (state-dependent ⇒ NOT `/catalog`, unlike the static set) so the button hides AND says why. Also fixes the ordering row below if the block carries an order | Highwayman (ph. 12) | ph. 12 pre-work — but build it at the FIRST set that adds an order-sensitive treasure |

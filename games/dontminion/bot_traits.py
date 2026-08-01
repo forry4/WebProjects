@@ -244,6 +244,18 @@ def kingdom_traits(kingdom):
     return {n: traits(n) for n in kingdom}
 
 
+def pile_traits(game, pile):
+    """Traits of what a PILE is currently offering.
+
+    `traits` is a pure function of a CARD, and a pile is not always the card it
+    is named after — an ordered pile (Ruins, Knights, a split pile) shows its
+    top card. So any read that STARTS from a Supply key has to come through
+    here; calling traits() on the key is a KeyError the day ph. 6 ships Ruins,
+    raised inside the scheduler's turn-finisher on a live game."""
+    from . import engine                  # kept lazy: this module is card data
+    return traits(engine.pile_face(game, pile))
+
+
 def best_bm_terminal(kingdom, supply=None):
     """The kingdom's best Big-Money terminal, or None if it has none.
 
@@ -251,6 +263,11 @@ def best_bm_terminal(kingdom, supply=None):
     """
     best, score = None, 0
     for n in kingdom:
+        if n not in CARDS:
+            # an ORDERED pile: what it offers changes as it empties, so it is
+            # nobody's reliable terminal — and the deck-count rules below
+            # ("the second Smithy at ~16 cards") can't count copies of a pile
+            continue
         r = traits(n)["bm_terminal_rank"]
         if r > score and (supply is None or supply.get(n, 0) > 0):
             best, score = n, r

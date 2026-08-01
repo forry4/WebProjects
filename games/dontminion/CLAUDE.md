@@ -27,8 +27,8 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **3**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity) is the game-dict
-shape version, stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
+`engine.SCHEMA` (now **6**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+5 = Hinterlands, 6 = the pile model) is the game-dict shape version, stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
 guarantees** (28 of them were retired when this landed). Genuinely lazy transients
@@ -118,6 +118,51 @@ runs in a LATER stage — Minion, Replace — must capture `list(game["_atk_immu
 data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
 private_to=None,**kw)`. Turn counters (`game["turn_ctx"]["bridges"/"merchants"]`) are incremented
 directly by the owning card's effect.
+
+**THE PILE MODEL (phase 3H) — read before touching the Supply.** `supply = {name: count}` could
+only ever say "N copies of the card this pile is named after". A pile is a real object now, but
+its COUNT deliberately stays in a flat `{name: count}` index, because that is the shape ~60 read
+sites across five effects modules, both bots, the client and ~110 test fixtures already speak.
+- **Two count indexes, identical in shape.** `game["supply"]` — the BUYABLE piles, **untouched by
+  this phase**: still hand-writable, so `g["supply"]["Curse"] = 0` in a fixture is still exactly
+  right. `game["nonsupply"]` — piles outside the Supply (Rewards ph. 4, Spoils/Madman/Mercenary
+  ph. 6, Horses ph. 10, Spirits ph. 11, Loot ph. 13): never buyable, never counted for the
+  three-empty-piles end.
+- **`game["piles"][name]`** = `{supply, face, contents|None, members, attach}`. `face` is the card
+  whose cost/types the pile SHOWS (itself for an ordinary pile, the top card for an ordered one,
+  and it is RETAINED when the pile empties so `cost()`/`types_of()` stay total). `contents` is the
+  ordered list, top first — Ruins/Knights ph. 6, split piles + Castles ph. 8, rotating ph. 12.
+  `members` is every card the pile can hold, which is how a RETURNED card finds its way home once
+  `contents` is empty. `attach` is per-pile public state (Adventures tokens ph. 7, gathered VP
+  ph. 8, Traits ph. 13).
+- **EXACTLY ONE AUTHORITY PER COUNT.** An ordinary pile's count is its index entry; an ORDERED
+  pile's is `len(contents)`, and for those the index is a MIRROR written only by
+  `_pile_take`/`_pile_return` and never read by `pile_count`. Putting the count on the pile object
+  instead would have made every existing `g["supply"][x] = 0` a silent desync — in fixtures today
+  and in every future card batch. `test_soak._assert_piles_agree` asserts the mirror per move.
+- **API**: `pile_count` (THE count reader) · `pile_top(game,name)` (the card a gain/buy yields,
+  None if empty) · `pile_face` (total, even when empty) · `pile_of(game,card)` · `is_supply_pile` ·
+  `supply_piles` · `pile_cards(game)` (the CENSUS — a pile's NAME is not a card) ·
+  `add_pile(game,name,count=|contents=,supply=False,members=)` (setup only; refuses a duplicate,
+  an empty ordered pile, or a face that is not a real card) · `gain_from(game,pid,pile,dest=)` ·
+  `return_to_pile(game,pid,card,zone=)` · `pile_attach`/`pile_attachment`.
+- **`gain`, `cost`, `types_of`, `coins_of` and `_h_buy` all take a PILE name** and resolve it
+  through the face. You buy a pile and get its top card: the `gain`/`buy` events, the log and the
+  gained-card zone all carry the REAL card, never the pile name.
+- **Non-supply piles are kept OUT of `game["supply"]` rather than flagged inside it**, deliberately:
+  every "piles costing up to $4" enumeration in card code reads that dict, so "gain a card from
+  the Supply" excludes a Spoils by construction, in every module, with no call site to remember.
+- **Wire**: `piles` ships as `{count, supply, face, ordered, attach}` — never `contents` (an
+  ordered pile's order below the top is hidden information) and never `members`. `supply` and
+  `costs` ship unchanged; `costs` now prices every pile, including the unbuyable ones.
+- **The bots read the Supply too.** `bot_traits.pile_traits(game, pile)` is THE bot-side face
+  resolution — `traits()` is a pure function of a CARD and KeyErrors on a pile name. Anything
+  starting from a Supply key goes through it (`bot_endgame` does); `best_bm_terminal` skips a
+  pile that isn't a card, since a face that changes is nobody's reliable terminal.
+- 3H ships no card that uses any of this. `tests/test_piles.py` drives every seam end to end
+  (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
+  and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
+  both shapes under the conservation census.
 
 **Kernel v3 — the phase-3 (Hinterlands) delta. FROZEN: batch agents build against this.**
 - `cost_lt(game,card,coins)` — "cheaper" / "costing less than" is STRICT, unlike `cost_le`.
@@ -696,6 +741,7 @@ Vassal that played nothing passed). And derive parametrize counts from the data
 (`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
 the next expansion's kingdoms would have gone unsoaked in silence.
 
+`test_piles.py` (THE PILE MODEL — every ph. 3H seam, none of which a shipped card consumes yet),
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp
 recompute, JSON-safety, per-move progress, termination, determinism), `test_cards.py` (WP1

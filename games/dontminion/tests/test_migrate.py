@@ -19,6 +19,7 @@ A, B = "alice", "bob"
 V2_KEYS_GAME = ("watchers", "last_turn_pid", "extra_turn", "last_turn_gains")
 V2_KEYS_SEAT = ("duration", "dur_aside", "island", "village_mat")
 V3_KEYS_GAME = ("vp_tokens", "colony", "curse_is_treasure")
+V6_KEYS_GAME = ("piles", "nonsupply")
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -31,6 +32,9 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 6:
+        for k in V6_KEYS_GAME:
+            g.pop(k, None)
     if to_version < 3:
         for k in V3_KEYS_GAME:
             g.pop(k, None)
@@ -62,7 +66,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 5
+    assert _fresh()["schema"] == engine.SCHEMA == 6
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -72,16 +76,21 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert "watchers" not in old and "duration" not in old["seats"][A]
     g = engine.migrate(old)
     assert g["schema"] == engine.SCHEMA
-    for k in V2_KEYS_GAME + V3_KEYS_GAME:
+    for k in V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME:
         assert k in g, k
     for seat in g["seats"].values():
         for k in V2_KEYS_SEAT:
             assert k in seat, k
     assert g["vp_tokens"] == {A: 0, B: 0}
     assert g["colony"] is False and g["curse_is_treasure"] is False
+    # ph. 3H: the pile model rebuilds from the count index — every pile a
+    # pre-3H save can hold is an ordinary Supply pile of its own card
+    assert set(g["piles"]) == set(g["supply"]) and g["nonsupply"] == {}
+    for name in g["supply"]:
+        assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 5])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -104,7 +113,7 @@ def test_migrate_tolerates_junk():
         engine.migrate(junk)          # must not raise
 
 
-@pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME)
+@pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME)
 def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     """THE prod shape that broke this. `schema = 2` was stamped across the whole
     Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys

@@ -392,6 +392,7 @@ function fmtLog(e, names) {
       ? `${who} gains ${art(e.card)} (to ${e.dest === "deck" ? "their deck" : e.dest})`
       : `${who} gains ${art(e.card)}`;
     case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
+    case "return_to_pile": return `${who} returns ${art(e.card)} to its pile`;
     case "trash": return `${who} trashes ${listCards(e.cards || [])}`;
     case "supply_trash": return `${who} trashes ${art(e.card)} from the Supply`;
     case "discard": {
@@ -594,9 +595,17 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // Prices come from the SERVER (engine.cost): Bridge, Quarry, Peddler's
   // dynamic self-cost and anything a future set adds. The bridges-only
   // fallback covers a pre-costs save being replayed by a cached client.
+  // A PILE is not always the card it is named after. An ordered pile (Ruins,
+  // Knights, a split pile) shows its TOP card, and that is what it costs, is,
+  // and hands you when you buy it — so anything reading card data off a pile
+  // name has to go through its face. The server owns the face (engine.cost
+  // resolves it too); the fallback to the name itself covers both an ordinary
+  // pile and a cached client looking at a pre-piles save.
+  const pileFace = (name) => game?.piles?.[name]?.face || name;
+  const pileLeft = (name) => game?.piles?.[name]?.count ?? game?.supply?.[name] ?? 0;
   const effCost = (name) => game?.costs?.[name]
-    ?? Math.max(0, (cards[name]?.cost ?? 0) - bridges);
-  const printedCost = (name) => cards[name]?.cost ?? 0;
+    ?? Math.max(0, (cards[pileFace(name)]?.cost ?? 0) - bridges);
+  const printedCost = (name) => cards[pileFace(name)]?.cost ?? 0;
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -623,7 +632,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const constraint = iAmActor ? pv.constraint : null;
   const kingdomPiles = game?.kingdom || [];
   const kingdomByCost = [...kingdomPiles].sort((a, b) =>
-    ((cards[a]?.cost ?? 0) - (cards[b]?.cost ?? 0)) || a.localeCompare(b));
+    ((cards[pileFace(a)]?.cost ?? 0) - (cards[pileFace(b)]?.cost ?? 0))
+    || a.localeCompare(b));
   const seatOrder = game?.players || Object.keys(names);
   // The single opponent play box tracks the ACTION: the opponent whose turn it
   // is — or, on your turn, whoever plays next. (2p: always the one opponent.)
@@ -937,12 +947,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const pileClick = (pile) => {
     if (iAmActor && constraint?.piles) {
       if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
-      setCardInfo(pile); return;
+      setCardInfo(pileFace(pile)); return;
     }
-    if (inBuy && game.buys > 0 && (game.supply[pile] || 0) > 0 && effCost(pile) <= game.coins) {
+    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && effCost(pile) <= game.coins) {
       mv({ type: "buy", card: pile }); return;
     }
-    setCardInfo(pile);
+    setCardInfo(pileFace(pile));
   };
 
   // ── render helpers ──
@@ -1111,8 +1121,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
 
   const renderPile = (name, idx = 0) => {
-    const cardData = cards[name];
-    const count = game.supply[name] ?? 0;
+    // the FACE, not the pile name — an ordered pile shows its top card
+    const face = pileFace(name);
+    const cardData = cards[face];
+    const count = pileLeft(name);
     const promptPiles = iAmActor && constraint?.piles ? constraint.piles : null;
     const highlight = promptPiles ? promptPiles.includes(name)
       : (inBuy && game.buys > 0 && count > 0 && effCost(name) <= game.coins);
@@ -1120,9 +1132,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
     return (
       <div key={name} className="dm-pile-slot"
         style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
-        <DmCardFace name={name} card={cardData} small
+        <DmCardFace name={face} card={cardData} small
           highlight={highlight} disabled={disabled && !highlight}
-          onClick={() => pileClick(name)} onInfo={() => setCardInfo(name)} />
+          onClick={() => pileClick(name)} onInfo={() => setCardInfo(face)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
         <span className="dm-pile-count"><Pop n={count} /></span>
         {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
@@ -1709,8 +1721,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-kgrid">
               {kingdomByCost.map((n) => (
                 <div key={n} className="dm-pile-slot">
-                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
-                  <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
+                  <DmCardFace name={pileFace(n)} card={cards[pileFace(n)]}
+                    onInfo={() => setCardInfo(pileFace(n))} />
+                  <span className="dm-pile-count">{pileLeft(n)} left</span>
                 </div>
               ))}
             </div>
@@ -1719,7 +1732,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               {basicsRowFor(game.supply).map((n) => (
                 <div key={n} className="dm-pile-slot">
                   <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
-                  <span className="dm-pile-count">{game.supply[n] ?? 0} left</span>
+                  <span className="dm-pile-count">{pileLeft(n)} left</span>
                 </div>
               ))}
             </div>
@@ -1761,7 +1774,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   Cost ${cards[cardInfo].cost}
                   {effCost(cardInfo) !== printedCost(cardInfo) ? ` (now $${effCost(cardInfo)})` : ""}
                   {" · "}{(cards[cardInfo].types || []).map((t) => TYPE_LABEL[t] || t).join(" – ")}
-                  {game.supply?.[cardInfo] != null ? ` · ${game.supply[cardInfo]} left in the Supply` : ""}
+                  {game.piles?.[cardInfo]
+                    ? ` · ${pileLeft(cardInfo)} left${game.piles[cardInfo].supply ? " in the Supply" : ""}`
+                    : ""}
                 </p>
                 <p className="dm-cardinfo-text">{cards[cardInfo].text}</p>
               </div>

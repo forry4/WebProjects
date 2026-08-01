@@ -24,7 +24,10 @@ MOVE_CAP = 6000
 
 
 def _census(game):
-    total = Counter(game["supply"])
+    # engine.pile_cards, not Counter(game["supply"]): the supply index misses
+    # the non-supply piles entirely, and an ORDERED pile's name ("Knights") is
+    # not a card anyone can own — its contents are the real cards.
+    total = Counter(engine.pile_cards(game))
     total.update(game["trash"])
     for seat in game["seats"].values():
         for zone in ("deck", "hand", "discard", "in_play", "aside",
@@ -56,10 +59,30 @@ def _fingerprint(game):
                       sort_keys=True)
 
 
+def _assert_piles_agree(game):
+    """The pile model's one piece of redundancy: an ORDERED pile's count lives
+    in len(contents), and its entry in the supply/nonsupply index is a MIRROR
+    kept for the ~60 sites that enumerate the index. Only _pile_take and
+    _pile_return write it, so it can't drift on its own — which is exactly the
+    kind of claim that stops being true silently. Every pile is in exactly one
+    index, and no index holds a pile that doesn't exist."""
+    for name, p in game["piles"].items():
+        idx = game["supply"] if p["supply"] else game["nonsupply"]
+        other = game["nonsupply"] if p["supply"] else game["supply"]
+        assert name in idx, f"{name} is in no count index"
+        assert name not in other, f"{name} is in both count indexes"
+        assert idx[name] == engine.pile_count(game, name), \
+            f"{name}: index says {idx[name]}, pile says {engine.pile_count(game, name)}"
+    for idx in (game["supply"], game["nonsupply"]):
+        for name in idx:
+            assert name in game["piles"], f"{name} is indexed but has no pile"
+
+
 def _assert_invariants(game, baseline, before=None):
     """Returns the post-move fingerprint so the caller can feed it back in as
     the next move's `before` — one dump per move rather than two."""
     assert _census(game) == baseline, "card conservation broken"
+    _assert_piles_agree(game)
     # An accepted move must CHANGE something. A no-op that reported success is
     # what let a bot livelock on prod: play_all_treasures with only
     # MANUAL_TREASURES in hand played nothing, and the bot prefers that move.
@@ -161,6 +184,43 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
         assert ok, f"random legal move rejected: {err}"
         before = _assert_invariants(game, baseline, before)
     assert game["over"], "game did not terminate under the move cap"
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_soak_a_board_carrying_every_kind_of_pile(seed):
+    """Full random games on a board that ALSO holds an ordered Supply pile and
+    a pile outside the Supply — the two shapes ph. 3H built and no shipped card
+    uses yet. Nothing else in the suite plays them under the conservation
+    census, and the census is the check that would notice an ordered pile
+    handing out its own NAME (a card nobody can own) or a non-supply pile
+    leaking copies. It is also what proves every effects module's
+    "piles costing up to $N" enumeration survives a pile that is not the card
+    it is named after."""
+    game = engine.new_game([A, B], ["base"], seed=seed, kingdom=K7)
+    # cheapest card on top so random play actually reaches the pile — the
+    # price RISES as it empties, which is itself the ordered-pile behaviour
+    engine.add_pile(game, "Knights", supply=True,
+                    contents=["Cellar", "Harbinger", "Poacher", "Bandit"])
+    engine.add_pile(game, "Vassal", count=8)          # stands in for Spoils
+    baseline = _census(game)
+    before = _fingerprint(game)
+    rng = random.Random(seed * 77 + 3)
+    saw_ordered_gain = False
+    for _ in range(MOVE_CAP):
+        if game["over"]:
+            break
+        pid = _actor(game)
+        ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
+        assert ok, f"random legal move rejected: {err}"
+        before = _assert_invariants(game, baseline, before)
+        if engine.pile_count(game, "Knights") < 4:
+            saw_ordered_gain = True
+        # nobody may ever come to own the PILE — only the cards in it
+        for seat in game["seats"].values():
+            for zone in ("deck", "hand", "discard", "in_play", "aside"):
+                assert "Knights" not in seat[zone]
+    assert game["over"], "game did not terminate under the move cap"
+    assert saw_ordered_gain, "the ordered pile was never drawn from — vacuous"
 
 
 def test_soak_determinism_same_seed_same_game():

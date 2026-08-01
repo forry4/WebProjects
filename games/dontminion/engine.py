@@ -37,12 +37,13 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 5
+SCHEMA = 6
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
 #   4 = card RENAMES (Harem -> Farm) — the first genuine TRANSFORM step
 #   5 = Hinterlands  (per-turn counters for Crossroads/Fool's Gold/Cauldron)
+#   6 = the PILE MODEL (game["piles"]: ordered/non-supply piles, attachments)
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -71,6 +72,12 @@ _GAME_FILLS = {
     "vp_tokens": lambda g: {p: 0 for p in g.get("players", [])},
     "colony": lambda g: False,
     "curse_is_treasure": lambda g: False,
+    # the pile model (ph. 3H). Every pile a pre-3H save can hold is an
+    # ordinary Supply pile of the card it is named after, so the whole model
+    # rebuilds from the count index — and it stays a FILL, not a transform,
+    # because a game that already has `piles` must keep the one it has.
+    "nonsupply": lambda g: {},
+    "piles": lambda g: {c: _plain_pile(c) for c in g.get("supply", {})},
 }
 _SEAT_FILLS = {
     "aside": list,
@@ -387,6 +394,244 @@ def _undo_move(game, pid):
     return True, None
 
 
+# --- THE PILE MODEL -----------------------------------------------------------
+# `supply = {name: count}` could only ever say "a pile of N copies of the card
+# it is named after". Five later sets need more than that (ordered Ruins and
+# Knights, split piles and Castles, ROTATING piles, per-pile Traits and
+# Adventures tokens) and six need gain sources that are not in the Supply at
+# all (Rewards, Spoils/Madman/Mercenary, Horses, Spirits, Loot).
+#
+# So a pile is an OBJECT — but its COUNT deliberately stays in a flat
+# {name: count} index, because that is the shape ~60 read sites across five
+# effects modules, both bots, the client and a hundred tests already speak.
+# There are two such indexes, identical in shape:
+#
+#   game["supply"]    — the BUYABLE piles. Untouched by this phase: still the
+#                       same dict, still hand-writable, so `g["supply"]["Curse"]
+#                       = 0` in a test or a fixture is still exactly right.
+#   game["nonsupply"] — the piles that are not in the Supply. Never buyable,
+#                       never counted for the three-empty-piles game end.
+#
+# and one metadata record per pile:
+#
+#   game["piles"][name] = {
+#     "supply":   bool,           # which index holds this pile's count
+#     "face":     card_name,      # the card whose cost/types this pile SHOWS.
+#                                 #   == name for an ordinary pile; the top card
+#                                 #   for an ordered one, and it is RETAINED
+#                                 #   when the pile empties so cost()/types_of()
+#                                 #   stay total (an empty pile still has a
+#                                 #   price on the board)
+#     "contents": [card, ...]|None,  # ORDERED piles only, top first. None means
+#                                 #   "index[name] copies of `name`" — no list of
+#                                 #   identical strings to keep in step
+#     "members":  [card, ...],    # every card name that belongs to this pile —
+#                                 #   how a RETURNED card finds its way home
+#                                 #   once the pile is empty and `contents` can
+#                                 #   no longer answer it
+#     "attach":   {},             # per-pile attachments (Adventures tokens,
+#                                 #   Empires' gathered VP, Plunder's Traits)
+#   }
+#
+# EXACTLY ONE AUTHORITY PER COUNT, which is the whole point of splitting it
+# this way: an ordinary pile's count is its index entry, and an ORDERED pile's
+# count is len(contents) — for those the index is a MIRROR, written only by
+# _pile_take/_pile_return so the enumeration sites keep working, and never
+# read by pile_count(). The soak asserts the mirror. Storing the count on the
+# pile object instead would have made every existing `g["supply"][x] = 0` a
+# silent desync, in tests today and in every future card batch.
+#
+# The reason non-supply piles live in a SEPARATE index rather than a flag
+# inside `supply`: every "piles costing up to $4" enumeration in card code
+# reads `game["supply"]`, and "gain a card from the Supply" must never offer a
+# Spoils. Out of that dict they are excluded by construction, in every module,
+# with no call site to remember. Card code reaches them through gain_from().
+
+def _plain_pile(name, supply=True):
+    return {"supply": supply, "face": name, "contents": None,
+            "members": [name], "attach": {}}
+
+
+def _pile_index(game, pile):
+    """The count map holding this pile — see THE PILE MODEL."""
+    return game["supply"] if pile["supply"] else game["nonsupply"]
+
+
+def add_pile(game, name, count=None, contents=None, supply=False, members=None):
+    """Create a pile at SETUP time. `contents` (top first) makes it ORDERED —
+    Ruins, Knights, split piles, Castles; otherwise it is `count` copies of a
+    card named `name`. Defaults to a NON-supply pile, which is what every
+    caller outside new_game wants (Rewards, Spoils, Horses, Spirits, Loot):
+    never buyable, never counted for the game end."""
+    if name in game["piles"]:
+        raise ValueError(f"pile {name!r} already exists")
+    # Every pile FACE has to be a real card, because cost()/types_of() price a
+    # pile through its face and player_view prices every pile on every wire
+    # build. Catching it here names the pile; catching it there is a KeyError
+    # deep in a view the client is waiting on.
+    unknown = [c for c in (contents if contents is not None else [name])
+               if c not in CARDS]
+    if unknown:
+        raise ValueError(f"pile {name!r} holds unknown cards: {unknown}")
+    if contents is not None:
+        contents = list(contents)
+        if not contents:
+            raise ValueError("an ordered pile must start with cards in it")
+        pile = {"supply": supply, "face": contents[0], "contents": contents,
+                "members": list(members) if members else sorted(set(contents)),
+                "attach": {}}
+        n = len(contents)
+    else:
+        pile = _plain_pile(name, supply)
+        n = int(count or 0)
+    game["piles"][name] = pile
+    _pile_index(game, pile)[name] = n
+    return pile
+
+
+def pile_count(game, name):
+    """How many cards are left in a pile. THE reader — never index the count
+    maps directly for an ordered pile, whose index entry is only a mirror."""
+    p = game["piles"].get(name)
+    if p is None:
+        return 0
+    if p["contents"] is not None:
+        return len(p["contents"])
+    return _pile_index(game, p).get(name, 0)
+
+
+def is_supply_pile(game, name):
+    p = game["piles"].get(name)
+    return bool(p and p["supply"])
+
+
+def pile_face(game, name):
+    """The card whose cost and types this pile SHOWS — total, even for an empty
+    ordered pile (it keeps the last card's face, so the board still prices it).
+    A plain card name is its own face, so this is safe to call on anything."""
+    p = game["piles"].get(name)
+    return p["face"] if p else name
+
+
+def pile_top(game, name):
+    """The card a gain or buy from this pile would actually yield, or None if
+    the pile is empty. For an ordinary pile that is the pile's own name; for an
+    ordered one it is the top card, which is what the pile costs and is."""
+    p = game["piles"].get(name)
+    if p is None or pile_count(game, name) <= 0:
+        return None
+    return p["contents"][0] if p["contents"] is not None else name
+
+
+def pile_of(game, card):
+    """Which pile `card` belongs to — how a returned card (exchange, Spoils
+    going home) finds its way back. None if the card came from nowhere we own.
+
+    A pile of the card's own name wins over an ordered pile listing it. Nothing
+    real is ambiguous here (a card in an ordered pile — a Ruin, a Knight, half
+    of a split pile — never also has a Supply pile of its own), so this only
+    fixes an order for a situation the sets cannot produce."""
+    p = game["piles"].get(card)
+    if p is not None and p["contents"] is None:
+        return card
+    for name, pile in game["piles"].items():
+        if pile["contents"] is not None and card in pile["members"]:
+            return name
+    return None
+
+
+def supply_piles(game):
+    """Sorted names of the buyable piles — the Supply."""
+    return sorted(game["supply"])
+
+
+def pile_cards(game):
+    """Every REAL card sitting in a pile, as a {name: count} map. The pile NAME
+    is not a card for an ordered pile ("Knights" is nothing you can own), so
+    the conservation census has to ask this rather than count the index — and
+    it has to reach the non-supply piles, which the index does not hold."""
+    out = {}
+    for name, p in game["piles"].items():
+        if p["contents"] is not None:
+            for c in p["contents"]:
+                out[c] = out.get(c, 0) + 1
+        else:
+            n = pile_count(game, name)
+            if n:
+                out[name] = out.get(name, 0) + n
+    return out
+
+
+def pile_attach(game, name, key, value):
+    """Put something ON a pile (an Adventures token, a Trait, gathered VP).
+    Public table state — it ships in the pile view."""
+    game["piles"][name]["attach"][key] = value
+
+
+def pile_attachment(game, name, key, default=None):
+    p = game["piles"].get(name)
+    return p["attach"].get(key, default) if p else default
+
+
+def _pile_take(game, name):
+    """Remove the top card from a pile and return its NAME (None if empty).
+    THE take — with _pile_return it is the only writer of an ordered pile's
+    contents, and the only thing that keeps that pile's index mirror honest."""
+    p = game["piles"].get(name)
+    n = pile_count(game, name)
+    if p is None or n <= 0:
+        return None
+    if p["contents"] is not None:
+        card = p["contents"].pop(0)
+        if p["contents"]:
+            p["face"] = p["contents"][0]     # else keep the last face
+    else:
+        card = name
+    _pile_index(game, p)[name] = n - 1
+    return card
+
+
+def _pile_return(game, card):
+    """Put a card back on its pile (Trader's exchange; Spoils going home).
+    False if we can't tell which pile it belongs to — nothing happens then,
+    rather than conjuring a new buyable pile out of the card's name, which is
+    what the old `supply[card] = supply.get(card, 0) + 1` would have done."""
+    name = pile_of(game, card)
+    if name is None:
+        return False
+    p = game["piles"][name]
+    n = pile_count(game, name)
+    if p["contents"] is not None:
+        p["contents"].insert(0, card)
+        p["face"] = card
+    _pile_index(game, p)[name] = n + 1
+    return True
+
+
+def return_to_pile(game, pid, card, zone="in_play"):
+    """Move a card a player holds back onto its own pile — Spoils, Madman and
+    Mercenary "return this to its pile" (ph. 6), Encampment (ph. 8). Not a
+    trash and not a discard: it emits nothing and the card leaves play."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    if not _pile_return(game, card):
+        return False
+    seat[zone].remove(card)
+    _log(game, pid, "return_to_pile", card=card)
+    return True
+
+
+def _priced(game, name):
+    """Resolve a name that may be a PILE into the card whose printed cost and
+    types apply — "the cost and types of a pile are those of its top card".
+    A real card name is itself, so every cost/type query can call this."""
+    if name in CARDS:
+        return name
+    p = game["piles"].get(name)
+    return p["face"] if p is not None else name
+
+
 # --- kernel zone helpers (importable by card modules) ------------------------
 
 def draw(game, pid, n):
@@ -439,16 +684,23 @@ def look_top(game, pid, n):
     return moved
 
 
-def gain(game, pid, card, dest="discard", via_buy=False):
-    """Gain from the supply. Returns False (nothing happens) if the pile is
-    empty. WOULD-GAIN interception (the replacement protocol, Trader-class):
-    if any TRIGGERS entry with on="would_gain"/from="hand" matches for the
-    GAINER, the physical gain is parked as a __gain/resolve auto frame with
-    the reaction windows on top; a replacement stage calls
-    cancel_pending_gain() and performs its own effect instead. Callers see
-    True ("a gain is underway") — no current call site branches on the
-    difference, and new card code must not either."""
-    if game["supply"].get(card, 0) <= 0:
+def gain(game, pid, pile, dest="discard", via_buy=False):
+    """Gain the top card of a pile. `pile` is a pile NAME — for every ordinary
+    pile that is the card's own name, which is why every existing call site
+    reads as "gain this card"; for an ordered pile (Knights, a split pile) the
+    card you actually get is its top one, and that is what lands in your zone,
+    logs, and rides the `gain` event as the subject. Returns False (nothing
+    happens) if the pile is empty.
+
+    WOULD-GAIN interception (the replacement protocol, Trader-class): if any
+    TRIGGERS entry with on="would_gain"/from="hand" matches for the GAINER, the
+    physical gain is parked as a __gain/resolve auto frame with the reaction
+    windows on top; a replacement stage calls cancel_pending_gain() and
+    performs its own effect instead. Callers see True ("a gain is underway") —
+    no current call site branches on the difference, and new card code must
+    not either."""
+    got = pile_top(game, pile)
+    if got is None:
         return False
     from . import effects
     would = [(rc, s) for rc, specs in getattr(effects, "TRIGGERS", {}).items()
@@ -456,24 +708,34 @@ def gain(game, pid, card, dest="discard", via_buy=False):
     for rcard, spec in would:
         when = spec.get("when")
         if rcard in game["seats"][pid]["hand"] and (when is None or when(game, pid,
-                {"actor": pid, "subject": card, "dest": dest, "via_buy": via_buy})):
+                {"actor": pid, "subject": got, "dest": dest, "via_buy": via_buy})):
             verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
             push_auto(game, pid, "__gain", "resolve",
-                      data={"pid": pid, "card": card, "dest": dest,
+                      data={"pid": pid, "card": pile, "dest": dest,
                             "via_buy": via_buy, "cancelled": False})
             push_choose_option(game, pid, rcard, spec["stage"],
-                               options=[{"id": "react", "label": f"{verb} {rcard} ({card} gain)"},
+                               options=[{"id": "react", "label": f"{verb} {rcard} ({got} gain)"},
                                         {"id": "decline", "label": "Don't react"}],
-                               data={"card": card, "gainer": pid, "dest": dest})
+                               data={"card": got, "gainer": pid, "dest": dest})
             return True
-    return _gain_now(game, pid, card, dest, via_buy)
+    return _gain_now(game, pid, pile, dest, via_buy)
 
 
-def _gain_now(game, pid, card, dest, via_buy=False):
+def gain_from(game, pid, pile, dest="discard"):
+    """Gain from a NON-SUPPLY pile — Rewards (ph. 4), Spoils/Madman/Mercenary
+    (ph. 6), Horses (ph. 10), Spirits (ph. 11), Loot (ph. 13). Mechanically the
+    same physical gain as any other (it IS a gain: Watchtower reacts to it,
+    when-gain abilities fire), so it shares one code path; the name exists so a
+    card SAYS it is reaching outside the Supply, and so a reader can tell that
+    from a Supply gain at the call site rather than by knowing the pile."""
+    return gain(game, pid, pile, dest=dest)
+
+
+def _gain_now(game, pid, pile, dest, via_buy=False):
     """The physical gain — pile decrement, placement, bookkeeping, emit."""
-    if game["supply"].get(card, 0) <= 0:
+    card = _pile_take(game, pile)
+    if card is None:
         return False
-    game["supply"][card] -= 1
     seat = game["seats"][pid]
     if dest == "discard":
         seat["discard"].append(card)
@@ -530,18 +792,21 @@ def exchange(game, pid, card, into, zone="discard"):
 
     "You return the card to its pile no matter where you gained it from. You
     place the Silver in your discard pile no matter where you gained the card
-    to." Returns False if `into` is empty (nothing happens) or the card isn't
-    where we expect (lose-track)."""
-    if game["supply"].get(into, 0) <= 0:
+    to." Returns False if `into` is empty (nothing happens), if the card isn't
+    where we expect (lose-track), or if it belongs to no pile we know — the
+    last of which used to CREATE a pile keyed on the card's name."""
+    if pile_top(game, into) is None:
         return False
     seat = game["seats"][pid]
     if card not in seat[zone]:
         return False                    # lost track of it; the exchange fails
+    if pile_of(game, card) is None:
+        return False                    # came from no pile; nothing to return to
     seat[zone].remove(card)
-    game["supply"][card] = game["supply"].get(card, 0) + 1
-    game["supply"][into] -= 1
-    seat["discard"].append(into)         # always the discard pile
-    _log(game, pid, "exchange", card=card, into=into)
+    _pile_return(game, card)
+    got = _pile_take(game, into)
+    seat["discard"].append(got)          # always the discard pile
+    _log(game, pid, "exchange", card=card, into=got)
     return True
 
 
@@ -576,10 +841,10 @@ def trash(game, pid, cards, zone="hand"):
 
 
 def trash_from_supply(game, card):
-    if game["supply"].get(card, 0) <= 0:
+    got = _pile_take(game, card)
+    if got is None:
         return False
-    game["supply"][card] -= 1
-    game["trash"].append(card)
+    game["trash"].append(got)
     return True
 
 
@@ -750,13 +1015,19 @@ def opponents(game, pid):
 
 
 def count_empty_piles(game):
+    """The three-empty-piles game end counts SUPPLY piles only — a spent
+    non-supply pile (Spoils, Horses) is not an empty Supply pile. Non-supply
+    piles are already out of this dict, so this is the pre-3H code unchanged."""
     return sum(1 for v in game["supply"].values() if v == 0)
 
 
 def types_of(game, card):
     """THE type query — card code must never read CARDS[x]["types"] directly
     for a rules decision. Game-wide type injections live here: Charlatan in
-    the kingdom makes Curse also a Treasure for the whole game (2E rule)."""
+    the kingdom makes Curse also a Treasure for the whole game (2E rule).
+    Accepts a PILE name too, resolving to the pile's face (an ordered pile is
+    the type of its top card)."""
+    card = _priced(game, card)
     types = CARDS[card]["types"]
     if card == "Curse" and game["curse_is_treasure"]:
         return types + ["treasure"]
@@ -797,6 +1068,7 @@ def autoplay_last():
 
 def coins_of(game, card):
     """Printed coin value under game rules (Charlatan's Curse plays for $1)."""
+    card = _priced(game, card)
     if card == "Curse" and game["curse_is_treasure"]:
         return 1
     return CARDS[card]["coins"]
@@ -806,7 +1078,11 @@ def cost(game, card):
     """THE single cost function — Bridge reduction applies everywhere, min 0.
     effects.COST_MODS is the while-in-play modifier seam (Quarry-class,
     Prosperity+): {source_card: fn(game, priced_name) -> reduction per copy},
-    summed over every copy on ANY table (cost changes are global)."""
+    summed over every copy on ANY table (cost changes are global).
+
+    Takes a card name or a PILE name: a pile costs what its face card costs
+    (its top card, retained when the pile empties so the board keeps a price)."""
+    card = _priced(game, card)
     c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"]
     # Quarry (2022): a TURN-scoped discount — survives the Quarry leaving play
     if game["turn_ctx"].get("quarries") and "action" in CARDS[card]["types"]:
@@ -1857,6 +2133,9 @@ def _h_buy(game, pid, move):
     if game["phase"] != "buy":
         return False, "not in your buy phase"
     card = move.get("card")
+    # `supply` is the index of BUYABLE piles, so a non-supply pile (Spoils,
+    # Horses, Rewards) fails here without needing its own check — the only
+    # way to those is gain_from().
     if card not in game["supply"]:
         return False, "no such pile"
     if game["supply"][card] <= 0:
@@ -1869,12 +2148,15 @@ def _h_buy(game, pid, move):
     c = cost(game, card)
     if c > game["coins"]:
         return False, "can't afford it"
+    # you buy a PILE and get its top card — the same for every pile we ship
+    # today, and the distinction an ordered pile (Knights, Castles) needs
+    got = pile_top(game, card)
     game["coins"] -= c
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
-    _log(game, pid, "buy", card=card)
+    _log(game, pid, "buy", card=got)
     gain(game, pid, card, via_buy=True)
-    emit(game, "buy", actor=pid, subject=card)   # Prosperity's on-buy seam
+    emit(game, "buy", actor=pid, subject=got)   # Prosperity's on-buy seam
     return True, None
 
 
@@ -2356,7 +2638,16 @@ def player_view(game, viewer):
     # (Quarry's turn discount, Peddler's dynamic self-cost, and every future
     # one) was invisible: the pile showed its printed price, never lit up as
     # affordable, and the click handler refused to send the buy.
-    g["costs"] = {c: cost(game, c) for c in game["supply"]}
+    g["costs"] = {c: cost(game, c) for c in game["piles"]}
+    # Piles ship as face + count, never `contents`: an ordered pile's order
+    # below the top is HIDDEN (Ruins and Knights are shuffled), and "an honest
+    # client ignores it" is not security — the repo has paid for that three
+    # times. `attach` is genuinely public table state (tokens, Traits) and
+    # `members` is static setup data the client has no use for.
+    g["piles"] = {n: {"count": pile_count(game, n), "supply": p["supply"],
+                      "face": p["face"], "ordered": p["contents"] is not None,
+                      "attach": copy.deepcopy(p["attach"])}
+                  for n, p in game["piles"].items()}
     pend = g.pop("pending")
     if pend:
         top = pend[-1]
@@ -2504,7 +2795,13 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "names": dict(names or {p: p for p in players}),
         "expansions": exps,
         "kingdom": kingdom,
+        # `supply` is the count index over the BUYABLE piles (unchanged);
+        # `nonsupply` the same shape for piles outside the Supply; `piles` the
+        # per-pile model that says which index holds a pile and what it shows.
+        # See THE PILE MODEL above.
         "supply": supply,
+        "nonsupply": {},
+        "piles": {c: _plain_pile(c) for c in supply},
         "trash": [],
         "seats": {},
         "turn": players[0],

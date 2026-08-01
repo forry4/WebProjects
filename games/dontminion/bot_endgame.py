@@ -20,7 +20,7 @@ freely and the search tiers can call it inside rollouts.
 """
 
 from . import engine
-from .bot_traits import traits
+from .bot_traits import pile_traits, traits
 
 # The classic ladder's thresholds, kept in one place so every tier greens on
 # the same clock: Duchy once Provinces are short, Estate only at the death.
@@ -125,15 +125,18 @@ def ppr_blocks(game, pid, card):
     lesser = _best_lesser_green(game, pid)
     if lesser is None:
         return False                        # nothing else to buy: take it
-    if _vp_of(lesser) <= deficit:
+    if _vp_of(game, lesser) <= deficit:
         return False                        # a Duchy would not take the lead
     if deficit > opponent_max_vp_swing(game, pid):
         return False                        # go for broke — nothing else wins
     return True
 
 
-def _vp_of(card):
-    v = engine.CARDS[card]["vp"]
+def _vp_of(game, pile):
+    """Plain VP of what a pile hands you. Every caller here starts from a
+    Supply KEY, which is a pile name — and a pile is not always the card it is
+    named after (see bot_traits.pile_traits)."""
+    v = engine.CARDS[engine.pile_face(game, pile)]["vp"]
     return v if isinstance(v, int) else 0
 
 
@@ -143,11 +146,11 @@ def _best_lesser_green(game, pid):
     for c, n in game["supply"].items():
         if n <= 0 or c in ("Province", "Colony"):
             continue
-        if not traits(c)["victory"] or engine.cost(game, c) > game["coins"]:
+        if not pile_traits(game, c)["victory"] or engine.cost(game, c) > game["coins"]:
             continue
         if engine.buy_gate(game, pid, c) is not None:
             continue
-        v = _vp_of(c)
+        v = _vp_of(game, c)
         if v > score:
             best, score = c, v
     return best
@@ -190,10 +193,10 @@ def override(game, pid, planned):
     #    it is a pile that has already run out, which is the strongest form of
     #    "running low" (filtering empties out was the first version, and it
     #    made the rule silently never fire on the boards that need it most).
-    if planned is not None and not traits(planned)["victory"]:
+    if planned is not None and not pile_traits(game, planned)["victory"]:
         if len(low_piles(game)) >= 2:
             duchy = _best_lesser_green(game, pid)
-            if duchy is not None and _vp_of(duchy) >= 3:
+            if duchy is not None and _vp_of(game, duchy) >= 3:
                 return duchy
     return planned
 
@@ -206,8 +209,8 @@ def _affordable(game, pid):
 
 def _wins_after_buying(game, pid, card):
     """Would we win (or tie-and-win-on-turns) with `card` added to our pile?"""
-    mine = _vp(game, pid) + _vp_of(card)
-    if card == "Gardens":                   # its value depends on deck size
+    mine = _vp(game, pid) + _vp_of(game, card)
+    if engine.pile_face(game, card) == "Gardens":                   # its value depends on deck size
         mine = _vp(game, pid) + (len(engine.owned_cards(game, pid)) + 1) // 10
     theirs = max((_vp(game, o) for o in engine.opponents(game, pid)), default=0)
     return mine > theirs or (mine == theirs and _turn_order_edge(game, pid))
@@ -220,7 +223,7 @@ def _best_non_ending(game, pid, affordable):
     for c in affordable:
         if ends_the_game(game, c):
             continue
-        s = _vp_of(c) * 10 + engine.cost(game, c)
+        s = _vp_of(game, c) * 10 + engine.cost(game, c)
         if s > score:
             best, score = c, s
     return best
