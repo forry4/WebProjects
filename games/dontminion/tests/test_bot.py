@@ -239,3 +239,26 @@ def test_big_money_beats_the_random_bot():
         vp = _run_game(g, {A: BM, B: "normal"}, seed)
         wins += vp[A] > vp[B]
     assert wins == 5, f"Big Money won {wins}/5 against random-legal"
+
+
+def test_war_chest_naming_denies_a_gainable_card_not_a_platinum():
+    """The bot naming for someone else's War Chest must name a card they could
+    ACTUALLY gain (cost <= $5) — naming a Platinum ($9) they can't take wastes
+    the deny. Regression: the policy used to pick the highest gain_value pile."""
+    import random
+    from games.dontminion import bot_decisions
+    kingdom = ["War Chest", "Village", "Smithy", "Market", "Festival",
+               "Laboratory", "Grand Market", "Witch", "Chapel", "Cellar"]
+    g = engine.new_game([A, B], ["base", "prosperity"], seed=2, kingdom=kingdom)
+    g["colony"] = True
+    g["supply"].setdefault("Platinum", 12)
+    g["supply"].setdefault("Colony", 8)
+    seat = g["seats"][g["turn"]]
+    seat["hand"].append("War Chest")
+    g["phase"] = "buy"
+    assert engine.apply_move(g, g["turn"], {"type": "play_treasure", "card": "War Chest"})[0]
+    namer = g["pending_pid"]
+    assert "Platinum" in g["pending"][-1]["constraint"]["cards"]     # it's on offer
+    ans = bot_decisions.decide(g, namer, random.Random(0))
+    assert engine.cost_le(g, ans["card"], 5)                         # names something gainable
+    assert ans["card"] != "Platinum"

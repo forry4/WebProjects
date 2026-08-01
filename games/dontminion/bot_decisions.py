@@ -457,9 +457,16 @@ def _name_card(game, pid, frame):
     — the player to our left names what we may not gain)."""
     pool = list(frame["constraint"]["cards"])
     if frame["card"] == "War Chest":
-        # naming for someone ELSE's War Chest: block the best thing they could
-        # take with it
-        return max(pool, key=lambda c: gain_value(game, pid, c))
+        # naming for someone ELSE's War Chest: DENY the best thing they could
+        # actually gain with it — a card costing <= $5, in supply, not already
+        # named this turn. Naming a Platinum they can't take (it costs $9) is a
+        # wasted name; restrict to what the owner could really gain.
+        owner = frame["data"].get("owner", pid)
+        named = game["turn_ctx"].get("war_chest_names", [])
+        gainable = [c for c in pool if game["supply"].get(c, 0) > 0
+                    and engine.cost_le(game, c, 5) and c not in named]
+        pick_from = gainable or pool
+        return max(pick_from, key=lambda c: gain_value(game, owner, c))
     seat = game["seats"][pid]
     unseen = list(seat["deck"])
     if not unseen:
