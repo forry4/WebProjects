@@ -524,6 +524,9 @@ def test_war_chest_left_player_names_then_gain():
     assert g["pending_pid"] == B and g["pending_kind"] == "name_card"
     assert decide(g, B, card="Silver")[0]
     assert g["turn_ctx"]["war_chest_names"] == ["Silver"]
+    # the naming is PUBLIC and logged (was silent — "b names Silver")
+    assert any(e.get("event") == "named" and e.get("card") == "Silver"
+               and e.get("pid") == B for e in g["log"])
     assert g["pending_pid"] == A and g["pending_kind"] == "choose_pile"
     piles = g["pending"][-1]["constraint"]["piles"]
     assert "Silver" not in piles                        # named -> blocked

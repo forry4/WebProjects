@@ -782,23 +782,31 @@ export default function Dontminion({ myId, authUser, onExit }) {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
 
   // The log reads oldest-at-top, so the newest line is at the BOTTOM and the
-  // view has to follow it. Only when the reader is already parked at the bottom
-  // though — scrolling up to re-read a turn must not be yanked away by the
-  // opponent's next move. Measured against the live scroll position, not a
-  // "user scrolled" flag, so it self-heals when they scroll back down.
+  // view has to follow it — unless the reader deliberately scrolled up to
+  // re-read a turn, which must not be yanked away by the next move.
+  //
+  // Stickiness is the reader's SCROLL INTENT (captured on their scroll events),
+  // NOT the distance-from-bottom measured after the content grew: a bot turn
+  // adds many lines at once, and on the short mobile log (180px) that jump
+  // exceeded the old 80px gate, so the log stopped following on a phone. And
+  // the scroll is deferred to rAF — iOS Safari drops a scrollTop set that races
+  // the DOM update, the other half of why mobile wasn't scrolling.
   const logLen = (game?.log || []).length;
   const logPinRef = useRef("");
+  const logStickRef = useRef(true);
+  const onLogScroll = useCallback((e) => {
+    const el = e.currentTarget;
+    logStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  }, []);
   useEffect(() => {
     const el = logRef.current;
     if (!el) return;
     const key = `${roomId}:${screen}`;
-    if (logPinRef.current !== key) {     // just opened this game: start at the newest
-      logPinRef.current = key;
-      el.scrollTop = el.scrollHeight;
-      return;
-    }
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distanceFromBottom < 80) el.scrollTop = el.scrollHeight;
+    const opened = logPinRef.current !== key;   // just opened this game
+    if (opened) { logPinRef.current = key; logStickRef.current = true; }
+    if (!opened && !logStickRef.current) return;
+    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(raf);
   }, [logLen, screen, roomId]);
 
   // clear decision-prompt state whenever the decision context changes
@@ -1525,7 +1533,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
-          <div className="dm-log" ref={logRef}>
+          <div className="dm-log" ref={logRef} onScroll={onLogScroll}>
             {/* CHRONOLOGICAL: oldest at the top, newest appended at the bottom,
                 and the view auto-scrolls to keep the newest line visible. Reads
                 the way the turn actually happened, which matters here because

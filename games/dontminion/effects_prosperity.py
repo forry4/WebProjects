@@ -303,6 +303,7 @@ def _war_chest_named(game, pid, frame, choice):
     owner = frame["data"]["owner"]
     named = game["turn_ctx"].setdefault("war_chest_names", [])
     named.append(choice["card"])         # the name lands BEFORE the gain
+    E._log(game, pid, "named", card=choice["card"])   # who named it is public (Wishing Well does this too)
     piles = sorted(p for p in game["supply"]
                    if game["supply"][p] > 0 and E.cost_le(game, p, 5)
                    and p not in named)
