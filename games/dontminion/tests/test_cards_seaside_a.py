@@ -384,6 +384,9 @@ def test_sea_chart_hit_copy_in_play():
     assert g["actions"] == 1
     assert sorted(s["hand"]) == ["Copper", "Sea Chart"]
     assert s["deck"] == ["Gold"] and s["aside"] == []
+    # putting the revealed match into hand is LOGGED (was silent)
+    assert any(e.get("event") == "to_hand" and e.get("cards") == ["Sea Chart"]
+               for e in g["log"])
 
 
 def test_sea_chart_miss_goes_back_on_top():

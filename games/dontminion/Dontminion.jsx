@@ -319,7 +319,7 @@ function DmMatChip({ emoji, count, label, cards, onView }) {
       role={canView ? "button" : undefined} tabIndex={canView ? 0 : undefined}
       onClick={canView ? () => onView({ label, cards }) : undefined}
       onKeyDown={canView ? (e) => { if (e.key === "Enter" || e.key === " ") onView({ label, cards }); } : undefined}>
-      {emoji} {count}{canView ? " 👁" : ""}
+      {emoji} {count}
     </span>
   );
 }
@@ -403,6 +403,13 @@ function fmtLog(e, names) {
       if (e.cards) return `${who} draws ${listCards(e.cards)}`;
       const k = e.count ?? e.n;
       return `${who} draws ${k} card${k === 1 ? "" : "s"}`;
+    }
+    case "to_hand": {
+      // a card moved into hand off the top of the deck (Sea Chart's match,
+      // Wishing Well, Library's keep, Patrol's pocketed Victory cards)
+      if (e.cards) return `${who} puts ${listCards(e.cards)} into their hand`;
+      const k = e.count ?? e.n;
+      return `${who} puts ${k} card${k === 1 ? "" : "s"} into their hand`;
     }
     case "shuffle": return `${who} shuffles their deck`;
     case "reveal": return `${who} reveals ${listCards(e.cards || [])}`;
