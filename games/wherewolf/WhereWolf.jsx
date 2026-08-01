@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
@@ -220,6 +220,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
   const [showCreateModal, setShowCreateModal] = useState(false);  // New Game confirm modal
   const [toast, setToast] = useState("");
+  // room connect in flight (create / join / deep-link resume) — show the spinner
+  // instead of the lobby while it is, so a reconnect doesn't flash the lobby.
+  const [connecting, setConnecting] = useState(false);
 
   // narration
   const [caption, setCaption] = useState("");
@@ -271,6 +274,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
+    setConnecting(false);        // any authoritative reply ends the connect loader
     if (msg.type === "error") {
       const m = msg.message || "error";
       const at = attemptRef.current;
@@ -382,6 +386,16 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2400); return () => clearTimeout(t); } }, [toast]);
+
+  // a connect that never answers must not leave the spinner up forever
+  useEffect(() => {
+    if (!connecting) return;
+    const t = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting — the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [connecting]);
   // clear transient selection when the step changes
   useEffect(() => { setCenterSel([]); setTmSel([]); }, [step, phase]);
 
@@ -422,6 +436,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: "create", rid, retried: true };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, { action: "create", name: playerName });
   };
   const startJoin = (rid) => {
@@ -430,6 +445,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: "join", rid, retried: false };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resume = (rid) => {
@@ -437,6 +453,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
     setRoomId(rid);
     try { localStorage.setItem("werewolf_roomId", rid); } catch {}
     attemptRef.current = { kind: tok ? "resume" : "join", rid, retried: false };
+    setConnecting(true);
     connect(`${WW_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   // Step out to the lobby but STAY a member of the room (socket only drops): the
@@ -444,6 +461,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // bring you right back. Use Cancel (host) to actually dispose of an open game.
   const leaveToLobby = () => {
     disconnect();
+    setConnecting(false);
     pushPath(buildPath("werewolf"));   // leave the room URL (dedup no-op when popstate-driven)
     setRoomData(null); setCaption(""); setScreen("lobby"); fetchGames();
   };
@@ -572,6 +590,14 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   );
 
   // ─── Lobby ─────────────────────────────────────────────────────────────────
+  // connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
+  if (connecting && screen === "lobby") {
+    return (
+      <div className="ww" style={{ "--lby-accent": "#6f86d6" }}><style>{css}</style>
+        <LobbyLoading label="Connecting…" />
+      </div>
+    );
+  }
   if (screen === "lobby") {
     const savedId = (() => { try { return localStorage.getItem("werewolf_roomId"); } catch { return null; } })();
     const savedTok = savedId ? (() => { try { return localStorage.getItem(`werewolf_token_${savedId}_${myId}`); } catch { return null; } })() : null;
