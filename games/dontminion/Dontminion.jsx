@@ -420,6 +420,23 @@ function fmtLog(e, names) {
   }
 }
 
+// Every card a seat owns at game over, folded to name→count — the player's
+// FINAL DECK. Mirrors engine.owned_cards: all zones reveal at over, so this
+// needs no new wire field (duration cards ride duration_view, since the raw
+// duration list is popped by player_view).
+function deckCensus(seat) {
+  if (!seat) return {};
+  const all = [
+    ...(seat.deck || []), ...(seat.hand || []), ...(seat.discard || []),
+    ...(seat.in_play || []), ...(seat.aside || []), ...(seat.dur_aside || []),
+    ...(seat.island || []), ...(seat.village_mat || []),
+    ...((seat.duration_view || []).flatMap((e) => [e.card, ...(e.riders || [])])),
+  ];
+  const counts = {};
+  for (const c of all) counts[c] = (counts[c] || 0) + 1;
+  return counts;
+}
+
 // "12–9" for a finished game (yours first, then each opponent), the way CoC's
 // history reads. Prefers the server's ordered `standings`, which survives two
 // players sharing a display name; falls back to the name-keyed `scores` for a
@@ -508,6 +525,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showTrash, setShowTrash] = useState(false);
   const [showKingdom, setShowKingdom] = useState(false);
   const [cardInfo, setCardInfo] = useState(null);    // card name → detail modal
+  const [deckView, setDeckView] = useState(null);    // game-over: whose final deck to show
+  const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -765,7 +784,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   useEffect(() => {
     setPickIdx([]); setPickOpts([]); setOrderIdx([]); setPromptMin(false);
   }, [game?.turn, game?.turn_number, game?.pending_kind, game?.pending_pid, (game?.log || []).length]);
-  useEffect(() => { setGameOverDismissed(false); }, [roomId]);
+  useEffect(() => { setGameOverDismissed(false); setDeckView(null); }, [roomId]);
 
   // The engine auto-advances action->buy after moves and at turn hand-offs, but
   // deliberately not at game CREATION (test fixtures stage hands post-deal). The
@@ -1139,6 +1158,34 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const scores = game.scores || {};
     const ranked = [...seatOrder].sort((a, b) => (scores[b]?.vp ?? 0) - (scores[a]?.vp ?? 0));
     const winners = game.winners || [];
+    // Drilldown: one player's full final deck (every zone folded to counts),
+    // sorted by cost then name like the supply. Rows show how many of each.
+    if (deckView) {
+      const counts = deckCensus(seats[deckView]);
+      const entries = Object.entries(counts).sort((a, b) =>
+        ((cards[a[0]]?.cost ?? 0) - (cards[b[0]]?.cost ?? 0)) || a[0].localeCompare(b[0]));
+      const total = entries.reduce((n, [, k]) => n + k, 0);
+      return (
+        <div className="dm-backdrop" onClick={() => setDeckView(null)}>
+          <div className="dm-modal dm-deckview" onClick={(e) => e.stopPropagation()}>
+            <h2>{names[deckView] || deckView}{deckView === myId ? " (you)" : ""}</h2>
+            <p className="dm-wait-note">Final deck — {total} cards · {scores[deckView]?.vp ?? "?"} VP</p>
+            <div className="dm-deck-list">
+              {entries.map(([name, k]) => (
+                <div key={name} className={"dm-deck-row " + faceClass(cards[name]?.types)}>
+                  <span className="dm-deck-count">{k}&times;</span>
+                  <span className="dm-deck-name">{name}</span>
+                  <span className="dm-deck-cost">${cards[name]?.cost ?? "?"}</span>
+                </div>
+              ))}
+            </div>
+            <div className="dm-prompt-actions">
+              <button className="btn btn-gold" onClick={() => setDeckView(null)}>&larr; Back</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="dm-backdrop">
         <div className="dm-modal">
@@ -1148,13 +1195,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {winners.map((w) => names[w] || w).join(" & ")}
           </p>
           <table className="dm-scores">
-            <thead><tr><th></th><th>VP</th><th>Turns</th></tr></thead>
+            <thead><tr><th></th><th>VP</th><th>Turns</th><th></th></tr></thead>
             <tbody>
               {ranked.map((p) => (
-                <tr key={p} className={winners.includes(p) ? "dm-win" : ""}>
+                <tr key={p} className={"dm-score-row" + (winners.includes(p) ? " dm-win" : "")}
+                  onClick={() => setDeckView(p)} title="See this player's final deck">
                   <td>{names[p] || p}{p === myId ? " (you)" : ""}</td>
                   <td>{scores[p]?.vp ?? "?"}</td>
                   <td>{scores[p]?.turns ?? "?"}</td>
+                  <td className="dm-score-deck">deck &rsaquo;</td>
                 </tr>
               ))}
             </tbody>
@@ -1186,7 +1235,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
     return (
       <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
         <style>{dmStyles}</style>
-        <LobbyHeader onBack={onExit} title="Dontminion" onRules={() => setShowRules(true)} user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
+        {/* No Rules button in the lobby — the how-to-play is reachable from the
+            in-game Menu (☰), where a player who's actually at a table needs it. */}
+        <LobbyHeader onBack={onExit} title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
         <LobbyCreateRow onCreate={() => setShowCreateModal(true)} onJoin={joinGame}
           onRefresh={fetchGames} refreshing={loadingGames} />
         {showCreateModal && (
@@ -1290,9 +1341,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
           </CreateModal>
         )}
-        {showRules && renderRules()}
-        <div className="dm-lobby-cols">
-          <div>
+        {/* Mobile-only tab bar (mirrors Spender Duel): the three columns can't
+            sit side by side on a phone, so pick ONE section to show. Hidden on
+            wide screens (CSS) where all three columns render at once. */}
+        <div className="dm-lobby-tabs" role="tablist">
+          {[
+            ["open", "Open", openGames.length],
+            ["active", "Active", myGames.length],
+            ["history", "History", history.length],
+          ].map(([key, label, count]) => (
+            <button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
+              className={"dm-lobby-tab" + (lobbyTab === key ? " sel" : "")}
+              onClick={() => setLobbyTab(key)}>
+              {label}{count > 0 ? <span className="dm-lobby-tab-count">{count}</span> : null}
+            </button>
+          ))}
+        </div>
+        <div className={"dm-lobby-cols tab-" + lobbyTab}>
+          <div className="dm-section open-section">
             <LobbySectionHd title="Open Games" note="join a table" />
             {openGames.length === 0 && <div className="lby-empty">No open games — create one!</div>}
             {openGames.map((g) => (
@@ -1314,7 +1380,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             ))}
           </div>
-          <div>
+          <div className="dm-section active-section">
             <LobbySectionHd title="My Games" note={authUser?.session_token ? "in progress" : "sign in to track games"} />
             {myGames.map((g) => (
               <div key={g.id} className="lby-card">
@@ -1332,7 +1398,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             ))}
             {myGames.length === 0 && <div className="lby-empty">Nothing in progress.</div>}
           </div>
-          <div>
+          <div className="dm-section history-section">
             <LobbySectionHd title="History" note="finished games" />
             {history.map((g) => {
               const line = historyScores(g);
@@ -1600,7 +1666,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       {renderPromptModal()}
       {cardInfo && cards[cardInfo] && (
         <div className="dm-backdrop" onClick={() => setCardInfo(null)}>
-          <div className="dm-modal dm-cardinfo" onClick={(e) => e.stopPropagation()}>
+          <div className={"dm-modal dm-cardinfo " + faceClass(cards[cardInfo].types)} onClick={(e) => e.stopPropagation()}>
             <div className="dm-cardinfo-cols">
               <div className="dm-cardinfo-face">
                 <DmCardFace name={cardInfo} card={cards[cardInfo]} />

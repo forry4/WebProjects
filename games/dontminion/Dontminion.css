@@ -51,6 +51,36 @@
 }
 .dm-check-on { color: var(--gold-light, #e8c96a); border-color: var(--gold, #c9a84c); }
 
+/* Mobile-only Open/Active/History tab bar (mirrors Spender Duel). Hidden on wide
+   screens where all three lobby columns render side by side; shown at the phone
+   breakpoint, where it drives which single section is visible. */
+.dm-lobby-tabs {
+  display: none; gap: 6px; margin: 0 18px 14px; background: var(--surface2, #242018);
+  border: 1px solid var(--border, #3a342a); border-radius: 12px; padding: 4px;
+}
+.dm-lobby-tab {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  background: transparent; border: none; color: var(--text-dim, #8a7d6a); cursor: pointer;
+  font-family: 'Cinzel','Cinzel Fallback',serif; font-size: .82rem; letter-spacing: .04em;
+  padding: 9px 4px; border-radius: 9px; transition: background .15s, color .15s;
+}
+.dm-lobby-tab.sel { background: var(--lby-accent, #b08d57); color: #160f0a; font-weight: 700; }
+.dm-lobby-tab-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px;
+  height: 18px; padding: 0 5px; border-radius: 9px; background: rgba(0, 0, 0, .22);
+  color: inherit; font-size: .72rem; font-weight: 600; letter-spacing: 0;
+}
+.dm-lobby-tab:not(.sel) .dm-lobby-tab-count { background: var(--surface, #1a1814); color: var(--text-dim, #8a7d6a); }
+
+/* On touch, :hover STICKS to the last-tapped button until you tap elsewhere, so a
+   just-DESELECTED pick-option (a .btn-outline) kept the gold hover fill and looked
+   selected (the reported bug). Kill the hover fill where the device can't truly
+   hover — the selected state (.btn-gold, solid gold) then reads unambiguously. */
+@media (hover: none) {
+  .dm .btn-outline:hover { background: transparent; color: var(--gold, #c9a84c); }
+  .dm .btn-gold:hover { background: var(--gold, #c9a84c); }
+}
+
 /* ── waiting room ── */
 .dm-wait { max-width: 520px; margin: 40px auto; padding: 0 18px; text-align: center; }
 .dm-wait h2 { font-family: 'Cinzel','Cinzel Fallback',serif; letter-spacing: 2px; }
@@ -405,7 +435,30 @@
 .dm-scores { width: 100%; border-collapse: collapse; margin: 12px 0 16px; }
 .dm-scores th, .dm-scores td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border, #3a342a); }
 .dm-scores .dm-win td { color: var(--gold-light, #e8c96a); font-weight: 700; }
+/* Each score row opens that player's final deck (the drilldown below) */
+.dm-score-row { cursor: pointer; transition: background .12s; }
+.dm-score-row:hover { background: var(--surface2, #242018); }
+.dm-score-deck { color: var(--text-dim, #8a7d6a); font-size: 12px; text-align: right; white-space: nowrap; }
 .dm-rules p { margin: 8px 0; line-height: 1.5; }
+
+/* ── game-over: a player's final deck (name → count over every zone) ── */
+.dm-deckview { max-width: 460px; }
+.dm-deck-list {
+  display: flex; flex-direction: column; gap: 5px; margin: 12px 0 16px;
+  max-height: min(56vh, 460px); overflow-y: auto;
+}
+.dm-deck-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
+  border-radius: 8px; font-size: 15px;
+}
+.dm-deck-row.dm-f-treasure { border-left: 3px solid #c9a84c; }
+.dm-deck-row.dm-f-victory { border-left: 3px solid #6fae55; }
+.dm-deck-row.dm-f-curse { border-left: 3px solid #9a6fc0; }
+.dm-deck-row.dm-f-action { border-left: 3px solid var(--border, #3a342a); }
+.dm-deck-count { color: var(--gold-light, #e8c96a); font-weight: 800; min-width: 30px; }
+.dm-deck-name { flex: 1; min-width: 0; color: var(--text, #e8dfc8); }
+.dm-deck-cost { color: var(--text-dim, #8a7d6a); font-weight: 700; white-space: nowrap; }
 
 /* ── card-detail modal (any card you can't act on right now) ── */
 .dm-cardinfo { max-width: 560px; --card-w: 180px; --card-h: 252px; }
@@ -449,8 +502,15 @@
   .dm .dm-hand { gap: 8px; }
   .dm .dm-prompt { --card-w-s: calc((100cqw - 16px) / 3); }
   .dm .dm-prompt-cards { gap: 8px; }
-  .dm .dm-kingdom-modal { --card-w: calc((100vw - 110px) / 3); --card-h: calc(var(--card-w) * 1.4); }
-  .dm .dm-kgrid { gap: 8px; row-gap: 24px; }
+  /* Kingdom browser: THREE cards per row. The modal takes nearly the full
+     width (a thin 8px side buffer, down from 24px) and its padding is trimmed
+     to 10px, so three (100vw-60)/3 faces + two 8px gaps clear the content box
+     with room to spare instead of wrapping to two. */
+  .dm .dm-kingdom-modal {
+    width: calc(100% - 16px); max-width: none; padding: 16px 10px;
+    --card-w: calc((100vw - 60px) / 3); --card-h: calc(var(--card-w) * 1.4);
+  }
+  .dm .dm-kgrid { gap: 8px; row-gap: 24px; justify-content: center; }
   .dm .dm-resbar { gap: 14px; font-size: 14px; padding: 8px 12px; }
   .dm .dm-resbar b { font-size: 17px; }
   /* stack the piles above the hand so the hand row spans the FULL width — with
@@ -472,7 +532,37 @@
   /* opponent zones swipe sideways instead of burying the board */
   .dm .dm-opp-zones { gap: 12px; overflow-x: auto; padding-bottom: 16px; }
   .dm .dm-opp-inplay { flex-wrap: nowrap; }
-  .dm .dm-cardinfo-cols { flex-direction: column; align-items: center; }
+
+  /* Card detail on a phone: the WHOLE modal reads as the card — tinted by its
+     type, the little thumbnail dropped, and the rules text shown big and
+     legible instead of shrunk onto a 180px face. Close sits centered at the
+     bottom. (Cards are text-only faces, so the tinted panel + big text IS the
+     card, just readable.) */
+  .dm .dm-cardinfo {
+    width: calc(100% - 20px); max-width: 420px; padding: 0; overflow: hidden;
+  }
+  .dm .dm-cardinfo.dm-f-treasure { background: #2a2410; }
+  .dm .dm-cardinfo.dm-f-victory { background: #1c2417; }
+  .dm .dm-cardinfo.dm-f-curse { background: #241a2b; }
+  .dm .dm-cardinfo.dm-f-action { background: #221d15; }
+  .dm .dm-cardinfo-cols { flex-direction: column; margin: 0; gap: 0; }
+  .dm .dm-cardinfo-face { display: none; }
+  .dm .dm-cardinfo-detail { padding: 24px 22px 10px; width: 100%; box-sizing: border-box; }
+  .dm .dm-cardinfo-detail h2 { font-size: 1.6rem; }
+  .dm .dm-cardinfo-meta { font-size: 14px; margin: 6px 0 14px; }
+  .dm .dm-cardinfo-text { font-size: 16px; line-height: 1.6; }
+  .dm .dm-cardinfo .dm-prompt-actions { justify-content: center; padding: 4px 22px 22px; }
+
+  /* Lobby: reveal the Open/Active/History tab bar and let the selected tab pick
+     which of the (now single-column) sections shows — the other two are hidden. */
+  .dm .dm-lobby-tabs { display: flex; }
+  .dm .dm-lobby-cols { grid-template-columns: 1fr; gap: 0; }
+  .dm .dm-lobby-cols.tab-open > .active-section,
+  .dm .dm-lobby-cols.tab-open > .history-section,
+  .dm .dm-lobby-cols.tab-active > .open-section,
+  .dm .dm-lobby-cols.tab-active > .history-section,
+  .dm .dm-lobby-cols.tab-history > .open-section,
+  .dm .dm-lobby-cols.tab-history > .active-section { display: none; }
 }
 
 /* ── motion ────────────────────────────────────────────────────────────────
