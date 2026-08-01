@@ -630,7 +630,7 @@ def reveal(game, pid, cards, source):
 
 def take_aside(game, pid, cards, dest="hand"):
     """Move looked-at/set-aside cards out of the aside zone (Library keeps,
-    Patrol pockets victory cards, ...)."""
+    Patrol pockets victory cards, Sea Chart puts its match into hand, ...)."""
     seat = game["seats"][pid]
     for c in cards:
         seat["aside"].remove(c)
@@ -640,6 +640,12 @@ def take_aside(game, pid, cards, dest="hand"):
             seat["discard"].append(c)
         else:
             raise ValueError(f"bad take_aside dest {dest!r}")
+    # A card entering the HAND is a visible effect the player wants logged —
+    # Sea Chart's "put it into your hand", Wishing Well's match, Library's keep,
+    # Patrol's pocketed Victory cards were all SILENT. Card names are per-field
+    # redacted (owner-only pre-over), exactly like draw.
+    if dest == "hand" and cards:
+        _log(game, pid, "to_hand", count=len(cards), cards=list(cards))
 
 
 def deck_from_aside(game, pid, order):
@@ -2389,9 +2395,10 @@ def player_view(game, viewer):
     for e in g["log"]:
         if "private_to" in e and viewer not in e["private_to"]:
             continue
-        # draw entries carry the drawn card names — owner-only until game over
-        # (per-field redaction; the count n stays public)
-        if not over and e.get("event") == "draw" and e.get("pid") != viewer and "cards" in e:
+        # draw / to_hand entries carry card names — owner-only until game over
+        # (per-field redaction; the count stays public)
+        if not over and e.get("event") in ("draw", "to_hand") \
+                and e.get("pid") != viewer and "cards" in e:
             e = {k: v for k, v in e.items() if k != "cards"}
         log.append(e)
     g["log"] = log
