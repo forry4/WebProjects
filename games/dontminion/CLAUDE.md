@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands, all 2E)
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds, all 2E)
 
-2–4 players, 139 cards. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 171 cards. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -12,7 +12,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 |---|---|
 | `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
-| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py` | ONE module per expansion, each owning a disjoint card set |
+| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | the bots: random-legal (easy/normal/hard) + the Big Money buy ladder (`bigmoney`) |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
@@ -27,8 +27,9 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **6**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
-5 = Hinterlands, 6 = the pile model) is the game-dict shape version, stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
+`engine.SCHEMA` (now **7**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds) is the game-dict shape version,
+stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
 guarantees** (28 of them were retired when this landed). Genuinely lazy transients
@@ -163,6 +164,52 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v4 — the phase-4 (Cornucopia & Guilds) delta. FROZEN.**
+- **COFFERS** — `game["coffers"][pid]` + `add_coffers(game, n, pid=None)`. Deliberately NOT routed
+  through `_grant`: the per-turn pools evaporate off-turn because "on another player's turn you
+  always start with empty pools", but Coffers are a MAT and persist by their nature, so an
+  off-turn Coffers is KEPT. Setup: Baker in the kingdom starts everyone on 1.
+- **The generic `spend` MOVE** — `{"type":"spend","what":"coffers","n":k}`, the first of the
+  move-surface trio (Villagers ph. 9, Favors ph. 12, Debt payoff ph. 8 are all the same shape).
+  `spendable(game, pid) -> {kind: count}` is THE reader — `legal_moves`, the handler and the
+  client all go through it, because an enumerator and a handler that disagree hand the bot a
+  no-op move (the `play_all_treasures` livelock). Legal in EITHER phase: "Coffers tokens can be
+  spent at any time during your turn" (2022 change).
+- **OVERPAY** — `cards.py` carries `"overpay": True` (the `$N+` cost); `cost()` still returns the
+  plain number, because "for any ability that refers to a card's cost, ignore the +". `_h_buy`
+  pays the cost, then — if any money is left — pushes a `choose_option` for the amount under a
+  parked `("__buy","finish")`; `("*","__overpay")` is a kernel stage, so the prompt displays
+  under the BOUGHT CARD's own name. **The ability the money buys is a WHEN-GAIN ability** (the
+  2022 retiming): the amount rides the `gain` event as `overpay=N`, and each card registers
+  `{"on":"gain","from":"self"}`. Pre-2022 it was a when-buy ability — the compendium's older
+  examples describe that version and do not apply.
+- **`TRIGGERS` source `"game"`** — "in games using this, ..." (Footpad). Fires for the event's
+  ACTOR when the card is in the **Supply** (not merely the dealt 10, so a set-up extra pile
+  counts), whether or not anyone owns a copy. On the bus rather than a game-dict flag
+  (Charlatan's shape) because it must resolve in the player's chosen order against the other
+  abilities the same occurrence triggered.
+- **Per-seat set-asides + start-of-turn abilities** — `set_aside(game,pid,cards,zone,until=None)`
+  / `take_set_aside` / `add_start_fx(game,pid,card,stage,data)`. Farmhands is the reason: its
+  set-aside is NOT a Duration (the Farmhands itself goes to the discard), so there is nothing on
+  the table to hang a duration fx off. `_start_of_turn` drains `seat["start_fx"]` into the SAME
+  ability pool as the duration fx and the `turn_start` reactions — they are simultaneous.
+  `until="cleanup"` uses the second zone, `cleanup_aside`, swept to the discard by `_end_turn`
+  (Joust's "discard the Province in Clean-up"). Both zones are set-aside, NOT in play, which is
+  what keeps them out of Horn of Plenty's and Shop's in-play counts.
+- **`play_treasure_card(game,pid,card,from_zone="hand")`** — a Treasure played out of band
+  (Coronet plays one twice; Farmhands plays a set-aside one at turn start). `from_zone=None` is
+  the throne-room replay.
+- **`turn_ctx["buy_gains"]`** (cards GAINED in this Buy phase — Merchant Guild counts all gains,
+  including ones from before it was played) and **`turn_ctx["end_draw"]`** (drawn by `_end_turn`
+  AFTER the new hand — Farrier's overpay is cards for NEXT turn).
+- **Setup-chosen piles**, all riding ph. 3H: `game["bane"]` (Young Witch — an 11th pile added TO
+  the Supply, cost $2/$3; "Bane" is not a type), `game["ferryman_pile"]` (an unused $3/$4 pile
+  OUTSIDE the Supply), and the six Rewards as six non-supply piles (one of each at 2 players,
+  two otherwise). All are drawn from the kingdom cards this game did not deal; with none eligible
+  we play without one rather than re-dealing the board.
+- **New computed VP kinds**: `"fairgrounds"` (2 VP per 5 differently named cards you have) and
+  `"demesne"` (1 VP per Gold), alongside `gardens`/`duke` in `_vp_of`.
 
 **Kernel v3 — the phase-3 (Hinterlands) delta. FROZEN: batch agents build against this.**
 - `cost_lt(game,card,coins)` — "cheaper" / "costing less than" is STRICT, unlike `cost_le`.
@@ -438,6 +485,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | A1 | A **throne-roomed Attack**: one reaction window, or one per replay? | One window **per replay** — a Moat holder is asked twice and must reveal twice; immunity is per-play. | p53 says a reaction triggers "whenever an Attack card is *played*" and Cultist 3 wants a reveal per play; but Moat reads "unaffected by **it**" and Reckless 8 says one reveal covers both resolutions of a single play. Not settled either way. Pinned by `test_throne_room_on_a_new_attack_opens_a_reaction_window_per_play` + its decline twin. |
 | ~~A2~~ | ~~A gained card's own when-gain vs a hand reaction on the same gain~~ | **RETIRED (phase 2 of the ability pool)** — the player now chooses, per p23 §2. `test_watchtower_and_inn_the_player_chooses_and_each_order_differs` plays the compendium's worked Example 1 down BOTH branches. | — |
 | ~~A3~~ | ~~Two of the player's own triggers firing simultaneously~~ | **RETIRED (phase 2)** — same pool. Registration order survives only as the pool's OPTION order (the first option is the historical default). | — |
+| A4 | **Butcher**: do the Coffers you spend for its "remodel" ALSO pay you the +$1 each? | **Yes** — one rule for spending. `_butcher_spend` goes through the same accounting as the `spend` move: tokens off the mat, +$1 each, and the count also raises the gain's cost limit. | The global rule is unconditional ("each spent token gives you +$ and is immediately removed") and Butcher only adds a use for the COUNT. But the compendium's phrasing cuts the other way — "any Coffers tokens you get from Butcher that you don't use to 'remodel' a card, you save for later to spend for +$ **as normal**" reads as though the ones spent on Butcher were spent for something else instead. We took the branch that keeps ONE rule for spending rather than two. Pinned by `test_butcher_gives_two_coffers_and_remodels_per_coffers_spent`. |
 
 **B. Deliberate simplifications — the rules are clear, we do something simpler**
 
@@ -447,6 +495,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
 | B5 | **Stop-moving rule: a card that moved away and BACK is still lost track of** (wiki Stop moving rule; compendium p26 Example 6) | `find_card_zone` is PRESENCE-based — it can't tell "still there" from "left and returned", so a returned card would wrongly be movable/playable | Unreachable in the 139-card pool (no shipped sequence returns a card to its trigger zone inside one window; the official examples need Royal Carriage / Counterfeit-class cards). Revisit when a set ships a card that can round-trip a zone mid-window — the fix is a per-window move counter, not more zone checks. |
+| B6 | **Coffers may be spent "even in the middle of resolving an ability"** | `spendable()` additionally requires NO open decision, so the `spend` move is refused while a frame is pending | The compendium's examples of mid-ability spending are Black Market, Capital City, Diadem, Fortune and Storyteller — **none of which we ship**, so the restriction is currently unreachable. The one card that genuinely needs to spend mid-resolution, Butcher, asks for the amount inside its own decision frame instead. Revisit at the first card that can want $ while a prompt is open. Pinned by `test_the_spend_move_is_not_offered_while_a_decision_is_open`. |
 | ~~B4~~ | ~~Concurrent same-player abilities: the player chooses resolution order (p23 §2)~~ | **RETIRED — all four phases of the ability pool shipped.** Start-of-turn duration fx (1), every emit-driven event (2), multi-card discard/trash batches via `emit_batch` (3 — `test_batch_discard_reactions_are_the_players_choice_not_click_order`), and turn_start reactions folded into the same pool as the fx (4 — `test_turn_start_reaction_and_duration_fx_share_one_pool`: a Clerk and a Wharf are one choice, and the cross-player park order is current-player-first per p23 §3, where the old separate emit let reactions cut ahead). | — |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
@@ -468,6 +517,11 @@ pinning the current behaviour, so changing your mind means changing a test on pu
   Pinned both ways: `test_playing_the_first_discarded_trail_can_lose_track_of_the_second` plus a
   control with a deep deck where both Trails ARE offered (without it, a Trail trigger that simply
   stopped firing would pass).
+- **Overpay is a WHEN-GAIN ability, not a when-buy one** (2022 retiming). That is why Herald may
+  put the just-bought Herald back on its own deck, and why Infirmary plays a card that has
+  already been gained. Any compendium example describing the when-buy order is the old version.
+- **"In games using this" binds the SUPPLY, not the owner** — Footpad's draw applies to every
+  player, in anyone's Action phase, with nobody owning a copy.
 - **A card name is not a card COPY.** Zones hold names, so a seat can have a Duration finishing at
   this clean-up AND a fresh copy of the same Duration just played; only the count separates them.
   `topdeck_from_play` matched `in_play` by name and took the wrong one, stranding the persisting
@@ -741,6 +795,7 @@ Vassal that played nothing passed). And derive parametrize counts from the data
 (`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
 the next expansion's kingdoms would have gone unsoaked in silence.
 
+`test_cards_cornucopia_a/b.py` (the ph. 4 batches, incl. the Coffers and overpay kernels),
 `test_piles.py` (THE PILE MODEL — every ph. 3H seam, none of which a shipped card consumes yet),
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp

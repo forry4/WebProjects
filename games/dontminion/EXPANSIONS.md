@@ -16,7 +16,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 2 | **Prosperity 2E** (25 + Platinum/Colony) | VP tokens, would-gain protocol, via_buy, buy gates, dynamic self-costs, game-aware type queries (Charlatan), treasure-throne, Platinum/Colony setup | **SHIPPED** 2026-07-30 + audited |
 | 3 | **Hinterlands 2E** (26) | `discard` emit, unfiltered offers, self-trigger context, registry-driven attack reactions + reaction-that-plays-itself (Guard Dog), attack-typed Treasures opening the window (Cauldron), plays from non-hand zones + lose-track (Trail), actor-aware resource pools, coin floor (Souk), `exchange` (Trader), `shuffle_into_deck` (Inn), `cost_lt`, all-seats clean-up sweep, `discard_then_putback` | **SHIPPED** 2026-07-30 + audited |
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
-| 4 | Cornucopia & Guilds 2E (26 + Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (needs 3H), Young Witch's Bane (11th pile + marker) | planned |
+| 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
 | 5 | Alchemy (12 + Potion) | cost VECTOR dimension 1 (Potion) — lands inside cost_le/cost_eq; Potion production/payment in the buy flow. ⚠ **Possession is phase-sized on its own** (take a turn controlling another player's cards) — budget it like a kernel system, not a card | planned |
 | 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), ⚠ **card identity / "play-as" system** (Band of Misfits — see ledger) | planned |
 | 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
@@ -144,6 +144,49 @@ from the physical cards or an owned digital copy**; the compendium then verifies
 behavior, threshold and version. Do not fill this gap from memory — that is risk #2 in the
 original plan, and the audit step cannot catch it if the audit runs from the same memory.
 
+## Phase 4 — Cornucopia & Guilds 2E — SHIPPED 2026-08-01
+
+The 2024 Second Edition is a COMBINED set. **26 kingdom cards = 18 kept + 8 new**, plus 6
+Rewards outside the Supply. Full build spec (roster, per-card rulings, kernel checklist):
+`.claude-plans/dontminion-phase4-cornucopia-guilds.md`.
+
+Roster verified by two independent sources that agree exactly, the same standard phase 3 used:
+the compendium's 13 `❖ Not included in the 2024 Second Edition` markers, and the wiki chart's
+`Cornucopia & Guilds, 1E` label — they name the same 13 (Doctor, Farming Village, Fortune
+Teller, Harvest, Horse Traders, Masterpiece, Taxman, Tournament and the 5 Prizes). Every one of
+the 32 shipped cards had its cost, types and overpay flag checked back against the chart
+programmatically rather than by eye.
+
+**Kernel added** (frozen in `CLAUDE.md`, "Kernel v4"): Coffers + the generic `spend` move,
+overpay-on-buy as a when-gain ability, the `"game"` trigger source, per-seat set-asides and
+start-of-turn abilities, `play_treasure_card`, two turn counters, three setup-chosen piles and
+two computed VP kinds. Every one of them is a bus extension or a registry entry — no bespoke
+mechanism, which is the contract phase 3 set.
+
+**What the playbook caught this time**, each by a different step:
+
+- **Step 4/5 (per-card tests) found two real bugs.** Hamlet and Coronet each pushed BOTH of
+  their optional offers up front, so the second offer's constraint held a hand the first had
+  already changed — a decision the engine then refused to apply. The soak found it as a
+  `ValueError` inside `discard`; the lesson generalises: **a card with two optional offers must
+  push them SEQUENTIALLY**, because a constraint is a snapshot.
+- **Step 7 (the audit) found the sharper one.** Coronet queued its Treasure half from the answer
+  to its Action half, so a hand with no playable Action silently lost the entire Treasure
+  ability. Nothing else would have found it — the card "worked" in every test that had an
+  Action to play, which is every test written from the card's own text. Re-deriving from the
+  compendium ("you may play a non-Reward Action... you may play a non-Reward Treasure" — two
+  independent mays) is what exposed it.
+- **A third, cheaper class**: the tests kept failing on boards that also held Footpad, because
+  its game-wide rule fires on the same gain and the ability pool (correctly) asks which resolves
+  first. Those were test-premise errors, not defects — but they are also the evidence that the
+  new `from="game"` source joins the pool like any other consumer instead of cutting ahead, so
+  one of them was kept as a test on purpose.
+
+**One judgement call recorded rather than asserted** (CLAUDE.md row A4): whether the Coffers
+Butcher spends also pay their +$1 each. We said yes — the global spending rule is unconditional
+and Butcher only adds a use for the count — but the compendium's phrasing can be read the other
+way, so it is a pinned deviation, not a silent choice.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |
@@ -164,7 +207,7 @@ original plan, and the audit step cannot catch it if the audit runs from the sam
 | ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
 | ~~Non-supply gain sources~~ **PAID ph. 3H** — `gain_from` + a second count index, so "a card from the Supply" excludes them by construction rather than by remembering | Rewards (ph. 4) | done |
 | ~~Pile abstraction~~ **PAID ph. 3H** — `game["piles"]`: ordered `contents` + retained `face` + `members` + `attach`; cost/type resolve through the face, the census unpacks it, the wire never sees the order | Ruins/Knights (ph. 6), scheduled early deliberately | done |
-| **Move-surface trio**: generic `spend` (Coffers/Villagers/Favors/Debt-payoff + a counters row in the resbar UI), `buy_landscape` (Events/Projects), `call` (Reserves). Design each ONCE at first need; every later consumer is registry + data | spend: ph. 4 · buy_landscape/call: ph. 7 | ph. 4 / ph. 7 pre-work |
+| **Move-surface trio**: ~~generic `spend`~~ **PAID ph. 4** — `{"type":"spend","what":...,"n":...}` + `spendable()` as THE reader + a counters row in the resbar; Villagers/Favors/Debt-payoff are now registry + data. Still owed: `buy_landscape` (Events/Projects), `call` (Reserves) | spend: ph. 4 · buy_landscape/call: ph. 7 | spend done · ph. 7 pre-work |
 | **Card identity / "play-as"**: a physical card played AS another (Band of Misfits ph. 6, Inheritance ph. 7, Ways ph. 10, Overlord). Needs `play_card_as(game, pid, physical, as_name)` where identity-vs-physicality is explicit (types/cost read from WHICH?— the compendium's lose-track rules decide). The Charlatan `types_of` seam is the foothold | Band of Misfits (ph. 6) | ph. 6 pre-work, DESIGN reviewed against ph. 7/10 consumers before freezing |
 | **`play_all_treasures` suppression must become a STATE predicate.** Today it's a static card list (`MANUAL_TREASURES` — treasures that push a decision). Highwayman negates the FIRST Treasure its victim plays, so which treasure goes first becomes a real choice and the button must not make it for them — a condition the card list cannot express, since it depends on game state and LIFTS once the negation is spent. Wanted: `autoplay_block(game, pid) -> reason \| None`, fed by both the static set and watcher-registered blocks, read by `legal_moves` + the handler + shipped in `player_view` (state-dependent ⇒ NOT `/catalog`, unlike the static set) so the button hides AND says why. Also fixes the ordering row below if the block carries an order | Highwayman (ph. 12) | ph. 12 pre-work — but build it at the FIRST set that adds an order-sensitive treasure |
 | ~~Autoplay ORDER is hand order~~ **PAID (post-ph. 2)** — `AUTOPLAY_LAST` registry + a stable sort in the handler; Bank now plays after the rest ($6 → $10 on the measured hand, matching optimal play). Adding a Treasure with an ability now means choosing a bucket: manual / autoplay-last / autoplay — see CLAUDE.md | Bank (was live) | done |

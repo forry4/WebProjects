@@ -25,8 +25,8 @@ import itertools
 import random
 
 from .cards import (
-    CARDS, KINGDOM, pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
-    grants as cards_grant,
+    CARDS, KINGDOM, REWARDS, pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
+    grants as cards_grant, overpays as cards_overpay,
 )
 
 BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
@@ -37,13 +37,15 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 6
+SCHEMA = 7
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
 #   4 = card RENAMES (Harem -> Farm) — the first genuine TRANSFORM step
 #   5 = Hinterlands  (per-turn counters for Crossroads/Fool's Gold/Cauldron)
 #   6 = the PILE MODEL (game["piles"]: ordered/non-supply piles, attachments)
+#   7 = Cornucopia & Guilds (Coffers, the setup-chosen Bane/Ferryman piles,
+#       Footpad's game rule, per-seat set-asides + start-of-turn abilities)
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -78,12 +80,20 @@ _GAME_FILLS = {
     # because a game that already has `piles` must keep the one it has.
     "nonsupply": lambda g: {},
     "piles": lambda g: {c: _plain_pile(c) for c in g.get("supply", {})},
+    # Cornucopia & Guilds (ph. 4)
+    "coffers": lambda g: {p: 0 for p in g.get("players", [])},
+    "bane": lambda g: None,             # Young Witch's extra Supply pile
+    "ferryman_pile": lambda g: None,    # Ferryman's extra NON-Supply pile
+    "footpad_draw": lambda g: False,    # Footpad's game-wide when-gain rule
 }
 _SEAT_FILLS = {
     "aside": list,
     # Seaside zones + mats
     "duration": list, "dur_aside": list,
     "island": list, "village_mat": list,
+    # C&G: cards set aside to be played at the start of your next turn
+    # (Farmhands), and the seat-level start-of-turn abilities that play them
+    "set_aside": list, "start_fx": list, "cleanup_aside": list,
 }
 
 
@@ -684,7 +694,7 @@ def look_top(game, pid, n):
     return moved
 
 
-def gain(game, pid, pile, dest="discard", via_buy=False):
+def gain(game, pid, pile, dest="discard", via_buy=False, overpay=0):
     """Gain the top card of a pile. `pile` is a pile NAME — for every ordinary
     pile that is the card's own name, which is why every existing call site
     reads as "gain this card"; for an ordered pile (Knights, a split pile) the
@@ -712,13 +722,14 @@ def gain(game, pid, pile, dest="discard", via_buy=False):
             verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
             push_auto(game, pid, "__gain", "resolve",
                       data={"pid": pid, "card": pile, "dest": dest,
-                            "via_buy": via_buy, "cancelled": False})
+                            "via_buy": via_buy, "overpay": overpay,
+                            "cancelled": False})
             push_choose_option(game, pid, rcard, spec["stage"],
                                options=[{"id": "react", "label": f"{verb} {rcard} ({got} gain)"},
                                         {"id": "decline", "label": "Don't react"}],
                                data={"card": got, "gainer": pid, "dest": dest})
             return True
-    return _gain_now(game, pid, pile, dest, via_buy)
+    return _gain_now(game, pid, pile, dest, via_buy, overpay)
 
 
 def gain_from(game, pid, pile, dest="discard"):
@@ -731,7 +742,7 @@ def gain_from(game, pid, pile, dest="discard"):
     return gain(game, pid, pile, dest=dest)
 
 
-def _gain_now(game, pid, pile, dest, via_buy=False):
+def _gain_now(game, pid, pile, dest, via_buy=False, overpay=0):
     """The physical gain — pile decrement, placement, bookkeeping, emit."""
     card = _pile_take(game, pile)
     if card is None:
@@ -750,11 +761,16 @@ def _gain_now(game, pid, pile, dest, via_buy=False):
     if pid == game["turn"]:
         # Smugglers: what a player gained during THEIR OWN turn
         game.setdefault("_turn_gains", []).append(card)
-        if game["phase"] == "buy" and has_type(game, card, "victory"):
-            game["turn_ctx"]["gained_victory_in_buy"] = True   # Treasury's gate
+        if game["phase"] == "buy":
+            game["turn_ctx"]["buy_gains"] += 1        # Merchant Guild counts these
+            if has_type(game, card, "victory"):
+                game["turn_ctx"]["gained_victory_in_buy"] = True   # Treasury's gate
     _log(game, pid, "gain", card=card, dest=dest)
-    # via_buy rides the event: Hoard fires only on BOUGHT gains, Mint on any
-    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=via_buy)
+    # via_buy rides the event: Hoard fires only on BOUGHT gains, Mint on any.
+    # overpay rides it too — the `$N+` cards' overpay ability IS a when-gain
+    # ability (2022 retiming), so it reads its amount off the event.
+    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=via_buy,
+         overpay=overpay)
     return True
 
 
@@ -771,7 +787,8 @@ def cancel_pending_gain(game):
 def _k_gain_resolve(game, pid, frame, choice):
     d = frame["data"]
     if not d["cancelled"]:
-        _gain_now(game, d["pid"], d["card"], d["dest"], d.get("via_buy", False))
+        _gain_now(game, d["pid"], d["card"], d["dest"], d.get("via_buy", False),
+                  d.get("overpay", 0))
 
 
 def gain_from_trash(game, pid, card):
@@ -997,6 +1014,57 @@ def add_coins(game, n, pid=None):
         _log(game, game["turn"], "minus", coins=-n)
         return
     _grant(game, pid, "coins", n, "coins")
+
+
+def add_coffers(game, n, pid=None):
+    """+x Coffers — Coin tokens onto a player's Coffers mat (Guilds/C&G).
+
+    Deliberately NOT routed through _grant: the per-turn pools evaporate off
+    turn because "on another player's turn you always start with empty pools",
+    but Coffers are a MAT. They persist across turns by their whole nature, so
+    a Coffers earned on someone else's turn is simply kept — the off-turn rule
+    does not apply and applying it would silently eat the tokens."""
+    if n == 0:
+        return
+    pid = _acting(game, pid)
+    game["coffers"][pid] = game["coffers"].get(pid, 0) + n
+    _log(game, pid, "coffers", n=n, total=game["coffers"][pid])
+
+
+def spendable(game, pid):
+    """What pid may spend right now, as {kind: count}. THE reader — legal_moves,
+    the handler and the client all go through it (the manual_treasures lesson:
+    an enumerator and a handler that disagree hand the bot a no-op move).
+
+    Coffers are spendable "at any time during your turn" (the 2022 rules
+    change; before, only the first part of the Buy phase). We additionally
+    require no open decision — see the deviation note in CLAUDE.md."""
+    if game["over"] or game["pending"] or pid != game["turn"]:
+        return {}
+    out = {}
+    if game["coffers"].get(pid, 0) > 0:
+        out["coffers"] = game["coffers"][pid]
+    return out
+
+
+def _h_spend(game, pid, move):
+    """The generic spend move — one surface for every "spendable counter" the
+    later sets add (Villagers ph. 9, Favors ph. 12, Debt payoff ph. 8), so each
+    one is a registry entry rather than a new move type."""
+    what = move.get("what")
+    avail = spendable(game, pid)
+    if what not in avail:
+        return False, "nothing to spend"
+    try:
+        n = int(move.get("n", 1))
+    except (TypeError, ValueError):
+        return False, "bad amount"
+    if not 1 <= n <= avail[what]:
+        return False, f"you don't have {n} {what}"
+    game["coffers"][pid] -= n
+    _log(game, pid, "spend", what=what, n=n)
+    add_coins(game, n, pid)
+    return True, None
 
 
 def add_vp_tokens(game, pid, n):
@@ -1266,6 +1334,50 @@ def take_village_mat(game, pid):
     return taken
 
 
+def set_aside(game, pid, cards, zone="hand", until=None):
+    """Move cards to pid's own SET-ASIDE zone — Farmhands' "set aside an Action
+    or Treasure from your hand". Distinct from Seaside's `dur_aside`, which
+    hangs off a Duration entry on the table: this one belongs to the seat and
+    outlives any card in play (the Farmhands itself goes to the discard).
+
+    `until="cleanup"` sets the card aside only for THIS turn — Joust's "discard
+    the Province in Clean-up". Both zones are set-aside rather than in play, so
+    nothing there counts for Horn of Plenty or Shop; they differ only in who
+    takes the card back and when."""
+    dest = "cleanup_aside" if until == "cleanup" else "set_aside"
+    seat = game["seats"][pid]
+    for c in cards:
+        seat[zone].remove(c)
+        seat[dest].append(c)
+    if cards:
+        _mark_revealed(game)             # the owner learns where a card went
+        _log(game, pid, "set_aside", count=len(cards), private_to=[pid],
+             cards=list(cards))
+    return list(cards)
+
+
+def take_set_aside(game, pid, cards, dest="hand"):
+    seat = game["seats"][pid]
+    taken = []
+    for c in cards:
+        if c in seat["set_aside"]:
+            seat["set_aside"].remove(c)
+            taken.append(c)
+    if dest is not None:
+        seat[dest].extend(taken)
+    return taken
+
+
+def add_start_fx(game, pid, card, stage, data=None):
+    """Register an ability that resolves at the START of pid's next turn, with
+    no Duration on the table to hang it off (Farmhands sets one up from its
+    when-gain, and can do it on an OPPONENT's turn). It joins the same ability
+    pool as the duration fx and the turn_start reactions, so the player orders
+    all of them together — they are simultaneous."""
+    game["seats"][pid]["start_fx"].append(
+        {"card": card, "stage": stage, "data": data or {}})
+
+
 def request_extra_turn(game, pid):
     """Outpost: flag an extra turn after this one (the _end_turn gate applies
     the official can't-take-three-turns rule and the 3-card draw)."""
@@ -1369,6 +1481,22 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                     # (by index) and re-checks the card is still on the table
                     add(actor, 1, card, "__inplay_push",
                         {"event": event, "spec": si, "ctx": ctx})
+            elif src == "game":
+                # A GAME-WIDE rule: "in games using this, ..." (Footpad). It
+                # binds every player whether or not anyone owns a copy, so the
+                # test is the SUPPLY, not a zone — the same shape as
+                # Charlatan's Curse rule, but on the trigger bus rather than a
+                # game-dict flag, because this one has to resolve in order with
+                # the other abilities the same gain triggered.
+                #
+                # `supply`, not `kingdom`: a set-up EXTRA pile (Young Witch's
+                # Bane) is in the game without being one of the dealt 10, and
+                # "in games using this" plainly covers it.
+                if actor is not None and card in game["supply"] \
+                        and (when is None or when(game, actor, ctx)):
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
             elif src == "hand":
                 verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
                 for p in game["players"]:
@@ -1584,6 +1712,11 @@ def _start_of_turn(game, pid):
     # Clerk in hand are the player's ordering choice, not the engine's. Also
     # fixes the cross-player order: pools park current-player-FIRST (p23 §3),
     # where the old separate emit made reactions cut ahead of the fx.
+    # ...and the seat-level start-of-turn abilities (Farmhands), which have no
+    # Duration on the table to hang off but are just as simultaneous
+    for fx in seat["start_fx"]:
+        fx_batch.append((fx["card"], fx))
+    seat["start_fx"] = []
     pools = {}
     for card, fx in fx_batch:
         pools.setdefault(pid, ([], [], [], []))[0].append(
@@ -2024,7 +2157,11 @@ KERNEL_STAGES = {
 
 def _fresh_turn_ctx():
     return {"bridges": 0, "actions_played": 0, "merchants": 0,
-            "silver_played": False, "bought": False}
+            "silver_played": False, "bought": False,
+            # C&G: cards GAINED in this Buy phase (Merchant Guild counts all
+            # gains, not just buys, and counts ones from before it was played)
+            # and cards owed at the end of the turn (Farrier's overpay).
+            "buy_gains": 0, "end_draw": 0}
 
 
 def _h_play_action(game, pid, move):
@@ -2054,11 +2191,20 @@ def _treasure_coins(game, pid, card):
             _log(game, pid, "plus", coins=m, why="Merchant")
 
 
-def _play_one_treasure(game, pid, card):
+def play_treasure_card(game, pid, card, from_zone="hand"):
+    """Play a Treasure from somewhere other than the ordinary buy-phase flow —
+    Coronet plays one twice, Farmhands plays a set-aside one at the start of a
+    turn. `from_zone=None` replays a Treasure already in play (the throne-room
+    shape), running its ability and its coins again without moving it."""
+    return _play_one_treasure(game, pid, card, from_zone)
+
+
+def _play_one_treasure(game, pid, card, from_zone="hand"):
     from . import effects
     seat = game["seats"][pid]
-    seat["hand"].remove(card)
-    seat["in_play"].append(card)
+    if from_zone is not None:
+        seat[from_zone].remove(card)
+        seat["in_play"].append(card)
     game["_cur_dur"] = None
     if has_type(game, card, "duration"):
         _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
@@ -2154,10 +2300,48 @@ def _h_buy(game, pid, move):
     game["coins"] -= c
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
-    _log(game, pid, "buy", card=got)
-    gain(game, pid, card, via_buy=True)
-    emit(game, "buy", actor=pid, subject=got)   # Prosperity's on-buy seam
+    # OVERPAY (Guilds/C&G): a `$N+` card lets you pay MORE than it costs. The
+    # payment happens HERE, while paying for the card; the ability it buys is a
+    # when-gain ability that reads how much you overpaid (the 2022 retiming —
+    # pre-2022 it was a when-buy ability, which is why the compendium's older
+    # examples read differently). With money left, ask before finishing.
+    if cards_overpay(got) and game["coins"] > 0:
+        push_auto(game, pid, "__buy", "finish", data={"pile": card, "card": got, "overpay": 0})
+        push_choose_option(
+            game, pid, got, "__overpay",
+            options=[{"id": str(k), "label": "Don't overpay" if k == 0 else f"Overpay ${k}"}
+                     for k in range(game["coins"] + 1)])
+        return True, None
+    _finish_buy(game, pid, card, got, 0)
     return True, None
+
+
+def _finish_buy(game, pid, pile, got, overpay):
+    """The half of a buy that follows the price being settled. Split out so the
+    overpay prompt can sit in the middle of it: the log line, the gain (which
+    carries `overpay` so the card's own when-gain ability can read it) and the
+    buy event all belong AFTER the money has actually been paid."""
+    _log(game, pid, "buy", card=got, **({"overpay": overpay} if overpay else {}))
+    gain(game, pid, pile, via_buy=True, overpay=overpay)
+    emit(game, "buy", actor=pid, subject=got)   # Prosperity's on-buy seam
+
+
+def _k_overpay(game, pid, frame, choice):
+    """Answer to the overpay prompt. A kernel stage named `__*`, so it displays
+    under the bought card's own name (_stage_fn falls back to ("*", stage))."""
+    n = int(choice["ids"][0])
+    n = max(0, min(n, game["coins"]))
+    for f in reversed(game["pending"]):
+        if f["card"] == "__buy" and f["stage"] == "finish":
+            f["data"]["overpay"] = n
+            break
+    if n:
+        game["coins"] -= n
+
+
+def _k_buy_finish(game, pid, frame, choice):
+    d = frame["data"]
+    _finish_buy(game, pid, d["pile"], d["card"], d["overpay"])
 
 
 def buy_gate(game, pid, card):
@@ -2197,6 +2381,8 @@ def _k_turn_finish(game, pid, frame, choice):
 
 
 KERNEL_STAGES[("__turn", "finish")] = _k_turn_finish
+KERNEL_STAGES[("__buy", "finish")] = _k_buy_finish
+KERNEL_STAGES[("*", "__overpay")] = _k_overpay
 KERNEL_STAGES[("__gain", "resolve")] = _k_gain_resolve
 KERNEL_STAGES[("__abilities", "pool")] = _k_ability_pool
 KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
@@ -2209,6 +2395,7 @@ _HANDLERS = {
     "play_treasure": _h_play_treasure,
     "play_all_treasures": _h_play_all_treasures,
     "buy": _h_buy,
+    "spend": _h_spend,
     "end_phase": _h_end_phase,
 }
 
@@ -2256,6 +2443,13 @@ def _end_turn(game, pid):
     seat["in_play"] = []
     seat["discard"].extend(seat["hand"])
     seat["hand"] = []
+    # cards set aside only until this Clean-up (Joust's Province: "Discard the
+    # Province in Clean-up"). They are NOT in play while set aside, which is
+    # what keeps them out of Horn of Plenty's and Shop's in-play counts.
+    if seat["cleanup_aside"]:
+        _log(game, pid, "discard", cards=list(seat["cleanup_aside"]))
+        seat["discard"].extend(seat["cleanup_aside"])
+        seat["cleanup_aside"] = []
     # OTHER seats' in_play too: a REACTION THAT PLAYS ITSELF was played during
     # THIS turn and "you discard the card in that turn's Clean-up phase" —
     # this turn's, not the reactor's. Left behind it would still be on the
@@ -2296,6 +2490,11 @@ def _end_turn(game, pid):
                 entry["fx"] = []
                 entry["done"] = True
     draw(game, pid, 3 if outpost_played else 5)
+    # "+1 Card at the end of this turn" (Farrier's overpay) — AFTER the new
+    # hand is drawn, which is the whole point of the card: the extra cards are
+    # for NEXT turn, so a Farrier overpaid by 2 leaves you holding 7.
+    if game["turn_ctx"]["end_draw"]:
+        draw(game, pid, game["turn_ctx"]["end_draw"])
     # An EXTRA turn (Outpost) does not add to the player's turn count — the
     # count exists for the fewest-turns tiebreaker, and "extra turns do not add
     # to a player's turn count, and are not used in breaking ties" (wiki Turn
@@ -2489,6 +2688,12 @@ def legal_moves(game, pid):
                 if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"] \
                         and buy_gate(game, pid, pile) is None:
                     mv.append({"type": "buy", "card": pile})
+    # Coffers (and every later spendable counter) — legal in EITHER phase,
+    # "at any time during your turn". Enumerated per amount so a search or a
+    # bot can pick how much, the way it picks any other move.
+    for what, have in spendable(game, pid).items():
+        for k in range(1, have + 1):
+            mv.append({"type": "spend", "what": what, "n": k})
     mv.append({"type": "end_phase"})
     return mv
 
@@ -2570,6 +2775,7 @@ def owned_cards(game, pid):
     owned = s["deck"] + s["hand"] + s["discard"] + s["in_play"] + s["aside"]
     # Seaside zones + mats (migrate guarantees these on every loaded save)
     owned += s["dur_aside"] + s["island"] + s["village_mat"]
+    owned += s["set_aside"] + s["cleanup_aside"]   # C&G set-asides
     for entry in s["duration"]:
         owned.append(entry["card"])
         owned += entry.get("riders", [])
@@ -2580,6 +2786,9 @@ def _vp_of(game, pid):
     owned = owned_cards(game, pid)
     n = len(owned)
     duchies = owned.count("Duchy")
+    golds = owned.count("Gold")
+    # "differently named cards you have" (Fairgrounds) — the whole deck, by name
+    distinct = len(set(owned))
     total = 0
     for c in owned:
         v = CARDS[c]["vp"]
@@ -2587,6 +2796,10 @@ def _vp_of(game, pid):
             total += n // 10
         elif v == "duke":
             total += duchies
+        elif v == "fairgrounds":
+            total += 2 * (distinct // 5)
+        elif v == "demesne":
+            total += golds
         else:
             total += v
     return total
@@ -2672,8 +2885,11 @@ def player_view(game, viewer):
         seat["island"] = list(seat["island"])
         seat["dur_aside_count"] = len(seat["dur_aside"])
         seat["village_count"] = len(seat["village_mat"])
+        # C&G: a set-aside card is face down in front of you until you play it
+        seat["set_aside_count"] = len(seat["set_aside"])
         seat.pop("duration", None)
         seat.pop("dur_setup", None)
+        seat.pop("start_fx", None)       # holds resume data, like watcher data
         if not over:
             seat.pop("deck")
             seat.pop("discard")
@@ -2682,6 +2898,7 @@ def player_view(game, viewer):
                 seat.pop("hand")
                 seat.pop("dur_aside", None)
                 seat.pop("village_mat", None)
+                seat.pop("set_aside", None)
     log = []
     for e in g["log"]:
         if "private_to" in e and viewer not in e["private_to"]:
@@ -2789,6 +3006,26 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         supply["Colony"] = pile_size("Colony", n)
     # Charlatan's game-wide rule: Curse is also a Treasure worth $1
     curse_is_treasure = "Charlatan" in kingdom
+    # Cornucopia & Guilds SPECIAL SETUP (compendium § I). Both extra piles are
+    # drawn from the kingdom cards this game did NOT deal, so they can only
+    # come from the expansions in play; with none eligible we simply play
+    # without one (a legal board — Young Witch just attacks unblockably, and
+    # Ferryman gains nothing), rather than re-dealing the whole kingdom.
+    bane = ferryman_pile = None
+    unused = sorted({c for e in exps for c in KINGDOM[e]} - set(kingdom))
+    if "Young Witch" in kingdom:
+        # "an extra Kingdom card pile costing $2 or $3, added TO the Supply"
+        pick = [c for c in unused if CARDS[c]["cost"] in (2, 3)]
+        if pick:
+            bane = rng.choice(pick)
+            supply[bane] = pile_size(bane, n)
+            unused.remove(bane)
+    if "Ferryman" in kingdom:
+        # "an unused Kingdom card pile costing $3 or $4, OUTSIDE the Supply"
+        pick = [c for c in unused if CARDS[c]["cost"] in (3, 4)]
+        if pick:
+            ferryman_pile = rng.choice(pick)
+            unused.remove(ferryman_pile)
     game = {
         "game": "dontminion",
         "players": players,
@@ -2821,6 +3058,11 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "extra_turn": False,       # the CURRENT turn is an Outpost extra turn
         "colony": colony,          # Platinum/Colony game (Prosperity setup rule)
         "curse_is_treasure": curse_is_treasure,   # Charlatan's game-wide rule
+        # Cornucopia & Guilds
+        "coffers": {p: 0 for p in players},
+        "bane": bane,                     # the Young Witch pile (IS in the Supply)
+        "ferryman_pile": ferryman_pile,   # Ferryman's pile (is NOT in the Supply)
+        "footpad_draw": "Footpad" in kingdom,     # its game-wide when-gain rule
         "vp_tokens": {p: 0 for p in players},
         "vp": {},
         "log": [],
@@ -2832,19 +3074,37 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "rng_state": None,
     }
     _save_rng(game, rng)
+    # the non-Supply piles this set brings, all riding ph. 3H's pile model
+    if ferryman_pile:
+        add_pile(game, ferryman_pile, count=pile_size(ferryman_pile, n))
+    if "Joust" in kingdom:
+        # "a pile of the 6 different Rewards outside the Supply. In a 2-player
+        # game, use one of each, otherwise two of each." Modelled as six piles
+        # rather than one ordered pile: every Reward is face up and Joust gains
+        # ANY of them, so there is no top card and no hidden order.
+        for r in REWARDS:
+            add_pile(game, r, count=1 if n == 2 else 2)
     for pid in players:
         game["seats"][pid] = {"deck": [], "hand": [], "discard": [],
                               "in_play": [], "aside": [], "turns_taken": 0,
                               # Seaside zones: persistent duration entries, their
                               # face-down set-asides (Haven/Blockade), and mats
                               "duration": [], "dur_aside": [],
-                              "island": [], "village_mat": []}
+                              "island": [], "village_mat": [],
+                              # C&G: Farmhands' set-aside + its start-of-turn play
+                              "set_aside": [], "start_fx": [],
+                              "cleanup_aside": []}
         start = ["Copper"] * 7 + ["Estate"] * 3
         r = _make_rng(game)
         r.shuffle(start)
         _save_rng(game, r)
         game["seats"][pid]["deck"] = start
         draw(game, pid, 5)
+    if "Baker" in kingdom:
+        # "If Baker is in the game, each player starts with one token on their
+        # Coffers mat" — set directly, not via add_coffers, which would log a
+        # gain for a player before the game has begun
+        game["coffers"] = {p: 1 for p in players}
     _log(game, players[0], "turn_start", turn=1)
     _post_move(game)
     # The setup draws marked "revealed" — arm the FIRST turn's undo cleanly.

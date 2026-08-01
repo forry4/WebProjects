@@ -47,6 +47,7 @@ const EXPANSIONS = [
   { id: "seaside", name: "Seaside" },
   { id: "prosperity", name: "Prosperity" },
   { id: "hinterlands", name: "Hinterlands" },
+  { id: "cornucopia", name: "Cornucopia & Guilds" },
 ];
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
@@ -393,6 +394,12 @@ function fmtLog(e, names) {
       : `${who} gains ${art(e.card)}`;
     case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
     case "return_to_pile": return `${who} returns ${art(e.card)} to its pile`;
+    case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
+    case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;
+    case "set_aside": return e.cards
+      ? `${who} sets aside ${listCards(e.cards)}`
+      : `${who} sets aside ${e.count} card${e.count === 1 ? "" : "s"}`;
+    case "end_draw": return `${who} will draw ${e.n} more card${e.n === 1 ? "" : "s"} at the end of the turn`;
     case "trash": return `${who} trashes ${listCards(e.cards || [])}`;
     case "supply_trash": return `${who} trashes ${art(e.card)} from the Supply`;
     case "discard": {
@@ -606,6 +613,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const effCost = (name) => game?.costs?.[name]
     ?? Math.max(0, (cards[pileFace(name)]?.cost ?? 0) - bridges);
   const printedCost = (name) => cards[pileFace(name)]?.cost ?? 0;
+  // Coffers (Guilds / Cornucopia & Guilds) — public table state, spendable in
+  // EITHER phase, which is why this is not gated on inBuy.
+  const myCoffers = game?.coffers?.[myId] ?? 0;
+  const canSpend = !!game && !over && game.turn === myId && !game.pending_pid;
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -1617,6 +1628,29 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 <span>Actions <b><Pop n={game.actions} /></b></span>
                 <span>Buys <b><Pop n={game.buys} /></b></span>
                 <span>Money <b>$<Pop n={game.coins} /></b></span>
+                {/* Coffers: a SPENDABLE counter, not a resource that ticks
+                    down on its own. Spendable "at any time during your turn",
+                    so the button lives here rather than in the buy row — and
+                    it is hidden while a decision is open, which is exactly
+                    when the server refuses the move. */}
+                {myCoffers > 0 && (
+                  <span className="dm-counter">Coffers <b><Pop n={myCoffers} /></b>
+                    {canSpend && (
+                      <button className="btn btn-gold btn-sm dm-spend"
+                        title="Spend 1 Coffers for +$1"
+                        onClick={() => mv({ type: "spend", what: "coffers", n: 1 })}>
+                        spend $1
+                      </button>
+                    )}
+                    {canSpend && myCoffers > 1 && (
+                      <button className="btn btn-outline btn-sm dm-spend"
+                        title={`Spend all ${myCoffers} Coffers`}
+                        onClick={() => mv({ type: "spend", what: "coffers", n: myCoffers })}>
+                        all
+                      </button>
+                    )}
+                  </span>
+                )}
                 {bridges > 0 && <span>Cards cost <b>−<Pop n={bridges} /></b></span>}
                 {hasModalPrompt && promptMin
                   ? <button className="btn btn-gold btn-sm dm-reshint-btn"

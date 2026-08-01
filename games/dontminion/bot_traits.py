@@ -57,6 +57,9 @@ TRASHERS = {
     "Masquerade": "weak", "Lookout": "weak", "Sentry": "weak",
     "Jack of All Trades": "weak", "Sailor": "weak", "Treasure Map": "weak",
     "Lurker": "weak",           # trashes from the SUPPLY, not your deck
+    # Cornucopia & Guilds
+    "Butcher": "tfb", "Remake": "tfb", "Stonemason": "tfb",
+    "Infirmary": "weak",
 }
 
 # Attack kind — what the attack DOES to its victims. Drives both the defensive
@@ -70,6 +73,11 @@ ATTACKS = {
     "Minion": "discard", "Cutpurse": "discard",
     "Bandit": "trash", "Swindler": "trash", "Corsair": "trash",
     "Bureaucrat": "topdeck", "Rabble": "topdeck", "Clerk": "topdeck",
+    # Cornucopia & Guilds. Jester is filed under "curse" for the DEFENSIVE
+    # read that matters — on a Victory card it hands out a Curse, and the
+    # alternative (a copy of what they discarded) is not reliably junk.
+    "Young Witch": "curse", "Soothsayer": "curse", "Jester": "curse",
+    "Footpad": "discard",
 }
 
 # Cards that answer an Attack from hand (the reaction window / immunity).
@@ -82,6 +90,9 @@ GAINERS = {
     "Berserker", "Develop", "Trader", "Remodel", "Upgrade", "Replace",
     "Expand", "Forge", "Farmland", "Bureaucrat", "Bandit", "Blockade",
     "Pirate", "Jack of All Trades", "Treasure Map", "Lurker", "Mine",
+    # Cornucopia & Guilds
+    "Butcher", "Remake", "Stonemason", "Horn of Plenty", "Soothsayer",
+    "Demesne", "Courser",
 }
 
 # The subset that can gain ANY pile of its own choosing, repeatably, without
@@ -110,6 +121,7 @@ ALT_VP = {
     "Gardens": "per_10_cards", "Duke": "per_duchy", "Farm": "treasure_vp",
     "Mill": "action_vp", "Nobles": "action_vp", "Island": "action_vp",
     "Tunnel": "reaction_vp", "Farmland": "on_gain_vp",
+    "Fairgrounds": "per_5_distinct", "Demesne": "per_gold",
 }
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
@@ -120,7 +132,10 @@ VP_TOKENS = {"Monument", "Bishop", "Collection", "Investment"}
 # text-derived classifier cannot see — it was absent from the engine plan's
 # draw pool for exactly this reason.
 DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
-             "Cellar", "Crossroads", "Shanty Town", "Minion", "Tactician"}
+             "Cellar", "Crossroads", "Shanty Town", "Minion", "Tactician",
+             # C&G: Advisor nets 2, Carnival up to 4, Journeyman exactly 3,
+             # Housecarl scales with the table — none of them print "+N Cards"
+             "Advisor", "Carnival", "Journeyman", "Housecarl"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
@@ -145,13 +160,18 @@ BM_TERMINALS = {
     "Courtyard": 46, "Militia": 44,
     "Patrol": 40, "Nobles": 36,
     "Steward": 30, "Moat": 20,
+    # Cornucopia & Guilds. Ranked against the same article's logic: the cursers
+    # score for the Curses (Young Witch is a Witch that can be blocked;
+    # Soothsayer trades a card to them for the Gold), then the terminal draw.
+    "Young Witch": 90, "Soothsayer": 84, "Footpad": 62, "Jester": 58,
+    "Journeyman": 54, "Carnival": 45,
 }
 
 # Every kingdom card that has been reviewed against the tables above. A set
 # lands => its 25-30 names land here => the test goes green again.
 REVIEWED = frozenset(
     KINGDOM["base"] + KINGDOM["intrigue"] + KINGDOM["seaside"]
-    + KINGDOM["prosperity"] + KINGDOM["hinterlands"]
+    + KINGDOM["prosperity"] + KINGDOM["hinterlands"] + KINGDOM["cornucopia"]
 )
 
 

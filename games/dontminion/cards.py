@@ -515,13 +515,139 @@ CARDS.update({
                          "expansion": "hinterlands", "kingdom": True},
 })
 
+# --- Cornucopia & Guilds 2E (26 + 6 Rewards) ------------------------------
+# The 2024 Second Edition is a COMBINED set: 18 kept (Cornucopia 8 + Guilds 10)
+# plus 8 new. The 13 removed cards (Doctor, Farming Village, Fortune Teller,
+# Harvest, Horse Traders, Masterpiece, Taxman, Tournament and the 5 Prizes) are
+# deliberately absent — verified twice over, by the compendium's 13
+# "Not included in the 2024 Second Edition" markers and the wiki chart's
+# "Cornucopia & Guilds, 1E" label, which name the same 13.
+#
+# "overpay": True is the `$N+` cost — you may pay MORE when buying, and the
+# extra is handed to the card's own when-gain ability. Any ability that reads
+# the card's cost ignores the + (compendium, OVERPAYING § IV), so `cost` stays
+# the plain number and nothing else has to know.
+CARDS.update({
+    "Advisor":           {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nReveal the top 3 cards of your deck. The player to your left chooses one of them. Discard that card and put the rest into your hand.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Baker":             {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+1 Coffers\nSetup: Each player gets +1 Coffers.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Butcher":           {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Coffers\nYou may trash a card from your hand, to gain a card costing up to $1 more than it per Coffers you spend.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Candlestick Maker": {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\n+1 Buy\n+1 Coffers",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Carnival":          {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Reveal the top 4 cards of your deck. Put one of each differently named card into your hand and discard the rest.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Fairgrounds":       {"cost": 6, "types": ["victory"], "coins": 0, "vp": "fairgrounds",
+                        "text": "Worth 2 VP per 5 differently named cards you have (round down).",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Farmhands":         {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nWhen you gain this, you may set aside an Action or Treasure from your hand, and play it at the start of your next turn.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Farrier":           {"cost": 2, "types": ["action"], "coins": 0, "vp": 0, "overpay": True,
+                        "text": "+1 Card\n+1 Action\n+1 Buy\nOverpay: +1 Card at the end of this turn per $1 overpaid.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Ferryman":          {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nDiscard a card.\nSetup: Choose an unused Kingdom card pile costing $3 or $4. Gain one when you gain a Ferryman.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Footpad":           {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+2 Coffers\nEach other player discards down to 3 cards in hand.\nIn games using this, when you gain a card in an Action phase, +1 Card.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Hamlet":            {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nYou may discard a card for +1 Action.\nYou may discard a card for +1 Buy.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Herald":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0, "overpay": True,
+                        "text": "+1 Card\n+1 Action\nReveal the top card of your deck. If it's an Action, play it.\nOverpay: Per $1 overpaid, put any card from your discard pile onto your deck.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Horn of Plenty":    {"cost": 5, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "Gain a card costing up to $1 per differently named card you have in play (counting this). If it's a Victory card, trash this.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Hunting Party":     {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal your hand. Reveal cards from your deck until you reveal a card that isn't a copy of one in your hand. Put it into your hand and discard the rest.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Infirmary":         {"cost": 3, "types": ["action"], "coins": 0, "vp": 0, "overpay": True,
+                        "text": "+1 Card\nYou may trash a card from your hand.\nOverpay: Play this once per $1 overpaid.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Jester":            {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+$2\nEach other player discards the top card of their deck. If it's a Victory card they gain a Curse; otherwise they gain a copy of the discarded card or you do, your choice.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Journeyman":        {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Name a card. Reveal cards from your deck until you reveal 3 cards without that name. Put those cards into your hand and discard the rest.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Joust":             {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+$1\nYou may set aside a Province from your hand to gain any Reward to your hand. Discard the Province in Clean-up.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Menagerie":         {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nReveal your hand. If the revealed cards all have different names, +3 Cards. Otherwise, +1 Card.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Merchant Guild":    {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\n+$1\nAt the end of your Buy phase this turn, +1 Coffers per card you gained in it.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Plaza":             {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nYou may discard a Treasure for +1 Coffers.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Remake":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Do this twice: Trash a card from your hand, then gain a card costing exactly $1 more than it.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Shop":              {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+$1\nYou may play an Action card from your hand that you don't have a copy of in play.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Soothsayer":        {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "Gain a Gold. Each other player gains a Curse, and if they did, draws a card.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Stonemason":        {"cost": 2, "types": ["action"], "coins": 0, "vp": 0, "overpay": True,
+                        "text": "Trash a card from your hand. Gain 2 cards each costing less than it.\nOverpay: Gain 2 Action cards each costing the amount overpaid.",
+                        "expansion": "cornucopia", "kingdom": True},
+    "Young Witch":       {"cost": 4, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nDiscard 2 cards. Each other player gains a Curse unless they reveal a Bane from their hand.\nSetup: Add an extra Kingdom card pile costing $2 or $3 to the Supply. Its cards are Banes.",
+                        "expansion": "cornucopia", "kingdom": True},
+})
+
+# The 6 REWARDS — a pile outside the Supply, gained only by Joust and only to
+# your hand. `kingdom: False` keeps them out of the randomiser; the `reward`
+# type is what Coronet reads ("a non-Reward Action"). Their cost is $0 for any
+# ability that refers to it (compendium, Reward (type)).
+REWARDS = ["Coronet", "Courser", "Demesne", "Housecarl", "Huge Turnip", "Renown"]
+CARDS.update({
+    "Coronet":     {"cost": 0, "types": ["action", "treasure", "reward"], "coins": 0, "vp": 0,
+                    "text": "You may play a non-Reward Action from your hand twice.\nYou may play a non-Reward Treasure from your hand twice.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+    "Courser":     {"cost": 0, "types": ["action", "reward"], "coins": 0, "vp": 0,
+                    "text": "Choose two different options: +2 Cards; +2 Actions; +$2; gain 4 Silvers.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+    "Demesne":     {"cost": 0, "types": ["action", "victory", "reward"], "coins": 0, "vp": "demesne",
+                    "text": "+2 Actions\n+2 Buys\nGain a Gold.\nWorth 1 VP per Gold you have.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+    "Housecarl":   {"cost": 0, "types": ["action", "reward"], "coins": 0, "vp": 0,
+                    "text": "+1 Card per differently named Action card you have in play.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+    "Huge Turnip": {"cost": 0, "types": ["treasure", "reward"], "coins": 0, "vp": 0,
+                    "text": "+2 Coffers\n+$1 per Coffers you have.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+    "Renown":      {"cost": 0, "types": ["action", "reward"], "coins": 0, "vp": 0,
+                    "text": "+1 Buy\nThis turn, cards cost $2 less.\n(This is not in the Supply.)",
+                    "expansion": "cornucopia", "kingdom": False},
+})
+
+
 KINGDOM = {
     "base": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "base"],
     "intrigue": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "intrigue"],
     "seaside": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "seaside"],
     "prosperity": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "prosperity"],
     "hinterlands": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "hinterlands"],
+    "cornucopia": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "cornucopia"],
 }
+
+
+def overpays(name):
+    """Does buying this card let you pay MORE than its cost? (The `$N+` cost.)"""
+    return bool(CARDS[name].get("overpay"))
 
 
 # --- kingdom REQUIREMENTS (create-time "at least one card that gives ...") ----

@@ -20,6 +20,8 @@ V2_KEYS_GAME = ("watchers", "last_turn_pid", "extra_turn", "last_turn_gains")
 V2_KEYS_SEAT = ("duration", "dur_aside", "island", "village_mat")
 V3_KEYS_GAME = ("vp_tokens", "colony", "curse_is_treasure")
 V6_KEYS_GAME = ("piles", "nonsupply")
+V7_KEYS_GAME = ("coffers", "bane", "ferryman_pile", "footpad_draw")
+V7_KEYS_SEAT = ("set_aside", "start_fx", "cleanup_aside")
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -32,6 +34,12 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 7:
+        for k in V7_KEYS_GAME:
+            g.pop(k, None)
+        for seat in g["seats"].values():
+            for k in V7_KEYS_SEAT:
+                seat.pop(k, None)
     if to_version < 6:
         for k in V6_KEYS_GAME:
             g.pop(k, None)
@@ -66,7 +74,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 6
+    assert _fresh()["schema"] == engine.SCHEMA == 7
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -76,10 +84,10 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert "watchers" not in old and "duration" not in old["seats"][A]
     g = engine.migrate(old)
     assert g["schema"] == engine.SCHEMA
-    for k in V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME:
+    for k in V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME + V7_KEYS_GAME:
         assert k in g, k
     for seat in g["seats"].values():
-        for k in V2_KEYS_SEAT:
+        for k in V2_KEYS_SEAT + V7_KEYS_SEAT:
             assert k in seat, k
     assert g["vp_tokens"] == {A: 0, B: 0}
     assert g["colony"] is False and g["curse_is_treasure"] is False
@@ -90,7 +98,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5])
+@pytest.mark.parametrize("version", [1, 2, 3, 5, 6])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -113,7 +121,8 @@ def test_migrate_tolerates_junk():
         engine.migrate(junk)          # must not raise
 
 
-@pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME)
+@pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME
+                         + V7_KEYS_GAME)
 def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     """THE prod shape that broke this. `schema = 2` was stamped across the whole
     Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys
@@ -128,7 +137,8 @@ def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     _drive(g, moves=60)          # the KeyError landed at the next end of turn
 
 
-@pytest.mark.parametrize("missing", ["duration", "island", "aside"])
+@pytest.mark.parametrize("missing", ["duration", "island", "aside",
+                                     "set_aside", "start_fx", "cleanup_aside"])
 def test_a_stamped_blob_missing_a_seat_zone_is_still_filled(missing):
     g = _fresh()
     g["schema"] = 2
@@ -241,3 +251,21 @@ def test_v3_keys_survive_a_v3_blob_untouched():
     engine.migrate(blob)
     assert blob["curse_is_treasure"] is True       # NOT reset by the migration
     assert blob["vp_tokens"][A] == 4
+
+
+def test_a_pre_cornucopia_save_gains_the_coffers_shape():
+    """ph. 4 adds a per-player counter and three seat zones the kernel indexes
+    directly. A live prod game predates all of them, so the fill is what stops
+    the first end of turn KeyErroring."""
+    g = _fresh()
+    old = _downgrade(g, 6)
+    for k in V7_KEYS_GAME:
+        assert k not in old
+    engine.migrate(old)
+    assert old["coffers"] == {A: 0, B: 0}
+    assert old["bane"] is None and old["ferryman_pile"] is None
+    assert old["footpad_draw"] is False
+    for seat in old["seats"].values():
+        assert seat["set_aside"] == [] and seat["start_fx"] == []
+        assert seat["cleanup_aside"] == []
+    _drive(old, moves=120)

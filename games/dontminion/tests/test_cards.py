@@ -1,5 +1,5 @@
-"""Card-data tests: the verified 139-card dataset (Base + Intrigue + Seaside +
-Prosperity + Hinterlands, all 2E).
+"""Card-data tests: the verified 171-card dataset (Base + Intrigue + Seaside +
+Prosperity + Hinterlands + Cornucopia & Guilds, all 2E).
 
 Pure data tests — no engine import. The EXPECTED table below is the corruption tell:
 every (name, cost, types) triple was verified against the Knutsen compendium v11.1
@@ -9,9 +9,13 @@ every (name, cost, types) triple was verified against the Knutsen compendium v11
 from games.dontminion import cards
 
 
-ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction", "duration"}
-ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity", "hinterlands"}
+ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
+                 "duration", "reward"}
+ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
+                      "hinterlands", "cornucopia"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
+# keys a card may carry IN ADDITION to the required schema
+OPTIONAL_FIELDS = {"overpay"}      # the `$N+` cost (Guilds/C&G)
 
 REMOVED_1E = [
     # Base 1E -> 2E removals
@@ -24,6 +28,10 @@ REMOVED_1E = [
     # Prosperity 1E -> 2E removals
     "Contraband", "Counting House", "Goons", "Loan", "Mountebank", "Royal Seal",
     "Talisman", "Trade Route", "Venture",
+    # Cornucopia & Guilds 1E -> 2E removals (5 Cornucopia + 3 Guilds + 5 Prizes)
+    "Doctor", "Farming Village", "Fortune Teller", "Harvest", "Horse Traders",
+    "Masterpiece", "Taxman", "Tournament",
+    "Bag of Gold", "Diadem", "Followers", "Princess", "Trusty Steed",
 ]
 
 # The full verified (cost, types) table for all 59 cards.
@@ -173,6 +181,39 @@ EXPECTED = {
     "Witch's Hut": (5, ['action', 'attack']),
     "Border Village": (6, ['action']),
     "Farmland": (6, ['victory']),
+    # Cornucopia & Guilds 2E (26 kingdom + 6 Rewards)
+    "Advisor": (4, ['action']),
+    "Baker": (5, ['action']),
+    "Butcher": (5, ['action']),
+    "Candlestick Maker": (2, ['action']),
+    "Carnival": (5, ['action']),
+    "Coronet": (0, ['action', 'treasure', 'reward']),
+    "Courser": (0, ['action', 'reward']),
+    "Demesne": (0, ['action', 'victory', 'reward']),
+    "Fairgrounds": (6, ['victory']),
+    "Farmhands": (4, ['action']),
+    "Farrier": (2, ['action']),
+    "Ferryman": (5, ['action']),
+    "Footpad": (5, ['action', 'attack']),
+    "Hamlet": (2, ['action']),
+    "Herald": (4, ['action']),
+    "Horn of Plenty": (5, ['treasure']),
+    "Housecarl": (0, ['action', 'reward']),
+    "Huge Turnip": (0, ['treasure', 'reward']),
+    "Hunting Party": (5, ['action']),
+    "Infirmary": (3, ['action']),
+    "Jester": (5, ['action', 'attack']),
+    "Journeyman": (5, ['action']),
+    "Joust": (5, ['action']),
+    "Menagerie": (3, ['action']),
+    "Merchant Guild": (5, ['action']),
+    "Plaza": (4, ['action']),
+    "Remake": (4, ['action']),
+    "Renown": (0, ['action', 'reward']),
+    "Shop": (3, ['action']),
+    "Soothsayer": (5, ['action', 'attack']),
+    "Stonemason": (2, ['action']),
+    "Young Witch": (4, ['action', 'attack']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -188,9 +229,9 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 139
+    assert len(cards.CARDS) == 171
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
-              "prosperity": [], "hinterlands": []}
+              "prosperity": [], "hinterlands": [], "cornucopia": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     assert len(by_exp["basic"]) == 7
@@ -199,12 +240,14 @@ def test_card_count_and_expansion_counts():
     assert len(by_exp["seaside"]) == 27
     assert len(by_exp["prosperity"]) == 27      # 25 kingdom + Platinum + Colony
     assert len(by_exp["hinterlands"]) == 26     # 17 kept from 1E + 9 new in 2E
+    assert len(by_exp["cornucopia"]) == 32      # 18 kept + 8 new + 6 Rewards
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
     for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27),
-                      ("prosperity", 25), ("hinterlands", 26)):
+                      ("prosperity", 25), ("hinterlands", 26),
+                      ("cornucopia", 26)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -234,7 +277,8 @@ def test_removed_1e_cards_absent():
 def test_schema_field_completeness_and_validity():
     str_vp = []
     for name, c in cards.CARDS.items():
-        assert set(c.keys()) == SCHEMA_FIELDS, name
+        assert SCHEMA_FIELDS <= set(c.keys()), name
+        assert set(c.keys()) - SCHEMA_FIELDS <= OPTIONAL_FIELDS, name
         # cost
         assert type(c["cost"]) is int and 0 <= c["cost"] <= 11, name   # Colony is $11
         # types
@@ -257,7 +301,8 @@ def test_schema_field_completeness_and_validity():
         assert isinstance(c["text"], str) and c["text"].strip(), name
         assert c["expansion"] in ALLOWED_EXPANSIONS, name
         assert isinstance(c["kingdom"], bool), name
-    assert sorted(str_vp) == [("Duke", "duke"), ("Gardens", "gardens")]
+    assert sorted(str_vp) == [("Demesne", "demesne"), ("Duke", "duke"),
+                              ("Fairgrounds", "fairgrounds"), ("Gardens", "gardens")]
 
 
 def test_static_vp_values():
@@ -311,22 +356,23 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.REQUIREMENT_ORDER == ("actions", "buys", "draw")
     assert set(cards.REQUIREMENTS) == set(cards.REQUIREMENT_ORDER)
     assert cards.cards_granting("actions") == [
-        "Bazaar", "Border Village", "City", "Crossroads", "Diplomat", "Festival",
-        "Fishing Village", "Inn", "Mining Village", "Native Village", "Nobles",
-        "Shanty Town", "Village", "Worker's Village"]
+        "Bazaar", "Border Village", "City", "Crossroads", "Diplomat",
+        "Farmhands", "Festival", "Fishing Village", "Inn", "Mining Village",
+        "Native Village", "Nobles", "Plaza", "Shanty Town", "Village",
+        "Worker's Village"]
     assert cards.cards_granting("buys") == [
-        "Astrolabe", "Baron", "Bridge", "Cauldron", "City", "Collection",
-        "Council Room", "Courtier", "Festival", "Grand Market", "Margrave",
-        "Market", "Nomads", "Pawn", "Salvager", "Souk", "Spice Merchant",
-        "Tactician", "Tiara", "Wharf", "Worker's Village"]
+        "Astrolabe", "Baron", "Bridge", "Candlestick Maker", "Cauldron",
+        "City", "Collection", "Council Room", "Courtier", "Farrier",
+        "Festival", "Grand Market", "Hamlet", "Margrave", "Market",
+        "Merchant Guild", "Nomads", "Pawn", "Salvager", "Souk",
+        "Spice Merchant", "Tactician", "Tiara", "Wharf", "Worker's Village"]
     assert cards.cards_granting("draw") == [
-        "Council Room", "Courtyard", "Diplomat", "Guard Dog", "Inn",
-        "Laboratory", "Margrave", "Masquerade", "Minion", "Moat", "Nobles",
-        "Patrol", "Rabble", "Sea Witch", "Secret Passage", "Shanty Town",
-        "Smithy", "Spice Merchant", "Stables", "Steward", "Tactician",
-        "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf", "Witch",
-        "Witch's Hut"]
-
+        "Council Room", "Courtyard", "Diplomat", "Ferryman", "Guard Dog",
+        "Inn", "Laboratory", "Margrave", "Masquerade", "Menagerie", "Minion",
+        "Moat", "Nobles", "Patrol", "Rabble", "Sea Witch", "Secret Passage",
+        "Shanty Town", "Smithy", "Spice Merchant", "Stables", "Steward",
+        "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
+        "Witch", "Witch's Hut", "Young Witch"]
 
 def test_requirement_bar_is_the_printed_bonus():
     # the threshold really binds: a cantrip is not a village, a Moat is a drawer

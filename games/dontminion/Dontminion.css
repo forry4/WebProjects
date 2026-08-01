@@ -381,6 +381,10 @@
   font-size: 16px; color: var(--text-dim, #8a7d6a);
 }
 .dm-resbar b { color: var(--gold-light, #e8c96a); font-size: 21px; margin-left: 4px; }
+/* Coffers and the later spendable counters (Villagers, Favors): a count plus
+   its spend controls, kept on one baseline with the rest of the bar. */
+.dm-counter { display: inline-flex; align-items: baseline; gap: 6px; }
+.dm-spend { padding: 2px 8px; font-size: 12px; align-self: center; }
 /* the what-you-can-do hint rides the right edge of the resource bar */
 .dm-reshint {
   margin-left: auto; font-style: italic; color: var(--gold-light, #e8c96a) !important;

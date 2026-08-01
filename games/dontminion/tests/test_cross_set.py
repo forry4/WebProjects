@@ -1279,7 +1279,7 @@ def test_a_hinterlands_position_round_trips_through_json_and_migrate():
     blob = json.dumps(g)
     loaded = engine.migrate(json.loads(blob))
     assert loaded == json.loads(blob), "migrate mutated a current-shape save"
-    assert loaded["schema"] == engine.SCHEMA == 6
+    assert loaded["schema"] == engine.SCHEMA == 7
     rng = random.Random(11)
     for _ in range(120):                          # and it plays on from the blob
         if loaded["over"]:
@@ -1589,3 +1589,304 @@ def test_commuting_abilities_never_prompt_and_still_pay():
     xs_pool2 = {o["label"]: o["id"] for o in f["constraint"]["options"]}
     assert decide(g, A, ids=[xs_pool2["Inn"]])[0]
     assert (xs_top(g)["card"], xs_top(g)["stage"]) == ("Inn", "shuffle")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Cornucopia & Guilds (phase 4) — the new mechanics against the old ones.
+#
+# This is the step that found the put-back/when-discard bug in FOUR cards in
+# phase 3, three of them already shipped: a per-set batch can only ever be as
+# correct as the precedent it copies, so the combos live here.
+# ═══════════════════════════════════════════════════════════════════════════
+
+CG = ("base", "intrigue", "cornucopia")
+
+
+def cg(kingdom, players=(A, B), seed=42):
+    return engine.new_game(list(players), list(CG), seed=seed,
+                           kingdom=list(kingdom))
+
+
+def _cg_board(*extra):
+    """Ten piles: this set's cards plus enough ordinary ones to fill up."""
+    base = ["Village", "Smithy", "Market", "Festival", "Laboratory",
+            "Militia", "Mine", "Library", "Council Room", "Moat"]
+    picked = list(extra) + [c for c in base if c not in extra]
+    return picked[:10]
+
+
+# --- Throne Room x the new cards ---------------------------------------------
+
+def test_throne_room_on_merchant_guild_pays_twice():
+    """"It's cumulative if played with a throne-room" — two watchers, two
+    payouts, both reading the same Buy phase."""
+    g = cg(_cg_board("Merchant Guild", "Throne Room"))
+    give_hand(g, A, ["Throne Room", "Merchant Guild"])
+    before = g["coffers"][A]
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Merchant Guild"])[0]
+    assert g["buys"] == 3 and g["coins"] == 2          # both plays paid
+    g["phase"] = "buy"
+    g["coins"] = 10
+    assert mv(g, A, {"type": "buy", "card": "Copper"})[0]
+    assert mv(g, A, {"type": "end_phase"})[0]
+    assert g["coffers"][A] == before + 2, "one Coffers per PLAY, per card gained"
+
+
+def test_throne_room_on_young_witch_opens_a_reaction_window_per_play():
+    """Pinned deviation A1: one window PER REPLAY, so a Moat holder is asked
+    twice."""
+    g = cg(["Young Witch", "Throne Room", "Moat", "Village", "Smithy",
+            "Market", "Festival", "Laboratory", "Militia", "Mine"])
+    give_hand(g, A, ["Throne Room", "Young Witch"])
+    g["seats"][A]["deck"] = ["Gold"] * 8
+    give_hand(g, B, ["Moat"])
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Young Witch"])[0]
+    windows = 0
+    for _ in range(40):
+        f = g["pending"][-1] if g["pending"] else None
+        if f is None:
+            break
+        if f["pid"] == B and f["kind"] == "choose_option":
+            windows += 1
+            assert decide(g, B, ids=["react:Moat"])[0]
+        else:
+            pid = g["pending_pid"]
+            assert decide(g, pid,
+                          **engine.sample_decision(g, pid, random.Random(1)))[0]
+    assert windows == 2, "one reaction window per replay"
+    assert "Curse" not in g["seats"][B]["discard"]
+
+
+def test_throne_room_on_butcher_gives_four_coffers_and_two_remodels():
+    g = cg(_cg_board("Butcher", "Throne Room"))
+    g["coffers"][A] = 0
+    give_hand(g, A, ["Throne Room", "Butcher", "Estate", "Copper"])
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Butcher"])[0]
+    assert g["coffers"][A] == 2
+    assert decide(g, A, cards=[])[0]                   # decline the first trash
+    assert g["coffers"][A] == 4, "the second play's +2 Coffers"
+    assert decide(g, A, cards=["Estate"])[0]
+    assert decide(g, A, ids=["4"])[0]                  # spend all four
+    assert g["coffers"][A] == 0 and g["coins"] == 4
+
+
+def test_throne_room_on_shop_cannot_replay_the_same_action():
+    """Shop's "no copy in play" is re-read on the SECOND play, by which time
+    the first play's card is on the table."""
+    g = cg(_cg_board("Shop", "Throne Room"))
+    give_hand(g, A, ["Throne Room", "Shop", "Village"])
+    g["seats"][A]["deck"] = ["Gold"] * 8
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Shop"])[0]
+    assert decide(g, A, cards=["Village"])[0]          # first play takes it
+    f = g["pending"][-1] if g["pending"] else None
+    assert f is None or "Village" not in f["constraint"].get("cards", [])
+
+
+# --- Watchtower / the would-gain protocol x the new gains ---------------------
+
+def test_watchtower_on_a_gained_farrier_and_the_overpay_still_pays():
+    """The overpay ability is a WHEN-GAIN ability, so it fires on the same
+    occurrence Watchtower reacts to — the player orders the two, and the
+    overpay pays whichever way they order it."""
+    g = engine.new_game([A, B], ["base", "prosperity", "cornucopia"], seed=4,
+                        kingdom=["Farrier", "Watchtower", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    g["phase"] = "buy"
+    g["coins"] = 5
+    give_hand(g, A, ["Watchtower"])
+    g["seats"][A]["deck"] = ["Gold"] * 10
+    assert mv(g, A, {"type": "buy", "card": "Farrier"})[0]
+    assert decide(g, A, ids=["2"])[0]                  # overpay $2
+    drain_decisions(g)
+    assert g["turn_ctx"]["end_draw"] == 2, "the overpay paid regardless"
+
+
+def test_watchtower_and_heralds_overpay_leave_exactly_one_herald():
+    """"If you move the gained Herald from your discard pile after overpaying,
+    cards like Watchtower lose track of it." Whichever order the pool resolves
+    in, the card is neither duplicated nor lost."""
+    g = engine.new_game([A, B], ["base", "prosperity", "cornucopia"], seed=4,
+                        kingdom=["Herald", "Watchtower", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    g["phase"] = "buy"
+    g["coins"] = 6
+    give_hand(g, A, ["Watchtower"])
+    g["seats"][A]["discard"] = []
+    g["seats"][A]["deck"] = ["Gold"] * 10
+    assert mv(g, A, {"type": "buy", "card": "Herald"})[0]
+    assert decide(g, A, ids=["2"])[0]
+    drain_decisions(g)
+    owned = engine.owned_cards(g, A)
+    assert owned.count("Herald") + g["trash"].count("Herald") == 1
+
+
+def test_trader_can_exchange_a_gained_farmhands():
+    """Trader's exchange happens on the same gain; "you DID gain the card (and
+    triggered any when-gain ability). You DIDN'T gain the Silver.\""""
+    g = engine.new_game([A, B], ["base", "hinterlands", "cornucopia"], seed=4,
+                        kingdom=["Farmhands", "Trader", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    give_hand(g, A, ["Trader", "Copper"])
+    engine.gain(g, A, "Farmhands")
+    engine._drive(g)              # a direct gain parks an auto frame
+    drain_decisions(g)
+    owned = engine.owned_cards(g, A)
+    assert owned.count("Farmhands") + owned.count("Silver") >= 1
+    assert engine.pile_count(g, "Farmhands") in (9, 10)
+
+
+# --- cost changes x the new cost checks --------------------------------------
+
+def test_renown_and_bridge_stack_on_the_same_turn():
+    g = engine.new_game([A, B], ["base", "intrigue", "cornucopia"], seed=4,
+                        kingdom=["Joust", "Bridge", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    give_hand(g, A, ["Bridge", "Renown"])
+    g["actions"] = 2
+    assert mv(g, A, {"type": "play_action", "card": "Bridge"})[0]
+    assert mv(g, A, {"type": "play_action", "card": "Renown"})[0]
+    assert engine.cost(g, "Gold") == 6 - 1 - 2
+    assert g["buys"] == 3                              # 1 + Bridge + Renown
+
+
+def test_a_cost_reduction_reaches_stonemasons_overpay_gains():
+    """"Cost reduction might be applied on when-gain before you resolve the
+    overpay ability" — the overpay gains are priced when they are chosen."""
+    g = engine.new_game([A, B], ["base", "intrigue", "cornucopia"], seed=4,
+                        kingdom=["Stonemason", "Bridge", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    give_hand(g, A, ["Bridge"])
+    assert mv(g, A, {"type": "play_action", "card": "Bridge"})[0]
+    g["phase"] = "buy"
+    g["coins"] = 6
+    assert mv(g, A, {"type": "buy", "card": "Stonemason"})[0]   # now $1
+    assert decide(g, A, ids=["2"])[0]                  # Actions costing $2 NOW
+    f = g["pending"][-1]
+    for p in f["constraint"]["piles"]:
+        assert engine.cost(g, p) == 2
+
+
+def test_horn_of_plenty_prices_with_the_turns_discount():
+    g = engine.new_game([A, B], ["base", "intrigue", "cornucopia"], seed=4,
+                        kingdom=["Horn of Plenty", "Bridge", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    give_hand(g, A, ["Bridge", "Horn of Plenty"])
+    assert mv(g, A, {"type": "play_action", "card": "Bridge"})[0]
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "play_treasure", "card": "Horn of Plenty"})[0]
+    f = g["pending"][-1]
+    # 2 distinct cards in play (Bridge, Horn of Plenty) -> cap $2; Bridge has
+    # made everything $1 cheaper, so the $3 Silver qualifies
+    assert "Silver" in f["constraint"]["piles"]
+
+
+# --- Coffers x the rest of the engine ----------------------------------------
+
+def test_coffers_spent_before_a_buy_pay_for_it():
+    g = cg(_cg_board("Candlestick Maker"))
+    g["coffers"][A] = 3
+    g["phase"] = "buy"
+    g["coins"] = 3
+    assert mv(g, A, {"type": "spend", "what": "coffers", "n": 3})[0]
+    assert g["coins"] == 6
+    assert mv(g, A, {"type": "buy", "card": "Gold"})[0]
+    assert "Gold" in g["seats"][A]["discard"]
+
+
+def test_spending_coffers_is_undoable_like_any_other_move():
+    g = cg(_cg_board("Candlestick Maker"))
+    g["coffers"][A] = 2
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "spend", "what": "coffers", "n": 2})[0]
+    assert g["coins"] == 2 and g["coffers"][A] == 0
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["coins"] == 0 and g["coffers"][A] == 2
+
+
+def test_choosing_an_overpay_amount_is_undoable():
+    """Nothing about a buy is hidden information, so the whole thing — the
+    price, the overpay and the gain — must still walk back."""
+    g = cg(_cg_board("Farrier"))
+    g["phase"] = "buy"
+    g["coins"] = 5
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "buy", "card": "Farrier"})[0]
+    assert decide(g, A, ids=["3"])[0]
+    assert g["coins"] == 0 and g["turn_ctx"]["end_draw"] == 3
+    for _ in range(4):
+        if g["coins"] == 5:
+            break
+        assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["coins"] == 5
+    assert g["turn_ctx"]["end_draw"] == 0
+    assert "Farrier" not in g["seats"][A]["discard"]
+
+
+# --- when-discard x the new discards -----------------------------------------
+
+def test_tunnel_reacts_to_ferrymans_discard():
+    """Ferryman's discard is an ordinary discard (not Clean-up), so a discarded
+    Tunnel may be revealed for its Gold."""
+    g = engine.new_game([A, B], ["base", "hinterlands", "cornucopia"], seed=4,
+                        kingdom=["Ferryman", "Tunnel", "Village", "Smithy",
+                                 "Market", "Festival", "Laboratory", "Militia",
+                                 "Mine", "Library"])
+    give_hand(g, A, ["Ferryman", "Tunnel"])
+    g["seats"][A]["deck"] = ["Copper", "Copper"]
+    assert mv(g, A, {"type": "play_action", "card": "Ferryman"})[0]
+    assert decide(g, A, cards=["Tunnel"])[0]
+    f = g["pending"][-1]
+    assert f["card"] == "Tunnel"
+    assert decide(g, A, ids=["reveal"])[0]
+    assert "Gold" in g["seats"][A]["discard"]
+
+
+def test_a_joust_province_set_aside_is_not_in_play_for_horn_of_plenty():
+    """The set-aside is deliberately its own zone: a Province sitting in play
+    would raise Horn of Plenty's cap by one, and Shop could count it."""
+    g = cg(["Joust", "Horn of Plenty", "Village", "Smithy", "Market",
+            "Festival", "Laboratory", "Militia", "Mine", "Library"])
+    give_hand(g, A, ["Joust", "Province", "Horn of Plenty"])
+    g["seats"][A]["deck"] = ["Copper"] * 5
+    assert mv(g, A, {"type": "play_action", "card": "Joust"})[0]
+    assert decide(g, A, cards=["Province"])[0]
+    assert decide(g, A, pile="Renown")[0]
+    assert g["seats"][A]["cleanup_aside"] == ["Province"]
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "play_treasure", "card": "Horn of Plenty"})[0]
+    f = g["pending"][-1]
+    # in play: Joust + Horn of Plenty = 2 distinct. The Province is NOT there.
+    assert all(engine.cost(g, p) <= 2 for p in f["constraint"]["piles"])
+
+
+# --- the whole set under the bot ---------------------------------------------
+
+@pytest.mark.parametrize("chunk", [0, 1, 2])
+def test_the_bot_plays_a_cornucopia_board_to_the_end(chunk):
+    """The tiers read the Supply to decide what to buy, and this set adds a
+    spendable counter, an overpay prompt and two setup-chosen piles. Each of
+    those is a place bot.choose could raise inside the server's guaranteed
+    turn-finisher, where the failure is a stuck live game."""
+    from games.dontminion import bot
+    from games.dontminion.cards import KINGDOM
+    names = sorted(KINGDOM["cornucopia"])
+    kingdom = (names[chunk * 8: chunk * 8 + 10] + names)[:10]
+    g = engine.new_game([A, B], list(CG), seed=100 + chunk, kingdom=kingdom)
+    rng = random.Random(chunk)
+    for _ in range(4000):
+        if g["over"]:
+            break
+        pid = g["pending_pid"] or g["turn"]
+        ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
+        assert ok, err
+    assert g["over"], "the bots did not finish a Cornucopia & Guilds board"
