@@ -265,7 +265,7 @@ def save_game(room_id: str) -> None:
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
         _persist_row, room_id, room.get("status", "open"), seats,
-        room.get("host"), json.dumps(state), now, now,
+        room.get("host"), _rooms.encode_state(state), now, now,
     )
 
 
@@ -280,7 +280,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return json.loads(row["state_json"])
+        return _rooms.decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -294,7 +294,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _rooms.decode_state(row["state_json"])
     except Exception:
         return False
     ROOMS[room_id] = {
@@ -316,7 +316,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 def _parse_state(row) -> dict:
     try:
-        return json.loads(row["state_json"] or "{}")
+        return _rooms.decode_state(row["state_json"])
     except Exception:
         return {}
 

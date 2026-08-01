@@ -311,3 +311,45 @@ def test_message_throttle_is_per_socket_so_it_cannot_leak():
     a, b = rooms.MessageThrottle(max_per_min=1), rooms.MessageThrottle(max_per_min=1)
     assert a.allow(now=1.0) is True and a.allow(now=1.0) is False
     assert b.allow(now=1.0) is True        # independent budget
+
+
+# ─── state_json codec (compressed at-rest storage, all five games) ───────────
+
+def test_encode_decode_round_trips_a_state():
+    state = {"players": {"a": "Al", "b": "Bo"}, "game": {"log": [1, 2, 3] * 50},
+             "meta": {"a": {"token": "x"}}, "unicode": "würfel — 石"}
+    blob = rooms.encode_state(state)
+    assert isinstance(blob, str) and blob.startswith("z:")
+    assert rooms.decode_state(blob) == state
+
+
+def test_encoded_blob_is_much_smaller_than_plain_json():
+    # the whole point: repetitive game state compresses hard
+    state = {"log": [{"event": "draw", "cards": ["Copper", "Estate"], "pid": "a"}] * 300}
+    blob = rooms.encode_state(state)
+    assert len(blob) < len(json.dumps(state)) // 3
+
+
+def test_decode_reads_legacy_plain_json_blobs_unchanged():
+    """Live prod rows are plain JSON (start with '{'); they must load with no
+    migration and re-encode compressed on the next save."""
+    legacy = json.dumps({"game": {"turn": "a"}, "status": "playing"})
+    assert legacy.startswith("{")
+    assert rooms.decode_state(legacy) == {"game": {"turn": "a"}, "status": "playing"}
+
+
+def test_decode_empty_or_none_is_an_empty_dict():
+    # the read sites that used `json.loads(x or "{}")` rely on this
+    assert rooms.decode_state(None) == {}
+    assert rooms.decode_state("") == {}
+
+
+def test_decode_accepts_bytes_from_the_driver():
+    blob = rooms.encode_state({"k": "v"})
+    assert rooms.decode_state(blob.encode("ascii")) == {"k": "v"}
+
+
+def test_a_corrupt_blob_still_raises_like_json_loads():
+    # callers wrap these reads in try/except; the codec must not swallow errors
+    with pytest.raises(Exception):
+        rooms.decode_state("{not valid json")

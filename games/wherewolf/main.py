@@ -194,7 +194,7 @@ def save_game(room_id: str) -> None:
         room.get("host"), room.get("players", {}).get(room.get("host")),
         pids[0] if pids else None,
         pids[1] if len(pids) > 1 else None,
-        json.dumps(pids), json.dumps(state), now, now,
+        json.dumps(pids), _rooms.encode_state(state), now, now,
     )
 
 
@@ -211,7 +211,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _rooms.decode_state(row["state_json"])
     except Exception:
         return False
     room = {

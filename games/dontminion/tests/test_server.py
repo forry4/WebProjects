@@ -104,7 +104,7 @@ def test_kingdom_requirements_reach_the_deal_and_survive_the_blob(monkeypatch):
 
     blob = {}
     monkeypatch.setattr(m, "_persist_row",
-                        lambda rid, st, seats, host, sj, now, made: blob.update(json.loads(sj)))
+                        lambda rid, st, seats, host, sj, now, made: blob.update(m._rooms.decode_state(sj)))
     monkeypatch.setattr(m, "_DB_WRITE_EXEC", _InlineExec())
     _REAL_SAVE_GAME("RQ")
     assert blob["requires"] == ["actions", "draw"]     # save_game itself writes it
@@ -317,7 +317,7 @@ def test_save_blob_round_trip_restores_options(monkeypatch):
     captured = {}
 
     def fake_persist(room_id, status, seats, host, state_json, now, created_at):
-        captured["state"] = json.loads(state_json)
+        captured["state"] = m._rooms.decode_state(state_json)   # state_json is now compressed
         captured["seats"] = seats
         captured["status"] = status
 

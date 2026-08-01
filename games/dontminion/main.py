@@ -222,7 +222,7 @@ def save_game(room_id: str) -> None:
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
         _persist_row, room_id, room.get("status", "open"), seats[:4],
-        room.get("host"), json.dumps(state), now, now,
+        room.get("host"), _rooms.encode_state(state), now, now,
     )
 
 
@@ -235,7 +235,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return json.loads(row["state_json"])
+        return _rooms.decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -278,7 +278,7 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         out.append({
@@ -306,7 +306,7 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -336,7 +336,7 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}

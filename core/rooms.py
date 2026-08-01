@@ -19,8 +19,10 @@ does not know what a game is.
 """
 from __future__ import annotations
 
+import base64
 import json
 import time
+import zlib
 from collections import deque
 from typing import Any, Callable
 
@@ -50,6 +52,47 @@ def gen_room_token(n: int = 12) -> str:
 def db_conn():
     """The shared dual sqlite/Turso connection. Not pooled: callers close it."""
     return get_db_conn()
+
+
+# ── state_json codec (shared by all five games' save/load) ───────────────────
+# Every game stores its whole room state as one JSON string in a `state_json`
+# TEXT column, re-written on EVERY move. Those blobs are hugely repetitive (the
+# verbose move log, plus the undo stack's near-duplicate snapshots), so they
+# compress ~8-10x — measured on full Dontminion games: ~111 KB plain JSON ->
+# ~11 KB zlib, and the log+undo that dominate the raw size all but vanish once
+# compressed. This is pure at-rest encoding: player_view still ships plain JSON
+# over the WebSocket, so nothing on the wire or in the client changes.
+#
+# base64-in-TEXT rather than a raw BLOB column keeps it DRIVER-AGNOSTIC — the
+# dual sqlite/libsql wrapper can't be trusted to bind/return bytes identically
+# (libsql can't be tested on this box), and base64 survives a plain SELECT and
+# the libSQL HTTP JSON protocol unchanged. The ~33% base64 overhead still nets
+# ~7-8x. The "z:" prefix is outside the base64 alphabet AND can't begin a JSON
+# object ("{"), so decode_state can tell a compressed blob from a legacy one.
+_STATE_PREFIX = "z:"
+
+
+def encode_state(state: dict) -> str:
+    """Serialize a room's full state for the `state_json` column: compact JSON,
+    zlib-compressed, base64'd, and prefixed. Inverse of decode_state."""
+    raw = json.dumps(state, separators=(",", ":")).encode("utf-8")
+    return _STATE_PREFIX + base64.b64encode(zlib.compress(raw, 6)).decode("ascii")
+
+
+def decode_state(blob) -> dict:
+    """Inverse of encode_state, BACKWARD-COMPATIBLE with legacy plain-JSON blobs
+    (which start with "{") so existing prod rows load with no migration — they
+    re-encode compressed the next time the game saves. Empty/None -> {} (the
+    `... or "{}"` read sites relied on that). A genuinely corrupt blob raises,
+    exactly as json.loads did, so the try/except already around these reads
+    still catches it."""
+    if not blob:
+        return {}
+    if isinstance(blob, (bytes, bytearray)):
+        blob = blob.decode("utf-8")
+    if blob.startswith(_STATE_PREFIX):
+        return json.loads(zlib.decompress(base64.b64decode(blob[len(_STATE_PREFIX):])))
+    return json.loads(blob)
 
 
 def ensure_room_loaded(rooms: Rooms, room_id: str,

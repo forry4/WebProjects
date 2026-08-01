@@ -30,6 +30,7 @@ import sys
 import urllib.request
 
 from games.dontminion import bot, engine
+from core.rooms import decode_state
 
 CREDS = os.path.expanduser("~/.spender_turso")
 MOVE_CAP = 4000
@@ -68,7 +69,7 @@ def census(g):
 def check(row):
     """Migrate one save and play it forward. Returns a one-line report."""
     rid, status = row["id"], row["status"]
-    saved = json.loads(row["state"]).get("game")
+    saved = decode_state(row["state"]).get("game")
     if not isinstance(saved, dict):
         return f"  {rid} {status:8} no game dict (open room) — skipped"
     was = saved.get("schema", 1)
@@ -129,7 +130,7 @@ def main():
             if args.file else fetch_saves())
     seen = collections.Counter()
     for row in rows:
-        g = json.loads(row["state"]).get("game")
+        g = decode_state(row["state"]).get("game")
         seen[g.get("schema", 1) if isinstance(g, dict) else "none"] += 1
         print(check(row), flush=True)
     print(f"\n{len(rows)} prod saves replayed; schema versions on prod: "

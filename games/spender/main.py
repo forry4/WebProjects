@@ -202,7 +202,7 @@ def save_game(room_id: str) -> None:
     ids = [seat(pids, i) for i in range(4)]
     nms = [seat(names, i) for i in range(4)]
     _DB_WRITE_EXEC.submit(_persist_row, room_id, room.get("status", "open"),
-                          ids, nms, room.get("host"), json.dumps(state), now, now)
+                          ids, nms, room.get("host"), _rooms.encode_state(state), now, now)
 
 
 def load_game_to_memory(room_id: str) -> bool:
@@ -215,7 +215,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = json.loads(row["state_json"])
+        state = _rooms.decode_state(row["state_json"])
     except Exception:
         return False
     game = state.get("game")
@@ -254,7 +254,7 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         try:
@@ -288,7 +288,7 @@ def list_user_games(user_id: str) -> list[dict]:
     result = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -332,7 +332,7 @@ def list_active_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -368,7 +368,7 @@ def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             continue
         g = state.get("game") or {}
@@ -3051,7 +3051,7 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = json.loads(row["state_json"])
+            state = _rooms.decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):
@@ -3143,7 +3143,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = json.loads(row["state_json"])
+            state = _rooms.decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):

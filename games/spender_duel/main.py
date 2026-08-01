@@ -204,7 +204,7 @@ def save_game(room_id: str) -> None:
         _persist_row, room_id, room.get("status", "open"),
         pids[0] if pids else None, names[0] if names else None,
         pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
-        room.get("host"), json.dumps(state), now, now,
+        room.get("host"), _rooms.encode_state(state), now, now,
     )
 
 
@@ -217,7 +217,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return json.loads(row["state_json"])
+        return _rooms.decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -268,7 +268,7 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = json.loads(r["state_json"] or "{}")
+            state = _rooms.decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -295,7 +295,7 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (json.loads(r["state_json"] or "{}").get("game") or {})
+            g = (_rooms.decode_state(r["state_json"]).get("game") or {})
         except Exception:
             g = {}
         if not isinstance(g, dict) or not g.get("players"):
