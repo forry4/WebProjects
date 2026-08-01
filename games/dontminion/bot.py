@@ -38,7 +38,7 @@ and it must never consume the game's own rng_state (pass an explicit rng).
 
 import random
 
-from . import bot_champion, bot_decisions, bot_endgame, bot_plan, engine
+from . import bot_champion, bot_decisions, bot_endgame, bot_engine, bot_plan, engine
 from .bot_traits import best_bm_terminal, traits
 
 # ai_difficulty values that route to a real strategy. Everything else
@@ -47,6 +47,7 @@ BIG_MONEY = "bigmoney"
 BM_PLUS = "bmplus"
 STRATEGIST = "strategist"
 CHAMPION = "champion"
+ENGBOT = "engbot"          # guarded fair-engine bot (bmplus fallback); unshipped
 
 
 def choose(game, pid, rng=None, difficulty=None):
@@ -59,6 +60,8 @@ def choose(game, pid, rng=None, difficulty=None):
         return choose_strategist(game, pid, rng)
     if difficulty == CHAMPION:
         return choose_champion(game, pid, rng)
+    if difficulty == ENGBOT:
+        return choose_engine(game, pid, rng)
     # "strategist:<archetype>" forces one plan — the arena measures archetypes
     # one at a time this way, and the champion applies its tournament result
     # through the same seam.
@@ -444,6 +447,40 @@ def choose_strategist(game, pid, rng=None, force=None):
         return r.choice(treasures)
 
     want = bot_endgame.override(game, pid, _strategist_buy(game, pid, force))
+    if want is not None and {"type": "buy", "card": want} in moves:
+        return {"type": "buy", "card": want}
+    return {"type": "end_phase"}
+
+
+# ── the guarded fair-engine bot ──────────────────────────────────────────────
+# Big Money+ on every board where an engine is NOT clearly viable (the clean
+# fallback — it can never do worse than the default there), and the fair engine
+# (bot_engine: builds + pilots off HAND + deck COMPOSITION + public counts, never
+# the draw order) on boards that pass the strict four-leg gate.
+
+def choose_engine(game, pid, rng=None):
+    r = rng or random.Random()
+    if game["pending_pid"] == pid:
+        return _decision(game, pid, r, policy=True)
+    if not bot_engine.engine_viable(game):
+        return choose_bm_plus(game, pid, r)         # clean bmplus fallback
+
+    moves = engine.legal_moves(game, pid)
+    if game["phase"] == "action":
+        mv = bot_engine.engine_action(game, pid, moves)
+        return mv if mv is not None else {"type": "end_phase"}
+
+    for m in moves:
+        if m["type"] == "play_all_treasures":
+            return m
+    treasures = [m for m in moves if m["type"] == "play_treasure"]
+    if treasures:
+        return r.choice(treasures)
+
+    planned = bot_engine.engine_buy(game, pid)
+    if planned is None:
+        planned = _bm_plus_buy(game, pid)           # money ladder underneath
+    want = bot_endgame.override(game, pid, planned)
     if want is not None and {"type": "buy", "card": want} in moves:
         return {"type": "buy", "card": want}
     return {"type": "end_phase"}

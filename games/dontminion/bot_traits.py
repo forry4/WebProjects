@@ -147,6 +147,59 @@ BM_TERMINALS = {
     "Steward": 30, "Moat": 20,
 }
 
+# ── general card-strength prior (ThunderDominion 2022 rankings) ──────────────
+# A GENERAL power ranking the bot otherwise lacked — it only had BM_TERMINALS
+# (~22 cards). Source: wiki.dominionstrategy.com ThunderDominion Card Rankings,
+# 2022 column, transcribed per expansion (best -> worst; these are WITHIN-set
+# ranks, 1 = best in that set). Cross-set comparisons anchor on cost (see
+# bot_engine.card_power) since a within-set rank can't compare a Base #1 to a
+# Seaside #1 directly. Harem is our Farm (2023 rename).
+_RANKS_2022 = {
+    "base": ["Chapel", "Sentry", "Witch", "Throne Room", "Militia", "Artisan",
+             "Laboratory", "Village", "Festival", "Remodel", "Market",
+             "Moneylender", "Council Room", "Smithy", "Merchant", "Vassal",
+             "Poacher", "Bandit", "Workshop", "Cellar", "Moat", "Gardens",
+             "Library", "Harbinger", "Mine", "Bureaucrat"],
+    "intrigue": ["Masquerade", "Bridge", "Steward", "Torturer", "Upgrade",
+                 "Replace", "Conspirator", "Swindler", "Minion", "Ironworks",
+                 "Nobles", "Mill", "Mining Village", "Lurker", "Courtier",
+                 "Diplomat", "Courtyard", "Patrol", "Wishing Well",
+                 "Shanty Town", "Pawn", "Baron", "Trading Post",
+                 "Secret Passage", "Duke", "Farm"],
+    "seaside": ["Wharf", "Sea Witch", "Outpost", "Fishing Village", "Blockade",
+                "Monkey", "Sailor", "Salvager", "Lookout", "Bazaar", "Caravan",
+                "Lighthouse", "Native Village", "Astrolabe", "Warehouse",
+                "Smugglers", "Sea Chart", "Haven", "Pirate", "Tactician",
+                "Island", "Tide Pools", "Corsair", "Treasury", "Cutpurse",
+                "Treasure Map", "Merchant Ship"],
+    "prosperity": ["King's Court", "Collection", "Worker's Village", "Peddler",
+                   "Grand Market", "City", "Tiara", "Clerk", "Quarry",
+                   "Investment", "Charlatan", "Expand", "Watchtower",
+                   "War Chest", "Mint", "Anvil", "Rabble", "Forge", "Bishop",
+                   "Hoard", "Bank", "Magnate", "Monument", "Crystal Ball",
+                   "Vault"],
+    "hinterlands": ["Margrave", "Border Village", "Souk", "Berserker",
+                    "Highway", "Trail", "Spice Merchant", "Stables", "Haggler",
+                    "Wheelwright", "Witch's Hut", "Weaver", "Crossroads",
+                    "Jack of All Trades", "Inn", "Cauldron", "Scheme",
+                    "Develop", "Guard Dog", "Fool's Gold", "Nomads", "Tunnel",
+                    "Farmland", "Oasis", "Cartographer", "Trader"],
+}
+# name -> quality in (0, 1], 1 = best in its expansion, normalized by set size
+# so a #1 of 26 and a #1 of 25 both read ~1.0.
+CARD_QUALITY = {}
+for _names in _RANKS_2022.values():
+    _n = len(_names)
+    for _i, _name in enumerate(_names):
+        CARD_QUALITY[_name] = (_n - _i) / _n
+
+
+def quality(name):
+    """Within-expansion 2022 ranking as a 0..1 quality, or None if unranked
+    (Hinterlands, and anything not on the list)."""
+    return CARD_QUALITY.get(name)
+
+
 # Every kingdom card that has been reviewed against the tables above. A set
 # lands => its 25-30 names land here => the test goes green again.
 REVIEWED = frozenset(

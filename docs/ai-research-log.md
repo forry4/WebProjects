@@ -8,6 +8,36 @@ Content below is preserved **verbatim** from the pre-split `CLAUDE.md` (git also
 
 ---
 
+<!-- ===================================================================== -->
+# Dontminion — the FAIR engine attempt (no deck-order peeking): re-confirmed the engine wall; card-strength rankings integrated
+<!-- ===================================================================== -->
+
+### Session (2026-08-01) — a clean-fallback guarded engine bot, built and MEASURED NEGATIVE again (0.06 on engine boards); the ThunderDominion 2022 rankings added as a general strength prior
+
+**The user's reframe (right, and it fixed the disaster half):** the old `strategist` lost 0.27–0.35 because it DEVIATED into a losing engine plan on ~66% of boards. Make the fallback *literally* `choose_bm_plus` and deviate only where an engine is clearly viable. Built `bot_engine.py` + the `engbot` tier (unshipped, server refuses it like strategist/champion): Big Money+ on every non-engine board, a FAIR engine (reads only its HAND + deck COMPOSITION + public counts — **never `seat["deck"]` order/contents**, per the user's "no cheating by knowing deck order") on boards passing a strict four-leg gate.
+
+**Result — the fallback works, the engine does not.** CRN arena, all sets, mirror 0.5000 exact:
+- **Fallback boards (~83%): 0.5000 exactly** — the clean guard is perfect; on non-engine boards `engbot` IS bmplus.
+- **Engine-viable boards (~17%): 0.05 → 0.09 → 0.06** across the iteration — CATASTROPHIC, no better than the old 0.20.
+- **Overall: 0.40** (up from strategist's 0.27, entirely from the clean fallback).
+
+**Why it loses — a real dilemma, not a tuning miss (diagnosed by instrumenting decks + max hand size).** The engine never "goes off": max hand stays 5–9 (a real engine draws 15+), it durdles to turn 25–40, and buys 0–2 Provinces. Each fix exposed the next layer:
+- **Sifter vs real draw:** the metric counted Cellar/Warehouse/Crossroads/Tide Pools ("+3 Cards, discard 3", net ~0) as draw, so a cantrip pile "could draw the deck". Added `real_drawer` (REVIEWED: `_FAKE_DRAW` set) — draw_capacity now credits only genuine card-advantage.
+- **No copy caps** → bought 7–10 of one piece (Border Village×9, Warehouse×10). Capped every role; abandon-to-money if the deck bloats past 26 without coming online.
+- **Payload:** an engine that draws but makes only $8 just TIES money ten turns later — the online test needs ~$16 + a +Buy (two Provinces), which few heuristic builds reach, so it either greens a dead engine (0.09) or never greens and bails (0.06). **There is no threshold that makes a hand-built engine reliably out-race Big Money**, because composition metrics can't tell whether the engine will *fire* this turn and the piloting can't guarantee it does.
+
+This is the SAME wall as strategist (0.20), the champion rollout ceiling (=bmplus), and the oracle bound (0.596 with *perfect* selection). **Do not relitigate the heuristic engine** — the evidenced path to beating bmplus is a learned eval / a search whose leaf policy can itself pilot an engine, not more heuristics.
+
+**SHIPPED-worthy asset — the ThunderDominion 2022 card rankings (`bot_traits.CARD_QUALITY` / `quality()`).** The bot had no general strength prior, only `BM_TERMINALS` (~22 cards). Transcribed all five sets from the wiki (user-supplied screenshots; the page is Anubis-walled + proxy-blocked here) — **130 kingdom cards, validated against the roster (0 missing, 0 typos, Harem→Farm handled).** `bot_engine.card_power` uses it (cost-anchored so ranked/unranked stay comparable) for engine piece selection; also **fixed a real bug** where piece ties broke toward the *cheaper* card (user caught it — pricier is generally better).
+
+**MEASURED: the general ranking must NOT replace purpose-specific rankings.** Tested a `bmrank` throwaway that picks bmplus's terminal by general `quality` instead of `bm_terminal_rank`: **0.4725 vs bmplus**, slightly worse. It changes the pick on 35% of boards and the changes are wrong — it takes Masquerade (Intrigue #1 overall, but a *trasher*) over Sea Witch/Torturer (elite Big Money cursers). General strength ≠ role-specific strength; `bm_terminal_rank` stays for BM, general `quality` is a role-*filtered* tiebreak only.
+
+**Also fixed (shared, helps every policy tier):** pure-thinning trashing now removes ONLY Copper/Estate/Curse (`_THIN_JUNK`), never a weak Action or a Silver+ (user directive; also the brake on "The Trasher"). Didn't move the engine number (over-trash wasn't the dominant failure) but it's correct.
+
+**Kept as research artifacts** (server refuses both via `_valid_difficulty`): `bot_engine.py` + the `engbot` tier, with the failure modes mapped for the next attempt.
+
+---
+
 
 
 <!-- ===================================================================== -->

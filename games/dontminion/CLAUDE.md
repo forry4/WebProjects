@@ -545,9 +545,22 @@ BM+Smithy ~14 — ours read 16.3 and 15.3, which is how we know the ladder is fa
 
 ### NOT shipped — built, measured, and beaten by `bmplus` (do not relitigate as-is)
 
-`strategist` and `champion` exist in `bot.py` behind difficulty strings **the server refuses**
-(`_valid_difficulty` coerces them), pinned by a test. They are the research harness, not
+`strategist`, `champion`, and **`engbot`** exist in `bot.py` behind difficulty strings **the server
+refuses** (`_valid_difficulty` coerces them), pinned by a test. They are the research harness, not
 opponents.
+
+- **`engbot` (2026-08-01) — a FAIR guarded engine bot = 0.40 vs bmplus (research-log session).** Big
+  Money+ on every non-engine board (clean fallback: exactly **0.5000** there), and `bot_engine.py`'s
+  engine — which reads only HAND + deck COMPOSITION + public counts, **never the draw order** (user
+  directive: no cheating by knowing the deck) — on strict-gate boards, where it reads **0.06–0.09**.
+  Same wall as strategist: a hand-heuristic engine can't reliably build+pilot itself to out-race BM
+  (sifter-vs-real-draw, over-trash, payload/green-timing each a layer). **Do not relitigate the
+  heuristic engine** — the path above bmplus is learned eval / engine-piloting search, not heuristics.
+- **`bot_traits.CARD_QUALITY` — the ThunderDominion 2022 rankings** (all 5 sets, 130 cards, validated)
+  are the general strength prior the bot lacked. `bot_engine.card_power` uses them (cost-anchored) for
+  engine piece selection. **A general ranking is NOT a substitute for a role-specific one**: picking
+  bmplus's terminal by general `quality` measured 0.4725 (it takes Masquerade over Sea Witch) —
+  `bm_terminal_rank` stays for BM; general `quality` is a role-*filtered* tiebreak only.
 
 - **`strategist` (archetype board-read) = 0.35 vs bmplus.** Engine 0.231, minion 0.237,
   cursing-money 0.381, rush 0.000; even its plain money plan reads 0.4667 over 120 games. This is

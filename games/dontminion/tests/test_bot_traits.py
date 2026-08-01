@@ -89,3 +89,21 @@ def test_best_bm_terminal_prefers_the_articles_ranking():
     # an empty pile is not a terminal you can buy
     assert T.best_bm_terminal(["Smithy", "Wharf"],
                               supply={"Smithy": 10, "Wharf": 0}) == "Smithy"
+
+
+def test_card_quality_rankings_are_real_cards_and_normalized():
+    """The ThunderDominion 2022 rankings are transcribed by hand — guard against
+    a typo (a name that is not a real card) and against a broken normalization.
+    Not a COMPLETENESS check: a future expansion the 2022 list never ranked is
+    fine (card_power falls back to cost), so we don't force every kingdom card
+    to appear."""
+    from games.dontminion.cards import CARDS, KINGDOM
+    bad = sorted(n for n in T.CARD_QUALITY if n not in CARDS)
+    assert not bad, f"CARD_QUALITY has names that are not cards: {bad}"
+    # every current kingdom card IS ranked today (all five sets were captured)
+    kingdom = set(sum((KINGDOM[s] for s in KINGDOM), []))
+    assert all(T.quality(c) is not None for c in kingdom)
+    # normalized to (0, 1], best in each set ~1.0
+    assert all(0 < q <= 1 for q in T.CARD_QUALITY.values())
+    assert T.quality("Chapel") == 1.0 and T.quality("Wharf") == 1.0
+    assert T.quality("Bureaucrat") < 0.1        # last in Base

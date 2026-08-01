@@ -284,6 +284,12 @@ def _choose_option(game, pid, frame, rng):
 
 # ── per-purpose card policy ──────────────────────────────────────────────────
 
+# The ONLY cards pure thinning removes — the starting junk. A weak Action or a
+# Silver is worth more than a dead card, so thinning never touches them (user
+# directive; also the brake on "The Trasher" losing archetype). Estate is on the
+# list but `_junk`'s endgame flip pulls it off once it is worth points.
+_THIN_JUNK = {"Copper", "Estate", "Curse"}
+
 # Trashing here is a CONVERSION, not thinning: the card is exchanged for
 # something better, so the pick reads "what upgrades best", not "what is worst".
 _TRASH_TO_GAIN = {"Remodel", "Upgrade", "Expand", "Replace", "Develop", "Mine",
@@ -308,8 +314,13 @@ def _choose_cards(game, pid, frame, rng):
     if purpose == "trash":
         if card in _TRASH_TO_GAIN:
             return _clamp(frame, _trash_to_gain(game, pid, card, pool, lo, hi))
-        # pure thinning: junk only, never more than the frame demands
-        junk = sorted([x for x in pool if _junk(game, pid, x)],
+        # PURE THINNING trashes ONLY the starting junk — Copper, Estate, Curse —
+        # never an Action or a Silver+ (a weak terminal is worth keeping over a
+        # dead card, and trashing your own pieces is how "The Trasher" loses).
+        # `_junk` still applies on top, so an Estate drops out of the list once
+        # the game is ending and it is worth points again.
+        junk = sorted([x for x in pool
+                       if x in _THIN_JUNK and _junk(game, pid, x)],
                       key=lambda x: deck_value(game, pid, x))
         junk = _protect_economy(game, pid, junk)
         return _clamp(frame, junk[:hi] if len(junk) >= lo
