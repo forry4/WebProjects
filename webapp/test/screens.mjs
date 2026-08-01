@@ -508,9 +508,15 @@ try {
 							.every((b) => b.getBoundingClientRect().height < 44),
 				};
 			});
-			check("...the bot style is pickable, defaulting to Big Money",
-				!!bots && bots.labels.length >= 2 && bots.sel.length === 1
-				&& /big money/i.test(bots.sel[0]), JSON.stringify(bots));
+			// Defaults to the STRONGEST tier (main.DEFAULT_DIFFICULTY = bmplus,
+			// labelled "Money+"). Asserted on the label rather than the id
+			// because the id never reaches the DOM; the full tier names ride
+			// as button titles, since a longer label would be clipped by the
+			// seg track's overflow:hidden — which is what the one-line check
+			// below guards.
+			check("...the bot style is pickable, defaulting to the strongest tier",
+				!!bots && bots.labels.length >= 3 && bots.sel.length === 1
+				&& /money\+/i.test(bots.sel[0]), JSON.stringify(bots));
 			check("...sharing one line with the bot count, without wrapping",
 				!!bots && bots.oneLine, JSON.stringify(bots));
 

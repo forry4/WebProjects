@@ -24,10 +24,16 @@ const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 // The bot tiers the SERVER actually distinguishes (main.AI_DIFFICULTIES), in
 // strength order. easy/normal/hard are one and the same random-legal bot, so
 // only one of them is offered rather than pretending to three tiers.
+//
+// LABELS ARE SHORT ON PURPOSE. These render as a `cm-seg` sharing one row with
+// the Bots counter (the side-by-side layout is what keeps the create modal
+// inside its 148px budget), and `.cm-seg-btn` is `white-space:nowrap` inside an
+// `overflow:hidden` track — a label too wide for its third of the track is
+// CLIPPED, not wrapped. The full name rides along as the button's title.
 const BOTS = [
-  { id: "easy", name: "Random" },
-  { id: "bigmoney", name: "Big Money" },
-  { id: "bmplus", name: "Big Money+" },
+  { id: "easy", name: "Random", title: "Random legal moves — barely plays" },
+  { id: "bigmoney", name: "Money", title: "Big Money — the classic buy ladder" },
+  { id: "bmplus", name: "Money+", title: "Big Money+ — reads the board for a terminal, knows how the game ends" },
 ];
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
 // "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
@@ -1202,7 +1208,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
                 <div className="dm-cm-col dm-cm-botstyle">
                   <span className="cm-label">Bot style</span>
-                  <CmSeg options={BOTS.map((b) => ({ value: b.id, label: b.name }))}
+                  <CmSeg options={BOTS.map((b) => ({ value: b.id, label: b.name, title: b.title }))}
                     value={createBotKind} onChange={setCreateBotKind} />
                 </div>
               </div>
