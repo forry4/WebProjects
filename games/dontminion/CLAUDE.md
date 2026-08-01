@@ -557,9 +557,14 @@ opponents.
   and picks plain money on 45 of 60 boards, so archetype selection is a small lever by
   construction.
 - **The Rust simulation core was NOT built, on purpose.** Its justification is making rollout
-  search deep enough to pay; that premise is testable in Python first, and the rollout-count
-  ladder is the gate. Porting 139 cards (plus a recurring tax for ~13 more planned sets) for a
-  lever with no measured gain is the trade this campaign explicitly declined.
+  search deep enough to pay, and that premise is testable in Python first. The measured ladder
+  (champion vs bmplus, n=20 per rung): **4 rollouts 0.250 | 16 = 0.300 | 64 = 0.425** — a real
+  upward trend, but still losing, and walking toward parity rather than past it. The mechanism:
+  **the rollouts play `bmplus`, so the search asks "how does this end if both sides play Big
+  Money" — its ceiling is the rollout POLICY, not sims/sec.** Porting 139 cards, plus a recurring
+  tax for ~13 more planned sets, to buy depth for a search that converges on a wash is the trade
+  this campaign declined. Rust becomes obvious the moment a better rollout policy or
+  action-phase search shows a rollout-count trend that crosses 0.5.
 
 Two harness bugs worth remembering, both of which look like "the search is weak": a "buy nothing"
 candidate that never ends the phase is really "let a fresh policy decide" and beats every real
