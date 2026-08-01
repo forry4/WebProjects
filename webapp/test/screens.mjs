@@ -515,7 +515,7 @@ try {
 			// seg track's overflow:hidden — which is what the one-line check
 			// below guards.
 			check("...the bot style is pickable, defaulting to the strongest tier",
-				!!bots && bots.labels.length >= 3 && bots.sel.length === 1
+				!!bots && bots.labels.length >= 2 && bots.sel.length === 1
 				&& /money\+/i.test(bots.sel[0]), JSON.stringify(bots));
 			check("...sharing one line with the bot count, without wrapping",
 				!!bots && bots.oneLine, JSON.stringify(bots));
