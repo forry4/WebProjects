@@ -52,7 +52,7 @@ const GameChunkLoading = () => (
 	<div style={{ minHeight: "100vh", background: "#120c0d" }} />
 );
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -697,6 +697,10 @@ export default function SpenderApp() {
 	// lives in `spenderScreen` and is only meaningful while screen === "spender".
 	const [screen, setScreen] = useState("loading");
 	const [spenderScreen, setSpenderScreen] = useState("browser");   // browser | waiting | game
+	// a room connect is in flight (create / join / continue / deep-link) — while it
+	// is AND we're still on the lobby, show the spinner instead of the lobby, so a
+	// reconnect doesn't flash the lobby then snap into the game (matches CoC).
+	const [connecting, setConnecting] = useState(false);
 
 	// Enter one of Spender's own screens. Always sets BOTH, so the two can never drift
 	// (a bare setSpenderScreen while the site is on, say, /coc would render nothing).
@@ -869,6 +873,7 @@ export default function SpenderApp() {
 
 	// ── handleMessage ──────────────────────────────────────────────────────
 	const handleMessage = useCallback((msg) => {
+		setConnecting(false);        // any authoritative reply ends the connect loader
 		const room = msg.room;
 		if (room?.reconnect_tokens?.[myId]) {
 			const rid = room.room_id || roomId;
@@ -1219,6 +1224,16 @@ export default function SpenderApp() {
 	useEffect(() => {
 		if (toast) { const t = setTimeout(() => setToast(""), 2500); return () => clearTimeout(t); }
 	}, [toast]);
+
+	// a connect that never answers must not leave the spinner up forever
+	useEffect(() => {
+		if (!connecting) return;
+		const t = setTimeout(() => {
+			setConnecting(false);
+			setToast("Still connecting — the server may be waking up. Try again in a moment.");
+		}, 15000);
+		return () => clearTimeout(t);
+	}, [connecting]);
 
 	// Hold on the final board for 2s after the game ends before revealing the
 	// win/loss screen, so the player sees the move that ended it. Resets whenever
@@ -1644,6 +1659,7 @@ export default function SpenderApp() {
 		pendingActionRef.current = vsAI
 			? { action: "create", name: playerName, vs_ai: true, ai_variant: aiVariant, win_points: wp }
 			: { action: "create", name: playerName, win_points: wp, max_players: maxPlayers };
+		setConnecting(true);
 		connect(`${WS_BASE}/${newRoomId}/${myId}`);
 	};
 
@@ -1651,6 +1667,7 @@ export default function SpenderApp() {
 		setRoomId(gameId);
 		try { localStorage.setItem("spender_roomId", gameId); } catch {}
 		pendingActionRef.current = { action: "join", name: playerName, session_token: authUser?.session_token };
+		setConnecting(true);
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
@@ -1681,6 +1698,7 @@ export default function SpenderApp() {
 		pendingActionRef.current = savedToken
 			? { action: "reconnect", token: savedToken }
 			: { action: "join", name: playerName, session_token: authUser?.session_token };
+		setConnecting(true);
 		connect(`${WS_BASE}/${gameId}/${myId}`);
 	};
 
@@ -2568,6 +2586,15 @@ export default function SpenderApp() {
 	);
 
 	// Game browser screen
+	// connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
+	if (screen === "spender" && spenderScreen === "browser" && connecting) return (
+		<>
+			<style>{css}</style>
+			<div className="app" style={{ "--lby-accent": "#d4a84c" }}>
+				<LobbyLoading label="Connecting…" />
+			</div>
+		</>
+	);
 	if (screen === "spender" && spenderScreen === "browser") return (
 		<>
 			<style>{css}</style>

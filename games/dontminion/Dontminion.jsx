@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
-  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss,
+  lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
   LobbyCreateRow, lobbyCreateRowCss,
 } from "../../shared/lobby.jsx";
@@ -532,6 +532,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
+  // A room connect is in flight (create / join / deep-link resume). While it is
+  // AND we're still on the lobby screen, show the loading spinner instead of the
+  // lobby, so a reconnect doesn't flash the lobby then snap into the game (CoC).
+  const [connecting, setConnecting] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
@@ -675,6 +679,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── socket plumbing ──
   const handleMessage = useCallback((msg) => {
+    setConnecting(false);        // any authoritative reply ends the connect loader
     if (msg.type === "error") {
       const ua = urlAttemptRef.current;
       if (ua) {
@@ -793,6 +798,17 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
 
+  // A connect that never answers (server asleep, socket never opens) must not
+  // leave the spinner up forever — bail back to the lobby with a hint.
+  useEffect(() => {
+    if (!connecting) return;
+    const t = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting — the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [connecting]);
+
   // The log reads oldest-at-top, so the newest line is at the BOTTOM and the
   // view has to follow it — unless the reader deliberately scrolled up to
   // re-read a turn, which must not be yanked away by the next move.
@@ -864,18 +880,21 @@ export default function Dontminion({ myId, authUser, onExit }) {
     } else {
       msg.max_players = createPlayers;
     }
+    setConnecting(true);
     connect(`${DM_WS}/${rid}/${myId}`, msg);
   };
   const joinGame = (rid) => {
     rid = (rid || "").toUpperCase().trim();
     if (!rid) return;
     setRoomId(rid);
+    setConnecting(true);
     connect(`${DM_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resumeGame = (rid) => {
     let tok = null;
     try { tok = localStorage.getItem(`dm_token_${rid}_${myId}`); } catch {}
     setRoomId(rid);
+    setConnecting(true);
     connect(`${DM_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const cancelGame = (rid) => {
@@ -893,6 +912,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
   const leaveToLobby = () => {
     disconnect();
+    setConnecting(false);
     pushPath(buildPath("dontminion"));
     setScreen("lobby");
     setRoomData(null);
@@ -1271,6 +1291,17 @@ export default function Dontminion({ myId, authUser, onExit }) {
   );
 
   // ─── screens ───────────────────────────────────────────────────────────────
+  // Connecting to a room (deep-link resume / join / create) while still on the
+  // lobby screen → show the spinner, not the lobby, so a reconnect doesn't flash
+  // the lobby then snap into the game (matches CoC).
+  if (connecting && screen === "lobby") {
+    return (
+      <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
+        <style>{dmStyles}</style>
+        <div className="dm-center"><LobbyLoading label="Connecting…" /></div>
+      </div>
+    );
+  }
   if (screen === "lobby") {
     return (
       <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>

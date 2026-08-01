@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
-import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
@@ -350,6 +350,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
+  // room connect in flight (create / join / deep-link resume) — while it is AND
+  // we're still on the lobby screen, show the spinner instead of the lobby.
+  const [connecting, setConnecting] = useState(false);
   const [showRules, setShowRules] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
   const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
@@ -461,6 +464,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   // ── socket ──
   const handleMessage = useCallback((msg) => {
+    setConnecting(false);        // any authoritative reply ends the connect loader
     if (msg.type === "error") {
       // A URL-driven room attempt (deep link / popstate) failed. A stale token gets ONE
       // retry as a plain join (invite-link case); anything else falls back to the lobby
@@ -604,6 +608,16 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   }, [connected, inLiveGame, attemptReconnect]);
 
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
+
+  // a connect that never answers must not leave the spinner up forever
+  useEffect(() => {
+    if (!connecting) return;
+    const t = setTimeout(() => {
+      setConnecting(false);
+      setToast("Still connecting — the server may be waking up. Try again in a moment.");
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [connecting]);
 
   // clear interaction state whenever the decision context changes
   useEffect(() => {
@@ -856,18 +870,21 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     setShowCreateModal(false);
     const msg = { action: "create", name: playerName, vs_ai: vsAi };
     if (vsAi) msg.ai_difficulty = difficulty || "hard";
+    setConnecting(true);
     connect(`${DUEL_WS}/${rid}/${myId}`, msg);
   };
   const joinGame = (rid) => {
     rid = (rid || "").toUpperCase().trim();
     if (!rid) return;
     setRoomId(rid);
+    setConnecting(true);
     connect(`${DUEL_WS}/${rid}/${myId}`, { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const resumeGame = (rid) => {
     let tok = null;
     try { tok = localStorage.getItem(`duel_token_${rid}_${myId}`); } catch {}
     setRoomId(rid);
+    setConnecting(true);
     connect(`${DUEL_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const cancelGame = (rid) => {
@@ -915,6 +932,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   const leaveToLobby = () => {
     disconnect();
+    setConnecting(false);
     pushPath(buildPath("duel"));   // leave the room URL (dedup no-op when popstate-driven)
     setScreen("lobby");
     setRoomData(null);
@@ -1439,6 +1457,15 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   );
 
   // ── screens ──
+  // connecting to a room while still on the lobby → spinner, not a lobby flash (CoC)
+  if (connecting && screen === "lobby") {
+    return (
+      <div className="app duel" style={{ "--lby-accent": "#bf6fd0" }}>
+        <style>{duelStyles}</style>
+        <LobbyLoading label="Connecting…" />
+      </div>
+    );
+  }
   if (screen === "lobby") {
     const activeMine = myGames.filter((g) => g.status === "playing");
     const savedRid = (() => { try { return localStorage.getItem("duel_roomId"); } catch { return null; } })();
