@@ -37,7 +37,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 7
+SCHEMA = 8
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -46,6 +46,7 @@ SCHEMA = 7
 #   6 = the PILE MODEL (game["piles"]: ordered/non-supply piles, attachments)
 #   7 = Cornucopia & Guilds (Coffers, the setup-chosen Bane/Ferryman piles,
 #       Footpad's game rule, per-seat set-asides + start-of-turn abilities)
+#   8 = Alchemy (the cost VECTOR's second money pool, game["potions"])
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten

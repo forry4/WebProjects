@@ -17,7 +17,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 3 | **Hinterlands 2E** (26) | `discard` emit, unfiltered offers, self-trigger context, registry-driven attack reactions + reaction-that-plays-itself (Guard Dog), attack-typed Treasures opening the window (Cauldron), plays from non-hand zones + lose-track (Trail), actor-aware resource pools, coin floor (Souk), `exchange` (Trader), `shuffle_into_deck` (Inn), `cost_lt`, all-seats clean-up sweep, `discard_then_putback` | **SHIPPED** 2026-07-30 + audited |
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
 | 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
-| 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **kernel + cards landed**, held out of the picker: per-card tests, cross-set batch and audit outstanding |
+| 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **SHIPPED** 2026-08-02 + audited (11 of 12 — Possession deferred) |
 | 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), ⚠ **card identity / "play-as" system** (Band of Misfits — see ledger) | planned |
 | 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
@@ -196,10 +196,10 @@ It is recorded in `cards.DEFERRED` — as DATA, not a comment — with its reaso
 (12 kingdom cards) still reconciles as "what we ship + what we defer", so the hole cannot be
 quietly forgotten, and the day Possession is built the test points at the counts to update.
 
-**This breaks the roadmap's own whole-set rule on purpose.** A set is meant to ship only when
-whole, because a partial set poisons the random-kingdom picker. Alchemy is therefore **held out
-of `KNOWN_EXPANSIONS`** for now, so no live game can deal it — the same gate C&G sat behind
-while its audit was outstanding.
+**This breaks the roadmap's own whole-set rule on purpose**, and the rule is worth restating so
+the exception stays an exception: a set normally ships only when whole, because a partial set
+poisons the random-kingdom picker. Alchemy ships at 11 of 12 by explicit decision, with the
+twelfth recorded in `cards.DEFERRED` and reconciled by a test.
 
 ### What landed
 
@@ -219,10 +219,13 @@ while its audit was outstanding.
   rule, the buy gate on both components, `potion_costs` on the wire, and Vineyard's VP kind.
 - 11 cards in `effects_alchemy.py`, green under the conservation soak on an all-Alchemy board.
 
-### Still outstanding before it can be released
+### What the audit caught
 
-Per-card test batches, the cross-set batch, and the adversarial audit — which is where phase 4
-found all three of its real bugs, so this is not a formality.
+**University's gain is a "MAY" and I had made it mandatory** — a `choose_pile` frame has no way
+to decline, so the card forced a gain every time. Nothing else would have found it: it "worked"
+in every test written from the behaviour, because a test author reading the same implementation
+asks the same question. Re-reading the printed text is what exposed it. It is a 0-or-1
+`choose_cards` now, and `test_university_may_decline_to_gain` pins it.
 
 ### A finding for whoever picks this up
 

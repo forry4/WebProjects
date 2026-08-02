@@ -70,7 +70,7 @@ def _valid_difficulty(value) -> str:
 
 
 KNOWN_EXPANSIONS = ("base", "intrigue", "seaside", "prosperity", "hinterlands",
-                    "cornucopia")
+                    "cornucopia", "alchemy")
 
 
 def _valid_expansions(value) -> list[str]:

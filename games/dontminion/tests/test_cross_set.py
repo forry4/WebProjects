@@ -1279,7 +1279,7 @@ def test_a_hinterlands_position_round_trips_through_json_and_migrate():
     blob = json.dumps(g)
     loaded = engine.migrate(json.loads(blob))
     assert loaded == json.loads(blob), "migrate mutated a current-shape save"
-    assert loaded["schema"] == engine.SCHEMA == 7
+    assert loaded["schema"] == engine.SCHEMA == 8
     rng = random.Random(11)
     for _ in range(120):                          # and it plays on from the blob
         if loaded["over"]:
@@ -1890,3 +1890,196 @@ def test_the_bot_plays_a_cornucopia_board_to_the_end(chunk):
         ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
         assert ok, err
     assert g["over"], "the bots did not finish a Cornucopia & Guilds board"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Alchemy (phase 5) — the COST VECTOR against every other set's cost check.
+#
+# The vector's whole design claim is that the NUMBER forms absorbed it with no
+# call-site change and only the CARD-reference forms had to move. That claim is
+# about cards in other modules, so it can only be tested here.
+# ═══════════════════════════════════════════════════════════════════════════
+
+ALC = ("base", "intrigue", "alchemy")
+
+
+def _alc(kingdom, players=(A, B), seed=42, expansions=ALC):
+    return engine.new_game(list(players), list(expansions), seed=seed,
+                           kingdom=list(kingdom))
+
+
+def _fill(*extra):
+    base = ["Village", "Smithy", "Market", "Festival", "Laboratory",
+            "Militia", "Mine", "Library", "Council Room", "Moat"]
+    return (list(extra) + [c for c in base if c not in extra])[:10]
+
+
+@pytest.mark.parametrize("card,setup", [
+    ("Workshop", None),
+    ("Ironworks", None),
+])
+def test_a_number_bounded_gainer_never_offers_a_potion_card(card, setup):
+    """The payoff claim, on cards nobody edited: their bound is "$N", and
+    "up to $N" means "and no Potion"."""
+    g = _alc(_fill(card, "Golem", "University", "Transmute"))
+    give_hand(g, A, [card])
+    assert mv(g, A, {"type": "play_action", "card": card})[0]
+    f = g["pending"][-1]
+    piles = f["constraint"].get("piles") or f["constraint"].get("cards")
+    for p in ("Golem", "University", "Transmute"):
+        assert p not in piles, f"{card} must not reach {p}"
+
+
+def test_horn_of_plenty_never_gains_a_potion_card():
+    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=4,
+                        kingdom=["Horn of Plenty", "Transmute", "University",
+                                 "Village", "Smithy", "Market", "Festival",
+                                 "Laboratory", "Militia", "Moat"])
+    g["seats"][A]["in_play"] = ["Village", "Smithy", "Market", "Festival"]
+    give_hand(g, A, ["Horn of Plenty"])
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "play_treasure", "card": "Horn of Plenty"})[0]
+    piles = g["pending"][-1]["constraint"]["piles"]
+    assert "Transmute" not in piles, "{$0,P} is not 'up to $5'"
+    assert "University" not in piles
+    assert "Silver" in piles
+
+
+def test_stonemason_uses_the_vector_when_it_trashes_a_potion_card():
+    """"Each costing less than it" against {$4,P}: {$3,P} and {$4} are both
+    lower, {$5} is not, and {$4,P} itself is not."""
+    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=4,
+                        kingdom=["Stonemason", "Golem", "Alchemist", "Duchy"
+                                 if False else "Village", "Smithy", "Market",
+                                 "Festival", "Laboratory", "Militia", "Moat"])
+    give_hand(g, A, ["Stonemason", "Golem"])
+    assert mv(g, A, {"type": "play_action", "card": "Stonemason"})[0]
+    assert decide(g, A, cards=["Golem"])[0]
+    piles = g["pending"][-1]["constraint"]["piles"]
+    assert "Alchemist" in piles, "{$3,P} is lower than {$4,P}"
+    assert "Village" in piles, "{$3} is lower — nothing is higher"
+    assert "Golem" not in piles, "equal is not lower"
+    assert "Duchy" not in piles, "{$5} has higher coins"
+
+
+def test_butchers_coffers_delta_reaches_a_potion_card():
+    """Butcher's bound is "up to $1 more per Coffers spent than IT", a CARD
+    reference — so trashing a Potion card can reach another one."""
+    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=4,
+                        kingdom=["Butcher", "Golem", "Alchemist", "University",
+                                 "Village", "Smithy", "Market", "Festival",
+                                 "Laboratory", "Moat"])
+    g["coffers"][A] = 0
+    give_hand(g, A, ["Butcher", "Alchemist"])
+    assert mv(g, A, {"type": "play_action", "card": "Butcher"})[0]
+    assert decide(g, A, cards=["Alchemist"])[0]        # trash {$3,P}
+    assert decide(g, A, ids=["1"])[0]                  # up to {$4,P}
+    piles = g["pending"][-1]["constraint"]["piles"]
+    assert "Golem" in piles, "{$4,P} is within 'up to $1 more than {$3,P}'"
+    assert "Village" in piles, "a cheaper non-Potion card is still reachable"
+
+
+def test_a_cost_reduction_moves_the_coins_and_leaves_the_potion_alone():
+    """Bridge reduces $ costs. It does not make a Golem cost fewer Potions, so
+    a Potion is still required to buy one."""
+    g = _alc(_fill("Bridge", "Golem"))
+    give_hand(g, A, ["Bridge"])
+    assert mv(g, A, {"type": "play_action", "card": "Bridge"})[0]
+    assert engine.cost(g, "Golem") == 3
+    assert engine.potion_cost(g, "Golem") == 1
+    g["phase"] = "buy"
+    g["coins"] = 9
+    g["potions"] = 0
+    assert {"type": "buy", "card": "Golem"} not in engine.legal_moves(g, A)
+    ok, err = mv(g, A, {"type": "buy", "card": "Golem"})
+    assert not ok and err == "not enough Potions"
+
+
+def test_upgrade_needs_the_potion_components_to_match():
+    """Upgrade is "exactly $1 more", which means "the same cost plus $1" —
+    trashing a plain $2 card can never reach a {$3,P}."""
+    g = _alc(_fill("Upgrade", "Alchemist", "Apothecary"))
+    give_hand(g, A, ["Upgrade", "Estate"])
+    assert mv(g, A, {"type": "play_action", "card": "Upgrade"})[0]
+    assert decide(g, A, cards=["Estate"])[0]           # {$2} -> exactly {$3}
+    piles = g["pending"][-1]["constraint"]["piles"]
+    assert "Silver" in piles
+    assert "Alchemist" not in piles, "{$3,P} is not exactly $1 more than {$2}"
+
+
+def test_upgrading_a_potion_card_reaches_the_next_potion_card_up():
+    g = _alc(_fill("Upgrade", "Alchemist", "Apothecary"))
+    give_hand(g, A, ["Upgrade", "Apothecary"])
+    assert mv(g, A, {"type": "play_action", "card": "Upgrade"})[0]
+    assert decide(g, A, cards=["Apothecary"])[0]       # {$2,P} -> exactly {$3,P}
+    piles = g["pending"][-1]["constraint"]["piles"]
+    assert "Alchemist" in piles
+    assert "Silver" not in piles, "{$3} is not exactly $1 more than {$2,P}"
+
+
+def test_the_potion_pool_is_undoable_like_the_coin_pool():
+    g = _alc(_fill("Golem"))
+    give_hand(g, A, ["Potion"])
+    g["phase"] = "buy"
+    engine._arm_undo(g)
+    assert mv(g, A, {"type": "play_treasure", "card": "Potion"})[0]
+    assert g["potions"] == 1
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["potions"] == 0
+    assert "Potion" in g["seats"][A]["hand"]
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_the_bot_plays_an_alchemy_board_to_the_end(seed):
+    """The tiers price every pile they consider, and this set adds a second
+    cost component. A bot that ignored it would try to buy what it cannot
+    afford — inside the server's guaranteed turn-finisher."""
+    from games.dontminion import bot
+    from games.dontminion.cards import KINGDOM
+    kingdom = (sorted(KINGDOM["alchemy"]) + _fill())[:10]
+    g = engine.new_game([A, B], list(ALC), seed=200 + seed, kingdom=kingdom)
+    rng = random.Random(seed)
+    for _ in range(4000):
+        if g["over"]:
+            break
+        pid = g["pending_pid"] or g["turn"]
+        ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
+        assert ok, err
+    assert g["over"], "the bots did not finish an Alchemy board"
+
+
+def test_a_mandatory_trasher_cannot_eat_the_bots_whole_deck():
+    """THE REGRESSION. On an Alchemy board (seed 7) two bmplus bots each bought
+    an Apprentice, and the decision policy fed it the cheapest card in hand
+    every turn — Coppers, then Silvers, then everything. Both decks reached a
+    single Apprentice, neither could ever buy again, and the game ran 9908
+    turns without ending. The economy guard existed but only covered OPTIONAL
+    thinning; a mandatory trash walked straight past it into the fallback.
+
+    Asserted as "the game ends", because that is the property that broke: a
+    live room would have hung forever."""
+    from games.dontminion import bot
+    g = engine.new_game([A, B], ["alchemy"], seed=7)
+    rng = random.Random(7)
+    for _ in range(6000):
+        if g["over"]:
+            break
+        pid = g["pending_pid"] or g["turn"]
+        ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
+        assert ok, err
+    assert g["over"], "the bots ground each other into an unwinnable stalemate"
+    for p in (A, B):
+        owned = engine.owned_cards(g, p)
+        money = sum(engine.coins_of(g, c) for c in owned
+                    if engine.has_type(g, c, "treasure"))
+        assert money > 3, f"{p} trashed its economy away ({sorted(set(owned))})"
+
+
+def test_no_alchemy_card_is_ranked_as_a_big_money_terminal():
+    """A measurement, not an oversight — see BM_TERMINALS. Ranking Apprentice
+    there read 0.1875 against plain bigmoney, because a money deck that buys a
+    mandatory trasher feeds it Treasures."""
+    from games.dontminion import bot_traits
+    from games.dontminion.cards import KINGDOM
+    for name in KINGDOM["alchemy"]:
+        assert bot_traits.traits(name)["bm_terminal_rank"] == 0, name

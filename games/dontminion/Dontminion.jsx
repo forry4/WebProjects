@@ -48,6 +48,7 @@ const EXPANSIONS = [
   { id: "prosperity", name: "Prosperity" },
   { id: "hinterlands", name: "Hinterlands" },
   { id: "cornucopia", name: "Cornucopia & Guilds" },
+  { id: "alchemy", name: "Alchemy" },
 ];
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply

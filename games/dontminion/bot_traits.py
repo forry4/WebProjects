@@ -177,10 +177,12 @@ BM_TERMINALS = {
     # Soothsayer trades a card to them for the Gold), then the terminal draw.
     "Young Witch": 90, "Soothsayer": 84, "Footpad": 62, "Jester": 58,
     "Journeyman": 54, "Carnival": 45,
-    # Alchemy. Familiar is a cursing CANTRIP, so it is not a terminal at all
-    # and is absent on purpose; Scrying Pool needs a deck full of Actions,
-    # which a money deck by definition does not have.
-    "Apprentice": 34,
+    # Alchemy contributes NO Big-Money terminal, and that is a measurement,
+    # not an oversight. Familiar is a cursing cantrip (not terminal at all) and
+    # Scrying Pool needs a deck full of Actions, which a money deck by
+    # definition lacks. Apprentice was ranked here at 34 and the arena read
+    # 0.1875 vs plain bigmoney on the Alchemy pool: a money deck that buys a
+    # mandatory trasher feeds it Treasures until it cannot buy anything.
 }
 
 # Every kingdom card that has been reviewed against the tables above. A set

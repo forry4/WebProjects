@@ -312,8 +312,17 @@ def _choose_cards(game, pid, frame, rng):
         junk = sorted([x for x in pool if _junk(game, pid, x)],
                       key=lambda x: deck_value(game, pid, x))
         junk = _protect_economy(game, pid, junk)
-        return _clamp(frame, junk[:hi] if len(junk) >= lo
-                      else _worst(game, pid, pool, lo))
+        if len(junk) >= lo:
+            return _clamp(frame, junk[:hi])
+        # A MANDATORY trash with no junk to give (Apprentice, Transmute). The
+        # fallback used to hand over the cheapest card in hand, which on a
+        # money deck means Coppers, then Silvers, then everything: MEASURED,
+        # two bmplus bots ground each other down to a single Apprentice apiece
+        # and then played 9908 turns without either being able to buy anything
+        # — a game that literally cannot end. Protect the economy here too.
+        return _clamp(frame, _worst(game, pid,
+                                    _protect_economy(game, pid, pool, hard=True)
+                                    or pool, lo))
 
     if purpose == "discard":
         # Witch's Hut curses the table only if BOTH discards are Actions —
@@ -354,17 +363,27 @@ def _choose_cards(game, pid, frame, rng):
     return _clamp(frame, _worst(game, pid, pool, lo))
 
 
-def _protect_economy(game, pid, junk):
-    """Drop Coppers out of a trash list while the deck still needs them.
+def _protect_economy(game, pid, junk, hard=False):
+    """Drop Treasures out of a trash list while the deck still needs them.
 
     The Level-10 rule with its brake on: thinning is the strongest early play,
     but a deck trashed below its money can no longer reach $8, and "The
     Trasher" is a named losing archetype. Coppers stay until there are real
     Treasures behind them.
+
+    `hard=True` is for a MANDATORY trash, where the choice is only ever which
+    card to give up: it protects EVERY Treasure while the deck is still thin,
+    not just the Coppers. Without it a repeatable mandatory trasher eats the
+    whole deck one card at a time, and the game stops being able to end.
     """
     owned = engine.owned_cards(game, pid)
-    real_money = sum(1 for c in owned
-                     if traits(c)["treasure"] and engine.coins_of(game, c) >= 2)
+    money = [c for c in owned if traits(c)["treasure"]]
+    real_money = sum(1 for c in money if engine.coins_of(game, c) >= 2)
+    if hard:
+        # keep enough Treasure to still reach a Province-ish hand
+        if sum(engine.coins_of(game, c) for c in money) > 12:
+            return junk
+        return [c for c in junk if not traits(c)["treasure"]]
     if real_money >= 3:
         return junk
     return [c for c in junk if not (traits(c)["treasure"]

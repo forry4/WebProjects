@@ -347,11 +347,17 @@ def _university(game, pid):
                    and E.cost_le(game, p, 5))
     if not piles:
         return
-    E.push_choose_pile(game, pid, "University", "gain", piles)
+    # "You MAY gain an Action card costing up to $5" — optional, so this is a
+    # 0-or-1 choose_cards over the pile names rather than a choose_pile, which
+    # has no way to decline. (The client renders a None button whenever min is
+    # 0, so declining is one click.)
+    E.push_choose_cards(game, pid, "University", "gain", piles, 0, 1,
+                        "gain an Action card costing up to $5")
 
 
 def _university_gain(game, pid, frame, choice):
-    E.gain(game, pid, choice["pile"])
+    if choice["cards"]:
+        E.gain(game, pid, choice["cards"][0])
 
 
 # --- Vineyard ----------------------------------------------------------------

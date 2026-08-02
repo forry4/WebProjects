@@ -513,14 +513,13 @@ def _butcher_trash(game, pid, frame, choice):
     if not choice["cards"]:
         return
     card = choice["cards"][0]
-    base = E.cost(game, card)              # captured before the trash (B3)
     E.trash(game, pid, [card])
     have = game["coffers"].get(pid, 0)
     E.push_choose_option(
         game, pid, "Butcher", "spend",
         options=[{"id": str(k), "label": "Spend nothing" if k == 0
                   else f"Spend {k} Coffers"} for k in range(have + 1)],
-        data={"base": base})
+        data={"ref": card})
 
 
 def _butcher_spend(game, pid, frame, choice):
@@ -529,8 +528,10 @@ def _butcher_spend(game, pid, frame, choice):
         game["coffers"][pid] -= n
         E._log(game, pid, "spend", what="coffers", n=n)
         E.add_coins(game, n)
-    cap = frame["data"]["base"] + n
-    piles = _piles(game, lambda p: E.cost_le(game, p, cap))
+    # "up to $1 more than IT per Coffers you spend" — a CARD reference, so
+    # trashing a Potion card can reach another one (see engine's cost vector)
+    ref = frame["data"]["ref"]
+    piles = _piles(game, lambda p: E.cost_le_card(game, p, ref, n))
     if piles:
         E.push_choose_pile(game, pid, "Butcher", "gain", piles)
 
