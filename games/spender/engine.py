@@ -37,7 +37,7 @@ from __future__ import annotations
 import copy
 
 from games.spender.cards import (
-    GEM_COLORS, bonuses_from, can_afford, calc_spend,
+    GEM_COLORS, bonuses_from, calc_spend,
 )
 
 LEVEL_KEYS = ["L1", "L2", "L3"]
@@ -275,10 +275,10 @@ def _apply_buy(game, pid, ps, mv, effects):
         return False, "card not found", effects
 
     bonuses = bonuses_from(ps["purchased"])
-    if not can_afford(card["cost"], ps["tokens"], bonuses):
+    spend = calc_spend(card["cost"], ps["tokens"], bonuses)
+    if spend["gold"] > ps["tokens"].get("gold", 0):
         return False, "can't afford", effects
 
-    spend = calc_spend(card["cost"], ps["tokens"], bonuses)
     for c, n in spend.items():
         ps["tokens"][c] = ps["tokens"].get(c, 0) - n
         game["bank"][c] = game["bank"].get(c, 0) + n
