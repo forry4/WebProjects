@@ -26,7 +26,7 @@ import random
 
 from .cards import (
     CARDS, KINGDOM, REWARDS, pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
-    grants as cards_grant, overpays as cards_overpay,
+    grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
 )
 
 BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
@@ -82,6 +82,7 @@ _GAME_FILLS = {
     "piles": lambda g: {c: _plain_pile(c) for c in g.get("supply", {})},
     # Cornucopia & Guilds (ph. 4)
     "coffers": lambda g: {p: 0 for p in g.get("players", [])},
+    "potions": lambda g: 0,
     "bane": lambda g: None,             # Young Witch's extra Supply pile
     "ferryman_pile": lambda g: None,    # Ferryman's extra NON-Supply pile
     "footpad_draw": lambda g: False,    # Footpad's game-wide when-gain rule
@@ -1067,6 +1068,12 @@ def _h_spend(game, pid, move):
     return True, None
 
 
+def add_potions(game, n, pid=None):
+    """+Potions into the money pool. Same per-turn pool discipline as coins —
+    a Potion produced on someone else's turn has no pool to land in."""
+    _grant(game, pid, "potions", n, "potions")
+
+
 def add_vp_tokens(game, pid, n):
     """VP tokens (Prosperity+): per-player, only ever gained, scored at game
     end, public. The pool is unlimited."""
@@ -1172,26 +1179,70 @@ def cost(game, card):
     return max(0, c)
 
 
+def potion_cost(game, card):
+    """The POTION component of a cost (Alchemy) — the second dimension of the
+    cost VECTOR. Cost reductions only ever touch the COIN component, so this is
+    the printed value; Bridge does not make a Golem cost fewer Potions."""
+    return cards_potion(_priced(game, card))
+
+
+# THE COST VECTOR (compendium, POTIONS § IV). A cost is {coins, potions}: a
+# printed cost of just {Potion} is {$0, 1P}, and a plain $3 is {$3, 0P}. Three
+# rules follow, and they live HERE rather than in thirty batch call sites —
+# which is the whole reason cost_le/cost_eq/cost_lt were introduced in ph. 2:
+#
+#   "up to $3"        -> coins <= 3 AND potions == 0
+#   "exactly $1 more" -> "the same cost plus $1", so {$3,P} is exactly $1 more
+#                        than {$2,P} but NOT than {$2}
+#   "lower than"      -> no component higher and at least one lower, so {$4,P}
+#                        and {$5} are INCOMPARABLE — neither is lower
+#
+# The number forms below are "…$N", which by the first rule means no Potion.
+# When the reference is a CARD rather than a number, use the *_card forms —
+# that is where the second and third rules actually bite.
+
 def cost_le(game, card, coins):
-    """'costing up to $coins' — the ONLY way card code may bound a cost.
-    This boundary is what makes the future cost VECTOR cheap: when Potion
-    (Alchemy) and Debt (Empires) arrive, a card with a non-coin component is
-    never 'up to $n' — that rule lands HERE, not in thirty batch call sites."""
-    return cost(game, card) <= coins
+    """'costing up to $coins' — the ONLY way card code may bound a cost against
+    a number. A card with a Potion in its cost is NEVER "up to $N"."""
+    return potion_cost(game, card) == 0 and cost(game, card) <= coins
 
 
 def cost_eq(game, card, coins):
-    """'costing exactly $coins' (Upgrade's +1, Swindler's same-cost)."""
-    return cost(game, card) == coins
+    """'costing exactly $coins' against a NUMBER (Stonemason's overpay). For
+    "exactly $N more than THIS card", use cost_eq_card — the two differ the
+    moment a Potion is involved."""
+    return potion_cost(game, card) == 0 and cost(game, card) == coins
 
 
 def cost_lt(game, card, coins):
-    """'costing LESS than' / 'a cheaper card' — Border Village, Berserker,
-    Haggler. Distinct from cost_le: "cheaper" excludes an equal cost, and the
-    compendium's "lower cost" is strict. Same reason cost_le exists: when the
-    cost VECTOR arrives (Potion, Debt), 'lower' means at least one component
-    lower and none higher, and that rule lands HERE, not in card code."""
-    return cost(game, card) < coins
+    """'costing LESS than $coins'. Distinct from cost_le: "cheaper" excludes an
+    equal cost. For "cheaper than THIS card", use cost_lt_card."""
+    return potion_cost(game, card) == 0 and cost(game, card) < coins
+
+
+def cost_eq_card(game, card, ref, delta=0):
+    """'costing exactly $delta more than `ref`' — Remake, Upgrade, Develop,
+    Farmland, Swindler (delta 0). "Costing exactly $1 more" means "having the
+    same cost plus $1", so the POTION component must MATCH."""
+    return (potion_cost(game, card) == potion_cost(game, ref)
+            and cost(game, card) == cost(game, ref) + delta)
+
+
+def cost_le_card(game, card, ref, delta=0):
+    """'costing up to $delta more than `ref`' — Remodel, Expand, Butcher.
+    "Up to $2 more than {$3,P}" means "up to {$5,P}": the potion component may
+    not be HIGHER than the reference's."""
+    return (potion_cost(game, card) <= potion_cost(game, ref)
+            and cost(game, card) <= cost(game, ref) + delta)
+
+
+def cost_lt_card(game, card, ref):
+    """'a cheaper card than `ref`' — Border Village, Berserker, Haggler,
+    Stonemason. A vector is LOWER only if no component is higher and at least
+    one is lower, so {$4,P} is not cheaper than {$5} (nor the reverse)."""
+    c1, p1 = cost(game, card), potion_cost(game, card)
+    c2, p2 = cost(game, ref), potion_cost(game, ref)
+    return c1 <= c2 and p1 <= p2 and (c1 < c2 or p1 < p2)
 
 
 # --- the DURATION kernel (Seaside; reused by later expansions) ----------------
@@ -2182,6 +2233,11 @@ def _h_play_action(game, pid, move):
 def _treasure_coins(game, pid, card):
     """The printed $ of a played Treasure + the Merchant first-Silver hook —
     shared by the buy-phase handler and out-of-band plays (play_action_card)."""
+    if card == "Potion":
+        # "When you play a Potion, it produces a Potion (instead of $, like
+        # other Treasures do), which is added to your money pool."
+        add_potions(game, 1, pid)
+        return
     game["coins"] += coins_of(game, card)
     if card == "Silver" and not game["turn_ctx"]["silver_played"]:
         game["turn_ctx"]["silver_played"] = True
@@ -2294,10 +2350,14 @@ def _h_buy(game, pid, move):
     c = cost(game, card)
     if c > game["coins"]:
         return False, "can't afford it"
+    p = potion_cost(game, card)
+    if p > game["potions"]:
+        return False, "not enough Potions"
     # you buy a PILE and get its top card — the same for every pile we ship
     # today, and the distinction an ordered pile (Knights, Castles) needs
     got = pile_top(game, card)
     game["coins"] -= c
+    game["potions"] -= p
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
     # OVERPAY (Guilds/C&G): a `$N+` card lets you pay MORE than it costs. The
@@ -2516,6 +2576,7 @@ def _end_turn(game, pid):
     game["actions"] = 1
     game["buys"] = 1
     game["coins"] = 0
+    game["potions"] = 0
     game["turn_ctx"] = _fresh_turn_ctx()
     _log(game, nxt, "turn_start", turn=game["turn_number"], extra=bool(extra))
     _arm_undo(game)
@@ -2686,6 +2747,7 @@ def legal_moves(game, pid):
         if game["buys"] > 0:
             for pile in sorted(game["supply"]):
                 if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"] \
+                        and potion_cost(game, pile) <= game["potions"] \
                         and buy_gate(game, pid, pile) is None:
                     mv.append({"type": "buy", "card": pile})
     # Coffers (and every later spendable counter) — legal in EITHER phase,
@@ -2787,6 +2849,7 @@ def _vp_of(game, pid):
     n = len(owned)
     duchies = owned.count("Duchy")
     golds = owned.count("Gold")
+    actions = sum(1 for c in owned if has_type(game, c, "action"))
     # "differently named cards you have" (Fairgrounds) — the whole deck, by name
     distinct = len(set(owned))
     total = 0
@@ -2800,6 +2863,8 @@ def _vp_of(game, pid):
             total += 2 * (distinct // 5)
         elif v == "demesne":
             total += golds
+        elif v == "vineyard":
+            total += actions // 3
         else:
             total += v
     return total
@@ -2852,6 +2917,12 @@ def player_view(game, viewer):
     # one) was invisible: the pile showed its printed price, never lit up as
     # affordable, and the click handler refused to send the buy.
     g["costs"] = {c: cost(game, c) for c in game["piles"]}
+    # the POTION half of each price (Alchemy). Shipped separately rather
+    # than folded into `costs` so the existing numeric field keeps its
+    # meaning for every client — a cached bundle still prices $ correctly,
+    # it just does not draw the Potion. Only non-zero entries ship.
+    g["potion_costs"] = {c: potion_cost(game, c) for c in game["piles"]
+                         if potion_cost(game, c)}
     # Piles ship as face + count, never `contents`: an ordered pile's order
     # below the top is HIDDEN (Ruins and Knights are shuffled), and "an honest
     # client ignores it" is not security — the repo has paid for that three
@@ -3004,6 +3075,10 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     if colony:
         supply["Platinum"] = pile_size("Platinum", n)
         supply["Colony"] = pile_size("Colony", n)
+    # Alchemy: "if any Kingdom card has a Potion in its cost, include the 16
+    # Potion cards in the Supply" — a setup rule, not a randomiser roll.
+    if any(cards_potion(c) for c in kingdom):
+        supply["Potion"] = pile_size("Potion", n)
     # Charlatan's game-wide rule: Curse is also a Treasure worth $1
     curse_is_treasure = "Charlatan" in kingdom
     # Cornucopia & Guilds SPECIAL SETUP (compendium § I). Both extra piles are
@@ -3047,6 +3122,7 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "actions": 1,
         "buys": 1,
         "coins": 0,
+        "potions": 0,              # the Potion half of the money pool (Alchemy)
         "turn_ctx": _fresh_turn_ctx(),
         "pending": [],
         "pending_pid": None,

@@ -355,6 +355,7 @@ function fmtLog(e, names) {
       if (e.coins) bits.push(`+$${e.coins}`);
       if (e.actions) bits.push(`+${e.actions} Action${e.actions > 1 ? "s" : ""}`);
       if (e.buys) bits.push(`+${e.buys} Buy${e.buys > 1 ? "s" : ""}`);
+      if (e.potions) bits.push(`+${e.potions} Potion${e.potions > 1 ? "s" : ""}`);
       if (!bits.length) return null;
       return `${who} gets ${bits.join(", ")}${e.why ? ` (${e.why})` : ""}`;
     }
@@ -613,6 +614,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const effCost = (name) => game?.costs?.[name]
     ?? Math.max(0, (cards[pileFace(name)]?.cost ?? 0) - bridges);
   const printedCost = (name) => cards[pileFace(name)]?.cost ?? 0;
+  // Alchemy: the POTION half of a price. Rendered beside the coin cost rather
+  // than folded into it — {$3, 1 Potion} is a different price from $3, and a
+  // pile you cannot afford for want of a Potion has to look unaffordable.
+  const potionCost = (name) => game?.potion_costs?.[name] ?? 0;
+  const affordable = (name) => effCost(name) <= game.coins
+    && potionCost(name) <= (game.potions ?? 0);
   // Coffers (Guilds / Cornucopia & Guilds) — public table state, spendable in
   // EITHER phase, which is why this is not gated on inBuy.
   const myCoffers = game?.coffers?.[myId] ?? 0;
@@ -960,7 +967,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
       setCardInfo(pileFace(pile)); return;
     }
-    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && effCost(pile) <= game.coins) {
+    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && affordable(pile)) {
       mv({ type: "buy", card: pile }); return;
     }
     setCardInfo(pileFace(pile));
@@ -1138,7 +1145,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const count = pileLeft(name);
     const promptPiles = iAmActor && constraint?.piles ? constraint.piles : null;
     const highlight = promptPiles ? promptPiles.includes(name)
-      : (inBuy && game.buys > 0 && count > 0 && effCost(name) <= game.coins);
+      : (inBuy && game.buys > 0 && count > 0 && affordable(name));
     const disabled = promptPiles ? !promptPiles.includes(name) : count === 0;
     return (
       <div key={name} className="dm-pile-slot"
@@ -1151,6 +1158,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
         {cardData && effCost(name) !== printedCost(name)
           && <span className="dm-disc">now {effCost(name)}</span>}
+        {potionCost(name) > 0 && <span className="dm-potion" title="costs a Potion">P</span>}
       </div>
     );
   };
@@ -1650,6 +1658,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       </button>
                     )}
                   </span>
+                )}
+                {(game.potions ?? 0) > 0 && (
+                  <span title="Potions — spent on cards with a Potion in their cost">
+                    Potions <b><Pop n={game.potions} /></b></span>
                 )}
                 {bridges > 0 && <span>Cards cost <b>−<Pop n={bridges} /></b></span>}
                 {hasModalPrompt && promptMin

@@ -165,6 +165,35 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
 
+**Kernel v5 — the phase-5 (Alchemy) delta: THE COST VECTOR. FROZEN.**
+A cost is `{coins, potions}`. `cost()` still returns the COIN component, so every existing
+caller is unchanged; `potion_cost(game, card)` is the second dimension (printed — cost
+reductions only ever touch coins). The compendium's three rules (POTIONS § IV) live in
+engine.py and nowhere else:
+- **"up to $N"** = coins ≤ N **and potions == 0**. So `cost_le`/`cost_eq`/`cost_lt` — the
+  NUMBER forms — now exclude every Potion card, which is what makes "gain a card costing up to
+  $4" correct on an Alchemy board with no call-site change anywhere.
+- **"exactly $N more"** = *the same cost plus $N*, so the potion components must MATCH:
+  `{$3,P}` is exactly $1 more than `{$2,P}` but **not** than `{$2}`.
+- **"lower than"** = no component higher and at least one lower, so `{$4,P}` and `{$5}` are
+  **incomparable** — neither is cheaper than the other.
+
+The last two are not expressible against a number, so they get **card-reference** forms:
+`cost_le_card(game, card, ref, delta)` · `cost_eq_card(game, card, ref, delta=0)` ·
+`cost_lt_card(game, card, ref)`. **Any "N more/less than THIS CARD" comparison must use them**;
+the number forms are for literal bounds only (Workshop's $4, University's $5, Stonemason's
+overpay). The remodel family (Remodel, Mine, Remake, Upgrade, Develop, Expand, Swindler,
+Stonemason) is already migrated — copy one of those, not a number bound.
+
+Also: `game["potions"]` is the second money pool (a played Potion produces one, per-turn like
+coins, so it evaporates off-turn); `_h_buy` and `legal_moves` gate on both components; the
+Potion pile joins the Supply whenever any kingdom card has one in its cost; `player_view` ships
+`potion_costs` (non-zero entries only) beside `costs`; `"vineyard"` joins the computed VP kinds.
+
+**`cards.DEFERRED`** records cards we have deliberately not built (today: Possession), as DATA
+with a reason and a plan pointer, so `test_cards.py` can reconcile a set's published roster
+against what ships. Deleting a row is how you hand the work back in.
+
 **Kernel v4 — the phase-4 (Cornucopia & Guilds) delta. FROZEN.**
 - **COFFERS** — `game["coffers"][pid]` + `add_coffers(game, n, pid=None)`. Deliberately NOT routed
   through `_grant`: the per-turn pools evaporate off-turn because "on another player's turn you

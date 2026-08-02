@@ -60,6 +60,8 @@ TRASHERS = {
     # Cornucopia & Guilds
     "Butcher": "tfb", "Remake": "tfb", "Stonemason": "tfb",
     "Infirmary": "weak",
+    # Alchemy
+    "Apprentice": "tfb", "Transmute": "tfb",
 }
 
 # Attack kind — what the attack DOES to its victims. Drives both the defensive
@@ -78,6 +80,9 @@ ATTACKS = {
     # alternative (a copy of what they discarded) is not reliably junk.
     "Young Witch": "curse", "Soothsayer": "curse", "Jester": "curse",
     "Footpad": "discard",
+    # Alchemy. Scrying Pool is filed as "topdeck": it does not junk anyone,
+    # it reorders what they draw (the attacker chooses discard-or-keep).
+    "Familiar": "curse", "Scrying Pool": "topdeck",
 }
 
 # Cards that answer an Attack from hand (the reaction window / immunity).
@@ -93,6 +98,8 @@ GAINERS = {
     # Cornucopia & Guilds
     "Butcher", "Remake", "Stonemason", "Horn of Plenty", "Soothsayer",
     "Demesne", "Courser",
+    # Alchemy
+    "University", "Transmute", "Apprentice",
 }
 
 # The subset that can gain ANY pile of its own choosing, repeatably, without
@@ -109,6 +116,7 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
 # Looks at / discards / reorders cards to improve what you draw. The
 # reshuffle-control rules (R4: "don't overcartograph") key on these.
 SIFTERS = {
+    "Apothecary", "Golem",
     "Cellar", "Warehouse", "Cartographer", "Oasis", "Lookout", "Sentry",
     "Harbinger", "Vault", "Stables", "Inn", "Tide Pools", "Sea Chart",
     "Crystal Ball", "Jack of All Trades", "Patrol", "Library", "Scheme",
@@ -122,6 +130,7 @@ ALT_VP = {
     "Mill": "action_vp", "Nobles": "action_vp", "Island": "action_vp",
     "Tunnel": "reaction_vp", "Farmland": "on_gain_vp",
     "Fairgrounds": "per_5_distinct", "Demesne": "per_gold",
+    "Vineyard": "per_3_actions",
 }
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
@@ -135,7 +144,10 @@ DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
              "Cellar", "Crossroads", "Shanty Town", "Minion", "Tactician",
              # C&G: Advisor nets 2, Carnival up to 4, Journeyman exactly 3,
              # Housecarl scales with the table — none of them print "+N Cards"
-             "Advisor", "Carnival", "Journeyman", "Housecarl"}
+             "Advisor", "Carnival", "Journeyman", "Housecarl",
+             # Alchemy: Apprentice scales with what it trashed, Scrying Pool
+             # with how many Actions sit on top of the deck
+             "Apprentice", "Scrying Pool"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
@@ -165,6 +177,10 @@ BM_TERMINALS = {
     # Soothsayer trades a card to them for the Gold), then the terminal draw.
     "Young Witch": 90, "Soothsayer": 84, "Footpad": 62, "Jester": 58,
     "Journeyman": 54, "Carnival": 45,
+    # Alchemy. Familiar is a cursing CANTRIP, so it is not a terminal at all
+    # and is absent on purpose; Scrying Pool needs a deck full of Actions,
+    # which a money deck by definition does not have.
+    "Apprentice": 34,
 }
 
 # Every kingdom card that has been reviewed against the tables above. A set
@@ -172,6 +188,7 @@ BM_TERMINALS = {
 REVIEWED = frozenset(
     KINGDOM["base"] + KINGDOM["intrigue"] + KINGDOM["seaside"]
     + KINGDOM["prosperity"] + KINGDOM["hinterlands"] + KINGDOM["cornucopia"]
+    + KINGDOM["alchemy"]
 )
 
 

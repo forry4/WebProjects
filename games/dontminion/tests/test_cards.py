@@ -1,5 +1,5 @@
 """Card-data tests: the verified 171-card dataset (Base + Intrigue + Seaside +
-Prosperity + Hinterlands + Cornucopia & Guilds, all 2E).
+Prosperity + Hinterlands + Cornucopia & Guilds + Alchemy).
 
 Pure data tests — no engine import. The EXPECTED table below is the corruption tell:
 every (name, cost, types) triple was verified against the Knutsen compendium v11.1
@@ -12,10 +12,11 @@ from games.dontminion import cards
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
                  "duration", "reward"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
-                      "hinterlands", "cornucopia"}
+                      "hinterlands", "cornucopia", "alchemy"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
-OPTIONAL_FIELDS = {"overpay"}      # the `$N+` cost (Guilds/C&G)
+OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
+                   "potion"}       # the Potion component of a cost (Alchemy)
 
 REMOVED_1E = [
     # Base 1E -> 2E removals
@@ -214,6 +215,19 @@ EXPECTED = {
     "Soothsayer": (5, ['action', 'attack']),
     "Stonemason": (2, ['action']),
     "Young Witch": (4, ['action', 'attack']),
+    # Alchemy (11 shipped kingdom cards + Potion; Possession deferred)
+    "Alchemist": (3, ['action']),
+    "Apothecary": (2, ['action']),
+    "Apprentice": (5, ['action']),
+    "Familiar": (3, ['action', 'attack']),
+    "Golem": (4, ['action']),
+    "Herbalist": (2, ['action']),
+    "Philosopher's Stone": (3, ['treasure']),
+    "Potion": (4, ['treasure']),
+    "Scrying Pool": (2, ['action', 'attack']),
+    "Transmute": (0, ['action']),
+    "University": (2, ['action']),
+    "Vineyard": (0, ['victory']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -229,9 +243,10 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 171
+    assert len(cards.CARDS) == 183
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
-              "prosperity": [], "hinterlands": [], "cornucopia": []}
+              "prosperity": [], "hinterlands": [], "cornucopia": [],
+              "alchemy": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     assert len(by_exp["basic"]) == 7
@@ -241,13 +256,14 @@ def test_card_count_and_expansion_counts():
     assert len(by_exp["prosperity"]) == 27      # 25 kingdom + Platinum + Colony
     assert len(by_exp["hinterlands"]) == 26     # 17 kept from 1E + 9 new in 2E
     assert len(by_exp["cornucopia"]) == 32      # 18 kept + 8 new + 6 Rewards
+    assert len(by_exp["alchemy"]) == 12         # 11 shipped + Potion; see DEFERRED
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
     for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27),
                       ("prosperity", 25), ("hinterlands", 26),
-                      ("cornucopia", 26)):
+                      ("cornucopia", 26), ("alchemy", 11)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -302,7 +318,8 @@ def test_schema_field_completeness_and_validity():
         assert c["expansion"] in ALLOWED_EXPANSIONS, name
         assert isinstance(c["kingdom"], bool), name
     assert sorted(str_vp) == [("Demesne", "demesne"), ("Duke", "duke"),
-                              ("Fairgrounds", "fairgrounds"), ("Gardens", "gardens")]
+                              ("Fairgrounds", "fairgrounds"), ("Gardens", "gardens"),
+                              ("Vineyard", "vineyard")]
 
 
 def test_static_vp_values():
@@ -358,21 +375,22 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.cards_granting("actions") == [
         "Bazaar", "Border Village", "City", "Crossroads", "Diplomat",
         "Farmhands", "Festival", "Fishing Village", "Inn", "Mining Village",
-        "Native Village", "Nobles", "Plaza", "Shanty Town", "Village",
-        "Worker's Village"]
+        "Native Village", "Nobles", "Plaza", "Shanty Town", "University",
+        "Village", "Worker's Village"]
     assert cards.cards_granting("buys") == [
         "Astrolabe", "Baron", "Bridge", "Candlestick Maker", "Cauldron",
         "City", "Collection", "Council Room", "Courtier", "Farrier",
-        "Festival", "Grand Market", "Hamlet", "Margrave", "Market",
-        "Merchant Guild", "Nomads", "Pawn", "Salvager", "Souk",
+        "Festival", "Grand Market", "Hamlet", "Herbalist", "Margrave",
+        "Market", "Merchant Guild", "Nomads", "Pawn", "Salvager", "Souk",
         "Spice Merchant", "Tactician", "Tiara", "Wharf", "Worker's Village"]
     assert cards.cards_granting("draw") == [
-        "Council Room", "Courtyard", "Diplomat", "Ferryman", "Guard Dog",
-        "Inn", "Laboratory", "Margrave", "Masquerade", "Menagerie", "Minion",
-        "Moat", "Nobles", "Patrol", "Rabble", "Sea Witch", "Secret Passage",
-        "Shanty Town", "Smithy", "Spice Merchant", "Stables", "Steward",
-        "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
-        "Witch", "Witch's Hut", "Young Witch"]
+        "Alchemist", "Apprentice", "Council Room", "Courtyard", "Diplomat",
+        "Ferryman", "Guard Dog", "Inn", "Laboratory", "Margrave",
+        "Masquerade", "Menagerie", "Minion", "Moat", "Nobles", "Patrol",
+        "Rabble", "Sea Witch", "Secret Passage", "Shanty Town", "Smithy",
+        "Spice Merchant", "Stables", "Steward", "Tactician", "Tide Pools",
+        "Torturer", "Vault", "Warehouse", "Wharf", "Witch", "Witch's Hut",
+        "Young Witch"]
 
 def test_requirement_bar_is_the_printed_bonus():
     # the threshold really binds: a cantrip is not a village, a Moat is a drawer
@@ -392,3 +410,18 @@ def test_every_expansion_alone_can_satisfy_every_requirement():
     for exp, pool in sorted(cards.KINGDOM.items()):
         for req in cards.REQUIREMENT_ORDER:
             assert cards.cards_granting(req, pool), f"{exp} has no {req} card"
+
+
+def test_the_deferred_cards_are_recorded_and_still_absent():
+    """A roster hole is DATA, not a comment. Alchemy published 12 kingdom
+    cards; we ship 11 and record the twelfth here with its reason, so the set's
+    published size still reconciles and the omission cannot be quietly
+    forgotten. Build Possession -> delete its DEFERRED row -> this test tells
+    you where the counts now disagree."""
+    assert set(cards.DEFERRED) == {"Possession"}
+    for name, why in cards.DEFERRED.items():
+        assert name not in cards.CARDS, f"{name} is implemented — drop its DEFERRED row"
+        assert len(why) > 80, f"{name} needs a real reason, not a shrug"
+        assert ".claude-plans/" in why, f"{name} should point at where it is scoped"
+    # Alchemy's published roster is 12 kingdom cards: what we ship + what we defer
+    assert len(cards.KINGDOM["alchemy"]) + len(cards.DEFERRED) == 12

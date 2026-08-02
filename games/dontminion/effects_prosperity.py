@@ -145,9 +145,9 @@ def _expand(game, pid):
 def _expand_trash(game, pid, frame, choice):
     card = choice["cards"][0]
     E.trash(game, pid, [card])
-    cap = E.cost(game, card) + 3
+    ref = card                    # "up to $3 more than IT"
     piles = sorted(p for p in game["supply"]
-                   if game["supply"][p] > 0 and E.cost_le(game, p, cap))
+                   if game["supply"][p] > 0 and E.cost_le_card(game, p, ref, 3))
     if piles:
         E.push_choose_pile(game, pid, "Expand", "gain", piles)
 

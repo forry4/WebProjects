@@ -635,6 +635,71 @@ CARDS.update({
 })
 
 
+# --- Alchemy (12 kingdom cards + Potion; no second edition) ----------------
+# Alchemy was reprinted in 2018 with no card removed, so the roster is the
+# original 12 — except that POSSESSION IS DELIBERATELY DEFERRED (see DEFERRED
+# below). `potion` is the second component of a card's COST: a cost of just
+# {Potion} is {$0, 1 Potion}, and a plain $3 is {$3, 0 Potions}.
+CARDS.update({
+    "Alchemist":          {"cost": 3, "potion": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nAt the start of Clean-up this turn, if you have a Potion in play, you may put this onto your deck.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Apothecary":         {"cost": 2, "potion": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top 4 cards of your deck. Put the Coppers and Potions into your hand. Put the rest back in any order.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Apprentice":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nTrash a card from your hand.\n+1 Card per $1 it costs.\n+2 Cards if it has Potion in its cost.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Familiar":           {"cost": 3, "potion": 1, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nEach other player gains a Curse.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Golem":              {"cost": 4, "potion": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Reveal cards from your deck until you reveal 2 Action cards other than Golems. Discard the other cards, then play the Action cards in either order.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Herbalist":          {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\n+$1\nOnce this turn, when you discard a Treasure from play, you may put it onto your deck.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Philosopher's Stone": {"cost": 3, "potion": 1, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "Count your deck and discard pile. +$1 per 5 cards total between them (round down).",
+                        "expansion": "alchemy", "kingdom": True},
+    "Scrying Pool":       {"cost": 2, "potion": 1, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nEach player (including you) reveals the top card of their deck and either discards it or puts it back, your choice.\nThen reveal cards from your deck until revealing one that isn't an Action. Put all of those revealed cards into your hand.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Transmute":          {"cost": 0, "potion": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Trash a card from your hand. If it is an...\nAction card, gain a Duchy\nTreasure card, gain a Transmute\nVictory card, gain a Gold",
+                        "expansion": "alchemy", "kingdom": True},
+    "University":         {"cost": 2, "potion": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\nYou may gain an Action card costing up to $5.",
+                        "expansion": "alchemy", "kingdom": True},
+    "Vineyard":           {"cost": 0, "potion": 1, "types": ["victory"], "coins": 0, "vp": "vineyard",
+                        "text": "Worth 1 VP per 3 Action cards you have (round down).",
+                        "expansion": "alchemy", "kingdom": True},
+    # Potion is a basic-style pile, not a kingdom card: it joins the Supply
+    # whenever any kingdom card has a Potion in its cost.
+    "Potion":             {"cost": 4, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "1 Potion",
+                        "expansion": "alchemy", "kingdom": False},
+})
+
+# Cards we have deliberately NOT implemented, and why. This is a real roster
+# hole, so it is DATA rather than a comment: `test_cards.py` asserts the set's
+# published size equals what we ship plus what is listed here, so the omission
+# cannot be quietly forgotten — and the day one is built, the test tells you to
+# delete its row.
+DEFERRED = {
+    "Possession": (
+        "Alchemy. One player takes a turn that another player CONTROLS: the "
+        "possessor makes every decision, gains every card the possessed player "
+        "would gain, takes their VP tokens, and their trashed cards are set "
+        "aside and returned. That is ~10 kernel seams, two of them "
+        "security-adjacent (the move gate and per-recipient redaction), which "
+        "is why the roadmap sizes it as a kernel system rather than a card. "
+        "Scoped in .claude-plans/dontminion-phase5-alchemy-possession-scope.md "
+        "— including a design that adds a `controller_of` indirection instead "
+        "of relaxing the WS seat binding."),
+}
+
+
 KINGDOM = {
     "base": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "base"],
     "intrigue": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "intrigue"],
@@ -642,12 +707,20 @@ KINGDOM = {
     "prosperity": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "prosperity"],
     "hinterlands": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "hinterlands"],
     "cornucopia": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "cornucopia"],
+    "alchemy": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "alchemy"],
 }
 
 
 def overpays(name):
     """Does buying this card let you pay MORE than its cost? (The `$N+` cost.)"""
     return bool(CARDS[name].get("overpay"))
+
+
+def potion_of(name):
+    """The POTION component of a card's printed cost (Alchemy). Cards without
+    one cost {$N, 0 Potions}, which is what makes "up to $N" exclude every
+    Potion card — see engine.cost_le."""
+    return CARDS[name].get("potion", 0)
 
 
 # --- kingdom REQUIREMENTS (create-time "at least one card that gives ...") ----
@@ -705,6 +778,8 @@ def pile_size(name, n_players):
         return 10 * (n_players - 1)
     if name == "Platinum":
         return 12                     # fixed at every player count
+    if name == "Potion":
+        return 16                     # "include the 16 Potion cards" 
     if "victory" in card["types"]:
         return 8 if n_players == 2 else 12   # includes Colony (8 at 2p)
     return 10

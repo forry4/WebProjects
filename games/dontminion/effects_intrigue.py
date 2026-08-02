@@ -283,9 +283,9 @@ def _upgrade(game, pid):
 
 def _upgrade_trash(game, pid, frame, choice):
     trashed = choice["cards"][0]
-    target = E.cost(game, trashed) + 1        # EXACTLY $1 more (Bridge-aware)
+    ref = trashed                             # EXACTLY $1 more (Bridge-aware)
     E.trash(game, pid, [trashed])
-    piles = _gain_piles(game, lambda p: E.cost_eq(game, p, target))
+    piles = _gain_piles(game, lambda p: E.cost_eq_card(game, p, ref, 1))
     if piles:
         E.push_choose_pile(game, pid, "Upgrade", "gain", piles=piles)
 
@@ -407,9 +407,9 @@ def _swindler_hit(game, pid, frame, choice):
     c = moved[0]
     E.trash(game, pid, [c], zone="aside")         # trash log is public
     attacker = game["turn"]
-    target = E.cost(game, c)
+    ref = c                                   # the SAME cost as it
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost_eq(game, p, target)]
+             if game["supply"][p] > 0 and E.cost_eq_card(game, p, ref)]
     if piles:
         E.push_choose_pile(game, attacker, "Swindler", "gain",
                            piles=piles, data={"victim": pid})
@@ -554,10 +554,10 @@ def _replace(game, pid):
 
 def _replace_trash(game, pid, frame, choice):
     trashed = choice["cards"][0]
-    cap = E.cost(game, trashed) + 2
+    ref = trashed                 # "up to $2 more than IT"
     E.trash(game, pid, [trashed])
     piles = [p for p in sorted(game["supply"])
-             if game["supply"][p] > 0 and E.cost_le(game, p, cap)]
+             if game["supply"][p] > 0 and E.cost_le_card(game, p, ref, 2)]
     if piles:
         E.push_choose_pile(game, pid, "Replace", "gain",
                            piles=piles, data=dict(frame["data"]))

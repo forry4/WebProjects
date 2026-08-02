@@ -372,11 +372,11 @@ def _remake_step(game, pid, left):
 
 def _remake_trash(game, pid, frame, choice):
     card = choice["cards"][0]
-    want = E.cost(game, card) + 1          # read BEFORE the trash resolves (B3)
+    ref = card                             # read BEFORE the trash resolves (B3)
     left = frame["data"]["left"] - 1
     E.push_auto(game, pid, "Remake", "again", data={"left": left})
     E.trash(game, pid, [card])
-    piles = _piles(game, lambda p: E.cost_eq(game, p, want))
+    piles = _piles(game, lambda p: E.cost_eq_card(game, p, ref, 1))
     if piles:
         E.push_choose_pile(game, pid, "Remake", "gain", piles)
 
@@ -905,25 +905,28 @@ def _stonemason(game, pid):
 
 def _stonemason_trash(game, pid, frame, choice):
     card = choice["cards"][0]
-    cap = E.cost(game, card)               # captured before the trash (B3)
+    ref = card                             # captured before the trash (B3)
     E.trash(game, pid, [card])
-    _stonemason_gain_step(game, pid, cap, 2)
+    _stonemason_gain_step(game, pid, ref, 2)
 
 
-def _stonemason_gain_step(game, pid, cap, left):
+def _stonemason_gain_step(game, pid, ref, left):
+    """`ref` is the TRASHED CARD, not a coin cap: "each costing less than it"
+    is a vector comparison, so trashing a Golem {$4,P} may gain {$3,P} and
+    {$4} but not {$5}."""
     if left <= 0:
         return
-    piles = _piles(game, lambda p: E.cost_lt(game, p, cap))
+    piles = _piles(game, lambda p: E.cost_lt_card(game, p, ref))
     if not piles:
         return
     E.push_choose_pile(game, pid, "Stonemason", "gain", piles,
-                       data={"cap": cap, "left": left})
+                       data={"ref": ref, "left": left})
 
 
 def _stonemason_gain(game, pid, frame, choice):
     E.gain(game, pid, choice["pile"])
     d = frame["data"]
-    _stonemason_gain_step(game, pid, d["cap"], d["left"] - 1)
+    _stonemason_gain_step(game, pid, d["ref"], d["left"] - 1)
 
 
 def _stonemason_gained(game, pid, frame, choice):

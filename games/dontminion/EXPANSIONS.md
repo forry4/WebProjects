@@ -17,7 +17,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 3 | **Hinterlands 2E** (26) | `discard` emit, unfiltered offers, self-trigger context, registry-driven attack reactions + reaction-that-plays-itself (Guard Dog), attack-typed Treasures opening the window (Cauldron), plays from non-hand zones + lose-track (Trail), actor-aware resource pools, coin floor (Souk), `exchange` (Trader), `shuffle_into_deck` (Inn), `cost_lt`, all-seats clean-up sweep, `discard_then_putback` | **SHIPPED** 2026-07-30 + audited |
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
 | 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
-| 5 | Alchemy (12 + Potion) | cost VECTOR dimension 1 (Potion) — lands inside cost_le/cost_eq; Potion production/payment in the buy flow. ⚠ **Possession is phase-sized on its own** (take a turn controlling another player's cards) — budget it like a kernel system, not a card | planned |
+| 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **kernel + cards landed**, held out of the picker: per-card tests, cross-set batch and audit outstanding |
 | 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), ⚠ **card identity / "play-as" system** (Band of Misfits — see ledger) | planned |
 | 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
@@ -186,6 +186,53 @@ mechanism, which is the contract phase 3 set.
 Butcher spends also pay their +$1 each. We said yes — the global spending rule is unconditional
 and Butcher only adds a use for the count — but the compendium's phrasing can be read the other
 way, so it is a pinned deviation, not a silent choice.
+
+## Phase 5 — Alchemy: status, and the one card we did not build
+
+**Possession is deliberately NOT implemented** (user decision, 2026-08-02, after it was scoped).
+It is recorded in `cards.DEFERRED` — as DATA, not a comment — with its reason and a pointer to
+`.claude-plans/dontminion-phase5-alchemy-possession-scope.md`.
+`test_the_deferred_cards_are_recorded_and_still_absent` asserts that Alchemy's published roster
+(12 kingdom cards) still reconciles as "what we ship + what we defer", so the hole cannot be
+quietly forgotten, and the day Possession is built the test points at the counts to update.
+
+**This breaks the roadmap's own whole-set rule on purpose.** A set is meant to ship only when
+whole, because a partial set poisons the random-kingdom picker. Alchemy is therefore **held out
+of `KNOWN_EXPANSIONS`** for now, so no live game can deal it — the same gate C&G sat behind
+while its audit was outstanding.
+
+### What landed
+
+- **THE COST VECTOR.** A cost is `{coins, potions}`. The three rules from the compendium's
+  POTIONS section live in `engine.py` and nowhere else:
+  "up to $3" = coins ≤ 3 **and potions == 0**; "exactly $1 more" = *the same cost plus $1*, so
+  the potion components must MATCH; "lower than" = no component higher and at least one lower,
+  which makes `{$4,P}` and `{$5}` **incomparable**.
+  The number forms (`cost_le`/`cost_eq`/`cost_lt`) took the first rule; the other two needed new
+  **card-reference** forms (`cost_le_card` / `cost_eq_card` / `cost_lt_card`), because "up to $2
+  more than IT" is only expressible against the card, not against a number.
+- **The remodel family was migrated to them** — Remodel, Mine, Remake, Upgrade, Develop, Expand,
+  Swindler, Stonemason. This is the payoff for the `cost_le`/`cost_eq` boundary introduced in
+  ph. 2: the *number* call sites needed no change at all, and only the ones whose bound is a
+  CARD had to move. Exactly the "thirty batch call sites" that comment promised to avoid.
+- Potion production (a Potion adds to a second money pool, not to `$`), the Potion pile's setup
+  rule, the buy gate on both components, `potion_costs` on the wire, and Vineyard's VP kind.
+- 11 cards in `effects_alchemy.py`, green under the conservation soak on an all-Alchemy board.
+
+### Still outstanding before it can be released
+
+Per-card test batches, the cross-set batch, and the adversarial audit — which is where phase 4
+found all three of its real bugs, so this is not a formality.
+
+### A finding for whoever picks this up
+
+**Alchemist and Herbalist take the half-paid "`_end_turn` is not interruptible" ledger row from
+one consumer to three.** Both are implemented with the same per-play `buy_phase_end` watcher as
+Scheme. For Herbalist that is faithful rather than approximate only because the candidate set
+comes from `leaving_play()` — "the cards that WILL be discarded from play at this Clean-up" —
+which is what correctly excludes a Duration that stays out ("if a card is not discarded…
+Herbalist can't put it onto your deck"). If a future set adds a card that cares about the order
+of Clean-up itself, pay the row properly instead of adding a fourth watcher.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 

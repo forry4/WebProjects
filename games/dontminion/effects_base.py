@@ -129,10 +129,20 @@ def _throne_room_second(game, pid, frame, choice):
 # base_a batch
 # ==========================================================================
 
-def _eligible_gain_piles(game, cap):
-    """Non-empty supply piles costing <= cap — ALWAYS via engine.cost (Bridge)."""
-    return [p for p in sorted(game["supply"])
-            if game["supply"][p] > 0 and E.cost_le(game, p, cap)]
+def _eligible_gain_piles(game, cap=None, ref=None, delta=0):
+    """Non-empty supply piles a gain may reach, by ONE of two bounds:
+
+    `cap`  — a literal "$N" (Workshop). A card with a Potion in its cost is
+             never "up to $N", which engine.cost_le enforces.
+    `ref`  — "up to `delta` more than THIS CARD" (Remodel). This is the form
+             the cost VECTOR needs: "up to $2 more than {$3,P}" is
+             "up to {$5,P}", and a number bound would exclude every Potion
+             card instead."""
+    if ref is not None:
+        ok = lambda p: E.cost_le_card(game, p, ref, delta)      # noqa: E731
+    else:
+        ok = lambda p: E.cost_le(game, p, cap)                  # noqa: E731
+    return [p for p in sorted(game["supply"]) if game["supply"][p] > 0 and ok(p)]
 
 
 def _cellar(game, pid):
@@ -262,8 +272,8 @@ def _remodel(game, pid):
 def _remodel_trash(game, pid, frame, choice):
     trashed = choice["cards"][0]
     E.trash(game, pid, [trashed])
-    cap = E.cost(game, trashed) + 2
-    piles = _eligible_gain_piles(game, cap)
+    ref = trashed                          # vector: "up to $2 more than IT"
+    piles = _eligible_gain_piles(game, ref=ref, delta=2)
     if piles:
         E.push_choose_pile(game, pid, "Remodel", "gain", piles=piles)
     # No eligible pile -> nothing more (the trash already happened).
@@ -428,12 +438,12 @@ def _mine_trash(game, pid, frame, choice):
     if not choice["cards"]:
         return                                  # "may" — declined
     t = choice["cards"][0]
-    cap = E.cost(game, t) + 3                   # cost read at trash time (Bridge applies)
+    ref = t                       # vector: "up to $3 more than IT" (Bridge-aware)
     E.trash(game, pid, [t])
     piles = [p for p in sorted(game["supply"])
              if game["supply"][p] > 0
              and E.has_type(game, p, "treasure")
-             and E.cost_le(game, p, cap)]
+             and E.cost_le_card(game, p, ref, 3)]
     if piles:
         E.push_choose_pile(game, pid, "Mine", "gain", piles=piles)
 
