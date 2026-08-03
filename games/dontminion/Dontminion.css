@@ -236,6 +236,10 @@
      so it takes the padding off the frame and applies --cf-pad itself: every
      row now sits the SAME distance from the edge (border + --cf-pad). */
   --cf-pad: 4px; padding: 0;
+  /* the cost-coin size and the potion-bottle height, shared by the coin, the
+     potion, and the text carve-out so they always agree */
+  --coin-sz: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
+  --pot-h: clamp(15px, calc(var(--card-h, 120px) * .19), 26px);
   /* press-and-hold opens the detail modal, so the OS must not answer the hold
      first: iOS pops a selection callout / magnifier over the card otherwise,
      and a text selection would swallow the gesture on every platform */
@@ -299,22 +303,32 @@
 .dm-cost {
   background: radial-gradient(circle at 35% 30%, #f5d98a, #c9a84c 70%);
   color: #221a05; font-weight: 800; border-radius: 50%;
-  width: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
-  height: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
+  width: var(--coin-sz); height: var(--coin-sz);
   display: flex; align-items: center; justify-content: center;
   font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
 }
-/* the cost coins stack vertically at the foot's right edge: a Potion component
-   (Alchemy) sits ABOVE the coin cost — both are parts of the same price */
-.dm-cost-col { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
 /* the Potion component of a cost: a little blue potion bottle (body tapering up
-   into a corked spout), sized to sit ABOVE the coin cost */
+   into a corked spout) sitting just ABOVE the coin. Absolutely placed so it does
+   NOT grow the foot row and squeeze the rules text — the text carves around it. */
 .dm-cost-p {
-  display: flex; align-items: center; justify-content: center; flex: none;
-  width: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
-  height: clamp(15px, calc(var(--card-h, 120px) * .19), 26px);
+  position: absolute; right: var(--cf-pad, 4px);
+  bottom: calc(var(--cf-pad, 4px) + var(--coin-sz) + 2px);
+  width: var(--coin-sz); height: var(--pot-h);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 2;
 }
 .dm-cost-p svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* Carve the potion's bottom-right footprint out of the rules-text flow so the
+   text wraps AROUND it and keeps using the rest of the card. A ::before float
+   survives FitBodyText's textContent rewrites (a pseudo-element is not a child
+   node), and shape-outside limits the exclusion to just the potion's corner —
+   the text still flows full-width above it. */
+.dm-card-text.dm-has-potion::before {
+  content: ""; float: right; height: 100%;
+  width: calc(var(--coin-sz) + 6px);
+  shape-outside: inset(calc(100% - (var(--pot-h) + 6px)) 0 0 0);
+  shape-margin: 3px;
+}
 .dm-type {
   display: block;
   /* +15% on the SCALE and the cap (.068/11). The FLOOR stays 5.5px on purpose:

@@ -168,36 +168,36 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {/* supply piles opt into fitted body text via `body` (small stays text-free
           on the 56px in-play/hand/mat faces); large faces keep the length tiers */}
       {body
-        ? <FitBodyText text={text} />
-        : (!small && <div className={"dm-card-text" + textCls}>{text}</div>)}
-      {/* foot row: type lines bottom-LEFT, the cost coins bottom-RIGHT. A Potion
-          is part of the cost (Alchemy) — its blue "P" token stacks ABOVE the
-          coin cost, both being components of the same price. */}
+        ? <FitBodyText text={text} hasPotion={card?.potion > 0} />
+        : (!small && <div className={"dm-card-text" + textCls + (card?.potion > 0 ? " dm-has-potion" : "")}>{text}</div>)}
+      {/* foot row: type lines bottom-LEFT, the coin cost bottom-RIGHT */}
       <div className="dm-card-foot">
         <div className="dm-types">
           {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
         </div>
-        <div className="dm-cost-col">
-          {card?.potion > 0 && (
-            <span className="dm-cost-p" title="costs a Potion">
-              <svg viewBox="0 0 24 28" role="img" aria-label="costs a Potion">
-                {/* blue potion: a bulbous body tapering up into a narrow spout */}
-                <path d="M9.4 5 L9.4 9 C9.4 12 3 12.6 3 18.4 C3 23.4 7.4 26 12 26
-                         C16.6 26 21 23.4 21 18.4 C21 12.6 14.6 12 14.6 9 L14.6 5 Z"
-                      fill="#3f57d8" stroke="#243a9e" strokeWidth="1" />
-                {/* a glassy shine down the left of the liquid */}
-                <ellipse cx="8.8" cy="16.5" rx="1.6" ry="3" fill="#89a4f2" opacity="0.7" />
-                {/* the cork, plugging the spout */}
-                <rect x="8.3" y="1.4" width="7.4" height="4.3" rx="1.4"
-                      fill="#caa268" stroke="#8a6a3c" strokeWidth="0.8" />
-                <text x="12" y="20.4" textAnchor="middle" fontSize="9.5" fontWeight="800"
-                      fill="#fff">P</text>
-              </svg>
-            </span>
-          )}
-          <span className="dm-cost">{card ? card.cost : ""}</span>
-        </div>
+        <span className="dm-cost">{card ? card.cost : ""}</span>
       </div>
+      {/* A Potion is part of the cost (Alchemy): a little bottle sitting just
+          ABOVE the coin. It is absolutely placed so it never grows the foot row —
+          the rules text reflows AROUND its corner (see .dm-has-potion) instead of
+          stopping short above a tall cost column. */}
+      {card?.potion > 0 && (
+        <span className="dm-cost-p" title="costs a Potion">
+          <svg viewBox="0 0 24 28" role="img" aria-label="costs a Potion">
+            {/* blue potion: a bulbous body tapering up into a narrow spout */}
+            <path d="M9.4 5 L9.4 9 C9.4 12 3 12.6 3 18.4 C3 23.4 7.4 26 12 26
+                     C16.6 26 21 23.4 21 18.4 C21 12.6 14.6 12 14.6 9 L14.6 5 Z"
+                  fill="#3f57d8" stroke="#243a9e" strokeWidth="1" />
+            {/* a glassy shine down the left of the liquid */}
+            <ellipse cx="8.8" cy="16.5" rx="1.6" ry="3" fill="#89a4f2" opacity="0.7" />
+            {/* the cork, plugging the spout */}
+            <rect x="8.3" y="1.4" width="7.4" height="4.3" rx="1.4"
+                  fill="#caa268" stroke="#8a6a3c" strokeWidth="0.8" />
+            <text x="12" y="20.4" textAnchor="middle" fontSize="9.5" fontWeight="800"
+                  fill="#fff">P</text>
+          </svg>
+        </span>
+      )}
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
   );
@@ -292,7 +292,7 @@ const BODY_MIN_PX = 10;
 const BODY_MAX_PX = 16;
 const BODY_LH = 1.2;
 
-function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX }) {
+function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX, hasPotion = false }) {
   const ref = useRef(null);
   const [shown, setShown] = useState(text);
   const [size, setSize] = useState(max);
@@ -339,10 +339,11 @@ function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX }) {
       ro.observe(el);
     }
     return () => { if (ro) ro.disconnect(); };
-  }, [text, min, max]);
+  }, [text, min, max, hasPotion]);
   return (
     <div ref={ref}
-      className={"dm-card-text dm-card-body" + (clipped ? " dm-body-clip" : "")}
+      className={"dm-card-text dm-card-body" + (clipped ? " dm-body-clip" : "")
+        + (hasPotion ? " dm-has-potion" : "")}
       style={{ fontSize: size + "px", lineHeight: BODY_LH }}>
       {shown}
     </div>
