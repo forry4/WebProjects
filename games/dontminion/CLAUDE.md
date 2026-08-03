@@ -715,6 +715,18 @@ marker). Because engine constraints are generic, the decision UI is SIX renderer
 a played card doesn't change size depending on who played it. Supply affordance mirrors
 `engine.cost` via `turn_ctx.bridges` — display only, the server stays authoritative.
 
+**Card rules text is rendered per face SIZE, two ways.** Large faces (hand, the `cardInfo`/kingdom
+modals) size text off the length-tiered `.dm-text-{l,xl,xxl}` CSS clamps. **Supply piles opt in
+with `<DmCardFace body>`**, which renders `FitBodyText` instead: it MEASURES the real box and fills
+the text within a 10-16px band (`BODY_MIN_PX`/`BODY_MAX_PX`), truncating with a trailing "…" when
+even the floor won't fit — press/right-click (or the face's `title`) reads the full card. The 56px
+in-play/hand/mat faces stay text-free — they are `small` but never pass `body`, so the one-size
+in-play rule is unaffected. No wire change: `card.text` is already on the client (`/catalog`), so
+`test_wire_contract.py` is untouched. `screens.mjs` pins that supply faces render fitted text, that
+the band holds (short cards capped, nothing overflows), and that a face truncates IFF its full rule
+can't fit at the floor. **Truncation is reached at ~≤130px cards — including the 1440 two-column
+laptop layout, where the 340px sidebar squeezes kingdom piles to the ~88px floor — not just phones.**
+
 **Reading a card is its own gesture: right-click, or press-and-hold on touch.** A plain click is
 always the card's PRIMARY action (play / buy / pick), and the card you most want to read is the
 one whose click is already taken — so info can't be the click. `useCardInfoGesture` handles both:

@@ -267,6 +267,13 @@
 .dm-card-text.dm-text-l { font-size: clamp(7px, calc(var(--card-h, 120px) * .07), 10px); line-height: 1.2; }
 .dm-card-text.dm-text-xl { font-size: clamp(6px, calc(var(--card-h, 120px) * .06), 9px); line-height: 1.18; }
 .dm-card-text.dm-text-xxl { font-size: clamp(6px, calc(var(--card-h, 120px) * .05), 8px); line-height: 1.15; }
+/* Supply faces opt into fitted body text via <DmCardFace body>. FitBodyText sizes
+   it inline (fill within a 10-16px band, then a trailing "…"), so it needs no
+   length-tier class — it carries .dm-card-text too, inheriting the colour, the
+   --cf-pad inset, pre-line wrapping and overflow:hidden. The large hand/modal
+   faces keep the .dm-text-* classes above. .dm-body-clip is a hook for a future
+   "more" cue; the ellipsis already signals it, and a fade would blur the "…". */
+.dm-card-body { min-height: 0; }
 .dm-card-foot {
   margin-top: auto; display: flex; align-items: flex-end; gap: 2px 2px;
   padding: 0 var(--cf-pad) var(--cf-pad);

@@ -758,6 +758,63 @@ try {
 			check("the pile count never covers a card's type or cost",
 				pills.length === 0, JSON.stringify(pills));
 
+			// ── Supply faces render fitted rules text (the `body` opt-in) ─────────
+			// Rules text used to be gated off small faces; supply piles now pass
+			// <DmCardFace body> and FitBodyText fills within a 10-16px band, cutting
+			// a too-long rule with "…" (the full card is a press/right-click away).
+			// The deal is RANDOM, so rather than demand a particular wordy card (a
+			// ~2% deal has none — a flaky gate), assert the INVARIANTS: text renders,
+			// the band holds, nothing overflows, short cards hit the ceiling, and a
+			// face is truncated IFF its full rule can't fit at the floor. The
+			// biconditional exercises the truncation logic on every deal without
+			// depending on which cards were dealt.
+			await page.setViewportSize({ width: 1000, height: 900 });   // squeezes kingdom piles to the 88px floor
+			await sleep(500);                                           // let FitBodyText's ResizeObserver refit
+			const bodyTxt = await page.evaluate(() => {
+				const rows = [...document.querySelectorAll(".dm-supply .dm-card")].map((c) => {
+					const el = c.querySelector(".dm-card-body");
+					const name = c.querySelector(".dm-fitspan")?.textContent;
+					if (!el) return { name, hasBody: false };
+					const px = +parseFloat(getComputedStyle(el).fontSize).toFixed(2);
+					const shown = el.textContent;
+					// full rule rides in the face's title as "Name (cost) — <text>"
+					const full = (c.getAttribute("title") || "").split(" — ").slice(1).join(" — ");
+					// measure the FULL text at the floor, then restore the fitter's output
+					const prevF = el.style.fontSize, prevT = el.textContent;
+					el.style.fontSize = "10px"; el.textContent = full;
+					const fullOverflows = el.scrollHeight > el.clientHeight + 0.5;
+					el.textContent = prevT; el.style.fontSize = prevF;
+					return { name, hasBody: true, px, shown, truncated: /…$/.test(shown),
+						fullOverflows, overflow: el.scrollHeight - el.clientHeight };
+				});
+				const b = rows.filter((r) => r.hasBody);
+				const basic = /^(Copper|Silver|Gold|Estate|Duchy|Province|Curse)$/;
+				return {
+					total: rows.length, withText: b.filter((r) => r.shown && r.shown.length).length,
+					outOfBand: b.filter((r) => r.px < 9.9 || r.px > 16.1).map((r) => [r.name, r.px]),
+					overflowing: b.filter((r) => r.overflow > 1).map((r) => r.name),
+					short: b.filter((r) => basic.test(r.name)),
+					mismatch: b.filter((r) => r.truncated !== r.fullOverflows).map((r) => [r.name, r.truncated, r.fullOverflows]),
+					floorOff: b.filter((r) => r.truncated && Math.abs(r.px - 10) > 0.6).map((r) => [r.name, r.px]),
+					sample: b.slice(0, 3).map((r) => [r.name, r.px, r.truncated]),
+				};
+			});
+			check("every supply pile renders fitted body text",
+				bodyTxt.total > 0 && bodyTxt.withText === bodyTxt.total, JSON.stringify(bodyTxt.sample));
+			// short cards must NOT balloon (ceiling) and nothing may overflow (floor)
+			check("...within the 10-16px band, short cards capped, none overflowing",
+				bodyTxt.outOfBand.length === 0 && bodyTxt.overflowing.length === 0
+				&& bodyTxt.short.length > 0 && bodyTxt.short.every((r) => r.px >= 15.5),
+				JSON.stringify({ band: bodyTxt.outOfBand, over: bodyTxt.overflowing,
+					short: bodyTxt.short.map((r) => [r.name, r.px]) }));
+			// truncation is exactly "the full rule can't fit at the floor", and every
+			// cut face sits at the 10px floor
+			check("...truncated with an ellipsis iff the full rule can't fit at the floor",
+				bodyTxt.mismatch.length === 0 && bodyTxt.floorOff.length === 0,
+				JSON.stringify({ mismatch: bodyTxt.mismatch, floorOff: bodyTxt.floorOff }));
+			await page.setViewportSize({ width: 1280, height: 900 });
+			await sleep(400);
+
 			// The log reads CHRONOLOGICALLY — oldest at the top, newest at the
 			// bottom — and follows the newest line. Both the brightened line and
 			// the slide-in animation key off :last-child, so a flip back to

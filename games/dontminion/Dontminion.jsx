@@ -140,7 +140,7 @@ function useCardInfoGesture(onInfo) {
   };
 }
 
-function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight, small, badge }) {
+function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight, small, badge, body }) {
   const types = card?.types || [];
   const infoGesture = useCardInfoGesture(onInfo);
   // A card that isn't actionable right now still answers a click with its
@@ -161,7 +161,11 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {types.includes("reaction") && <span className="dm-edge dm-edge-rx" />}
       {types.includes("duration") && !types.includes("attack") && <span className="dm-edge dm-edge-dur" />}
       <FitText text={name} className="dm-card-name" />
-      {!small && <div className={"dm-card-text" + textCls}>{text}</div>}
+      {/* supply piles opt into fitted body text via `body` (small stays text-free
+          on the 56px in-play/hand/mat faces); large faces keep the length tiers */}
+      {body
+        ? <FitBodyText text={text} />
+        : (!small && <div className={"dm-card-text" + textCls}>{text}</div>)}
       {/* foot row: type lines bottom-LEFT, the cost coin bottom-RIGHT */}
       <div className="dm-card-foot">
         <div className="dm-types">
@@ -247,6 +251,75 @@ function FitText({ text, className, min = 8 }) {
   return (
     <div ref={box} className={className}>
       <span ref={span} className="dm-fitspan">{text}</span>
+    </div>
+  );
+}
+
+// Supply-face rules text: FILL the body between a legible floor and a ceiling —
+// the ceiling stops a short card (Smithy) ballooning, the floor keeps it readable.
+// If the whole rule won't fit even at the floor, drop to the floor and trim with a
+// "…"; the full text is one press/right-click away (useCardInfoGesture opens the
+// detail modal, and the face's `title` carries it for a desktop hover). Unlike the
+// large faces' length-tiered .dm-text-* classes, this MEASURES the real box, so it
+// stays correct as the container query resizes the pile (180px on a wide screen
+// down to the ~88px floor of the two-column laptop layout).
+const BODY_MIN_PX = 10;
+const BODY_MAX_PX = 16;
+const BODY_LH = 1.2;
+
+function FitBodyText({ text, min = BODY_MIN_PX, max = BODY_MAX_PX }) {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(text);
+  const [size, setSize] = useState(max);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let lastW = -1;
+    // Trial strings are written imperatively (one layout read each), then the
+    // winner is COMMITTED through state so the vdom and the DOM agree — textContent
+    // replaces the single text node React manages for {shown}, so there is no
+    // orphaned-node fight, and the transient writes happen before paint.
+    const fits = (px, str) => {
+      el.style.fontSize = px + "px";
+      el.textContent = str;
+      return el.scrollHeight <= el.clientHeight + 0.5;   // box height is fixed (overflow:hidden)
+    };
+    const fit = () => {
+      el.style.lineHeight = BODY_LH;
+      for (let px = max; px >= min; px -= 0.5) {          // largest whole-text size in [min,max]
+        if (fits(px, text)) { setSize(px); setShown(text); setClipped(false); return; }
+      }
+      let lo = 0, hi = text.length, best = 0;             // floor won't fit → trim to an ellipsis
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (fits(min, text.slice(0, mid).replace(/\s+$/, "") + "…")) { best = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      let cut = text.slice(0, best);
+      const sp = cut.lastIndexOf(" ");
+      if (sp > best * 0.6) cut = cut.slice(0, sp);        // don't cut mid-word
+      const out = cut.replace(/\s+$/, "") + "…";
+      setSize(min); setShown(out); setClipped(true);
+      el.style.fontSize = min + "px"; el.textContent = out;   // leave DOM == committed state
+    };
+    fit();
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver((entries) => {              // re-fit on WIDTH changes only
+        const w = entries[0].contentRect.width;
+        if (Math.abs(w - lastW) < 0.5) return;
+        lastW = w; fit();
+      });
+      ro.observe(el);
+    }
+    return () => { if (ro) ro.disconnect(); };
+  }, [text, min, max]);
+  return (
+    <div ref={ref}
+      className={"dm-card-text dm-card-body" + (clipped ? " dm-body-clip" : "")}
+      style={{ fontSize: size + "px", lineHeight: BODY_LH }}>
+      {shown}
     </div>
   );
 }
@@ -1151,7 +1224,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     return (
       <div key={name} className="dm-pile-slot"
         style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
-        <DmCardFace name={face} card={cardData} small
+        <DmCardFace name={face} card={cardData} small body
           highlight={highlight} disabled={disabled && !highlight}
           onClick={() => pileClick(name)} onInfo={() => setCardInfo(face)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
