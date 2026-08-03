@@ -669,6 +669,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [matView, setMatView] = useState(null);      // {label, cards} for a mat viewer modal
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
+  const [reviewLoadingId, setReviewLoadingId] = useState(null);  // History row whose Review is in flight
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -1048,20 +1049,40 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // reveals at game over, so the live game screen renders the whole thing: the
   // game-over panel (winner, scores, each player's final deck), the board, and
   // the full log — all already gated on `over`, so nothing is actionable.
-  const enterReview = (rid) => {
+  const enterReview = async (rid) => {
+    if (reviewLoadingId) return;                 // one review load at a time
+    setReviewLoadingId(rid);
     const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
-    fetch(`${DM_HTTP}/games/${rid}/review?player_id=${encodeURIComponent(myId)}`, { headers })
-      .then((r) => r.json()).then((d) => {
-        if (!d.ok) { setToast(d.message || "Could not load review"); return; }
-        setReviewOnly(true);
-        setGameOverDismissed(false);   // land on the results panel first
-        setRoomData({
-          game: d.game, players: d.players || {}, host: null, status: "over",
-          vs_ai: false, ai_players: [],
-        });
-        setRoomId(rid);
-        setScreen("game");
-      }).catch(() => setToast("Could not load review"));
+    const url = `${DM_HTTP}/games/${rid}/review?player_id=${encodeURIComponent(myId)}`;
+    // Render's free tier cold-starts (~30-50s, serving 503s while it wakes), and
+    // the lobby History renders from localStorage cache — so the FIRST review
+    // click can race the spin-up, and a 503/HTML body would make r.json() throw
+    // into a dead-end toast. Retry through the wake like a browser, and only a
+    // real JSON rejection (not your game / not finished) stops immediately.
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      let d = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        let res;
+        try { res = await fetch(url, { headers }); }
+        catch { await sleep(1500 * (attempt + 1)); continue; }   // offline / still waking
+        if (res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }  // cold start
+        try { d = await res.json(); } catch { d = null; }
+        break;
+      }
+      if (!d) { setToast("Couldn't reach the server — it may be waking up. Try again in a moment."); return; }
+      if (!d.ok) { setToast(d.message || "Could not load review"); return; }
+      setReviewOnly(true);
+      setGameOverDismissed(false);   // land on the results panel first
+      setRoomData({
+        game: d.game, players: d.players || {}, host: null, status: "over",
+        vs_ai: false, ai_players: [],
+      });
+      setRoomId(rid);
+      setScreen("game");
+    } finally {
+      setReviewLoadingId(null);
+    }
   };
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };
@@ -1663,7 +1684,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
                     <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                   </div>
                   <div className="lby-card-actions">
-                    <button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button>
+                    <button className="btn btn-outline" disabled={!!reviewLoadingId}
+                      onClick={() => enterReview(g.id)}>
+                      {reviewLoadingId === g.id ? "Loading…" : "Review"}
+                    </button>
                   </div>
                 </div>
               );
