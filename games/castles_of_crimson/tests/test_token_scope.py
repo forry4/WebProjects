@@ -67,3 +67,42 @@ def test_supply_and_rng_not_shipped_to_wire():
         assert "rng_state" in live
     finally:
         m.ROOMS.pop("TLEAK", None)
+
+
+def test_no_hidden_state_anywhere_in_a_real_broadcast():
+    """The test above builds a synthetic game dict, so it can only prove the TOP-LEVEL
+    keys are stripped — and that is exactly how the leak got in: `turn_undo` is a
+    whole-game snapshot carrying its own copy of all four hidden keys, and shipping it
+    defeated the redaction entirely (100 ordered supply tiles + rng_state on the wire).
+
+    So this runs a REAL in-progress game and searches the whole serialized payload,
+    which is the only form that catches a hidden field nested inside a new one."""
+    import json
+    import random
+
+    from games.castles_of_crimson import engine
+
+    g = engine.new_game(["a", "b"], seed=4)
+    rng = random.Random(99)
+    for _ in range(60):                       # play in far enough to arm a snapshot
+        if engine.is_over(g):
+            break
+        pid = g.get("pending_pid") or g.get("turn")
+        moves = engine.legal_moves(g, pid)
+        if not moves:
+            break
+        engine.apply_move(g, pid, rng.choice(moves))
+    assert "turn_undo" in g, "test needs a game with an armed undo snapshot"
+
+    m.ROOMS["TDEEP"] = {
+        "players": {"a": "A", "b": "B"}, "sockets": {}, "host": "a",
+        "status": "playing", "game": g, "meta": {"a": {"token": "t"}},
+    }
+    try:
+        for viewer in ("a", "b", None):
+            blob = json.dumps(m.mk_room_state("TDEEP", viewer_pid=viewer))
+            for hidden in ("supply", "black_supply", "goods_supply", "rng_state"):
+                assert f'"{hidden}"' not in blob, f"{hidden} leaked to {viewer}'s wire"
+        assert len(g["supply"]) > 0 and g["rng_state"] is not None   # live dict intact
+    finally:
+        m.ROOMS.pop("TDEEP", None)

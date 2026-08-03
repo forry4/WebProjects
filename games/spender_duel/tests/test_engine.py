@@ -803,6 +803,43 @@ def test_undo_leaves_no_trace_in_the_log():
     assert not any(e["type"] == "undo_turn" for e in g["log"])
 
 
+def test_undo_snapshot_stores_the_log_position_not_the_log():
+    """The log is the one unbounded-growth structure in the dict, and `save_game`
+    persists the snapshot alongside the game — copying it in wrote the whole log twice
+    on every save. Storing its LENGTH is exact because `_log` only ever appends."""
+    g = fresh()
+    g["players"][A]["privileges"] = 2
+    clear_board(g)
+    put(g, 5, "blue")
+    put(g, 7, "red")
+    arm(g)
+    assert "log" not in g["turn_undo"]
+    assert g["turn_undo"]["_log_len"] == len(g["log"])
+    before = [dict(e) for e in g["log"]]
+    assert engine.apply_move(g, A, {"type": "use_privilege", "cell": 5})[0]
+    assert engine.apply_move(g, A, {"type": "use_privilege", "cell": 7})[0]
+    assert engine.apply_move(g, A, {"type": "undo_turn"})[0]
+    assert g["log"] == before          # restored entry-for-entry, not merely in length
+
+
+def test_undo_reads_a_pre_compaction_snapshot():
+    """A game saved before the snapshot dropped its log carries a full `log` instead
+    of `_log_len`; an in-progress turn must survive the deploy."""
+    g = fresh()
+    g["players"][A]["privileges"] = 1
+    clear_board(g)
+    put(g, 5, "blue")
+    arm(g)
+    legacy = copy.deepcopy(g)                       # emulate the old snapshot shape
+    legacy.pop("turn_undo", None)
+    g["turn_undo"] = legacy
+    assert "log" in g["turn_undo"] and "_log_len" not in g["turn_undo"]
+    before = [dict(e) for e in g["log"]]
+    assert engine.apply_move(g, A, {"type": "use_privilege", "cell": 5})[0]
+    assert engine.apply_move(g, A, {"type": "undo_turn"})[0]
+    assert g["log"] == before
+
+
 def test_undo_snapshot_never_reaches_a_client():
     """turn_undo is a FULL copy of the game (bag, decks, both hands) — it must not ship."""
     g = fresh()

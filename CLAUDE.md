@@ -72,6 +72,7 @@ games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
                        #   engine.py = the rules (single source of truth); cards.py = static card data
   castles_of_crimson/  # CoC — engine.py + ai.py + main.py (coc_app @ /coc) + CastlesOfCrimson.jsx
+                       #   persist.py = at-rest compaction of the state_json blob (save/load only)
   wherewolf/           # Where Wolf? — engine.py + main.py (werewolf_app @ /werewolf) + WhereWolf.jsx
   spender_duel/        # Spender Duel — engine.py + ai.py + main.py (duel_app @ /duel) + SpenderDuel.jsx
   dontminion/          # Dontminion (Dominion) — engine.py + ONE effects_<set>.py per expansion +
@@ -193,6 +194,18 @@ family. Same shape in all four games, differing only in table name and columns.
   unmet requirement.
 - **The game dict is JSON-safe** (no sets anywhere; RNG persisted as lists in `rng_state`) → reconnect-
   and save/load-safe.
+- **An undo snapshot must store a POSITION in the move log, never a copy of it.** `save_game` persists
+  the snapshot with the game, so a copied log is written twice on every save and the duplication grows
+  all game — it was measured at half the stored blob in CoC and 487KB→150KB in Dontminion. All three
+  games that have undo now store an offset (Dontminion `_log_len`, Duel `_log_len`, CoC `moves_seq`).
+  **A length only works if the log strictly APPENDS**: CoC's prepends and caps by evicting the tail, so
+  at the cap its length stops moving and a length delta silently restores nothing — it needs a
+  monotonic counter. Check which shape a log has before copying the pattern across.
+- **Anything that nests a whole-game snapshot defeats per-field wire redaction.** CoC's `turn_undo`
+  carried its own copies of the four `_HIDE` keys and shipped the ordered supply + `rng_state` to every
+  client despite the top-level redaction being correct — the 2026-07 audit fixed the top level and
+  missed the nested copy. A redaction test built on a synthetic game dict cannot catch this; assert
+  against the whole SERIALIZED payload of a REAL in-progress game.
 - **AI turns run in a thread pool, never under `ROOM_LOCK`.** `_schedule_*_turn` snapshots under the lock
   → releases → runs the search via `loop.run_in_executor` → re-locks → re-validates turn/phase hasn't
   changed → applies → saves + broadcasts outside the lock. **OUTAGE LESSON (do not regress): never loop
@@ -274,8 +287,13 @@ family. Same shape in all four games, differing only in table name and columns.
   driving `ws_room_player` MUST reset `_rooms._ws_connect_limiter` per test, or the suite eventually
   throttles itself and the failures look like anything but a rate limit (measured: 90 of 150
   in-process connects rejected without the reset).
-- **Rust parity:** CoC — regen fixtures via `gen_engine_fixtures.py`, then `cargo test --release
-  --features bridge`. Spender — `cargo test --lib` (`src/bin/*` need `--features bridge`).
+- **Rust parity:** CoC — regen fixtures via **BOTH** `gen_engine_fixtures.py` (→ `games.jsonl`, feeds
+  `python_fixture_replay`) **and** `gen_value_fixtures.py` (→ `values.jsonl`, feeds
+  `heuristic_value_parity`), then `cargo test --release --features bridge`. The fixtures are
+  **gitignored**, so on a fresh clone the gate fails with a `FAILED` that looks like a parity break and
+  is really just a missing file — read the panic, it names the generator. Run the tools with
+  `PYTHONPATH=<repo root>`. Spender — `cargo test --lib` (`src/bin/*` need `--features bridge`);
+  Duel — `cargo test --lib` (37 lib tests).
 
 ---
 

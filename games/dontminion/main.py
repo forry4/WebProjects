@@ -767,6 +767,43 @@ async def games_history(token: str | None = Depends(_bearer_token)):
     return {"ok": True, "games": list_user_history(user["id"])}
 
 
+@dontminion_app.get("/games/{game_id}/review")
+async def games_review(game_id: str, token: str | None = Depends(_bearer_token),
+                       player_id: str | None = None):
+    """Read-only review of a FINISHED game: the fully-revealed final state (every
+    zone opens at game over — decks, hands, mats), plus players + winners, for the
+    lobby History 'Review' button. The client reuses the live game screen (its
+    game-over panel, per-player final decks, and log all already read this shape),
+    so nothing plays — over is set, and every affordance is already gated on it.
+
+    Restricted to OVER games (an in-progress game's hidden state is never exposed
+    here — resume it over WS instead) AND to a PARTICIPANT (mirrors CoC/Spender):
+    a logged-in player whose account id is in the game, or a guest presenting
+    their in-game player_id — so an anonymous id-guess can't read another table's
+    revealed board. The state passes through player_view like every wire view."""
+    game_id = normalize_room(game_id)
+    room = ROOMS.get(game_id)
+    if room and room.get("game"):
+        g, players = room["game"], room.get("players", {})
+    else:
+        state = load_game_state(game_id)
+        if not state:
+            return {"ok": False, "message": "not found"}
+        g, players = state.get("game"), state.get("players", {})
+        if isinstance(g, dict):
+            # A finished game may predate later phases; migrate before reading it,
+            # exactly as load_game_to_memory does for the live path.
+            g = engine.migrate(g)
+    if not isinstance(g, dict) or not g.get("players") or not engine.is_over(g):
+        return {"ok": False, "message": "game not finished"}
+    user = get_user_by_session(token) if token else None
+    requester = (user or {}).get("id") or player_id
+    if not requester or requester not in players:
+        return {"ok": False, "message": "not your game"}
+    return {"ok": True, "game": engine.player_view(g, requester),
+            "players": players, "winners": list(g.get("winners") or [])}
+
+
 @dontminion_app.post("/games/{game_id}/cancel")
 async def games_cancel(game_id: str, token: str | None = Depends(_bearer_token),
                        player_id: str | None = None):

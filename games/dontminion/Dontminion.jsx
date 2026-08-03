@@ -668,6 +668,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [deckView, setDeckView] = useState(null);    // game-over: whose final deck to show
   const [matView, setMatView] = useState(null);      // {label, cards} for a mat viewer modal
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
+  const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
+  const [reviewLoadingId, setReviewLoadingId] = useState(null);  // History row whose Review is in flight
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -887,6 +889,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── URL deep entry + popstate ──
   const urlResume = (rid) => {
+    setReviewOnly(false);   // a stale review must not linger past a URL-driven resume
     urlAttemptRef.current = { rid, retried: false };
     resumeGame(rid);
   };
@@ -908,7 +911,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   // ── auto-reconnect while in a live game (re-kicks the bot scheduler server-side) ──
-  const inLiveGame = !!roomId && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
+  const inLiveGame = !!roomId && !reviewOnly && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   const attemptReconnect = useCallback(() => {
     if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
     const rs = socketReady();
@@ -1042,6 +1045,45 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setConnecting(true);
     connect(`${DM_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
+  // Load + show a finished game read-only over HTTP (no WebSocket). Everything
+  // reveals at game over, so the live game screen renders the whole thing: the
+  // game-over panel (winner, scores, each player's final deck), the board, and
+  // the full log — all already gated on `over`, so nothing is actionable.
+  const enterReview = async (rid) => {
+    if (reviewLoadingId) return;                 // one review load at a time
+    setReviewLoadingId(rid);
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    const url = `${DM_HTTP}/games/${rid}/review?player_id=${encodeURIComponent(myId)}`;
+    // Render's free tier cold-starts (~30-50s, serving 503s while it wakes), and
+    // the lobby History renders from localStorage cache — so the FIRST review
+    // click can race the spin-up, and a 503/HTML body would make r.json() throw
+    // into a dead-end toast. Retry through the wake like a browser, and only a
+    // real JSON rejection (not your game / not finished) stops immediately.
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    try {
+      let d = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        let res;
+        try { res = await fetch(url, { headers }); }
+        catch { await sleep(1500 * (attempt + 1)); continue; }   // offline / still waking
+        if (res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }  // cold start
+        try { d = await res.json(); } catch { d = null; }
+        break;
+      }
+      if (!d) { setToast("Couldn't reach the server — it may be waking up. Try again in a moment."); return; }
+      if (!d.ok) { setToast(d.message || "Could not load review"); return; }
+      setReviewOnly(true);
+      setGameOverDismissed(false);   // land on the results panel first
+      setRoomData({
+        game: d.game, players: d.players || {}, host: null, status: "over",
+        vs_ai: false, ai_players: [],
+      });
+      setRoomId(rid);
+      setScreen("game");
+    } finally {
+      setReviewLoadingId(null);
+    }
+  };
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };
     if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
@@ -1058,6 +1100,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const leaveToLobby = () => {
     disconnect();
     setConnecting(false);
+    setReviewOnly(false);   // a read-only review holds no WS / resume pointer
     pushPath(buildPath("dontminion"));
     setScreen("lobby");
     setRoomData(null);
@@ -1369,12 +1412,25 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const scores = game.scores || {};
     const ranked = [...seatOrder].sort((a, b) => (scores[b]?.vp ?? 0) - (scores[a]?.vp ?? 0));
     const winners = game.winners || [];
-    // Drilldown: one player's full final deck (every zone folded to counts),
-    // sorted by cost then name like the supply. Rows show how many of each.
+    // Drilldown: one player's full final deck (every zone folded to counts).
+    // Grouped by type — Treasures, then Actions, then Victory, then Curses —
+    // and within each group most expensive first (then name). A card with
+    // several types counts as an Action if it has the Action type at all, so an
+    // Action-Victory like Nobles sits with the Actions rather than the Victory.
     if (deckView) {
       const counts = deckCensus(seats[deckView]);
+      const typeRank = (name) => {
+        const t = cards[name]?.types || [];
+        if (t.includes("action")) return 1;
+        if (t.includes("treasure")) return 0;
+        if (t.includes("victory")) return 2;
+        if (t.includes("curse")) return 3;
+        return 4;
+      };
       const entries = Object.entries(counts).sort((a, b) =>
-        ((cards[a[0]]?.cost ?? 0) - (cards[b[0]]?.cost ?? 0)) || a[0].localeCompare(b[0]));
+        (typeRank(a[0]) - typeRank(b[0]))
+        || ((cards[b[0]]?.cost ?? 0) - (cards[a[0]]?.cost ?? 0))
+        || a[0].localeCompare(b[0]));
       const total = entries.reduce((n, [, k]) => n + k, 0);
       return (
         <div className="dm-backdrop" onClick={() => setDeckView(null)}>
@@ -1639,6 +1695,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       </span>
                     </div>
                     <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
+                  </div>
+                  <div className="lby-card-actions">
+                    <button className="btn btn-outline" disabled={!!reviewLoadingId}
+                      onClick={() => enterReview(g.id)}>
+                      {reviewLoadingId === g.id ? "Loading…" : "Review"}
+                    </button>
                   </div>
                 </div>
               );

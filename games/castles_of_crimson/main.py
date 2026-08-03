@@ -32,6 +32,7 @@ from . import engine
 from . import board
 from . import tiles
 from . import bot
+from . import persist               # at-rest compaction for the state_json blob
 from . import ai as coc_ai          # MCTS opponent (aliased: `ai` is used as a local for the bot pid)
 
 # Expert-tier client-side AI (browser WASM): the compact projection + the
@@ -242,6 +243,19 @@ def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> N
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here:
+    a compacted blob reaching a caller that skipped `expand_state` would hand it
+    `[id, shape]` pairs where it expects tiles. Rows written before compaction carry
+    no marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
     event loop via the single-thread write executor (fire-and-forget)."""
@@ -265,7 +279,7 @@ def save_game(room_id: str) -> None:
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
         _persist_row, room_id, room.get("status", "open"), seats,
-        room.get("host"), _rooms.encode_state(state), now, now,
+        room.get("host"), _encode_state(state), now, now,
     )
 
 
@@ -280,7 +294,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return _rooms.decode_state(row["state_json"])
+        return _decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -294,7 +308,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = _rooms.decode_state(row["state_json"])
+        state = _decode_state(row["state_json"])
     except Exception:
         return False
     ROOMS[room_id] = {
@@ -316,7 +330,7 @@ def load_game_to_memory(room_id: str) -> bool:
 
 def _parse_state(row) -> dict:
     try:
-        return _rooms.decode_state(row["state_json"])
+        return _decode_state(row["state_json"])
     except Exception:
         return {}
 
@@ -490,7 +504,15 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         # future depot tiles, and rng_state lets a client reconstruct every future die for BOTH
         # players — both hidden in real Castles of Burgundy. The frontend reads none of them (the
         # visible depots live in `depots`/`boards`). Shallow-copy so the live game dict is untouched.
-        _HIDE = ("supply", "black_supply", "goods_supply", "rng_state")
+        #
+        # `turn_undo` MUST be in this list. It is a whole-game snapshot, so it carries its own
+        # copies of all four keys above and shipping it defeated every one of them — measured at
+        # 100 ordered supply tiles plus rng_state reaching the client on a mid-game broadcast.
+        # This is the same leak class as the 2026-07 audit (Spender `decks`, WW `deck`, the CoC
+        # supplies): redacting a field is not enough while something else nests a copy of it.
+        # The frontend never reads it — the Undo button's enabled state is derived client-side
+        # from whether you have acted this turn (`actedThisTurn`), not from the snapshot.
+        _HIDE = ("supply", "black_supply", "goods_supply", "rng_state", "turn_undo")
         if any(k in g for k in _HIDE):
             g = {k: v for k, v in g.items() if k not in _HIDE}
     state = {

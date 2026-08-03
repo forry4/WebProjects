@@ -30,6 +30,36 @@ prod. **Now a 4-animal CoB port** (chicken added; monastery 6 = spend 1 silver �
   two hex tiles of fixed TYPES (the specific building/monastery still varies by seed). Locked by tests.
 - **Shadow VP ledger** (`region_vp`/`color_vp`/`livestock_vp`) is telemetry OUTSIDE the canonical
   projection — for AI aux training only; don't fold it into `proj`/parity.
+- **`turn_undo` stores a log POSITION, not the log.** `_snapshot_turn` excludes `moves` and keeps
+  `moves_seq` (a monotonic count of records logged); undo rewinds by dropping the records added
+  since. It has to be a counter and not a length because `_log` PREPENDS and caps by evicting the
+  tail — at the 2000 cap the length stops moving and a length delta would restore nothing. The
+  snapshot is persisted with the game, so the old full copy was half the stored blob.
+
+---
+
+## At-rest compaction (`persist.py`)
+
+`state_json` is compacted on the way into the DB and expanded on the way out — **`_encode_state` /
+`_decode_state` in `main.py` are the only codec call sites, and every read must funnel through them.**
+Tiles become `[id_number, shape_index]` against a per-blob shape table, and `rng_state`'s 625 Mersenne
+words pack into base64. Measured on 5 played-out games: **-56% raw dict, -41% stored** (on top of the
+shared zlib layer in `core/rooms.py`).
+
+- **It is a persistence boundary ONLY.** The live dict, the wire, the engine, the bot and the Rust
+  parity fixtures all still see full tile objects. That is deliberate — the tile `id` is load-bearing
+  in both directions (engine moves address a tile by `tile_id`; the frontend's flyer animation tracks
+  a tile across locations by its id), so compacting the live dict would be a wire break for a disk win.
+- **Tile locations are enumerated by hand, not walked generically** — a "looks like a tile" walk would
+  also run over `rng_state`'s int list and `track`'s pid lists, where a false positive is a corrupt
+  save. `tests/test_persist.py` asserts the list still covers every tile in a played game; that check
+  is what found `moves[].tile`, which reading `new_game` misses.
+- **Two counter-intuitive findings — do not relitigate:**
+  1. **Measure after zlib, not before.** `rng_state` is 8% of the raw dict but 22% of the compressed
+     one (incompressible noise surrounded by ~8x-compressible JSON).
+  2. **Transform BOTH copies of a key or neither.** The game and its `turn_undo` hold near-identical
+     `rng_state`s and zlib was already collapsing the second. Packing only the live copy destroyed
+     that dedup and made the blob *bigger* than not packing at all (-37% → -17% in the A/B).
 
 ---
 
@@ -93,6 +123,14 @@ prod. **Now a 4-animal CoB port** (chicken added; monastery 6 = spend 1 silver �
   same-color region unless you own monastery effect 1) so the legal-glow matches what the click accepts.
 - **The WASM worker pool must not take every core** — `hc<=4 ? hc-1 : min(hc-2, 8)`. CoC shipped without
   this for months and pegged every core on a 4-core machine.
+- **`turn_undo` is in `mk_room_state`'s `_HIDE` list and must stay there.** It is a whole-game snapshot,
+  so it carries its own copies of `supply`/`black_supply`/`goods_supply`/`rng_state` and shipping it
+  defeated the redaction of all four — measured at 100 ordered supply tiles (the exact future depot
+  refills) plus `rng_state` (every future die for BOTH players) reaching the client on a mid-game
+  broadcast. Same leak class as the 2026-07 audit, which fixed the top-level keys and missed the nested
+  copy. The frontend never reads it — the Undo button derives from client-side `actedThisTurn`.
+  `tests/test_token_scope.py` now searches the whole SERIALIZED payload of a REAL in-progress game,
+  because the older synthetic-dict test could only ever prove the top level was clean.
 
 ---
 
