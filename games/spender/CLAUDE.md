@@ -185,6 +185,12 @@ design: no server row, no history, no sync. Games vs the client-WASM tiers only 
   auto-pick (the `_run_ai_turn` behavior — the search never sees NOBLE roots), AI discard re-dispatch
   (the defer_discard flow). It runs the engine in its OWN lazy module worker (the hub needs engine
   calls before any search pool exists; one extra instance, idles during search).
+  **The undo snapshot deliberately COPIES the move log**, diverging from the root CLAUDE.md
+  "store a position, not a copy" rule: this log PREPENDS and caps — exactly the shape where that
+  rule's own caveat says a length delta silently restores nothing (the CoC trap; a counter would
+  work but buys nothing here) — and the copy is transient (cleared when the turn completes) and
+  bounded (≤500 tiny entries in ONE overwritten IDB record), so the server-side every-save
+  blob-growth rationale doesn't apply. Do not "align" it.
 - **Shell** (`Spender.jsx`): `/offline` = hub (create/resume/delete + the offline-asset download),
   `/offline/<LOCALID>` = a save; the game screen renders a puzzle-mode-style synthesized `roomData`
   whose `ai_search` is built locally, so the EXISTING worker-pool dispatch plays the AI unchanged —
