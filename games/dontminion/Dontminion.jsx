@@ -179,7 +179,21 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
         </div>
         <div className="dm-cost-col">
           {card?.potion > 0 && (
-            <span className="dm-cost dm-cost-p" title="costs a Potion">P</span>
+            <span className="dm-cost-p" title="costs a Potion">
+              <svg viewBox="0 0 24 28" role="img" aria-label="costs a Potion">
+                {/* blue potion: a bulbous body tapering up into a narrow spout */}
+                <path d="M9.4 5 L9.4 9 C9.4 12 3 12.6 3 18.4 C3 23.4 7.4 26 12 26
+                         C16.6 26 21 23.4 21 18.4 C21 12.6 14.6 12 14.6 9 L14.6 5 Z"
+                      fill="#3f57d8" stroke="#243a9e" strokeWidth="1" />
+                {/* a glassy shine down the left of the liquid */}
+                <ellipse cx="8.8" cy="16.5" rx="1.6" ry="3" fill="#89a4f2" opacity="0.7" />
+                {/* the cork, plugging the spout */}
+                <rect x="8.3" y="1.4" width="7.4" height="4.3" rx="1.4"
+                      fill="#caa268" stroke="#8a6a3c" strokeWidth="0.8" />
+                <text x="12" y="20.4" textAnchor="middle" fontSize="9.5" fontWeight="800"
+                      fill="#fff">P</text>
+              </svg>
+            </span>
           )}
           <span className="dm-cost">{card ? card.cost : ""}</span>
         </div>

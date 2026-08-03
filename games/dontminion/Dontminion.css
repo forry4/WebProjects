@@ -307,11 +307,14 @@
 /* the cost coins stack vertically at the foot's right edge: a Potion component
    (Alchemy) sits ABOVE the coin cost — both are parts of the same price */
 .dm-cost-col { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
-/* the Potion component of a cost: same coin shape as .dm-cost, but BLUE with a P */
+/* the Potion component of a cost: a little blue potion bottle (body tapering up
+   into a corked spout), sized to sit ABOVE the coin cost */
 .dm-cost-p {
-  background: radial-gradient(circle at 35% 30%, #8fb4f7, #3a54d6 70%);
-  color: #f4f8ff;
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: clamp(13px, calc(var(--card-h, 120px) * .16), 22px);
+  height: clamp(15px, calc(var(--card-h, 120px) * .19), 26px);
 }
+.dm-cost-p svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .dm-type {
   display: block;
   /* +15% on the SCALE and the cap (.068/11). The FLOOR stays 5.5px on purpose:
