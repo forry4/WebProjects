@@ -36,6 +36,15 @@ invariants and deploy; full AI campaign detail in `docs/ai-research-log.md`.
   **a pyramid buy that opens an ability sub-decision** (new card flipped up, turn not yet over), plus
   replenish. `legal_moves` deliberately omits `undo_turn`, which keeps the bot from taking it and stops
   a tampered client smuggling one through `ai_move`.
+- **The snapshot stores `_log_len`, not the log.** The log is the only unbounded-growth structure in
+  the dict (everything else is bounded by 66 cards and 25 tokens) and `save_game` persists `turn_undo`
+  with the game, so copying it in wrote the log twice per save. `_log` only appends, so the turn-start
+  log is exactly `log[:_log_len]` and undo truncates back. Worth **-28% on the raw dict** but only
+  **-2.7% stored** — zlib was already deduping the near-identical copy, so the real win is the per-turn
+  deepcopy and the per-save serialize/compress, not disk. (CoC's equivalent needs a monotonic counter
+  rather than a length, because its log PREPENDS and evicts; Duel's appends, so a length is exact.)
+  Post-fix `turn_undo` is 3.3% of the stored blob and the log itself is 28% — shrinking that further
+  would mean changing a format both `replay.py` and the frontend read, for a measured ~0.1%.
 - **AI determinization needs `players[pid]["reserved_from_deck"]`** (a list of card ids stripped by
   `player_view`) — the log can't answer "was this reserve blind?" because it omits `card_id` for blind
   draws. Blind reserves resample PER LEVEL (which deck is public; identity is secret).

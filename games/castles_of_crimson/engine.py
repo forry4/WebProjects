@@ -225,6 +225,7 @@ def new_game(player_ids: list[str], names: dict[str, str] | None = None, seed: i
         "pending_kind": None,
         "pending": None,
         "moves": [],
+        "moves_seq": 0,     # records ever logged; see _snapshot_turn
         "rng_state": None,
     }
 
@@ -401,6 +402,9 @@ def _log(game: dict, pid: str, mtype: str, **kw) -> None:
            "ph": game.get("phase_letter"), "rd": game.get("round")}
     rec.update(kw)
     game["moves"].insert(0, rec)
+    # Counts records logged, so `_snapshot_turn` can store a position in the log
+    # instead of a copy of it. Survives the tail eviction below, which a length can't.
+    game["moves_seq"] = game.get("moves_seq", 0) + 1
     # Keep the WHOLE game's log (records are tiny — {pid, type, +a few fields}) so the
     # UI can scroll back to the opening. A full 2-player game is a few hundred entries;
     # the generous cap is just a runaway guard, never hit in real play.
@@ -477,10 +481,21 @@ def _snapshot_turn(game: dict) -> None:
 
     Skipped when ``game["_skip_undo"]`` is set — the AI search clones the game and
     steps it thousands of times and never needs undo, so it disables the per-turn
-    deepcopy (a major hot-path cost). Real games never set the flag."""
+    deepcopy (a major hot-path cost). Real games never set the flag.
+
+    The snapshot EXCLUDES ``moves`` and stores ``moves_seq`` instead. The log is the
+    biggest single thing in the dict and it was being copied wholesale every turn —
+    measured at half the persisted blob, since `save_game` writes `turn_undo` too. The
+    log at turn start is recoverable from the live log (see the undo handler), so the
+    copy was pure duplication, in the deepcopy cost as well as at rest.
+
+    Why a SEQUENCE COUNTER and not a length: `_log` PREPENDS and caps by evicting the
+    tail, so once the cap is reached the length stops changing and a length delta would
+    silently restore nothing. `moves_seq` counts records logged, so the delta is exact
+    whether or not eviction happened."""
     if game.get("_skip_undo"):
         return
-    snap = {k: v for k, v in game.items() if k != "turn_undo"}
+    snap = {k: v for k, v in game.items() if k not in ("turn_undo", "moves")}
     game["turn_undo"] = copy.deepcopy(snap)
 
 
@@ -1220,6 +1235,13 @@ def apply_move(game: dict, pid: str, move: dict) -> tuple[bool, str | None]:
         if not snap:
             return False, "nothing to undo"
         restored = copy.deepcopy(snap)
+        # The snapshot stores a POSITION in the log rather than a copy of it
+        # (see _snapshot_turn), so rewinding the log means dropping the records
+        # prepended since. Games saved before that change carry a full `moves`
+        # instead; both shapes are read so an in-progress turn survives the deploy.
+        if "moves" not in restored:
+            drop = game.get("moves_seq", 0) - restored.get("moves_seq", 0)
+            restored["moves"] = game.get("moves", [])[max(drop, 0):]
         game.clear()
         game.update(restored)
         _snapshot_turn(game)

@@ -123,11 +123,24 @@ def _snapshot_turn(game: dict) -> None:
     PERF (the CoC lesson — do not remove): this is a full deepcopy on every turn, which
     is the dominant cost inside an MCTS simulation. Search clones set ``_skip_undo`` and
     pay nothing (they never undo).
+
+    SIZE (the Dontminion lesson): the snapshot EXCLUDES the move log and stores only its
+    length. The log is the one unbounded-growth structure in the dict — everything else
+    is bounded by 66 cards and 25 tokens — and `save_game` persists `turn_undo` along
+    with the game, so copying it in meant every save carried the whole log TWICE, with
+    the duplication growing all game. `_log` only ever appends, so the log at turn start
+    is exactly `log[:_log_len]` and truncating on undo restores it byte-for-byte.
     """
     if game.get("_skip_undo"):
         return
     game.pop("turn_undo", None)          # never nest a snapshot inside a snapshot
-    game["turn_undo"] = copy.deepcopy(game)
+    log = game.pop("log")
+    try:
+        snap = copy.deepcopy(game)
+    finally:
+        game["log"] = log
+    snap["_log_len"] = len(log)
+    game["turn_undo"] = snap
 
 
 def _mark_revealed(game: dict) -> None:
@@ -810,6 +823,11 @@ def _undo_turn(game: dict, pid: str) -> tuple:
     the log and break turn-by-turn review.) The rng_state is restored too, so a redone
     draw plays out identically and the game stays reproducible from seed + log.
 
+    The snapshot stores the log's LENGTH rather than its contents (see `_snapshot_turn`),
+    so "restore the log" means truncate back to it — identical, because `_log` only ever
+    appends. Games saved before that change carry a full `log` in the snapshot instead;
+    both shapes are read here so an in-progress turn survives the deploy.
+
     HIDDEN INFORMATION CLOSES THE UNDO. This used to accept a known exploit: a player
     could blind-reserve, see the deck's top card, undo, and act on what they had
     learned. The two obvious answers were both bad — accept it, or reshuffle on undo
@@ -831,6 +849,9 @@ def _undo_turn(game: dict, pid: str) -> tuple:
     if game.get("turn_flags", {}).get("revealed"):
         return False, "can't undo — new cards or tokens have been revealed"
     restored = copy.deepcopy(snap)
+    log_len = restored.pop("_log_len", None)
+    if log_len is not None:              # compact snapshot: truncate the live log back
+        restored["log"] = game["log"][:log_len]
     game.clear()
     game.update(restored)
     _snapshot_turn(game)                 # the restored turn is itself undoable again
