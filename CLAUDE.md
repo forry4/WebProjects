@@ -287,8 +287,13 @@ family. Same shape in all four games, differing only in table name and columns.
   driving `ws_room_player` MUST reset `_rooms._ws_connect_limiter` per test, or the suite eventually
   throttles itself and the failures look like anything but a rate limit (measured: 90 of 150
   in-process connects rejected without the reset).
-- **Rust parity:** CoC — regen fixtures via `gen_engine_fixtures.py`, then `cargo test --release
-  --features bridge`. Spender — `cargo test --lib` (`src/bin/*` need `--features bridge`).
+- **Rust parity:** CoC — regen fixtures via **BOTH** `gen_engine_fixtures.py` (→ `games.jsonl`, feeds
+  `python_fixture_replay`) **and** `gen_value_fixtures.py` (→ `values.jsonl`, feeds
+  `heuristic_value_parity`), then `cargo test --release --features bridge`. The fixtures are
+  **gitignored**, so on a fresh clone the gate fails with a `FAILED` that looks like a parity break and
+  is really just a missing file — read the panic, it names the generator. Run the tools with
+  `PYTHONPATH=<repo root>`. Spender — `cargo test --lib` (`src/bin/*` need `--features bridge`);
+  Duel — `cargo test --lib` (37 lib tests).
 
 ---
 
