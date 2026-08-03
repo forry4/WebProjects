@@ -668,6 +668,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [deckView, setDeckView] = useState(null);    // game-over: whose final deck to show
   const [matView, setMatView] = useState(null);      // {label, cards} for a mat viewer modal
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
+  const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   // decision-prompt interaction state (generic across all frame kinds)
   const [pickIdx, setPickIdx] = useState([]);        // choose_cards: selected INDICES (dups!)
   const [pickOpts, setPickOpts] = useState([]);      // choose_option pick>1: selected ids
@@ -887,6 +888,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
 
   // ── URL deep entry + popstate ──
   const urlResume = (rid) => {
+    setReviewOnly(false);   // a stale review must not linger past a URL-driven resume
     urlAttemptRef.current = { rid, retried: false };
     resumeGame(rid);
   };
@@ -908,7 +910,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   useEffect(() => subscribe((r) => popHandlerRef.current(r)), []); // eslint-disable-line
 
   // ── auto-reconnect while in a live game (re-kicks the bot scheduler server-side) ──
-  const inLiveGame = !!roomId && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
+  const inLiveGame = !!roomId && !reviewOnly && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   const attemptReconnect = useCallback(() => {
     if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
     const rs = socketReady();
@@ -1042,6 +1044,25 @@ export default function Dontminion({ myId, authUser, onExit }) {
     setConnecting(true);
     connect(`${DM_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
+  // Load + show a finished game read-only over HTTP (no WebSocket). Everything
+  // reveals at game over, so the live game screen renders the whole thing: the
+  // game-over panel (winner, scores, each player's final deck), the board, and
+  // the full log — all already gated on `over`, so nothing is actionable.
+  const enterReview = (rid) => {
+    const headers = authUser?.session_token ? { Authorization: `Bearer ${authUser.session_token}` } : {};
+    fetch(`${DM_HTTP}/games/${rid}/review?player_id=${encodeURIComponent(myId)}`, { headers })
+      .then((r) => r.json()).then((d) => {
+        if (!d.ok) { setToast(d.message || "Could not load review"); return; }
+        setReviewOnly(true);
+        setGameOverDismissed(false);   // land on the results panel first
+        setRoomData({
+          game: d.game, players: d.players || {}, host: null, status: "over",
+          vs_ai: false, ai_players: [],
+        });
+        setRoomId(rid);
+        setScreen("game");
+      }).catch(() => setToast("Could not load review"));
+  };
   const cancelGame = (rid) => {
     const headers = { "Content-Type": "application/json" };
     if (authUser?.session_token) headers.Authorization = `Bearer ${authUser.session_token}`;
@@ -1058,6 +1079,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const leaveToLobby = () => {
     disconnect();
     setConnecting(false);
+    setReviewOnly(false);   // a read-only review holds no WS / resume pointer
     pushPath(buildPath("dontminion"));
     setScreen("lobby");
     setRoomData(null);
@@ -1639,6 +1661,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       </span>
                     </div>
                     <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
+                  </div>
+                  <div className="lby-card-actions">
+                    <button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button>
                   </div>
                 </div>
               );
