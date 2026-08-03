@@ -55,6 +55,10 @@ const EXPANSIONS = [
 const basicsRowFor = (supply) => {
   const row = ["Copper", "Silver", "Gold"];
   if (supply && supply.Platinum != null) row.push("Platinum");
+  // Alchemy's Potion is a basic-supply Treasure (like Platinum) — it joins the
+  // Supply whenever a Kingdom card costs a Potion, and MUST be buyable then, or
+  // every Potion-costed card is unreachable.
+  if (supply && supply.Potion != null) row.push("Potion");
   row.push("Estate", "Duchy", "Province");
   if (supply && supply.Colony != null) row.push("Colony");
   row.push("Curse");
@@ -722,10 +726,27 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const handTreasures = (mySeat?.hand || []).some((c) => (cards[c]?.types?.includes("treasure")
     || (c === "Curse" && game?.curse_is_treasure)) && !manualTreasures.includes(c));
   const constraint = iAmActor ? pv.constraint : null;
-  const kingdomPiles = game?.kingdom || [];
-  const kingdomByCost = [...kingdomPiles].sort((a, b) =>
+  const byCost = (a, b) =>
     ((cards[pileFace(a)]?.cost ?? 0) - (cards[pileFace(b)]?.cost ?? 0))
-    || a.localeCompare(b));
+    || a.localeCompare(b);
+  // A pile is buyable only if it sits in the Supply. Non-Supply piles (Ferryman's
+  // set-aside pile, Joust's Rewards) still ship, so guard the buy paths on this.
+  const isSupplyPile = (name) => game?.piles?.[name]?.supply !== false;
+  // The Kingdom row is EVERY Supply pile that isn't a basic one — derived from
+  // the Supply, not game.kingdom, so a set-up extra Supply pile (Young Witch's
+  // Bane) shows up and is buyable. Falls back to game.kingdom for a cached
+  // pre-piles save that shipped no per-pile `supply` flags.
+  const basicNames = new Set(basicsRowFor(game?.supply));
+  const kingdomByCost = (game?.supply
+    ? Object.keys(game.supply).filter((n) => !basicNames.has(n))
+    : [...(game?.kingdom || [])]).sort(byCost);
+  // Non-Supply piles set aside at setup — shown so the player can see what
+  // Ferryman will gain, or which Rewards are available, when viewing the
+  // Kingdom. They are info-only on the board (never buyable).
+  const asidePiles = Object.entries(game?.piles || {})
+    .filter(([, p]) => p.supply === false)
+    .map(([n]) => n)
+    .sort(byCost);
   const seatOrder = game?.players || Object.keys(names);
   // The single opponent play box tracks the ACTION: the opponent whose turn it
   // is — or, on your turn, whoever plays next. (2p: always the one opponent.)
@@ -1041,7 +1062,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
       if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
       setCardInfo(pileFace(pile)); return;
     }
-    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && affordable(pile)) {
+    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && isSupplyPile(pile) && affordable(pile)) {
       mv({ type: "buy", card: pile }); return;
     }
     setCardInfo(pileFace(pile));
@@ -1219,8 +1240,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const count = pileLeft(name);
     const promptPiles = iAmActor && constraint?.piles ? constraint.piles : null;
     const highlight = promptPiles ? promptPiles.includes(name)
-      : (inBuy && game.buys > 0 && count > 0 && affordable(name));
-    const disabled = promptPiles ? !promptPiles.includes(name) : count === 0;
+      : (inBuy && game.buys > 0 && count > 0 && isSupplyPile(name) && affordable(name));
+    const disabled = promptPiles ? !promptPiles.includes(name)
+      : (count === 0 || !isSupplyPile(name));
     return (
       <div key={name} className="dm-pile-slot"
         style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
@@ -1703,6 +1725,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-supply">
             <div className="dm-supply-row dm-basics">{basicsRowFor(game.supply).map(renderPile)}</div>
             <div className="dm-supply-row dm-kingdom">{kingdomByCost.map(renderPile)}</div>
+            {asidePiles.length > 0 && (
+              <div className="dm-aside-piles">
+                <div className="dm-aside-label">Set aside — not in the Supply</div>
+                <div className="dm-supply-row">{asidePiles.map(renderPile)}</div>
+              </div>
+            )}
           </div>
           <div className="dm-me">
             {!over && game.turn === myId && (
@@ -1856,6 +1884,20 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
               ))}
             </div>
+            {asidePiles.length > 0 && (
+              <>
+                <h3>Set aside — not in the Supply</h3>
+                <div className="dm-kgrid">
+                  {asidePiles.map((n) => (
+                    <div key={n} className="dm-pile-slot">
+                      <DmCardFace name={pileFace(n)} card={cards[pileFace(n)]}
+                        onInfo={() => setCardInfo(pileFace(n))} />
+                      <span className="dm-pile-count">{pileLeft(n)} left</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             <div className="dm-prompt-actions">
               <button className="btn btn-gold" onClick={() => setShowKingdom(false)}>Close</button>
             </div>

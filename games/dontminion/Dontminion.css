@@ -213,6 +213,13 @@
 }
 .dm-supply-row { display: flex; flex-wrap: wrap; gap: 10px; row-gap: 24px; justify-content: center; padding-bottom: 14px; }
 .dm-basics { margin-bottom: 8px; border-bottom: 1px solid var(--border, #3a342a); }
+/* Non-Supply set-aside piles (Ferryman's pile, Joust's Rewards): shown so the
+   player can see what those effects gain, visually fenced off from the Supply. */
+.dm-aside-piles { margin-top: 6px; border-top: 1px dashed var(--border, #3a342a); padding-top: 10px; }
+.dm-aside-label {
+  text-align: center; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted, #9a8f7a); margin-bottom: 10px;
+}
 .dm-pile-slot { position: relative; }
 .dm-disc {
   position: absolute; top: -7px; right: -4px; background: var(--gold, #c9a84c);

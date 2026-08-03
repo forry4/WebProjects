@@ -3076,10 +3076,6 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     if colony:
         supply["Platinum"] = pile_size("Platinum", n)
         supply["Colony"] = pile_size("Colony", n)
-    # Alchemy: "if any Kingdom card has a Potion in its cost, include the 16
-    # Potion cards in the Supply" — a setup rule, not a randomiser roll.
-    if any(cards_potion(c) for c in kingdom):
-        supply["Potion"] = pile_size("Potion", n)
     # Charlatan's game-wide rule: Curse is also a Treasure worth $1
     curse_is_treasure = "Charlatan" in kingdom
     # Cornucopia & Guilds SPECIAL SETUP (compendium § I). Both extra piles are
@@ -3102,6 +3098,15 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         if pick:
             ferryman_pile = rng.choice(pick)
             unused.remove(ferryman_pile)
+    # Alchemy: "if any Kingdom card has a Potion in its cost, include the 16
+    # Potion cards in the Supply" — a setup rule, not a randomiser roll. Run it
+    # AFTER the Cornucopia setup so the extra Supply piles count: Young Witch's
+    # Bane is a Kingdom card added TO the Supply, so a Potion-costed Bane pulls
+    # the Potion pile in too (otherwise the Bane would be unbuyable). Ferryman's
+    # pile is OUTSIDE the Supply and can only be gained, never bought, so it
+    # does not — matching the "Kingdom card in the Supply" wording.
+    if any(cards_potion(c) for c in kingdom) or (bane and cards_potion(bane)):
+        supply["Potion"] = pile_size("Potion", n)
     game = {
         "game": "dontminion",
         "players": players,
