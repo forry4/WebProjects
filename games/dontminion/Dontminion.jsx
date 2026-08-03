@@ -1412,12 +1412,25 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const scores = game.scores || {};
     const ranked = [...seatOrder].sort((a, b) => (scores[b]?.vp ?? 0) - (scores[a]?.vp ?? 0));
     const winners = game.winners || [];
-    // Drilldown: one player's full final deck (every zone folded to counts),
-    // sorted by cost then name like the supply. Rows show how many of each.
+    // Drilldown: one player's full final deck (every zone folded to counts).
+    // Grouped by type — Treasures, then Actions, then Victory, then Curses —
+    // and within each group most expensive first (then name). A card with
+    // several types counts as an Action if it has the Action type at all, so an
+    // Action-Victory like Nobles sits with the Actions rather than the Victory.
     if (deckView) {
       const counts = deckCensus(seats[deckView]);
+      const typeRank = (name) => {
+        const t = cards[name]?.types || [];
+        if (t.includes("action")) return 1;
+        if (t.includes("treasure")) return 0;
+        if (t.includes("victory")) return 2;
+        if (t.includes("curse")) return 3;
+        return 4;
+      };
       const entries = Object.entries(counts).sort((a, b) =>
-        ((cards[a[0]]?.cost ?? 0) - (cards[b[0]]?.cost ?? 0)) || a[0].localeCompare(b[0]));
+        (typeRank(a[0]) - typeRank(b[0]))
+        || ((cards[b[0]]?.cost ?? 0) - (cards[a[0]]?.cost ?? 0))
+        || a[0].localeCompare(b[0]));
       const total = entries.reduce((n, [, k]) => n + k, 0);
       return (
         <div className="dm-backdrop" onClick={() => setDeckView(null)}>
