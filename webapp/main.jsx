@@ -5,6 +5,9 @@ import SpenderApp from '../games/spender/Spender.jsx'
 // newer build and offers a refresh. Outside React on purpose: the shell early-returns
 // each game's component, so there is no single tree the banner could live in.
 import { startUpdateNudge } from '../shared/update-nudge.js'
+// Registers the service worker (prod hosts only) so the site is installable to a
+// phone home screen and opens offline. Fire-and-forget, outside React, after load.
+import { startPwa } from '../shared/pwa.js'
 
 class ErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { err: null }; }
@@ -33,3 +36,4 @@ createRoot(document.getElementById('root')).render(
 )
 
 startUpdateNudge()
+startPwa()
