@@ -162,6 +162,48 @@ home-menu 🧩 button; backend is static (no serve-time AI).
 
 ---
 
+## Offline vs-AI mode (`offline.js` + the `/offline` route)
+
+Spender is playable **fully offline** (airplane mode, installed PWA): the BROWSER is authoritative —
+the saved game is the compact-state JSON (the same Dump shape the search consumes), and every step is
+a stateless JSON→JSON call into the Rust engine already in `spender_core_bg.wasm`. Purely local by
+design: no server row, no history, no sync. Games vs the client-WASM tiers only (S/N).
+
+- **Rust side** (`rust-cores/spender-core`): `src/dump.rs` (State ⇄ Dump JSON, both directions) and
+  `src/gamedict.rs` (State → the incumbent render game-dict, WITH the server's per-viewer
+  blind-reserve redaction), exposed as four stateless wasm exports — `new_game_json` /
+  `legal_moves_json` (→ `[{action,move}]`) / `apply_action_json` (validates membership; sub-decisions
+  resolve inside the 70-action space) / `game_dict_json`. **Parity-gated**: `tests/gamedict_parity.rs`
+  compares against Python `to_game_dict` + the real `main._redact_blind_reserves` per sampled ply
+  (fixtures: `tools/gen_gamedict_fixtures.py`, run with the repo root on PYTHONPATH); `tests/new_game.rs`
+  gates the deal by INVARIANTS (partition/bank/nobles + a playout soak), deliberately not Python-seed
+  parity. These lib modules are `bridge`-feature-gated like the serde bins → `cargo test --features bridge`.
+- **Driver** (`games/spender/offline.js`): owns the IndexedDB record (`shared/offline-db.js`, DB
+  `forrest-offline`) — `{id: LOCAL…, dump, mySeat, aiVariant, winPoints, moves, status, undo, seed}` —
+  and mirrors main.py: legality by legal-moves match (never raw apply), newest-first log cap 500,
+  pre-take/reserve undo snapshot restored on `undo_discard` (persisted, survives reload), AI noble
+  auto-pick (the `_run_ai_turn` behavior — the search never sees NOBLE roots), AI discard re-dispatch
+  (the defer_discard flow). It runs the engine in its OWN lazy module worker (the hub needs engine
+  calls before any search pool exists; one extra instance, idles during search).
+- **Shell** (`Spender.jsx`): `/offline` = hub (create/resume/delete + the offline-asset download),
+  `/offline/<LOCALID>` = a save; the game screen renders a puzzle-mode-style synthesized `roomData`
+  whose `ai_search` is built locally, so the EXISTING worker-pool dispatch plays the AI unchanged —
+  the one `ai_move` send has an offline fork into the driver. The boot gate skips the backend ping
+  for `/offline` routes, and the loading screen has a "Play offline" escape hatch (the poll loop has
+  no give-up branch). `offlineRef` guards the visibility reconnect exactly like `puzzlingRef`.
+- **Service worker**: source moved to `webapp/sw.js`, emitted by `vite.config.js` with a
+  `__BUILD_ID__`-stamped cache name (each deploy's `activate` drops the old cache). The hub's
+  "Download for offline" sends `PRECACHE_OFFLINE` → the SW `cache:"reload"`-fetches the wasm trio +
+  fonts (bypassing the ~10-min Pages TTL for the copy that serves offline); runtime policy for
+  `/wasm/*` stays network-first. **The search pool only has its wasm after that download or a prior
+  vs-S/N game** — the screens harness waits for the pool-ready console line before cutting the network
+  for exactly this reason.
+- **Coverage**: the `screens.mjs` offline scenario is the first browser coverage of the client-WASM AI
+  path anywhere — hub → create → `context.setOffline(true)` → human move through the local engine →
+  **AI reply from the pool while offline** → IndexedDB resume after reload.
+
+---
+
 ## Frontend (`Spender.jsx` — also the site shell)
 
 `webapp/main.jsx` mounts `Spender.jsx`, which is both the site shell (home menu, auth, routing to every

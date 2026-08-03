@@ -1,5 +1,10 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   // Prod is a GitHub Pages USER site (repo forry4.github.io) served at the domain
@@ -21,6 +26,22 @@ export default defineConfig({
           type: 'asset',
           fileName: 'version.json',
           source: JSON.stringify({ build: process.env.GITHUB_SHA || 'dev' }),
+        })
+      },
+    },
+    {
+      // Emit the service worker from webapp/sw.js with __BUILD_ID__ stamped into its
+      // cache name, so each deploy's `activate` drops the previous deploy's cache.
+      // The source deliberately does NOT live in public/ (which is copied verbatim —
+      // an unstamped literal "__BUILD_ID__" cache would never rotate). Read at
+      // generateBundle time so watch/rebuild picks up edits.
+      name: 'emit-service-worker',
+      generateBundle() {
+        const src = readFileSync(path.join(here, 'sw.js'), 'utf8')
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw.js',
+          source: src.replaceAll('__BUILD_ID__', process.env.GITHUB_SHA || 'dev'),
         })
       },
     },

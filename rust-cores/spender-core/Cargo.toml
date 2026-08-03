@@ -23,6 +23,11 @@ serde_json = "1"
 # native-only cross-impl bridge (the move_server bin); keeps serde out of the native lib otherwise.
 bridge = ["dep:serde", "dep:serde_json"]
 
+[[test]]
+# Needs the serde-gated lib modules (dump/gamedict); plain `cargo test` runs everything else.
+name = "gamedict_parity"
+required-features = ["bridge"]
+
 [[bin]]
 name = "move_server"
 required-features = ["bridge"]

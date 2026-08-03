@@ -10,6 +10,12 @@
 pub mod actions;
 pub mod attn;
 pub mod cards;
+// Offline-driver serialization (State ⇄ compact JSON; State → render game-dict). Needs serde,
+// so native builds get it only with the same `bridge` feature that gates the serde bins.
+#[cfg(any(target_arch = "wasm32", feature = "bridge"))]
+pub mod dump;
+#[cfg(any(target_arch = "wasm32", feature = "bridge"))]
+pub mod gamedict;
 pub mod endgame;
 pub mod feats;
 pub mod engine;

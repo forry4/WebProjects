@@ -21,6 +21,29 @@ export function action_to_move_for(state_json, action) {
 }
 
 /**
+ * Apply `action` and return the resulting compact-state JSON. Rejects an action not in
+ * `legal_actions` with `{"error":"illegal"}` — the driver must never corrupt a save with an
+ * out-of-phase apply (engine::apply assumes legality).
+ * @param {string} state_json
+ * @param {number} action
+ * @returns {string}
+ */
+export function apply_action_json(state_json, action) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.apply_action_json(ptr0, len0, action);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Benchmark: run the search on a deterministic mid-game position; return the chosen action (JS times it).
  * @param {bigint} setup_seed
  * @param {number} setup_moves
@@ -108,6 +131,76 @@ export function endgame_refine_move(state_json, seat, puct_action, seed) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Render the state as the incumbent game-dict JSON for `Spender.jsx`. `viewer` (0/1) hides the
+ * OTHER seat's blind reserves while the game runs — pass the human's seat so the AI's deck-top
+ * reserves stay secret, exactly as the server redacts them. -1 = full view.
+ * @param {string} state_json
+ * @param {string} pid0
+ * @param {string} pid1
+ * @param {number} viewer
+ * @returns {string}
+ */
+export function game_dict_json(state_json, pid0, pid1, viewer) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(pid0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(pid1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.game_dict_json(ptr0, len0, ptr1, len1, ptr2, len2, viewer);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * Legal moves for the state's side-to-move: `[{"action":<idx>,"move":<dict-move>}, ...]`.
+ * The driver matches the HUMAN's UI move dict against `move` (movesEqual) to find the action
+ * index, and validates AI submissions the same way the server does (membership).
+ * @param {string} state_json
+ * @returns {string}
+ */
+export function legal_moves_json(state_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.legal_moves_json(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Deal a fresh 2-player game and return its compact-state JSON (the offline save format).
+ * @param {bigint} seed
+ * @param {number} win_points
+ * @returns {string}
+ */
+export function new_game_json(seed, win_points) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.new_game_json(seed, win_points);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
     }
 }
 

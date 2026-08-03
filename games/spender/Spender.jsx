@@ -61,6 +61,9 @@ import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../sh
 // Site-shell screens, extracted out of this file (see shared/AuthScreen.jsx).
 import AuthScreen from "../../shared/AuthScreen.jsx";
 import HomeScreen, { SITE_NAME, GAMES } from "../../shared/HomeScreen.jsx";
+// Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
+import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
+	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -83,8 +86,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -740,6 +743,13 @@ export default function SpenderApp() {
 	const [puzHideOverlay, setPuzHideOverlay] = useState(false); // Return -> view the board, hide the result overlay
 	const [puzFailMove, setPuzFailMove] = useState(null);          // the wrong move the player just tried
 	const [pinged, setPinged] = useState(false);                  // a ping arrived while the tab was hidden (drives the "waiting for you" tab alert)
+	// ── Offline vs-AI mode (local wasm engine, no socket, IndexedDB saves) ──
+	const [offline, setOffline] = useState(false);       // an offline game drives the game screen (like puzzling)
+	const [offlineRecord, setOfflineRecord] = useState(null);   // the saved-game record (offline.js shape)
+	const [offlineGames, setOfflineGames] = useState(null);     // hub list (null = loading)
+	const [offlineVariant, setOfflineVariant] = useState("N");  // hub New Game options — only the
+	const [offlineWin, setOfflineWin] = useState(15);           //   client-WASM tiers exist offline
+	const [precacheState, setPrecacheState] = useState(null);   // null | {done,total} | "ok" | "err"
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -992,6 +1002,16 @@ export default function SpenderApp() {
 	// server reply replaces roomData and wipes the puzzle board.
 	const puzzlingRef = useRef(puzzling);
 	puzzlingRef.current = puzzling;
+	// An offline game also drives the "game" screen with NO socket (roomId = the local save
+	// id) — same reasons as puzzlingRef: the visibility reconnect must never open a WS to a
+	// room named after a local save, and popstate must treat it as its own site-level mode.
+	const offlineRef = useRef(offline);
+	offlineRef.current = offline;
+	const offlineRecordRef = useRef(offlineRecord);
+	offlineRecordRef.current = offlineRecord;
+	// Fresh-closure mirror for the AI-dispatch effect's offline fork (the effect's deps are
+	// tuned for the online path; a ref keeps the fork from widening them).
+	const submitOfflineAiMoveRef = useRef(null);
 
 	// ── URL routing (shared/router.js) ─────────────────────────────────────
 	// Segment 1 (game mode) is owned HERE; each sub-game owns its own segment 2 (room id).
@@ -1020,6 +1040,7 @@ export default function SpenderApp() {
 				&& screenRef.current === "spender" && spenderScreenRef.current === "game"
 				&& !reviewingRef.current
 				&& !puzzlingRef.current
+				&& !offlineRef.current
 				&& roomIdRef.current
 				&& getReadyState() !== WebSocket.OPEN) {
 				connect(`${WS_BASE}/${roomIdRef.current}/${myId}`);
@@ -1163,7 +1184,10 @@ export default function SpenderApp() {
 				if (mv && !mv.error) {
 					const ms = Math.round(performance.now() - t0);
 					console.info(`[client-AI] ${contrib} workers, ${sims} sims in ${ms}ms ->`, mv);
-					send({ action: "ai_move", move: mv });
+					// Offline: the move is applied locally by the driver instead of submitted —
+					// the browser IS the server here. Same search, same move, different sink.
+					if (offlineRef.current) submitOfflineAiMoveRef.current?.(mv);
+					else send({ action: "ai_move", move: mv });
 				}
 			} catch {}
 		})();
@@ -1360,6 +1384,13 @@ export default function SpenderApp() {
 				]);
 			} catch {}
 		};
+		// OFFLINE route: the whole point of /offline is working with NO backend, so it must
+		// never gate on the ping (the polling loop below has no give-up branch). Land straight
+		// on the hub — identity is local (guest myId / cached login) and needs no network.
+		if (initialRouteRef.current?.game === "offline") {
+			(async () => { await waitFonts(); if (!cancelled) landAt("home"); })();
+			return () => { cancelled = true; };
+		}
 		// Fast path: if backend responds within 250ms, skip the loading screen entirely
 		(async () => {
 			try {
@@ -1983,6 +2014,134 @@ export default function SpenderApp() {
 		startPuzzle(id);
 	};
 
+	// ── Offline vs-AI mode ─────────────────────────────────────────────────
+	// The game screen renders a synthesized roomData (the puzzle-mode pattern) whose game
+	// dict comes from the LOCAL wasm engine via offline.js; there is no socket at all.
+	// The AI plays through the exact same worker-pool dispatch as online — the synthesized
+	// roomData carries ai_search when it's the AI's turn — with the resulting move routed
+	// into the driver instead of a WS send.
+
+	// Rebuild + publish the synthesized roomData for a record. The state swap drives the
+	// same diff-based animations a server broadcast would.
+	const publishOfflineRoom = async (rec) => {
+		const rd = await offlineRoomData(rec, myId, authUser?.name);
+		setOfflineRecord(rec);
+		setRoomData(rd);
+	};
+
+	const enterOfflineGame = async (rec) => {
+		disconnect();                              // an offline game must never share the screen with a live socket
+		setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
+		setResultReady(rec.status === "over");     // re-opening a finished save shows the result immediately
+		// reset the animation baselines so the resumed board doesn't spuriously animate
+		prevBankRef.current = null; prevPlayersRef.current = null; prevBoardRef.current = null; prevMovesLenRef.current = 0;
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		aiDispatchPlyRef.current = -1;             // ply counters are per-game; a stale one would eat the first dispatch
+		setRoomId(rec.id);
+		setOffline(true);
+		offlineRef.current = true;                 // the render below may need it before the commit
+		await publishOfflineRoom(rec);
+		goSpender("game");
+	};
+
+	// Enter the hub (list screen). A deep-linked save id resumes that game once loaded;
+	// a dead id just leaves you on the hub (replace the URL so reload doesn't re-try it).
+	const enterOfflineHub = (rid) => {
+		setScreen("offline");
+		setOfflineGames(null);
+		listOfflineGames().then((list) => setOfflineGames(list));
+		if (rid) {
+			loadOfflineGame(rid).then((rec) => {
+				if (rec) enterOfflineGame(rec);
+				else replacePath(buildPath("offline"));
+			});
+		}
+	};
+
+	const createAndEnterOffline = async () => {
+		try {
+			const rec = await createOfflineGame({ aiVariant: offlineVariant, winPoints: offlineWin });
+			pushPath(buildPath("offline", rec.id));
+			await enterOfflineGame(rec);
+		} catch (e) {
+			setToast(String(e?.message || "Couldn't start an offline game"));
+		}
+	};
+
+	// Human move sink (the sendMove fork). Illegal is user-visible; the engine failing to
+	// load (cold cache, never downloaded) surfaces as its own message.
+	const submitOfflineMove = async (move) => {
+		const rec = offlineRecordRef.current;
+		if (!rec) return;
+		try {
+			const res = await applyOfflineMove(rec, move, myId, { isAi: false });
+			if (!res.ok) { setToast(res.err); return; }
+			await publishOfflineRoom(res.rec);
+		} catch (e) {
+			setToast(String(e?.message || "Move failed"));
+		}
+	};
+
+	// AI move sink (the worker-pool dispatch fork). A stale/illegal submission is dropped
+	// silently — same policy as the server's ai_move handler (races are normal, not errors).
+	const submitOfflineAiMove = async (move) => {
+		const rec = offlineRecordRef.current;
+		if (!rec) return;
+		try {
+			const res = await applyOfflineMove(rec, move, myId, { isAi: true });
+			if (res.ok) await publishOfflineRoom(res.rec);
+			else console.debug("[offline-AI] dropped:", res.err);
+		} catch (e) {
+			console.debug("[offline-AI] apply failed:", e);
+		}
+	};
+	submitOfflineAiMoveRef.current = submitOfflineAiMove;
+
+	// State-only teardown — shared by user exits (which also write the URL) and the
+	// popstate handler (which must never write it).
+	const resetOfflineState = () => {
+		setOffline(false);
+		offlineRef.current = false;
+		setOfflineRecord(null);
+		setRoomData(null); setRoomId("");
+		setReviewing(false); setReplaySnapshots(null); setReplayTurn(null);
+		setSelectedGems([]); setSelectedCard(null); setReserveArmed(false);
+		setConfirmAbandon(false);
+	};
+
+	const exitOfflineToHub = () => {
+		resetOfflineState();
+		pushPath(buildPath("offline"));
+		enterOfflineHub(null);
+	};
+
+	const handleDeleteOffline = async (id) => {
+		await deleteOfflineGame(id);
+		setOfflineGames(await listOfflineGames());
+	};
+
+	// ── Offline asset precache (the "Download for offline" button) ─────────
+	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
+	// only ever fetched lazily during a live vs-S/N game — a cold install has no engine.
+	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
+	// the ~10-min Pages TTL) and streams progress back over a MessageChannel.
+	const startPrecache = () => {
+		const urls = ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm",
+			"fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"]
+			.map((p) => `${import.meta.env.BASE_URL}${p}`);
+		const ctrl = navigator.serviceWorker?.controller;
+		if (!ctrl) { setPrecacheState("err"); return; }
+		const ch = new MessageChannel();
+		ch.port1.onmessage = (e) => {
+			const d = e.data || {};
+			if (d.ok) setPrecacheState("ok");
+			else if (d.error) setPrecacheState("err");
+			else if (d.total) setPrecacheState({ done: d.done, total: d.total });
+		};
+		setPrecacheState({ done: 0, total: urls.length });
+		ctrl.postMessage({ type: "PRECACHE_OFFLINE", urls }, [ch.port2]);
+	};
+
 	// State-only exit from a Spender room/review — shared by goToMenu (user action) and
 	// the popstate handler (which must never write the URL itself).
 	const leaveSpenderRoomState = () => {
@@ -2022,6 +2181,7 @@ export default function SpenderApp() {
 			return;
 		}
 		if (g === "puzzles") { enterPuzzles(); return; }   // needs the fetch+pick, not just the screen
+		if (g === "offline") { enterOfflineHub(route.room); return; }   // needs the saved-game list (+ a deep-linked resume)
 		if (g === "spender") {
 			goSpender("browser");
 			if (route.room) setDeepRoom(route.room);   // deep entry once the lobby is up
@@ -2060,13 +2220,23 @@ export default function SpenderApp() {
 		// "in a Spender ROOM" means waiting/game — the lobby (browser) is not a room.
 		const inRoomScreen = s === "spender"
 			&& (spenderScreenRef.current === "waiting" || spenderScreenRef.current === "game");
-		const inSpenderRoom = inRoomScreen && !puzzlingRef.current;
-		// A puzzle runs on Spender's game screen but is its own site-level mode.
+		const inSpenderRoom = inRoomScreen && !puzzlingRef.current && !offlineRef.current;
+		// A puzzle or an offline game runs on Spender's game screen but is its own site-level mode.
 		const curMode = inRoomScreen
-			? (puzzlingRef.current ? "puzzles" : "spender")
+			? (puzzlingRef.current ? "puzzles" : offlineRef.current ? "offline" : "spender")
 			: (MODE_FOR_SCREEN[s] || "home");
 		const target = route.game === null ? "home" : route.game;
 		if (target === curMode) {
+			if (target === "offline") {
+				// Offline owns its own segment 2 (the local save id): Back out of a game →
+				// the hub; Forward (or cross-save) into a game → resume it. State-only.
+				const rid = route.room;
+				if (!rid && offlineRef.current) { resetOfflineState(); enterOfflineHub(null); }
+				else if (rid && (!offlineRef.current || rid !== roomIdRef.current)) {
+					resetOfflineState(); enterOfflineHub(rid);
+				}
+				return;
+			}
 			if (target === "spender") {
 				// Spender owns its own segment 2 (rooms live in the shell, unlike sub-games).
 				const rid = route.room;
@@ -2088,6 +2258,7 @@ export default function SpenderApp() {
 		}
 		// Leaving the current mode: state-only cleanup, then land on the target.
 		if (puzzlingRef.current) resetPuzzleState();
+		else if (offlineRef.current) resetOfflineState();
 		else if (inRoomScreen) leaveSpenderRoomState();
 		enterRoute(route);
 	};
@@ -2106,6 +2277,14 @@ export default function SpenderApp() {
 	}, [deepRoom, screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	const handleAbandon = () => {
+		if (offline) {
+			// No server to record a forfeit against — abandoning a local game just deletes
+			// the save and returns to the hub.
+			const id = offlineRecordRef.current?.id;
+			if (id) deleteOfflineGame(id);
+			exitOfflineToHub();
+			return;
+		}
 		send({ action: "abandon" });
 		setConfirmAbandon(false);
 	};
@@ -2149,6 +2328,7 @@ export default function SpenderApp() {
 
 	const sendMove = (move) => {
 		if (puzzling) { submitPuzzleMove(move); return; }   // puzzle: compare to canonical, don't send
+		if (offline) { submitOfflineMove(move); return; }   // offline: apply through the local engine
 		send({ action: "move", move });
 	};
 
@@ -2167,8 +2347,9 @@ export default function SpenderApp() {
 		// just about as the gems land.
 		//
 		// A puzzle is resolved locally with no socket, so its animation already comes
-		// from the state diff — pre-flying there would double it.
-		if (!puzzling) {
+		// from the state diff — pre-flying there would double it. Same for offline: the
+		// local apply lands in ~ms, so the diff animation IS the feedback.
+		if (!puzzling && !offline) {
 			const counts = {};
 			for (const c of selectedGems) counts[c] = (counts[c] || 0) + 1;
 			spawnFlyers(Object.entries(counts).map(([color, count]) =>
@@ -2504,6 +2685,13 @@ export default function SpenderApp() {
 					<p className="loading-hint">
 						{loadingProgress >= 0.99 ? "Ready!" : loadingProgress < 0.05 ? "Connecting…" : `${Math.round(loadingProgress * 100)}%`}
 					</p>
+					{/* The polling loop above never gives up, so a user with NO connection needs an
+					    exit that doesn't. Navigating away from "loading" cancels the poll (the
+					    effect's cleanup); the offline hub then works entirely from local storage. */}
+					<button className="btn btn-ghost" style={{ marginTop: 18 }}
+						onClick={() => { pushPath(buildPath("offline")); enterOfflineHub(null); }}>
+						Play offline vs AI →
+					</button>
 				</div>
 			</>
 		);
@@ -2581,6 +2769,87 @@ export default function SpenderApp() {
 						{(puzList != null && puzList.length === 0) && <div className="puzzle-empty">No puzzles available yet.</div>}
 					</div>
 					{toast && <div className="toast">{toast}</div>}
+			</div>
+		</>
+	);
+
+	// Local vs AI hub — start/resume/delete offline games + the offline-asset download.
+	// Reachable with NO backend (the boot gate skips the ping for /offline).
+	if (screen === "offline") return (
+		<>
+			<style>{css}</style>
+			<div className="app" style={{ "--lby-accent": "#7fb069" }}>
+				<LobbyHeader
+					onBack={() => nav("home")}
+					title="Local vs AI"
+					user={<>
+						{authUser?.guest && <span className="lby-head-tag">Guest</span>}
+						<span className="lby-head-name">{authUser?.name}</span>
+					</>}
+				/>
+				<div className="browser offline-hub">
+					<div className="offline-panel">
+						<CmRow label="Opponent">
+							<div className="cm-pills">
+								{["S", "N"].map(v => (
+									<button key={v} type="button" className={`cm-pill${offlineVariant === v ? " sel" : ""}`}
+										onClick={() => setOfflineVariant(v)}>
+										<span className="cm-pill-name">{aiPersona(v)}</span>
+										<span className="cm-pill-sub">{aiTierLabel(v)}</span>
+									</button>
+								))}
+							</div>
+							<span className="cm-hint">These are the strongest opponents — the same AI that runs in your browser online.</span>
+						</CmRow>
+						<CmRow label="Length">
+							<CmSeg value={offlineWin} onChange={setOfflineWin} options={[
+								{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+							]} />
+						</CmRow>
+						<button type="button" className="cm-create" style={{ marginTop: 10 }}
+							onClick={createAndEnterOffline}>
+							Start Game
+						</button>
+					</div>
+
+					<div className="offline-panel">
+						<h3 className="offline-h">Saved games</h3>
+						{offlineGames == null && <div className="puzzle-empty">Loading…</div>}
+						{offlineGames != null && offlineGames.length === 0 &&
+							<div className="puzzle-empty">No local games yet — start one above.</div>}
+						{(offlineGames || []).map(g => (
+							<div key={g.id} className="offline-save-row">
+								<div className="offline-save-info">
+									<b>{aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}
+									{" · "}{g.status === "over" ? "finished" : "in progress"}
+									<span className="offline-save-time"> · {timeAgo(Math.floor((g.updated || 0) / 1000))}</span>
+								</div>
+								<div className="offline-save-btns">
+									<button className="btn btn-gold btn-sm"
+										onClick={() => { pushPath(buildPath("offline", g.id)); enterOfflineGame(g); }}>
+										{g.status === "over" ? "View" : "Continue"}
+									</button>
+									<button className="btn btn-ghost btn-sm" onClick={() => handleDeleteOffline(g.id)}>✕</button>
+								</div>
+							</div>
+						))}
+					</div>
+
+					<div className="offline-panel">
+						<h3 className="offline-h">Play with no connection</h3>
+						<p className="offline-note">
+							Download the AI engine (~5 MB) so games here work fully offline — even in airplane
+							mode. Install the site to your home screen first for the best experience.
+						</p>
+						{precacheState === "ok" && <span className="offline-note ok">✓ Downloaded — this page now works offline.</span>}
+						{precacheState === "err" && <span className="offline-note err">Download unavailable here — open the live site once, then retry.</span>}
+						{precacheState && typeof precacheState === "object" &&
+							<span className="offline-note">Downloading… {precacheState.done}/{precacheState.total}</span>}
+						{(precacheState == null || precacheState === "err") &&
+							<button className="btn btn-outline btn-sm" onClick={startPrecache}>Download for offline</button>}
+					</div>
+				</div>
+				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
 	);
@@ -2890,19 +3159,23 @@ export default function SpenderApp() {
 							})}
 						</div>
 						<div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
-							<button className="btn btn-gold" onClick={() => enterReview(roomId)}>
-								Review game
-							</button>
-							<button className="btn btn-outline" onClick={() => {
-								try { localStorage.removeItem("spender_roomId"); } catch {}
-								setReviewing(false);
-								setReplaySnapshots(null); setReplayTurn(null);
-								pushPath(buildPath("spender"));   // leave the finished room's URL
-								goSpender("browser"); setRoomData(null); setRoomId(""); disconnect();
-								fetchGames(authUser);
-							}}>
-								Back to lobby
-							</button>
+							{/* Review needs the server's per-turn snapshots — a local save has none.
+							    "View board" drops the overlay so the final position is inspectable. */}
+							{offline
+								? <button className="btn btn-gold" onClick={() => setResultReady(false)}>View board</button>
+								: <button className="btn btn-gold" onClick={() => enterReview(roomId)}>Review game</button>}
+							{offline
+								? <button className="btn btn-outline" onClick={exitOfflineToHub}>Back to Local Games</button>
+								: <button className="btn btn-outline" onClick={() => {
+									try { localStorage.removeItem("spender_roomId"); } catch {}
+									setReviewing(false);
+									setReplaySnapshots(null); setReplayTurn(null);
+									pushPath(buildPath("spender"));   // leave the finished room's URL
+									goSpender("browser"); setRoomData(null); setRoomId(""); disconnect();
+									fetchGames(authUser);
+								}}>
+									Back to lobby
+								</button>}
 						</div>
 					</div>
 				</div>
@@ -2921,9 +3194,13 @@ export default function SpenderApp() {
 						: reviewChrome
 						? <button className="btn btn-ghost btn-sm" onClick={() => { setReplayTurn(null); setReviewing(false); setResultReady(true); }}>← Back to Results</button>
 						: <GameMenu items={[
-								{ label: "Return to menu", icon: "←", onClick: goToMenu },
+								// Offline: "menu" is the Local Games hub, and leaving just closes the game
+								// (the save persists) — no socket to tear down, no server forfeit.
+								{ label: offline ? "Back to Local Games" : "Return to menu", icon: "←",
+									onClick: offline ? exitOfflineToHub : goToMenu },
 								{ label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
-								{ label: "Abandon game", icon: "⚑", danger: true, onClick: () => setConfirmAbandon(true) },
+								{ label: offline ? "Delete game" : "Abandon game", icon: "⚑", danger: true,
+									onClick: () => setConfirmAbandon(true) },
 							]} />}
 					<span className="game-nav-title">Spender{puzzling ? " — Puzzle" : reviewChrome ? " — Review" : ""}</span>
 					{puzzling
@@ -3300,10 +3577,12 @@ export default function SpenderApp() {
 				{confirmAbandon && (
 					<div className="modal-backdrop">
 						<div className="modal">
-							<h3>Abandon Game?</h3>
-							<p>This counts as a loss for you. Your opponent will be awarded the win.</p>
+							<h3>{offline ? "Delete Game?" : "Abandon Game?"}</h3>
+							<p>{offline
+								? "This deletes the local save. Nothing is recorded — offline games never leave this device."
+								: "This counts as a loss for you. Your opponent will be awarded the win."}</p>
 							<div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-								<button className="btn btn-danger" onClick={handleAbandon}>Yes, Abandon</button>
+								<button className="btn btn-danger" onClick={handleAbandon}>{offline ? "Yes, Delete" : "Yes, Abandon"}</button>
 								<button className="btn btn-ghost" onClick={() => setConfirmAbandon(false)}>Cancel</button>
 							</div>
 						</div>

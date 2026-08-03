@@ -9,6 +9,7 @@
 //! cross-impl bridge uses) and returns the chosen action index. The action→move-dict bridge (actions.py)
 //! is still unported; the browser glue will map the index for now or we port it in Phase 3.
 
+use crate::dump::Dump;
 use crate::engine::State;
 use crate::rng::Rng;
 use crate::vsearch;
@@ -23,41 +24,8 @@ pub fn bench_move(setup_seed: u64, setup_moves: u32, sims: usize, search_seed: u
     vsearch::choose_action(&pos, pos.turn, sims, &mut rng) as i32
 }
 
-#[derive(Deserialize)]
-struct Dump {
-    bank: [i32; 6],
-    tokens: [[i32; 6]; 2],
-    bonuses: [[i32; 5]; 2],
-    points: [i32; 2],
-    purchased_n: [i32; 2],
-    purchased: [Vec<i32>; 2],
-    reserved: [Vec<i32>; 2],
-    reserved_blind: [Vec<bool>; 2],
-    nobles_won: [Vec<i32>; 2],
-    board: [i32; 12],
-    decks: [Vec<i32>; 3],
-    nobles: [i32; 3],
-    turn: usize,
-    phase: u8,
-    pending_nobles: Vec<usize>,
-    final_trigger: i32,
-    winner: i32,
-    ply: i32,
-    win_points: i32,
-}
-
-impl Dump {
-    fn into_state(self) -> State {
-        State {
-            bank: self.bank, tokens: self.tokens, bonuses: self.bonuses, points: self.points,
-            purchased_n: self.purchased_n, purchased: self.purchased, reserved: self.reserved,
-            reserved_blind: self.reserved_blind, nobles_won: self.nobles_won, board: self.board,
-            decks: self.decks, nobles: self.nobles, turn: self.turn, phase: self.phase,
-            pending_nobles: self.pending_nobles, final_trigger: self.final_trigger,
-            winner: self.winner, ply: self.ply, win_points: self.win_points,
-        }
-    }
-}
+// The Dump struct (compact-state JSON shape) lives in `crate::dump` — shared with the offline
+// driver exports below, which also need the Serialize direction.
 
 /// Serving entry: search the given compact-state JSON for `seat` and return the chosen move as a
 /// compact dict-move JSON string (the exact shape main.py's move handler accepts). `{"error":...}`
@@ -383,4 +351,59 @@ pub fn action_to_move_for(state_json: &str, action: usize) -> String {
     };
     let s = dump.into_state();
     crate::actions::action_to_move_json(&s, action)
+}
+
+// ─── Offline-driver exports (stateless engine calls for local vs-AI play) ─────
+// The browser is the authority in an offline game: it holds the compact-state JSON, and every
+// driver step is a pure JSON→JSON call — create, list legal moves, apply, render. All errors are
+// `{"error":...}` strings (the driver surfaces them; nothing panics across the boundary).
+
+/// Deal a fresh 2-player game and return its compact-state JSON (the offline save format).
+#[wasm_bindgen]
+pub fn new_game_json(seed: u64, win_points: i32) -> String {
+    crate::dump::state_to_json(&crate::engine::new_game(seed, win_points))
+}
+
+/// Legal moves for the state's side-to-move: `[{"action":<idx>,"move":<dict-move>}, ...]`.
+/// The driver matches the HUMAN's UI move dict against `move` (movesEqual) to find the action
+/// index, and validates AI submissions the same way the server does (membership).
+#[wasm_bindgen]
+pub fn legal_moves_json(state_json: &str) -> String {
+    let s = match crate::dump::state_from_json(state_json) {
+        Some(s) => s,
+        None => return "{\"error\":\"parse\"}".to_string(),
+    };
+    let parts: Vec<String> = crate::engine::legal_actions(&s)
+        .into_iter()
+        .map(|a| format!("{{\"action\":{},\"move\":{}}}", a, crate::actions::action_to_move_json(&s, a)))
+        .collect();
+    format!("[{}]", parts.join(","))
+}
+
+/// Apply `action` and return the resulting compact-state JSON. Rejects an action not in
+/// `legal_actions` with `{"error":"illegal"}` — the driver must never corrupt a save with an
+/// out-of-phase apply (engine::apply assumes legality).
+#[wasm_bindgen]
+pub fn apply_action_json(state_json: &str, action: usize) -> String {
+    let mut s = match crate::dump::state_from_json(state_json) {
+        Some(s) => s,
+        None => return "{\"error\":\"parse\"}".to_string(),
+    };
+    if !crate::engine::legal_actions(&s).contains(&action) {
+        return "{\"error\":\"illegal\"}".to_string();
+    }
+    crate::engine::apply(&mut s, action);
+    crate::dump::state_to_json(&s)
+}
+
+/// Render the state as the incumbent game-dict JSON for `Spender.jsx`. `viewer` (0/1) hides the
+/// OTHER seat's blind reserves while the game runs — pass the human's seat so the AI's deck-top
+/// reserves stay secret, exactly as the server redacts them. -1 = full view.
+#[wasm_bindgen]
+pub fn game_dict_json(state_json: &str, pid0: &str, pid1: &str, viewer: i32) -> String {
+    let s = match crate::dump::state_from_json(state_json) {
+        Some(s) => s,
+        None => return "{\"error\":\"parse\"}".to_string(),
+    };
+    crate::gamedict::to_game_dict_json(&s, pid0, pid1, viewer)
 }

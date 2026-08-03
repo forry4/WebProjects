@@ -945,6 +945,97 @@ try {
 		await ctx.close();
 	}
 
+	// ── Offline vs-AI (Spender local play) ────────────────────────────────────
+	// The first browser coverage of BOTH the offline driver and the client-WASM AI
+	// path: /offline must boot with no backend ping, create a local game through the
+	// wasm engine, and — with the network genuinely CUT (context.setOffline) — apply a
+	// human move and get an AI reply from the worker-pool search. Then, back online
+	// (the preview server is the asset origin; there's no SW on localhost to serve a
+	// reload's assets), a reload must resume the save from IndexedDB.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "offline-harness", name: "Offline", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		// The search pool announces itself on the console once its workers have FETCHED and
+		// compiled the wasm — the network can only be cut after that (see below).
+		let poolReady = false;
+		page.on("console", (m) => { if (/\[client-AI\].*ready/.test(m.text())) poolReady = true; });
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+		const hubUp = await page.waitForSelector(".offline-panel", { timeout: 20_000 })
+			.then(() => true).catch(() => false);
+		check("the Local-vs-AI hub renders", hubUp);
+
+		if (hubUp) {
+			// S searches its full 4.5s budget per move; that's the real serving shape.
+			await page.locator(".cm-pill", { hasText: "Steve" }).click({ timeout: 10_000 }).catch(() => {});
+			await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
+			const board = await page.waitForSelector(".gem-stack", { timeout: 20_000 })
+				.then(() => true).catch(() => false);
+			check("Start Game deals a local board", board);
+			check("...at its /offline/<LOCALID> URL",
+				/^\/offline\/LOCAL[A-Z0-9]+$/.test(new URL(page.url()).pathname),
+				new URL(page.url()).pathname);
+
+			// Cut the network only once the search pool has its wasm in memory — cutting
+			// earlier races the pool's module fetches and hangs the AI's first search
+			// (caught exactly that way; the AI can open the game when seats shuffle it
+			// first). On a real device this window is covered by the SW precache.
+			for (let i = 0; i < 40 && !poolReady; i++) await sleep(250);
+			check("the search worker pool arms", poolReady);
+			await ctx.setOffline(true);
+
+			let takeable = 0;
+			for (let i = 0; i < 60 && takeable < 3; i++) {   // the AI may move first — wait it out
+				takeable = await page.locator(".gem-stack:not(.disabled)").count().catch(() => 0);
+				if (takeable < 3) await sleep(500);
+			}
+			check("our turn arrives with the network OFF", takeable >= 3, `${takeable} takeable`);
+
+			const colours = (await page.evaluate(() =>
+				[...document.querySelectorAll(".gem-stack:not(.disabled)")]
+					.map((e) => e.dataset.color).filter((c) => c && c !== "gold"))).slice(0, 3);
+			for (const c of colours) {
+				await page.locator(`.gem-stack[data-color="${c}"]`).click({ timeout: 10_000 }).catch(() => {});
+			}
+			const moved = await page.locator("button:visible", { hasText: /^Take/ }).first()
+				.click({ timeout: 10_000 }).then(() => true).catch(() => false);
+			check("a take-gems move applies through the local engine", moved);
+
+			// The AI's reply is the whole point: the worker pool searches and the driver
+			// applies — no server anywhere.
+			let aiMoved = false;
+			for (let i = 0; i < 50 && !aiMoved; i++) {
+				aiMoved = (await page.locator(".gem-stack:not(.disabled)").count().catch(() => 0)) >= 3
+					&& !(await page.locator(".ai-thinking").count().catch(() => 0));
+				if (!aiMoved) await sleep(500);
+			}
+			check("the wasm AI replies while offline", aiMoved);
+
+			// Assets need the network again for a reload (no SW on localhost) — the SAVE
+			// must not: it comes from IndexedDB.
+			await ctx.setOffline(false);
+			await page.reload({ waitUntil: "load" }).catch(() => {});
+			const resumed = await page.waitForSelector(".gem-stack", { timeout: 20_000 })
+				.then(() => true).catch(() => false);
+			check("a reload resumes the save from IndexedDB", resumed);
+
+			await page.goBack().catch(() => {});
+			const listed = await page.waitForSelector(".offline-save-row", { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("Back lands on the hub with the save listed", listed);
+		}
+		check("no page errors in offline play", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;
