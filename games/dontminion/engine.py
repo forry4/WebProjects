@@ -3083,29 +3083,29 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     # come from the expansions in play; with none eligible we simply play
     # without one (a legal board — Young Witch just attacks unblockably, and
     # Ferryman gains nothing), rather than re-dealing the whole kingdom.
+    # A Potion is PART of a card's cost, so "$2 or $3" / "$3 or $4" means those
+    # coin amounts with NO Potion component — a {$3,P} card does not cost $3, so
+    # both selections exclude every Potion-costed card.
     bane = ferryman_pile = None
     unused = sorted({c for e in exps for c in KINGDOM[e]} - set(kingdom))
     if "Young Witch" in kingdom:
         # "an extra Kingdom card pile costing $2 or $3, added TO the Supply"
-        pick = [c for c in unused if CARDS[c]["cost"] in (2, 3)]
+        pick = [c for c in unused if CARDS[c]["cost"] in (2, 3) and not cards_potion(c)]
         if pick:
             bane = rng.choice(pick)
             supply[bane] = pile_size(bane, n)
             unused.remove(bane)
     if "Ferryman" in kingdom:
         # "an unused Kingdom card pile costing $3 or $4, OUTSIDE the Supply"
-        pick = [c for c in unused if CARDS[c]["cost"] in (3, 4)]
+        pick = [c for c in unused if CARDS[c]["cost"] in (3, 4) and not cards_potion(c)]
         if pick:
             ferryman_pile = rng.choice(pick)
             unused.remove(ferryman_pile)
     # Alchemy: "if any Kingdom card has a Potion in its cost, include the 16
-    # Potion cards in the Supply" — a setup rule, not a randomiser roll. Run it
-    # AFTER the Cornucopia setup so the extra Supply piles count: Young Witch's
-    # Bane is a Kingdom card added TO the Supply, so a Potion-costed Bane pulls
-    # the Potion pile in too (otherwise the Bane would be unbuyable). Ferryman's
-    # pile is OUTSIDE the Supply and can only be gained, never bought, so it
-    # does not — matching the "Kingdom card in the Supply" wording.
-    if any(cards_potion(c) for c in kingdom) or (bane and cards_potion(bane)):
+    # Potion cards in the Supply" — a setup rule, not a randomiser roll. The
+    # extra Cornucopia piles are never Potion-costed (filtered above), so the
+    # dealt kingdom is the whole test.
+    if any(cards_potion(c) for c in kingdom):
         supply["Potion"] = pile_size("Potion", n)
     game = {
         "game": "dontminion",

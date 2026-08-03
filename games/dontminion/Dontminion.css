@@ -304,6 +304,14 @@
   display: flex; align-items: center; justify-content: center;
   font-size: clamp(9px, calc(var(--card-h, 120px) * .1), 13px); flex: none;
 }
+/* the cost coins stack vertically at the foot's right edge: a Potion component
+   (Alchemy) sits ABOVE the coin cost — both are parts of the same price */
+.dm-cost-col { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: none; }
+/* the Potion component of a cost: same coin shape as .dm-cost, but BLUE with a P */
+.dm-cost-p {
+  background: radial-gradient(circle at 35% 30%, #8fb4f7, #3a54d6 70%);
+  color: #f4f8ff;
+}
 .dm-type {
   display: block;
   /* +15% on the SCALE and the cap (.068/11). The FLOOR stays 5.5px on purpose:
@@ -398,11 +406,12 @@
 /* Coffers and the later spendable counters (Villagers, Favors): a count plus
    its spend controls, kept on one baseline with the rest of the bar. */
 .dm-counter { display: inline-flex; align-items: baseline; gap: 6px; }
-/* the Potion marker on a pile whose cost has one (Alchemy) */
-.dm-potion {
+/* Young Witch's Bane marker — a lavender "B" in the pile's top-right corner
+   (the Potion cost now renders as a coin on the card face itself) */
+.dm-bane {
   position: absolute; top: 2px; right: 3px; z-index: 2;
-  font-size: 11px; font-weight: 700; line-height: 1;
-  color: #d8b6ff; text-shadow: 0 1px 2px rgba(0,0,0,.8);
+  font-size: 12px; font-weight: 800; line-height: 1;
+  color: #c8a2ff; text-shadow: 0 1px 2px rgba(0,0,0,.85);
 }
 .dm-spend { padding: 2px 8px; font-size: 12px; align-self: center; }
 /* the what-you-can-do hint rides the right edge of the resource bar */

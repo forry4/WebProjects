@@ -2029,46 +2029,58 @@ def test_the_potion_pool_is_undoable_like_the_coin_pool():
     assert "Potion" in g["seats"][A]["hand"]
 
 
-# The Potion pile's setup rule crosses Alchemy with Cornucopia's setup-chosen
-# piles: the Potion pile joins the Supply "if any Kingdom card has a Potion in
-# its cost", and Young Witch's Bane is a Kingdom card added TO the Supply, so a
-# Potion-costed Bane must pull the Potion pile in too — otherwise it would be
-# unbuyable. Ferryman's pile is OUTSIDE the Supply (gained, never bought), so it
-# does not. The kingdoms below carry NO Potion-costed dealt card, so the ONLY
-# thing that can add Potion is the extra pile.
+# A Potion is PART of a card's cost (the cost VECTOR): a {$2,P} card costs $2
+# AND a Potion, so it does NOT cost "$2 or $3". Young Witch's Bane ("$2 or $3")
+# and Ferryman's set-aside pile ("$3 or $4") therefore never land on a
+# Potion-costed card. The kingdoms below carry NO Potion-costed dealt card, so
+# the ONLY thing that could add the Potion pile is a dealt kingdom card.
 _KNP = ["Young Witch", "Village", "Smithy", "Market", "Festival",
         "Laboratory", "Militia", "Moat", "Cellar", "Mine"]
 
 
-def test_a_potion_costed_bane_pulls_the_potion_pile_into_the_supply():
-    # seed 0 with this board picks Philosopher's Stone ({$3,P}) as the Bane.
-    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=0,
-                        kingdom=list(_KNP))
-    assert g["bane"] and engine.potion_cost(g, g["bane"]) > 0, "expected a Potion Bane"
-    assert g["bane"] in g["supply"], "the Bane is added to the Supply"
-    assert "Potion" in g["supply"], "a Potion-costed Bane needs the Potion pile"
+def test_young_witch_never_sets_aside_a_potion_costed_bane():
+    """The Bane pool is drawn from unused cornucopia+alchemy cards; the alchemy
+    ones in the $2-$3 coin band (Apothecary/Scrying Pool/University/Alchemist/
+    Familiar/Philosopher's Stone) all carry a Potion, so the filter must skip
+    them on EVERY seed."""
+    saw_bane = False
+    for s in range(60):
+        g = engine.new_game([A, B], ["cornucopia", "alchemy"], seed=s,
+                            kingdom=list(_KNP))
+        if g["bane"]:
+            saw_bane = True
+            assert engine.potion_cost(g, g["bane"]) == 0, \
+                f"seed {s}: Bane {g['bane']} costs a Potion"
+            assert "Potion" not in g["supply"], \
+                f"seed {s}: no dealt Potion card, so no Potion pile"
+    assert saw_bane, "no seed produced a Bane — the test proved nothing"
 
 
-def test_a_plain_bane_leaves_the_potion_pile_out():
-    # seed 3 picks Harbinger ({$3}) — no Potion anywhere, so no Potion pile.
-    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=3,
-                        kingdom=list(_KNP))
-    assert g["bane"] and engine.potion_cost(g, g["bane"]) == 0, "expected a plain Bane"
-    assert "Potion" not in g["supply"]
-
-
-def test_a_potion_costed_ferryman_pile_does_not_add_the_potion_pile():
-    """Ferryman's pile is OUTSIDE the Supply and can only be gained — so a
-    Potion-costed one does NOT pull the buyable Potion pile in, but it still
-    ships in `piles` so the client can show what Ferryman will gain."""
+def test_ferryman_never_sets_aside_a_potion_costed_pile():
+    """Same rule for Ferryman's "$3 or $4" pile — Alchemist/Familiar/
+    Philosopher's Stone ({$3,P}) and Golem ({$4,P}) are all excluded."""
     fkingdom = ["Ferryman"] + _KNP[1:]
-    # seed 2 with this board sets aside Alchemist ({$3,P}) for Ferryman.
-    g = engine.new_game([A, B], ["base", "cornucopia", "alchemy"], seed=2,
-                        kingdom=fkingdom)
-    fp = g["ferryman_pile"]
-    assert fp and engine.potion_cost(g, fp) > 0, "expected a Potion Ferryman pile"
-    assert fp not in g["supply"] and "Potion" not in g["supply"]
-    assert fp in g["piles"] and g["piles"][fp]["supply"] is False
+    saw_pile = False
+    for s in range(60):
+        g = engine.new_game([A, B], ["cornucopia", "alchemy"], seed=s,
+                            kingdom=list(fkingdom))
+        fp = g["ferryman_pile"]
+        if fp:
+            saw_pile = True
+            assert engine.potion_cost(g, fp) == 0, \
+                f"seed {s}: Ferryman pile {fp} costs a Potion"
+            assert fp not in g["supply"] and fp in g["piles"] \
+                and g["piles"][fp]["supply"] is False
+    assert saw_pile, "no seed produced a Ferryman pile — the test proved nothing"
+
+
+def test_a_dealt_potion_card_adds_the_potion_pile_but_a_plain_board_does_not():
+    with_potion = engine.new_game([A, B], ["alchemy"], seed=1,
+                                  kingdom=["Golem"] + _fill()[:9])
+    assert engine.potion_cost(with_potion, "Golem") > 0
+    assert "Potion" in with_potion["supply"], "a Potion-costed kingdom card adds Potion"
+    without = engine.new_game([A, B], ["base"], seed=1, kingdom=_fill())
+    assert "Potion" not in without["supply"]
 
 
 @pytest.mark.parametrize("seed", [0, 1])

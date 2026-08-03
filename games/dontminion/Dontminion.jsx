@@ -170,12 +170,19 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
       {body
         ? <FitBodyText text={text} />
         : (!small && <div className={"dm-card-text" + textCls}>{text}</div>)}
-      {/* foot row: type lines bottom-LEFT, the cost coin bottom-RIGHT */}
+      {/* foot row: type lines bottom-LEFT, the cost coins bottom-RIGHT. A Potion
+          is part of the cost (Alchemy) — its blue "P" token stacks ABOVE the
+          coin cost, both being components of the same price. */}
       <div className="dm-card-foot">
         <div className="dm-types">
           {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
         </div>
-        <span className="dm-cost">{card ? card.cost : ""}</span>
+        <div className="dm-cost-col">
+          {card?.potion > 0 && (
+            <span className="dm-cost dm-cost-p" title="costs a Potion">P</span>
+          )}
+          <span className="dm-cost">{card ? card.cost : ""}</span>
+        </div>
       </div>
       {badge != null && <span className="dm-card-badge">{badge}</span>}
     </div>
@@ -1254,7 +1261,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
         {cardData && effCost(name) !== printedCost(name)
           && <span className="dm-disc">now {effCost(name)}</span>}
-        {potionCost(name) > 0 && <span className="dm-potion" title="costs a Potion">P</span>}
+        {/* Young Witch's Bane — the one extra pile added to the Supply. Marked
+            top-right (the Potion cost now lives on the card face itself). */}
+        {game.bane === name && <span className="dm-bane" title="Young Witch's Bane">B</span>}
       </div>
     );
   };
@@ -1872,6 +1881,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   <DmCardFace name={pileFace(n)} card={cards[pileFace(n)]}
                     onInfo={() => setCardInfo(pileFace(n))} />
                   <span className="dm-pile-count">{pileLeft(n)} left</span>
+                  {game.bane === n && <span className="dm-bane" title="Young Witch's Bane">B</span>}
                 </div>
               ))}
             </div>
