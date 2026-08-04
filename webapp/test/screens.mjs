@@ -1036,6 +1036,77 @@ try {
 		await ctx.close();
 	}
 
+	// ── Offline vs-AI (Castles of Crimson) ────────────────────────────────────
+	// The CoC offline stack is deeper than Spender's: a per-decision bot loop, a
+	// model-fetching search pool, and a board-layout localStorage cache the game
+	// screen hard-gates on. The scenario seeds the boards cache (what the hub's
+	// Download button does online), creates a local game, cuts the network once the
+	// search pool is armed, and plays the SETUP castle placement both ways — ours by
+	// clicking a legal hex, the bot's through the offline search loop.
+	{
+		const boards = await (await fetch(`http://localhost:${API_PORT}/coc/boards`)).json();
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(([user, boardsJson]) => {
+			localStorage.setItem("spender_user", user);
+			localStorage.setItem("coc_boards_v1", boardsJson);
+		}, [JSON.stringify({ id: "coc-offline-harness", name: "CocOff", guest: true }),
+			JSON.stringify(boards)]);
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		let poolReady = false;
+		page.on("console", (m) => { if (/\[coc client-AI\].*ready/.test(m.text())) poolReady = true; });
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+		await page.waitForSelector(".offline-panel", { timeout: 20_000 }).catch(() => {});
+		await page.locator(".cm-seg button", { hasText: "Castles of Crimson" }).click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
+		const mounted = await page.waitForSelector(".coc", { timeout: 20_000 })
+			.then(() => true).catch(() => false);
+		check("a local Castles game mounts the CoC screen", mounted);
+		check("...at its /offline/<LOCALID> URL",
+			/^\/offline\/LOCAL[A-Z0-9]+$/.test(new URL(page.url()).pathname), new URL(page.url()).pathname);
+
+		if (mounted) {
+			for (let i = 0; i < 60 && !poolReady; i++) await sleep(250);
+			check("the CoC search pool arms (model fetched)", poolReady);
+			await ctx.setOffline(true);
+
+			// Our setup turn arrives (the bot's castle, if it opens, plays through the
+			// offline search loop) → click a legal burgundy hex to place our castle.
+			let legal = 0;
+			for (let i = 0; i < 90 && legal === 0; i++) {
+				legal = await page.locator(".coc-hex.legal").count().catch(() => 0);
+				if (legal === 0) await sleep(500);
+			}
+			check("our castle placement arrives with the network OFF", legal > 0, `${legal} legal`);
+			await page.locator(".coc-hex.legal").first().click({ timeout: 10_000 }).catch(() => {});
+
+			// Both castles down → round 1 rolls and play begins; wait for OUR first real
+			// turn (the bot's opening turn runs the per-decision loop offline).
+			const badge = await page.waitForSelector("text=Your turn", { timeout: 90_000 })
+				.then(() => true).catch(() => false);
+			check("the game reaches round 1 and our turn (bot played offline)", badge);
+
+			await ctx.setOffline(false);   // assets for a reload (no SW on localhost)
+			await page.reload({ waitUntil: "load" }).catch(() => {});
+			const resumed = await page.waitForSelector(".coc", { timeout: 20_000 })
+				.then(() => true).catch(() => false);
+			check("a reload resumes the Castles save from IndexedDB", resumed);
+
+			await page.goBack().catch(() => {});
+			const listed = await page.waitForSelector(".offline-save-row", { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("Back lands on the hub with the Castles save listed", listed);
+		}
+		check("no page errors in offline Castles play", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

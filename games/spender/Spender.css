@@ -206,3 +206,4 @@
 .offline-save-info b{color:var(--text)}
 .offline-save-time{color:var(--text-muted)}
 .offline-save-btns{display:flex;gap:6px;flex-shrink:0}
+.offline-select{width:100%;max-width:280px}

@@ -1,4 +1,36 @@
 /**
+ * Apply one move (engine-style `{"type":...}` OR compact `{"t":...}`) for `seat`.
+ * Returns `{"save": <envelope>, "events": [...]}` — events are oldest→newest log
+ * records for the JS driver to prepend. Validates actor + full legality.
+ * @param {string} save_json
+ * @param {string} move_json
+ * @param {number} seat
+ * @param {string} pid0
+ * @param {string} pid1
+ * @returns {string}
+ */
+export function coc_apply_json(save_json, move_json, seat, pid0, pid1) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(move_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(pid0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(pid1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.coc_apply_json(ptr0, len0, ptr1, len1, seat, ptr2, len2, ptr3, len3);
+        deferred5_0 = ret[0];
+        deferred5_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * P4b throughput probe: attention forward evals/s at an arbitrary shape with
  * random weights (cost depends only on shape). Bench tooling — never called by
  * the serving path.
@@ -40,6 +72,39 @@ export function coc_chain_move(state_json, prefix_json) {
 }
 
 /**
+ * Render the save as the WIRE game dict (the engine dict minus the server's _HIDE
+ * keys) plus the room-level extras: `{"game":..., "final_scores":{pid:score}}`.
+ * @param {string} save_json
+ * @param {string} pid0
+ * @param {string} pid1
+ * @param {string} name0
+ * @param {string} name1
+ * @returns {string}
+ */
+export function coc_game_dict_json(save_json, pid0, pid1, name0, name1) {
+    let deferred6_0;
+    let deferred6_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(pid0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(pid1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(name0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(name1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.coc_game_dict_json(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4);
+        deferred6_0 = ret[0];
+        deferred6_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+    }
+}
+
+/**
  * Load the PV model from the compact binary blob. Call once per worker before any
  * pv/hybrid search. Returns false on a malformed blob (caller drops the worker).
  * @param {Uint8Array} bytes
@@ -50,6 +115,69 @@ export function coc_init_model(bytes) {
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.coc_init_model(ptr0, len0);
     return ret !== 0;
+}
+
+/**
+ * Legal ENGINE moves at the current boundary as compact dicts:
+ * `{"actor": seat|-1, "moves":[{...}, ...]}` — the offline analog of
+ * `engine.legal_moves` (drives the forced-move fast path in the bot loop).
+ * @param {string} save_json
+ * @returns {string}
+ */
+export function coc_legal_json(save_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.coc_legal_json(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Deal a fresh 2-player game (boards 0..=8) and return its save-envelope JSON.
+ * @param {number} board0
+ * @param {number} board1
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function coc_new_game_json(board0, board1, seed) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.coc_new_game_json(board0, board1, seed);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The REDACTED search projection for `ai_search.state` — `az_compact.project`'s
+ * shape with the three hidden pools sorted (exactly what the server ships).
+ * @param {string} save_json
+ * @returns {string}
+ */
+export function coc_offline_proj(save_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.coc_offline_proj(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
 }
 
 /**

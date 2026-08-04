@@ -9,6 +9,12 @@ pub mod tiles;
 pub mod valuenet;
 
 pub mod actions;
+// Offline-play serialization (full-fidelity save + render dict + ledger). Serde-backed,
+// so native builds get them only with the `bridge` feature (same gate as pxio).
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod dump;
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod gamedict;
 pub mod attn;
 pub mod batch;
 pub mod engine;

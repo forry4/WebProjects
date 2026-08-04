@@ -139,3 +139,44 @@ shared zlib layer in `core/rooms.py`).
 `tests/` (~319: board invariants, placement, scoring, lifecycle, one-per-monastery, endgame) +
 `test_client_ai.py` + `test_ws_auth.py`. **Python↔Rust differential parity** — regen fixtures via
 `gen_engine_fixtures.py`, then `cargo test --release --features bridge` in `rust-cores/coc-core`.
+
+---
+
+## Offline vs-AI mode (`offline.js` + the shell's `/offline` hub)
+
+CoC is playable **fully offline** (installed PWA, airplane mode): the browser is authoritative —
+the save is the SAVE ENVELOPE `{state, ids}` (full-fidelity Rust State incl. ordered pools + rng,
+serde via `coc-core/src/dump.rs`, PLUS the tile-id LEDGER) in IndexedDB, and every step is a
+stateless call into the engine already in `coc_core_bg.wasm`. Hard/Expert only (the wasm tiers).
+
+- **The tile-id ledger** (`coc-core/src/gamedict.rs`) exists because Rust State deliberately has
+  no tile identity while the JSX addresses moves by `tile_id` and tracks flyers by stable ids:
+  it mirrors every VISIBLE container, ids follow tile codes between containers on each apply
+  (code-matched reconciliation; identical-code swaps are harmless), supply emergences mint fresh
+  ids ("oh"/"ob" prefixes carry blackness — a black market shares a colored market's code).
+- **Render = the WIRE dict** (engine dict minus `_HIDE`), emitted by `gamedict::to_game_dict`
+  with `bonus_vp` (a shadow field on PlayerState, outside the parity projection like `region_vp`)
+  recovering `claimed_bonus`. Parity-gated by `tests/gamedict_parity.rs` against the REAL Python
+  wire over random games (one shared canonicalizer for ids/order/provenance — its header lists
+  what's erased and why each is safe), plus a `to_proj` round-trip gate and an offline-apply soak.
+  Fixtures: `tools/gen_gamedict_fixtures.py` — the wire snapshot MUST be deepcopied (a shallow
+  copy serializes every record as the final position; caught exactly that way).
+- **Search input stays redacted**: `ai_search.state` is `gamedict::to_proj` (pools SORTED, no rng)
+  — the offline AI can't read hidden state the client physically holds, same strength as online.
+- **The driver** (`offline.js`) mirrors `_client_bot_turn`: per-decision loop, single-legal moves
+  apply directly (paced ~1s), else it arms `ai_search` and the component's EXISTING search loop
+  plays the decision, sinking the compact move back through the driver (validated in wasm against
+  `legal_actions_full` — NOT the search-pruned set). Human moves go engine-dict → compact (tile_id
+  resolved via the ledger) → micro chain. Log events are diff-synthesized in Rust per apply
+  (rolls, phase ends, area completions, bonus tiles, livestock, track, mine income); log-side
+  bookkeeping (`t` stamps, undo snapshot AS A COPY — same rationale as Spender offline) is
+  driver-side. `vp_breakdown` degrades to empty offline (it replays the server log).
+- **Component forks** (`CastlesOfCrimson.jsx`): the `offline` prop mounts a record with no socket;
+  `mv` + the `ai_move` sink fork into the driver; `inLiveGame`/deep-entry/popstate gate on it; the
+  shell owns `/offline/<id>`. **roomData must be published BEFORE the screen flips to "game"** —
+  the game render assumes `game` exists (the online flow sets both from one message; violating it
+  blanked the screen with a TDZ-style crash, caught by the screens scenario).
+- **Engine worker** = the same `coc-worker.js` with `?engine=1` (skips the model fetch, so engine
+  calls work offline even with no model cached; search pool workers load models as always). The
+  hub's offline download precaches the coc wasm + BOTH model bins and warms the `/coc/boards`
+  localStorage cache (the game screen hard-gates on it and the SW can't serve localStorage).

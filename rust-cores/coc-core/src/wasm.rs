@@ -391,3 +391,75 @@ pub fn coc_chain_move(state_json: &str, prefix_json: &str) -> String {
     }
     chain_to_compact(&s0, &prefix)
 }
+
+// ─── Offline-driver exports (stateless save-envelope calls for local vs-AI) ──
+// The browser is the authority in an offline game: it holds the SAVE envelope
+// (full-fidelity state incl. ordered pools + rng, plus the tile-id ledger — see
+// gamedict.rs) and every step is a pure JSON→JSON call. Search stays on the
+// REDACTED projection from `coc_offline_proj` so the AI cannot read the hidden
+// pools or the rng the client physically holds. All errors are `{"error":...}`.
+
+/// Deal a fresh 2-player game (boards 0..=8) and return its save-envelope JSON.
+#[wasm_bindgen]
+pub fn coc_new_game_json(board0: u8, board1: u8, seed: u64) -> String {
+    if board0 > 8 || board1 > 8 {
+        return r#"{"error":"bad board"}"#.to_string();
+    }
+    crate::gamedict::new_game_save(board0, board1, seed)
+}
+
+/// Legal ENGINE moves at the current boundary as compact dicts:
+/// `{"actor": seat|-1, "moves":[{...}, ...]}` — the offline analog of
+/// `engine.legal_moves` (drives the forced-move fast path in the bot loop).
+#[wasm_bindgen]
+pub fn coc_legal_json(save_json: &str) -> String {
+    let Some((s, _ids)) = crate::gamedict::save_from_json(save_json) else {
+        return r#"{"error":"bad save"}"#.to_string();
+    };
+    let moves = crate::gamedict::legal_compact_moves(&s);
+    serde_json::json!({"actor": s.actor(), "moves": moves}).to_string()
+}
+
+/// Apply one move (engine-style `{"type":...}` OR compact `{"t":...}`) for `seat`.
+/// Returns `{"save": <envelope>, "events": [...]}` — events are oldest→newest log
+/// records for the JS driver to prepend. Validates actor + full legality.
+#[wasm_bindgen]
+pub fn coc_apply_json(save_json: &str, move_json: &str, seat: usize, pid0: &str, pid1: &str) -> String {
+    match crate::gamedict::apply_save(save_json, move_json, seat, pid0, pid1) {
+        Ok((save, events)) => {
+            // `save` is already a JSON document; splice it in raw.
+            format!(
+                r#"{{"save":{},"events":{}}}"#,
+                save,
+                serde_json::Value::Array(events)
+            )
+        }
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
+/// Render the save as the WIRE game dict (the engine dict minus the server's _HIDE
+/// keys) plus the room-level extras: `{"game":..., "final_scores":{pid:score}}`.
+#[wasm_bindgen]
+pub fn coc_game_dict_json(save_json: &str, pid0: &str, pid1: &str, name0: &str, name1: &str) -> String {
+    let Some((s, ids)) = crate::gamedict::save_from_json(save_json) else {
+        return r#"{"error":"bad save"}"#.to_string();
+    };
+    let game = crate::gamedict::to_game_dict(&s, &ids, [pid0, pid1], [name0, name1]);
+    let scores = s.final_scores();
+    serde_json::json!({
+        "game": game,
+        "final_scores": { pid0: scores[0], pid1: scores[1] },
+    })
+    .to_string()
+}
+
+/// The REDACTED search projection for `ai_search.state` — `az_compact.project`'s
+/// shape with the three hidden pools sorted (exactly what the server ships).
+#[wasm_bindgen]
+pub fn coc_offline_proj(save_json: &str) -> String {
+    let Some((s, _ids)) = crate::gamedict::save_from_json(save_json) else {
+        return r#"{"error":"bad save"}"#.to_string();
+    };
+    crate::gamedict::to_proj(&s).to_string()
+}
