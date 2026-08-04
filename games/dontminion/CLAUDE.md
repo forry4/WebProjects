@@ -14,7 +14,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
 | `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
-| `bot.py` | the bots: random-legal (easy/normal/hard) + the Big Money buy ladder (`bigmoney`) |
+| `bot.py` | the bots: random-legal (easy/normal/hard) + `bmplus`, the only shipped opponent; the Big Money ladder stays as the arena's reference rung |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
 | `tests/` | engine, soak, per-batch card tests, cross-set, migrate, server, ws-auth, wire-redaction, wire-contract |
 | `tools/replay_prod_saves.py` | THE migration gate — replays every real prod save (see below) |
@@ -661,10 +661,43 @@ friend rooms are host-started with shuffled seat order.
 
 **Shipped ladder** (`main.AI_DIFFICULTIES`, persisted per room; an unknown value coerces to
 `DEFAULT_DIFFICULTY`, which is how the ladder grows without a migration):
-`easy`/`normal`/`hard` (all still the one random-legal bot) · `bigmoney` · **`bmplus` (default)**.
+`easy`/`normal`/`hard` (all still the one random-legal bot) · **`bmplus` (default)**.
 
 Full campaign, every number, and the negative results: `docs/ai-research-log.md`, session
 2026-07-31. Distilled strategy corpus: `.claude-plans/dontminion-bot-ladder.md`.
+
+**PLAIN `bigmoney` WAS RETIRED AS AN OPPONENT (2026-08-04) BUT NOT DELETED.** It is a strict
+SUBSET of bmplus — the same buy ladder minus the terminal, the Colony rungs and the endgame —
+which bmplus beats **0.77** (base) / **0.73** (all sets), so offering it only ever added a choice
+no one should pick. It had already been dropped from the create modal; this took it out of
+`AI_DIFFICULTIES`, so the server now coerces it exactly like `strategist`/`champion`.
+- **Removing a tier from that tuple RETIERS LIVE GAMES**, because `load_game_to_memory` re-runs
+  `_valid_difficulty` on the persisted value — the same coercion that lets the ladder grow
+  without a migration also silently upgrades an in-progress room, which is precisely the "a live
+  game can't be retiered by a redeploy" property the tuple exists to protect. Checked against
+  prod before shipping: 27 rows, 4 on `bigmoney` and **all 4 already `over`** (a finished game's
+  bot never acts again), the single in-progress game on `bmplus`. Query the DB, don't reason
+  about it — and if a future removal does find live games, give the load path its own legacy set
+  rather than retiering them mid-game.
+- **It stays in `bot.py` as the arena's REFERENCE RUNG.** "Is bmplus still better than just
+  buying money?" is the most informative gate the ladder has, the pace anchors (pure BM reaches
+  4 Provinces ~turn 17) are how we know the buy ladder is faithful to the published one, and
+  `choose_big_money` is the only clean harness for the shared `_want` ladder — bmplus's own buy
+  path wraps it in terminal, Colony and endgame logic. `_want` itself is **live production
+  code**: bmplus falls back to it for every rung it doesn't override.
+- Two tests pin the split: `test_the_unshipped_tiers_are_not_offered_and_coerce_to_the_default`
+  (no room can select it) and `test_bigmoney_is_still_dispatchable_for_the_arena` (`bot.choose`
+  still routes the string to the LADDER — falling through to `choose_random` would turn the
+  baseline into a coin flip and make every number measured against it meaningless).
+- **`test_every_bot_tier_the_picker_offers_is_one_the_server_accepts`** (in `test_wire_contract.py`)
+  keeps the JSX `BOTS` ids a subset of `AI_DIFFICULTIES`. This seam fails SILENTLY: an id that
+  drifts out of the tuple doesn't error, it quietly seats a different bot than the player picked.
+- It also cost a server test its discriminator. `test_the_room_tier_reaches_the_bot` told the
+  tiers apart by "random-legal plays an Action in hand, Big Money never does" — bmplus owns
+  Actions and plays them, so that probe stopped discriminating and the test would have PASSED
+  while checking nothing. It now uses **$0 with an empty hand**: random takes any active move
+  over ending the phase and buys a Copper/Curse, every ladder tier wants nothing below $2.
+  Verified non-vacuous by breaking the scheduler's tier read and watching it fail.
 
 **Big Money** is the classic buy ladder: Treasure and Victory only, greening on a Province-count
 clock. Three things about it are load-bearing:
@@ -677,11 +710,11 @@ clock. Three things about it are load-bearing:
 - **Deliberate gaps, both faithful to the ladder as specified**: Colony/Platinum are not in it,
   and it plays no Actions at all. `bmplus` closes both.
 
-**`bmplus`** = Big Money + three named skills, and it beats `bigmoney` **0.77** (base) / **0.73**
-(all sets): the kingdom's best terminal off `bot_traits.BM_TERMINALS` (with the <=2-copy budget
-and "second copy at ~16 cards"), the Colony/Platinum rungs, and `bot_endgame` on every buy. It
-also drops Big Money's "really early: Gold at $8" quirk once the game is ending — plain
-`bigmoney` keeps it, being faithful to the published ladder.
+**`bmplus`** = Big Money + three named skills, and **the only real opponent the game ships**: the
+kingdom's best terminal off `bot_traits.BM_TERMINALS` (with the <=2-copy budget and "second copy
+at ~16 cards"), the Colony/Platinum rungs, and `bot_endgame` on every buy. It also drops Big
+Money's "really early: Gold at $8" quirk once the game is ending — the reference `bigmoney` keeps
+it, being faithful to the published ladder.
 
 **`BM_TERMINALS` IS MEASURED, NOT JUDGED** (`tools/bm_terminal_sweep.py`). Each candidate
 plays as bmplus's forced terminal against bmplus forced to buy NO terminal, on a board of
@@ -803,9 +836,10 @@ BM+Smithy ~14 — ours read 16.3 and 15.3, which is how we know the ladder is fa
 
 ### NOT shipped — built, measured, and beaten by `bmplus` (do not relitigate as-is)
 
-`strategist` and `champion` exist in `bot.py` behind difficulty strings **the server refuses**
-(`_valid_difficulty` coerces them), pinned by a test. They are the research harness, not
-opponents.
+`bigmoney`, `strategist` and `champion` exist in `bot.py` behind difficulty strings **the server
+refuses** (`_valid_difficulty` coerces them), pinned by a test. They are the research harness,
+not opponents. `bigmoney` is here for a different reason from the other two — not a failed
+experiment but a RETIRED one, kept as the measurement baseline (above).
 
 - **`strategist` (archetype board-read) = 0.35 vs bmplus.** Engine 0.231, minion 0.237,
   cursing-money 0.381, rush 0.000; even its plain money plan reads 0.4667 over 120 games. This is

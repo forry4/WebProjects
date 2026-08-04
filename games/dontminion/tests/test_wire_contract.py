@@ -120,6 +120,34 @@ def test_every_log_event_the_engine_emits_has_a_fmtLog_case():
         f"field names in the game log")
 
 
+def test_every_bot_tier_the_picker_offers_is_one_the_server_accepts():
+    """The create modal's bot ids are the same seam as any other wire field,
+    and it FAILS SILENTLY: `_valid_difficulty` coerces anything it doesn't
+    recognise to the default, so a picker id that has drifted out of
+    AI_DIFFICULTIES doesn't error — it quietly seats a different bot than the
+    one the player chose. Plain `bigmoney` leaving the ladder is exactly the
+    move that can strand an id here."""
+    jsx = _src(JSX)
+    block = jsx[jsx.find("const BOTS = ["):]
+    block = block[:block.find("]")]
+    offered = set(re.findall(r'id:\s*"(\w+)"', block))
+    assert offered, "the BOTS picker list was not found — regex rotted"
+
+    main_src = _src(MAIN)
+    tuple_src = re.search(r"AI_DIFFICULTIES = \(([^)]*)\)", main_src).group(1)
+    names = re.findall(r'"(\w+)"|bot\.(\w+)', tuple_src)
+    from games.dontminion import bot
+    accepted = {lit or getattr(bot, attr) for lit, attr in names}
+
+    assert offered <= accepted, (
+        f"Dontminion.jsx offers bot tiers {sorted(offered - accepted)} that "
+        f"main.AI_DIFFICULTIES does not accept — the server will silently "
+        f"substitute the default instead of seating what was picked")
+    assert bot.BIG_MONEY not in accepted, (
+        "plain bigmoney is a strict subset of bmplus and was retired as an "
+        "opponent — it must stay a research-only tier")
+
+
 def test_every_pinned_ambiguity_names_a_test_that_exists():
     """The OPEN AMBIGUITIES list in CLAUDE.md claims each entry is pinned by a
     test. A list that cites a test which has been renamed or deleted is worse

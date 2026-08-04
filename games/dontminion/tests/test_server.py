@@ -220,10 +220,17 @@ def test_bots_answer_a_humans_attack_mid_turn():
 
 
 def test_the_room_tier_reaches_the_bot():
-    """The scheduler must play the room's OWN tier — the two bots are told apart
-    by an Action in hand: random-legal plays it (anti-stall), Big Money never
-    does. Same forced position, one create option apart."""
-    def played_smithy(room_id, difficulty):
+    """The scheduler must play the room's OWN tier. The two are told apart at
+    $0 with an empty hand: random-legal takes any active move over ending the
+    phase, so it buys a Copper or a Curse; every ladder tier wants NOTHING
+    below $2 and ends the turn. Same forced position, one create option apart.
+
+    The probe used to be an Action in hand (random plays it, plain Big Money
+    never does), which stopped discriminating when `bigmoney` was retired —
+    bmplus owns Actions and plays them too. A create option that silently
+    stopped reaching the scheduler would then have looked identical for both
+    tiers, i.e. the test would have passed while checking nothing."""
+    def bought_junk(room_id, difficulty):
         _run(m._handle_create(_FakeWS(), room_id, "human", {
             "name": "H", "vs_ai": True, "num_bots": 1, "expansions": ["base"],
             "ai_difficulty": difficulty}))
@@ -233,16 +240,15 @@ def test_the_room_tier_reaches_the_bot():
         game["pending"].clear()
         engine._sync_pending(game)
         game["turn"] = "bot1"
-        game["phase"] = "action"
-        game["actions"] = 1
-        game["supply"].setdefault("Smithy", 10)
-        game["seats"]["bot1"]["hand"] = ["Smithy", "Copper"]
-        _run(m._schedule_bots(room_id))                # plays bot1's whole turn
-        return any(e.get("event") == "play" and e.get("card") == "Smithy"
-                   and e.get("pid") == "bot1" for e in room["game"]["log"])
+        game["phase"] = "buy"
+        game["coins"] = 0
+        game["seats"]["bot1"]["hand"] = []             # nothing left to play
+        _run(m._schedule_bots(room_id))                # finishes bot1's turn
+        return any(e.get("event") == "buy" and e.get("pid") == "bot1"
+                   for e in room["game"]["log"])
 
-    assert played_smithy("R9a", "easy") is True
-    assert played_smithy("R9b", bot.BIG_MONEY) is False
+    assert bought_junk("R9a", "easy") is True
+    assert bought_junk("R9b", bot.BM_PLUS) is False
 
 
 def test_scheduler_noops_when_no_bot_owes_a_move():

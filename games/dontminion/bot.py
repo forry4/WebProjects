@@ -1,24 +1,28 @@
 """The bots, one strategy per rung of the ladder, selected by `ai_difficulty`:
 
 * ``random``   — uniform over legal moves (v1; the easy/normal/hard tiers).
-* ``bigmoney`` — the classic Big Money buy ladder. Buys ONLY Treasure and
-  Victory, never an Action, and greens on a Province-count clock. It is a real
-  opponent: the random bot mostly buys Coppers and Curses and rarely finishes a
-  Province.
 * ``bmplus``   — Big Money that READS THE BOARD: it picks the kingdom's best
   terminal (the published Terminal-Draw-BM ranking), plays its Actions, buys
   Colonies/Platinum in a colony game, and hands every buy to `bot_endgame` for
   the Penultimate Province Rule and pile control. **The strongest tier we
   have**, and the default.
 
-Each rung is the one below it plus a NAMED skill, so the ladder reads like
-playing better humans rather than different species.
+THREE further strategies exist in code and are deliberately NOT in
+`main.AI_DIFFICULTIES`. Reaching one needs an explicit difficulty string, which
+the server will not accept from a client (`_valid_difficulty` coerces anything
+unknown), so they are usable from the arena and tests only. They are the
+research harness, not opponents (every number: docs/ai-research-log.md):
 
-Two further tiers exist in code and are deliberately NOT in
-`main.AI_DIFFICULTIES`, because they were built, measured, and did not beat
-`bmplus`. They are kept as the research harness (see the numbers in
-docs/ai-research-log.md), not as opponents:
-
+* ``bigmoney``    — the classic Big Money buy ladder: ONLY Treasure and
+  Victory, never an Action, greening on a Province-count clock. Retired as an
+  opponent because it is a strict SUBSET of bmplus — same ladder minus the
+  terminal, the Colony rungs and the endgame — which bmplus beats 0.77 (base) /
+  0.73 (all sets). It stays here as THE REFERENCE RUNG: "is bmplus still better
+  than just buying money?" is the most informative gate the ladder has, and the
+  pace anchors (pure BM reaches 4 Provinces ~turn 17) are how we know the buy
+  ladder is faithful to the published one. It is also the only clean harness
+  for the shared `_want` ladder below, which bmplus reuses — bmplus's own buy
+  path wraps it in terminal, Colony and endgame logic.
 * ``strategist``  — archetype board-read + action sequencing + reshuffle rules.
   Measured 0.35 vs bmplus overall; per archetype engine 0.231, minion 0.237,
   cursing-money 0.381, rush 0.000, and even its money plan reads 0.4667 over
@@ -26,10 +30,6 @@ docs/ai-research-log.md), not as opponents:
   to Big Money" — reproduced.
 * ``champion``    — per-kingdom plan tournament + determinized rollout buy
   search. Roughly a wash with bmplus at ~160x the cost.
-
-Reaching either needs an explicit difficulty string, which the server will not
-accept from a client (`_valid_difficulty` coerces anything unknown), so they
-are usable from the arena and tests only.
 
 `choose` is the server scheduler's guaranteed turn-finisher: for EVERY strategy
 it must return a valid move for ANY state where (pending_pid or turn) == pid,
@@ -107,6 +107,12 @@ def choose_random(game, pid, rng=None):
 # The buy ladder, verbatim from the strategy it implements: $8+ Province, $6-7
 # Gold (Duchy once Provinces are short), $5 Silver (Duchy), $3-4 Silver
 # (Estate), $2 Estate only at the very end, and never more than one buy.
+#
+# `_want` IS SHARED — bmplus falls back to it for every rung it doesn't
+# override, so this ladder is live production code. Only `choose_big_money`,
+# the wrapper that plays NOTHING but this ladder, is research-only (see the
+# module docstring: it is the arena's reference rung and this ladder's test
+# harness, and no room can select it).
 #
 # DELIBERATE GAPS, both faithful to the ladder as specified:
 #   * Colony/Platinum are not in it. In a Prosperity game with the colony setup

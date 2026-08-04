@@ -54,13 +54,22 @@ _BOT_THINK = 0.7
 
 
 # The ladder, in strength order. easy/normal/hard are all still the v1
-# random-legal bot; "bigmoney" is the classic buy ladder; "bmplus" adds a
-# terminal read off the board, the Colony rungs and endgame technique
-# (bot.choose dispatches on this string). The tier is validated + persisted so
-# a live game can't be silently retiered by a redeploy (the Spender ai_variant
-# lesson) — which also means the ladder can grow without a migration, since an
-# unknown value falls back to the default.
-AI_DIFFICULTIES = ("easy", "normal", "hard", bot.BIG_MONEY, bot.BM_PLUS)
+# random-legal bot; "bmplus" reads the board for a terminal, buys the Colony
+# rungs and knows how the game ends (bot.choose dispatches on this string).
+# The tier is validated + persisted so a live game can't be silently retiered
+# by a redeploy (the Spender ai_variant lesson) — which also means the ladder
+# can grow without a migration, since an unknown value falls back to the
+# default.
+#
+# PLAIN `bigmoney` IS DELIBERATELY ABSENT. It is a strict subset of bmplus —
+# the same buy ladder without the terminal, the Colony rungs or the endgame —
+# and bmplus beats it 0.77 (base) / 0.73 (all sets), so offering it only ever
+# added a choice no one should pick. The strategy stays in bot.py as the
+# arena's reference rung (it is what "does bmplus still beat plain money?" is
+# measured against), reachable exactly like `strategist`/`champion`: by an
+# explicit string this validator refuses. Dropping it retiers nothing — prod
+# was checked, and every game still on `bigmoney` had already finished.
+AI_DIFFICULTIES = ("easy", "normal", "hard", bot.BM_PLUS)
 DEFAULT_DIFFICULTY = bot.BM_PLUS
 
 AI_PIDS = ("bot1", "bot2", "bot3")

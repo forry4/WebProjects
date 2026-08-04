@@ -21,12 +21,13 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const DM_WS = WS_RAW.replace(/\/ws$/, "/dontminion/ws");
 const DM_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dontminion");
 
-// The bot tiers OFFERED in the picker. The server still distinguishes more
-// (main.AI_DIFFICULTIES also has plain `bigmoney`), but only two are worth
-// surfacing: a barely-playing Random and the real opponent, Big Money+. Plain
-// Big Money was dropped from the UI — it is a strictly weaker bmplus, so it
-// only added a choice that no one should pick. A saved game still on `bigmoney`
-// keeps working; the server just no longer offers it here.
+// The bot tiers OFFERED in the picker, and now the whole shipped ladder: a
+// barely-playing Random and the real opponent, Big Money+. Plain Big Money
+// left the UI first and has since been dropped from `main.AI_DIFFICULTIES`
+// too — it is a strictly weaker bmplus, so it only added a choice no one
+// should pick. Keep this list a subset of AI_DIFFICULTIES: the server coerces
+// anything it doesn't know to the default, so an id that drifts out of that
+// tuple silently hands the player a different bot than the one they picked.
 //
 // LABELS ARE SHORT ON PURPOSE. These render as a `cm-seg` sharing one row with
 // the Bots counter (the side-by-side layout is what keeps the create modal
