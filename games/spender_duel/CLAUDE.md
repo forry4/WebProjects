@@ -63,8 +63,12 @@ invariants and deploy; full AI campaign detail in `docs/ai-research-log.md`.
 Ported to Rust→WASM and served **client-side** (`rust-cores/duel-core`). Entry points are
 `duel_search` (Hard) and `duel_search_expert` (Expert) in `src/wasm.rs` — a separate entry rather than a
 tier param, so the Hard worker call stays byte-unchanged. `duel_pick_move` is net-independent (pooled
-greedy pick) and shared. Nets are **embedded in the wasm** (`include_str!`), not fetched — unlike CoC, a
-net swap here DOES need a wasm rebuild.
+greedy pick) and shared. Nets are **embedded in the wasm**, not fetched — unlike CoC, a net swap here
+DOES need a wasm rebuild. The embed is the **bincode of the JSON's parsed f32s** (`include_bytes!` of
+`src/attn_*.bin` — ~3x smaller wasm, bit-identical weights); the `.json` stays committed as the
+training-side source. **A net swap = replace the JSON + `cargo run --release --features bridge --bin
+gen_net_bins` + rebuild** — the `net_bins_match_their_source_jsons` lib test fails until the bins are
+regenerated, so a stale bin can't ship inside a green build.
 
 ### The serving shape — and the rule that comes with it
 

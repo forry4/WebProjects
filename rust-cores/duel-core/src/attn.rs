@@ -301,9 +301,16 @@ impl AttnNet {
     }
 }
 
+/// The net's serde twin — one struct, two wire formats. JSON is the TRAINING-side
+/// format (`tools/attn_net.py` exports it; human-diffable). The wasm embeds the
+/// bincode encoding of this same struct instead: a JSON float costs ~11 bytes of
+/// text where bincode stores the parsed f32's 4 bytes verbatim, which is ~65% of
+/// the shipped wasm's size for the SAME bits — `from_bin_bytes(bincode(json_parse(x)))`
+/// is field-for-field bit-identical to `from_json_str(x)`, and the `net_bins_*` lib
+/// tests pin that equality so a JSON swap without `gen_net_bins` fails loudly.
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
-#[derive(serde::Deserialize)]
-struct AttnJson {
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct AttnJson {
     emb_w: Vec<f32>,
     emb_b: Vec<f32>,
     wq: Vec<Vec<f32>>,
@@ -328,15 +335,51 @@ struct AttnJson {
 
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
 impl AttnNet {
-    pub fn from_json_str(s: &str) -> Result<Self, String> {
-        let j: AttnJson = serde_json::from_str(s).map_err(|e| e.to_string())?;
+    fn from_parts(j: AttnJson) -> AttnNet {
         let tf = j.emb_w.len() / D; // emb_w is [D x tf] row-major
         let sf = j.sw.len() / D; //    sw    is [D x sf]
-        Ok(AttnNet {
+        AttnNet {
             emb_w: j.emb_w, emb_b: j.emb_b, wq: j.wq, wk: j.wk, wv: j.wv, wo: j.wo,
             f1w: j.f1w, f1b: j.f1b, f2w: j.f2w, f2b: j.f2b,
             sw: j.sw, sb: j.sb, tw: j.tw, tb: j.tb, vw: j.vw, vb: j.vb,
             pw: j.pw, pb: j.pb, tf, sf,
-        })
+        }
+    }
+
+    pub fn from_json_str(s: &str) -> Result<Self, String> {
+        let j: AttnJson = serde_json::from_str(s).map_err(|e| e.to_string())?;
+        Ok(Self::from_parts(j))
+    }
+
+    /// The compact embed format (`gen_net_bins` writes it from the JSON): the same
+    /// AttnJson through bincode. Bit-identical to `from_json_str` of the source JSON.
+    pub fn from_bin_bytes(b: &[u8]) -> Result<Self, String> {
+        let j: AttnJson = bincode::deserialize(b).map_err(|e| e.to_string())?;
+        Ok(Self::from_parts(j))
+    }
+}
+
+// The stale-bin guard: the wasm embeds the .bin, the training pipeline writes the
+// .json — this pins them together. If a net swap lands a new JSON without running
+// `gen_net_bins`, this fails `cargo test --features bridge` instead of silently
+// shipping the OLD net inside a green build. Byte equality of the bincode encodings
+// implies bit-identical weights (bincode is a pure function of the parsed f32s).
+#[cfg(all(test, feature = "bridge"))]
+mod bin_tests {
+    use super::AttnJson;
+
+    fn check(json: &str, bin: &[u8], name: &str) {
+        let j: AttnJson = serde_json::from_str(json).expect("parse json");
+        assert_eq!(
+            bincode::serialize(&j).unwrap(),
+            bin,
+            "{name}.bin is stale — rerun: cargo run --release --features bridge --bin gen_net_bins"
+        );
+    }
+
+    #[test]
+    fn net_bins_match_their_source_jsons() {
+        check(include_str!("attn_value_net.json"), include_bytes!("attn_value_net.bin"), "attn_value_net");
+        check(include_str!("attn_expert_net.json"), include_bytes!("attn_expert_net.bin"), "attn_expert_net");
     }
 }

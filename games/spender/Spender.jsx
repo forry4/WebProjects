@@ -761,7 +761,8 @@ export default function SpenderApp() {
 	// A CoC/Duel offline game in play: the shell mounts that game's component with this
 	// record (they own their whole screen, unlike Spender whose game screen lives here).
 	const [offlinePlay, setOfflinePlay] = useState(null);
-	const [precacheState, setPrecacheState] = useState(null);   // null | {done,total} | "ok" | "err"
+	// Per-game download state: {spender|coc|duel: null | {done,total} | "ok" | "err"}
+	const [precacheState, setPrecacheState] = useState({});
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -2174,36 +2175,50 @@ export default function SpenderApp() {
 	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
 	// only ever fetched lazily during a live vs-AI game — a cold install has no engine.
 	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
-	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. Covers all
-	// three offline games: Spender + Duel (self-contained wasm, nets embedded) and CoC
-	// (wasm + its two fetched model bins — the worker's runtime fetch(model) must hit the
-	// SW cache offline). Also warms the two localStorage caches the SW can't serve: CoC's
-	// board layouts (its game screen hard-gates on them) and Duel's card catalog.
-	const startPrecache = () => {
-		const urls = [
-			"wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm",
-			"wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
-			"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin",
-			"wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm",
-			"fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"]
-			.map((p) => `${import.meta.env.BASE_URL}${p}`);
-		fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
-			.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} })
-			.catch(() => {});
-		// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
-		fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
-			.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} })
-			.catch(() => {});
+	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. PER GAME —
+	// nobody pays for engines they don't play (CoC's fetched model bins are ~4x the other
+	// two games combined; Spender + Duel embed their nets in the wasm). Each list carries
+	// the fonts too (tiny, and any single download must make that game FULLY offline).
+	// `warm` covers the localStorage caches the SW can't serve: CoC's board layouts (its
+	// game screen hard-gates on them) and Duel's card catalog. Sizes are the real gzip'd
+	// transfer, rounded up.
+	const OFFLINE_ASSETS = {
+		spender: {
+			label: "Spender", size: "~1 MB",
+			urls: ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm"],
+		},
+		coc: {
+			label: "Castles of Crimson", size: "~5 MB",
+			urls: ["wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
+				"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin"],
+			warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
+				.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
+		},
+		duel: {
+			label: "Spender Duel", size: "~1 MB",
+			urls: ["wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm"],
+			// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
+			warm: () => fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
+				.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} }),
+		},
+	};
+	const FONT_URLS = ["fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"];
+	const startPrecache = (gameKey) => {
+		const spec = OFFLINE_ASSETS[gameKey];
+		if (!spec) return;
+		const setGame = (v) => setPrecacheState((s) => ({ ...s, [gameKey]: v }));
+		const urls = [...spec.urls, ...FONT_URLS].map((p) => `${import.meta.env.BASE_URL}${p}`);
+		spec.warm?.().catch(() => {});
 		const ctrl = navigator.serviceWorker?.controller;
-		if (!ctrl) { setPrecacheState("err"); return; }
+		if (!ctrl) { setGame("err"); return; }
 		const ch = new MessageChannel();
 		ch.port1.onmessage = (e) => {
 			const d = e.data || {};
-			if (d.ok) setPrecacheState("ok");
-			else if (d.error) setPrecacheState("err");
-			else if (d.total) setPrecacheState({ done: d.done, total: d.total });
+			if (d.ok) setGame("ok");
+			else if (d.error) setGame("err");
+			else if (d.total) setGame({ done: d.done, total: d.total });
 		};
-		setPrecacheState({ done: 0, total: urls.length });
+		setGame({ done: 0, total: urls.length });
 		ctrl.postMessage({ type: "PRECACHE_OFFLINE", urls }, [ch.port2]);
 	};
 
@@ -2965,15 +2980,26 @@ export default function SpenderApp() {
 					<div className="offline-panel">
 						<h3 className="offline-h">Play with no connection</h3>
 						<p className="offline-note">
-							Download the AI engines (~15 MB) so games here work fully offline — even in airplane
-							mode. Install the site to your home screen first for the best experience.
+							Download a game's AI engine so it works fully offline — even in airplane mode.
+							Install the site to your home screen first for the best experience.
 						</p>
-						{precacheState === "ok" && <span className="offline-note ok">✓ Downloaded — this page now works offline.</span>}
-						{precacheState === "err" && <span className="offline-note err">Download unavailable here — open the live site once, then retry.</span>}
-						{precacheState && typeof precacheState === "object" &&
-							<span className="offline-note">Downloading… {precacheState.done}/{precacheState.total}</span>}
-						{(precacheState == null || precacheState === "err") &&
-							<button className="btn btn-outline btn-sm" onClick={startPrecache}>Download for offline</button>}
+						{Object.entries(OFFLINE_ASSETS).map(([key, spec]) => {
+							const st = precacheState[key];
+							return (
+								<div key={key} className="offline-save-row">
+									<div className="offline-save-info"><b>{spec.label}</b> · {spec.size}</div>
+									<div className="offline-save-btns">
+										{st === "ok" && <span className="offline-note ok">✓ Ready offline</span>}
+										{st && typeof st === "object" &&
+											<span className="offline-note">Downloading… {st.done}/{st.total}</span>}
+										{st === "err" &&
+											<span className="offline-note err">Unavailable here — open the live site once, then retry. </span>}
+										{(st == null || st === "err") &&
+											<button className="btn btn-outline btn-sm" onClick={() => startPrecache(key)}>Download</button>}
+									</div>
+								</div>
+							);
+						})}
 					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}

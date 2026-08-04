@@ -35,19 +35,21 @@ use crate::rng::Rng;
 // The deployed Hard leaf: the card-set ATTENTION value net (rollout + attention value = "attnval").
 // It beat the heuristic leaf at equal sims across the ladder (700:0.58 / 2000:0.62 / 4000:0.59, edge
 // GROWS with depth) where the heuristic saturates by ~6k — so at prod's ~60k sims it is the stronger
-// bot. Embedded (~1.9MB JSON) + parsed once per worker (thread_local). Rollout unchanged.
-static ATTN_JSON: &str = include_str!("attn_value_net.json");
+// bot. Embedded as bincode (~0.7MB vs ~2MB JSON text, same bits — the .json stays the training-side
+// source; regen via `gen_net_bins`, pinned by the `net_bins_*` tests) + parsed once per worker
+// (thread_local). Rollout unchanged.
+static ATTN_BIN: &[u8] = include_bytes!("attn_value_net.bin");
 thread_local! {
-    static ATTN_NET: AttnNet = AttnNet::from_json_str(ATTN_JSON).expect("embedded attn_value_net.json");
+    static ATTN_NET: AttnNet = AttnNet::from_bin_bytes(ATTN_BIN).expect("embedded attn_value_net.bin");
 }
 
 // The EXPERT leaf: champion-1 — the deployed v2 (Hard) further retrained to DEFEND patient development
 // (the human-exploited blind spot), via a league dev-defense pass. Beats Hard's v2 0.559/0.570/0.583
 // at 700/2k/4k sims (edge GROWS with search, so stronger still at prod's ~60k). Same arch/serving
 // path as Hard — only the weights differ; selected by `duel_search_expert`.
-static EXPERT_JSON: &str = include_str!("attn_expert_net.json");
+static EXPERT_BIN: &[u8] = include_bytes!("attn_expert_net.bin");
 thread_local! {
-    static EXPERT_NET: AttnNet = AttnNet::from_json_str(EXPERT_JSON).expect("embedded attn_expert_net.json");
+    static EXPERT_NET: AttnNet = AttnNet::from_bin_bytes(EXPERT_BIN).expect("embedded attn_expert_net.bin");
 }
 
 /// The tier this serves. `duel_search` takes its budget from the caller instead of the

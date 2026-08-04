@@ -128,6 +128,11 @@ web --release --no-typescript` → `cp pkg/spender_core.{js,_bg.wasm} ../../weba
 those two files (CI does NOT rebuild Rust; the wasm is a committed artifact) → push. **Same wasm filename
 ⇒ browsers may serve the cached old wasm** (~10 min Pages TTL / hard-refresh). The crate is in **neither**
 CI path filter, so committing it never deploys anything on its own.
+The four embedded nets (`n_model`/`pv_model`/`pv_model_21`/`attn_model`) ship as the **bincode of the
+JSON's parsed f32s** (`include_bytes!` of `src/*.bin` — ~3x smaller wasm, bit-identical weights; see
+`src/models.rs`); the `.json` stays committed as the training-side source. **A net swap = replace the
+JSON + `cargo run --release --features bridge --bin gen_net_bins` + rebuild** — the models.rs stale-bin
+test fails until the bins are regenerated, so a stale bin can't ship inside a green build.
 
 ---
 
