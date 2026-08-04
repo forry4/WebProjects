@@ -705,6 +705,39 @@ Three cautions on that sweep, all learned from it:
   where the pick actually changes it reads 0.5242 (still n.s. at n=310). The per-card adds
   and drops are individually significant; the re-ordering among already-good cards is not.
 
+**TERMINAL QUANTITIES ARE MEASURED TOO** (`tools/bm_quantity_sweep.py`). How many copies,
+and when the extra one is allowed, were the article's rules of thumb. Most survived:
+
+- **cap 2 stands.** Capping at 1, 3 or 4 all measured BELOW it on random boards
+  (0.458 / 0.446 / 0.446).
+- **the deck>=16 gate stands, and its challenger is a cautionary tale.** deck>=12 read
+  0.550 (random, n=120) and 0.545 (colony, n=100) - two independent samples agreeing - and
+  then **collapsed to 0.5050 at n=400**. Textbook regression to the mean. Confirm a
+  promising arm at higher n BEFORE shipping it.
+- **longer games do want slightly more, but not enough to act on:** cap 3 improves from
+  0.446 on random boards to 0.508 on COLONY boards. Still n.s. If revisited, that knob
+  should key on the Colony pile rather than being global.
+
+`TERMINAL_CAPS` holds the per-card exceptions, each measured at n=120 on a board where that
+card is the only terminal: **Sea Witch 3** (cap3 0.5917 sig; cap1 0.2958 sig), Council Room
+1 (2nd copy 0.4042 sig), Magnate 1 (0.4208 n.s., point estimate agrees), and **Witch's Hut
+back to 2** - it was hand-listed as single-copy and allowing a second measures **0.6000**,
+so that exception was simply wrong. Margrave measured 0.3833 for a third, which the default
+cap already blocks.
+
+**THE MIRROR CAVEAT (user-raised, and it checks out).** A cap sweep pits cap-N against
+cap-M with BOTH seats buying the same card, so a junking attack is measured in a mutual
+curse war - both decks clogged, both racing the same 10-card Curse pile. Sea Witch's third
+copy is worth **+0.100 in that mirror but only +0.028 against a strong non-junking
+opponent** (and vs pure money the comparison saturates entirely at ~99% either way). It is
+never harmful, so it ships, but it is NOT a general "buy three terminals" result. **Any
+future quantity or attack measurement owes the same asymmetric check** - this is the same
+confound that made Corsair look like a 0.80 card while its mirror could not terminate.
+
+Combined gate for the cap change, restricted to boards whose chosen terminal is affected:
+0.5354 (n.s., n=240) - directionally positive, consistent with the per-card results, and
+diluted for the usual reason (the cap only binds once a second or third copy is affordable).
+
 **THE STALL BREAKER (`bot_endgame.STALL_TURNS`) - a game that cannot end is worse than one
 someone loses.** Two bots both refusing to end a game they would lose is a deadlock with no
 exit, and it is reachable: on a Corsair board each side trashes the other's first Silver or

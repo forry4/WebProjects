@@ -261,3 +261,55 @@ def test_the_colony_policy_cannot_touch_a_non_colony_game():
         assert bot._colony_green(g2, A) is None
         assert bot.choose(g2, A, random.Random(1), BMP) \
             == bot.choose(g2, A, random.Random(1), "bmplus:v1")
+
+
+# ── terminal QUANTITY: how many copies, and when ─────────────────────────────
+#
+# Both knobs were the article's rules of thumb; both are now measured
+# (tools/bm_quantity_sweep.py). Most defaults survived, which is itself worth
+# pinning — and one hand-set exception was simply wrong.
+
+def test_the_default_cap_is_two_and_the_extra_copy_waits_for_the_deck():
+    """cap 2 measured better than 1, 3 and 4 on random boards (0.458 / 0.446 /
+    0.446 against it), and the deck>=16 gate survived a confirmation run that
+    killed its challenger (deck>=12 read 0.550 at n=120 and 0.5050 at n=400)."""
+    assert bot._MAX_TERMINALS == 2
+    assert bot._SECOND_TERMINAL_DECK == 16
+
+    g = in_buy(fresh(kingdom=SMITHY_BOARD), 4)
+    g["seats"][A]["discard"] += ["Smithy"]           # one already, small deck
+    assert buys(g)["card"] != "Smithy"
+    g = in_buy(fresh(seed=6, kingdom=SMITHY_BOARD), 4)
+    g["seats"][A]["discard"] += ["Smithy"] + ["Silver"] * 6
+    assert buys(g)["card"] == "Smithy"               # deck big enough now
+
+
+def test_sea_witch_is_allowed_a_third_copy():
+    """The one card measured to want more than two (cap 3 = 0.5917 vs cap 2,
+    and cap 1 = 0.2958 — it wants several).
+
+    KNOWN LIMIT, worth stating: the gain is concentrated in the MIRROR
+    (+0.100 when the opponent also buys Sea Witch, +0.028 against a strong
+    non-junking opponent). It is never harmful, so it ships, but it is not a
+    general "buy three terminals" result.
+    """
+    assert bot.TERMINAL_CAPS["Sea Witch"] == 3
+    board = ["Sea Witch", "Moneylender", "Chapel", "Gardens", "Workshop",
+             "Harbinger", "Vassal", "Cellar", "Mine"]
+    g = in_buy(fresh(kingdom=board + ["Village"], exps=("base", "seaside")), 5)
+    g["seats"][A]["discard"] += ["Sea Witch", "Sea Witch"] + ["Silver"] * 8
+    assert buys(g)["card"] == "Sea Witch"
+
+
+def test_witchs_hut_is_no_longer_capped_at_one():
+    """It was hand-listed with the 5-card drawers as too collision-prone to
+    double up. Measured, allowing a second copy is worth 0.6000 — the
+    hand-written exception was simply wrong."""
+    assert bot.TERMINAL_CAPS.get("Witch's Hut", bot._MAX_TERMINALS) == 2
+
+
+def test_the_measured_single_copy_cards_stay_single():
+    """Council Room (2nd copy = 0.4042) and Magnate (0.4208) both measured
+    worse with a second, so these two keep the cap the article gave them."""
+    assert bot.TERMINAL_CAPS["Council Room"] == 1
+    assert bot.TERMINAL_CAPS["Magnate"] == 1

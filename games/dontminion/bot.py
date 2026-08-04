@@ -187,11 +187,39 @@ def choose_big_money(game, pid, rng=None):
 # whole reason plain Big Money works: "<= 1 terminal per 5-6 cards, ~2 drawers
 # max, Envoy exactly 1".
 
-_MAX_TERMINALS = 2          # the published cap for a BM deck
-_SECOND_TERMINAL_DECK = 16  # "add the 2nd Smithy at ~16-18 cards"
-# Cards good enough to buy a second copy of; the article singles out the
-# 5-card drawers as the ones that collide too hard to double up.
-_SINGLE_COPY = {"Council Room", "Magnate", "Witch's Hut"}
+# HOW MANY copies of its terminal the tier buys, and WHEN the extra one is
+# allowed. Both knobs were the article's rules of thumb; both are now measured
+# (tools/bm_quantity_sweep.py), and most of the defaults survived:
+#
+#   cap 2 is right ON AVERAGE — capping at 1, 3 or 4 all measured BELOW it on
+#   random boards (0.458 / 0.446 / 0.446), so the global default stands.
+#
+#   the deck>=16 gate for the extra copy also stands. 12 looked better at
+#   n=120 (0.550 random, 0.545 colony) and COLLAPSED to 0.5050 at n=400 — a
+#   textbook regression to the mean, and the reason the promising arm gets a
+#   confirmation run before it gets shipped.
+#
+#   longer games want slightly more, as expected, but not enough to act on:
+#   cap 3 goes from 0.446 on random boards to 0.508 on COLONY boards, still
+#   n.s. If that is ever revisited, the knob wants to key on the Colony pile.
+_MAX_TERMINALS = 2
+_SECOND_TERMINAL_DECK = 16
+
+# Per-card exceptions to the cap, each one MEASURED against the default of 2
+# on a board where that card is the only terminal (n=120 CRN games):
+#
+#   Sea Witch    cap 3 = 0.5917 sig  (and cap 1 = 0.2958 sig — it wants many)
+#   Council Room 2nd copy = 0.4042 sig -> stays at 1
+#   Magnate      2nd copy = 0.4208 n.s. -> stays at 1, point estimate agrees
+#   Witch's Hut  2nd copy = 0.6000 sig -> was WRONGLY capped at 1 by hand
+#   Margrave     cap 3 = 0.3833 sig  -> the default 2 already blocks it
+#
+# Sea Witch being the one card that wants a THIRD is not obviously a fluke: it
+# is a Duration, so it sits in play across the shuffle and de-collides with
+# itself (the reshuffle article's R8), and each copy races the 10-card Curse
+# pile faster. Wharf is also a Duration and did NOT want a third (0.4708), so
+# treat that as a plausible mechanism rather than a rule.
+TERMINAL_CAPS = {"Sea Witch": 3, "Council Room": 1, "Magnate": 1}
 
 
 # Set by the terminal-sweep harness to force ONE card (or "" for none) as the
@@ -235,7 +263,7 @@ def _wants_terminal(game, pid):
     have = _terminals_owned(game, pid, card)
     if have == 0:
         return card
-    cap = 1 if card in _SINGLE_COPY else _MAX_TERMINALS
+    cap = TERMINAL_CAPS.get(card, _MAX_TERMINALS)
     if have >= cap:
         return None
     # the second copy waits for the deck to be big enough to absorb it
