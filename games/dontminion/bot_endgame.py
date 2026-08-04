@@ -59,6 +59,17 @@ def winning_on_tiebreak(game, pid):
     return m > 0 or (m == 0 and _turn_order_edge(game, pid))
 
 
+# Turns after which a game is treated as deadlocked rather than close. A real
+# Big Money game finishes around turn 17-20, so this is far outside normal play
+# and cannot fire in a game that is merely slow.
+STALL_TURNS = 60
+
+
+def _stalled(game):
+    """Has this game stopped being a game? See `override` rule 2."""
+    return game["turn_number"] >= STALL_TURNS
+
+
 def low_piles(game):
     """Supply piles at or below the watch threshold, empties included."""
     return sorted(p for p, n in game["supply"].items() if n <= LAST_PILE_WATCH)
@@ -175,12 +186,36 @@ def override(game, pid, planned):
 
     # 2. Never hand the win over: a buy that ends the game while we are behind
     #    is the worst move on the board.
+    #
+    #    UNLESS the game has stopped going anywhere. Two bots both refusing to
+    #    end a game they would lose is a deadlock with no exit: measured on a
+    #    Corsair board (each side trashing the other's first Silver or Gold
+    #    every turn, so neither can ever reach $8 again) the pair ran 4,448
+    #    turns and never finished. A game that cannot end is worse for everyone
+    #    than a game someone loses, so past the stall horizon this rule stops
+    #    applying and somebody takes the ending.
     if planned is not None and ends_the_game(game, planned) \
-            and not _wins_after_buying(game, pid, planned):
+            and not _wins_after_buying(game, pid, planned) \
+            and not _stalled(game):
         alt = _best_non_ending(game, pid, affordable)
         if alt is not None:
             return alt
         return None                         # buying nothing beats losing now
+
+    # 2b. Actively break a stall. Past the horizon, END IT — first with a buy
+    #     that finishes the game outright, otherwise by PILEDRIVING: buy down
+    #     the shallowest pile we can afford until it empties and takes the
+    #     game with it. Without the second half the breaker cannot fire at all
+    #     in the position that motivated it, where the only affordable piles
+    #     were Curse (10 left) and Copper (46) and no single buy ended
+    #     anything.
+    if _stalled(game):
+        for c in affordable:
+            if ends_the_game(game, c):
+                return c
+        drain = _shallowest(game, affordable)
+        if drain is not None:
+            return drain
 
     # 3. The Penultimate Province Rule.
     if planned is not None and ppr_blocks(game, pid, planned):
@@ -214,6 +249,23 @@ def _wins_after_buying(game, pid, card):
         mine = _vp(game, pid) + (len(engine.owned_cards(game, pid)) + 1) // 10
     theirs = max((_vp(game, o) for o in engine.opponents(game, pid)), default=0)
     return mine > theirs or (mine == theirs and _turn_order_edge(game, pid))
+
+
+def _shallowest(game, affordable):
+    """The affordable pile closest to empty — what a stalled game buys to walk
+    the board toward a third empty pile and an ending.
+
+    Copper is excluded: at 46 cards it is not a pile anyone drains, and it is
+    always affordable, so it would win this comparison forever on cost alone.
+    """
+    best, fewest = None, float("inf")
+    for c in affordable:
+        n = game["supply"].get(c, 0)
+        if c == "Copper" or n <= 0:
+            continue
+        if n < fewest:
+            best, fewest = c, n
+    return best
 
 
 def _best_non_ending(game, pid, affordable):

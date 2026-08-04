@@ -194,9 +194,23 @@ _SECOND_TERMINAL_DECK = 16  # "add the 2nd Smithy at ~16-18 cards"
 _SINGLE_COPY = {"Council Room", "Magnate", "Witch's Hut"}
 
 
+# Set by the terminal-sweep harness to force ONE card (or "" for none) as the
+# tier's terminal, so a candidate can be measured against buying no terminal at
+# all. Read at call time; never set outside tools/tests.
+FORCE_TERMINAL = None
+
+
+# Swapped by the sweep/gate harness to score an alternative ranking table
+# against the shipped one. None = the real table.
+TERMINAL_TABLE = None
+
+
 def _bm_terminal(game, pid):
     """The kingdom's best Big Money terminal, or None on a board with none."""
-    return best_bm_terminal(game["kingdom"], game["supply"])
+    if FORCE_TERMINAL is not None:
+        return FORCE_TERMINAL or None
+    return best_bm_terminal(game["kingdom"], game["supply"],
+                            table=TERMINAL_TABLE)
 
 
 def _terminals_owned(game, pid, card):
@@ -207,6 +221,12 @@ def _wants_terminal(game, pid):
     """Should we buy (another copy of) our terminal at these coins?"""
     card = _bm_terminal(game, pid)
     if card is None or engine.cost(game, card) > game["coins"]:
+        return None
+    # The cost VECTOR's second dimension (Alchemy). `cost()` returns only the
+    # COIN component, so a Golem reads as $4 and looks affordable at $4 — the
+    # bot then names a card it cannot pay for. This tier buys no Potion, so any
+    # Potion cost is simply out of reach.
+    if engine.potion_cost(game, card) > game.get("potions", 0):
         return None
     if game["supply"].get(card, 0) <= 0:
         return None
@@ -332,6 +352,21 @@ def _bm_plus_buy(game, pid, policy=None):
     return want
 
 
+def _buy_or_fall_back(game, pid, want, moves):
+    """Turn a wanted pile into a move, falling back to the money ladder.
+
+    A plan can name a card that is not actually buyable — a Potion cost the
+    tier cannot pay, a buy_gate (Grand Market with Coppers in play), a pile
+    that emptied. Ending the turn on that is the worst outcome available: the
+    coins are simply thrown away, silently, every turn the condition holds.
+    Fall through to the ladder, and only then end the phase.
+    """
+    for candidate in (want, _want(game, pid)):
+        if candidate is not None and {"type": "buy", "card": candidate} in moves:
+            return {"type": "buy", "card": candidate}
+    return {"type": "end_phase"}
+
+
 def choose_bm_plus(game, pid, rng=None, policy=None):
     """`policy` overrides the Colony-game buy policy — the arena seam that lets
     colony variants play each other under CRN."""
@@ -360,9 +395,7 @@ def choose_bm_plus(game, pid, rng=None, policy=None):
         return r.choice(treasures)
 
     want = bot_endgame.override(game, pid, _bm_plus_buy(game, pid, policy))
-    if want is not None and {"type": "buy", "card": want} in moves:
-        return {"type": "buy", "card": want}
-    return {"type": "end_phase"}
+    return _buy_or_fall_back(game, pid, want, moves)
 
 
 # ── the Strategist ───────────────────────────────────────────────────────────
@@ -515,9 +548,7 @@ def choose_strategist(game, pid, rng=None, force=None):
         return r.choice(treasures)
 
     want = bot_endgame.override(game, pid, _strategist_buy(game, pid, force))
-    if want is not None and {"type": "buy", "card": want} in moves:
-        return {"type": "buy", "card": want}
-    return {"type": "end_phase"}
+    return _buy_or_fall_back(game, pid, want, moves)
 
 
 # ── the Champion ─────────────────────────────────────────────────────────────

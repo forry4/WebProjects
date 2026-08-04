@@ -33,9 +33,16 @@ def buys(g, seed=1):
 # ── it reads a terminal off the board ────────────────────────────────────────
 
 def test_it_buys_the_kingdoms_best_terminal():
-    """The published Terminal-Draw-BM ranking, not the first Action it sees."""
-    g = in_buy(fresh(kingdom=["Wharf", "Smithy"] + K[:8],
-                     exps=("base", "intrigue", "seaside")), 5)
+    """The measured ranking, not the first Action it sees.
+
+    The board is deliberately a WIDE gap (Wharf 87 vs Smithy 65) and holds no
+    third contender: the ranks come from a 25-pair sweep, so neighbours a few
+    points apart are inside the noise band and a test that pinned one of those
+    orderings would be pinning noise.
+    """
+    board = ["Wharf", "Smithy", "Village", "Moat", "Throne Room", "Gardens",
+             "Chapel", "Cellar", "Harbinger", "Merchant"]
+    g = in_buy(fresh(kingdom=board, exps=("base", "seaside")), 5)
     assert buys(g) == {"type": "buy", "card": "Wharf"}
 
 

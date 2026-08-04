@@ -177,3 +177,54 @@ def test_the_greening_clock_opens_once_the_provinces_run_short():
     only thing left to buy."""
     g = board(provinces=4)
     assert E.should_green(g, A)
+
+
+# ── the stall breaker ────────────────────────────────────────────────────────
+
+def test_a_deadlocked_game_stops_refusing_to_end():
+    """Two bots both refusing to end a game they would lose is a deadlock with
+    no exit. Found for real: on a Corsair board each side trashes the other's
+    first Silver or Gold every turn, so neither ever reaches $8 again — the
+    pair ran 4,448 turns and never finished. Past the horizon the refusal
+    stops applying and somebody takes the ending."""
+    g = board(provinces=1, coins=8, lead=-20)
+    assert E.override(g, A, "Province") != "Province"    # normal play: refuse
+    g["turn_number"] = E.STALL_TURNS
+    assert E._stalled(g)
+    assert E.override(g, A, "Province") == "Province"    # stalled: end it
+
+
+def test_a_stalled_game_piledrives_when_no_single_buy_ends_it():
+    """The position that motivated the breaker had NO game-ending buy on
+    offer: Estates and Duchies gone, and the only affordable piles were Curse
+    (10 left) and Copper (46). Ending it means buying the shallowest pile down
+    until a third one empties."""
+    g = board(provinces=6, coins=2, lead=0)
+    g["supply"]["Village"] = 0
+    g["supply"]["Smithy"] = 0
+    g["supply"]["Estate"] = 0
+    g["supply"]["Moat"] = 5          # affordable at $2, and the shallowest
+    g["turn_number"] = E.STALL_TURNS
+    got = E.override(g, A, None)
+    assert got == "Moat", f"expected the shallowest affordable pile, got {got}"
+
+
+def test_the_stall_breaker_never_drains_copper():
+    """Copper is always affordable and 46 deep, so on cost alone it would win
+    the "shallowest" comparison forever and drain nothing."""
+    g = board(provinces=6, coins=2, lead=0)
+    g["turn_number"] = E.STALL_TURNS
+    for pile in list(g["supply"]):
+        if pile not in ("Copper", "Curse"):
+            g["supply"][pile] = 0
+    assert E._shallowest(g, ["Copper", "Curse"]) == "Curse"
+
+
+def test_the_horizon_cannot_fire_in_a_normal_length_game():
+    """A Big Money game finishes around turn 17-20, so the breaker must sit far
+    outside normal play — it changes losing behaviour, and a false positive
+    would make the bot throw games away."""
+    assert E.STALL_TURNS >= 50
+    g = board(provinces=6, coins=8, lead=-5)
+    g["turn_number"] = 25
+    assert not E._stalled(g)

@@ -156,35 +156,63 @@ DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
 BM_TREASURES = {"Fool's Gold", "Bank", "Hoard", "Farm", "Collection",
                 "Astrolabe", "Cauldron", "Anvil", "Tiara"}
 
-# How good a card is as Big Money's ONE terminal, higher = better. Ordered from
-# the Terminal-Draw-BM article (Wharf best; cursers score for the Curses, not
-# the pace; Smithy is the benchmark at 50). Cards absent from this table are
-# not BM terminals at all — `bm_terminal_rank` returns 0 for them.
+# How good a card is as Big Money's ONE terminal, higher = better. Cards absent
+# from this table are not BM terminals at all and `bm_terminal_rank` returns 0
+# for them — which makes them INVISIBLE to the tier, so an omission is silent.
+#
+# MEASURED, not judged (tools/bm_terminal_sweep.py). Each card was played as
+# bmplus's forced terminal against bmplus forced to buy NO terminal, on a board
+# of inert filler so the candidate is the only Action worth having — i.e. the
+# article's own question, "is this better than just buying money?". 25 CRN
+# pairs each; the no-terminal control reads exactly 0.5000 on every board, so
+# the values share a baseline. The rank IS the measured win rate x100, and a
+# card measuring at or below 0.5 is simply absent.
+#
+# The hand-written table this replaced had real errors, in both directions:
+#   Steward   rank 30 -> measured 0.36  (bought over a Silver, and LOSING)
+#   Footpad   rank 62 -> measured 0.28  (the worst card in the sweep)
+#   Moat      rank 20 -> measured 0.41
+#   Vault     rank 58 -> measured 0.82  (badly underrated)
+#   Patrol    rank 40 -> measured 0.77
+#   Rabble    rank 78 -> measured 0.58  (overrated)
+# and seven cards were missing entirely, including Masquerade — which the
+# source article names as a Big Money opener.
+#
+# CAVEAT ON THE METHOD: this scores each card in ISOLATION against a common
+# baseline, while the rank is used to choose BETWEEN cards on a board holding
+# several. A shared baseline is a good proxy for that ordering, not a proof of
+# it; re-run head-to-head if a specific pairing ever looks wrong.
 BM_TERMINALS = {
-    "Wharf": 100,               # "best non-attack card": split draw + a Buy
-    "Sea Witch": 95, "Witch": 92,           # cursing-BM wins on the split
-    "Margrave": 88, "Torturer": 86,
-    "Witch's Hut": 82, "Rabble": 78,
-    "Jack of All Trades": 76,   # the double-Jack deck
-    "Council Room": 70, "Library": 68,
-    "Magnate": 60, "Vault": 58,
-    "Smithy": 50,               # the benchmark
-    "Courtyard": 46, "Militia": 44,
-    "Patrol": 40, "Nobles": 36,
-    "Steward": 30, "Moat": 20,
-    # Cornucopia & Guilds. Ranked against the same article's logic: the cursers
-    # score for the Curses (Young Witch is a Witch that can be blocked;
-    # Soothsayer trades a card to them for the Gold), then the terminal draw.
-    "Young Witch": 90, "Soothsayer": 84, "Footpad": 62, "Jester": 58,
-    "Journeyman": 54, "Carnival": 45,
-    # Alchemy contributes NO Big-Money terminal, and that is a measurement,
-    # not an oversight. Familiar is a cursing cantrip (not terminal at all) and
-    # Scrying Pool needs a deck full of Actions, which a money deck by
-    # definition lacks. Apprentice was ranked here at 34 and the arena read
-    # 0.1875 vs plain bigmoney on the Alchemy pool: a money deck that buys a
-    # mandatory trasher feeds it Treasures until it cannot buy anything.
+    "Sea Witch": 94,
+    "Witch": 90,
+    "Wharf": 87,
+    "Vault": 82,
+    "Charlatan": 81,
+    "Young Witch": 80,
+    "Corsair": 80,
+    "Soothsayer": 79,
+    "Torturer": 78,
+    "Patrol": 77,
+    "Witch's Hut": 76,
+    "Blockade": 72,
+    "Margrave": 71,
+    "Clerk": 71,
+    "Cutpurse": 70,
+    "Jester": 68,
+    "Smithy": 65,
+    "Militia": 65,
+    "Masquerade": 65,
+    "Jack of All Trades": 65,
+    "Bandit": 64,
+    "Council Room": 63,
+    "Carnival": 63,
+    "Rabble": 58,
+    "Magnate": 58,
+    "Berserker": 57,
+    "Library": 55,
+    "Journeyman": 55,
+    "Courtyard": 55,
 }
-
 # Every kingdom card that has been reviewed against the tables above. A set
 # lands => its 25-30 names land here => the test goes green again.
 REVIEWED = frozenset(
@@ -295,11 +323,13 @@ def pile_traits(game, pile):
     return traits(engine.pile_face(game, pile))
 
 
-def best_bm_terminal(kingdom, supply=None):
+def best_bm_terminal(kingdom, supply=None, table=None):
     """The kingdom's best Big-Money terminal, or None if it has none.
 
-    `supply` (optional) skips piles that are already empty.
+    `supply` (optional) skips piles that are already empty. `table` overrides
+    the ranking — the harness seam for scoring one ranking against another.
     """
+    ranks = BM_TERMINALS if table is None else table
     best, score = None, 0
     for n in kingdom:
         if n not in CARDS:
@@ -307,7 +337,7 @@ def best_bm_terminal(kingdom, supply=None):
             # nobody's reliable terminal — and the deck-count rules below
             # ("the second Smithy at ~16 cards") can't count copies of a pile
             continue
-        r = traits(n)["bm_terminal_rank"]
+        r = ranks.get(n, 0)
         if r > score and (supply is None or supply.get(n, 0) > 0):
             best, score = n, r
     return best

@@ -665,6 +665,46 @@ and "second copy at ~16 cards"), the Colony/Platinum rungs, and `bot_endgame` on
 also drops Big Money's "really early: Gold at $8" quirk once the game is ending — plain
 `bigmoney` keeps it, being faithful to the published ladder.
 
+**`BM_TERMINALS` IS MEASURED, NOT JUDGED** (`tools/bm_terminal_sweep.py`). Each candidate
+plays as bmplus's forced terminal against bmplus forced to buy NO terminal, on a board of
+inert filler, 25 CRN pairs - the article's own question, "is this better than just buying
+money?". The no-terminal control reads exactly 0.5000 on every board, so the values share a
+baseline, and **the rank IS the measured win rate x100**; a card at or below 0.5 is absent.
+The hand-written table it replaced was wrong in both directions - Steward (rank 30) measured
+**0.36** and Footpad (62) measured **0.28**, i.e. both were bought over a Silver and LOSING,
+while Vault (58) measured 0.82 - and it was missing seven cards entirely, including
+**Masquerade**, which the source article names as a Big Money opener.
+
+Three cautions on that sweep, all learned from it:
+- **It scores each card in ISOLATION against a common baseline**, while the rank is used to
+  choose BETWEEN cards on a board holding several. Good proxy, not a proof; re-run
+  head-to-head if a pairing looks wrong. Ranks within ~10 points are inside the noise band
+  (n=50 each), so don't pin an ordering that close in a test.
+- **It OVERRATES attacks**, because the opponent it beats up has no terminal to defend with.
+  Corsair measured 0.80 that way and its MIRROR is degenerate (below).
+- Aggregate gates dilute it to nothing: new table vs old reads 0.5050 (n.s.) across random
+  boards, because **61% of boards pick the same card either way**; restricted to the 39%
+  where the pick actually changes it reads 0.5242 (still n.s. at n=310). The per-card adds
+  and drops are individually significant; the re-ordering among already-good cards is not.
+
+**THE STALL BREAKER (`bot_endgame.STALL_TURNS`) - a game that cannot end is worse than one
+someone loses.** Two bots both refusing to end a game they would lose is a deadlock with no
+exit, and it is reachable: on a Corsair board each side trashes the other's first Silver or
+Gold every turn, so neither ever reaches $8 again - measured, the pair ran **4,448 turns**
+and never finished, with Estates and Duchies gone and only Curse (10) and Copper (46)
+affordable. Past turn 60 the refusal stops applying, and because no single buy ended anything
+in that position the breaker also **PILEDRIVES**: it buys down the shallowest affordable pile
+(never Copper - 46 deep and always affordable, so it would win that comparison forever) until
+a third pile empties. Seed 43 now ends on turn 35. Termination soak: 150 boards across all
+seven expansions, longest game 38 turns, zero failures.
+
+**Alchemy contributes no BM terminals, and that is correct, not an omission** - every
+Alchemy card costs a Potion, and this tier buys none. `_wants_terminal` checks
+`engine.potion_cost` explicitly: `cost()` returns only the COIN component, so a Golem reads
+as $4 and looked affordable at $4. Naming a card it could not pay for made the bot END ITS
+TURN buying nothing; `_buy_or_fall_back` now drops to the money ladder whenever the wanted
+pile is not actually legal (a Potion cost, a buy_gate, an emptied pile).
+
 **COLONY GAMES ARE A DIFFERENT ECONOMY, and the clock is what matters.** The density a deck
 needs rises 1.6 -> 2.2, and the pile the game ends on is the COLONY pile — but the plain ladder
 keys every green threshold to the Province count, so 2 Colonies left with 8 Provinces untouched
