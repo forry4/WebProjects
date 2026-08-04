@@ -26,6 +26,7 @@ from core.ratelimit import SlidingWindowLimiter
 from core.build_info import build_info
 from core import rooms as _rooms
 from games.spender import engine
+from games.spender import persist               # at-rest compaction for the state_json blob
 from games.spender.ai.serving import legacy_variants as _legacy
 
 # Spender's HTTP + WebSocket routes live on this router. The composition root
@@ -179,6 +180,19 @@ def _persist_row(room_id, status, ids, names, host, state_json, now, created_at)
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here: a
+    compacted blob reaching a caller that skipped `expand_state` would hand it bare id
+    STRINGS where it expects card objects. Rows written before compaction carry no
+    marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     """Snapshot the room on the calling thread (fast, no I/O) then persist OFF the
     event loop via the single-thread write executor (fire-and-forget)."""
@@ -202,7 +216,7 @@ def save_game(room_id: str) -> None:
     ids = [seat(pids, i) for i in range(4)]
     nms = [seat(names, i) for i in range(4)]
     _DB_WRITE_EXEC.submit(_persist_row, room_id, room.get("status", "open"),
-                          ids, nms, room.get("host"), _rooms.encode_state(state), now, now)
+                          ids, nms, room.get("host"), _encode_state(state), now, now)
 
 
 def load_game_to_memory(room_id: str) -> bool:
@@ -215,7 +229,7 @@ def load_game_to_memory(room_id: str) -> bool:
     if not row or not row["state_json"]:
         return False
     try:
-        state = _rooms.decode_state(row["state_json"])
+        state = _decode_state(row["state_json"])
     except Exception:
         return False
     game = state.get("game")
@@ -254,7 +268,7 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         try:
@@ -288,7 +302,7 @@ def list_user_games(user_id: str) -> list[dict]:
     result = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -332,7 +346,7 @@ def list_active_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -368,7 +382,7 @@ def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             continue
         g = state.get("game") or {}
@@ -3051,7 +3065,7 @@ async def get_game_full(game_id: str, token: str | None = Depends(bearer_token))
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = _rooms.decode_state(row["state_json"])
+            state = _decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):
@@ -3143,7 +3157,7 @@ async def get_game_review(game_id: str, token: str | None = Depends(bearer_token
         if not row or not row["state_json"]:
             return {"ok": False, "message": "game not found"}
         try:
-            state = _rooms.decode_state(row["state_json"])
+            state = _decode_state(row["state_json"])
         except Exception:
             return {"ok": False, "message": "corrupt game state"}
         if not state.get("game"):

@@ -36,6 +36,17 @@ pending_discard_pid == pid & type not in (discard, undo_discard) → "must disca
 
 - Rooms/WS/persistence/AI dispatch + the original MCTS bot live here; rules are `engine.py`, card data
   is `cards.py`, and `ai/` holds all AI data + the AZ/heuristic stacks.
+- **At-rest compaction (`persist.py`)** — `state_json` is compacted going into the DB and expanded
+  coming out; **`_encode_state`/`_decode_state` in `main.py` are the only codec sites and every read
+  must funnel through them** (7 read paths do). Cards and nobles are stored as bare ids and rebuilt
+  from `cards.card_catalog()` / `ALL_NOBLES`, which the move log and `setup` snapshot always did and
+  the live `board`/`decks`/`nobles`/`purchased`/`reserved` never did. **-65% stored** (1,858 → 662),
+  raw 11,219 → 4,355. Two things keep it honest: a card is replaced by its id **only when it
+  round-trips exactly**, because `_apply_reserve` stamps `from_deck` on a blind deck reserve and a
+  naive encode would drop it; and the card locations are enumerated by hand, because `moves` and
+  `setup` already hold bare id STRINGS and a generic walk would "decode" those into card objects and
+  corrupt the log. `pre_discard_snapshot` is a whole second copy of the game and is compacted too.
+  `ai/serving/replay.py` calls `expand_state` so a dumped row still loads offline.
 - **Retired AI variants (Z, H) live in `ai/serving/legacy_variants.py`** — retired means no lobby
   offers them, NOT dead: `ai_variant` is persisted, so an old saved game must still get a real move on
   its next AI turn. That is also why they are in `ai/serving/` and not `ai/offline/` (which the server

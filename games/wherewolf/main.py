@@ -225,6 +225,12 @@ def load_game_to_memory(room_id: str) -> bool:
         "_events": {},
     }
     g = room.get("game")
+    # Games saved before the engine stopped persisting it still carry `rng_state` —
+    # 625 words of dead Mersenne noise that nothing reads (see engine._save_rng). Drop
+    # it here so an existing row shrinks the next time it saves instead of carrying it
+    # for the rest of its retention window.
+    if isinstance(g, dict):
+        g.pop("rng_state", None)
     # Restart recovery: the night conductor is in-memory, so a game reloaded
     # mid-night is fast-forwarded straight into a fresh voting window (swaps/peeks
     # already applied are preserved). A DAY game with a passed deadline resolves on

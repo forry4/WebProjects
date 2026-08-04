@@ -313,6 +313,12 @@ def load_game(path: str) -> tuple[dict, dict]:
     raw persisted state_json, or a bare game dict. meta carries players/ai_variant if present."""
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    # A row dumped straight out of `state_json` is COMPACTED (cards stored as bare ids);
+    # expand it back to full card objects. A dump that predates compaction, a /full dump,
+    # or a bare game dict carries no marker and passes through untouched.
+    if isinstance(data, dict):
+        from games.spender import persist
+        data = persist.expand_state(data)
     game = data.get("game", data) if isinstance(data, dict) else None
     if not isinstance(game, dict) or "order" not in game:
         raise ReplayError(f"{path}: no game dict found (expected a /full dump, state_json, or game dict)")

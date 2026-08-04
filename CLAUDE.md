@@ -71,6 +71,7 @@ core/                  # SHARED BACKEND PLATFORM (imported by every feature; imp
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
                        #   engine.py = the rules (single source of truth); cards.py = static card data
+                       #   persist.py = at-rest compaction of the state_json blob (save/load only)
   castles_of_crimson/  # CoC — engine.py + ai.py + main.py (coc_app @ /coc) + CastlesOfCrimson.jsx
                        #   persist.py = at-rest compaction of the state_json blob (save/load only)
   wherewolf/           # Where Wolf? — engine.py + main.py (werewolf_app @ /werewolf) + WhereWolf.jsx
@@ -193,7 +194,10 @@ family. Same shape in all four games, differing only in table name and columns.
   Duel `pending_pid`/`pending_kind`/`pending`; WW `night_step`). A stray `room_update` can't clear an
   unmet requirement.
 - **The game dict is JSON-safe** (no sets anywhere; RNG persisted as lists in `rng_state`) → reconnect-
-  and save/load-safe.
+  and save/load-safe. **Persist the RNG only if something actually draws later** — WW spends all of
+  its randomness in the deal, so its `rng_state` was 625 words nothing read and **89.5% of the row**
+  (incompressible, so it survived zlib untouched while everything around it shrank ~8x). It is now
+  not persisted, guarded by a test that plays a full game with the stdlib RNG booby-trapped.
 - **An undo snapshot must store a POSITION in the move log, never a copy of it.** `save_game` persists
   the snapshot with the game, so a copied log is written twice on every save and the duplication grows
   all game — it was measured at half the stored blob in CoC and 487KB→150KB in Dontminion. All three
