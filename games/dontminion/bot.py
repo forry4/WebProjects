@@ -65,6 +65,11 @@ def choose(game, pid, rng=None, difficulty=None):
     if isinstance(difficulty, str) and difficulty.startswith(STRATEGIST + ":"):
         return choose_strategist(game, pid, rng,
                                  force=difficulty.split(":", 1)[1])
+    # "bmplus:<policy>" forces a Colony-game buy policy — the same seam, used
+    # to measure the colony variants against each other.
+    if isinstance(difficulty, str) and difficulty.startswith(BM_PLUS + ":"):
+        return choose_bm_plus(game, pid, rng,
+                              policy=difficulty.split(":", 1)[1])
     return choose_random(game, pid, rng)
 
 
@@ -219,28 +224,92 @@ def _wants_terminal(game, pid):
     return None
 
 
-def _colony_rungs(game, pid):
+# ── Colony games ─────────────────────────────────────────────────────────────
+# A Colony game is a DIFFERENT ECONOMY, not the same one with a bigger card on
+# top: the density a deck needs rises from 1.6 to 2.2, and the pile the game
+# actually ends on is the Colony pile.
+#
+# `COLONY_POLICY` selects the buy policy; the alternatives are kept because
+# they are the measured decomposition, and the arena can still play them
+# head-to-head through the "bmplus:<policy>" tier string.
+#
+# MEASURED, 120 Colony-only boards, 240 CRN-paired games each, mirror 0.5000:
+#   v2 ($8 -> Gold only)            vs v1  0.5312  (n.s.)
+#   v4 (Colony greening clock only) vs v1  0.5896  significant
+#   v3 (both)                       vs v1  0.6562  significant   <- SHIPPED
+#   v3 vs v4                               0.5188  (n.s.)
+# The clock is the real lever; the $8 rung adds a little and never hurts.
+COLONY_POLICY = "v3"
+
+# How few Colonies must remain before the deck stops building and converts.
+_COLONY_GREEN_AT = 4
+
+
+def _colony_rungs(game, pid, policy=None):
     """Platinum/Colony, which plain Big Money deliberately ignores."""
     if not game.get("colony"):
         return None
+    policy = policy or COLONY_POLICY
     coins = game["coins"]
-    if coins >= 11 and game["supply"].get("Colony", 0) > 0:
+    sup = game["supply"]
+    if coins >= 11 and sup.get("Colony", 0) > 0:
         return "Colony"
-    if 9 <= coins <= 10 and game["supply"].get("Platinum", 0) > 0:
+    if 9 <= coins <= 10 and sup.get("Platinum", 0) > 0:
         # a Platinum is worth more than the Gold this would otherwise buy, and
         # 2.2 density is what a Colony game actually needs
         return "Platinum"
+    if policy in ("v1", "v4"):
+        return None
+    # v2/v3: at $8 the plain ladder takes a Province. In a Colony game that
+    # spends the climb to $11 on a 6-point card — take the Gold instead while
+    # the Colony pile is still deep.
+    if coins == 8 and sup.get("Colony", 0) > _COLONY_GREEN_AT \
+            and sup.get("Gold", 0) > 0:
+        return "Gold"
     return None
 
 
-def _bm_plus_buy(game, pid):
+def _colony_green(game, pid, policy=None):
+    """The COLONY clock: the race is the Colony pile, so the green rungs must
+    read THAT pile, not the Provinces.
+
+    The plain ladder keys every green threshold to the Province count, so a
+    Colony game with 2 Colonies left and 8 Provinces untouched reads as "no
+    urgency" and the bot keeps buying economy while the game ends under it.
+
+    **This is consulted BEFORE the Platinum rung, and the ordering is the
+    point:** checked after it, a $9 hand with one Colony left still bought a
+    Platinum — economy the game will end before the deck ever draws. Above $11
+    there is nothing to decide (a Colony is both the best green and the best
+    buy), so this stays quiet there.
+    """
+    policy = policy or COLONY_POLICY
+    if policy not in ("v3", "v4") or not game.get("colony"):
+        return None
+    sup = game["supply"]
+    if sup.get("Colony", 0) > _COLONY_GREEN_AT:
+        return None
+    coins = game["coins"]
+    if coins >= 11:
+        return None                     # the Colony rung owns this band
+    if coins >= 8 and sup.get("Province", 0) > 0:
+        return "Province"
+    if 5 <= coins <= 7 and sup.get("Duchy", 0) > 0:
+        return "Duchy"
+    return None
+
+
+def _bm_plus_buy(game, pid, policy=None):
     """What to buy this turn, before the endgame module gets a say.
 
     Order matters and is the published one: the Colony rungs outrank
     everything (a Colony game is a different economy), then the terminal that
     makes the money work, then the plain ladder.
     """
-    colony = _colony_rungs(game, pid)
+    green = _colony_green(game, pid, policy)
+    if green is not None:
+        return green
+    colony = _colony_rungs(game, pid, policy)
     if colony is not None:
         return colony
     terminal = _wants_terminal(game, pid)
@@ -263,7 +332,9 @@ def _bm_plus_buy(game, pid):
     return want
 
 
-def choose_bm_plus(game, pid, rng=None):
+def choose_bm_plus(game, pid, rng=None, policy=None):
+    """`policy` overrides the Colony-game buy policy — the arena seam that lets
+    colony variants play each other under CRN."""
     r = rng or random.Random()
     if game["pending_pid"] == pid:
         return _decision(game, pid, r, policy=True)
@@ -288,7 +359,7 @@ def choose_bm_plus(game, pid, rng=None):
     if treasures:
         return r.choice(treasures)
 
-    want = bot_endgame.override(game, pid, _bm_plus_buy(game, pid))
+    want = bot_endgame.override(game, pid, _bm_plus_buy(game, pid, policy))
     if want is not None and {"type": "buy", "card": want} in moves:
         return {"type": "buy", "card": want}
     return {"type": "end_phase"}

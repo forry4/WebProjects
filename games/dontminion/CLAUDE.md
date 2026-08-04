@@ -665,6 +665,26 @@ and "second copy at ~16 cards"), the Colony/Platinum rungs, and `bot_endgame` on
 also drops Big Money's "really early: Gold at $8" quirk once the game is ending — plain
 `bigmoney` keeps it, being faithful to the published ladder.
 
+**COLONY GAMES ARE A DIFFERENT ECONOMY, and the clock is what matters.** The density a deck
+needs rises 1.6 -> 2.2, and the pile the game ends on is the COLONY pile — but the plain ladder
+keys every green threshold to the Province count, so 2 Colonies left with 8 Provinces untouched
+reads as "no urgency" while the game ends underneath. `COLONY_POLICY` (shipped: `v3`) fixes
+both halves, and `_colony_green` is consulted **before** `_colony_rungs` — checked after it, a
+$9 hand with one Colony left still bought a Platinum, i.e. economy the game would end before
+the deck ever drew. Measured on 120 Colony-only boards, 240 CRN games each, mirror 0.5000:
+
+| policy | change | vs the old policy |
+|---|---|---|
+| v2 | $8 -> Gold while Colonies are deep | 0.5312 (n.s.) |
+| v4 | Colony-keyed greening clock only | 0.5896 **significant** |
+| **v3** | **both — SHIPPED** | **0.6562 significant** (0.6687 on a fresh 80-board sample) |
+
+The clock is the lever; the $8 rung adds a little and never hurts (v3 vs v4 = 0.5188, n.s.).
+`_COLONY_GREEN_AT = 4` is a swept interior optimum (2/3 = 0.66, **4 = 0.68**, 5 = 0.63,
+6 = 0.59). **Non-Colony play is untouched by construction** — every path is gated on
+`game["colony"]`, verified move-for-move identical to the old policy across 40 non-Colony
+boards. Variants stay reachable as `bmplus:<policy>` for re-measurement (arena/tests only).
+
 **`bot_decisions.decide` replaces `engine.sample_decision` for every tier above `random`**, and is
 the cheapest strength in the ladder (**0.62** on the full card pool). Two value scales, kept
 separate on purpose — `hand_value` (worth for the coming turn; green is 0) and `deck_value`
