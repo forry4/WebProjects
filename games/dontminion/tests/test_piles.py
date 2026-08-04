@@ -494,7 +494,9 @@ def test_a_pile_whose_face_is_not_a_real_card_is_refused_at_setup():
     on every wire build, so an unknown face is a KeyError inside a view the
     client is waiting on. Fail where the pile is named instead."""
     g = fresh()
+    # names from sets we have not built — Spoils and Sir Martin used to stand
+    # in here and are real cards since Dark Ages shipped
     with pytest.raises(ValueError):
-        engine.add_pile(g, "Spoils", count=15)          # not a card we ship yet
+        engine.add_pile(g, "Encampment", count=5)
     with pytest.raises(ValueError):
-        engine.add_pile(g, "Knights", contents=["Sir Martin"])
+        engine.add_pile(g, "Castles", contents=["Humble Castle"])

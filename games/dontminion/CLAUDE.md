@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds, all 2E)
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages)
 
-2–4 players, 171 cards. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 238 cards. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -12,7 +12,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 |---|---|
 | `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
-| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py` | ONE module per expansion, each owning a disjoint card set |
+| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py`, `effects_alchemy.py`, `effects_darkages.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | the bots: random-legal (easy/normal/hard) + `bmplus`, the only shipped opponent; the Big Money ladder stays as the arena's reference rung |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
@@ -27,8 +27,9 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **7**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
-5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds) is the game-dict shape version,
+`engine.SCHEMA` (now **9**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages) is
+the game-dict shape version,
 stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
@@ -182,6 +183,58 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v6 — the phase-6 (Dark Ages) delta. FROZEN.** The set is almost pure card work — the
+on-trash theme is `trash()`'s existing emit read `from:"self"`, and both shuffled piles are ph.
+3H ordered piles. What it did add:
+
+- **A KINGDOM ENTRY MAY BE A PILE NAME, NOT A CARD.** `cards.PILES` holds the dealt piles whose
+  name is not a card ("Knights" today) — `{cost, expansion, kingdom, members, size}`. This is
+  forced, not stylistic: `_priced` resolves a name that IS a card to itself, so a `CARDS["Knights"]`
+  entry would make the pile show its own printed cost instead of its top card's, and a Sir Martin
+  on top really does cost $4. Everything that walks a kingdom list therefore tolerates one:
+  `cards.grants` returns False, `cards.expansion_of`/`cards.printed_cost` answer for it,
+  `bot_traits.best_bm_terminal` and `bot_plan.features` skip it, `REVIEWED` reviews its MEMBERS,
+  and `push_name_card` leaves it out of the offer ("'Knight' and 'Ruins' are types, not names").
+- **Setup rules** (all three from SPECIAL SETUP § I, all in `new_game`): `game["shelters"]` is
+  Colony's probabilistic shape — the Dark Ages PROPORTION of the dealt 10 — on a SEPARATE rng
+  draw ("it should not be the same card you check for Colonies"), and replaces each player's 3
+  starting Estates with a Hovel/Necropolis/Overgrown Estate (the Estate PILE is untouched; the
+  Shelters belong to no pile). A `looter`-typed kingdom card includes the **Ruins** pile: as many
+  cards as there are Curses, drawn from a shuffled 10-of-each-of-5. **Knights** is one shuffled
+  pile of its 10 distinct cards. Both are ordered piles, so only the top card is visible and
+  `contents` never ships. Hermit/Urchin/(Bandit Camp|Marauder|Pillage) add the **Madman /
+  Mercenary / Spoils** non-Supply piles — and so does a Bane or Ferryman pile that happens to be
+  one of them ("if these extra cards have a special setup rule, do that setup").
+- **`cost_ge(game, card, coins)`** — "costing $N or MORE" (Sage; the lower half of Knights' and
+  Rogue's "$3 to $6"). It reads the COIN component alone: the compendium's Potion rule is about
+  UPPER bounds, so a range's `cost_le` half is what (correctly) excludes Potion cards. Recorded
+  as an open ambiguity (A5) — the rule is stated for "up to", not for "or more".
+- **`from_trash(game, pid, card, dest="hand")`** — take a card OUT of the trash WITHOUT gaining
+  it (Fortress: "This is not gaining it. It was still trashed"). Emits nothing. Distinct from
+  `gain_from_trash`, which IS a gain — and which now **emits** one (compendium, Graverobber 4:
+  "When-gain abilities will trigger"), and takes `dest=` for Graverobber's onto-your-deck.
+- **`deck_to_discard(game, pid)`** — Scavenger's "put your deck into your discard pile". NOT a
+  discard for triggers ("this doesn't trigger cards that say WHEN YOU DISCARD THIS"), so it never
+  goes through `discard()`; it does mark revealed, since the bottom of the deck becomes visible.
+- **`emit("play_attack")`** — the BEFORE-play window (Urchin). Emitted AFTER
+  `_open_attack_window`, so its ability pool sits ABOVE the reaction windows and resolves first,
+  which is what "you may FIRST trash this" means. It carries `replay=` so a throne-room replay of
+  the same card does not count as "another Attack card".
+- **Reaction MODES `"discard"` and `"trash"`** — a hand reaction whose cost is the card itself
+  (Beggar discards, Hovel trashes, Market Square discards). `_REACT_VERB` is the one place a
+  mode's verb is named, shared by the attack window and the `from:"hand"` trigger offer; the
+  STAGE still performs the move.
+- **`"feodum"`** joins the computed VP kinds (1 VP per 3 Silvers), and four inert TYPES arrive
+  (`looter`, `ruins`, `knight`, `shelter`) that only the cards themselves read.
+
+**The ordering rule this phase re-proved: a gain that follows a trash must be parked BELOW it.**
+Procession, Graverobber and Rebuild all first pushed the gain prompt after calling `trash()` —
+LIFO, so the player was asked what to gain before the trashed card's own when-trash ability
+resolved, and a processioned Fortress came back to hand only afterwards. The compendium spells
+the order out for each ("first play twice, then trash, then check cost, then gain"). Push the
+continuation FIRST; `trash()`'s pool then stacks on top of it. Same shape as the phase-3
+put-back lesson, in the opposite direction.
 
 **Kernel v5H — Clean-up and Command. FROZEN.**
 - **CLEAN-UP IS INTERRUPTIBLE.** `_end_turn` parks the sweep as a `("__cleanup","sweep")`
@@ -552,6 +605,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | ~~A2~~ | ~~A gained card's own when-gain vs a hand reaction on the same gain~~ | **RETIRED (phase 2 of the ability pool)** — the player now chooses, per p23 §2. `test_watchtower_and_inn_the_player_chooses_and_each_order_differs` plays the compendium's worked Example 1 down BOTH branches. | — |
 | ~~A3~~ | ~~Two of the player's own triggers firing simultaneously~~ | **RETIRED (phase 2)** — same pool. Registration order survives only as the pool's OPTION order (the first option is the historical default). | — |
 | A4 | **Butcher**: do the Coffers you spend for its "remodel" ALSO pay you the +$1 each? | **Yes** — one rule for spending. `_butcher_spend` goes through the same accounting as the `spend` move: tokens off the mat, +$1 each, and the count also raises the gain's cost limit. | The global rule is unconditional ("each spent token gives you +$ and is immediately removed") and Butcher only adds a use for the COUNT. But the compendium's phrasing cuts the other way — "any Coffers tokens you get from Butcher that you don't use to 'remodel' a card, you save for later to spend for +$ **as normal**" reads as though the ones spent on Butcher were spent for something else instead. We took the branch that keeps ONE rule for spending rather than two. Pinned by `test_butcher_gives_two_coffers_and_remodels_per_coffers_spent`. |
+| A5 | **"costing $N or MORE"** with a Potion in the cost — is a {$3,P} card "costing $3 or more"? | **Yes** — `cost_ge` reads the COIN component alone, so Sage finds a Familiar and a Knight can trash one. | The compendium states the Potion rule for UPPER bounds only ("up to $N" = coins ≤ N and potions == 0); it says nothing about a lower bound, and both readings are defensible. Ours keeps a range like Knights' "from $3 to $6" excluding Potion cards, because its `cost_le` half still does. Pinned by `test_sage_digs_for_a_three_or_more` + the cost-vector tests. |
 
 **B. Deliberate simplifications — the rules are clear, we do something simpler**
 
@@ -562,6 +616,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
 | B5 | **Stop-moving rule: a card that moved away and BACK is still lost track of** (wiki Stop moving rule; compendium p26 Example 6) | `find_card_zone` is PRESENCE-based — it can't tell "still there" from "left and returned", so a returned card would wrongly be movable/playable | Unreachable in the 139-card pool (no shipped sequence returns a card to its trigger zone inside one window; the official examples need Royal Carriage / Counterfeit-class cards). Revisit when a set ships a card that can round-trip a zone mid-window — the fix is a per-window move counter, not more zone checks. |
 | B6 | **Coffers may be spent "even in the middle of resolving an ability"** | `spendable()` additionally requires NO open decision, so the `spend` move is refused while a frame is pending | The compendium's examples of mid-ability spending are Black Market, Capital City, Diadem, Fortune and Storyteller — **none of which we ship**, so the restriction is currently unreachable. The one card that genuinely needs to spend mid-resolution, Butcher, asks for the amount inside its own decision frame instead. Revisit at the first card that can want $ while a prompt is open. Pinned by `test_the_spend_move_is_not_offered_while_a_decision_is_open`. |
+| B7 | **Urchin's before-play ability with TWO Urchins in play** | The offer opens ONCE per Attack played, not once per Urchin | Zones hold NAMES, so two copies of one card are only a count — the pool would have to carry per-copy identity to offer two trashes. The trigger correctly fires when the played Attack IS an Urchin and a second one is on the table (that second copy is "another Attack card"), and correctly does NOT fire on a throne-room replay. Costs one Mercenary in the rare double-Urchin turn. Pinned by `test_urchin_does_not_trigger_on_a_throne_roomed_replay_of_itself`. |
 | ~~B4~~ | ~~Concurrent same-player abilities: the player chooses resolution order (p23 §2)~~ | **RETIRED — all four phases of the ability pool shipped.** Start-of-turn duration fx (1), every emit-driven event (2), multi-card discard/trash batches via `emit_batch` (3 — `test_batch_discard_reactions_are_the_players_choice_not_click_order`), and turn_start reactions folded into the same pool as the fx (4 — `test_turn_start_reaction_and_duration_fx_share_one_pool`: a Clerk and a Wharf are one choice, and the cross-player park order is current-player-first per p23 §3, where the old separate emit let reactions cut ahead). | — |
 
 **C. Settled — do NOT relitigate** (kept because each cost real time to establish)
@@ -1000,7 +1055,10 @@ Vassal that played nothing passed). And derive parametrize counts from the data
 (`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
 the next expansion's kingdoms would have gone unsoaked in silence.
 
-`test_cards_cornucopia_a/b.py` (the ph. 4 batches, incl. the Coffers and overpay kernels),
+`test_cards_darkages_a/b.py` (the ph. 6 batches — half A is the 20 cards whose interest is
+their own play ability, half B the trash theme, the attacks, the two shuffled piles and all
+three setup rules), `test_cards_cornucopia_a/b.py` (the ph. 4 batches, incl. the Coffers and
+overpay kernels),
 `test_piles.py` (THE PILE MODEL — every ph. 3H seam, none of which a shipped card consumes yet),
 `test_engine.py` (kernel + exemplars + redaction), `test_soak.py` (per-move card-conservation
 census over full random games — the Duel 25-token analog — plus never-strand, mirror-sync, vp

@@ -225,7 +225,15 @@ _SECOND_TERMINAL_DECK = 16
 # itself (the reshuffle article's R8), and each copy races the 10-card Curse
 # pile faster. Wharf is also a Duration and did NOT want a third (0.4708), so
 # treat that as a plausible mechanism rather than a rule.
-TERMINAL_CAPS = {"Sea Witch": 3, "Council Room": 1, "Magnate": 1}
+TERMINAL_CAPS = {"Sea Witch": 3, "Council Room": 1, "Magnate": 1,
+                 # Dark Ages: Catacombs wants exactly ONE (cap1 0.593 at
+                 # n=400, cap3 0.391 — both significant, and the promising arm
+                 # got its confirmation run). It draws no cards on net when it
+                 # collides: the second copy just re-reads the same three.
+                 # Cultist / Marauder / Rogue / Hunting Grounds all measured
+                 # inside the noise band at the default 2 (a third Marauder is
+                 # significantly WORSE at 0.333), so they keep it.
+                 "Catacombs": 1}
 
 
 # Set by the terminal-sweep harness to force ONE card (or "" for none) as the

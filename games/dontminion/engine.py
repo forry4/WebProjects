@@ -25,8 +25,10 @@ import itertools
 import random
 
 from .cards import (
-    CARDS, KINGDOM, REWARDS, pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
+    CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
+    pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
     grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
+    expansion_of as cards_expansion, printed_cost as cards_printed_cost,
 )
 
 BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
@@ -37,7 +39,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 8
+SCHEMA = 9
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -47,6 +49,7 @@ SCHEMA = 8
 #   7 = Cornucopia & Guilds (Coffers, the setup-chosen Bane/Ferryman piles,
 #       Footpad's game rule, per-seat set-asides + start-of-turn abilities)
 #   8 = Alchemy (the cost VECTOR's second money pool, game["potions"])
+#   9 = Dark Ages (game["shelters"] — the Shelter starting decks)
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -87,6 +90,10 @@ _GAME_FILLS = {
     "bane": lambda g: None,             # Young Witch's extra Supply pile
     "ferryman_pile": lambda g: None,    # Ferryman's extra NON-Supply pile
     "footpad_draw": lambda g: False,    # Footpad's game-wide when-gain rule
+    # Dark Ages (ph. 6): did this game deal Shelters instead of Estates? Read
+    # by nothing at runtime but the view and the tests — it is a SETUP record,
+    # and an old save that never had one played without them.
+    "shelters": lambda g: False,
 }
 _SEAT_FILLS = {
     "aside": list,
@@ -284,8 +291,14 @@ def push_place_in_deck(game, pid, card, stage, deck_card, data=None):
 
 
 def push_name_card(game, pid, card, stage, data=None):
+    # A PILE NAME IS NOT A CARD NAME: "'Knight', 'Loot', 'Ruins', 'Castle' and
+    # 'Shelter' are types, not names" — you can't name the Knights pile, so an
+    # ordered pile's key is filtered out of the offer (its cards are named by
+    # their own names, which is what pile_top would give you).
     _push_frame(game, {"kind": "name_card", "pid": pid, "card": card, "stage": stage,
-                       "constraint": {"cards": sorted(game["supply"])}, "data": data or {}})
+                       "constraint": {"cards": sorted(c for c in game["supply"]
+                                                      if c in CARDS)},
+                       "data": data or {}})
 
 
 def push_auto(game, pid, card, stage, data=None):
@@ -793,13 +806,67 @@ def _k_gain_resolve(game, pid, frame, choice):
                   d.get("overpay", 0))
 
 
-def gain_from_trash(game, pid, card):
+def gain_from_trash(game, pid, card, dest="discard"):
+    """Gain a card OUT OF THE TRASH (Lurker, Graverobber, Rogue). It really is
+    a gain — "When-gain abilities will trigger" (compendium, Graverobber 4) —
+    so it emits like any other, and "it's possible to gain non-Kingdom cards
+    from the trash". `dest` is the zone it lands in: Graverobber's is the
+    DECK."""
     if card not in game["trash"]:
         return False
     game["trash"].remove(card)
-    game["seats"][pid]["discard"].append(card)
-    _log(game, pid, "gain_from_trash", card=card)
+    seat = game["seats"][pid]
+    if dest == "deck":
+        seat["deck"].insert(0, card)
+    elif dest == "hand":
+        seat["hand"].append(card)
+    else:
+        seat["discard"].append(card)
+    if pid == game["turn"]:
+        game.setdefault("_turn_gains", []).append(card)   # Smugglers
+        if game["phase"] == "buy":
+            game["turn_ctx"]["buy_gains"] += 1
+            if has_type(game, card, "victory"):
+                game["turn_ctx"]["gained_victory_in_buy"] = True
+    _log(game, pid, "gain_from_trash", card=card, dest=dest)
+    emit(game, "gain", actor=pid, subject=card, dest=dest, via_buy=False, overpay=0)
     return True
+
+
+def from_trash(game, pid, card, dest="hand"):
+    """Take a card out of the trash WITHOUT gaining it — Fortress' "when you
+    trash this, put it into your hand" ("This is not gaining it. It was still
+    trashed"), and Lich's discard later. Emits nothing, by that definition.
+    False if the card is no longer in the trash (the lose-track case)."""
+    if card not in game["trash"]:
+        return False
+    game["trash"].remove(card)
+    seat = game["seats"][pid]
+    if dest == "hand":
+        seat["hand"].append(card)
+    elif dest == "discard":
+        seat["discard"].append(card)
+    else:
+        raise ValueError(f"bad from_trash dest {dest!r}")
+    _log(game, pid, "from_trash", card=card, dest=dest)
+    return True
+
+
+def deck_to_discard(game, pid):
+    """Put your whole deck into your discard pile (Scavenger). NOT a discard
+    for trigger purposes — "this doesn't trigger cards that say WHEN YOU
+    DISCARD THIS" — so it never goes through discard(). It does expose
+    information (the bottom of the deck becomes the visible discard top), so it
+    locks undo like any other reveal."""
+    seat = game["seats"][pid]
+    n = len(seat["deck"])
+    if not n:
+        return 0
+    seat["discard"].extend(seat["deck"])
+    seat["deck"] = []
+    _mark_revealed(game)
+    _log(game, pid, "deck_to_discard", count=n)
+    return n
 
 
 def exchange(game, pid, card, into, zone="discard"):
@@ -1221,6 +1288,18 @@ def cost_lt(game, card, coins):
     return potion_cost(game, card) == 0 and cost(game, card) < coins
 
 
+def cost_ge(game, card, coins):
+    """'costing $coins or MORE' — a LOWER bound, which reads the coin component
+    alone. The Potion rule the other three enforce ("up to $N" excludes every
+    Potion card) is a rule about UPPER bounds: a {$3,P} card is not "up to $3",
+    but nothing about it is below $3 either, so Sage finds it. A range like
+    Knights' "from $3 to $6" is written as cost_ge + cost_le, and the upper
+    half is what (correctly) keeps the Potion cards out. Recorded as an open
+    ambiguity in CLAUDE.md — the compendium states the rule for upper bounds
+    only."""
+    return cost(game, card) >= coins
+
+
 def cost_eq_card(game, card, ref, delta=0):
     """'costing exactly $delta more than `ref`' — Remake, Upgrade, Develop,
     Farmland, Swindler (delta 0). "Costing exactly $1 more" means "having the
@@ -1456,6 +1535,14 @@ def request_extra_turn(game, pid):
 # Adding a future set's timing = new emit() call site (one line) + registry
 # entries — never another bespoke kernel mechanism.
 
+# How a from="hand" reaction (or an attack-window reaction) SHOWS ITSELF, by
+# the spec's `mode`. It is the card's own instruction: Watchtower reveals,
+# Guard Dog plays itself, Market Square discards itself, Hovel trashes itself.
+# The stage still performs the move — this only names it in the prompt.
+_REACT_VERB = {"reveal": "Reveal", "play": "Play",
+               "discard": "Discard", "trash": "Trash"}
+
+
 def emit(game, event, actor=None, subject=None, **extra):
     """Fire an event AFTER the triggering change has been applied.
 
@@ -1550,7 +1637,7 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                         {**extra, "actor": actor, "subject": subject},
                         commutes=spec.get("commutes", False))
             elif src == "hand":
-                verb = "Reveal" if spec.get("mode") == "reveal" else "Play"
+                verb = _REACT_VERB.get(spec.get("mode"), "Play")
                 for p in game["players"]:
                     if spec.get("who") == "actor" and p != actor:
                         continue          # when-YOU-x reactions (Watchtower-class)
@@ -1990,6 +2077,7 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
         _log(game, pid, "play", card=card)
     if has_type(game, card, "attack"):
         _open_attack_window(game, pid, card)
+        _emit_play_attack(game, pid, card, replay=from_zone is None)
     else:
         from . import effects as _fx
         fn = _fx.EFFECTS.get(card)
@@ -2009,6 +2097,23 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
                     game["_actor"] = prev
         if has_type(game, card, "treasure"):
             emit(game, "play_treasure", actor=pid, subject=card)
+
+
+def _emit_play_attack(game, pid, card, replay=False):
+    """The BEFORE-PLAY window for an Attack (Urchin's "when you play another
+    Attack card with this in play, you may first trash this").
+
+    Emitted AFTER _open_attack_window on purpose: pushes are LIFO, so the
+    ability pool this parks sits ABOVE the opponents' reaction windows and
+    resolves first — which is what "you may FIRST trash this" means, and what
+    the compendium's Skirmisher example needs ("you gain a Mercenary before
+    resolving the played Attack, so Skirmisher's when-gain ability is not
+    active yet").
+
+    `replay` marks a throne-room replay of a card already in play: "the
+    before-play ability only triggers if you play ANOTHER Attack card, not if
+    you play the same Urchin multiple times with a throne-room"."""
+    emit(game, "play_attack", actor=pid, subject=card, replay=replay)
 
 
 def playable_from_supply(game, pid, pred=None):
@@ -2066,6 +2171,7 @@ def play_from_supply(game, pid, pile, count=True):
         # ran the attack twice. Same machinery as an Attack played from hand,
         # which is the point: an attack is an attack however it reached play.
         _open_attack_window(game, pid, card)
+        _emit_play_attack(game, pid, card)
         return True
     _run_supply_ability(game, pid, card)
     return True
@@ -2122,7 +2228,7 @@ def _reaction_options(game, o, immune, used=()):
         when = spec.get("when")
         if when is not None and not when(game, o):
             continue
-        verb = "Play" if spec.get("mode") == "play" else "Reveal"
+        verb = _REACT_VERB.get(spec.get("mode"), "Reveal")
         opts.append({"id": f"react:{card}",
                      "label": spec.get("label") or f"{verb} {card}"})
     if opts:
@@ -2216,6 +2322,11 @@ def _k_window(game, pid, frame, choice):
         # turn player's actions_played (Conspirator counts ACTIONS YOU played).
         play_action_card(game, pid, card, from_zone="hand",
                          count=(pid == game["turn"]))
+    elif spec.get("mode") == "discard":
+        # "you may first DISCARD this to ..." (Beggar). The card leaves the
+        # hand as the cost of reacting, which is also why a second copy is
+        # offered again without `repeatable` doing any work for the first one.
+        discard(game, pid, [card])
     else:
         reveal(game, pid, [card], "hand")
 
@@ -2354,6 +2465,7 @@ def _play_one_treasure(game, pid, card, from_zone="hand"):
         # captured an EMPTY immune list — i.e. the attack would have been
         # unblockable by Moat, silently.
         _open_attack_window(game, pid, card)
+        _emit_play_attack(game, pid, card, replay=from_zone is None)
         emit(game, "play_treasure", actor=pid, subject=card)
         return
     # treasures with abilities (Astrolabe's duration half) run their effect too
@@ -2950,6 +3062,7 @@ def _vp_of(game, pid):
     n = len(owned)
     duchies = owned.count("Duchy")
     golds = owned.count("Gold")
+    silvers = owned.count("Silver")
     actions = sum(1 for c in owned if has_type(game, c, "action"))
     # "differently named cards you have" (Fairgrounds) — the whole deck, by name
     distinct = len(set(owned))
@@ -2966,6 +3079,8 @@ def _vp_of(game, pid):
             total += golds
         elif v == "vineyard":
             total += actions // 3
+        elif v == "feodum":
+            total += silvers // 3
         else:
             total += v
     return total
@@ -3153,7 +3268,9 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     rng = random.Random(seed)
     if kingdom is not None:
         kingdom = list(kingdom)
-        bad = [c for c in kingdom if c not in CARDS or not CARDS[c]["kingdom"]]
+        # an entry may be a PILE name rather than a card (Knights) — see PILES
+        bad = [c for c in kingdom
+               if c not in PILES and (c not in CARDS or not CARDS[c]["kingdom"])]
         if bad:
             raise ValueError(f"unknown kingdom cards: {bad}")
     else:
@@ -3167,12 +3284,20 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     n = len(players)
     supply = {c: pile_size(c, n) for c in BASIC_CARDS}
     for c in kingdom:
+        if c in PILES:
+            continue          # ORDERED piles are built below, from `contents`
         supply[c] = pile_size(c, n)
     # Prosperity: Platinum/Colony join the Supply with probability equal to
     # the Prosperity proportion of the kingdom (official randomizer rule);
     # both piles or neither. Colony-empty becomes a game-end condition.
-    prosperity_n = sum(1 for c in kingdom if CARDS[c]["expansion"] == "prosperity")
+    prosperity_n = sum(1 for c in kingdom if cards_expansion(c) == "prosperity")
     colony = prosperity_n > 0 and rng.random() < prosperity_n / 10
+    # Dark Ages, the same probabilistic shape (SPECIAL SETUP § I): Shelters
+    # replace the 3 starting Estates with probability equal to the Dark Ages
+    # proportion of the kingdom. A SEPARATE draw from the Colony one —
+    # "it should not be the same card you check for Colonies".
+    darkages_n = sum(1 for c in kingdom if cards_expansion(c) == "darkages")
+    shelters = darkages_n > 0 and rng.random() < darkages_n / 10
     if colony:
         supply["Platinum"] = pile_size("Platinum", n)
         supply["Colony"] = pile_size("Colony", n)
@@ -3187,17 +3312,25 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     # coin amounts with NO Potion component — a {$3,P} card does not cost $3, so
     # both selections exclude every Potion-costed card.
     bane = ferryman_pile = None
-    unused = sorted({c for e in exps for c in KINGDOM[e]} - set(kingdom))
+    # ORDERED piles (Knights) are excluded as candidates: both selections build
+    # an ordinary pile out of the chosen name, which cannot represent a
+    # shuffled one. Nothing is lost today — the only such pile costs $5, which
+    # neither selection can reach — and a future one gets a deliberate decision
+    # rather than a silently malformed pile.
+    unused = sorted({c for e in exps for c in KINGDOM[e] if c in CARDS}
+                    - set(kingdom))
     if "Young Witch" in kingdom:
         # "an extra Kingdom card pile costing $2 or $3, added TO the Supply"
-        pick = [c for c in unused if CARDS[c]["cost"] in (2, 3) and not cards_potion(c)]
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)]
         if pick:
             bane = rng.choice(pick)
             supply[bane] = pile_size(bane, n)
             unused.remove(bane)
     if "Ferryman" in kingdom:
         # "an unused Kingdom card pile costing $3 or $4, OUTSIDE the Supply"
-        pick = [c for c in unused if CARDS[c]["cost"] in (3, 4) and not cards_potion(c)]
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (3, 4) and not cards_potion(c)]
         if pick:
             ferryman_pile = rng.choice(pick)
             unused.remove(ferryman_pile)
@@ -3205,8 +3338,29 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     # Potion cards in the Supply" — a setup rule, not a randomiser roll. The
     # extra Cornucopia piles are never Potion-costed (filtered above), so the
     # dealt kingdom is the whole test.
-    if any(cards_potion(c) for c in kingdom):
+    if any(cards_potion(c) for c in kingdom if c in CARDS):
         supply["Potion"] = pile_size("Potion", n)
+    # Dark Ages SPECIAL SETUP, part 2 — the shuffled piles. Their contents are
+    # drawn HERE, from the setup rng, so the whole board is a function of the
+    # seed; the piles themselves are added once the game dict exists.
+    #
+    # "If any Kingdom card has the type Looter, include a Ruins pile in the
+    # Supply. Shuffle the 50 Ruins cards, and from those draw and include the
+    # same number of Ruins as Curses." Only the top card is ever visible, which
+    # is exactly what an ordered pile is (ph. 3H).
+    # "If these extra cards have a special setup rule, do that setup" — a Bane
+    # or a Ferryman pile IS in the game, so a Hermit picked as the Bane brings
+    # the Madman pile with it and a Death Cart brings the Ruins.
+    in_play_cards = [c for c in kingdom + [bane, ferryman_pile]
+                     if c is not None and c in CARDS]
+    ruins_pile = knights_pile = None
+    if any("looter" in CARDS[c]["types"] for c in in_play_cards):
+        deck = [r for r in RUINS for _ in range(RUINS_EACH)]
+        rng.shuffle(deck)
+        ruins_pile = deck[:pile_size("Curse", n)]
+    if "Knights" in kingdom:
+        knights_pile = list(KNIGHTS)
+        rng.shuffle(knights_pile)
     game = {
         "game": "dontminion",
         "players": players,
@@ -3239,6 +3393,7 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "last_turn_gains": {},     # pid -> cards gained on their last own turn (Smugglers)
         "extra_turn": False,       # the CURRENT turn is an Outpost extra turn
         "colony": colony,          # Platinum/Colony game (Prosperity setup rule)
+        "shelters": shelters,      # Shelter starting decks (Dark Ages setup rule)
         "curse_is_treasure": curse_is_treasure,   # Charlatan's game-wide rule
         # Cornucopia & Guilds
         "coffers": {p: 0 for p in players},
@@ -3266,6 +3421,20 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         # ANY of them, so there is no top card and no hidden order.
         for r in REWARDS:
             add_pile(game, r, count=1 if n == 2 else 2)
+    # Dark Ages: the two shuffled SUPPLY piles (only their top card is ever
+    # visible — the wire never ships `contents`), then the three piles that sit
+    # OUTSIDE the Supply, so "gain a card from the Supply" excludes them by
+    # construction rather than by anyone remembering to check.
+    if ruins_pile:
+        add_pile(game, "Ruins", contents=ruins_pile, supply=True, members=RUINS)
+    if knights_pile:
+        add_pile(game, "Knights", contents=knights_pile, supply=True, members=KNIGHTS)
+    if "Hermit" in in_play_cards:
+        add_pile(game, "Madman", count=10)
+    if "Urchin" in in_play_cards:
+        add_pile(game, "Mercenary", count=10)
+    if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
+        add_pile(game, "Spoils", count=15)
     for pid in players:
         game["seats"][pid] = {"deck": [], "hand": [], "discard": [],
                               "in_play": [], "aside": [], "turns_taken": 0,
@@ -3276,7 +3445,12 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
                               # C&G: Farmhands' set-aside + its start-of-turn play
                               "set_aside": [], "start_fx": [],
                               "cleanup_aside": []}
-        start = ["Copper"] * 7 + ["Estate"] * 3
+        # "If Shelters are used, each player starts with 3 Shelters — a Hovel, a
+        # Necropolis, and an Overgrown Estate — instead of the 3 Estates. (Don't
+        # include those Estates in the game.)" The Estate PILE is untouched: it
+        # is the players' three copies that are replaced, and Shelters belong to
+        # no pile at all.
+        start = ["Copper"] * 7 + (list(SHELTERS) if shelters else ["Estate"] * 3)
         r = _make_rng(game)
         r.shuffle(start)
         _save_rng(game, r)

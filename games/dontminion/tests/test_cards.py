@@ -10,9 +10,11 @@ from games.dontminion import cards
 
 
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
-                 "duration", "reward", "command"}
+                 "duration", "reward", "command",
+                 # Dark Ages: four inert flags the cards themselves read
+                 "looter", "ruins", "knight", "shelter"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
-                      "hinterlands", "cornucopia", "alchemy"}
+                      "hinterlands", "cornucopia", "alchemy", "darkages"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
 OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
@@ -228,6 +230,67 @@ EXPECTED = {
     "Transmute": (0, ['action']),
     "University": (2, ['action']),
     "Vineyard": (0, ['victory']),
+    # Dark Ages (34 kingdom cards; no second edition, so nothing is trimmed)
+    "Poor House": (1, ['action']),
+    "Beggar": (2, ['action', 'reaction']),
+    "Squire": (2, ['action']),
+    "Vagrant": (2, ['action']),
+    "Forager": (3, ['action']),
+    "Hermit": (3, ['action']),
+    "Market Square": (3, ['action', 'reaction']),
+    "Sage": (3, ['action']),
+    "Storeroom": (3, ['action']),
+    "Urchin": (3, ['action', 'attack']),
+    "Armory": (4, ['action']),
+    "Death Cart": (4, ['action', 'looter']),
+    "Feodum": (4, ['victory']),
+    "Fortress": (4, ['action']),
+    "Ironmonger": (4, ['action']),
+    "Marauder": (4, ['action', 'attack', 'looter']),
+    "Procession": (4, ['action']),
+    "Rats": (4, ['action']),
+    "Scavenger": (4, ['action']),
+    "Wandering Minstrel": (4, ['action']),
+    "Band of Misfits": (5, ['action', 'command']),
+    "Bandit Camp": (5, ['action']),
+    "Catacombs": (5, ['action']),
+    "Count": (5, ['action']),
+    "Counterfeit": (5, ['treasure']),
+    "Cultist": (5, ['action', 'attack', 'looter']),
+    "Graverobber": (5, ['action']),
+    "Junk Dealer": (5, ['action']),
+    "Mystic": (5, ['action']),
+    "Pillage": (5, ['action', 'attack']),
+    "Rebuild": (5, ['action']),
+    "Rogue": (5, ['action', 'attack']),
+    "Altar": (6, ['action']),
+    "Hunting Grounds": (6, ['action']),
+    # the Knights — one shuffled pile of 10 ($5 each; Sir Martin is the
+    # cheaper one, and Dame Josephine is also a Victory card)
+    "Dame Anna": (5, ['action', 'attack', 'knight']),
+    "Dame Josephine": (5, ['action', 'attack', 'knight', 'victory']),
+    "Dame Molly": (5, ['action', 'attack', 'knight']),
+    "Dame Natalie": (5, ['action', 'attack', 'knight']),
+    "Dame Sylvia": (5, ['action', 'attack', 'knight']),
+    "Sir Bailey": (5, ['action', 'attack', 'knight']),
+    "Sir Destry": (5, ['action', 'attack', 'knight']),
+    "Sir Martin": (4, ['action', 'attack', 'knight']),
+    "Sir Michael": (5, ['action', 'attack', 'knight']),
+    "Sir Vander": (5, ['action', 'attack', 'knight']),
+    # the Ruins — one shuffled pile, all $0
+    "Abandoned Mine": (0, ['action', 'ruins']),
+    "Ruined Library": (0, ['action', 'ruins']),
+    "Ruined Market": (0, ['action', 'ruins']),
+    "Ruined Village": (0, ['action', 'ruins']),
+    "Survivors": (0, ['action', 'ruins']),
+    # the Shelters — they replace the 3 starting Estates
+    "Hovel": (1, ['reaction', 'shelter']),
+    "Necropolis": (1, ['action', 'shelter']),
+    "Overgrown Estate": (1, ['victory', 'shelter']),
+    # outside the Supply
+    "Madman": (0, ['action']),
+    "Mercenary": (0, ['action', 'attack']),
+    "Spoils": (0, ['treasure']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -243,12 +306,14 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 183
+    assert len(cards.CARDS) == 238
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
               "prosperity": [], "hinterlands": [], "cornucopia": [],
-              "alchemy": []}
+              "alchemy": [], "darkages": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
+    # 34 kingdom + 10 Knights + 5 Ruins + 3 Shelters + Spoils/Madman/Mercenary
+    assert len(by_exp["darkages"]) == 55
     assert len(by_exp["basic"]) == 7
     assert len(by_exp["base"]) == 26
     assert len(by_exp["intrigue"]) == 26
@@ -263,17 +328,20 @@ def test_card_count_and_expansion_counts():
 def test_kingdom_lists_match_flags_no_duplicates():
     for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27),
                       ("prosperity", 25), ("hinterlands", 26),
-                      ("cornucopia", 26), ("alchemy", 11)):
+                      ("cornucopia", 26), ("alchemy", 11), ("darkages", 35)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
         for n in names:
-            assert cards.CARDS[n]["kingdom"] is True
-            assert cards.CARDS[n]["expansion"] == exp
+            # an entry is a kingdom CARD, or a dealt PILE whose name is not a
+            # card at all ("Knight" and "Ruins" are types, not names)
+            spec = cards.CARDS.get(n) or cards.PILES[n]
+            assert spec["kingdom"] is True
+            assert spec["expansion"] == exp
     # every kingdom-flagged card appears in exactly one KINGDOM list
     flagged = {n for n, c in cards.CARDS.items() if c["kingdom"]}
     listed = set().union(*(set(v) for v in cards.KINGDOM.values()))
-    assert flagged == listed
+    assert flagged == listed - set(cards.PILES)
     # the expansion lists are pairwise disjoint — a card belongs to exactly one
     names = list(cards.KINGDOM)
     for i, a in enumerate(names):
@@ -318,14 +386,18 @@ def test_schema_field_completeness_and_validity():
         assert c["expansion"] in ALLOWED_EXPANSIONS, name
         assert isinstance(c["kingdom"], bool), name
     assert sorted(str_vp) == [("Demesne", "demesne"), ("Duke", "duke"),
-                              ("Fairgrounds", "fairgrounds"), ("Gardens", "gardens"),
+                              ("Fairgrounds", "fairgrounds"),
+                              ("Feodum", "feodum"), ("Gardens", "gardens"),
                               ("Vineyard", "vineyard")]
 
 
 def test_static_vp_values():
     expected_vp = {"Estate": 1, "Duchy": 3, "Province": 6, "Curse": -1,
                    "Farm": 2, "Mill": 1, "Nobles": 2, "Island": 2, "Colony": 10,
-                   "Farmland": 2, "Tunnel": 2}          # Hinterlands
+                   "Farmland": 2, "Tunnel": 2,          # Hinterlands
+                   # Dark Ages: a Knight that is also a Victory card, and a
+                   # Shelter printed as a literal 0 VP
+                   "Dame Josephine": 2, "Overgrown Estate": 0}
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0
@@ -373,24 +445,26 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.REQUIREMENT_ORDER == ("actions", "buys", "draw")
     assert set(cards.REQUIREMENTS) == set(cards.REQUIREMENT_ORDER)
     assert cards.cards_granting("actions") == [
-        "Bazaar", "Border Village", "City", "Crossroads", "Diplomat",
-        "Farmhands", "Festival", "Fishing Village", "Inn", "Mining Village",
-        "Native Village", "Nobles", "Plaza", "Shanty Town", "University",
-        "Village", "Worker's Village"]
+        "Bandit Camp", "Bazaar", "Border Village", "City", "Crossroads",
+        "Diplomat", "Farmhands", "Festival", "Fishing Village", "Fortress",
+        "Inn", "Mining Village", "Native Village", "Nobles", "Plaza",
+        "Shanty Town", "Squire", "University", "Village",
+        "Wandering Minstrel", "Worker's Village"]
     assert cards.cards_granting("buys") == [
         "Astrolabe", "Baron", "Bridge", "Candlestick Maker", "Cauldron",
-        "City", "Collection", "Council Room", "Courtier", "Farrier",
-        "Festival", "Grand Market", "Hamlet", "Herbalist", "Margrave",
-        "Market", "Merchant Guild", "Nomads", "Pawn", "Salvager", "Souk",
-        "Spice Merchant", "Tactician", "Tiara", "Wharf", "Worker's Village"]
+        "City", "Collection", "Council Room", "Counterfeit", "Courtier",
+        "Farrier", "Festival", "Forager", "Grand Market", "Hamlet",
+        "Herbalist", "Margrave", "Market", "Market Square", "Merchant Guild",
+        "Nomads", "Pawn", "Salvager", "Souk", "Spice Merchant", "Squire",
+        "Storeroom", "Tactician", "Tiara", "Wharf", "Worker's Village"]
     assert cards.cards_granting("draw") == [
-        "Alchemist", "Apprentice", "Council Room", "Courtyard", "Diplomat",
-        "Ferryman", "Guard Dog", "Inn", "Laboratory", "Margrave",
-        "Masquerade", "Menagerie", "Minion", "Moat", "Nobles", "Patrol",
-        "Rabble", "Sea Witch", "Secret Passage", "Shanty Town", "Smithy",
-        "Spice Merchant", "Stables", "Steward", "Tactician", "Tide Pools",
-        "Torturer", "Vault", "Warehouse", "Wharf", "Witch", "Witch's Hut",
-        "Young Witch"]
+        "Alchemist", "Apprentice", "Catacombs", "Council Room", "Courtyard",
+        "Cultist", "Diplomat", "Ferryman", "Guard Dog", "Hunting Grounds",
+        "Inn", "Laboratory", "Margrave", "Masquerade", "Menagerie", "Minion",
+        "Moat", "Nobles", "Patrol", "Rabble", "Sea Witch", "Secret Passage",
+        "Shanty Town", "Smithy", "Spice Merchant", "Stables", "Steward",
+        "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
+        "Witch", "Witch's Hut", "Young Witch"]
 
 def test_requirement_bar_is_the_printed_bonus():
     # the threshold really binds: a cantrip is not a village, a Moat is a drawer

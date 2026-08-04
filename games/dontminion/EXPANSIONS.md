@@ -18,7 +18,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
 | 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
 | 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **SHIPPED** 2026-08-02 + audited (11 of 12 — Possession deferred) |
-| 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H). **No unpaid kernel rows** | planned — pure card work |
+| 6 | **Dark Ages** (35 piles + Ruins/Shelters/Spoils/Madman/Mercenary) | on-trash triggers (the `trash` emit + `from:"self"`), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H); added `cost_ge`, `from_trash`, `deck_to_discard`, the `play_attack` before-play window and two reaction modes | **SHIPPED** 2026-08-04 + audited |
 | 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
@@ -281,6 +281,48 @@ ABOVE the reaction windows, so a Supply-played Attack resolved before anyone cou
 then, once reordered, ran twice, because `_open_attack_window` already parks the ability itself.
 The fix was to delete the continuation and reuse the kernel's own machinery, which is the right
 answer anyway: an attack is an attack however it reached play.
+
+## Phase 6 — Dark Ages: SHIPPED 2026-08-04
+
+**55 card definitions**, the largest batch in the roadmap and the first set with no second
+edition to trim it: 34 ordinary kingdom piles + the Knights pile (10 cards) + Ruins (5) +
+Shelters (3) + Spoils/Madman/Mercenary. Roster, costs, types and texts from the wiki chart
+(Wayback capture of `List_of_cards`, all 55 rows); every behaviour and edge case from the
+compendium's ch. VII entries, read per card rather than recalled.
+
+**The kernel readiness call in the plan held.** Phases 3H and 5H had already paid every row this
+set was going to hit, and the delta ended up being five small seams rather than a mechanism:
+`cost_ge`, `from_trash`, `deck_to_discard`, the `play_attack` before-play emit and the
+`discard`/`trash` reaction modes. Full list: `CLAUDE.md`, "Kernel v6".
+
+**What the playbook caught this time:**
+
+- **A GAIN THAT FOLLOWS A TRASH MUST BE PARKED BELOW IT.** Procession, Graverobber and Rebuild
+  each pushed their gain prompt *after* calling `trash()`. Pushes are LIFO, so the player was
+  asked what to gain before the trashed card's own when-trash ability resolved — a processioned
+  Fortress came back to hand only after the gain was picked, and the compendium spells the order
+  out for all three ("first play twice, then trash, then check cost, then gain"). Found by the
+  per-card test for the set's most famous combo. It is the phase-3 put-back lesson in the
+  opposite direction: there the discard had to come first, here the continuation does.
+- **A Bane or a Ferryman pile is IN THE GAME** ("if these extra cards have a special setup rule,
+  do that setup"), so a Hermit chosen as Young Witch's Bane has to bring the Madman pile. Found
+  by the audit pass, not by a test — nothing else looks at the interaction between two sets'
+  setup rules.
+- **The pile-name-is-not-a-card design was forced, not chosen.** `_priced` resolves a name that
+  IS a card to itself, so giving "Knights" a `CARDS` entry would have made the pile show its own
+  cost instead of its top card's — a Sir Martin on top really does cost $4. Everything that walks
+  a kingdom list had to tolerate a pile name instead: `grants`, `expansion_of`, `printed_cost`,
+  `push_name_card`, `bot_plan.features`, `REVIEWED`. That is the cost 3H deferred, paid here.
+
+**The bots.** `BM_TERMINALS` gained five measured entries (Cultist 76, Rogue/Marauder 62,
+Hunting Grounds 61, Catacombs 58 — all at 300 games, since the sweep's default 50 left four of
+them inside the noise band), and every non-drawing Dark Ages terminal was measured and rejected
+(Death Cart 0.008 … Hermit 0.350). `TERMINAL_CAPS` gained one: **Catacombs wants exactly one**
+(cap1 0.593 at n=400, confirmed after the n=120 signal, per the regression-to-the-mean rule the
+quantity sweep established).
+
+**Gates:** package suite (1240), full repo suite, the conservation soak over all four forced
+Dark Ages kingdoms, and all 27 REAL prod saves replayed v1/v2/v5/v7/v8 → 9.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 

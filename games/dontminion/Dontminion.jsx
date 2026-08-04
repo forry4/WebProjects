@@ -50,6 +50,7 @@ const EXPANSIONS = [
   { id: "hinterlands", name: "Hinterlands" },
   { id: "cornucopia", name: "Cornucopia & Guilds" },
   { id: "alchemy", name: "Alchemy" },
+  { id: "darkages", name: "Dark Ages" },
 ];
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
@@ -494,8 +495,16 @@ function fmtLog(e, names) {
     case "gain": return e.dest && e.dest !== "discard"
       ? `${who} gains ${art(e.card)} (to ${e.dest === "deck" ? "their deck" : e.dest})`
       : `${who} gains ${art(e.card)}`;
-    case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
+    case "gain_from_trash": return e.dest === "deck"
+      ? `${who} gains ${art(e.card)} from the trash, onto their deck`
+      : `${who} gains ${art(e.card)} from the trash`;
     case "return_to_pile": return `${who} returns ${art(e.card)} to its pile`;
+    // taking a card OUT of the trash without gaining it (Fortress)
+    case "from_trash": return e.dest === "hand"
+      ? `${who} takes ${art(e.card)} from the trash into their hand`
+      : `${who} takes ${art(e.card)} from the trash`;
+    case "deck_to_discard":
+      return `${who} puts their deck (${e.count} card${e.count === 1 ? "" : "s"}) into their discard pile`;
     case "play_from_supply": return `${who} plays ${art(e.card)} from the Supply, leaving it there`;
     case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
     case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;

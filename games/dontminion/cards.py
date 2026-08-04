@@ -1,4 +1,5 @@
-"""Dontminion static card data (Dominion Base 2E + Intrigue 2E) — the full 59-card dataset.
+"""Dontminion static card data — the full 238-card dataset (Base, Intrigue, Seaside,
+Prosperity, Hinterlands and Cornucopia & Guilds in 2E, plus Alchemy and Dark Ages).
 
 Verified against the Knutsen compendium (Dominion_CompleteRules_v11.1.pdf: ch. V editions/
 errata p37-38 + ch. VII Card Reference) and the dominionstrategy.com card-list pages for
@@ -23,9 +24,12 @@ Schema (frozen contract — see plan par.9):
     "expansion": str,             # "basic" | "base" | "intrigue"
     "kingdom": bool,
   }
-  KINGDOM = {"base": [...26 names...], "intrigue": [...26 names...]}
+  KINGDOM = {"base": [...26 names...], "intrigue": [...26 names...], ...}
+      — a list entry is a kingdom CARD, or (Dark Ages' "Knights") the name of a
+        dealt PILE that is not a card at all; see PILES.
+  PILES = {pile_name: {cost, expansion, kingdom, members, size}}
   pile_size(name, n_players) -> int
-  DATA_COMPLETE: bool — True only when all 59 cards are present and verified.
+  DATA_COMPLETE: bool — True only when every set's cards are present and verified.
 """
 
 import re
@@ -681,6 +685,223 @@ CARDS.update({
                         "expansion": "alchemy", "kingdom": False},
 })
 
+# --- Dark Ages (35 Supply piles + Ruins/Shelters/Spoils/Madman/Mercenary) ----
+# No second edition exists, so nothing is trimmed: 34 ordinary kingdom piles
+# plus the KNIGHTS pile (10 differently named cards in one shuffled pile), the
+# Ruins pile (5 different cards, included when a Looter is in the kingdom), the
+# 3 Shelters (which replace the starting Estates, and belong to no pile) and
+# the three non-Supply piles Spoils / Madman / Mercenary.
+#
+# FOUR NEW TYPES, all inert flags the cards themselves read: `looter` (its
+# presence in the kingdom is what includes the Ruins pile), `ruins`, `knight`
+# and `shelter` (Vagrant reads all three by name).
+_KNIGHT_ATTACK = ("Each other player reveals the top 2 cards of their deck, "
+                  "trashes one of them costing from $3 to $6, and discards the "
+                  "rest. If a Knight is trashed by this, trash this.")
+
+CARDS.update({
+    "Altar":             {"cost": 6, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Trash a card from your hand. Gain a card costing up to $5.",
+                        "expansion": "darkages", "kingdom": True},
+    "Armory":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain a card onto your deck costing up to $4.",
+                        "expansion": "darkages", "kingdom": True},
+    "Band of Misfits":   {"cost": 5, "types": ["action", "command"], "coins": 0, "vp": 0,
+                        "text": "Play a non-Command non-Duration Action card from the Supply that costs less than this, leaving it there.",
+                        "expansion": "darkages", "kingdom": True},
+    "Bandit Camp":       {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nGain a Spoils.",
+                        "expansion": "darkages", "kingdom": True},
+    "Beggar":            {"cost": 2, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "Gain 3 Coppers to your hand.\nWhen another player plays an Attack card, you may first discard this to gain 2 Silvers, putting one onto your deck.",
+                        "expansion": "darkages", "kingdom": True},
+    "Catacombs":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Look at the top 3 cards of your deck. Choose one: Put them into your hand; or discard them and +3 Cards.\nWhen you trash this, gain a cheaper card.",
+                        "expansion": "darkages", "kingdom": True},
+    "Count":             {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Choose one: Discard 2 cards; or put a card from your hand onto your deck; or gain a Copper.\nChoose one: +$3; or trash your hand; or gain a Duchy.",
+                        "expansion": "darkages", "kingdom": True},
+    "Counterfeit":       {"cost": 5, "types": ["treasure"], "coins": 1, "vp": 0,
+                        "text": "$1\n+1 Buy\nYou may play a non-Duration Treasure from your hand twice. Trash it.",
+                        "expansion": "darkages", "kingdom": True},
+    "Cultist":           {"cost": 5, "types": ["action", "attack", "looter"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nEach other player gains a Ruins. You may play a Cultist from your hand.\nWhen you trash this, +3 Cards.",
+                        "expansion": "darkages", "kingdom": True},
+    "Death Cart":        {"cost": 4, "types": ["action", "looter"], "coins": 0, "vp": 0,
+                        "text": "You may trash this or an Action card from your hand, for +$5.\nWhen you gain this, gain 2 Ruins.",
+                        "expansion": "darkages", "kingdom": True},
+    "Feodum":            {"cost": 4, "types": ["victory"], "coins": 0, "vp": "feodum",
+                        "text": "Worth 1 VP per 3 Silvers you have (round down).\nWhen you trash this, gain 3 Silvers.",
+                        "expansion": "darkages", "kingdom": True},
+    "Forager":           {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\n+1 Buy\nTrash a card from your hand, then +$1 per differently named Treasure in the trash.",
+                        "expansion": "darkages", "kingdom": True},
+    "Fortress":          {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nWhen you trash this, put it into your hand.",
+                        "expansion": "darkages", "kingdom": True},
+    "Graverobber":       {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Choose one: Gain a card from the trash costing from $3 to $6, onto your deck; or trash an Action card from your hand and gain a card costing up to $3 more than it.",
+                        "expansion": "darkages", "kingdom": True},
+    "Hermit":            {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Look through your discard pile. You may trash a non-Treasure from it or from your hand. Gain a card costing up to $3.\nAt the end of your Buy phase this turn, if you didn't gain any cards in it, exchange this for a Madman.",
+                        "expansion": "darkages", "kingdom": True},
+    "Hunting Grounds":   {"cost": 6, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+4 Cards\nWhen you trash this, gain a Duchy or 3 Estates.",
+                        "expansion": "darkages", "kingdom": True},
+    "Ironmonger":        {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top card of your deck; you may discard it. Either way, if it is an...\nAction card, +1 Action\nTreasure card, +$1\nVictory card, +1 Card",
+                        "expansion": "darkages", "kingdom": True},
+    "Junk Dealer":       {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+$1\nTrash a card from your hand.",
+                        "expansion": "darkages", "kingdom": True},
+    "Marauder":          {"cost": 4, "types": ["action", "attack", "looter"], "coins": 0, "vp": 0,
+                        "text": "Gain a Spoils. Each other player gains a Ruins.",
+                        "expansion": "darkages", "kingdom": True},
+    "Market Square":     {"cost": 3, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+1 Buy\nWhen one of your cards is trashed, you may discard this from your hand to gain a Gold.",
+                        "expansion": "darkages", "kingdom": True},
+    "Mystic":            {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\n+$2\nName a card, then reveal the top card of your deck. If you named it, put it into your hand.",
+                        "expansion": "darkages", "kingdom": True},
+    "Pillage":           {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "Trash this. If you did, gain 2 Spoils, and each other player with 5 or more cards in hand reveals their hand and discards a card that you choose.",
+                        "expansion": "darkages", "kingdom": True},
+    "Poor House":        {"cost": 1, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$4\nReveal your hand. -$1 per Treasure card in your hand. (You can't go below $0.)",
+                        "expansion": "darkages", "kingdom": True},
+    "Procession":        {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "You may play a non-Duration Action card from your hand twice. Trash it. Gain an Action card costing exactly $1 more than it.",
+                        "expansion": "darkages", "kingdom": True},
+    "Rats":              {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nGain a Rats. Trash a card from your hand other than a Rats (or reveal a hand of all Rats).\nWhen you trash this, +1 Card.",
+                        "expansion": "darkages", "kingdom": True},
+    "Rebuild":           {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nName a card. Reveal cards from your deck until you reveal a Victory card you did not name. Discard the rest, trash the Victory card, and gain a Victory card costing up to $3 more than it.",
+                        "expansion": "darkages", "kingdom": True},
+    "Rogue":             {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+$2\nIf there are any cards in the trash costing from $3 to $6, gain one of them. Otherwise, each other player reveals the top 2 cards of their deck, trashes one of them costing from $3 to $6, and discards the rest.",
+                        "expansion": "darkages", "kingdom": True},
+    "Sage":              {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nReveal cards from the top of your deck until you reveal one costing $3 or more. Put that card into your hand and discard the rest.",
+                        "expansion": "darkages", "kingdom": True},
+    "Scavenger":         {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nYou may put your deck into your discard pile. Put a card from your discard pile onto your deck.",
+                        "expansion": "darkages", "kingdom": True},
+    "Squire":            {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$1\nChoose one: +2 Actions; or +2 Buys; or gain a Silver.\nWhen you trash this, gain an Attack card.",
+                        "expansion": "darkages", "kingdom": True},
+    "Storeroom":         {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\nDiscard any number of cards, then draw that many. Then discard any number of cards for +$1 each.",
+                        "expansion": "darkages", "kingdom": True},
+    "Urchin":            {"cost": 3, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nEach other player discards down to 4 cards in hand.\nWhen you play another Attack card with this in play, you may first trash this, to gain a Mercenary.",
+                        "expansion": "darkages", "kingdom": True},
+    "Vagrant":           {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top card of your deck. If it's a Curse, Ruins, Shelter, or Victory card, put it into your hand.",
+                        "expansion": "darkages", "kingdom": True},
+    "Wandering Minstrel": {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nReveal the top 3 cards of your deck. Put the Action cards back in any order and discard the rest.",
+                        "expansion": "darkages", "kingdom": True},
+
+    # --- the KNIGHTS: ten differently named cards in ONE shuffled pile -------
+    # `kingdom: False` keeps them out of the randomiser — the PILE is what gets
+    # dealt (cards.PILES below), and only its top card is ever visible.
+    "Dame Anna":         {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "You may trash up to 2 cards from your hand.\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Dame Josephine":    {"cost": 5, "types": ["action", "attack", "knight", "victory"], "coins": 0, "vp": 2,
+                        "text": _KNIGHT_ATTACK + "\n2 VP",
+                        "expansion": "darkages", "kingdom": False},
+    "Dame Molly":        {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Dame Natalie":      {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "You may gain a card costing up to $3.\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Dame Sylvia":       {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "+$2\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Sir Bailey":        {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Sir Destry":        {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    # "This Knight has a lower cost than the others."
+    "Sir Martin":        {"cost": 4, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "+2 Buys\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Sir Michael":       {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": "Each other player discards down to 3 cards in hand.\n" + _KNIGHT_ATTACK,
+                        "expansion": "darkages", "kingdom": False},
+    "Sir Vander":        {"cost": 5, "types": ["action", "attack", "knight"], "coins": 0, "vp": 0,
+                        "text": _KNIGHT_ATTACK + "\nWhen you trash this, gain a Gold.",
+                        "expansion": "darkages", "kingdom": False},
+
+    # --- the RUINS: one shuffled Supply pile, included iff a Looter is in the
+    # kingdom, holding as many cards as there are Curses ---------------------
+    "Abandoned Mine":    {"cost": 0, "types": ["action", "ruins"], "coins": 0, "vp": 0,
+                        "text": "+$1", "expansion": "darkages", "kingdom": False},
+    "Ruined Library":    {"cost": 0, "types": ["action", "ruins"], "coins": 0, "vp": 0,
+                        "text": "+1 Card", "expansion": "darkages", "kingdom": False},
+    "Ruined Market":     {"cost": 0, "types": ["action", "ruins"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy", "expansion": "darkages", "kingdom": False},
+    "Ruined Village":    {"cost": 0, "types": ["action", "ruins"], "coins": 0, "vp": 0,
+                        "text": "+1 Action", "expansion": "darkages", "kingdom": False},
+    "Survivors":         {"cost": 0, "types": ["action", "ruins"], "coins": 0, "vp": 0,
+                        "text": "Look at the top 2 cards of your deck. Discard them or put them back in any order.",
+                        "expansion": "darkages", "kingdom": False},
+
+    # --- the SHELTERS: they replace the 3 starting Estates and belong to NO
+    # pile ("Shelter cards don't belong to any pile") ------------------------
+    "Hovel":             {"cost": 1, "types": ["reaction", "shelter"], "coins": 0, "vp": 0,
+                        "text": "When you gain a Victory card, you may trash this from your hand.",
+                        "expansion": "darkages", "kingdom": False},
+    "Necropolis":        {"cost": 1, "types": ["action", "shelter"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions", "expansion": "darkages", "kingdom": False},
+    "Overgrown Estate":  {"cost": 1, "types": ["victory", "shelter"], "coins": 0, "vp": 0,
+                        "text": "0 VP\nWhen you trash this, +1 Card.",
+                        "expansion": "darkages", "kingdom": False},
+
+    # --- the three NON-SUPPLY piles ----------------------------------------
+    # "The cost of Spoils/Madman/Mercenary is $0 for any ability that refers to
+    # its cost" — the printed `$0*` only marks it as not being in the Supply.
+    "Spoils":            {"cost": 0, "types": ["treasure"], "coins": 3, "vp": 0,
+                        "text": "$3\nWhen you play this, return it to the Spoils pile.\n(This is not in the Supply.)",
+                        "expansion": "darkages", "kingdom": False},
+    "Madman":            {"cost": 0, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\nReturn this to the Madman pile. If you do, +1 Card per card in your hand.\n(This is not in the Supply.)",
+                        "expansion": "darkages", "kingdom": False},
+    "Mercenary":         {"cost": 0, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "You may trash 2 cards from your hand. If you did, +2 Cards, +$2, and each other player discards down to 3 cards in hand.\n(This is not in the Supply.)",
+                        "expansion": "darkages", "kingdom": False},
+})
+
+# The cards each shuffled Dark Ages pile is built from. Named constants rather
+# than a types scan so a set that reuses a type can't quietly join a pile.
+KNIGHTS = ["Dame Anna", "Dame Josephine", "Dame Molly", "Dame Natalie",
+           "Dame Sylvia", "Sir Bailey", "Sir Destry", "Sir Martin",
+           "Sir Michael", "Sir Vander"]
+RUINS = ["Abandoned Mine", "Ruined Library", "Ruined Market", "Ruined Village",
+         "Survivors"]
+RUINS_EACH = 10          # "shuffle the 50 Ruins cards" — 10 of each of the 5
+SHELTERS = ["Hovel", "Necropolis", "Overgrown Estate"]
+
+# PILES — dealt like a kingdom card, but the pile's NAME IS NOT A CARD.
+#
+# "Knight" and "Ruins" are TYPES, not names (compendium): there is no card
+# called "Knights", so the pile cannot have a CARDS entry — engine._priced
+# resolves a name that IS a card to itself, which would make the pile show its
+# own printed cost instead of its top card's (a Sir Martin on top costs $4).
+# Everything that walks a kingdom list therefore has to tolerate a name that is
+# a pile: `grants` returns False for one, `expansion_of` answers for it, and
+# the bots go through bot_traits.pile_traits.
+PILES = {
+    "Knights": {"cost": 5, "expansion": "darkages", "kingdom": True,
+                "members": KNIGHTS, "size": len(KNIGHTS)},
+}
+
+
 # Cards we have deliberately NOT implemented, and why. This is a real roster
 # hole, so it is DATA rather than a comment: `test_cards.py` asserts the set's
 # published size equals what we ship plus what is listed here, so the omission
@@ -708,7 +929,33 @@ KINGDOM = {
     "hinterlands": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "hinterlands"],
     "cornucopia": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "cornucopia"],
     "alchemy": [n for n, c in CARDS.items() if c["kingdom"] and c["expansion"] == "alchemy"],
+    # Dark Ages deals 35 piles: the 34 ordinary kingdom cards plus KNIGHTS,
+    # which is a pile name rather than a card (see PILES).
+    "darkages": ([n for n, c in CARDS.items()
+                  if c["kingdom"] and c["expansion"] == "darkages"]
+                 + [p for p, d in PILES.items()
+                    if d["kingdom"] and d["expansion"] == "darkages"]),
 }
+
+
+def expansion_of(name):
+    """Which set a kingdom-list entry belongs to — a CARD or a PILE name."""
+    if name in CARDS:
+        return CARDS[name]["expansion"]
+    return PILES[name]["expansion"] if name in PILES else None
+
+
+def printed_cost(name):
+    """The printed COIN cost of a kingdom-list entry — a CARD or a PILE name.
+
+    A split/shuffled pile's cost "follows the Randomizer card" (compendium,
+    SPLIT PILES: PILE TYPE AND COST), which is what the setup rules that pick a
+    pile by cost (Young Witch's Bane, Ferryman's extra pile) have to read. This
+    is SETUP data: in play, a pile costs what its top card costs, which is
+    engine.cost's job."""
+    if name in CARDS:
+        return CARDS[name]["cost"]
+    return PILES[name]["cost"] if name in PILES else None
 
 
 def overpays(name):
@@ -753,7 +1000,13 @@ def _printed_bonus(text, word):
 
 
 def grants(name, requirement):
-    """Does `name` satisfy the named kingdom requirement?"""
+    """Does `name` satisfy the named kingdom requirement?
+
+    A PILE name never does: only its top card is available, so a Knights pile
+    cannot promise the +2 Actions that one Dame Molly deep inside it prints.
+    (It is also not a card, so there is no text to read.)"""
+    if name not in CARDS:
+        return False
     spec = REQUIREMENTS[requirement]
     return _printed_bonus(CARDS[name]["text"], spec["word"]) >= spec["min"]
 
@@ -767,7 +1020,11 @@ def cards_granting(requirement, pool=None):
 
 def pile_size(name, n_players):
     """Supply pile size for a card, by player count (2-4)."""
+    if name in PILES:
+        return PILES[name]["size"]        # Knights: one shuffled pile of 10
     card = CARDS[name]
+    if name == "Rats":
+        return 20                         # "If Rats is in the Supply, use all 20"
     if name == "Copper":
         return 60 - 7 * n_players
     if name == "Silver":

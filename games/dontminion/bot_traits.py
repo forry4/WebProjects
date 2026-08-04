@@ -24,7 +24,7 @@ callers can cache freely.
 import functools
 import re
 
-from .cards import CARDS, KINGDOM
+from .cards import CARDS, KINGDOM, KNIGHTS, RUINS, SHELTERS
 
 # ── derived: printed bonuses ─────────────────────────────────────────────────
 
@@ -62,6 +62,15 @@ TRASHERS = {
     "Infirmary": "weak",
     # Alchemy
     "Apprentice": "tfb", "Transmute": "tfb",
+    # Dark Ages — the trashing set. Rats is "weak" on purpose: it trashes one
+    # card and hands you a Rats for it, so it thins nothing on net. Count's
+    # "trash your hand" is deliberately ABSENT: it takes the good cards with
+    # the bad, so a plan that reads it as a thinner would build on sand.
+    "Altar": "tfb", "Counterfeit": "tfb", "Forager": "tfb",
+    "Graverobber": "tfb", "Hermit": "tfb", "Junk Dealer": "tfb",
+    "Procession": "tfb", "Rebuild": "tfb",
+    "Death Cart": "weak", "Rats": "weak",
+    "Mercenary": "multi",
 }
 
 # Attack kind — what the attack DOES to its victims. Drives both the defensive
@@ -83,6 +92,18 @@ ATTACKS = {
     # Alchemy. Scrying Pool is filed as "topdeck": it does not junk anyone,
     # it reorders what they draw (the attacker chooses discard-or-keep).
     "Familiar": "curse", "Scrying Pool": "topdeck",
+    # Dark Ages. The RUINS-givers are filed under "curse": the kind drives the
+    # defensive read ("am I about to be junked?"), and a Ruin is junk that
+    # costs a card slot exactly like a Curse does — it just scores 0 instead
+    # of -1. The Knights are "trash" (they eat a $3-$6 card off your deck);
+    # Sir Michael also discards, and its harsher half is the trashing one.
+    "Cultist": "curse", "Marauder": "curse",
+    "Pillage": "discard", "Urchin": "discard", "Mercenary": "discard",
+    "Rogue": "trash",
+    "Dame Anna": "trash", "Dame Josephine": "trash", "Dame Molly": "trash",
+    "Dame Natalie": "trash", "Dame Sylvia": "trash", "Sir Bailey": "trash",
+    "Sir Destry": "trash", "Sir Martin": "trash", "Sir Michael": "trash",
+    "Sir Vander": "trash",
 }
 
 # Cards that answer an Attack from hand (the reaction window / immunity).
@@ -100,6 +121,10 @@ GAINERS = {
     "Demesne", "Courser",
     # Alchemy
     "University", "Transmute", "Apprentice",
+    # Dark Ages
+    "Altar", "Armory", "Bandit Camp", "Beggar", "Count", "Dame Natalie",
+    "Graverobber", "Hermit", "Marauder", "Procession", "Rats", "Rebuild",
+    "Rogue",
 }
 
 # The subset that can gain ANY pile of its own choosing, repeatably, without
@@ -111,7 +136,13 @@ GAINERS = {
 # 0.165). The remodel family is excluded for the same reason — each gain costs
 # a card from your hand, so the deck never grows.
 PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
-                "Haggler", "War Chest", "Anvil", "Tiara", "Smugglers"}
+                "Haggler", "War Chest", "Anvil", "Tiara", "Smugglers",
+                # Dark Ages: Armory and Hermit both gain a pile of your choice
+                # every play without spending a card to do it (Hermit's trash
+                # is optional) — the two Dark Ages cards a rush can be built
+                # on. Altar is NOT one: its gain costs a card from your hand,
+                # so the deck never grows, exactly like the remodel family.
+                "Armory", "Hermit"}
 
 # Looks at / discards / reorders cards to improve what you draw. The
 # reshuffle-control rules (R4: "don't overcartograph") key on these.
@@ -121,6 +152,9 @@ SIFTERS = {
     "Harbinger", "Vault", "Stables", "Inn", "Tide Pools", "Sea Chart",
     "Crystal Ball", "Jack of All Trades", "Patrol", "Library", "Scheme",
     "Native Village", "Haven", "Secret Passage", "Courtyard", "Wishing Well",
+    # Dark Ages
+    "Catacombs", "Ironmonger", "Mystic", "Sage", "Scavenger", "Storeroom",
+    "Survivors", "Vagrant", "Wandering Minstrel",
 }
 
 # Victory cards whose value is NOT a fixed number — the alt-VP article's
@@ -131,6 +165,9 @@ ALT_VP = {
     "Tunnel": "reaction_vp", "Farmland": "on_gain_vp",
     "Fairgrounds": "per_5_distinct", "Demesne": "per_gold",
     "Vineyard": "per_3_actions",
+    # Dark Ages. Dame Josephine is a flat 2 VP, so it is not an alt-VP card —
+    # it is a Victory card that happens to live in the Knights pile.
+    "Feodum": "per_3_silvers",
 }
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
@@ -142,6 +179,10 @@ VP_TOKENS = {"Monument", "Bishop", "Collection", "Investment"}
 # draw pool for exactly this reason.
 DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
              "Cellar", "Crossroads", "Shanty Town", "Minion", "Tactician",
+             # Dark Ages: Catacombs takes 3 either way, Madman empties your
+             # hand into a draw, Storeroom cycles as many as you discard, and
+             # Sage/Mystic/Vagrant each fish exactly one card into hand
+             "Catacombs", "Madman", "Storeroom", "Sage",
              # C&G: Advisor nets 2, Carnival up to 4, Journeyman exactly 3,
              # Housecarl scales with the table — none of them print "+N Cards"
              "Advisor", "Carnival", "Journeyman", "Housecarl",
@@ -185,6 +226,15 @@ BM_TREASURES = {"Fool's Gold", "Bank", "Hoard", "Farm", "Collection",
 BM_TERMINALS = {
     "Sea Witch": 94,
     "Witch": 90,
+    # Dark Ages, measured at 300 games each (the sweep's default 50 left all
+    # four of the non-Cultist ones inside the noise band). Every non-drawing
+    # Dark Ages terminal was measured too and every one of them LOST badly —
+    # Death Cart 0.008, Graverobber 0.025, Procession 0.058, Altar 0.171,
+    # Poor House 0.179, Squire 0.192, Count/Armory 0.242, Hermit 0.350 — which
+    # is the tier being honest about itself: they are engine parts, and this
+    # bot buys no engine. Pillage (0.10) and Storeroom (0.05) are absent for
+    # the same reason.
+    "Cultist": 76,
     "Wharf": 87,
     "Vault": 82,
     "Charlatan": 81,
@@ -199,6 +249,9 @@ BM_TERMINALS = {
     "Clerk": 71,
     "Cutpurse": 70,
     "Jester": 68,
+    "Rogue": 62,
+    "Marauder": 62,
+    "Hunting Grounds": 61,
     "Smithy": 65,
     "Militia": 65,
     "Masquerade": 65,
@@ -206,6 +259,7 @@ BM_TERMINALS = {
     "Bandit": 64,
     "Council Room": 63,
     "Carnival": 63,
+    "Catacombs": 58,
     "Rabble": 58,
     "Magnate": 58,
     "Berserker": 57,
@@ -215,10 +269,16 @@ BM_TERMINALS = {
 }
 # Every kingdom card that has been reviewed against the tables above. A set
 # lands => its 25-30 names land here => the test goes green again.
+#
+# A kingdom list may hold a PILE NAME that is not a card (Dark Ages' Knights),
+# and the cards a bot actually meets are that pile's MEMBERS — plus the Ruins,
+# the Shelters it starts with, and the non-Supply cards it can be handed. All
+# of those are classified above, so all of them belong here; the pile name
+# itself does not (traits() is a function of a card, and the bots reach a pile
+# through pile_traits).
 REVIEWED = frozenset(
-    KINGDOM["base"] + KINGDOM["intrigue"] + KINGDOM["seaside"]
-    + KINGDOM["prosperity"] + KINGDOM["hinterlands"] + KINGDOM["cornucopia"]
-    + KINGDOM["alchemy"]
+    [c for names in KINGDOM.values() for c in names if c in CARDS]
+    + KNIGHTS + RUINS + SHELTERS + ["Spoils", "Madman", "Mercenary"]
 )
 
 

@@ -21,6 +21,7 @@ requires (it re-enters `choose` per move).
 import functools
 
 from .bot_traits import traits
+from .cards import CARDS
 
 # A menu entry: buy `card` while we own fewer than `count`, but only once the
 # `after` prerequisites are satisfied (by count). Menus are read top-down.
@@ -51,11 +52,19 @@ class Plan:
 # ── board features ───────────────────────────────────────────────────────────
 
 def features(kingdom):
-    """What the kingdom offers, as counts of each role."""
+    """What the kingdom offers, as counts of each role.
+
+    A kingdom entry may be a PILE name rather than a card (Dark Ages' Knights).
+    Such a pile is skipped: what it offers CHANGES as it empties, so no fixed
+    role can be claimed for it — the same reason bot_traits.best_bm_terminal
+    skips one. A tier that wants to read what the pile is showing right now
+    asks bot_traits.pile_traits, which needs the live game."""
     f = {"villages": [], "draw": [], "trashers": [], "cursers": [],
          "payload": [], "buys": [], "gainers": [], "pile_gainers": [],
          "cantrips": [], "alt_vp": [], "attacks": [], "terminal_draw": []}
     for name in kingdom:
+        if name not in CARDS:
+            continue
         t = traits(name)
         if t["village"]:
             f["villages"].append(name)

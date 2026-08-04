@@ -8,13 +8,17 @@ cards to `REVIEWED`.
 """
 
 from games.dontminion import bot_traits as T
-from games.dontminion.cards import CARDS, KINGDOM
+from games.dontminion.cards import CARDS, KINGDOM, PILES
 
 
 def test_every_kingdom_card_is_reviewed():
     """A new set's cards MUST be added to the trait tables. Derived from the
-    data, so the next expansion fails here on the day it ships."""
-    every = {c for names in KINGDOM.values() for c in names}
+    data, so the next expansion fails here on the day it ships.
+
+    A kingdom list may name a PILE rather than a card (Knights): the cards a
+    bot meets are that pile's MEMBERS, so those are what must be reviewed."""
+    every = {c for names in KINGDOM.values() for c in names if c in CARDS}
+    every |= {c for p in PILES.values() for c in p["members"]}
     missing = sorted(every - set(T.REVIEWED))
     assert not missing, (
         f"{len(missing)} kingdom cards have no reviewed traits: {missing}. "

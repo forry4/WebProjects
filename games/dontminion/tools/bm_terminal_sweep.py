@@ -43,6 +43,8 @@ def candidates(include_ranked=False):
         for n in sorted(names):
             if not include_ranked and n in BM_TERMINALS:
                 continue
+            if n not in CARDS:
+                continue      # an ORDERED pile is nobody's reliable terminal
             t = traits(n)
             if CARDS[n].get("potion") or engine.cards_potion(n):
                 continue

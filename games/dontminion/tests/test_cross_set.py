@@ -1279,7 +1279,7 @@ def test_a_hinterlands_position_round_trips_through_json_and_migrate():
     blob = json.dumps(g)
     loaded = engine.migrate(json.loads(blob))
     assert loaded == json.loads(blob), "migrate mutated a current-shape save"
-    assert loaded["schema"] == engine.SCHEMA == 8
+    assert loaded["schema"] == engine.SCHEMA == 9
     rng = random.Random(11)
     for _ in range(120):                          # and it plays on from the blob
         if loaded["over"]:
@@ -2137,3 +2137,168 @@ def test_no_alchemy_card_is_ranked_as_a_big_money_terminal():
     from games.dontminion.cards import KINGDOM
     for name in KINGDOM["alchemy"]:
         assert bot_traits.traits(name)["bm_terminal_rank"] == 0, name
+
+
+# ── Dark Ages × everything that came before ──────────────────────────────────
+#
+# The cross-set step, which is where the put-back/when-discard bug was found in
+# ph. 3: a batch can only ever be as correct as the precedent it copies, so the
+# new mechanics are exercised against the OLD sets here rather than in the
+# per-card files.
+
+DA = ("base", "intrigue", "hinterlands", "darkages")
+DA_FILL = ["Village", "Smithy", "Market", "Festival", "Laboratory", "Moat"]
+
+
+def _da(kingdom, players=(A, B), seed=9, expansions=DA):
+    return engine.new_game(list(players), list(expansions), seed=seed,
+                           kingdom=list(kingdom))
+
+
+def test_a_throne_roomed_knight_does_everything_but_trash_itself_twice():
+    """"If you play a Knight without moving it into play, you still do
+    everything except trashing the Knight. (With Throne Room you do everything
+    twice even if the Knight is trashed the first time.)\""""
+    g = _da(["Throne Room", "Knights", "Fortress"] + DA_FILL + ["Cellar"])
+    give_hand(g, A, ["Throne Room", "Sir Bailey"])
+    g["seats"][A]["deck"] = ["Copper"] * 6
+    g["seats"][B]["deck"] = ["Dame Molly", "Copper", "Gold", "Estate"]
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Sir Bailey"])[0]
+    drain_decisions(g)
+    # the first play trashed Sir Bailey (it took a Knight); the second still ran
+    assert g["trash"].count("Sir Bailey") == 1
+    assert "Dame Molly" in g["trash"]
+    assert len(g["seats"][A]["hand"]) == 2, "+1 Card from BOTH plays"
+
+
+def test_a_throne_roomed_pillage_only_works_once():
+    """The 2019 card: "If you play Pillage without moving it into play, nothing
+    happens. (Throne Room + Pillage will only work once.)\""""
+    g = _da(["Throne Room", "Pillage"] + DA_FILL + ["Cellar", "Chapel"])
+    give_hand(g, A, ["Throne Room", "Pillage"])
+    give_hand(g, B, ["Copper"] * 5)
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Pillage"])[0]
+    drain_decisions(g)
+    assert g["seats"][A]["discard"].count("Spoils") == 2, "not 4"
+    assert len(g["seats"][B]["hand"]) == 4, "one discard, not two"
+
+
+def test_watchtower_can_trash_a_ruins_as_it_arrives():
+    g = _da(["Watchtower", "Marauder"] + DA_FILL + ["Cellar", "Chapel"],
+            expansions=("base", "prosperity", "darkages"))
+    give_hand(g, A, ["Marauder"])
+    give_hand(g, B, ["Watchtower"])
+    assert mv(g, A, {"type": "play_action", "card": "Marauder"})[0]
+    assert g["pending_pid"] == B and g["pending"][-1]["card"] == "Watchtower"
+    assert decide(g, B, ids=["play"])[0]
+    assert decide(g, B, ids=["trash"])[0]
+    assert g["seats"][B]["discard"] == []
+    assert any(engine.has_type(g, c, "ruins") for c in g["trash"])
+
+
+def test_trader_exchanges_a_gained_ruins_for_a_silver():
+    g = _da(["Trader", "Cultist"] + DA_FILL + ["Cellar", "Chapel"])
+    give_hand(g, A, ["Cultist"])
+    give_hand(g, B, ["Trader"])
+    g["seats"][A]["deck"] = ["Copper"] * 4
+    assert mv(g, A, {"type": "play_action", "card": "Cultist"})[0]
+    assert decide(g, B, ids=["play"])[0]
+    assert g["seats"][B]["discard"] == ["Silver"]
+    assert not any(engine.has_type(g, c, "ruins")
+                   for c in engine.owned_cards(g, B))
+
+
+def test_a_cost_reduction_moves_the_knights_band():
+    """Highway is turn-scoped and every new cost check goes through the
+    kernel's comparators, so a discount moves the "$3 to $6" band with
+    everything else: a $6 Gold is still inside it at $5."""
+    g = _da(["Highway", "Knights"] + DA_FILL + ["Cellar", "Chapel"])
+    give_hand(g, A, ["Highway", "Sir Destry"])
+    g["seats"][A]["deck"] = ["Copper"] * 4
+    g["seats"][B]["deck"] = ["Gold", "Estate"]
+    assert mv(g, A, {"type": "play_action", "card": "Highway"})[0]
+    assert engine.cost(g, "Gold") == 5
+    assert mv(g, A, {"type": "play_action", "card": "Sir Destry"})[0]
+    drain_decisions(g)
+    assert "Gold" in g["trash"] and "Estate" in g["seats"][B]["discard"]
+
+
+def test_a_cost_reduction_reaches_processions_exactly_one_more():
+    g = _da(["Highway", "Procession", "Fortress"] + DA_FILL + ["Cellar"])
+    give_hand(g, A, ["Highway", "Procession", "Village"])
+    g["seats"][A]["deck"] = ["Copper"] * 6
+    mv(g, A, {"type": "play_action", "card": "Highway"})
+    mv(g, A, {"type": "play_action", "card": "Procession"})
+    assert decide(g, A, cards=["Village"])[0]
+    piles = g["pending"][-1]["constraint"]["piles"]
+    # the Village now costs $2, so the target is a pile costing $3 WITH the
+    # discount applied — Fortress ($4 printed) is exactly that
+    assert all(engine.cost(g, p) == 3 for p in piles)
+    assert "Fortress" in piles
+
+
+def test_hovel_can_trash_itself_on_an_opponents_turn():
+    """The 2022 card is a when-GAIN ability: "This might trigger on an
+    opponent's turn." Swindler handing you an Estate is that case."""
+    g = _da(["Swindler", "Hermit"] + DA_FILL + ["Cellar", "Chapel"])
+    give_hand(g, A, ["Swindler"])
+    give_hand(g, B, ["Hovel"])
+    g["seats"][B]["deck"] = ["Estate"]
+    assert mv(g, A, {"type": "play_action", "card": "Swindler"})[0]
+    assert decide(g, A, pile="Estate")[0]          # the attacker's choice
+    assert g["pending_pid"] == B and g["pending"][-1]["card"] == "Hovel"
+    assert decide(g, B, ids=["play"])[0]
+    assert "Hovel" in g["trash"]
+
+
+def test_a_chapel_can_eat_your_shelters():
+    g = _da(["Chapel", "Hermit"] + DA_FILL + ["Cellar", "Fortress"])
+    give_hand(g, A, ["Chapel", "Hovel", "Necropolis", "Overgrown Estate"])
+    g["seats"][A]["deck"] = ["Copper"] * 4
+    assert mv(g, A, {"type": "play_action", "card": "Chapel"})[0]
+    assert decide(g, A, cards=["Hovel", "Necropolis", "Overgrown Estate"])[0]
+    drain_decisions(g)
+    for c in ("Hovel", "Necropolis", "Overgrown Estate"):
+        assert c in g["trash"], c
+    assert len(g["seats"][A]["hand"]) == 1, "Overgrown Estate's when-trash draw"
+
+
+def test_a_fortress_trashed_by_an_attack_returns_to_its_owners_hand():
+    g = _da(["Knights", "Fortress"] + DA_FILL + ["Cellar", "Chapel"])
+    give_hand(g, A, ["Dame Sylvia"])
+    g["seats"][B]["deck"] = ["Fortress", "Copper"]
+    assert mv(g, A, {"type": "play_action", "card": "Dame Sylvia"})[0]
+    drain_decisions(g)
+    assert "Fortress" in g["seats"][B]["hand"], "back to the VICTIM's hand"
+    assert "Fortress" not in g["trash"]
+
+
+def test_an_empty_ruins_pile_counts_toward_the_three_pile_ending():
+    """Ruins is an ordinary Supply pile for the game end — unlike Spoils."""
+    g = _da(["Cultist"] + DA_FILL + ["Cellar", "Chapel", "Fortress"])
+    g["supply"]["Ruins"] = 0
+    g["piles"]["Ruins"]["contents"] = []
+    assert engine.count_empty_piles(g) == 1
+
+
+def test_the_bots_finish_every_dark_ages_chunk():
+    """The whole roster under the shipped tier, in the shape the server runs:
+    a bot that mispriced a shuffled pile would raise inside the guaranteed
+    turn-finisher, on a live game."""
+    from games.dontminion import bot
+    from games.dontminion.cards import KINGDOM
+    names = sorted(KINGDOM["darkages"])
+    chunks = [names[i:i + 10] if i + 10 <= len(names) else names[-10:]
+              for i in range(0, len(names), 10)]
+    for i, kingdom in enumerate(chunks):
+        g = engine.new_game([A, B], ["darkages"], seed=300 + i, kingdom=kingdom)
+        rng = random.Random(i)
+        for _ in range(6000):
+            if g["over"]:
+                break
+            pid = g["pending_pid"] or g["turn"]
+            ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
+            assert ok, err
+        assert g["over"], f"chunk {i} never finished: {kingdom}"

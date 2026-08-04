@@ -32,7 +32,7 @@ from ..bot_traits import BM_TERMINALS
 from ..cards import CARDS
 
 EXPS = ["base", "intrigue", "seaside", "prosperity", "hinterlands",
-        "cornucopia", "alchemy"]
+        "cornucopia", "alchemy", "darkages"]
 
 # The defaults every arm is measured against.
 BASE = {"cap": 2, "deck": 16}
@@ -107,6 +107,8 @@ def main(argv=None):
     ap.add_argument("-n", "--boards", type=int, default=40)
     ap.add_argument("--colony", action="store_true",
                     help="colony boards only — the long-game question")
+    ap.add_argument("cards", nargs="*",
+                    help="percard: measure these cards instead of the top 12")
     a = ap.parse_args(argv)
 
     if a.colony:
@@ -130,9 +132,10 @@ def main(argv=None):
             report(f"second copy at deck>={deck:2d} vs >=16", wr, n)
 
     else:  # percard
-        cards = [c for c in sorted(BM_TERMINALS, key=BM_TERMINALS.get,
-                                   reverse=True)
-                 if CARDS[c]["expansion"] in EXPS][:12]
+        cards = a.cards or [c for c in sorted(BM_TERMINALS,
+                                              key=BM_TERMINALS.get,
+                                              reverse=True)
+                            if CARDS[c]["expansion"] in EXPS][:12]
         print(f"Per-card cap on a board where that card is the ONLY terminal "
               f"({len(seeds)} boards each)\n")
         print(f"  {'card':20s} {'cap1':>16s} {'cap3':>16s}")

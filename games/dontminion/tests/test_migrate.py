@@ -23,6 +23,7 @@ V6_KEYS_GAME = ("piles", "nonsupply")
 V7_KEYS_GAME = ("coffers", "bane", "ferryman_pile", "footpad_draw")
 V7_KEYS_SEAT = ("set_aside", "start_fx", "cleanup_aside")
 V8_KEYS_GAME = ("potions",)
+V9_KEYS_GAME = ("shelters",)
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -35,6 +36,9 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 9:
+        for k in V9_KEYS_GAME:
+            g.pop(k, None)
     if to_version < 8:
         for k in V8_KEYS_GAME:
             g.pop(k, None)
@@ -78,7 +82,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 8
+    assert _fresh()["schema"] == engine.SCHEMA == 9
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -89,7 +93,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
     g = engine.migrate(old)
     assert g["schema"] == engine.SCHEMA
     for k in (V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME + V7_KEYS_GAME
-              + V8_KEYS_GAME):
+              + V8_KEYS_GAME + V9_KEYS_GAME):
         assert k in g, k
     for seat in g["seats"].values():
         for k in V2_KEYS_SEAT + V7_KEYS_SEAT:
@@ -103,7 +107,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7])
+@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -127,7 +131,7 @@ def test_migrate_tolerates_junk():
 
 
 @pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME
-                         + V7_KEYS_GAME + V8_KEYS_GAME)
+                         + V7_KEYS_GAME + V8_KEYS_GAME + V9_KEYS_GAME)
 def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     """THE prod shape that broke this. `schema = 2` was stamped across the whole
     Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys
@@ -284,3 +288,37 @@ def test_a_pre_alchemy_save_gains_the_second_money_pool():
     engine.migrate(old)
     assert old["potions"] == 0
     _drive(old, moves=120)
+
+
+def test_a_pre_dark_ages_save_gains_the_shelter_flag():
+    """ph. 6 adds game["shelters"] — the record of whether this game dealt
+    Shelter starting decks. A live prod game predates it and played without
+    them, which is exactly what the fill says."""
+    old = _downgrade(_fresh(), 8)
+    assert "shelters" not in old
+    engine.migrate(old)
+    assert old["shelters"] is False
+    _drive(old, moves=120)
+
+
+def test_a_dark_ages_position_with_shuffled_piles_round_trips():
+    """The two ORDERED Supply piles (Ruins, Knights) and the three non-Supply
+    ones are pile-model state, so a save carrying them has to survive JSON and
+    migrate untouched — including the hidden `contents` order."""
+    g = engine.new_game([A, B], ["darkages"], seed=11,
+                        kingdom=["Knights", "Cultist", "Hermit", "Urchin",
+                                 "Marauder", "Fortress", "Rats", "Squire",
+                                 "Altar", "Ironmonger"])
+    assert engine.pile_count(g, "Knights") == 10
+    assert engine.pile_count(g, "Ruins") == 10          # 2 players => 10 Curses
+    assert set(g["nonsupply"]) == {"Madman", "Mercenary", "Spoils"}
+    _drive(g, moves=80)
+    blob = json.loads(json.dumps(g))
+    engine.migrate(blob)
+    assert blob == json.loads(json.dumps(g)), "migrate mutated a current save"
+    _drive(blob, moves=60)
+    for viewer in (A, B, None):
+        view = engine.player_view(blob, viewer)
+        json.dumps(view)
+        # the shuffled order is hidden information and never ships
+        assert "contents" not in view["piles"]["Knights"]
