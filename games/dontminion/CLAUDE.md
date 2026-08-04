@@ -72,6 +72,24 @@ one forward before shipping a shape change.
 copies of a growing log into every save blob — measured 487 KB → 150 KB on a late-game
 position, written to Turso on every move.
 
+**At-rest compaction (`persist.py`).** Dontminion has the BIGGEST rows in the DB (~15–20 KB stored
+vs CoC ~9.5 KB, Spender ~0.7 KB), so it is worth knowing exactly what is in them. `rng_state` is
+packed to base64 via `core.rooms.pack_rng` — **-8.1% stored** (mean of 6 played-out games, 2p/base
+through 4p/4-expansion). `_encode_state`/`_decode_state` in `main.py` are the only codec sites and
+every read must funnel through them — including `tools/replay_prod_saves.py`, which calls
+`expand_state` explicitly (a packed `rng_state` reaching `engine._load_rng` would hand it a base64
+blob where it wants 625 ints). **Every `undo_stack` snapshot carries its own `rng_state` and must be
+packed too** — up to `_UNDO_CAP` (30) of them mid-turn; packing some and not others breaks zlib's
+dedup and can make the row bigger than doing nothing (measured +49.5% on Duel).
+
+**The LOG is deliberately left uncompacted, and this is measured, not an oversight.** It is 58–67%
+of the row (1,426 entries on a played-out 2p game) and looks like the obvious target, but it is
+enormously repetitive and zlib already collapses it: encoding every card name to a table index took
+raw 104,863 → 93,436 and STORED only 20,042 → 19,474, i.e. **-2.8%** for a rewrite of the most-read
+structure in the game. What survives zlib is the log's actual information content — the only way to
+shrink it further is to log less, which is a product decision about replay and scrollback. The same
+measurement was run on CoC's and Duel's logs with the same verdict; don't relitigate it per game.
+
 ## THE FROZEN ENGINE API (stop-the-line to change — escalate, never edit the kernel from a batch)
 
 **Moves** are dicts keyed on `"type"`: `play_action` / `play_treasure` / `play_all_treasures` /

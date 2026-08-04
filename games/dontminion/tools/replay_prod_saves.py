@@ -31,6 +31,7 @@ import urllib.request
 
 from games.dontminion import bot, engine
 from core.rooms import decode_state
+from games.dontminion import persist
 
 CREDS = os.path.expanduser("~/.spender_turso")
 MOVE_CAP = 4000
@@ -72,7 +73,10 @@ def census(g):
 def check(row):
     """Migrate one save and play it forward. Returns a one-line report."""
     rid, status = row["id"], row["status"]
-    saved = decode_state(row["state"]).get("game")
+    # state_json is COMPACTED at rest (packed rng_state) — expand before replaying,
+    # or engine._load_rng gets a base64 blob where it wants 625 ints. A row written
+    # before compaction carries no marker and passes through untouched.
+    saved = persist.expand_state(decode_state(row["state"])).get("game")
     if not isinstance(saved, dict):
         return f"  {rid} {status:8} no game dict (open room) — skipped"
     was = saved.get("schema", 1)
@@ -133,7 +137,7 @@ def main():
             if args.file else fetch_saves())
     seen = collections.Counter()
     for row in rows:
-        g = decode_state(row["state"]).get("game")
+        g = persist.expand_state(decode_state(row["state"])).get("game")
         seen[g.get("schema", 1) if isinstance(g, dict) else "none"] += 1
         print(check(row), flush=True)
     print(f"\n{len(rows)} prod saves replayed; schema versions on prod: "

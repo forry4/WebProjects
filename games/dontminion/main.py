@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import engine
 from . import bot
 from . import cards
+from . import persist          # at-rest compaction for the state_json blob
 
 from core.db import cleanup_stale_games, maybe_cleanup_games
 from core.auth import (
@@ -200,6 +201,19 @@ def _persist_row(room_id, status, seats, host, state_json, now, created_at) -> N
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here: a
+    compacted blob reaching a caller that skipped `expand_state` would hand it a packed
+    rng_state where it expects a list of ints. Rows written before compaction carry no
+    marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     room = ROOMS.get(room_id)
     if not room:
@@ -223,7 +237,7 @@ def save_game(room_id: str) -> None:
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
         _persist_row, room_id, room.get("status", "open"), seats[:4],
-        room.get("host"), _rooms.encode_state(state), now, now,
+        room.get("host"), _encode_state(state), now, now,
     )
 
 
@@ -236,7 +250,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return _rooms.decode_state(row["state_json"])
+        return _decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -279,7 +293,7 @@ def list_open_games() -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         out.append({
@@ -307,7 +321,7 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -337,7 +351,7 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}

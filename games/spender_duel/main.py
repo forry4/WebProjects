@@ -31,6 +31,7 @@ from . import engine
 from . import bot
 from . import cards
 from . import compact
+from . import persist          # at-rest compaction for the state_json blob
 from . import replay
 # `ai` is used as a local name for the bot pid in places, so alias the module
 # (the same collision CoC hit — see its `coc_ai` import).
@@ -183,6 +184,19 @@ def _persist_row(room_id, status, p1id, p1name, p2id, p2name, host, state_json, 
         _save_conn = None
 
 
+def _encode_state(state: dict) -> str:
+    """The ONLY write path into `state_json` — compact, then the shared zlib codec."""
+    return _rooms.encode_state(persist.compact_state(state))
+
+
+def _decode_state(blob) -> dict:
+    """The ONLY read path out of `state_json`. Every read must funnel through here: a
+    compacted blob reaching a caller that skipped `expand_state` would hand it a packed
+    rng_state where it expects a list of ints. Rows written before compaction carry no
+    marker and pass through untouched."""
+    return persist.expand_state(_rooms.decode_state(blob))
+
+
 def save_game(room_id: str) -> None:
     room = ROOMS.get(room_id)
     if not room:
@@ -204,7 +218,7 @@ def save_game(room_id: str) -> None:
         _persist_row, room_id, room.get("status", "open"),
         pids[0] if pids else None, names[0] if names else None,
         pids[1] if len(pids) > 1 else None, names[1] if len(names) > 1 else None,
-        room.get("host"), _rooms.encode_state(state), now, now,
+        room.get("host"), _encode_state(state), now, now,
     )
 
 
@@ -217,7 +231,7 @@ def load_game_state(room_id: str) -> dict | None:
     if not row or not row["state_json"]:
         return None
     try:
-        return _rooms.decode_state(row["state_json"])
+        return _decode_state(row["state_json"])
     except Exception:
         return None
 
@@ -268,7 +282,7 @@ def list_user_games(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            state = _rooms.decode_state(r["state_json"])
+            state = _decode_state(r["state_json"])
         except Exception:
             state = {}
         g = state.get("game") or {}
@@ -295,7 +309,7 @@ def list_user_history(user_id: str) -> list[dict]:
     out = []
     for r in rows:
         try:
-            g = (_rooms.decode_state(r["state_json"]).get("game") or {})
+            g = (_decode_state(r["state_json"]).get("game") or {})
         except Exception:
             g = {}
         if not isinstance(g, dict) or not g.get("players"):

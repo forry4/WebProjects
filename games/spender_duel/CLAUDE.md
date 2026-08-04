@@ -45,6 +45,14 @@ invariants and deploy; full AI campaign detail in `docs/ai-research-log.md`.
   rather than a length, because its log PREPENDS and evicts; Duel's appends, so a length is exact.)
   Post-fix `turn_undo` is 3.3% of the stored blob and the log itself is 28% — shrinking that further
   would mean changing a format both `replay.py` and the frontend read, for a measured ~0.1%.
+- **At-rest compaction (`persist.py`)** — the live state is already id-compact (cards are ids, tokens
+  ints), so the only thing left was `rng_state`: packed to base64 via `core.rooms.pack_rng`, **-15.0%
+  stored** (8,240 → 7,002, mean of 5 played-out games). `_encode_state`/`_decode_state` in `main.py`
+  are the only codec sites; every read funnels through them. **Pack the `turn_undo` copy too or the
+  row GROWS** — zlib was already deduping the near-identical snapshot copy, and packing only the live
+  one measured **+49.5% versus doing nothing**. Three tests fail if you half-do it. (This is also why
+  `rng_state`'s *marginal* cost reads as ~1.8%: strip `turn_undo` first and the remaining copy is
+  ~4,800 bytes. The pair is ~59% of the row; neither alone looks like anything.)
 - **AI determinization needs `players[pid]["reserved_from_deck"]`** (a list of card ids stripped by
   `player_view`) — the log can't answer "was this reserve blind?" because it omits `card_id` for blind
   draws. Blind reserves resample PER LEVEL (which deck is public; identity is secret).

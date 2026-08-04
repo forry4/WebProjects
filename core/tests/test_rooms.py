@@ -7,6 +7,7 @@ libsql) and the stale-socket disconnect guard.
 """
 import asyncio
 import json
+import random
 import sqlite3
 
 import pytest
@@ -347,6 +348,52 @@ def test_decode_empty_or_none_is_an_empty_dict():
 def test_decode_accepts_bytes_from_the_driver():
     blob = rooms.encode_state({"k": "v"})
     assert rooms.decode_state(blob.encode("ascii")) == {"k": "v"}
+
+
+# ── rng_state packing (shared by CoC / Duel / Dontminion persist.py) ─────────
+def _rng_state(seed=7, draws=50):
+    r = random.Random(seed)
+    for _ in range(draws):
+        r.random()
+    st = r.getstate()
+    return [st[0], list(st[1]), st[2]]          # the JSON-safe shape games persist
+
+
+def test_pack_rng_round_trips_exactly():
+    st = _rng_state()
+    assert rooms.unpack_rng(rooms.pack_rng(st)) == st
+
+
+def test_packed_rng_reproduces_the_same_stream():
+    """A lossy pack would silently change every future draw in a resumed game."""
+    st = _rng_state()
+    back = rooms.unpack_rng(rooms.pack_rng(st))
+    a, b = random.Random(), random.Random()
+    a.setstate((st[0], tuple(st[1]), st[2]))
+    b.setstate((back[0], tuple(back[1]), back[2]))
+    assert [a.random() for _ in range(500)] == [b.random() for _ in range(500)]
+    assert [a.getrandbits(32) for _ in range(100)] == [b.getrandbits(32) for _ in range(100)]
+
+
+def test_pack_rng_actually_shrinks_it():
+    st = _rng_state()
+    assert len(json.dumps(rooms.pack_rng(st))) < len(json.dumps(st)) * 0.6
+
+
+def test_pack_rng_leaves_anything_unexpected_alone():
+    """Already packed, None, or a shape it doesn't recognise -> returned unchanged,
+    so a legacy or double-applied blob can't be corrupted."""
+    for odd in (None, [], [3], "nope", {"a": 1}, [3, "notalist", None]):
+        assert rooms.pack_rng(odd) == odd
+        assert rooms.unpack_rng(odd) == odd
+    packed = rooms.pack_rng(_rng_state())
+    assert rooms.pack_rng(packed) == packed          # idempotent
+    assert rooms.unpack_rng(rooms.unpack_rng(packed)) == rooms.unpack_rng(packed)
+
+
+def test_unpack_rng_passes_a_legacy_unpacked_value_through():
+    st = _rng_state()
+    assert rooms.unpack_rng(st) == st                # a pre-compaction row
 
 
 def test_a_corrupt_blob_still_raises_like_json_loads():

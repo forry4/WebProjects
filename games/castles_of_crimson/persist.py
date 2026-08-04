@@ -29,7 +29,7 @@ Two findings worth keeping, because both are counter-intuitive:
 """
 from __future__ import annotations
 
-import base64
+from core import rooms as _rooms
 
 _VERSION = 1
 _MARK = "_c"            # compaction version marker; absent => a legacy row, expand is a no-op
@@ -125,27 +125,12 @@ def _map_tiles(game: dict, fn) -> dict:
 
 
 # ── rng_state ────────────────────────────────────────────────────────────────
-# `random.getstate()` is (version, 625 words, gauss_next). As a JSON list of ints
-# that is ~6.7 KB of noise which zlib cannot touch; packed little-endian into base64
-# it is ~3.3 KB. Words are 32-bit (624 state + 1 index), so this is exact.
-
-def _pack_rng(st):
-    if not (isinstance(st, list) and len(st) >= 2 and isinstance(st[1], list)):
-        return st
-    try:
-        blob = b"".join(int(w).to_bytes(4, "little") for w in st[1])
-    except (OverflowError, ValueError, TypeError):
-        return st
-    return [st[0], {"b64": base64.b64encode(blob).decode("ascii")}] + list(st[2:])
-
-
-def _unpack_rng(st):
-    if not (isinstance(st, list) and len(st) >= 2 and isinstance(st[1], dict)
-            and "b64" in st[1]):
-        return st
-    blob = base64.b64decode(st[1]["b64"])
-    words = [int.from_bytes(blob[i:i + 4], "little") for i in range(0, len(blob), 4)]
-    return [st[0], words] + list(st[2:])
+# Packing lives in `core.rooms` — Duel and Dontminion pack theirs the same way, and a
+# per-game copy is exactly how the wire-redaction bug got fixed three times and stayed
+# broken. Read the rule in that module before touching this: pack EVERY copy in the
+# blob (here, the `turn_undo` snapshot too) or the dedup breaks and the row grows.
+_pack_rng = _rooms.pack_rng
+_unpack_rng = _rooms.unpack_rng
 
 
 # ── public API ───────────────────────────────────────────────────────────────

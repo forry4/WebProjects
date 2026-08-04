@@ -95,6 +95,44 @@ def decode_state(blob) -> dict:
     return json.loads(blob)
 
 
+# ── rng_state packing (used by every game's persist.py) ──────────────────────
+# `random.getstate()` is (version, 625 words, gauss_next). Stored as a JSON list of
+# ints that is ~6.7 KB of pure noise — zlib cannot touch it, so it survives the ~8x
+# compression around it and ends up dominating the row: 27-34% of a Dontminion blob,
+# 90% of a Where Wolf one (WW's answer was to stop persisting it — nothing read it).
+# Packed little-endian into base64 it is ~3.3 KB. The words are 32-bit (624 state + 1
+# index), so this is exact.
+#
+# THE RULE, learned the expensive way — PACK EVERY COPY IN THE BLOB OR NONE OF THEM.
+# A game and its undo snapshot(s) hold near-identical rng_states, and zlib was already
+# collapsing the duplicates to almost nothing. Packing only the live copy destroys that
+# dedup, and the blob comes out BIGGER than if you had done nothing: measured on Duel,
+# packing both copies is -15.2% and packing only the live one is **+49.5%**. Each
+# game's persist.py must therefore reach every snapshot too (Duel `turn_undo`,
+# Dontminion every entry of `undo_stack`).
+
+def pack_rng(st):
+    """[version, [625 ints], gauss] -> [version, {"b64": ...}, gauss]. Returns `st`
+    unchanged if it is not the expected shape (already packed, None, legacy)."""
+    if not (isinstance(st, list) and len(st) >= 2 and isinstance(st[1], list)):
+        return st
+    try:
+        blob = b"".join(int(w).to_bytes(4, "little") for w in st[1])
+    except (OverflowError, ValueError, TypeError):
+        return st                       # not 32-bit words -> leave it verbatim
+    return [st[0], {"b64": base64.b64encode(blob).decode("ascii")}] + list(st[2:])
+
+
+def unpack_rng(st):
+    """Inverse of pack_rng; passes an unpacked (legacy) value straight through."""
+    if not (isinstance(st, list) and len(st) >= 2
+            and isinstance(st[1], dict) and "b64" in st[1]):
+        return st
+    blob = base64.b64decode(st[1]["b64"])
+    words = [int.from_bytes(blob[i:i + 4], "little") for i in range(0, len(blob), 4)]
+    return [st[0], words] + list(st[2:])
+
+
 def ensure_room_loaded(rooms: Rooms, room_id: str,
                        loader: Callable[[str], Any]) -> Room | None:
     """Return the live room, hydrating it from the DB on first touch.

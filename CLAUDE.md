@@ -66,7 +66,8 @@ core/                  # SHARED BACKEND PLATFORM (imported by every feature; imp
   auth.py              #   users/sessions/passwords, admin + SITE_OWNER identity, reconnect tokens
   ratelimit.py         #   SlidingWindowLimiter (auth + WebSocket abuse throttle)
   config.py            #   cors_allowed_origins()
-  rooms.py             #   shared room-server primitives (normalize/token/db/send/delete/release_socket)
+  rooms.py             #   shared room-server primitives + the state_json codec
+                       #   (encode/decode_state, pack/unpack_rng) — all five games use it
   build_info.py        #   commit + started_at for /health, so a deploy can be VERIFIED not assumed
 games/
   spender/             # Spender (Splendor) — main.py exposes `router` (APIRouter), + ai/ stack
@@ -205,6 +206,27 @@ family. Same shape in all four games, differing only in table name and columns.
   **A length only works if the log strictly APPENDS**: CoC's prepends and caps by evicting the tail, so
   at the cap its length stops moving and a length delta silently restores nothing — it needs a
   monotonic counter. Check which shape a log has before copying the pattern across.
+- **At-rest compaction is a PERSISTENCE BOUNDARY, never a change to the live dict.** Each game has a
+  `persist.py` with `compact_state`/`expand_state`, and **`_encode_state`/`_decode_state` in its
+  `main.py` are the only codec sites — every read must funnel through them** (offline tools included:
+  Spender's `ai/serving/replay.py` and Dontminion's `tools/replay_prod_saves.py` both expand). The
+  live dict, the wire, the engines, the bots and the Rust parity fixtures all keep the verbose shape.
+  Blobs carry a `_c` marker, so pre-compaction rows load untouched and need no migration.
+- **`rng_state` is the sleeper cost, and you must pack EVERY copy in a blob or none.** 625 words of
+  Mersenne noise is incompressible, so it survives the ~8x zlib around it and dominates the row
+  (27–34% of a Dontminion blob, ~59% of a Duel one counting the snapshot copy, 90% of a WW one).
+  `core.rooms.pack_rng` halves it. But a game and its undo snapshot(s) hold near-identical states
+  that zlib was already deduping — packing only the live copy destroys that dedup and the row comes
+  out **+49.5% BIGGER than doing nothing** (measured on Duel). Reach every snapshot: Duel
+  `turn_undo`, Dontminion all 30 `undo_stack` entries, CoC `turn_undo`.
+- **Measure compaction AFTER zlib, and beware marginal costs.** Removing one key at a time
+  under-reports anything that has a near-duplicate elsewhere (Duel's `rng_state` marginal reads 1.8%;
+  the pair is ~59%). Use a cumulative strip-down to see what is really in a blob.
+- **Move logs are already as small as they get — do not relitigate this per game.** They are the
+  biggest single item in CoC (33%), Duel (28%) and Dontminion (58–67%) rows, but they are hugely
+  repetitive and zlib handles it: Dontminion card-names→indices was raw 104,863→93,436 but stored
+  only −2.8%; CoC pid→seat-index was −0.5%. Capping instead trades scrollback history (CoC) or breaks
+  seed+log reconstruction (Duel `replay.py`) — a product decision, not a compaction one.
 - **Anything that nests a whole-game snapshot defeats per-field wire redaction.** CoC's `turn_undo`
   carried its own copies of the four `_HIDE` keys and shipped the ordered supply + `rng_state` to every
   client despite the top-level redaction being correct — the 2026-07 audit fixed the top level and
