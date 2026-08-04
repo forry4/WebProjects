@@ -165,6 +165,25 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
 
+**Kernel v5H — Clean-up and Command. FROZEN.**
+- **CLEAN-UP IS INTERRUPTIBLE.** `_end_turn` parks the sweep as a `("__cleanup","sweep")`
+  continuation and emits **`cleanup_start`** (new) then `cleanup_discard` per in-play card,
+  all before anything moves. A consumer may push a real decision frame and RELOCATE a card:
+  with the prompt open, nothing is discarded, no new hand is drawn and the turn is not yet
+  counted. The sweep RE-READS the table rather than trusting a snapshot. Alchemist rides
+  `cleanup_start`; Scheme and Herbalist stay on the per-play `buy_phase_end` watcher on
+  purpose (their triggers are per-play, not per-card, so one prompt with the whole list is
+  the same decision with fewer clicks).
+- **`play_from_supply(game, pid, pile, count=True)`** — PLAY A CARD WHILE LEAVING IT: run a
+  Supply pile's top card's play ability with the card never moving. Band of Misfits and
+  Overlord (Command) and Inheritance's Estates all do exactly this. **It is NOT "play this
+  card as that one"** — the 2019 errata retired that reading. Attacks route through the
+  kernel's own `_open_attack_window`, so reactions resolve first, once.
+  `command_may_play(game, card)` is the eligibility rule (an Action, not a Command — "to
+  prevent loops" — and not a Duration, per the 2025 change); `playable_from_supply(game, pid,
+  pred=None)` enumerates the piles, asking **`pile_top`** because only the top card of a pile
+  is choosable. `"command"` is an allowed card type awaiting its first card in ph. 6.
+
 **Kernel v5 — the phase-5 (Alchemy) delta: THE COST VECTOR. FROZEN.**
 A cost is `{coins, potions}`. `cost()` still returns the COIN component, so every existing
 caller is unchanged; `potion_cost(game, card)` is the second dimension (printed — cost

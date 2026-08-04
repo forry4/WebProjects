@@ -495,6 +495,7 @@ function fmtLog(e, names) {
       : `${who} gains ${art(e.card)}`;
     case "gain_from_trash": return `${who} gains ${art(e.card)} from the trash`;
     case "return_to_pile": return `${who} returns ${art(e.card)} to its pile`;
+    case "play_from_supply": return `${who} plays ${art(e.card)} from the Supply, leaving it there`;
     case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
     case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;
     case "set_aside": return e.cards

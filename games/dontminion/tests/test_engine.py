@@ -1244,3 +1244,263 @@ def test_turn_start_reaction_and_duration_fx_share_one_pool():
     assert engine.apply_move(g, A, {"type": "decision", "ids": ["play"]})[0]
     assert "Clerk" in g["seats"][A]["in_play"]
     assert g["pending_pid"] == B                         # Clerk's attack hits B
+
+
+# --- INTERRUPTIBLE CLEAN-UP (ph. 5H) -----------------------------------------
+# Before 5H the `cleanup_start`/`cleanup_discard` events fired and the sweep
+# carried straight on, so a consumer could be TOLD a card was being discarded
+# and had no way to act on it. The sweep is a parked continuation now. These
+# pin the property that changed — a decision resolves BEFORE anything moves —
+# rather than re-testing the cards that ride it.
+
+def _alchemy_game(seed=42):
+    return engine.new_game(
+        [A, B], ["alchemy"], seed=seed,
+        kingdom=["Alchemist", "Apothecary", "Apprentice", "Familiar", "Golem",
+                 "Herbalist", "Philosopher's Stone", "Scrying Pool",
+                 "Transmute", "University"])
+
+
+def test_a_cleanup_decision_opens_before_anything_is_swept():
+    """THE point of the restructure. With the prompt open, the table is still
+    exactly as the player left it: nothing discarded, no new hand drawn, and
+    the turn still theirs."""
+    g = _alchemy_game()
+    g["seats"][A]["hand"] = ["Alchemist", "Potion"]
+    g["seats"][A]["deck"] = ["Gold"] * 20
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Alchemist"})[0]
+    g["phase"] = "buy"
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Potion"})[0]
+    hand_before = sorted(g["seats"][A]["hand"])
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+
+    f = g["pending"][-1]
+    assert f["card"] == "Alchemist" and f["pid"] == A
+    assert sorted(g["seats"][A]["in_play"]) == ["Alchemist", "Potion"], \
+        "nothing has been discarded from play yet"
+    assert sorted(g["seats"][A]["hand"]) == hand_before, "no new hand yet"
+    assert g["turn"] == A and not g["over"]
+    assert g["seats"][A]["turns_taken"] == 0, "the turn has not been counted"
+
+    assert engine.apply_move(g, A, {"type": "decision", "ids": ["yes"]})[0]
+    # ...and only now does the rest of Clean-up run
+    assert g["turn"] == B
+    assert g["seats"][A]["in_play"] == []
+    assert len(g["seats"][A]["hand"]) == 5
+
+
+def test_declining_a_cleanup_decision_still_finishes_the_turn():
+    g = _alchemy_game()
+    g["seats"][A]["hand"] = ["Alchemist", "Potion"]
+    g["seats"][A]["deck"] = ["Gold"] * 20
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Alchemist"})[0]
+    g["phase"] = "buy"
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Potion"})[0]
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, A, {"type": "decision", "ids": ["no"]})[0]
+    assert g["turn"] == B
+    assert "Alchemist" in g["seats"][A]["discard"]
+    assert len(g["seats"][A]["hand"]) == 5
+
+
+def test_a_cleanup_discard_consumer_can_actually_move_the_card():
+    """The `cleanup_discard` seam itself, with a synthetic consumer — no
+    shipped card rides it yet (Scheme and Herbalist use the sanctioned
+    buy_phase_end shape), and a seam nothing exercises is how you ship one
+    that does not work. Registered and removed around the test."""
+    from games.dontminion import effects
+
+    moved = []
+
+    def _steal(game, pid, frame, choice):
+        card = frame["data"].get("subject")
+        if card and card in game["seats"][pid]["in_play"]:
+            engine.topdeck_from_play(game, pid, card)
+            moved.append(card)
+
+    effects.STAGES[("__probe", "steal")] = _steal
+    effects.TRIGGERS["Village"] = [{"on": "cleanup_discard", "from": "self",
+                                    "stage": "steal"}]
+    # the trigger's SUBJECT is the card being discarded, and `from: "self"`
+    # fires when that subject is this card — so a Village in play steals itself
+    effects.STAGES[("Village", "steal")] = _steal
+    try:
+        g = engine.new_game([A, B], ["base"], seed=9,
+                            kingdom=["Village", "Smithy", "Moat", "Militia",
+                                     "Witch", "Throne Room", "Gardens",
+                                     "Market", "Cellar", "Festival"])
+        g["seats"][A]["hand"] = ["Village"]
+        g["seats"][A]["deck"] = ["Gold"] * 20
+        assert engine.apply_move(g, A, {"type": "play_action", "card": "Village"})[0]
+        assert "Village" in g["seats"][A]["in_play"]
+        g["phase"] = "buy"
+        assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+        assert moved == ["Village"], "the consumer never got to move it"
+        assert "Village" not in g["seats"][A]["discard"], \
+            "the sweep discarded a card the consumer had already moved"
+        assert "Village" in g["seats"][A]["hand"], "topdecked, then drawn"
+    finally:
+        effects.TRIGGERS.pop("Village", None)
+        effects.STAGES.pop(("__probe", "steal"), None)
+        effects.STAGES.pop(("Village", "steal"), None)
+
+
+def test_the_sweep_re_reads_the_table_rather_than_trusting_a_snapshot():
+    """A consumer that moves a card mid-Clean-up must not have it discarded
+    anyway, and a card it did NOT move must still go. Both halves at once."""
+    g = _alchemy_game()
+    g["seats"][A]["hand"] = ["Alchemist", "Potion", "Copper"]
+    g["seats"][A]["deck"] = ["Gold"] * 20
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Alchemist"})[0]
+    g["phase"] = "buy"
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Potion"})[0]
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Copper"})[0]
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, A, {"type": "decision", "ids": ["yes"]})[0]
+    discard = g["seats"][A]["discard"]
+    assert "Potion" in discard and "Copper" in discard
+    assert "Alchemist" not in discard
+    assert g["seats"][A]["in_play"] == []
+
+
+def test_clean_up_still_ends_the_game_when_the_last_province_goes():
+    """The game-end check lives in the parked half now, so it has to still
+    fire — a turn that ends the game must not leave the loser holding a
+    pending Clean-up decision."""
+    g = _alchemy_game()
+    g["seats"][A]["hand"] = ["Alchemist", "Potion"]
+    g["seats"][A]["deck"] = ["Gold"] * 20
+    assert engine.apply_move(g, A, {"type": "play_action", "card": "Alchemist"})[0]
+    g["phase"] = "buy"
+    assert engine.apply_move(g, A, {"type": "play_treasure", "card": "Potion"})[0]
+    g["supply"]["Province"] = 0
+    assert engine.apply_move(g, A, {"type": "end_phase"})[0]
+    assert engine.apply_move(g, A, {"type": "decision", "ids": ["yes"]})[0]
+    assert g["over"] and g["winners"] and g["scores"]
+    assert g["pending"] == []
+
+
+# --- PLAY A CARD WHILE LEAVING IT (ph. 5H) -----------------------------------
+# The primitive the CURRENT Band of Misfits, Overlord and Inheritance need: run
+# a Supply pile's top card's play ability with the card never moving. No
+# shipped card rides it yet, so these are contract tests — a seam nothing
+# exercises is how you ship one that does not work (the test_piles.py lesson).
+#
+# NOTE the ledger row this replaces described the PRE-2019 Band of Misfits,
+# which turned itself into another card. The current one does not: "unlike the
+# first version, this version does not change itself to another card, nor does
+# it play itself. Instead it PLAYS AN ACTION CARD from the Supply."
+
+K_SUPPLY = ["Village", "Smithy", "Moat", "Militia", "Witch", "Throne Room",
+            "Gardens", "Market", "Cellar", "Festival"]
+
+
+def _supply_game(kingdom=None, expansions=("base",)):
+    return engine.new_game([A, B], list(expansions), seed=9,
+                           kingdom=list(kingdom or K_SUPPLY))
+
+
+def test_playing_from_the_supply_runs_the_ability_and_moves_nothing():
+    g = _supply_game()
+    g["seats"][A]["deck"] = ["Gold"] * 6
+    before = g["supply"]["Village"]
+    assert engine.play_from_supply(g, A, "Village") is True
+    assert g["actions"] == 3, "1 + Village's +2"
+    assert g["seats"][A]["hand"].count("Gold") == 1
+    # ...and the card never left its pile
+    assert g["supply"]["Village"] == before
+    assert "Village" not in g["seats"][A]["in_play"]
+    assert "Village" not in engine.owned_cards(g, A)
+
+
+def test_playing_from_the_supply_counts_as_an_action_played():
+    """Conspirator-class counters read actions_played, and this IS a play."""
+    g = _supply_game()
+    g["seats"][A]["deck"] = ["Gold"] * 6
+    n = g["turn_ctx"]["actions_played"]
+    engine.play_from_supply(g, A, "Village")
+    assert g["turn_ctx"]["actions_played"] == n + 1
+    engine.play_from_supply(g, A, "Smithy", count=False)
+    assert g["turn_ctx"]["actions_played"] == n + 1, "count=False is honoured"
+
+
+def test_a_command_card_may_not_play_a_duration():
+    """The 2025 change: "Band of Misfits can no longer play Duration cards.\""""
+    g = _supply_game(["Wharf", "Village", "Smithy", "Moat", "Militia", "Witch",
+                      "Throne Room", "Gardens", "Market", "Cellar"],
+                     expansions=("base", "seaside"))
+    assert engine.command_may_play(g, "Wharf") is False
+    assert engine.play_from_supply(g, A, "Wharf") is False
+    assert "Wharf" not in engine.playable_from_supply(g, A)
+    assert g["seats"][A]["duration"] == []
+
+
+def test_a_command_card_may_not_play_another_command_card():
+    """"This is to prevent loops from occurring." No Command card ships yet, so
+    the type is injected here — the guard is what ph. 6 will rely on."""
+    from games.dontminion.cards import CARDS
+    types = CARDS["Village"]["types"]
+    CARDS["Village"]["types"] = types + ["command"]
+    try:
+        g = _supply_game()
+        assert engine.command_may_play(g, "Village") is False
+        assert engine.play_from_supply(g, A, "Village") is False
+        assert "Village" not in engine.playable_from_supply(g, A)
+        assert "Smithy" in engine.playable_from_supply(g, A)
+    finally:
+        CARDS["Village"]["types"] = types
+
+
+def test_only_action_cards_can_be_played_from_the_supply():
+    g = _supply_game()
+    for name in ("Gold", "Estate", "Curse", "Gardens"):
+        assert engine.command_may_play(g, name) is False
+        assert engine.play_from_supply(g, A, name) is False
+    assert engine.command_may_play(g, "Village") is True
+
+
+def test_an_empty_pile_offers_nothing_to_play():
+    g = _supply_game()
+    g["supply"]["Village"] = 0
+    assert "Village" not in engine.playable_from_supply(g, A)
+    assert engine.play_from_supply(g, A, "Village") is False
+
+
+def test_only_the_TOP_card_of_an_ordered_pile_is_playable():
+    """"You can only choose a card that is currently on top of a Supply pile" —
+    which is why this asks pile_top rather than reading the pile name. ph. 3H's
+    ordered piles are what make the two differ."""
+    g = _supply_game()
+    engine.add_pile(g, "Knights", supply=True,
+                    contents=["Smithy", "Gardens", "Village"])
+    assert "Knights" in engine.playable_from_supply(g, A)
+    g["seats"][A]["deck"] = ["Gold"] * 6
+    assert engine.play_from_supply(g, A, "Knights") is True
+    assert g["seats"][A]["hand"].count("Gold") == 3, "the TOP card was a Smithy"
+    assert engine.pile_count(g, "Knights") == 3, "and it stayed on its pile"
+    # ...and once a Victory card is on top, the pile is no longer playable
+    engine.gain(g, A, "Knights")
+    assert engine.pile_top(g, "Knights") == "Gardens"
+    assert "Knights" not in engine.playable_from_supply(g, A)
+
+
+def test_an_attack_played_from_the_supply_opens_the_reaction_window_first():
+    """Same order as any Attack play: reactions resolve BEFORE the ability."""
+    g = _supply_game()
+    give_hand(g, B, ["Moat"])
+    g["seats"][B]["hand"] = ["Moat", "Copper", "Copper", "Copper", "Copper"]
+    assert engine.play_from_supply(g, A, "Militia") is True
+    f = g["pending"][-1]
+    assert f["pid"] == B and f["kind"] == "choose_option"
+    assert engine.apply_move(g, B, {"type": "decision", "ids": ["react:Moat"]})[0]
+    assert len(g["seats"][B]["hand"]) == 5, "unaffected by the attack"
+    assert g["coins"] == 2, "...but the attacker still got the ability's $2"
+
+
+def test_playing_a_supply_attack_still_hits_an_unprotected_opponent():
+    g = _supply_game()
+    g["seats"][B]["hand"] = ["Copper"] * 5
+    assert engine.play_from_supply(g, A, "Militia") is True
+    engine._drive(g)
+    f = g["pending"][-1]
+    assert f["pid"] == B and f["constraint"]["min"] == 2

@@ -2011,6 +2011,84 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
             emit(game, "play_treasure", actor=pid, subject=card)
 
 
+def playable_from_supply(game, pid, pred=None):
+    """Supply piles whose TOP CARD a Command card may play. Only the top card
+    of a pile is choosable ("you can only choose a card that is currently on
+    top of a Supply pile"), which is why this asks pile_top rather than reading
+    the pile name — ph. 3H's ordered piles make the two differ."""
+    out = []
+    for name in sorted(game["supply"]):
+        top = pile_top(game, name)
+        if top is None or not command_may_play(game, top):
+            continue
+        if pred is not None and not pred(name):
+            continue
+        out.append(name)
+    return out
+
+
+def command_may_play(game, card):
+    """Can a Command card play this? Two exclusions, both from the current
+    card texts rather than the original ones:
+
+      * NOT another Command card — "this is to prevent loops from occurring".
+      * NOT a Duration (the 2025 change). Before it, playing one directly was
+        allowed and its later ability stopped after this turn.
+    """
+    return (has_type(game, card, "action")
+            and not has_type(game, card, "command")
+            and not has_type(game, card, "duration"))
+
+
+def play_from_supply(game, pid, pile, count=True):
+    """PLAY A CARD WHILE LEAVING IT — run the play ability of a Supply pile's
+    top card with the card never moving: it stays on its pile, and the Command
+    card that played it is the one in play.
+
+    This is what the CURRENT Band of Misfits and Overlord do, and what
+    Inheritance's Estates do ("play the card with your Estate token, leaving it
+    there"). It is deliberately NOT a "play this card AS that one": the 2019
+    errata retired that reading — "unlike the first version, this version does
+    not change itself to another card, nor does it play itself. Instead it
+    PLAYS AN ACTION CARD from the Supply."
+
+    Returns False if the pile's top card is not something a Command card may
+    play, so the caller can offer the choice without pre-filtering twice."""
+    card = pile_top(game, pile)
+    if card is None or not command_may_play(game, card):
+        return False
+    _log(game, pid, "play_from_supply", card=card, pile=pile)
+    if count:
+        game["turn_ctx"]["actions_played"] += 1
+    if has_type(game, card, "attack"):
+        # _open_attack_window ALREADY parks the play ability under the reaction
+        # windows, so this path needs no continuation of its own — adding one
+        # ran the attack twice. Same machinery as an Attack played from hand,
+        # which is the point: an attack is an attack however it reached play.
+        _open_attack_window(game, pid, card)
+        return True
+    _run_supply_ability(game, pid, card)
+    return True
+
+
+def _run_supply_ability(game, pid, card):
+    from . import effects
+    fn = effects.EFFECTS.get(card)
+    if fn is None:
+        return
+    prev = game.get("_actor")
+    game["_actor"] = pid
+    _push_depth(game)
+    try:
+        fn(game, pid)
+    finally:
+        _pop_depth(game)
+        if prev is None:
+            game.pop("_actor", None)
+        else:
+            game["_actor"] = prev
+
+
 def attack_reactions():
     """THE registry of cards that react to an Attack being played, merged from
     the effects modules. Was hardcoded to Moat + Diplomat in the kernel, which
@@ -2478,28 +2556,47 @@ def _maybe_auto_buy(game):
 
 
 def _end_turn(game, pid):
+    """START Clean-up. The SWEEP is parked as a continuation rather than run
+    inline, which is what makes Clean-up INTERRUPTIBLE: a consumer of
+    `cleanup_start` or `cleanup_discard` may push a real decision frame and
+    MOVE a card before anything is discarded and before the new hand is drawn.
+
+    Before ph. 5H the events fired but the sweep carried straight on, so a
+    consumer could be told a card was being discarded and had no way to act on
+    it — a seam that looked usable and was not. Three cards (Scheme,
+    Alchemist, Herbalist) worked around it with a `buy_phase_end` watcher.
+    """
     seat = game["seats"][pid]
     # durations: discard resolved entries, keep this turn's setups on the table
     kept_out = _cleanup_durations(game, pid)
+    push_auto(game, pid, "__cleanup", "sweep", data={"kept_out": list(kept_out)})
+    # "at the start of Clean-up" (Alchemist, Hermit-class) — before any card
+    # has moved, so a consumer can still see the whole table.
+    emit(game, "cleanup_start", actor=pid)
     inplay = list(seat["in_play"])
     for name in kept_out:
         inplay.remove(name)
-    # "when you discard this FROM PLAY" during Clean-up (Scheme). A distinct
-    # event from `discard`, deliberately: the when-discard reactions
+    # "when you discard this FROM PLAY" during Clean-up (Scheme, Herbalist). A
+    # distinct event from `discard`, deliberately: the when-discard reactions
     # (Tunnel/Trail/Weaver) are all "other than during a Clean-up phase" and
     # must NOT see this. Fired BEFORE the cards move, so a consumer can still
-    # find them in in_play; it may relocate a card, so the mover re-reads.
-    if inplay:
-        for c in list(inplay):
-            emit(game, "cleanup_discard", actor=pid, subject=c)
-        # a consumer may have MOVED a card off the table (Scheme topdecks it),
-        # so re-read what is actually still in play rather than trusting the
-        # snapshot. kept_out (Durations + their riders) is accounted for in the
-        # duration zone, so it must not also be discarded — or counted twice.
-        inplay = list(seat["in_play"])
-        for name in kept_out:
-            if name in inplay:
-                inplay.remove(name)
+    # find them in in_play — and now actually relocate them.
+    for c in inplay:
+        emit(game, "cleanup_discard", actor=pid, subject=c)
+
+
+def _k_cleanup_sweep(game, pid, frame, choice):
+    """The rest of Clean-up, once every start-of-Clean-up ability has resolved."""
+    seat = game["seats"][pid]
+    kept_out = frame["data"]["kept_out"]
+    # a consumer may have MOVED a card off the table (Scheme topdecks it), so
+    # re-read what is actually still in play rather than trusting a snapshot.
+    # kept_out (Durations + their riders) is accounted for in the duration
+    # zone, so it must not also be discarded — or counted twice.
+    inplay = list(seat["in_play"])
+    for name in kept_out:
+        if name in inplay:
+            inplay.remove(name)
     seat["discard"].extend(inplay)
     seat["in_play"] = []
     seat["discard"].extend(seat["hand"])
@@ -2583,6 +2680,9 @@ def _end_turn(game, pid):
     _arm_undo(game)
     _start_of_turn(game, nxt)   # duration fx queue as auto frames; watchers expire
     _maybe_auto_buy(game)       # a hand with no Action cards skips straight to buy
+
+
+KERNEL_STAGES[("__cleanup", "sweep")] = _k_cleanup_sweep
 
 
 def _finish_game(game):

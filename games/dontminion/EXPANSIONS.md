@@ -18,7 +18,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 3H | **HARDENING: the pile & source model** (no new cards) | see below — pays two ledger rows at once, standalone, behavior-preserving | **SHIPPED** 2026-07-31 |
 | 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
 | 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **SHIPPED** 2026-08-02 + audited (11 of 12 — Possession deferred) |
-| 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), ⚠ **card identity / "play-as" system** (Band of Misfits — see ledger) | planned |
+| 6 | Dark Ages (35 + Ruins/Shelters/Spoils/Knights) | on-trash triggers (emit exists), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H). **No unpaid kernel rows** | planned — pure card work |
 | 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
@@ -237,6 +237,51 @@ which is what correctly excludes a Duration that stays out ("if a card is not di
 Herbalist can't put it onto your deck"). If a future set adds a card that cares about the order
 of Clean-up itself, pay the row properly instead of adding a fourth watcher.
 
+## Phase 5H — the Clean-up and Command hardening (no new cards) — SHIPPED 2026-08-04
+
+Two ledger rows, standalone and behaviour-preserving, with the full suite as the net. Same
+shape as 3H and for the same reason: both rows came due at ph. 6, and Dark Ages is the biggest
+card batch yet (35). Bundling a kernel change into it is exactly what 3H existed to avoid.
+
+**1. Clean-up is interruptible.** `_end_turn` now parks the sweep as a `__cleanup/sweep`
+continuation and emits `cleanup_start` (new) and `cleanup_discard` before anything moves. A
+consumer can push a real decision frame and relocate a card, with the whole table still intact —
+nothing discarded, no new hand drawn, the turn not yet counted. Before this the events fired
+into a sweep that carried straight on, so the seam LOOKED usable and was not; three cards worked
+around it. Alchemist moved onto `cleanup_start`, which is its printed timing exactly, and all
+four of its tests passed unchanged — which is itself the evidence the compendium was right that
+the workaround had no practical difference. Scheme and Herbalist stay where they are on purpose:
+their triggers are per-play, so a literal per-card consumer would ask yes/no for every card
+instead of once with the list.
+
+**2. "Play a card while leaving it" — and the ledger row was describing a retired card.**
+
+This is the finding worth keeping. The row said we needed `play_card_as(game, pid, physical,
+as_name)` with "identity-vs-physicality explicit". That is the PRE-2019 Band of Misfits. The
+current card, and Overlord with it, does not change itself into anything — it plays an Action
+card **from the Supply, leaving it there**. Inheritance's Estates turn out to be the same shape.
+So the whole identity system was unnecessary: what shipped is `play_from_supply` +
+`command_may_play` + `playable_from_supply`, about forty lines, reusing the existing attack
+window and effect dispatch.
+
+**This is the SECOND ledger row written from a card's old text** — phase 3 found the same thing
+with Haggler and wrote "a reminder that a ledger row written from a card's OLD text schedules
+the wrong work". It happened again, and cost more this time, because the wrong work was sized as
+a kernel campaign. **Re-read the current card before building a row, not just when the row comes
+due.** The compendium marks version history explicitly (`2019/2025 (current) version`); that
+marker is the thing to check first.
+
+Two rules came free from reading the current text: a Command card may not play a **Duration**
+(the 2025 change) or another **Command** card ("to prevent loops from occurring"), and only the
+**top card of a Supply pile** is choosable — which is why `playable_from_supply` asks
+`pile_top` rather than the pile name, and why ph. 3H's ordered piles matter here.
+
+One real bug, caught by the contract tests: the first cut parked its own ability continuation
+ABOVE the reaction windows, so a Supply-played Attack resolved before anyone could Moat it — and
+then, once reordered, ran twice, because `_open_attack_window` already parks the ability itself.
+The fix was to delete the continuation and reuse the kernel's own machinery, which is the right
+answer anyway: an attack is an attack however it reached play.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |
@@ -251,14 +296,14 @@ of Clean-up itself, pay the row properly instead of adding a fourth watcher.
 | ~~No `discard` emit point~~ **PAID (pre-ph.3)** — `discard()` emits per card AFTER the whole batch (the 2022 all-at-once change the Tunnel ruling needs); Clean-up bypasses `discard()` so when-discard correctly can't fire there, pinned by a test | Tunnel/Trail/Weaver (ph. 3) | done |
 | ~~`self` triggers couldn't see the emit context~~ **PAID (pre-ph.3)** — `**extra` now reaches self-trigger data, so a when-BUY-this card can tell a buy from any other gain | Farmland (ph. 3) | done |
 | ~~`in_play` triggers get no SUBJECT~~ **PAID, but the premise was WRONG.** Paid for Haggler — except Haggler 2022 "SETS UP A LATER ABILITY … for the rest of this turn", i.e. Hoard's per-play `until="turn_end"` watcher, NOT an `in_play` trigger. The row described the pre-2022 card. The fix (push receives `ctx`) is kept: a trigger seeing its own event's context is the right contract and Treasury ignores it. But nothing in ph. 3 needed it — a reminder that a ledger row written from a card's OLD text schedules the wrong work | (nothing — mis-scheduled) | done, not needed |
-| **HALF-PAID: `cleanup_discard` event exists, `_end_turn` is still NOT interruptible.** The event fires per in-play card before the sweep, and is deliberately separate from `discard` (Tunnel/Trail/Weaver are all "other than during a Clean-up phase" and must not see it) — but `emit` parks an AUTO FRAME and `_end_turn` never drives frames, so a consumer cannot yet MOVE the card. Scheme needs `_end_turn` restructured to resolve a decision before the sweep and before the 5-card draw | Scheme (ph. 3) | ph. 3, WITH Scheme |
+| ~~`_end_turn` is not interruptible~~ **PAID ph. 5H** — the Clean-up SWEEP is a parked `__cleanup/sweep` continuation, so a `cleanup_start` or `cleanup_discard` consumer can push a real decision and MOVE a card before anything is discarded and before the new hand is drawn. Alchemist moved onto `cleanup_start` (its printed timing); Scheme and Herbalist stay on `buy_phase_end` deliberately — their triggers are per-play, not per-card, so asking once with the whole list is the same decision with fewer prompts | Scheme (ph. 3) | done |
 | ~~Off-turn resource leak~~ **PAID ph. 3** — the kernel binds `_actor` around every effect and stage, so card code still calls `add_*` with no pid and a bonus earned on someone else's turn EVAPORATES (logged `off_turn_bonus`) instead of landing in the turn player's pool. NB the first attempt (an optional `pid=` argument) did NOT work: card code never passes one | Trail, Nomads | done |
 | ~~Clean-up doesn't sweep OTHER seats' `in_play`~~ **PAID ph. 3** — every seat's table is swept at each clean-up; durations and riders protected | Guard Dog/Trail/Weaver/Berserker | done |
 | ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
 | ~~Non-supply gain sources~~ **PAID ph. 3H** — `gain_from` + a second count index, so "a card from the Supply" excludes them by construction rather than by remembering | Rewards (ph. 4) | done |
 | ~~Pile abstraction~~ **PAID ph. 3H** — `game["piles"]`: ordered `contents` + retained `face` + `members` + `attach`; cost/type resolve through the face, the census unpacks it, the wire never sees the order | Ruins/Knights (ph. 6), scheduled early deliberately | done |
 | **Move-surface trio**: ~~generic `spend`~~ **PAID ph. 4** — `{"type":"spend","what":...,"n":...}` + `spendable()` as THE reader + a counters row in the resbar; Villagers/Favors/Debt-payoff are now registry + data. Still owed: `buy_landscape` (Events/Projects), `call` (Reserves) | spend: ph. 4 · buy_landscape/call: ph. 7 | spend done · ph. 7 pre-work |
-| **Card identity / "play-as"**: a physical card played AS another (Band of Misfits ph. 6, Inheritance ph. 7, Ways ph. 10, Overlord). Needs `play_card_as(game, pid, physical, as_name)` where identity-vs-physicality is explicit (types/cost read from WHICH?— the compendium's lose-track rules decide). The Charlatan `types_of` seam is the foothold | Band of Misfits (ph. 6) | ph. 6 pre-work, DESIGN reviewed against ph. 7/10 consumers before freezing |
+| ~~Card identity / "play-as"~~ **PAID ph. 5H — AND THE ROW'S PREMISE WAS WRONG.** It described the PRE-2019 Band of Misfits, which turned itself into another card. The current one does not: "unlike the first version, this version does not change itself to another card, nor does it play itself. Instead it PLAYS AN ACTION CARD from the Supply" — and Inheritance's Estates resolve to the same shape ("play the card with your Estate token, leaving it there"). So no identity system was needed at all: `play_from_supply` + `command_may_play` + `playable_from_supply`, ~40 lines. **Ways (ph. 10) is a DIFFERENT and smaller mechanism** — substitute a card's play ability, not change what it is — and should be designed then, not now | Band of Misfits (ph. 6) | done |
 | **`play_all_treasures` suppression must become a STATE predicate.** Today it's a static card list (`MANUAL_TREASURES` — treasures that push a decision). Highwayman negates the FIRST Treasure its victim plays, so which treasure goes first becomes a real choice and the button must not make it for them — a condition the card list cannot express, since it depends on game state and LIFTS once the negation is spent. Wanted: `autoplay_block(game, pid) -> reason \| None`, fed by both the static set and watcher-registered blocks, read by `legal_moves` + the handler + shipped in `player_view` (state-dependent ⇒ NOT `/catalog`, unlike the static set) so the button hides AND says why. Also fixes the ordering row below if the block carries an order | Highwayman (ph. 12) | ph. 12 pre-work — but build it at the FIRST set that adds an order-sensitive treasure |
 | ~~Autoplay ORDER is hand order~~ **PAID (post-ph. 2)** — `AUTOPLAY_LAST` registry + a stable sort in the handler; Bank now plays after the rest ($6 → $10 on the measured hand, matching optimal play). Adding a Treasure with an ability now means choosing a bucket: manual / autoplay-last / autoplay — see CLAUDE.md | Bank (was live) | done |
 | **Landscape cards** (Events/Landmarks/Projects/Ways/Traits/Prophecies/Allies) + a "global" trigger source + the board-row UI | Adventures (ph. 7) | ph. 7 kernel+UI work |

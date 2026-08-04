@@ -10,7 +10,7 @@ from games.dontminion import cards
 
 
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
-                 "duration", "reward"}
+                 "duration", "reward", "command"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
                       "hinterlands", "cornucopia", "alchemy"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
