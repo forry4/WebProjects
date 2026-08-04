@@ -38,6 +38,11 @@ ATTACK_REACTIONS = {}
 # the ability pool and never pollutes the what-resolves-first prompt. The stage
 # keeps its own guard as the resolve-time re-check.
 WATCHER_WHENS = {}
+# ph. 6H: landscape_name -> fn(game, pid) — the ability an Event/Project hands
+# you when you BUY it. Same shape as EFFECTS, on the other table: a landscape
+# is not a card (see cards.LANDSCAPES), so it cannot live in EFFECTS without
+# making every `card in EFFECTS` test wrong.
+LANDSCAPE_FX = {}
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -76,3 +81,7 @@ for _m in _MODULES:
         if _key in WATCHER_WHENS:
             raise RuntimeError(f"dontminion: duplicate WATCHER_WHENS entry {_key!r}")
         WATCHER_WHENS[_key] = _fn
+    for _name, _fn in getattr(_m, "LANDSCAPE_FX", {}).items():
+        if _name in LANDSCAPE_FX:
+            raise RuntimeError(f"dontminion: duplicate LANDSCAPE_FX entry {_name!r}")
+        LANDSCAPE_FX[_name] = _fn

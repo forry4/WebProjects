@@ -52,6 +52,14 @@ const EXPANSIONS = [
   { id: "alchemy", name: "Alchemy" },
   { id: "darkages", name: "Dark Ages" },
 ];
+// Adventures tokens that sit ON a Supply pile (engine.TOKEN_KINDS). Public
+// markers, so they render for every player; the glyph is the token's own
+// shorthand rather than an emoji, because "+1 Card on Smithy" has to be
+// readable at a pile-corner size.
+const TOKEN_GLYPH = {
+  "+card": "+C", "+action": "+A", "+buy": "+B", "+coin": "+$",
+  "-cost": "−$2", trashing: "🗑", estate: "🏠",
+};
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
 const basicsRowFor = (supply) => {
@@ -506,6 +514,18 @@ function fmtLog(e, names) {
     case "deck_to_discard":
       return `${who} puts their deck (${e.count} card${e.count === 1 ? "" : "s"}) into their discard pile`;
     case "play_from_supply": return `${who} plays ${art(e.card)} from the Supply, leaving it there`;
+    // landscapes (Events/Projects/...): bought with a Buy and money, but they
+    // are not cards, so nothing is gained and there is no pile
+    case "buy_landscape": return `${who} buys ${e.name}`;
+    // the Tavern mat: a Reserve card waits there to be CALLED, which is not
+    // playing it
+    case "to_tavern": return `${who} puts ${art(e.card)} on their Tavern mat`;
+    case "call": return `${who} calls ${art(e.card)}`;
+    case "move_token":
+      return `${who} moves their ${e.token} token onto the ${e.pile} pile`;
+    case "seat_token": return e.value == null
+      ? `${who} loses their ${e.token} token`
+      : `${who} takes their ${e.token} token`;
     case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
     case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;
     case "set_aside": return e.cards
@@ -782,6 +802,38 @@ export default function Dontminion({ myId, authUser, onExit }) {
     .filter(([, p]) => p.supply === false)
     .map(([n]) => n)
     .sort(byCost);
+  // LANDSCAPES (Events/Projects/...). Their static data (cost, text, kind) is
+  // in the catalog and never changes — "its cost cannot be changed by cards
+  // like Bridge" — so unlike a pile there is no per-game price to read; the
+  // game dict says only which ones are on the table and their state.
+  const landscapeData = catalog?.landscapes || {};
+  const boardLandscapes = Object.keys(game?.landscapes || {}).sort();
+  // MIRRORS engine.landscape_gate + the legal_moves enumeration. Display only,
+  // as always — the server stays authoritative and will refuse anything this
+  // gets wrong. Kept beside the pile affordance for exactly that reason.
+  const landscapeBuyable = (name) => {
+    const d = landscapeData[name] || {};
+    const st = game?.landscapes?.[name] || {};
+    if (!["event", "project"].includes(st.kind)) return false;
+    if (d.once === "turn" && st.bought_turn === game.turn_number) return false;
+    if (d.once === "game" && (st.bought_by || []).includes(myId)) return false;
+    return inBuy && game.buys > 0 && (d.cost ?? 99) <= game.coins;
+  };
+  // "spent" for the player: a once-per-game Event they have already bought is
+  // shown dimmed and ticked rather than silently un-clickable.
+  const landscapeSpent = (name) => {
+    const d = landscapeData[name] || {};
+    const st = game?.landscapes?.[name] || {};
+    return d.once === "game" && (st.bought_by || []).includes(myId);
+  };
+  // Adventures tokens ON a pile: pile.attach.tokens = {pid: [kind, ...]}. Every
+  // player's, flattened — they are public markers, and whose is whose matters
+  // (a -$2 token only discounts on its OWNER's turns).
+  const pileTokens = (name) => {
+    const toks = game?.piles?.[name]?.attach?.tokens || {};
+    return Object.entries(toks)
+      .flatMap(([pid, kinds]) => (kinds || []).map((kind) => ({ pid, kind })));
+  };
   const seatOrder = game?.players || Object.keys(names);
   // The single opponent play box tracks the ACTION: the opponent whose turn it
   // is — or, on your turn, whoever plays next. (2p: always the one opponent.)
@@ -1333,7 +1385,50 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {/* Young Witch's Bane — the one extra pile added to the Supply. Marked
             top-right (the Potion cost now lives on the card face itself). */}
         {game.bane === name && <span className="dm-bane" title="Young Witch's Bane">B</span>}
+        {/* Adventures tokens sitting ON this pile. Top-LEFT, deliberately: the
+            Bane marker owns top-right and the count pill straddles the bottom
+            edge, so this is the only corner left free. */}
+        {pileTokens(name).length > 0 && (
+          <span className="dm-tokens">
+            {pileTokens(name).map(({ pid, kind }, i) => (
+              <span key={i} className={"dm-tok" + (pid === myId ? " dm-tok-mine" : "")}
+                title={`${names[pid] || pid}'s ${kind} token`}>
+                {TOKEN_GLYPH[kind] || "•"}
+              </span>
+            ))}
+          </span>
+        )}
       </div>
+    );
+  };
+
+  // A landscape face: LANDSCAPE-orientation (wide), because that is what they
+  // physically are and what tells them apart from the Supply at a glance.
+  // Click buys; the info gesture (right-click / press-and-hold) reads it, like
+  // every other face.
+  const renderLandscape = (name, idx = 0) => {
+    const d = landscapeData[name] || {};
+    const buyable = landscapeBuyable(name);
+    const spent = landscapeSpent(name);
+    const cls = "dm-lscape dm-ls-" + (d.kind || "event")
+      + (buyable ? " dm-ls-buyable" : "") + (spent ? " dm-ls-spent" : "");
+    // The face carries its own rules text and `title` carries the full version,
+    // so unlike a card a landscape needs no info MODAL — and a non-buyable one
+    // stays a live element (never `disabled`) precisely so it keeps its
+    // tooltip: reading it must not depend on being able to afford it.
+    return (
+      <button key={name} type="button" className={cls}
+        style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}
+        title={`${name} — $${d.cost ?? "?"}\n${d.text || ""}`}
+        onClick={() => buyable && mv({ type: "buy_landscape", name })}>
+        <span className="dm-ls-name">{name}</span>
+        <span className="dm-ls-text">{d.text || ""}</span>
+        <span className="dm-ls-foot">
+          <span className="dm-ls-kind">{d.kind || "event"}</span>
+          <span className="dm-ls-cost">${d.cost ?? "?"}</span>
+        </span>
+        {spent && <span className="dm-ls-tick" title="you have bought this">✓</span>}
+      </button>
     );
   };
 
@@ -1411,6 +1506,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
               /* face down — the opponent's mat contents are hidden, count only */
               <DmMatChip emoji="🏕" count={s.village_count} label="Native Village mat"
                 cards={null} onView={setMatView} />
+            )}
+            {/* ...whereas a Tavern mat IS face up, so an opponent's contents show */}
+            {(s.tavern || []).length > 0 && (
+              <DmMatChip emoji="🍺" count={s.tavern.length} label="Tavern mat"
+                cards={s.tavern} onView={setMatView} />
             )}
           </div>
         </div>
@@ -1820,6 +1920,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
           {focusOpp && renderOppPlay(focusOpp)}
           {renderPrompt()}
           <div className="dm-supply">
+            {/* Landscapes sit ABOVE the Supply, and the row renders NOTHING at
+                all when the game has none — no ghost row and no layout shift,
+                which is every game until Adventures (ph. 7) ships one. */}
+            {boardLandscapes.length > 0 && (
+              <div className="dm-lscape-row">{boardLandscapes.map(renderLandscape)}</div>
+            )}
             <div className="dm-supply-row dm-basics">{basicsRowFor(game.supply).map(renderPile)}</div>
             <div className="dm-supply-row dm-kingdom">{kingdomByCost.map(renderPile)}</div>
             {asidePiles.length > 0 && (
@@ -1902,6 +2008,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
               {(mySeat?.dur_aside_count || 0) > 0 && (
                 <DmMatChip emoji="⏳" count={mySeat.dur_aside_count} label="Set aside"
                   cards={mySeat.dur_aside} onView={setMatView} />
+              )}
+              {/* The Tavern mat is PUBLIC — the cards lie face up — so it is
+                  the same chip for you and for an opponent, contents and all.
+                  There is no Call button: every call in the game is a timed
+                  WINDOW, so it arrives as an ordinary decision prompt. */}
+              {(mySeat?.tavern || []).length > 0 && (
+                <DmMatChip emoji="🍺" count={mySeat.tavern.length} label="Tavern mat"
+                  cards={mySeat.tavern} onView={setMatView} />
               )}
             </div>
             <div className="dm-handrow">

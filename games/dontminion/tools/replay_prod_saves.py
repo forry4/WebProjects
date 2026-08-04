@@ -91,8 +91,8 @@ def check(row):
         assert key in g, f"{rid}: migrate left {key} missing"
     for pid in g["players"]:
         seat = g["seats"][pid]
-        for key in _SEAT_KEYS:
-            assert isinstance(seat[key], list), f"{rid}: seat {pid} missing {key}"
+        for key, kind in _SEAT_KEYS.items():
+            assert isinstance(seat[key], kind), f"{rid}: seat {pid} missing {key}"
         assert isinstance(g["vp_tokens"][pid], int), f"{rid}: no vp_tokens"
     for key in engine._fresh_turn_ctx():
         assert key in g["turn_ctx"], f"{rid}: turn_ctx missing {key}"
@@ -125,7 +125,11 @@ def check(row):
 
 
 _GAME_KEYS = tuple(engine._GAME_FILLS)
-_SEAT_KEYS = ("deck", "hand", "discard", "in_play") + tuple(engine._SEAT_FILLS)
+# name -> the TYPE migrate guarantees. Derived from the fill factories rather
+# than assumed to be `list`: ph. 6H's seat token store is a dict, and hardcoding
+# the type here turned a correct migration into a tool crash.
+_SEAT_KEYS = {k: list for k in ("deck", "hand", "discard", "in_play")}
+_SEAT_KEYS.update({k: factory for k, factory in engine._SEAT_FILLS.items()})
 
 
 def main():

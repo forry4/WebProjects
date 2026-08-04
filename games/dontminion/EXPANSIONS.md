@@ -19,8 +19,8 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 4 | **Cornucopia & Guilds 2E** (26 + 6 Rewards) | Coffers (spendable counter + UI counters row + generic `spend` move), overpay-on-buy, differing-names, Rewards non-supply pile (rode 3H), Young Witch's Bane + Ferryman's extra pile, Footpad's game rule, per-seat set-asides + start-of-turn abilities | **SHIPPED** 2026-08-01 + audited |
 | 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **SHIPPED** 2026-08-02 + audited (11 of 12 — Possession deferred) |
 | 6 | **Dark Ages** (35 piles + Ruins/Shelters/Spoils/Madman/Mercenary) | on-trash triggers (the `trash` emit + `from:"self"`), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H); added `cost_ge`, `from_trash`, `deck_to_discard`, the `play_attack` before-play window and two reaction modes | **SHIPPED** 2026-08-04 + audited |
-| 6H | **HARDENING: the LANDSCAPE kernel + board-row UI** (no new cards) | pays the two ph.-7 ledger rows standalone: `cards.LANDSCAPES` + `game["landscapes"]` (a purchasable thing that is NOT a card and NOT a pile), the `buy_landscape` move (printed cost — "cannot be changed by cards like Bridge" — + once-per-turn/game gates with ONE reader), the Tavern mat seat zone + generic `call` move + `CALLS` registry, the `action_resolved` continuation-emit, `play_attack`→`before_play` generalization, Adventures-token storage + the `-cost` hook in `cost()`, and the landscapes/tavern/token frontend. Spec: `.claude-plans/dontminion-phase6h-landscapes.md` | planned — next |
-| 7 | Adventures (30 + 20 Events + Travellers) | LANDSCAPE system v1: Events (generic `buy_landscape` move + board row UI), Reserve/Tavern mat + generic `call` move, Adventures tokens on piles, exchange-on-discard (Travellers); Inheritance rides the identity system | planned |
+| 6H | **HARDENING: the LANDSCAPE kernel + board-row UI** (no new cards) | pays the two ph.-7 ledger rows standalone: `cards.LANDSCAPES` + `game["landscapes"]` (a purchasable thing that is NOT a card and NOT a pile), the `buy_landscape` move (printed cost — "cannot be changed by cards like Bridge" — + once-per-turn/game gates with ONE reader), the Tavern mat seat zone + the `from:"tavern"` call window, the `action_resolved` continuation-emit, `play_attack`→`before_play` generalization, Adventures-token storage + the `-cost` hook in `cost()`, and the landscapes/tavern/token frontend | **SHIPPED** 2026-08-04 |
+| 7 | Adventures (30 + 20 Events + Travellers) | **kernel-complete after 6H — a registry-and-data batch.** The 20 Events ride `LANDSCAPE_FX` + `buy_landscape`; the 9 Reserves ride the `tavern` zone + `from:"tavern"` windows + `action_resolved`; the 6 token Events ride `move_token` + the `-cost` hook; the Travellers ride `add_pile(supply=False)` (3H) + `exchange` (ph. 3); Mission rides the Outpost machinery; Inheritance rides `play_from_supply` (5H). Per-card spots still to spec THERE, not before: Distant Lands (a Reserve that scores ON the mat), Hireling (a Duration that never leaves play), Miser's Copper mat, Wine Merchant's discard from the mat | planned — next |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
 | 10 | Menagerie (30 + Events + 20 Ways) | Exile mat (+ discard-from-exile on gain), Horses non-supply (3H), Ways (alternative play modes — rides the identity system) | planned |
@@ -325,6 +325,77 @@ quantity sweep established).
 **Gates:** package suite (1240), full repo suite, the conservation soak over all four forced
 Dark Ages kingdoms, and all 27 REAL prod saves replayed v1/v2/v5/v7/v8 → 9.
 
+## Phase 6H — the LANDSCAPE kernel (no new cards) — SHIPPED 2026-08-04
+
+Hardening, in the 3H/5H mold: seams built and contract-tested with NO consumer, so Adventures'
+30 cards + 20 Events land on paths that were already exercised rather than paths that merely
+existed. `cards.LANDSCAPES` ships **empty** — there is nothing to buy on any board today.
+
+**The design call the phase turned on: a landscape gets its OWN home.** It has no copies, is
+never gained, never sits in a zone, and "buying an Event is not buying a card" (p32) — so a
+`CARDS` entry would give it a cost `cost()` would then discount, a `kingdom` flag that would
+deal it as one of the ten, and a name every card-shaped census would have to learn to skip.
+That is the **Knights lesson in reverse**: there an existing structure had to be taught to
+tolerate a foreign name, and the cost was six call sites (`grants`, `expansion_of`,
+`printed_cost`, `push_name_card`, `bot_plan.features`, `REVIEWED`). Here the foreign thing
+arrived before its first consumer, so it got its own table and cost none of them.
+
+**Two spec'd pieces came out different, both deliberately:**
+
+- **There is NO `call` move, and the plan was wrong to promise one.** Every Reserve call in
+  Adventures is a timed WINDOW — at the start of your turn (Guide, Ratcatcher, Transmogrify),
+  when you gain a card (Duplicate), directly after resolving an Action (Royal Carriage, Coin of
+  the Realm), at the end of your Buy phase (Wine Merchant). A free move would have been a rules
+  deviation: a call has to be ordered in the ability POOL against everything else the same
+  occurrence triggered, which a move enumerated in `legal_moves` cannot be. So calling rides
+  the existing offer machinery as a new trigger source, **`from:"tavern"`** — the hand-reaction
+  shape on the other public per-seat zone — and `engine.call_card` is the kernel helper its
+  stage calls. Move surface unchanged; bots, undo, redaction and all six renderers untouched.
+- **The `CALLS` registry was dropped for saying nothing.** A trigger spec already names the
+  stage that runs when the call is accepted; a second registry mapping card → the same stage
+  would have been a place for the two to disagree.
+
+**The generalization that had to be conditional.** Ph. 6's `play_attack` emit became
+`before_play`, fired for EVERY Action play, because an Adventures "+" token is the same timing
+class as Urchin ("after before-play abilities like Adventures tokens, Kiln, Urchin", p33) and
+one event beats two. But an Attack gets the ordering free (`_open_attack_window` already parks
+the play ability) while an ordinary play runs its effect INLINE — and a pool parked before an
+inline call resolves *after* it, i.e. exactly backwards. So the ability is parked underneath the
+window only when the emit actually collects a consumer, and runs inline when it doesn't. That
+is what makes the change byte-identical on today's boards rather than merely equivalent, and
+Urchin's existing suite passing UNCHANGED is the net.
+
+**"Directly after resolving" is not a place in `play_action_card`.** It returns while the play's
+frames are still pending, and "completely resolve the play ability before playing it again"
+(p17) defines resolution as those frames having drained. `action_resolved` is therefore a
+`("__play","resolved")` continuation parked before the play pushes anything, so LIFO fires it
+exactly then — and a throne-roomed Action emits twice, once per resolution, which is what a
+Royal Carriage called after each needs.
+
+**The behaviour-preservation proof is the rng, not the test count.** Setup is one call sequence,
+so inserting a step into it re-deals every existing seed's board. `deal_landscapes` returns
+before touching the rng while the pool is empty — which is every set today — so the sequence is
+untouched, and that is why the whole pre-6H suite (forced boards, expected kingdoms, the
+determinism soak) still reads the same. Pinned directly by
+`test_the_dealer_draws_no_entropy_when_there_is_nothing_to_deal`.
+
+**What the playbook caught:** the wire-contract test's emit scan named all five new log events
+before any of them could ship as raw field names, and the prod-save replay tool crashed on a
+correct migration because it derived its seat-key check from `_SEAT_FILLS` but hardcoded `list`
+— the phase's token store is a dict. Both are the mechanical guards doing their job.
+
+**The dormant frontend WAS rendered once, by hand.** "Ships dormant" otherwise means "ships
+unverified": the standing `screens.mjs` pin can only assert the row renders NOTHING, which a
+component that throws on its first real landscape would also satisfy. So three real Adventures
+Events were temporarily put in `cards.LANDSCAPES`, the gate re-run against a board that dealt
+one, and the row inspected live (name/cost/kind/text present, 223×76px, no overflow, inside the
+board's width, first child of `.dm-supply`) before both patches were reverted. Do this at every
+dormant-UI phase — it costs one run and it is the only thing between "the empty case is pinned"
+and "the feature works".
+
+**Gates:** package suite (1291, +48), full repo suite (2362), `npm run smoke` + `npm run screens`
+(with a new dormant-row pin), and all **27 real prod saves** replayed v1/v2/v5/v7/v8 → 10.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |
@@ -345,11 +416,11 @@ Dark Ages kingdoms, and all 27 REAL prod saves replayed v1/v2/v5/v7/v8 → 9.
 | ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
 | ~~Non-supply gain sources~~ **PAID ph. 3H** — `gain_from` + a second count index, so "a card from the Supply" excludes them by construction rather than by remembering | Rewards (ph. 4) | done |
 | ~~Pile abstraction~~ **PAID ph. 3H** — `game["piles"]`: ordered `contents` + retained `face` + `members` + `attach`; cost/type resolve through the face, the census unpacks it, the wire never sees the order | Ruins/Knights (ph. 6), scheduled early deliberately | done |
-| **Move-surface trio**: ~~generic `spend`~~ **PAID ph. 4** — `{"type":"spend","what":...,"n":...}` + `spendable()` as THE reader + a counters row in the resbar; Villagers/Favors/Debt-payoff are now registry + data. Still owed: `buy_landscape` (Events/Projects), `call` (Reserves) | spend: ph. 4 · buy_landscape/call: ph. 7 | spend done · **6H** (spec'd: `.claude-plans/dontminion-phase6h-landscapes.md`) |
+| ~~**Move-surface trio**~~ **PAID — `spend` ph. 4, `buy_landscape` ph. 6H, and `call` TURNED OUT NOT TO BE A MOVE.** `spend` gave Villagers/Favors/Debt-payoff one surface + `spendable()` as THE reader. `buy_landscape` is the same shape for Events/Projects, with `landscape_gate()` as THE reader. The third was mis-scheduled by this row: every Reserve call in the game is a timed WINDOW, so it belongs in the ability POOL (ordered against everything else the occurrence triggered) and not in `legal_moves` — it shipped as the trigger source `from:"tavern"` instead, and the move surface did not grow | spend: ph. 4 · buy_landscape: ph. 6H · call: n/a | done |
 | ~~Card identity / "play-as"~~ **PAID ph. 5H — AND THE ROW'S PREMISE WAS WRONG.** It described the PRE-2019 Band of Misfits, which turned itself into another card. The current one does not: "unlike the first version, this version does not change itself to another card, nor does it play itself. Instead it PLAYS AN ACTION CARD from the Supply" — and Inheritance's Estates resolve to the same shape ("play the card with your Estate token, leaving it there"). So no identity system was needed at all: `play_from_supply` + `command_may_play` + `playable_from_supply`, ~40 lines. **Ways (ph. 10) is a DIFFERENT and smaller mechanism** — substitute a card's play ability, not change what it is — and should be designed then, not now | Band of Misfits (ph. 6) | done |
 | **`play_all_treasures` suppression must become a STATE predicate.** Today it's a static card list (`MANUAL_TREASURES` — treasures that push a decision). Highwayman negates the FIRST Treasure its victim plays, so which treasure goes first becomes a real choice and the button must not make it for them — a condition the card list cannot express, since it depends on game state and LIFTS once the negation is spent. Wanted: `autoplay_block(game, pid) -> reason \| None`, fed by both the static set and watcher-registered blocks, read by `legal_moves` + the handler + shipped in `player_view` (state-dependent ⇒ NOT `/catalog`, unlike the static set) so the button hides AND says why. Also fixes the ordering row below if the block carries an order | Highwayman (ph. 12) | ph. 12 pre-work — but build it at the FIRST set that adds an order-sensitive treasure |
 | ~~Autoplay ORDER is hand order~~ **PAID (post-ph. 2)** — `AUTOPLAY_LAST` registry + a stable sort in the handler; Bank now plays after the rest ($6 → $10 on the measured hand, matching optimal play). Adding a Treasure with an ability now means choosing a bucket: manual / autoplay-last / autoplay — see CLAUDE.md | Bank (was live) | done |
-| **Landscape cards** (Events/Landmarks/Projects/Ways/Traits/Prophecies/Allies) + a "global" trigger source + the board-row UI | Adventures (ph. 7) | **6H** (spec'd: `.claude-plans/dontminion-phase6h-landscapes.md`) |
+| ~~**Landscape cards** (Events/Landmarks/Projects/Ways/Traits/Prophecies/Allies) + the board-row UI~~ **PAID ph. 6H** — `cards.LANDSCAPES` (all six kinds framed, only `event` wired) + `game["landscapes"]` + the official randomizer-mix deal + `buy_landscape` + the wide board row, all contract-tested against synthetic landscapes. The "global trigger source" half of this row was already **PAID ph. 4** (`TRIGGERS from:"game"`, Footpad) — the row predated it | Adventures (ph. 7) | done |
 | **Scoring pipeline hook** (Landmarks add/subtract at game end beyond card VP + tokens) | Empires (ph. 8) | ph. 8 pre-work |
 | **Turn structure** — Night phase breaks the action/buy enum, auto-advance, bot, undo gating, frontend phase logic | Nocturne (ph. 11) | ph. 11, sized as its own kernel campaign |
 | **Shared side-decks with persisted RNG** (Boons/Hexes ph. 11, Loot ph. 13, Black Market ph. 15) — same `_make_rng/_save_rng` discipline, new streams | Nocturne (ph. 11) | ph. 11 |

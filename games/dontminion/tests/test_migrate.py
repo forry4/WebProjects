@@ -24,6 +24,8 @@ V7_KEYS_GAME = ("coffers", "bane", "ferryman_pile", "footpad_draw")
 V7_KEYS_SEAT = ("set_aside", "start_fx", "cleanup_aside")
 V8_KEYS_GAME = ("potions",)
 V9_KEYS_GAME = ("shelters",)
+V10_KEYS_GAME = ("landscapes",)
+V10_KEYS_SEAT = ("tavern", "tokens")
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -36,6 +38,12 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 10:
+        for k in V10_KEYS_GAME:
+            g.pop(k, None)
+        for seat in g["seats"].values():
+            for k in V10_KEYS_SEAT:
+                seat.pop(k, None)
     if to_version < 9:
         for k in V9_KEYS_GAME:
             g.pop(k, None)
@@ -82,7 +90,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 9
+    assert _fresh()["schema"] == engine.SCHEMA == 10
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -93,10 +101,10 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
     g = engine.migrate(old)
     assert g["schema"] == engine.SCHEMA
     for k in (V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME + V7_KEYS_GAME
-              + V8_KEYS_GAME + V9_KEYS_GAME):
+              + V8_KEYS_GAME + V9_KEYS_GAME + V10_KEYS_GAME):
         assert k in g, k
     for seat in g["seats"].values():
-        for k in V2_KEYS_SEAT + V7_KEYS_SEAT:
+        for k in V2_KEYS_SEAT + V7_KEYS_SEAT + V10_KEYS_SEAT:
             assert k in seat, k
     assert g["vp_tokens"] == {A: 0, B: 0}
     assert g["colony"] is False and g["curse_is_treasure"] is False
@@ -107,7 +115,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8])
+@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8, 9])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -131,7 +139,8 @@ def test_migrate_tolerates_junk():
 
 
 @pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME
-                         + V7_KEYS_GAME + V8_KEYS_GAME + V9_KEYS_GAME)
+                         + V7_KEYS_GAME + V8_KEYS_GAME + V9_KEYS_GAME
+                         + V10_KEYS_GAME)
 def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     """THE prod shape that broke this. `schema = 2` was stamped across the whole
     Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys
@@ -147,7 +156,8 @@ def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
 
 
 @pytest.mark.parametrize("missing", ["duration", "island", "aside",
-                                     "set_aside", "start_fx", "cleanup_aside"])
+                                     "set_aside", "start_fx", "cleanup_aside",
+                                     "tavern", "tokens"])
 def test_a_stamped_blob_missing_a_seat_zone_is_still_filled(missing):
     g = _fresh()
     g["schema"] = 2
@@ -298,6 +308,21 @@ def test_a_pre_dark_ages_save_gains_the_shelter_flag():
     assert "shelters" not in old
     engine.migrate(old)
     assert old["shelters"] is False
+    _drive(old, moves=120)
+
+
+def test_a_pre_landscape_save_gains_the_landscape_and_tavern_shape():
+    """ph. 6H adds game["landscapes"] plus two seat keys the kernel indexes
+    directly (the Tavern mat and the Adventures token store). Every live prod
+    game predates all three, and played with no landscapes on the table — which
+    is exactly what the fills say."""
+    old = _downgrade(_fresh(), 9)
+    assert "landscapes" not in old
+    assert all("tavern" not in s for s in old["seats"].values())
+    engine.migrate(old)
+    assert old["landscapes"] == {}
+    for seat in old["seats"].values():
+        assert seat["tavern"] == [] and seat["tokens"] == {}
     _drive(old, moves=120)
 
 

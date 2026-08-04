@@ -750,6 +750,11 @@ async def catalog():
         "cards": cards.CARDS,
         "kingdom": cards.KINGDOM,
         "expansions": list(KNOWN_EXPANSIONS),
+        # LANDSCAPES (Events/Projects/...) — static like `cards`, and static is
+        # the whole point: a landscape's cost "cannot be changed by cards like
+        # Bridge", so unlike a pile it needs no per-game price on the wire. The
+        # game dict ships only which ones are on the table and their state.
+        "landscapes": cards.LANDSCAPES,
         # kingdom requirements the create screen may ask for, in dealing order
         # (the picker is built from THIS, so adding one needs no frontend edit)
         "requirements": [{"id": r, "label": cards.REQUIREMENTS[r]["label"]}

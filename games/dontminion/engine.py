@@ -26,9 +26,11 @@ import random
 
 from .cards import (
     CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
+    LANDSCAPES, BUYABLE_LANDSCAPE_KINDS,
     pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
     grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
     expansion_of as cards_expansion, printed_cost as cards_printed_cost,
+    landscape_pool as cards_landscape_pool, landscape_kind as cards_landscape_kind,
 )
 
 BASIC_CARDS = ("Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse")
@@ -39,7 +41,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 9
+SCHEMA = 10
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -50,6 +52,8 @@ SCHEMA = 9
 #       Footpad's game rule, per-seat set-asides + start-of-turn abilities)
 #   8 = Alchemy (the cost VECTOR's second money pool, game["potions"])
 #   9 = Dark Ages (game["shelters"] — the Shelter starting decks)
+#  10 = the LANDSCAPE kernel (ph. 6H): game["landscapes"], the Tavern mat and
+#       the Adventures token stores (seat["tavern"] / seat["tokens"])
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -94,9 +98,17 @@ _GAME_FILLS = {
     # by nothing at runtime but the view and the tests — it is a SETUP record,
     # and an old save that never had one played without them.
     "shelters": lambda g: False,
+    # the LANDSCAPE kernel (ph. 6H): the Events/Projects/… dealt to THIS game,
+    # name -> {"kind", + per-landscape state}. Public table info. An old save
+    # was dealt none, and none exists to deal until ph. 7.
+    "landscapes": lambda g: {},
 }
 _SEAT_FILLS = {
     "aside": list,
+    # ph. 6H: the Tavern mat (Reserve cards wait here to be CALLED — public,
+    # they lie face up) and the Adventures per-seat tokens (-1 Card, -$1,
+    # Journey). Per-PILE tokens ride the pile model's `attach` instead.
+    "tavern": list, "tokens": dict,
     # Seaside zones + mats
     "duration": list, "dur_aside": list,
     "island": list, "village_mat": list,
@@ -315,6 +327,24 @@ def _run_stage(game, card, stage, pid, frame, choice):
     _push_depth(game)
     try:
         _stage_fn(card, stage)(game, pid, frame, choice)
+    finally:
+        _pop_depth(game)
+        if prev is None:
+            game.pop("_actor", None)
+        else:
+            game["_actor"] = prev
+
+
+def _run_ability(game, pid, fn):
+    """Run `fn(game, pid)` as pid's ability — the same `_actor` binding and log
+    depth `_run_stage` gives a stage. Every non-stage dispatch point (a card's
+    on_play, a Command's borrowed ability, a landscape's ability) goes through
+    here so none of them can drift from the others."""
+    prev = game.get("_actor")
+    game["_actor"] = pid
+    _push_depth(game)
+    try:
+        fn(game, pid)
     finally:
         _pop_depth(game)
         if prev is None:
@@ -585,6 +615,82 @@ def pile_cards(game):
             if n:
                 out[name] = out.get(name, 0) + n
     return out
+
+
+# --- Adventures TOKENS (ph. 6H storage; ph. 7 places them) -------------------
+#
+# Two homes, because there are two kinds. A token that sits ON A PILE (+Card,
+# +Action, +Buy, +$, -$2 cost, Trashing, Estate) rides the pile model's
+# `attach`, which already ships on the wire — so the client sees them for free.
+# A token that sits in front of a PLAYER (-1 Card, -$1, Journey) is a seat key.
+#
+# `attach["tokens"] = {pid: [kind, ...]}`. Each player has ONE token of each
+# kind, so moving one always takes it off wherever it was: "if you move a token
+# that is already on a pile, it is moved from that pile" — which is what makes
+# move_token, not a bare pile_attach, the only writer.
+
+TOKEN_KINDS = ("+card", "+action", "+buy", "+coin", "-cost", "trashing", "estate")
+
+
+def _any_pile_tokens(game):
+    """Is there a token on ANY pile? cost() asks this first so the ordinary
+    board (every board before ph. 7) pays one cheap scan of empty `attach`
+    dicts instead of a pile_of lookup on every price it computes."""
+    return any("tokens" in p["attach"] for p in game["piles"].values())
+
+
+def pile_tokens(game, pile, pid=None):
+    """Tokens on a pile — every player's, or one player's list."""
+    p = game["piles"].get(pile)
+    toks = p["attach"].get("tokens", {}) if p else {}
+    return list(toks.get(pid, [])) if pid is not None else toks
+
+
+def token_pile(game, pid, kind):
+    """Which pile holds pid's token of this kind (None if it is off the board)."""
+    for name, p in game["piles"].items():
+        if kind in p["attach"].get("tokens", {}).get(pid, ()):
+            return name
+    return None
+
+
+def move_token(game, pid, kind, pile):
+    """Put pid's `kind` token on `pile`, taking it off whatever pile had it.
+
+    "Tokens may be put on an empty pile" — so this checks the pile EXISTS, not
+    that it has cards in it. False if there is no such pile (a card naming one
+    that this board did not deal)."""
+    if pile not in game["piles"]:
+        return False
+    old = token_pile(game, pid, kind)
+    if old is not None:
+        toks = game["piles"][old]["attach"]["tokens"]
+        toks[pid].remove(kind)
+        if not toks[pid]:
+            del toks[pid]
+        if not toks:
+            del game["piles"][old]["attach"]["tokens"]
+    game["piles"][pile]["attach"].setdefault("tokens", {}) \
+        .setdefault(pid, []).append(kind)
+    _log(game, pid, "move_token", token=kind, pile=pile,
+         **({"from": old} if old else {}))
+    return True
+
+
+def seat_token(game, pid, kind, default=None):
+    """A token in front of a PLAYER rather than on a pile (-1 Card, -$1,
+    Journey). Lazy by nature — absence is the common case — so unlike the
+    zones this is read through a default."""
+    return game["seats"][pid]["tokens"].get(kind, default)
+
+
+def set_seat_token(game, pid, kind, value):
+    toks = game["seats"][pid]["tokens"]
+    if value is None:
+        toks.pop(kind, None)
+    else:
+        toks[kind] = value
+    _log(game, pid, "seat_token", token=kind, value=value)
 
 
 def pile_attach(game, name, key, value):
@@ -1016,6 +1122,65 @@ def deck_insert(game, pid, card, position, zone="hand"):
     _log(game, pid, "deck_insert")
 
 
+# --- the TAVERN MAT and CALLING (ph. 6H — Adventures' Reserve cards) ---------
+#
+# A Reserve card is PLAYED like any Action, and its play ability puts it on its
+# owner's Tavern mat instead of leaving it in play. It waits there until a
+# timed window lets its owner CALL it, which is a different thing from playing
+# it. The mat is public — the cards lie face up (p28).
+
+def to_tavern(game, pid, card, zone="in_play"):
+    """Put a card on pid's Tavern mat — "when you play a Reserve card, it is put
+    on your Tavern mat", which the card's own on_play does at the end of its
+    ability. False (and nothing moved) if the card is not where it says it is,
+    the lose-track rule's usual shape."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    seat[zone].remove(card)
+    seat["tavern"].append(card)
+    _log(game, pid, "to_tavern", card=card)
+    return True
+
+
+def on_tavern(game, pid, card):
+    """Is this card on pid's mat right now? (The `when` of every call window.)"""
+    return card in game["seats"][pid]["tavern"]
+
+
+def call_card(game, pid, card):
+    """CALL a card off the Tavern mat: it moves to play, and the ability the
+    caller runs next is the card's CALL ability.
+
+    "This is NOT playing it, so you don't resolve the play ability, it doesn't
+    cost an Action, and it doesn't trigger before-play or after-play abilities"
+    (p28) — which is exactly why this is its own helper rather than a detour
+    through play_action_card: no `actions_played` bump, no `before_play` emit,
+    no `action_resolved`, and no attack window even for an Attack-typed
+    Reserve.
+
+    "It's discarded from play in Clean-up that turn" — THAT turn, not the
+    caller's, which the all-seats clean-up sweep (ph. 3) already handles for a
+    call made on an opponent's turn (a Duplicate on their gain)."""
+    seat = game["seats"][pid]
+    if card not in seat["tavern"]:
+        return False
+    seat["tavern"].remove(card)
+    seat["in_play"].append(card)
+    _log(game, pid, "call", card=card)
+    return True
+
+
+def discard_from_tavern(game, pid, card):
+    """Take a card OFF the mat to the discard pile without calling it (Wine
+    Merchant's end-of-buy-phase discard). It goes through `discard()`, so it is
+    a discard for triggers — unlike a call, which moves it to play."""
+    if card not in game["seats"][pid]["tavern"]:
+        return False
+    discard(game, pid, [card], zone="tavern")
+    return True
+
+
 def pass_card(game, giver, receiver, card):
     """Masquerade hand-to-hand pass: identity visible only to giver+receiver."""
     _mark_revealed(game)
@@ -1225,8 +1390,19 @@ def cost(game, card):
 
     Takes a card name or a PILE name: a pile costs what its face card costs
     (its top card, retained when the pile empties so the board keeps a price)."""
+    # The Adventures -$2 token (Ferry) sits on a PILE, so it is read before
+    # _priced collapses a pile name into its face card. "Cards from that pile
+    # cost $2 less ON YOUR TURNS" — it keys on whose turn it is, NOT on who is
+    # asking, which is what lets cost(game, card) keep its two-argument
+    # signature and its ~60 call sites.
+    discount = 0
+    if _any_pile_tokens(game):
+        pile = card if card in game["piles"] else pile_of(game, card)
+        if pile is not None:
+            toks = game["piles"][pile]["attach"].get("tokens", {})
+            discount = 2 * list(toks.get(game["turn"], ())).count("-cost")
     card = _priced(game, card)
-    c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"]
+    c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"] - discount
     # Quarry (2022): a TURN-scoped discount — survives the Quarry leaving play
     if game["turn_ctx"].get("quarries") and "action" in CARDS[card]["types"]:
         c -= 2 * game["turn_ctx"]["quarries"]
@@ -1540,7 +1716,12 @@ def request_extra_turn(game, pid):
 # Guard Dog plays itself, Market Square discards itself, Hovel trashes itself.
 # The stage still performs the move — this only names it in the prompt.
 _REACT_VERB = {"reveal": "Reveal", "play": "Play",
-               "discard": "Discard", "trash": "Trash"}
+               "discard": "Discard", "trash": "Trash",
+               # ph. 6H: a Reserve card CALLED off the Tavern mat. Not a play —
+               # see engine.call_card for everything that does not follow.
+               "call": "Call"}
+# where an offered reaction's card is, in words, per zone
+_REACT_WHERE = {"hand": "your hand", "tavern": "your Tavern mat"}
 
 
 def emit(game, event, actor=None, subject=None, **extra):
@@ -1636,14 +1817,23 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                     add(actor, 0, card, spec["stage"],
                         {**extra, "actor": actor, "subject": subject},
                         commutes=spec.get("commutes", False))
-            elif src == "hand":
-                verb = _REACT_VERB.get(spec.get("mode"), "Play")
+            elif src in ("hand", "tavern"):
+                # `tavern` is the same OFFER shape as a hand reaction, on the
+                # other public per-seat zone: a timed window in which the owner
+                # may CALL a Reserve card off their mat (p28). Every Reserve
+                # call in Adventures is a window like this — start of your
+                # turn, on a gain, after resolving an Action, end of the Buy
+                # phase — which is why calling is not a free move: it has to be
+                # ordered in the ability pool against everything else the same
+                # occurrence triggered.
+                default_mode = "call" if src == "tavern" else "play"
+                verb = _REACT_VERB.get(spec.get("mode") or default_mode, "Play")
                 for p in game["players"]:
                     if spec.get("who") == "actor" and p != actor:
                         continue          # when-YOU-x reactions (Watchtower-class)
-                    if card in game["seats"][p]["hand"] and (when is None or when(game, p, ctx)):
+                    if card in game["seats"][p][src] and (when is None or when(game, p, ctx)):
                         add(p, 2, card, "__offer_window",
-                            {"stage": spec["stage"], "verb": verb,
+                            {"stage": spec["stage"], "verb": verb, "zone": src,
                              "extra": {**extra, "gained": subject, "gainer": actor}})
     whens = getattr(effects, "WATCHER_WHENS", {})
     for w in list(game["watchers"]):
@@ -1664,16 +1854,20 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
 
 
 def _k_offer_window(game, pid, frame, choice):
-    """Deferred hand-reaction window (a pooled `from:"hand"` trigger). The card
-    was in hand at the OCCURRENCE; by the time the player picks this ability an
-    earlier pick may have moved it — lose track, and say so."""
+    """Deferred reaction/call window (a pooled `from:"hand"` or `from:"tavern"`
+    trigger). The card was in that zone at the OCCURRENCE; by the time the
+    player picks this ability an earlier pick may have moved it — lose track,
+    and say so. `zone` is read defensively because a frame written by an
+    earlier deploy is persisted inside a live save and predates it."""
     card, d = frame["card"], frame["data"]
-    if card not in game["seats"][pid]["hand"]:
+    zone = d.get("zone", "hand")
+    if card not in game["seats"][pid][zone]:
         lost_track(game, pid, card, f"{d['verb'].lower()}ed")
         return
+    where = _REACT_WHERE.get(zone, "your hand")
     push_choose_option(game, pid, card, d["stage"],
                        options=[{"id": "play",
-                                 "label": f"{d['verb']} {card} from your hand"},
+                                 "label": f"{d['verb']} {card} from {where}"},
                                 {"id": "decline", "label": "Don't react"}],
                        data=d["extra"])
 
@@ -2075,45 +2269,93 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
         _treasure_coins(game, pid, card)
     else:
         _log(game, pid, "play", card=card)
+    # "DIRECTLY AFTER RESOLVING an Action card" (Royal Carriage, Coin of the
+    # Realm). Parked FIRST so that LIFO puts it UNDER everything the play is
+    # about to push — see _k_play_resolved for why an emit here would be wrong.
+    if has_type(game, card, "action"):
+        push_auto(game, pid, "__play", "resolved",
+                  data={"card": card, "replay": from_zone is None})
     if has_type(game, card, "attack"):
         _open_attack_window(game, pid, card)
-        _emit_play_attack(game, pid, card, replay=from_zone is None)
+        _emit_before_play(game, pid, card, replay=from_zone is None)
     else:
-        from . import effects as _fx
-        fn = _fx.EFFECTS.get(card)
-        if fn is None and not has_type(game, card, "treasure"):
-            raise KeyError(f"dontminion: no effect registered for {card!r}")
-        if fn is not None:
-            prev = game.get("_actor")
-            game["_actor"] = pid            # see _acting: off-turn plays exist
-            _push_depth(game)
-            try:
-                fn(game, pid)
-            finally:
-                _pop_depth(game)
-                if prev is None:
-                    game.pop("_actor", None)
-                else:
-                    game["_actor"] = prev
-        if has_type(game, card, "treasure"):
-            emit(game, "play_treasure", actor=pid, subject=card)
+        _before_play_then_ability(game, pid, card, replay=from_zone is None)
 
 
-def _emit_play_attack(game, pid, card, replay=False):
-    """The BEFORE-PLAY window for an Attack (Urchin's "when you play another
-    Attack card with this in play, you may first trash this").
+def _emit_before_play(game, pid, card, replay=False):
+    """The BEFORE-PLAY window — the abilities that resolve between a card being
+    played and its own ability doing anything: an Adventures "+" token on its
+    pile, Urchin's "when you play another Attack card with this in play, you
+    may first trash this", Kiln. ("After before-play abilities like Adventures
+    tokens, Kiln, Urchin", p33 — ONE class, so ONE event.)
 
-    Emitted AFTER _open_attack_window on purpose: pushes are LIFO, so the
-    ability pool this parks sits ABOVE the opponents' reaction windows and
-    resolves first — which is what "you may FIRST trash this" means, and what
-    the compendium's Skirmisher example needs ("you gain a Mercenary before
-    resolving the played Attack, so Skirmisher's when-gain ability is not
-    active yet").
+    For an ATTACK this is emitted AFTER _open_attack_window on purpose: pushes
+    are LIFO, so the ability pool this parks sits ABOVE the opponents' reaction
+    windows and resolves first — which is what "you may FIRST trash this"
+    means, and what the compendium's Skirmisher example needs ("you gain a
+    Mercenary before resolving the played Attack, so Skirmisher's when-gain
+    ability is not active yet"). "Other players' Reactions are resolved after
+    your token" says the same thing for the tokens.
 
-    `replay` marks a throne-room replay of a card already in play: "the
-    before-play ability only triggers if you play ANOTHER Attack card, not if
-    you play the same Urchin multiple times with a throne-room"."""
-    emit(game, "play_attack", actor=pid, subject=card, replay=replay)
+    `attack` rides the ctx so an attack-only consumer (Urchin) can ask; before
+    ph. 6H this was a separate `play_attack` event, which would have meant two
+    kernel emits for one timing point. `replay` marks a throne-room replay of a
+    card already in play: "the before-play ability only triggers if you play
+    ANOTHER Attack card, not if you play the same Urchin multiple times with a
+    throne-room"."""
+    emit(game, "before_play", actor=pid, subject=card, replay=replay,
+         attack=has_type(game, card, "attack"))
+
+
+def _before_play_then_ability(game, pid, card, replay=False):
+    """A non-Attack play: the before-play window, THEN the card's own ability.
+
+    The attack path gets this ordering for free (_open_attack_window parks the
+    play ability first), but an ordinary play runs its effect inline — and a
+    pool parked before an inline call would resolve AFTER it, i.e. exactly
+    backwards. So when the emit actually collects something, the ability is
+    parked underneath it; when it collects nothing (every play in the game
+    today) the effect runs inline exactly as it always did, which is what makes
+    generalizing the event byte-identical rather than merely equivalent."""
+    pools = {}
+    _emit_collect(game, pools, "before_play", actor=pid, subject=card,
+                  replay=replay, attack=False)
+    if pools:
+        push_auto(game, pid, "__play", "ability", data={"card": card})
+        _park_pools(game, pools)
+        return
+    _run_play_ability(game, pid, card)
+
+
+def _run_play_ability(game, pid, card):
+    """A non-Attack card's own play ability (and the play_treasure emit that
+    follows a Treasure's). Split out so it can run inline OR from a parked
+    frame — the two must be the same code, not two copies that drift."""
+    from . import effects as _fx
+    fn = _fx.EFFECTS.get(card)
+    if fn is None and not has_type(game, card, "treasure"):
+        raise KeyError(f"dontminion: no effect registered for {card!r}")
+    if fn is not None:
+        _run_ability(game, pid, fn)     # see _acting: off-turn plays exist
+    if has_type(game, card, "treasure"):
+        emit(game, "play_treasure", actor=pid, subject=card)
+
+
+def _k_play_ability_frame(game, pid, frame, choice):
+    _run_play_ability(game, pid, frame["data"]["card"])
+
+
+def _k_play_resolved(game, pid, frame, choice):
+    """"Directly after resolving an Action card" — a parked continuation rather
+    than an emit inside play_action_card, because play_action_card RETURNS
+    while the play's frames are still pending and "completely resolve the play
+    ability before playing it again" (p17) defines resolution as those frames
+    having drained. Parked before the play pushes anything, so LIFO fires it
+    exactly then. A throne-room replay resolves twice and so emits twice; the
+    consumer decides what to do about that from `replay`."""
+    d = frame["data"]
+    emit(game, "action_resolved", actor=pid, subject=d["card"],
+         replay=d.get("replay", False))
 
 
 def playable_from_supply(game, pid, pred=None):
@@ -2171,7 +2413,7 @@ def play_from_supply(game, pid, pile, count=True):
         # ran the attack twice. Same machinery as an Attack played from hand,
         # which is the point: an attack is an attack however it reached play.
         _open_attack_window(game, pid, card)
-        _emit_play_attack(game, pid, card)
+        _emit_before_play(game, pid, card)
         return True
     _run_supply_ability(game, pid, card)
     return True
@@ -2180,19 +2422,8 @@ def play_from_supply(game, pid, pile, count=True):
 def _run_supply_ability(game, pid, card):
     from . import effects
     fn = effects.EFFECTS.get(card)
-    if fn is None:
-        return
-    prev = game.get("_actor")
-    game["_actor"] = pid
-    _push_depth(game)
-    try:
-        fn(game, pid)
-    finally:
-        _pop_depth(game)
-        if prev is None:
-            game.pop("_actor", None)
-        else:
-            game["_actor"] = prev
+    if fn is not None:
+        _run_ability(game, pid, fn)
 
 
 def attack_reactions():
@@ -2390,6 +2621,10 @@ KERNEL_STAGES = {
     ("__attack", "diplomat_discard"): _k_legacy_diplomat_discard,
     ("__attack", "play_ability"): _k_play_ability,
     ("__attack", "next"): _k_next,
+    # ph. 6H: the two halves of a play that a before-play consumer splits, and
+    # the "directly after resolving" continuation
+    ("__play", "ability"): _k_play_ability_frame,
+    ("__play", "resolved"): _k_play_resolved,
     # ("__turn", "finish") registers below its definition
 }
 
@@ -2465,23 +2700,13 @@ def _play_one_treasure(game, pid, card, from_zone="hand"):
         # captured an EMPTY immune list — i.e. the attack would have been
         # unblockable by Moat, silently.
         _open_attack_window(game, pid, card)
-        _emit_play_attack(game, pid, card, replay=from_zone is None)
+        _emit_before_play(game, pid, card, replay=from_zone is None)
         emit(game, "play_treasure", actor=pid, subject=card)
         return
     # treasures with abilities (Astrolabe's duration half) run their effect too
     fn = effects.EFFECTS.get(card)
     if fn is not None:
-        prev = game.get("_actor")
-        game["_actor"] = pid
-        _push_depth(game)
-        try:
-            fn(game, pid)
-        finally:
-            _pop_depth(game)
-            if prev is None:
-                game.pop("_actor", None)
-            else:
-                game["_actor"] = prev
+        _run_ability(game, pid, fn)
     emit(game, "play_treasure", actor=pid, subject=card)
 
 
@@ -2604,6 +2829,83 @@ def buy_gate(game, pid, card):
     return fn(game, pid) if fn is not None else None
 
 
+# --- LANDSCAPES: buying a thing that is not a card (ph. 6H) ------------------
+
+def landscape_cost(game, name):
+    """THE landscape price — the PRINTED cost, never engine.cost().
+
+    "Its cost cannot be changed by cards like Bridge" (p32). Routing it through
+    cost() would be the obvious thing and would silently make a Bridge turn
+    discount every Event on the table; a landscape is not a card, so nothing
+    that changes card costs reaches it. (Empires' Debt-costed Events are ph. 8;
+    until the Debt vector lands there this stays a plain coin int.)"""
+    return LANDSCAPES[name]["cost"]
+
+
+def landscape_gate(game, pid, name):
+    """Why pid may not BUY this landscape right now, or None if they may.
+
+    ONE reader, consulted by legal_moves AND by the handler. An enumerator and
+    a handler that disagree hand the bot a move that does nothing, which is the
+    play_all_treasures livelock — the reason `spendable` and `manual_treasures`
+    are shaped the same way."""
+    st = game["landscapes"].get(name)
+    # `name in LANDSCAPES` too: a live save names the landscapes it was dealt,
+    # and a deploy that retired one would otherwise KeyError on a game already
+    # holding it — the same reason pile helpers are total on unknown names.
+    if st is None or name not in LANDSCAPES:
+        return "no such landscape"
+    if st["kind"] not in BUYABLE_LANDSCAPE_KINDS:
+        return f"a {st['kind']} is not something you buy"
+    # "Once per turn / once per game means you can only BUY it once per turn /
+    # once per game" (p32). Both are per player; only the turn player can buy,
+    # so a turn is identified by its number (which an Outpost extra turn also
+    # increments — it is a different turn).
+    once = LANDSCAPES[name].get("once")
+    if once == "turn" and st["bought_turn"] == game["turn_number"]:
+        return "you already bought that this turn"
+    if once == "game" and pid in st["bought_by"]:
+        return "you already bought that this game"
+    return None
+
+
+def _h_buy_landscape(game, pid, move):
+    """Buy an Event (or, from ph. 9, a Project): "paying from your money pool
+    and using up one Buy from your Buy pool" (p32).
+
+    THIS IS NOT A GAIN AND NOT BUYING A CARD — "buying an Event is not buying a
+    card", so there is no `gain` or `buy` emit and no `buy_gains` bump, and
+    nothing Hoard / Haggler / Merchant Guild-class can see it. It DOES set
+    `turn_ctx["bought"]`, because buying ANYTHING ends the part of the Buy
+    phase in which you may still play Treasures."""
+    if game["phase"] != "buy":
+        return False, "not in your buy phase"
+    name = move.get("name")
+    err = landscape_gate(game, pid, name)
+    if err:
+        return False, err
+    if game["buys"] <= 0:
+        return False, "no buys left"
+    c = landscape_cost(game, name)
+    if c > game["coins"]:
+        return False, "can't afford it"
+    game["coins"] -= c
+    game["buys"] -= 1
+    game["turn_ctx"]["bought"] = True
+    st = game["landscapes"][name]
+    st["bought_turn"] = game["turn_number"]
+    if pid not in st["bought_by"]:
+        st["bought_by"].append(pid)
+    _log(game, pid, "buy_landscape", name=name)
+    from . import effects
+    fn = getattr(effects, "LANDSCAPE_FX", {}).get(name)
+    if fn is not None:
+        # a landscape's ability is an ability like any other: it may push
+        # frames, and they display under the LANDSCAPE's own name
+        _run_ability(game, pid, fn)
+    return True, None
+
+
 def _h_end_phase(game, pid, move):
     if game["phase"] == "action":
         game["phase"] = "buy"
@@ -2646,6 +2948,7 @@ _HANDLERS = {
     "play_treasure": _h_play_treasure,
     "play_all_treasures": _h_play_all_treasures,
     "buy": _h_buy,
+    "buy_landscape": _h_buy_landscape,
     "spend": _h_spend,
     "end_phase": _h_end_phase,
 }
@@ -2963,6 +3266,12 @@ def legal_moves(game, pid):
                         and potion_cost(game, pile) <= game["potions"] \
                         and buy_gate(game, pid, pile) is None:
                     mv.append({"type": "buy", "card": pile})
+            # ...and the landscapes, which cost a Buy the same way but are not
+            # cards and have no pile. Their price is the PRINTED one.
+            for name in sorted(game["landscapes"]):
+                if landscape_gate(game, pid, name) is None \
+                        and landscape_cost(game, name) <= game["coins"]:
+                    mv.append({"type": "buy_landscape", "name": name})
     # Coffers (and every later spendable counter) — legal in EITHER phase,
     # "at any time during your turn". Enumerated per amount so a search or a
     # bot can pick how much, the way it picks any other move.
@@ -3051,6 +3360,9 @@ def owned_cards(game, pid):
     # Seaside zones + mats (migrate guarantees these on every loaded save)
     owned += s["dur_aside"] + s["island"] + s["village_mat"]
     owned += s["set_aside"] + s["cleanup_aside"]   # C&G set-asides
+    # a card on the Tavern mat is OWNED — it is still yours, it still scores
+    # (Distant Lands scores ON the mat), and the bots' deck reads must see it
+    owned += s["tavern"]
     for entry in s["duration"]:
         owned.append(entry["card"])
         owned += entry.get("riders", [])
@@ -3115,7 +3427,14 @@ def player_view(game, viewer):
     replaced by pending_view; rng_state/seed popped; the undo snapshots (every
     hidden zone!) never leave the server — only their COUNT ships (undo_depth),
     which with turn_revealed drives the client's Undo button. Everything
-    reveals at over."""
+    reveals at over.
+
+    `landscapes`, every seat's `tavern` and every seat's `tokens` ship AS-IS and
+    that is correct, not an omission: landscapes sit face up on the table, mat
+    contents are face up (p28) and tokens are public markers. They are listed
+    here because "build, not filter" means a new key's publicity is a decision
+    someone made, and `test_view_wire` asserts these three against the
+    SERIALIZED payload of a real game."""
     g = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
     g["undo_depth"] = len(game.get("undo_stack") or [])
     g.pop("rng_state", None)
@@ -3252,13 +3571,58 @@ def deal_kingdom(pool, requires, rng):
     raise ValueError("could not deal a kingdom meeting the chosen requirements")
 
 
+_LANDSCAPE_CAP = 2
+_WAY_CAP = 1
+
+
+def deal_landscapes(kingdom_pool, landscape_pool, rng):
+    """The landscapes this game uses, by the official setup method (p11):
+
+        "shuffle them in with the Randomizer cards and use the first landscape
+         cards that show up before hitting 10 Kingdom cards. No more than two
+         landscape cards per game, and no more than one of them a Way."
+
+    Simulated literally rather than approximated — a deck of the enabled sets'
+    Kingdom randomizers plus their landscape randomizers, walked until the 10th
+    Kingdom card. That is why the *sizes* of both pools matter: a set with many
+    landscapes and few Kingdom cards really does put more of them on the table,
+    and a proportion-style shortcut would quietly lose that.
+
+    CONSUMES NO ENTROPY WHEN THERE ARE NO LANDSCAPES, which is what makes this
+    phase provably deal-preserving: every set shipped today has an empty pool,
+    so the rng call sequence of every existing seed is untouched (pinned by the
+    determinism soak and by test_landscapes' no-op proof)."""
+    if not landscape_pool:
+        return []
+    deck = ["" for _ in kingdom_pool] + list(landscape_pool)
+    rng.shuffle(deck)
+    out, kingdom_seen, ways = [], 0, 0
+    for entry in deck:
+        if not entry:
+            kingdom_seen += 1
+            if kingdom_seen >= 10:
+                break
+            continue
+        if cards_landscape_kind(entry) == "way" and ways >= _WAY_CAP:
+            continue
+        out.append(entry)
+        if cards_landscape_kind(entry) == "way":
+            ways += 1
+        if len(out) >= _LANDSCAPE_CAP:
+            break
+    return out
+
+
 def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
-             requires=None):
+             requires=None, landscapes=None):
     """players in seat/turn order (the caller shuffles seats); expansions a
     non-empty subset of KINGDOM's keys; kingdom overrides the random 10 (tests,
     forced-kingdom soaks) and, being an explicit board, ignores `requires`;
     requires a subset of cards.REQUIREMENTS naming bonuses the dealt kingdom
-    must contain at least one of."""
+    must contain at least one of; landscapes overrides the dealt Events/
+    Projects/... the way `kingdom` overrides the ten (the forced-board test
+    seam — every landscape pool is empty until ph. 7, so nothing else can put
+    one on the table)."""
     players = list(player_ids)
     if not 2 <= len(players) <= 4:
         raise ValueError("dontminion needs 2-4 players")
@@ -3266,6 +3630,7 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
     if not exps or any(e not in KINGDOM for e in exps):
         raise ValueError(f"expansions must be a non-empty subset of {sorted(KINGDOM)}")
     rng = random.Random(seed)
+    kingdom_pool = sorted({c for e in exps for c in KINGDOM[e]})
     if kingdom is not None:
         kingdom = list(kingdom)
         # an entry may be a PILE name rather than a card (Knights) — see PILES
@@ -3277,10 +3642,21 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         bad_req = sorted(set(requires or ()) - set(REQUIREMENTS))
         if bad_req:
             raise ValueError(f"unknown kingdom requirements: {bad_req}")
-        pool = sorted({c for e in exps for c in KINGDOM[e]})
-        if len(pool) < 10:
+        if len(kingdom_pool) < 10:
             raise ValueError("not enough kingdom cards in the enabled expansions")
-        kingdom = sorted(deal_kingdom(pool, requires, rng))
+        kingdom = sorted(deal_kingdom(kingdom_pool, requires, rng))
+    # LANDSCAPES (ph. 6H) — dealt from the same randomizer shuffle as the ten,
+    # so this sits directly after the kingdom deal. It draws NOTHING from the
+    # rng while every pool is empty, which is what keeps every existing seed's
+    # board byte-identical.
+    if landscapes is not None:
+        landscapes = list(landscapes)
+        bad_ls = [x for x in landscapes if x not in LANDSCAPES]
+        if bad_ls:
+            raise ValueError(f"unknown landscapes: {bad_ls}")
+    else:
+        landscapes = deal_landscapes(kingdom_pool,
+                                     cards_landscape_pool(exps), rng)
     n = len(players)
     supply = {c: pile_size(c, n) for c in BASIC_CARDS}
     for c in kingdom:
@@ -3374,6 +3750,13 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "supply": supply,
         "nonsupply": {},
         "piles": {c: _plain_pile(c) for c in supply},
+        # LANDSCAPES: name -> {"kind", + the per-landscape state the kernel
+        # reads}. `bought_turn`/`bought_by` are the once-per-turn / once-per-
+        # game gates (p32) and are written unconditionally at setup rather
+        # than lazily, so `landscape_gate` never needs a defensive .get().
+        "landscapes": {name: {"kind": LANDSCAPES[name]["kind"],
+                              "bought_turn": None, "bought_by": []}
+                       for name in landscapes},
         "trash": [],
         "seats": {},
         "turn": players[0],
@@ -3444,7 +3827,10 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
                               "island": [], "village_mat": [],
                               # C&G: Farmhands' set-aside + its start-of-turn play
                               "set_aside": [], "start_fx": [],
-                              "cleanup_aside": []}
+                              "cleanup_aside": [],
+                              # ph. 6H: the Tavern mat (public) + this seat's
+                              # Adventures tokens (-1 Card, -$1, Journey)
+                              "tavern": [], "tokens": {}}
         # "If Shelters are used, each player starts with 3 Shelters — a Hovel, a
         # Necropolis, and an Overgrown Estate — instead of the 3 Estates. (Don't
         # include those Estates in the game.)" The Estate PILE is untouched: it

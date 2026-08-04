@@ -10,7 +10,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 
 | File | Role |
 |---|---|
-| `cards.py` | static data ONLY (schema below); `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
+| `cards.py` | static data ONLY (schema below): `CARDS`, `PILES`, `LANDSCAPES`; `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
 | `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py`, `effects_alchemy.py`, `effects_darkages.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
@@ -27,9 +27,9 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **9**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
-5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages) is
-the game-dict shape version,
+`engine.SCHEMA` (now **10**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages,
+10 = the landscape kernel) is the game-dict shape version,
 stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
@@ -110,9 +110,13 @@ frame = {"kind", "pid", "card", "stage", "constraint", "data"}
 # auto           parked continuation; never observable at rest
 ```
 
-**Engine API**: `new_game(player_ids, expansions, seed=None, names=None, kingdom=None)` (players
-arrive in seat order — the SERVER shuffles; `kingdom` overrides the random 10: the forced-kingdom
-test seam) · `apply_move(game,pid,move)->(ok,err)` (gate order: over → pending → turn → handler;
+**Moves** now also include `spend` (ph. 4) and `buy_landscape` (ph. 6H).
+
+**Engine API**: `new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
+requires=None, landscapes=None)` (players
+arrive in seat order — the SERVER shuffles; `kingdom` overrides the random 10 and `landscapes`
+the dealt Events/Projects: the forced-board
+test seams) · `apply_move(game,pid,move)->(ok,err)` (gate order: over → pending → turn → handler;
 then `_drive` → `_post_move`) · `legal_moves` (never empty for the actor; complete iff ≤200) ·
 `sample_decision(game,pid,rng)` (uniform valid payload; caller's rng, never the game's) ·
 `is_over`/`winners`/`score_game` · `player_view` · `cost(game,card)` (base − bridges, min 0 — THE
@@ -133,6 +137,10 @@ revealed hand cards STAY in hand) · `play_action_card(game,pid,card,from_zone="
 `add_actions/add_buys/add_coins` (each logs a public `plus` line — the client's
 "gets +$2 / +1 Action" sub-effect lines come from these, so don't bypass them) ·
 `opponents(game,pid)` (turn order) · `count_empty_piles` ·
+`to_tavern(game,pid,card,zone="in_play")` / `call_card(game,pid,card)` /
+`discard_from_tavern` / `on_tavern` (ph. 6H — calling is NOT playing, see Kernel v6H) ·
+`move_token(game,pid,kind,pile)` / `pile_tokens` / `token_pile` / `seat_token` /
+`set_seat_token` (ph. 6H) · `landscape_cost` / `landscape_gate` (ph. 6H — THE readers) ·
 `attack_opponents(game,pid,card,per_opp_stage,data=None,immune=None)` (a card whose attack part
 runs in a LATER stage — Minion, Replace — must capture `list(game["_atk_immune"])` into its frame
 data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
@@ -183,6 +191,87 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v6H — the LANDSCAPE kernel. FROZEN.** Hardening with no consumer: `cards.LANDSCAPES`
+is EMPTY and nothing on any board today uses a line of it. Everything here is contract-tested
+in `tests/test_landscapes.py` against synthetic landscapes and a synthetic Reserve.
+
+- **A LANDSCAPE IS NOT A CARD AND NOT A PILE**, so it gets its own table:
+  `cards.LANDSCAPES[name] = {kind, cost, text, expansion, once?}` + `game["landscapes"][name] =
+  {kind, bought_turn, bought_by}`. It has no copies, is never gained, never sits in a zone, and
+  "buying an Event is not buying a card" — a `CARDS` entry would give it a cost `cost()` would
+  discount and a `kingdom` flag that would deal it as one of the ten. **This is the Knights
+  lesson in REVERSE**: there a card-shaped structure had to learn to tolerate a foreign name (at
+  six call sites); here the foreign thing arrived before its first consumer, so it cost none.
+  All six `LANDSCAPE_KINDS` are framed up front (`event` `project` `way` `landmark` `trait`
+  `prophecy`); only `event` is wired, and only `BUYABLE_LANDSCAPE_KINDS` may be bought.
+- **Setup is the official randomizer mix** (p11: "shuffle them in with the Randomizer cards and
+  use the first landscape cards that show up before hitting 10 Kingdom cards; no more than two,
+  no more than one a Way"), simulated literally so pool SIZE matters. `new_game(landscapes=...)`
+  is the forced-board seam, the `kingdom=` idiom. **`deal_landscapes` draws NO entropy while the
+  pool is empty** — that is the whole behaviour-preservation proof for this phase, since setup is
+  one rng call sequence and inserting a step into it would re-deal every existing seed's board.
+  There is no create-modal row: the deal is automatic, like Platinum/Colony.
+- **`{"type":"buy_landscape","name":...}`** — spends a Buy and coins, sets `turn_ctx["bought"]`
+  (buying anything ends the treasure half of the Buy phase), and emits **nothing**: no `gain`,
+  no `buy`, no `buy_gains` bump, so no Hoard/Haggler/Merchant Guild-class watcher can see it.
+  **`landscape_cost()` is the PRINTED cost and never `engine.cost()`** — "its cost cannot be
+  changed by cards like Bridge". **`landscape_gate(game, pid, name)` is THE reader**, consulted
+  by `legal_moves` AND the handler (the `spendable`/`manual_treasures` lesson); it owns the
+  buyable-kind test and the once-per-turn (`bought_turn` vs `turn_number`) and once-per-game
+  (`bought_by`) gates, both per player. Abilities live in `effects.LANDSCAPE_FX` (merged like
+  EFFECTS) and may push frames, which display under the landscape's own name.
+- **The TAVERN MAT + calling** — seat zone `tavern` (public: the cards lie face up), joined to
+  `owned_cards` (Distant Lands scores ON the mat) and both census copies. `to_tavern` /
+  `call_card` / `discard_from_tavern` / `on_tavern`. **Calling is NOT playing**: no
+  `actions_played` bump, no `before_play`, no `action_resolved`, no attack window even for an
+  Attack-typed Reserve — which is exactly why it is its own helper and not a detour through
+  `play_action_card`. A called card sits in `in_play` and the all-seats clean-up sweep (ph. 3)
+  discards it in THAT turn's Clean-up, including an off-turn call.
+- **THERE IS NO `call` MOVE, and the ledger row that promised one was wrong.** Every Reserve
+  call in the game is a timed window — start of your turn, on a gain, directly after resolving
+  an Action, end of your Buy phase — so it must be ordered in the ability POOL against
+  everything else the same occurrence triggered, which a `legal_moves` entry cannot be. Calling
+  is therefore a new TRIGGER SOURCE, **`from:"tavern"`**: the `from:"hand"` offer shape on the
+  other public per-seat zone, with `mode:"call"` (verb "Call", "from your Tavern mat"). The
+  stage performs the move, like every other reaction mode. No `CALLS` registry — a trigger spec
+  already names its stage, and a second map to the same stage is only somewhere to disagree.
+- **`emit("play_attack")` → `emit("before_play")`, fired for EVERY Action play**, carrying
+  `attack=` and `replay=` in the ctx. Adventures' "+" tokens are the same timing class as Urchin
+  ("after before-play abilities like Adventures tokens, Kiln, Urchin", p33), so one event serves
+  both. **The catch, and the reason this is conditional:** an Attack gets the ordering free
+  (`_open_attack_window` already parks the play ability under the windows) but an ordinary play
+  runs its effect INLINE, and a pool parked before an inline call resolves AFTER it — backwards.
+  So `_before_play_then_ability` parks the ability as `("__play","ability")` **only when the
+  emit actually collects a consumer**, and runs it inline when it doesn't. That is what makes
+  the widening byte-identical rather than merely equivalent; Urchin's existing suite passing
+  UNCHANGED is the net, and its `when` now reads `ctx["attack"]` explicitly.
+- **`emit("action_resolved")` — the one genuinely new event.** "Directly after resolving an
+  Action card" cannot be emitted from `play_action_card`: it returns while the play's frames are
+  still pending, and "completely resolve the play ability before playing it again" (p17) defines
+  resolution as those frames having drained. So it is a `("__play","resolved")` continuation
+  parked BEFORE the play pushes anything — LIFO fires it exactly then. A throne-roomed Action
+  emits twice, once per resolution (`replay` tells them apart), which is what a Royal Carriage
+  called after each needs. Zero consumers today.
+- **Adventures TOKENS, storage + one hook.** Per-PILE tokens ride 3H's `attach`
+  (`attach["tokens"] = {pid: [kind]}`, already on the wire) via **`move_token(game, pid, kind,
+  pile)`** — the only writer, because "if you move a token that is already on a pile, it is
+  moved FROM that pile", and it accepts an EMPTY pile ("tokens may be put on an empty pile").
+  Readers: `pile_tokens`, `token_pile`. Per-SEAT tokens (−1 Card, −$1, Journey) live in
+  `seat["tokens"]` via `seat_token`/`set_seat_token` — storage only, wired to the draw and the
+  +$ at ph. 7, landed now so migrate is done once. **The `-cost` token reaches `cost()`**:
+  "cards from that pile cost $2 less ON YOUR TURNS" keys on `game["turn"]`, not on an asking
+  player, which is what lets `cost(game, card)` keep its signature and its ~60 call sites; it is
+  read BEFORE `_priced` collapses a pile name into its face, and guarded by a cheap
+  `_any_pile_tokens` scan so an ordinary board pays nothing.
+- **`_run_ability(game, pid, fn)`** — the `_actor` binding + log depth every non-stage dispatch
+  point now shares (a card's on_play, a Command's borrowed ability, a landscape's ability). It
+  was three copies of the same eight lines.
+- **Frontend**: a wide landscape ROW above the Supply that renders NOTHING when the game has
+  none (pinned by `screens.mjs` — a ghost row would push the whole board down on every game for
+  a feature nobody can use yet); Tavern mats as public `DmMatChip`s for every seat (contents and
+  all, unlike the Native Village mat); token chips in a pile's top-LEFT corner (the Bane marker
+  owns top-right, the count pill straddles the bottom); `fmtLog` cases for all five new events.
 
 **Kernel v6 — the phase-6 (Dark Ages) delta. FROZEN.** The set is almost pure card work — the
 on-trash theme is `trash()`'s existing emit read `from:"self"`, and both shuffled piles are ph.
@@ -369,7 +458,9 @@ against what ships. Deleting a row is how you hand the work back in.
 - Attack-typed **Treasures** open the reaction window too (Cauldron).
 - Clean-up discards EVERY seat's `in_play`, not just the turn player's.
 - `emit`s available: `gain` (via_buy/dest), `buy`, `play_treasure`, `trash`, `discard` (per card,
-  AFTER the whole batch moves), `cleanup_discard`, `buy_phase_end`, `turn_start`, `would_gain`.
+  AFTER the whole batch moves), `cleanup_start`, `cleanup_discard`, `buy_phase_end`, `turn_start`,
+  `would_gain`, `before_play` (attack/replay — ph. 6H, was `play_attack`), `action_resolved`
+  (replay — ph. 6H). Sources: `"self"`, `"in_play"`, `"hand"`, `"game"`, `"tavern"` (ph. 6H).
   ⚠ **`cleanup_discard` fires but `_end_turn` is NOT interruptible** — `emit` parks an auto frame
   and the sweep doesn't drive frames, so a consumer cannot yet MOVE the card. Scheme needs that
   built; do not assume it works.
@@ -487,6 +578,11 @@ MANUAL_TREASURES: {names}          # optional — treasures play_all must skip
 WATCHER_WHENS: {(card, stage): fn(game, watcher, ctx)}  # optional — join-time
                                    # pool filters for watchers (see the
                                    # concurrent-ability section above)
+LANDSCAPE_FX: {landscape_name: fn(game, pid)}  # optional (ph. 6H) — the ability
+                                   # an Event/Project hands you when you BUY it.
+                                   # A landscape is not a card, so it cannot
+                                   # live in EFFECTS without making every
+                                   # `card in EFFECTS` test wrong.
 ```
 The resolver pops the frame BEFORE dispatching (stages never clean up). Treasures and pure
 Victory/Curse cards need NO entries (handlers + `cards.py` data cover them).
@@ -501,7 +597,10 @@ per-opponent stage for non-immune opponents, each fully resolving before the nex
 **cards.py schema**: `CARDS[name] = {cost:int, types:[lowercase], coins:int, vp:int|"gardens"|
 "duke", text:str, expansion:"basic"|"base"|"intrigue", kingdom:bool}`; `KINGDOM={"base":[26],
 "intrigue":[26]}`; `pile_size(name,n)` (Copper 60−7n, Silver 40, Gold 30, Curse 10(n−1),
-victory-typed 8/12, else 10); `DATA_COMPLETE`.
+victory-typed 8/12, else 10); `PILES` (a dealt pile whose name is not a card — Knights);
+`LANDSCAPES[name] = {kind, cost, text, expansion, once?}` (ph. 6H — NOT cards and NOT piles;
+empty until Adventures) + `landscape_pool(expansions)` / `landscape_kind(name)`;
+`DATA_COMPLETE`.
 
 **A SKIPPED ABILITY MUST NEVER BE SILENT — call `lost_track(game, pid, card[, verb][, why])`.**
 The lose-track rule ("cards that are lost track of can't be played") means a prompt correctly never
@@ -660,7 +759,11 @@ replaced by `pending_view` (actor: kind+card+constraint; others: card + waiting_
 honor `private_to`, `rng_state`/`seed` popped. Seaside zones: `duration_view` (card+riders,
 public — fx/data stripped), `island` public, `dur_aside`/`village_mat` owner-only with public
 counts, watchers shipped as identity-only (event/owner/card; data may hold hidden resume info),
-`dur_setup` never ships. Everything reveals at game over.
+`dur_setup` never ships. ph. 6H's three new keys are PUBLIC and ship as-is — `landscapes` (they
+sit face up on the table), every seat's `tavern` (mat contents are face UP, unlike the Native
+Village mat) and every seat's `tokens` — listed here because build-not-filter means a new key's
+publicity is a decision somebody made, and `test_view_wire` asserts all three against the
+payloads a REAL room sent. Everything reveals at game over.
 
 **The lobby History line carries every player's score** (`Won vs Bot 1  31–12`), matching CoC's.
 `list_user_history` ships `standings` — seat-ordered, YOU FIRST, `{name, vp, you, won}` per player —
@@ -1055,6 +1158,10 @@ Vassal that played nothing passed). And derive parametrize counts from the data
 (`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
 the next expansion's kingdoms would have gone unsoaked in silence.
 
+`test_landscapes.py` (THE LANDSCAPE KERNEL — every ph. 6H seam, none of which a shipped card
+consumes yet: the setup dealer and its no-entropy proof, `buy_landscape` and its gates, the
+enumerator/handler agreement sweep, the Tavern mat and calling, `before_play`/`action_resolved`,
+tokens and the `-cost` hook, the bots, and a full random game on a landscape board),
 `test_cards_darkages_a/b.py` (the ph. 6 batches — half A is the 20 cards whose interest is
 their own play ability, half B the trash theme, the attacks, the two shuffled piles and all
 three setup rules), `test_cards_cornucopia_a/b.py` (the ph. 4 batches, incl. the Coffers and

@@ -28,6 +28,9 @@ Schema (frozen contract — see plan par.9):
       — a list entry is a kingdom CARD, or (Dark Ages' "Knights") the name of a
         dealt PILE that is not a card at all; see PILES.
   PILES = {pile_name: {cost, expansion, kingdom, members, size}}
+  LANDSCAPES = {name: {kind, cost, text, expansion}}
+      — NOT cards and NOT piles (no copies, never gained, never in a zone); see
+        the LANDSCAPES block near the bottom of this file.
   pile_size(name, n_players) -> int
   DATA_COMPLETE: bool — True only when every set's cards are present and verified.
 """
@@ -900,6 +903,54 @@ PILES = {
     "Knights": {"cost": 5, "expansion": "darkages", "kingdom": True,
                 "members": KNIGHTS, "size": len(KNIGHTS)},
 }
+
+
+# --- LANDSCAPES (phase 6H) ----------------------------------------------------
+#
+# A LANDSCAPE IS NOT A CARD AND NOT A PILE, and that is why it gets its own home
+# rather than a corner of one of theirs. It has no copies, is never gained,
+# never sits in a zone, and "buying an Event is not buying a card" (compendium
+# p32) — so a CARDS entry would give it a cost that cost() would then reduce, a
+# type list nothing reads, and a `kingdom` flag that would deal it as one of the
+# ten. This is the Knights lesson (a pile name that is not a card) in reverse:
+# there, an existing structure had to LEARN to tolerate a foreign name; here the
+# foreign thing arrives before its first consumer, so it gets its own table.
+#
+#   LANDSCAPES[name] = {"kind": ..., "cost": int, "text": str, "expansion": str}
+#
+# `kind` is the whole taxonomy up front, so the schema does not have to change
+# per set even though the machinery arrives per set:
+#   event     — bought from the buy phase for a one-shot ability   (Adventures, ph. 7)
+#   project   — bought once, permanent, a cube marks it            (Renaissance, ph. 9)
+#   way       — an alternative way to play an Action                (Menagerie, ph. 10)
+#   landmark  — an alternative scoring rule                         (Empires, ph. 8)
+#   trait     — attaches to one Kingdom pile                        (Plunder, ph. 13)
+#   prophecy  — a global rule that switches on partway through      (Rising Sun, ph. 14)
+# 6H builds the EVENT path end to end and only frames the rest.
+LANDSCAPE_KINDS = ("event", "project", "way", "landmark", "trait", "prophecy")
+# The kinds you BUY (spending a Buy and money). Everything else is consulted,
+# never purchased — which is the difference `buy_landscape` gates on.
+BUYABLE_LANDSCAPE_KINDS = ("event", "project")
+# `once` (optional): "once per turn" / "once per game" restrictions on BUYING it
+# — p32, "once per turn/once per game means you can only buy it once per
+# turn/game". Both are per player.
+LANDSCAPE_ONCE = ("turn", "game")
+
+# Empty until ph. 7 (Adventures) ships the first 20 Events. Everything that
+# reads it is written and tested against synthetic entries in test_landscapes.py
+# — the 3H discipline: the seams the next phase lands on are exercised now.
+LANDSCAPES = {}
+
+
+def landscape_pool(expansions):
+    """Sorted landscape names belonging to the enabled expansions — the deck the
+    setup dealer shuffles in with the Kingdom randomizers."""
+    exps = set(expansions or ())
+    return sorted(n for n, d in LANDSCAPES.items() if d["expansion"] in exps)
+
+
+def landscape_kind(name):
+    return LANDSCAPES[name]["kind"] if name in LANDSCAPES else None
 
 
 # Cards we have deliberately NOT implemented, and why. This is a real roster

@@ -141,6 +141,30 @@ def test_game_over_reveals_everything():
             assert "hand" in seat and "deck" in seat and "discard" in seat
 
 
+def test_the_public_landscape_tavern_and_token_state_reaches_every_socket():
+    """ph. 6H's three new public keys, asserted against the payloads a REAL
+    room actually sent rather than a synthetic dict — the nested-snapshot
+    lesson, in the other direction. Landscapes lie face up on the table, Tavern
+    mats are face UP (unlike the Native Village mat), and tokens are public
+    markers, so "it's public" has to be a thing the wire demonstrably does, not
+    an assumption about what deepcopy happened to carry."""
+    sockets = _three_player_room("WIRE4")
+    game = m.ROOMS["WIRE4"]["game"]
+    game["landscapes"]["Errand"] = {"kind": "event", "bought_turn": None,
+                                    "bought_by": [A]}
+    game["seats"][B]["tavern"] = ["Village"]
+    game["seats"][C]["tokens"] = {"-card": True}
+    engine.move_token(game, A, "-cost", "Copper")
+    _run(m.broadcast_state("WIRE4"))
+    for viewer, ws in sockets.items():
+        last = ws.rooms_seen()[-1]["game"]
+        _assert_room_redacted(ws.rooms_seen()[-1], viewer)
+        assert last["landscapes"]["Errand"]["bought_by"] == [A]
+        assert last["seats"][B]["tavern"] == ["Village"]
+        assert last["seats"][C]["tokens"] == {"-card": True}
+        assert last["piles"]["Copper"]["attach"]["tokens"] == {A: ["-cost"]}
+
+
 def test_spectator_view_is_fully_redacted():
     _three_player_room("WIRE3")
     payload = m.mk_room_state("WIRE3", viewer_pid=None)

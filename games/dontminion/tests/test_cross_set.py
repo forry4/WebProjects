@@ -1279,7 +1279,7 @@ def test_a_hinterlands_position_round_trips_through_json_and_migrate():
     blob = json.dumps(g)
     loaded = engine.migrate(json.loads(blob))
     assert loaded == json.loads(blob), "migrate mutated a current-shape save"
-    assert loaded["schema"] == engine.SCHEMA == 9
+    assert loaded["schema"] == engine.SCHEMA == 10
     rng = random.Random(11)
     for _ in range(120):                          # and it plays on from the blob
         if loaded["over"]:

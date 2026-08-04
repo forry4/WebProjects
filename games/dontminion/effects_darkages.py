@@ -42,9 +42,10 @@ Rulings that changed an implementation (each verified in ch. VII, not recalled):
     if you gained nothing in it — a per-play `buy_phase_end` watcher, the
     Scheme shape, with the "if it is not in play you can't exchange it" guard.
   * **Urchin's is a BEFORE-play ability**: it resolves before the Attack that
-    triggered it, which is why the kernel emits `play_attack` AFTER opening the
+    triggered it, which is why the kernel emits `before_play` AFTER opening the
     reaction window (pushes are LIFO). It does not fire for a throne-room
-    replay of the same Urchin.
+    replay of the same Urchin, nor for a non-Attack play (ph. 6H widened the
+    event to every Action play, so the attack-ness is read off the ctx).
   * **Counterfeit and Procession cannot play Durations** (2022/2019), and both
     may fail to trash what they played ("lost track of it") while still doing
     the rest — Procession still gains.
@@ -1020,6 +1021,13 @@ def _urchin_discard(game, pid, frame, choice):
 
 
 def _urchin_when(game, pid, ctx):
+    # ph. 6H generalized the kernel's `play_attack` emit into `before_play`,
+    # fired for EVERY Action play (Adventures' "+" tokens are the same timing
+    # class). Urchin's ability is attack-only — "when you play another ATTACK
+    # card" — so the attack-ness that used to be implicit in the event's name
+    # is now an explicit read off the ctx.
+    if not ctx.get("attack"):
+        return False
     if ctx.get("replay"):
         return False        # "not if you play the same Urchin twice"
     if ctx.get("subject") != "Urchin":
@@ -1524,8 +1532,8 @@ TRIGGERS = {
                        "mode": "discard", "stage": "react"}],
     "Hovel": [{"on": "gain", "from": "hand", "who": "actor", "mode": "trash",
                "stage": "react", "when": _hovel_when}],
-    # the BEFORE-play ability: an in_play trigger on the kernel's play_attack
-    "Urchin": [{"on": "play_attack", "from": "in_play", "push": _urchin_before,
+    # the BEFORE-play ability: an in_play trigger on the kernel's before_play
+    "Urchin": [{"on": "before_play", "from": "in_play", "push": _urchin_before,
                 "when": _urchin_when}],
 }
 

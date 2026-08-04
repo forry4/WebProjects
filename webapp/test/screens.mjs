@@ -758,6 +758,26 @@ try {
 			check("the pile count never covers a card's type or cost",
 				pills.length === 0, JSON.stringify(pills));
 
+			// ── the landscape row ships DORMANT (ph. 6H) ──────────────────────────
+			// No set has a landscape until Adventures, so `game.landscapes` is empty
+			// on every board today and the row must render NOTHING — not an empty
+			// flex container with its own padding and border, which would push the
+			// whole Supply down on every game for a feature nobody can use yet. The
+			// row's real rendering gets pinned when ph. 7 lands the data; this is
+			// the half that can be pinned now, and it is the half that can regress
+			// silently. Token badges are the same story on the same boards.
+			const dormant = await page.evaluate(() => ({
+				rows: document.querySelectorAll(".dm-lscape-row").length,
+				faces: document.querySelectorAll(".dm-lscape").length,
+				tokens: document.querySelectorAll(".dm-tokens").length,
+				supplyTop: document.querySelector(".dm-supply")
+					?.firstElementChild?.className ?? null,
+			}));
+			check("an empty landscape row renders nothing at all",
+				dormant.rows === 0 && dormant.faces === 0 && dormant.tokens === 0
+				&& /dm-basics/.test(dormant.supplyTop || ""),
+				JSON.stringify(dormant));
+
 			// ── Supply faces render fitted rules text (the `body` opt-in) ─────────
 			// Rules text used to be gated off small faces; supply piles now pass
 			// <DmCardFace body> and FitBodyText fills within a 10-16px band, cutting

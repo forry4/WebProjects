@@ -30,8 +30,12 @@ def _census(game):
     total = Counter(engine.pile_cards(game))
     total.update(game["trash"])
     for seat in game["seats"].values():
+        # every zone a card can BE in. Keep this in step with
+        # engine.owned_cards — the two are the same claim (a card is somewhere)
+        # asked from opposite ends, and a zone missing from either goes unseen.
         for zone in ("deck", "hand", "discard", "in_play", "aside",
-                     "dur_aside", "island", "village_mat"):
+                     "dur_aside", "island", "village_mat",
+                     "set_aside", "cleanup_aside", "tavern"):
             total.update(seat.get(zone, []))
         # duration entries hold real cards; dur_setup cards are still in in_play
         for entry in seat.get("duration", []):
