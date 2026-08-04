@@ -371,3 +371,48 @@ def test_load_revalidates_difficulty(monkeypatch):
     assert r["ai_difficulty"] == m.DEFAULT_DIFFICULTY
     assert r["expansions"] == ["base", "intrigue"]
     assert r["max_players"] == 4
+
+
+def test_a_dark_ages_vs_ai_room_creates_saves_and_reloads(monkeypatch):
+    """The e2e sanity for a new set: create a vs-bot room with it enabled, let
+    the bots play, and round-trip the room through save + load. The shuffled
+    piles (Ruins/Knights) and the non-Supply ones live in the save blob, so a
+    codec or migrate gap shows up here rather than on a live room."""
+    ws = _FakeWS()
+    assert _run(m._handle_create(ws, "RDA", "host", {
+        "name": "Host", "vs_ai": True, "num_bots": 1,
+        "expansions": ["darkages"], "ai_difficulty": "bmplus",
+    })) is True
+    room = m.ROOMS["RDA"]
+    game = room["game"]
+    assert game["expansions"] == ["darkages"]
+    assert len(game["kingdom"]) == 10
+    # play it out with the shipped tier, exactly as the scheduler would
+    import random
+    from games.dontminion import bot, engine
+    rng = random.Random(3)
+    for _ in range(6000):
+        if engine.is_over(game):
+            break
+        pid = game["pending_pid"] or game["turn"]
+        ok, err = engine.apply_move(game, pid, bot.choose(game, pid, rng, "bmplus"))
+        assert ok, err
+    assert engine.is_over(game)
+
+    blob = {}
+    monkeypatch.setattr(m, "_persist_row",
+                        lambda rid, st, seats, host, sj, now, made: blob.update(m._rooms.decode_state(sj)))
+    monkeypatch.setattr(m, "_DB_WRITE_EXEC", _InlineExec())
+    _REAL_SAVE_GAME("RDA")
+    assert blob["game"]["schema"] == engine.SCHEMA
+    monkeypatch.setattr(m, "load_game_state", lambda rid: blob)
+    monkeypatch.setattr(m, "load_game_to_memory", _REAL_LOAD_TO_MEMORY)
+    m.ROOMS.clear()
+    assert m.load_game_to_memory("RDA") is True
+    loaded = m.ROOMS["RDA"]["game"]
+    assert loaded["kingdom"] == game["kingdom"]
+    for name, p in loaded["piles"].items():
+        assert engine.pile_count(loaded, name) >= 0
+    # and every seat's view still builds
+    for viewer in list(loaded["players"]) + [None]:
+        m.engine.player_view(loaded, viewer)
