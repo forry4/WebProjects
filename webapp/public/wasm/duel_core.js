@@ -1,4 +1,39 @@
 /**
+ * Apply one move (engine-style `{"type":...}` OR encmove `{"t":...}` — what
+ * `duel_pick_move` emits) for `seat`. Validates by `legal_moves` membership.
+ * `shuffle_seed` feeds the (at most one) replenish bag-reshuffle. Returns
+ * `{"save": <envelope>, "events": [...]}` — events oldest→newest for the driver
+ * to APPEND (Duel's log appends; the JSX reverses for display).
+ * @param {string} save_json
+ * @param {string} move_json
+ * @param {number} seat
+ * @param {string} pid0
+ * @param {string} pid1
+ * @param {bigint} shuffle_seed
+ * @returns {string}
+ */
+export function duel_apply_json(save_json, move_json, seat, pid0, pid1, shuffle_seed) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(move_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(pid0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(pid1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.duel_apply_json(ptr0, len0, ptr1, len1, seat, ptr2, len2, ptr3, len3, shuffle_seed);
+        deferred5_0 = ret[0];
+        deferred5_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
  * Time `iters` f32 forwards (chunked `dot`, no-alloc) on a random net; report ms + sims/s.
  * @param {number} iters
  * @param {number} seed
@@ -37,6 +72,69 @@ export function duel_bench_forward_i8(iters, seed) {
 }
 
 /**
+ * Legal moves for the acting seat as engine dicts: `{"actor": seat|-1, "moves":[...]}`
+ * — drives the offline bot loop's forced-move fast path and the human-move matcher.
+ * @param {string} save_json
+ * @returns {string}
+ */
+export function duel_legal_json(save_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.duel_legal_json(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Deal a fresh 2-player game and return its save-envelope JSON. Mirrors
+ * `engine.new_game`: per-level deck shuffles + pyramid deal, 25-token bag drawn
+ * onto the spiral, all 4 royals out, seat 1's setup privilege.
+ * @param {bigint} seed
+ * @returns {string}
+ */
+export function duel_new_game_json(seed) {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.duel_new_game_json(seed);
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * The REDACTED search projection for `ai_search.state` — `compact.project`'s
+ * shape for `seat` (bag sorted, unseen pools sorted, blind reserves as counts).
+ * @param {string} save_json
+ * @param {number} seat
+ * @returns {string}
+ */
+export function duel_offline_proj(save_json, seat) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.duel_offline_proj(ptr0, len0, seat);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Apply the tier's pick rule to POOLED root statistics and return the winning move in
  * `encmove` (== `gen_engine_fixtures.enc_move`) encoding.
  *
@@ -69,6 +167,41 @@ export function duel_pick_move(state_json, visits_json, wins_json) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * Render the save as `viewer`'s wire dict — `engine.player_view`'s exact shape
+ * and redaction (bag→count, decks→counts, the other seat's blind reserves as
+ * `{"level", "facedown": true}` until the game is over).
+ * @param {string} save_json
+ * @param {string} pid0
+ * @param {string} pid1
+ * @param {string} name0
+ * @param {string} name1
+ * @param {number} viewer
+ * @returns {string}
+ */
+export function duel_player_view_json(save_json, pid0, pid1, name0, name1, viewer) {
+    let deferred6_0;
+    let deferred6_1;
+    try {
+        const ptr0 = passStringToWasm0(save_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(pid0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(pid1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(name0, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ptr4 = passStringToWasm0(name1, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len4 = WASM_VECTOR_LEN;
+        const ret = wasm.duel_player_view_json(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, viewer);
+        deferred6_0 = ret[0];
+        deferred6_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
     }
 }
 

@@ -172,6 +172,13 @@ pub struct State {
     pub turn: usize,
     pub turn_number: i32,
     pub replenished: bool,
+    /// == python turn_flags["revealed"] — hidden information surfaced this turn (a
+    /// bag draw or a deck flip), which is what refuses undo. Exists for the OFFLINE
+    /// driver (the server tracks it in the game dict); set at _mark_revealed's exact
+    /// sites (a replenish that placed tokens, any pyramid refill that DREW a card, a
+    /// blind deck reserve), reset by finish_turn. Not read by the search and not in
+    /// the parity projection string — engine parity is unaffected.
+    pub revealed: bool,
     pub again: bool,
     pub board: [i8; N_CELLS],
     pub bag: Vec<u8>,
@@ -332,6 +339,7 @@ impl State {
             turn: 0,
             turn_number: 1,
             replenished: false,
+            revealed: false,
             again: false,
             board,
             bag,
@@ -344,6 +352,46 @@ impl State {
             pending_kind: PK_NONE,
             pending: Pending::default(),
         }
+    }
+
+    /// Fresh 2-player game — the port of engine.py::new_game. Deck shuffles run
+    /// levels 1→2→3, the pyramid pops from each shuffled deck's END, the initial
+    /// fill consumes the whole 25-token bag in SPIRAL_ORDER, and the OPPONENT of
+    /// the first player starts with one privilege (board pool 3→2). Rust rng ≠
+    /// Python's Mersenne on purpose (offline games are purely local); the deal is
+    /// gated by INVARIANTS, not cross-language seed parity.
+    pub fn new_game(seed: u64) -> State {
+        use crate::cards::{DECK_SIZES, LEVEL_OFF, PYRAMID_SIZES, TOKEN_BAG};
+        let mut rng = crate::rng::Rng::new(seed);
+        let mut decks: [Vec<usize>; 3] = Default::default();
+        let mut pyramid: [Vec<i32>; 3] = Default::default();
+        for lvl in 0..3 {
+            let mut deck: Vec<usize> =
+                (LEVEL_OFF[lvl]..LEVEL_OFF[lvl] + DECK_SIZES[lvl]).collect();
+            rng.shuffle(&mut deck);
+            for _ in 0..PYRAMID_SIZES[lvl] {
+                pyramid[lvl].push(deck.pop().unwrap() as i32);
+            }
+            decks[lvl] = deck;
+        }
+        let mut s = State::from_setup(
+            [EMPTY; N_CELLS],
+            TOKEN_BAG.to_vec(),
+            decks,
+            pyramid,
+            3,
+            vec![0, 1, 2, 3],
+            [0, 0],
+        );
+        struct RngSh<'a>(&'a mut crate::rng::Rng);
+        impl<'a> Shuffler for RngSh<'a> {
+            fn shuffle(&mut self, bag: &mut Vec<u8>) {
+                self.0.shuffle(bag);
+            }
+        }
+        s.fill_board(&mut RngSh(&mut rng));
+        s.grant_privilege(1); // setup rule: the second seat starts with a privilege
+        s
     }
 
     pub fn is_over(&self) -> bool {
@@ -539,6 +587,7 @@ impl State {
             return; // victory pre-empts AGAIN
         }
         self.replenished = false;
+        self.revealed = false;
         self.turn_number += 1;
         if self.again {
             self.again = false; // an AGAIN turn is its own turn: the seat does not pass
@@ -576,7 +625,9 @@ impl State {
         if self.replenished {
             return Err("already replenished this turn");
         }
-        self.fill_board(sh);
+        if self.fill_board(sh) > 0 {
+            self.revealed = true; // tokens came out of the bag — can't be un-seen
+        }
         self.replenished = true;
         self.grant_privilege(opponent(pid));
         Ok(())
@@ -623,7 +674,10 @@ impl State {
                 let cid = self.pyramid[level][slot] as usize;
                 // Refill the vacated slot from the deck (empty deck leaves it exhausted).
                 self.pyramid[level][slot] = match self.decks[level].pop() {
-                    Some(c) => c as i32,
+                    Some(c) => {
+                        self.revealed = true; // a new card is now face up
+                        c as i32
+                    }
                     None => -1,
                 };
                 self.players[pid].reserved.push(cid);
@@ -636,6 +690,7 @@ impl State {
                     Some(c) => c,
                     None => return Err("that deck is empty"),
                 };
+                self.revealed = true; // a blind draw: this player has now seen that card
                 self.players[pid].reserved.push(cid);
                 self.players[pid].reserved_from_deck.push(cid);
             }
@@ -702,7 +757,10 @@ impl State {
             BuySrc::Pyramid => {
                 let (lvl, slot) = pyr.unwrap();
                 self.pyramid[lvl][slot] = match self.decks[lvl].pop() {
-                    Some(c) => c as i32,
+                    Some(c) => {
+                        self.revealed = true; // a new card is now face up
+                        c as i32
+                    }
                     None => -1,
                 };
             }
@@ -1185,5 +1243,99 @@ mod tests {
         assert_eq!(color_points_of(&s.players[0])[1], 1, "wild's point lands in blue");
         assert_eq!(color_points_of(&s.players[0]).iter().sum::<i32>(), 1, "bonus-less card joins no group");
         assert_eq!(points_of(&s.players[0]), 4, "but it still scores");
+    }
+
+    /// Count every token in play (board + bag + both hands), by colour.
+    fn token_census(s: &State) -> [i32; crate::cards::N_TOKENS] {
+        let mut n = [0i32; crate::cards::N_TOKENS];
+        for &t in s.board.iter() {
+            if t >= 0 {
+                n[t as usize] += 1;
+            }
+        }
+        for &t in &s.bag {
+            n[t as usize] += 1;
+        }
+        for p in &s.players {
+            for (c, cnt) in p.tokens.iter().enumerate() {
+                n[c] += cnt;
+            }
+        }
+        n
+    }
+
+    /// `new_game` invariants — the cross-language gate for the offline deal. Seed
+    /// parity with Python is deliberately NOT required (different rngs); what must
+    /// hold is every structural property `engine.new_game` guarantees.
+    #[test]
+    fn new_game_deals_a_structurally_exact_setup() {
+        use crate::cards::{DECK_SIZES, PYRAMID_SIZES, TOKEN_BAG};
+        for seed in 0..50u64 {
+            let s = State::new_game(seed);
+            // The initial fill uses ALL 25 tokens: bag empty, board full, census exact.
+            assert!(s.bag.is_empty(), "initial fill must exhaust the bag");
+            assert!(s.board.iter().all(|&t| t >= 0), "board full after the deal");
+            let mut want = [0i32; crate::cards::N_TOKENS];
+            for &t in TOKEN_BAG.iter() {
+                want[t as usize] += 1;
+            }
+            assert_eq!(token_census(&s), want, "25-token conservation by colour");
+            // Decks partition each level's cards with the pyramid: 25/20/10 down, 5/4/3 up.
+            for lvl in 0..3 {
+                assert_eq!(s.decks[lvl].len(), DECK_SIZES[lvl] - PYRAMID_SIZES[lvl]);
+                assert_eq!(s.pyramid[lvl].len(), PYRAMID_SIZES[lvl]);
+                assert!(s.pyramid[lvl].iter().all(|&c| c >= 0), "pyramid dealt full");
+                let mut seen: Vec<usize> = s.decks[lvl].clone();
+                seen.extend(s.pyramid[lvl].iter().map(|&c| c as usize));
+                seen.sort_unstable();
+                let want: Vec<usize> =
+                    (crate::cards::LEVEL_OFF[lvl]..crate::cards::LEVEL_OFF[lvl] + DECK_SIZES[lvl])
+                        .collect();
+                assert_eq!(seen, want, "deck ∪ pyramid = exactly level {}'s cards", lvl + 1);
+            }
+            // Setup rule: seat 1 starts with the privilege, 2 stay on the board.
+            assert_eq!(s.privileges_board, 2);
+            assert_eq!(s.players[0].privileges, 0);
+            assert_eq!(s.players[1].privileges, 1);
+            assert_eq!(s.royals_available, vec![0, 1, 2, 3]);
+            assert_eq!((s.phase, s.turn, s.turn_number), (PLAYING, 0, 1));
+            assert!(!s.replenished && !s.revealed && !s.again);
+            assert_eq!(s.pending_kind, PK_NONE);
+        }
+        // Different seeds must produce different deals (the shuffle is real).
+        assert_ne!(State::new_game(1).decks, State::new_game(2).decks);
+    }
+
+    /// Random-playout soak through a real rng Shuffler — the exact offline serving
+    /// shape (`new_game` + `apply_move` with a live shuffle, no scripted fills).
+    /// Asserts the conservation law after EVERY move and that games terminate.
+    #[test]
+    fn new_game_random_playout_soak() {
+        struct RngSh<'a>(&'a mut crate::rng::Rng);
+        impl<'a> Shuffler for RngSh<'a> {
+            fn shuffle(&mut self, bag: &mut Vec<u8>) {
+                self.0.shuffle(bag);
+            }
+        }
+        let mut want = [0i32; crate::cards::N_TOKENS];
+        for &t in crate::cards::TOKEN_BAG.iter() {
+            want[t as usize] += 1;
+        }
+        for seed in 0..25u64 {
+            let mut s = State::new_game(seed);
+            let mut rng = crate::rng::Rng::new(seed * 7919 + 1);
+            let mut moves = 0usize;
+            while !s.is_over() {
+                let actor = if s.pending_pid >= 0 { s.pending_pid as usize } else { s.turn };
+                let legal = s.legal_moves(actor);
+                assert!(!legal.is_empty(), "no legal move while not over (seed {seed})");
+                let mv = legal[(rng.next_f64() * legal.len() as f64) as usize % legal.len()].clone();
+                s.apply_move(actor, &mv, &mut RngSh(&mut rng))
+                    .unwrap_or_else(|e| panic!("engine rejected its own legal move: {e} (seed {seed})"));
+                assert_eq!(token_census(&s), want, "token conservation (seed {seed})");
+                moves += 1;
+                assert!(moves < 20_000, "game did not terminate (seed {seed})");
+            }
+        }
     }
 }

@@ -1107,6 +1107,84 @@ try {
 		await ctx.close();
 	}
 
+	// ── Offline vs-AI (Spender Duel) ──────────────────────────────────────────
+	// Duel's offline stack: per-decision bot loop + the root-parallel search pool
+	// (nets embedded in the wasm — no model fetch) + a card-catalog localStorage
+	// cache. Seats are dealt randomly, so the scenario just waits for OUR turn
+	// (the bot's opening decision, if it goes first, runs the offline search),
+	// takes one token, and requires the bot's reply with the network OFF.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript((user) => {
+			localStorage.setItem("spender_user", user);
+		}, JSON.stringify({ id: "duel-offline-harness", name: "DuelOff", guest: true }));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		let poolReady = false;
+		page.on("console", (m) => { if (/\[duel client-AI\].*ready/.test(m.text())) poolReady = true; });
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+		await page.waitForSelector(".offline-panel", { timeout: 20_000 }).catch(() => {});
+		await page.locator(".cm-seg button", { hasText: "Spender Duel" }).click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
+		const mounted = await page.waitForSelector(".duel", { timeout: 20_000 })
+			.then(() => true).catch(() => false);
+		check("a local Duel game mounts the Duel screen", mounted);
+		check("...at its /offline/<LOCALID> URL",
+			/^\/offline\/LOCAL[A-Z0-9]+$/.test(new URL(page.url()).pathname), new URL(page.url()).pathname);
+
+		if (mounted) {
+			// The catalog fetch + the search pool both need the network once; the pool-ready
+			// line is the later of the two (workers instantiate the 5MB wasm).
+			for (let i = 0; i < 60 && !poolReady; i++) await sleep(250);
+			check("the Duel search pool arms", poolReady);
+			await ctx.setOffline(true);
+
+			// Wait for our turn (if the bot was dealt seat 0 its whole opening decision —
+			// search included — must run offline first).
+			const myTurn = await page.waitForSelector(".duel-turnbadge:has-text('Your turn')", { timeout: 90_000 })
+				.then(() => true).catch(() => false);
+			check("our turn arrives with the network OFF", myTurn);
+
+			// Take one token: click board gems until the Take button appears (a gold
+			// click arms the reserve flow instead — the next gem click clears it).
+			let took = false;
+			const tokens = page.locator(".duel-board .gem-token");
+			const n = await tokens.count().catch(() => 0);
+			for (let i = 0; i < n && !took; i++) {
+				await tokens.nth(i).click({ timeout: 5_000 }).catch(() => {});
+				took = (await page.locator("button:has-text('Take 1')").count().catch(() => 0)) > 0;
+			}
+			if (took) await page.locator("button:has-text('Take 1')").click({ timeout: 5_000 }).catch(() => {});
+			check("a take submits through the local engine", took);
+
+			// The bot answers offline (3.5s budget + pacing), then it's our turn again.
+			const botReplied = await page.waitForSelector(".duel-turnbadge:has-text('Bot is playing')", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			const back = botReplied && await page.waitForSelector(".duel-turnbadge:has-text('Your turn')", { timeout: 90_000 })
+				.then(() => true).catch(() => false);
+			check("the wasm AI replies while offline", back);
+
+			await ctx.setOffline(false);   // assets for a reload (no SW on localhost)
+			await page.reload({ waitUntil: "load" }).catch(() => {});
+			const resumed = await page.waitForSelector(".duel", { timeout: 20_000 })
+				.then(() => true).catch(() => false);
+			check("a reload resumes the Duel save from IndexedDB", resumed);
+
+			await page.goBack().catch(() => {});
+			const listed = await page.waitForSelector(".offline-save-row", { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("Back lands on the hub with the Duel save listed", listed);
+		}
+		check("no page errors in offline Duel play", errors.length === 0, errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

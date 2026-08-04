@@ -66,6 +66,8 @@ import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
 // CoC's offline driver: the hub creates its records; the CoC component plays them.
 import { createOfflineCocGame, COC_BOARD_NAMES } from "../castles_of_crimson/offline.js";
+// Duel's offline driver: same split — the hub creates, SpenderDuel plays.
+import { createOfflineDuelGame } from "../spender_duel/offline.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -755,8 +757,9 @@ export default function SpenderApp() {
 	const [offlineCocTier, setOfflineCocTier] = useState("expert"); // CoC tier (hard|expert)
 	const [offlineCocMyBoard, setOfflineCocMyBoard] = useState("1");  // CoC board picks
 	const [offlineCocOppBoard, setOfflineCocOppBoard] = useState("1");
-	// A CoC offline game in play: the shell mounts CastlesOfCrimson with this record
-	// (CoC owns its whole screen, unlike Spender whose game screen lives in this file).
+	const [offlineDuelTier, setOfflineDuelTier] = useState("expert"); // Duel tier (hard|expert)
+	// A CoC/Duel offline game in play: the shell mounts that game's component with this
+	// record (they own their whole screen, unlike Spender whose game screen lives here).
 	const [offlinePlay, setOfflinePlay] = useState(null);
 	const [precacheState, setPrecacheState] = useState(null);   // null | {done,total} | "ok" | "err"
 
@@ -2056,9 +2059,9 @@ export default function SpenderApp() {
 	};
 
 	// Enter a saved game by record, routed by which game owns it: Spender plays on this
-	// file's game screen; a CoC record mounts the CastlesOfCrimson component instead.
+	// file's game screen; a CoC/Duel record mounts that game's component instead.
 	const enterOfflineRecord = (rec) => {
-		if (rec.game === "coc") {
+		if (rec.game === "coc" || rec.game === "duel") {
 			disconnect();                    // never share the screen with a live socket
 			setOfflinePlay(rec);
 			offlinePlayRef.current = rec;
@@ -2093,6 +2096,12 @@ export default function SpenderApp() {
 				await enterOfflineRecord(rec);
 				return;
 			}
+			if (offlineGameSel === "duel") {
+				const rec = await createOfflineDuelGame({ tier: offlineDuelTier });
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
 			const rec = await createOfflineGame({ aiVariant: offlineVariant, winPoints: offlineWin });
 			pushPath(buildPath("offline", rec.id));
 			await enterOfflineGame(rec);
@@ -2101,8 +2110,8 @@ export default function SpenderApp() {
 		}
 	};
 
-	// Exit a CoC offline game back to the hub (the component's onExit).
-	const exitCocOfflineToHub = () => {
+	// Exit a CoC/Duel offline game back to the hub (the component's onExit).
+	const exitOfflinePlayToHub = () => {
 		setOfflinePlay(null);
 		offlinePlayRef.current = null;
 		pushPath(buildPath("offline"));
@@ -2165,20 +2174,25 @@ export default function SpenderApp() {
 	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
 	// only ever fetched lazily during a live vs-AI game — a cold install has no engine.
 	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
-	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. Covers BOTH
-	// offline games: Spender (self-contained wasm) and CoC (wasm + its two fetched model
-	// bins — the worker's runtime fetch(model) must hit the SW cache offline). Also warms
-	// CoC's board-layout cache (localStorage) — its game screen hard-gates on it, and
-	// localStorage is the one thing the SW can't serve.
+	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. Covers all
+	// three offline games: Spender + Duel (self-contained wasm, nets embedded) and CoC
+	// (wasm + its two fetched model bins — the worker's runtime fetch(model) must hit the
+	// SW cache offline). Also warms the two localStorage caches the SW can't serve: CoC's
+	// board layouts (its game screen hard-gates on them) and Duel's card catalog.
 	const startPrecache = () => {
 		const urls = [
 			"wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm",
 			"wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
 			"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin",
+			"wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm",
 			"fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"]
 			.map((p) => `${import.meta.env.BASE_URL}${p}`);
 		fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
 			.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} })
+			.catch(() => {});
+		// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
+		fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
+			.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} })
 			.catch(() => {});
 		const ctrl = navigator.serviceWorker?.controller;
 		if (!ctrl) { setPrecacheState("err"); return; }
@@ -2829,12 +2843,16 @@ export default function SpenderApp() {
 		</>
 	);
 
-	// A CoC offline game in play: mount the component with the record. It renders its
-	// own whole screen (board layout comes from the localStorage boards cache).
+	// A CoC/Duel offline game in play: mount that game's component with the record. It
+	// renders its own whole screen (CoC's board layout / Duel's card catalog come from
+	// their localStorage caches, warmed by the precache).
 	if (screen === "offline" && offlinePlay) return (
 		<Suspense fallback={<GameChunkLoading />}>
-			<CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
-				onExit={exitCocOfflineToHub} />
+			{offlinePlay.game === "duel"
+				? <SpenderDuel myId={myId} authUser={authUser} offline={offlinePlay}
+					onExit={exitOfflinePlayToHub} />
+				: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
+					onExit={exitOfflinePlayToHub} />}
 		</Suspense>
 	);
 
@@ -2858,9 +2876,18 @@ export default function SpenderApp() {
 							<CmSeg value={offlineGameSel} onChange={setOfflineGameSel} options={[
 								{ value: "spender", label: "Spender" },
 								{ value: "coc", label: "Castles of Crimson" },
+								{ value: "duel", label: "Spender Duel" },
 							]} />
 						</CmRow>
-						{offlineGameSel === "spender" ? (<>
+						{offlineGameSel === "duel" && (
+							<CmRow label="Difficulty">
+								<CmSeg value={offlineDuelTier} onChange={setOfflineDuelTier} options={[
+									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
+								]} />
+								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
+							</CmRow>
+						)}
+						{offlineGameSel === "spender" && (<>
 							<CmRow label="Opponent">
 								<div className="cm-pills">
 									{["S", "N"].map(v => (
@@ -2878,7 +2905,8 @@ export default function SpenderApp() {
 									{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
 								]} />
 							</CmRow>
-						</>) : (<>
+						</>)}
+						{offlineGameSel === "coc" && (<>
 							<CmRow label="Difficulty">
 								<CmSeg value={offlineCocTier} onChange={setOfflineCocTier} options={[
 									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
@@ -2900,6 +2928,7 @@ export default function SpenderApp() {
 								</select>
 							</CmRow>
 						</>)}
+						{/* duel: the Difficulty row above is its whole config (always 2p, one board) */}
 						<button type="button" className="cm-create" style={{ marginTop: 10 }}
 							onClick={createAndEnterOffline}>
 							Start Game
@@ -2916,7 +2945,9 @@ export default function SpenderApp() {
 								<div className="offline-save-info">
 									{g.game === "coc"
 										? <><b>Castles</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
-										: <><b>Spender · {aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}</>}
+										: g.game === "duel"
+											? <><b>Duel</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
+											: <><b>Spender · {aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}</>}
 									{" · "}{g.status === "over" ? "finished" : "in progress"}
 									<span className="offline-save-time"> · {timeAgo(Math.floor((g.updated || 0) / 1000))}</span>
 								</div>
@@ -2934,7 +2965,7 @@ export default function SpenderApp() {
 					<div className="offline-panel">
 						<h3 className="offline-h">Play with no connection</h3>
 						<p className="offline-note">
-							Download the AI engines (~10 MB) so games here work fully offline — even in airplane
+							Download the AI engines (~15 MB) so games here work fully offline — even in airplane
 							mode. Install the site to your home screen first for the best experience.
 						</p>
 						{precacheState === "ok" && <span className="offline-note ok">✓ Downloaded — this page now works offline.</span>}

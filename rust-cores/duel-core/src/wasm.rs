@@ -190,6 +190,87 @@ pub fn duel_pick_move(state_json: &str, visits_json: &str, wins_json: &str) -> S
     enc_move(&stats.moves[i]).to_string()
 }
 
+// ─── Offline-driver exports (stateless save-envelope calls for local vs-AI) ──
+// The browser is the authority in an offline game: it holds the SAVE envelope
+// (dump.rs — full-fidelity State: ordered bag/decks, blind-reserve identities,
+// the `revealed` undo gate) and every step is a pure JSON→JSON call. Search
+// stays on the REDACTED projection from `duel_offline_proj`, so the AI cannot
+// read the hidden order the client physically holds — the exact projection the
+// server ships online, consumed by the same `duel_search*` entries above.
+// All errors are `{"error":...}`.
+
+/// Deal a fresh 2-player game and return its save-envelope JSON. Mirrors
+/// `engine.new_game`: per-level deck shuffles + pyramid deal, 25-token bag drawn
+/// onto the spiral, all 4 royals out, seat 1's setup privilege.
+#[wasm_bindgen]
+pub fn duel_new_game_json(seed: u64) -> String {
+    crate::dump::state_to_json(&crate::engine::State::new_game(seed))
+}
+
+/// Legal moves for the acting seat as engine dicts: `{"actor": seat|-1, "moves":[...]}`
+/// — drives the offline bot loop's forced-move fast path and the human-move matcher.
+#[wasm_bindgen]
+pub fn duel_legal_json(save_json: &str) -> String {
+    match crate::gamedict::legal_json(save_json) {
+        Ok(v) => v.to_string(),
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
+/// Apply one move (engine-style `{"type":...}` OR encmove `{"t":...}` — what
+/// `duel_pick_move` emits) for `seat`. Validates by `legal_moves` membership.
+/// `shuffle_seed` feeds the (at most one) replenish bag-reshuffle. Returns
+/// `{"save": <envelope>, "events": [...]}` — events oldest→newest for the driver
+/// to APPEND (Duel's log appends; the JSX reverses for display).
+#[wasm_bindgen]
+pub fn duel_apply_json(
+    save_json: &str,
+    move_json: &str,
+    seat: usize,
+    pid0: &str,
+    pid1: &str,
+    shuffle_seed: u64,
+) -> String {
+    match crate::gamedict::apply_save(save_json, move_json, seat, pid0, pid1, shuffle_seed) {
+        Ok((save, events)) => {
+            // `save` is already a JSON document; splice it in raw.
+            format!(r#"{{"save":{},"events":{}}}"#, save, serde_json::Value::Array(events))
+        }
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
+/// Render the save as `viewer`'s wire dict — `engine.player_view`'s exact shape
+/// and redaction (bag→count, decks→counts, the other seat's blind reserves as
+/// `{"level", "facedown": true}` until the game is over).
+#[wasm_bindgen]
+pub fn duel_player_view_json(
+    save_json: &str,
+    pid0: &str,
+    pid1: &str,
+    name0: &str,
+    name1: &str,
+    viewer: i32,
+) -> String {
+    let Some(s) = crate::dump::state_from_json(save_json) else {
+        return r#"{"error":"bad save"}"#.to_string();
+    };
+    crate::gamedict::to_player_view(&s, [pid0, pid1], [name0, name1], viewer).to_string()
+}
+
+/// The REDACTED search projection for `ai_search.state` — `compact.project`'s
+/// shape for `seat` (bag sorted, unseen pools sorted, blind reserves as counts).
+#[wasm_bindgen]
+pub fn duel_offline_proj(save_json: &str, seat: usize) -> String {
+    let Some(s) = crate::dump::state_from_json(save_json) else {
+        return r#"{"error":"bad save"}"#.to_string();
+    };
+    if seat > 1 {
+        return r#"{"error":"bad seat"}"#.to_string();
+    }
+    crate::gamedict::to_proj(&s, seat).to_string()
+}
+
 // ─── Value-net forward micro-bench (Node/browser; not a serving entry) ───────────
 // The one number the int8 rewrite is really FOR: wasm has no f32 FMA but HAS an integer dot
 // (`i32x4_dot_i16x8`), so int8 is the path that changes the BROWSER forward economics. These

@@ -39,6 +39,12 @@ required-features = ["bridge"]
 name = "compact_parity"
 required-features = ["bridge"]
 
+# Offline-surface gate: player_view/project/log-events writers vs the Python they
+# mirror (see src/bin/gamedict_parity.rs; fixtures via tools/gen_gamedict_fixtures.py).
+[[bin]]
+name = "gamedict_parity"
+required-features = ["bridge"]
+
 # Self-play harvest for the learned value net (Phase 1). Gated behind `bridge` to keep it
 # out of the default/wasm build, like the other native-only offline tools.
 [[bin]]

@@ -127,9 +127,49 @@ rebuild coexists with a multi-hour gate.
 
 ---
 
+## Offline vs-AI mode (`offline.js` + the shell's `/offline` hub)
+
+Duel is playable **fully offline** (airplane mode, installed PWA), the same architecture as
+Spender/CoC: the BROWSER is authoritative, the save is the full-fidelity Rust `State` serde JSON
+(`duel-core/src/dump.rs` — ordered bag/decks, blind-reserve IDENTITIES, the `revealed` undo gate),
+every step a stateless JSON→JSON wasm call. Purely local; Hard/Expert only (the client-WASM tiers).
+
+- **Rust side** (`rust-cores/duel-core`): `engine.rs` gained `new_game(seed)` (the deal via the
+  `Shuffler` seam) and a `revealed` flag mirroring Python's `turn_flags["revealed"]` at `_mark_revealed`'s
+  exact sites (reset by `finish_turn`; NOT in the parity projection, so rules parity is untouched);
+  `dump.rs` (save codec); `gamedict.rs` (`to_player_view` = the `engine.player_view` redaction incl.
+  the heterogeneous reserved list, `to_proj` = `compact.project`, move parsers both ways, and
+  `synth_events` — the engine-log records derived by diffing, incl. auto-resolved abilities, AGAIN on
+  winning buys, and `extra_turn`'s post-increment `t`). Five wasm exports: `duel_new_game_json` /
+  `duel_legal_json` / `duel_apply_json` (validates by `legal_moves` membership; takes a shuffle seed —
+  Duel's State carries no rng) / `duel_player_view_json` / `duel_offline_proj`.
+- **Parity**: `src/bin/gamedict_parity` replays `tools/gen_gamedict_fixtures.py` games (fixtures
+  gitignored — a missing file means REGENERATE) and requires the three writers to match Python:
+  every move's log events, sampled `player_view` (both seats + spectator) and `project` (both seats).
+  `new_game` is gated by INVARIANTS + a random-playout soak in the lib tests (`cargo test --lib`),
+  deliberately not Python-seed parity.
+- **Driver** (`offline.js`): mirrors the server — per-decision bot loop (forced single-legal moves
+  apply directly; real decisions arm `ai_search` {3500ms, 20k sims} for the component's EXISTING pool
+  effect), search input is the seat-scoped REDACTED projection (the AI cannot read the deck order the
+  browser holds), log strictly APPENDS (wasm events are parity-exact engine records; the JSX reverses
+  for display), and undo is a whole-envelope snapshot re-armed per `turn_number` (an AGAIN turn is its
+  own undoable turn) and REFUSED once the save's `revealed` flag is set — the online exploit gate,
+  verbatim. The card catalog is cached in localStorage (`duel_catalog`, warmed by the hub's precache)
+  so cards render offline.
+- **JSX** (`SpenderDuel.jsx`): optional `offline` prop via the `{myId, authUser, onExit}` peer
+  contract — boot publishes roomData BEFORE flipping to the game screen (load-bearing), deep-entry/
+  popstate/reconnect are gated off, and the one `ai_move` send + the `mv` send each fork into the
+  driver. The shell's hub creates/lists/resumes records (`game: "duel"`); `screens.mjs` has a full
+  offline scenario (create → cut network → human take → **AI reply offline** → IndexedDB resume).
+
+---
+
 ## Tests
 
 `tests/` — card invariants, `player_view` redaction, `test_ws_auth.py`, and a bot-vs-bot soak with the
-25-token conservation invariant. Rust: `cargo test --lib` in `rust-cores/duel-core` (37 lib tests,
+25-token conservation invariant. Rust: `cargo test --lib` in `rust-cores/duel-core` (43 lib tests,
 including one pinning minimax `select()` semantics — at an opponent node it must take the root's WORST
-reply where max-max takes its best).
+reply where max-max takes its best — plus the `new_game` invariants + playout soak and the offline
+save-codec round-trip). Offline serving surface: `cargo run --release --features bridge --bin
+gamedict_parity` (regenerate fixtures first: `PYTHONPATH=. python
+rust-cores/duel-core/tools/gen_gamedict_fixtures.py`).

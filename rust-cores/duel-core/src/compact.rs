@@ -196,6 +196,9 @@ pub fn from_proj(v: &Value) -> Option<(State, usize)> {
         turn: i64_at(v, "turn")?.clamp(0, 1) as usize,
         turn_number: i64_at(v, "turn_number")? as i32,
         replenished: i64_at(v, "replenished")? != 0,
+        // Not projected (undo is a serving concern, not a search one) — the search
+        // never reads it, so false is always safe here.
+        revealed: false,
         again: i64_at(v, "again")? != 0,
         board,
         bag,
