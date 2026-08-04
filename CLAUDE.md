@@ -222,6 +222,15 @@ family. Same shape in all four games, differing only in table name and columns.
 - **Measure compaction AFTER zlib, and beware marginal costs.** Removing one key at a time
   under-reports anything that has a near-duplicate elsewhere (Duel's `rng_state` marginal reads 1.8%;
   the pair is ~59%). Use a cumulative strip-down to see what is really in a blob.
+- **…but a stored RATIO is a measurement, not an invariant — never assert on it tightly.** Its
+  denominator is the compressor, not the codec: the same CoC blobs read 0.660 at zlib level 1 and
+  0.755 at level 6, and **Python 3.14 ships zlib-ng** rather than stock zlib. All four games'
+  `test_compaction_actually_shrinks_the_blob` guards were written against CI's zlib; CoC's sat 0.005
+  under its threshold, so it passed CI and was red on every dev box, and Dontminion's/Duel's margins
+  were smaller than that swing. A size guard needs a DETERMINISTIC axis (raw bytes) for the tight
+  bound, with the stored bound left loose — and the real no-op detection belongs in a STRUCTURAL
+  test (CoC `test_every_tile_in_the_game_is_reached`, Duel/Dontminion's packed-snapshot tests),
+  which no compressor can move.
 - **Move logs are already as small as they get — do not relitigate this per game.** They are the
   biggest single item in CoC (33%), Duel (28%) and Dontminion (58–67%) rows, but they are hugely
   repetitive and zlib handles it: Dontminion card-names→indices was raw 104,863→93,436 but stored

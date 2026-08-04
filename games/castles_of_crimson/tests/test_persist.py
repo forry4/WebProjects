@@ -112,11 +112,50 @@ def test_legacy_uncompacted_blob_passes_through():
 
 
 def test_compaction_actually_shrinks_the_blob():
-    """A guard against the codec silently degrading to a no-op."""
-    state = _state(_play(7))
-    plain = len(_rooms.encode_state(state))
-    packed = len(_rooms.encode_state(persist.compact_state(state)))
-    assert packed < plain * 0.75, f"{packed} vs {plain} — compaction lost its effect"
+    """The size guard, on the two axes where each claim is actually meaningful.
+
+    A SIZE RATIO IS A MEASUREMENT, NOT AN INVARIANT, AND ITS DENOMINATOR IS THE
+    COMPRESSOR. This assertion used to be a single `stored < plain * 0.75`, and
+    it was red on any box whose zlib differed from the CI runner's: on Python
+    3.14 (which ships **zlib-ng**) the same five games read 0.751–0.758 against
+    that 0.75. Nothing about compaction had changed — the stored ratio for these
+    exact blobs swings 0.660 → 0.758 across zlib LEVELS 1..9 alone, so a
+    threshold sitting 0.005 from the observed value was measuring the
+    compressor, not the codec.
+
+    So the two claims are split onto the axes that can carry them:
+
+    * RAW is fully deterministic — no compressor in it at all — so it takes the
+      TIGHT bound. This is the real regression detector.
+    * STORED keeps the module docstring's rule ("measure after zlib"): a
+      transform that shrinks raw but not stored is worthless, because stored is
+      what the DB pays for. But as a *bound* it only gets a loose one, chosen
+      well clear of the compressor's own swing.
+
+    Neither is the no-op guard — `test_every_tile_in_the_game_is_reached` is,
+    and it is structural and compressor-independent. A no-op scores 1.000 on
+    both axes here and would fail these too, with room to spare.
+    """
+    for seed in (7, 11, 23, 42, 99):
+        state = _state(_play(seed))
+        packed_state = persist.compact_state(state)
+
+        def _raw(s):
+            return len(json.dumps(s, separators=(",", ":")).encode("utf-8"))
+
+        raw_ratio = _raw(packed_state) / _raw(state)
+        assert raw_ratio < 0.70, (
+            f"seed {seed}: compaction shrank the raw blob to {raw_ratio:.3f} "
+            f"of its size (measured 0.598–0.618; a no-op is 1.0)")
+
+        stored_ratio = (len(_rooms.encode_state(packed_state))
+                        / len(_rooms.encode_state(state)))
+        assert stored_ratio < 0.90, (
+            f"seed {seed}: compaction is not paying for itself after zlib "
+            f"({stored_ratio:.3f}) — the DB pays the STORED size, so a raw-only "
+            f"win is no win. Measured 0.644–0.758 across zlib levels 1..9; this "
+            f"bound is deliberately loose because the ratio moves with the "
+            f"compressor (zlib vs zlib-ng), not with the codec")
 
 
 # ── the rng pack, which the game's determinism rests on ──────────────────────

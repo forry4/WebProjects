@@ -103,7 +103,16 @@ def test_legacy_uncompacted_blob_passes_through():
 
 
 def test_compaction_actually_shrinks_the_blob():
+    """A LOOSE sanity bound, deliberately. `test_the_undo_snapshots_rng_is_packed_too`
+    and `test_packing_only_the_live_copy_would_make_the_row_bigger` are the real
+    guards — they are structural and compressor-independent.
+
+    This ratio is not: the same blob reads 0.756 at zlib level 1, 0.881 at level
+    6 and 0.848 at level 9, so a threshold set close to the observed value is
+    measuring which zlib you have. The CoC twin of this test was red on every
+    Python 3.14 box (zlib-ng) for exactly that reason; the measurement is in
+    `games/castles_of_crimson/tests/test_persist.py::test_compaction_actually_shrinks_the_blob`."""
     state = _state(_play())
     plain = len(_rooms.encode_state(state))
     packed = len(_rooms.encode_state(persist.compact_state(state)))
-    assert packed < plain * 0.93, f"{packed} vs {plain} — compaction lost its effect"
+    assert packed < plain * 0.95, f"{packed} vs {plain} — compaction lost its effect"

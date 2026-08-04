@@ -26,6 +26,17 @@ Two findings worth keeping, because both are counter-intuitive:
   almost nothing. Packing only the live copy destroyed that dedup and made the blob
   BIGGER than not packing at all (-37% -> -17% in the A/B). Anything applied here must
   be applied to the snapshot too.
+
+A third, learned the hard way from the TEST rather than the codec:
+
+* **"Measure after zlib" is a rule for CHOOSING what to compact, NOT a number to
+  assert on tightly.** A stored ratio has the compressor in its denominator: these
+  exact blobs read 0.660 at zlib level 1 and 0.755 at level 6, and Python 3.14 ships
+  **zlib-ng** rather than stock zlib, so a guard set 0.005 below the observed value
+  passed on CI and failed on every dev box. The numbers in the table above are real
+  and worth keeping; a regression guard built on them needs either a deterministic
+  axis (raw size) or a bound well clear of that ~0.1 swing. See
+  `tests/test_persist.py::test_compaction_actually_shrinks_the_blob`.
 """
 from __future__ import annotations
 

@@ -107,7 +107,20 @@ def test_legacy_uncompacted_blob_passes_through():
 
 
 def test_compaction_actually_shrinks_the_blob():
+    """STORED is the only axis that means anything here: this game's compaction
+    is the rng pack, which barely moves the RAW blob (measured 0.969) and only
+    pays after zlib. That is the module's own point — but it also means the
+    bound has to live near 1.0, where it is worth very little on its own.
+
+    `test_every_undo_snapshot_gets_packed` is the real no-op guard; this is a
+    loose sanity bound, and it is loose ON PURPOSE. The stored ratio is a
+    property of the COMPRESSOR as much as the codec: these blobs read 0.913 at
+    zlib level 1 and 0.950 at level 4, and the CoC twin of this test was red on
+    every Python 3.14 box (which ships zlib-ng) purely because its threshold sat
+    0.005 from the observed value. See
+    `games/castles_of_crimson/tests/test_persist.py::test_compaction_actually_shrinks_the_blob`
+    for the full measurement. Don't tighten this back up."""
     state = _state(_play())
     plain = len(_rooms.encode_state(state))
     packed = len(_rooms.encode_state(persist.compact_state(state)))
-    assert packed < plain * 0.96, f"{packed} vs {plain} — compaction lost its effect"
+    assert packed < plain * 0.98, f"{packed} vs {plain} — compaction lost its effect"
