@@ -265,6 +265,38 @@ def test_two_cargo_ship_plays_are_two_independent_set_asides():
     assert sorted(g["seats"][A]["dur_aside"]) == ["Gold", "Silver"]
 
 
+def test_two_cargo_ships_each_keep_their_own_card_on_the_table():
+    """Two SEPARATE Cargo Ships that each caught a gain are two physical cards
+    that each stay in play, and each returns its own set-aside.
+
+    This is what `duration_handle` bought (Kernel v9). The set-aside happens
+    in a LATER window than the play, so without a handle naming the physical
+    card, `add_duration_fx` writes wherever `_cur_dur` happens to point — and
+    piling both onto one entry leaves the SECOND Cargo Ship with no fx, so it
+    is discarded at this Clean-up while its card is still set aside on it."""
+    g = fresh()
+    give_hand(g, A, ["Cargo Ship", "Cargo Ship"])
+    g["actions"] = 2
+    play(g, A, "Cargo Ship")
+    play(g, A, "Cargo Ship")
+    to_buy(g, A)
+    gain(g, A, "Silver")
+    assert decide(g, A, ids=["yes"])[0]
+    engine._drive(g)
+    gain(g, A, "Gold")
+    assert decide(g, A, ids=["yes"])[0]
+    entries = g["seats"][A].get("dur_setup", [])
+    assert [e["card"] for e in entries] == ["Cargo Ship", "Cargo Ship"]
+    assert all(len(e["fx"]) == 1 for e in entries), "one return fx each"
+    ok, err = engine.apply_move(g, A, {"type": "end_phase"})
+    assert ok, err
+    # both persist, and the conservation census still sees exactly two
+    assert [e["card"] for e in g["seats"][A]["duration"]] == \
+        ["Cargo Ship", "Cargo Ship"]
+    assert "Cargo Ship" not in g["seats"][A]["in_play"]
+    assert engine.owned_cards(g, A).count("Cargo Ship") == 2
+
+
 # ══ EXPERIMENT ═══════════════════════════════════════════════════════════════
 
 def test_experiment_draws_two_and_returns_itself_to_its_pile():
