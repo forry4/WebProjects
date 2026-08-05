@@ -207,8 +207,8 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
                            seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)
     before = _fingerprint(game)
-    turns_at_start = game["turn_number"]
     rng = random.Random(4321 + chunk)
+    since = None
     for _ in range(MOVE_CAP):
         if game["over"]:
             break
@@ -216,12 +216,16 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
         ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
         assert ok, f"random legal move rejected: {err}"
         before = _assert_invariants(game, baseline, before)
-    if _donate_deadlock(game):
-        # the documented never-ending state (see _donate_deadlock): assert
-        # PROGRESS instead, which is what distinguishes it from a livelock
-        assert game["turn_number"] > turns_at_start + 20
-        return
-    assert game["over"], "game did not terminate under the move cap"
+        if since is None and _ > MOVE_CAP // 2:
+            # halfway in, start watching for the economic stall
+            since = (game["turn_number"],
+                     sum(1 for e in game["log"] if e.get("event") == "gain"))
+    if not game["over"]:
+        # the documented never-ending state (see _economically_frozen): turns
+        # still advancing but no gain possible, which is what distinguishes it
+        # from the livelock this soak exists to catch
+        assert since is not None and _economically_frozen(game, since), \
+            "game did not terminate under the move cap"
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
