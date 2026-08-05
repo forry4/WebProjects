@@ -51,6 +51,7 @@ const EXPANSIONS = [
   { id: "cornucopia", name: "Cornucopia & Guilds" },
   { id: "alchemy", name: "Alchemy" },
   { id: "darkages", name: "Dark Ages" },
+  { id: "adventures", name: "Adventures" },
 ];
 // Adventures tokens that sit ON a Supply pile (engine.TOKEN_KINDS). Public
 // markers, so they render for every player; the glyph is the token's own
@@ -59,6 +60,18 @@ const EXPANSIONS = [
 const TOKEN_GLYPH = {
   "+card": "+C", "+action": "+A", "+buy": "+B", "+coin": "+$",
   "-cost": "−$2", trashing: "🗑", estate: "🏠",
+};
+// ...and the ones that sit in front of a PLAYER (seat.tokens). The Journey
+// token is stored as its DOWN state, so absence means face up — which is where
+// it starts, and what an old save correctly means.
+const seatTokens = (seat) => {
+  const t = seat?.tokens || {};
+  const out = [];
+  if (t["-card"]) out.push({ key: "-card", glyph: "−1🃏", title: "-1 Card token: your next draw is one card short" });
+  if (t["-coin"]) out.push({ key: "-coin", glyph: "−$1", title: "-$1 token: the next $ you get is reduced by 1" });
+  if (t.journey_down) out.push({ key: "journey", glyph: "🧭", title: "Journey token: face DOWN" });
+  if (t.estate) out.push({ key: "estate", glyph: `🏠 ${t.estate}`, title: `Inheritance: their Estates play ${t.estate}` });
+  return out;
 };
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
@@ -514,6 +527,9 @@ function fmtLog(e, names) {
     case "deck_to_discard":
       return `${who} puts their deck (${e.count} card${e.count === 1 ? "" : "s"}) into their discard pile`;
     case "play_from_supply": return `${who} plays ${art(e.card)} from the Supply, leaving it there`;
+    // Inheritance: an Estate playing the card its owner's token sits on
+    case "play_set_aside": return `${who} plays their set-aside ${art(e.card)}, leaving it there`;
+    case "set_aside_supply": return `${who} sets ${art(e.card)} aside from the Supply and moves their Estate token to it`;
     // landscapes (Events/Projects/...): bought with a Buy and money, but they
     // are not cards, so nothing is gained and there is no pile
     case "buy_landscape": return `${who} buys ${e.name}`;
@@ -523,9 +539,16 @@ function fmtLog(e, names) {
     case "call": return `${who} calls ${art(e.card)}`;
     case "move_token":
       return `${who} moves their ${e.token} token onto the ${e.pile} pile`;
-    case "seat_token": return e.value == null
-      ? `${who} loses their ${e.token} token`
-      : `${who} takes their ${e.token} token`;
+    case "seat_token": {
+      // the Journey token is stored as its DOWN state, so it reads as a flip
+      if (e.token === "journey_down") return `${who} turns their Journey token ${e.value ? "face down" : "face up"}`;
+      return e.value == null
+        ? `${who} loses their ${e.token} token`
+        : `${who} takes their ${e.token} token`;
+    }
+    // the -1 Card / -$1 tokens being spent by the thing they were waiting for
+    case "minus_card_token": return `${who} removes their -1 Card token instead of drawing`;
+    case "minus_coin_token": return `${who} removes their -$1 token, losing $1`;
     case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
     case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;
     case "set_aside": return e.cards
@@ -756,7 +779,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // Coffers (Guilds / Cornucopia & Guilds) — public table state, spendable in
   // EITHER phase, which is why this is not gated on inBuy.
   const myCoffers = game?.coffers?.[myId] ?? 0;
-  const canSpend = !!game && !over && game.turn === myId && !game.pending_pid;
+  // What the SERVER says you may spend (engine.spendable). Read off the wire
+  // rather than re-derived: the rule moved in ph. 7 — Coffers are spendable in
+  // the middle of resolving an ability now, for Storyteller — and a client
+  // carrying its own copy of it is the Peddler-cost bug's exact shape.
+  const canSpend = (game?.spendable?.coffers ?? 0) > 0 && !over;
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -1453,6 +1480,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ <Pop n={game.vp_tokens[pid]} /></span>
         )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
+        {/* Adventures tokens that sit in front of a PLAYER rather than on a
+            pile. Public markers, so they render for every seat — and the two
+            negative ones matter enough to the reader that hiding them would be
+            the surprise ("why did I only draw 4?"). */}
+        {seatTokens(s).map(({ key, glyph, title }) => (
+          <span key={key} className="dm-seat-tok" title={title}>{glyph}</span>
+        ))}
       </div>
     );
   };

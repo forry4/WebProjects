@@ -102,15 +102,16 @@ def events(g, name):
 
 # ── the data model ────────────────────────────────────────────────────────────
 
-def test_no_shipped_set_has_a_landscape_yet_so_no_board_deals_one():
-    """The honest statement of what 6H ships: machinery, no content. If this
-    ever fails it is because a set added landscape DATA — at which point the
-    dealer below stops being a no-op and the determinism claim needs re-running,
-    which is exactly the moment to notice."""
-    assert cards.LANDSCAPES == {}
+def test_only_adventures_has_landscapes_so_far():
+    """6H shipped the machinery with no content; ph. 7 filled in the 20 Events.
+    This is the tripwire for the NEXT set that adds landscape data — at which
+    point the no-entropy proof below needs re-reading, since a non-empty pool
+    is exactly when the dealer stops being free."""
+    assert {d["expansion"] for d in cards.LANDSCAPES.values()} == {"adventures"}
     for exp in cards.KINGDOM:
         g = engine.new_game([A, B], [exp], seed=5)
-        assert g["landscapes"] == {}
+        if exp != "adventures":
+            assert g["landscapes"] == {}, exp
 
 
 def test_the_dealer_draws_no_entropy_when_there_is_nothing_to_deal():

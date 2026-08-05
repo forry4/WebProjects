@@ -8,11 +8,11 @@ modules is a packaging bug and raises at import.
 
 from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
                effects_hinterlands, effects_cornucopia, effects_alchemy,
-               effects_darkages)
+               effects_darkages, effects_adventures)
 
 _MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
             effects_hinterlands, effects_cornucopia, effects_alchemy,
-            effects_darkages)
+            effects_darkages, effects_adventures)
 
 EFFECTS = {}
 STAGES = {}

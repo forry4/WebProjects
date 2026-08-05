@@ -12,9 +12,13 @@ from games.dontminion import cards
 ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
                  "duration", "reward", "command",
                  # Dark Ages: four inert flags the cards themselves read
-                 "looter", "ruins", "knight", "shelter"}
+                 "looter", "ruins", "knight", "shelter",
+                 # Adventures: Reserve (waits on the Tavern mat to be CALLED)
+                 # and Traveller (exchanges upward when discarded from play)
+                 "reserve", "traveller"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
-                      "hinterlands", "cornucopia", "alchemy", "darkages"}
+                      "hinterlands", "cornucopia", "alchemy", "darkages",
+                      "adventures"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
 OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
@@ -290,6 +294,46 @@ EXPECTED = {
     # outside the Supply
     "Madman": (0, ['action']),
     "Mercenary": (0, ['action', 'attack']),
+    # --- Adventures (30 kingdom) ---
+    'Coin of the Realm': (2, ['treasure', 'reserve']),
+    'Page': (2, ['action', 'traveller']),
+    'Peasant': (2, ['action', 'traveller']),
+    'Ratcatcher': (2, ['action', 'reserve']),
+    'Raze': (2, ['action']),
+    'Amulet': (3, ['action', 'duration']),
+    'Caravan Guard': (3, ['action', 'duration', 'reaction']),
+    'Dungeon': (3, ['action', 'duration']),
+    'Gear': (3, ['action', 'duration']),
+    'Guide': (3, ['action', 'reserve']),
+    'Duplicate': (4, ['action', 'reserve']),
+    'Magpie': (4, ['action']),
+    'Messenger': (4, ['action']),
+    'Miser': (4, ['action']),
+    'Port': (4, ['action']),
+    'Ranger': (4, ['action']),
+    'Transmogrify': (4, ['action', 'reserve']),
+    'Artificer': (5, ['action']),
+    'Bridge Troll': (5, ['action', 'attack', 'duration']),
+    'Distant Lands': (5, ['action', 'reserve', 'victory']),
+    'Giant': (5, ['action', 'attack']),
+    'Haunted Woods': (5, ['action', 'attack', 'duration']),
+    'Lost City': (5, ['action']),
+    'Relic': (5, ['treasure', 'attack']),
+    'Royal Carriage': (5, ['action', 'reserve']),
+    'Storyteller': (5, ['action']),
+    'Swamp Hag': (5, ['action', 'attack', 'duration']),
+    'Treasure Trove': (5, ['treasure']),
+    'Wine Merchant': (5, ['action', 'reserve']),
+    'Hireling': (6, ['action', 'duration']),
+    # the 8 Traveller upgrades — non-Supply piles of 5, never bought
+    'Treasure Hunter': (3, ['action', 'traveller']),
+    'Warrior': (4, ['action', 'attack', 'traveller']),
+    'Hero': (5, ['action', 'traveller']),
+    'Champion': (6, ['action', 'duration']),
+    'Soldier': (3, ['action', 'attack', 'traveller']),
+    'Fugitive': (4, ['action', 'traveller']),
+    'Disciple': (5, ['action', 'traveller']),
+    'Teacher': (6, ['action', 'reserve']),
     "Spoils": (0, ['treasure']),
 }
 
@@ -306,10 +350,10 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 238
+    assert len(cards.CARDS) == 276
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
               "prosperity": [], "hinterlands": [], "cornucopia": [],
-              "alchemy": [], "darkages": []}
+              "alchemy": [], "darkages": [], "adventures": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     # 34 kingdom + 10 Knights + 5 Ruins + 3 Shelters + Spoils/Madman/Mercenary
@@ -322,6 +366,8 @@ def test_card_count_and_expansion_counts():
     assert len(by_exp["hinterlands"]) == 26     # 17 kept from 1E + 9 new in 2E
     assert len(by_exp["cornucopia"]) == 32      # 18 kept + 8 new + 6 Rewards
     assert len(by_exp["alchemy"]) == 12         # 11 shipped + Potion; see DEFERRED
+    # 30 kingdom + the 8 Traveller upgrades (non-Supply piles of 5)
+    assert len(by_exp["adventures"]) == 38
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
@@ -385,8 +431,11 @@ def test_schema_field_completeness_and_validity():
         assert isinstance(c["text"], str) and c["text"].strip(), name
         assert c["expansion"] in ALLOWED_EXPANSIONS, name
         assert isinstance(c["kingdom"], bool), name
-    assert sorted(str_vp) == [("Demesne", "demesne"), ("Duke", "duke"),
-                              ("Fairgrounds", "fairgrounds"),
+    assert sorted(str_vp) == [("Demesne", "demesne"),
+                              # the first VP kind that depends on WHERE the
+                              # card is, not on what else you own (ph. 7)
+                              ("Distant Lands", "distant_lands"),
+                              ("Duke", "duke"), ("Fairgrounds", "fairgrounds"),
                               ("Feodum", "feodum"), ("Gardens", "gardens"),
                               ("Vineyard", "vineyard")]
 
@@ -447,24 +496,32 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.cards_granting("actions") == [
         "Bandit Camp", "Bazaar", "Border Village", "City", "Crossroads",
         "Diplomat", "Farmhands", "Festival", "Fishing Village", "Fortress",
-        "Inn", "Mining Village", "Native Village", "Nobles", "Plaza",
-        "Shanty Town", "Squire", "University", "Village",
+        "Inn", "Lost City", "Mining Village", "Native Village", "Nobles",
+        "Plaza", "Port", "Shanty Town", "Squire", "University", "Village",
         "Wandering Minstrel", "Worker's Village"]
+    # ...and NOT Coin of the Realm, whose "+2 Actions" is on its CALL ability.
+    # A call is not a play, so a player guaranteed "+2 Actions" would otherwise
+    # be handed a Treasure and no village at all — see cards._CALL_CLAUSE.
+    assert "Coin of the Realm" not in cards.cards_granting("actions")
     assert cards.cards_granting("buys") == [
-        "Astrolabe", "Baron", "Bridge", "Candlestick Maker", "Cauldron",
-        "City", "Collection", "Council Room", "Counterfeit", "Courtier",
-        "Farrier", "Festival", "Forager", "Grand Market", "Hamlet",
-        "Herbalist", "Margrave", "Market", "Market Square", "Merchant Guild",
-        "Nomads", "Pawn", "Salvager", "Souk", "Spice Merchant", "Squire",
-        "Storeroom", "Tactician", "Tiara", "Wharf", "Worker's Village"]
+        "Astrolabe", "Baron", "Bridge", "Bridge Troll", "Candlestick Maker",
+        "Cauldron", "City", "Collection", "Council Room", "Counterfeit",
+        "Courtier", "Farrier", "Festival", "Forager", "Grand Market",
+        "Hamlet", "Herbalist", "Margrave", "Market", "Market Square",
+        "Merchant Guild", "Messenger", "Nomads", "Pawn", "Peasant", "Ranger",
+        "Salvager", "Souk", "Spice Merchant", "Squire", "Storeroom",
+        "Tactician", "Tiara", "Wharf", "Wine Merchant", "Worker's Village"
+    ]
     assert cards.cards_granting("draw") == [
         "Alchemist", "Apprentice", "Catacombs", "Council Room", "Courtyard",
-        "Cultist", "Diplomat", "Ferryman", "Guard Dog", "Hunting Grounds",
-        "Inn", "Laboratory", "Margrave", "Masquerade", "Menagerie", "Minion",
-        "Moat", "Nobles", "Patrol", "Rabble", "Sea Witch", "Secret Passage",
+        "Cultist", "Diplomat", "Dungeon", "Ferryman", "Gear", "Guard Dog",
+        "Haunted Woods", "Hunting Grounds", "Inn", "Laboratory", "Lost City",
+        "Margrave", "Masquerade", "Menagerie", "Minion", "Moat", "Nobles",
+        "Patrol", "Rabble", "Ranger", "Sea Witch", "Secret Passage",
         "Shanty Town", "Smithy", "Spice Merchant", "Stables", "Steward",
         "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
-        "Witch", "Witch's Hut", "Young Witch"]
+        "Witch", "Witch's Hut", "Young Witch"
+    ]
 
 def test_requirement_bar_is_the_printed_bonus():
     # the threshold really binds: a cantrip is not a village, a Moat is a drawer

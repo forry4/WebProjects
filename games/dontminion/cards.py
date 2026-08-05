@@ -1,5 +1,6 @@
-"""Dontminion static card data — the full 238-card dataset (Base, Intrigue, Seaside,
-Prosperity, Hinterlands and Cornucopia & Guilds in 2E, plus Alchemy and Dark Ages).
+"""Dontminion static card data — the full 276-card dataset plus the first 20 LANDSCAPE
+cards (Base, Intrigue, Seaside, Prosperity, Hinterlands and Cornucopia & Guilds in 2E,
+plus Alchemy, Dark Ages and Adventures).
 
 Verified against the Knutsen compendium (Dominion_CompleteRules_v11.1.pdf: ch. V editions/
 errata p37-38 + ch. VII Card Reference) and the dominionstrategy.com card-list pages for
@@ -880,6 +881,173 @@ CARDS.update({
                         "expansion": "darkages", "kingdom": False},
 })
 
+# --- ADVENTURES (phase 7) ----------------------------------------------------
+#
+# TEXTS ARE THE CURRENT ONES, AND FOR NINE CARDS THAT MEANS THEY DIFFER FROM
+# EVERY CARD-LIST SITE. The compendium's ch. V lists Bonfire, Bridge Troll,
+# Haunted Woods, Inheritance, Messenger, Plan, Port, Storyteller and Swamp Hag
+# among the cards printed in 2022, and Mission among the 2023 no-third-turn
+# changes. The 2022 pass did two things across the whole catalogue — "when-buy
+# triggers were changed to when-gain, and while-in-play timers were removed" —
+# and both bite here:
+#   * Haunted Woods / Swamp Hag / Messenger / Port / Plan's token now trigger on
+#     a GAIN (Haunted Woods and Swamp Hag on a BOUGHT gain), not on the buy;
+#   * Bridge Troll's cost reduction is turn-scoped like Highway's (this turn AND
+#     your next turn, cumulative with a throne-room), not while-in-play;
+#   * Bonfire only trashes COPPERS;
+#   * Storyteller gives +1 Card instead of the +$1 it used to pay itself with.
+# dominionstrategy.com/card-lists/ and the 2015 rulebook both still show the old
+# wording; the compendium is the source of truth per this package's CLAUDE.md.
+CARDS.update({
+    # --- $2 ---
+    "Coin of the Realm": {"cost": 2, "types": ["treasure", "reserve"], "coins": 1, "vp": 0,
+                        "text": "$1\nWhen you play this, put it on your Tavern mat.\nDirectly after you finish playing an Action card, you may call this, for +2 Actions.",
+                        "expansion": "adventures", "kingdom": True},
+    "Page":              {"cost": 2, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nWhen you discard this from play, you may exchange it for a Treasure Hunter.",
+                        "expansion": "adventures", "kingdom": True},
+    "Peasant":           {"cost": 2, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\n+$1\nWhen you discard this from play, you may exchange it for a Soldier.",
+                        "expansion": "adventures", "kingdom": True},
+    "Ratcatcher":        {"cost": 2, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nPut this on your Tavern mat.\nAt the start of your turn, you may call this, to trash a card from your hand.",
+                        "expansion": "adventures", "kingdom": True},
+    "Raze":              {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nTrash this or a card from your hand. Look at a number of cards from the top of your deck equal to the cost in $ of the trashed card. Put one of them into your hand and discard the rest.",
+                        "expansion": "adventures", "kingdom": True},
+    # --- $3 ---
+    "Amulet":            {"cost": 3, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "Now and at the start of your next turn, choose one: +$1; or trash a card from your hand; or gain a Silver.",
+                        "expansion": "adventures", "kingdom": True},
+    "Caravan Guard":     {"cost": 3, "types": ["action", "duration", "reaction"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nAt the start of your next turn, +$1.\nWhen another player plays an Attack card, you may first play this from your hand.",
+                        "expansion": "adventures", "kingdom": True},
+    "Dungeon":           {"cost": 3, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nNow and at the start of your next turn: +2 Cards, then discard 2 cards.",
+                        "expansion": "adventures", "kingdom": True},
+    "Gear":              {"cost": 3, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nSet aside up to 2 cards from your hand face down (under this). At the start of your next turn, put them into your hand.",
+                        "expansion": "adventures", "kingdom": True},
+    "Guide":             {"cost": 3, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nPut this on your Tavern mat.\nAt the start of your turn, you may call this, to discard your hand and draw 5 cards.",
+                        "expansion": "adventures", "kingdom": True},
+    # --- $4 ---
+    "Duplicate":         {"cost": 4, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "Put this on your Tavern mat.\nWhen you gain a card costing up to $6, you may call this, to gain a copy of that card.",
+                        "expansion": "adventures", "kingdom": True},
+    "Magpie":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top card of your deck. If it's a Treasure, put it into your hand. If it's an Action or Victory card, gain a Magpie.",
+                        "expansion": "adventures", "kingdom": True},
+    "Messenger":         {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\n+$2\nYou may put your deck into your discard pile.\nWhen you gain this, if it's your first gain this Buy phase, gain a card costing up to $4, and each other player gains a copy of it.",
+                        "expansion": "adventures", "kingdom": True},
+    "Miser":             {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Choose one: Put a Copper from your hand onto your Tavern mat; or +$1 per Copper on your Tavern mat.",
+                        "expansion": "adventures", "kingdom": True},
+    "Port":              {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nWhen you gain this, gain another Port.",
+                        "expansion": "adventures", "kingdom": True},
+    "Ranger":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\nTurn your Journey token over (it starts face up). Then if it's face up, +5 Cards.",
+                        "expansion": "adventures", "kingdom": True},
+    "Transmogrify":      {"cost": 4, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nPut this on your Tavern mat.\nAt the start of your turn, you may call this, to trash a card from your hand, and gain a card costing up to $1 more than it, into your hand.",
+                        "expansion": "adventures", "kingdom": True},
+    # --- $5 ---
+    "Artificer":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+$1\nDiscard any number of cards. You may gain a card costing exactly $1 per card discarded, onto your deck.",
+                        "expansion": "adventures", "kingdom": True},
+    "Bridge Troll":      {"cost": 5, "types": ["action", "attack", "duration"], "coins": 0, "vp": 0,
+                        "text": "Each other player takes their -$1 token.\nNow and at the start of your next turn: +1 Buy.\nThis turn and your next turn, cards cost $1 less.",
+                        "expansion": "adventures", "kingdom": True},
+    "Distant Lands":     {"cost": 5, "types": ["action", "reserve", "victory"], "coins": 0, "vp": "distant_lands",
+                        "text": "Put this on your Tavern mat.\nWorth 4 VP if on your Tavern mat at the end of the game (otherwise worth 0 VP).",
+                        "expansion": "adventures", "kingdom": True},
+    "Giant":             {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "Turn your Journey token over (it starts face up). Then if it's face down, +$1. If it's face up, +$5, and each other player reveals the top card of their deck, trashes it if it costs from $3 to $6, and otherwise discards it and gains a Curse.",
+                        "expansion": "adventures", "kingdom": True},
+    "Haunted Woods":     {"cost": 5, "types": ["action", "attack", "duration"], "coins": 0, "vp": 0,
+                        "text": "Until your next turn, when another player gains a bought card, they put their hand onto their deck in any order.\nAt the start of your next turn, +3 Cards.",
+                        "expansion": "adventures", "kingdom": True},
+    "Lost City":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+2 Actions\nWhen you gain this, each other player draws a card.",
+                        "expansion": "adventures", "kingdom": True},
+    "Relic":             {"cost": 5, "types": ["treasure", "attack"], "coins": 2, "vp": 0,
+                        "text": "$2\nWhen you play this, each other player puts their -1 Card token on their deck.",
+                        "expansion": "adventures", "kingdom": True},
+    "Royal Carriage":    {"cost": 5, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nPut this on your Tavern mat.\nDirectly after you finish playing an Action card, if it's still in play, you may call this, to replay that Action.",
+                        "expansion": "adventures", "kingdom": True},
+    "Storyteller":       {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nPlay up to 3 Treasures from your hand. Then pay all of your $, and draw a card per $1 you paid.",
+                        "expansion": "adventures", "kingdom": True},
+    "Swamp Hag":         {"cost": 5, "types": ["action", "attack", "duration"], "coins": 0, "vp": 0,
+                        "text": "Until your next turn, when another player gains a bought card, they gain a Curse.\nAt the start of your next turn, +$3.",
+                        "expansion": "adventures", "kingdom": True},
+    "Treasure Trove":    {"cost": 5, "types": ["treasure"], "coins": 2, "vp": 0,
+                        "text": "$2\nWhen you play this, gain a Gold and a Copper.",
+                        "expansion": "adventures", "kingdom": True},
+    "Wine Merchant":     {"cost": 5, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\n+$4\nPut this on your Tavern mat.\nAt the end of your Buy phase, if you have at least $2 unspent, you may discard this from your Tavern mat.",
+                        "expansion": "adventures", "kingdom": True},
+    # --- $6 ---
+    "Hireling":          {"cost": 6, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "At the start of each of your turns for the rest of the game: +1 Card.\n(This stays in play.)",
+                        "expansion": "adventures", "kingdom": True},
+
+    # --- the TRAVELLER upgrades: eight NON-SUPPLY piles of 5 (never bought,
+    # only exchanged into). Their printed `$N*` cost is a real cost for every
+    # ability that reads one — unlike Spoils' $0*, which is a placeholder.
+    "Treasure Hunter":   {"cost": 3, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\n+$1\nGain a Silver per card the player to your right gained on their last turn.\nWhen you discard this from play, you may exchange it for a Warrior.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Warrior":           {"cost": 4, "types": ["action", "attack", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nFor each Traveller you have in play (including this), each other player discards the top card of their deck and trashes it if it costs from $3 to $4.\nWhen you discard this from play, you may exchange it for a Hero.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Hero":              {"cost": 5, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+$2\nGain a Treasure.\nWhen you discard this from play, you may exchange it for a Champion.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Champion":          {"cost": 6, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nFor the rest of the game, when another player plays an Attack card, it doesn't affect you, and when you play an Action card, +1 Action.\n(This stays in play. This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Soldier":           {"cost": 3, "types": ["action", "attack", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+$2\n+$1 per other Attack card you have in play.\nEach other player with 4 or more cards in hand discards a card.\nWhen you discard this from play, you may exchange it for a Fugitive.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Fugitive":          {"cost": 4, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nDiscard a card.\nWhen you discard this from play, you may exchange it for a Disciple.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Disciple":          {"cost": 5, "types": ["action", "traveller"], "coins": 0, "vp": 0,
+                        "text": "You may play an Action card from your hand twice. Gain a copy of it.\nWhen you discard this from play, you may exchange it for a Teacher.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+    "Teacher":           {"cost": 6, "types": ["action", "reserve"], "coins": 0, "vp": 0,
+                        "text": "Put this on your Tavern mat.\nAt the start of your turn, you may call this, to move your +1 Card, +1 Action, +1 Buy, or +$1 token to an Action Supply pile you have no tokens on.\n(This is not in the Supply.)",
+                        "expansion": "adventures", "kingdom": False},
+})
+
+# THE TRAVELLER CHAINS — "when you discard this from play, you may EXCHANGE it
+# for the next one". `from -> into`; each upgrade is its own non-Supply pile of
+# TRAVELLER_PILE cards, included whenever the chain's head is in the kingdom.
+# A chain is data rather than a per-card constant because the setup rule ("if
+# Page is in the Supply, add the Treasure Hunter, Warrior, Hero and Champion
+# piles") has to walk it, and because a Traveller can only be exchanged for the
+# card that follows it.
+TRAVELLERS = {
+    "Page": "Treasure Hunter", "Treasure Hunter": "Warrior",
+    "Warrior": "Hero", "Hero": "Champion",
+    "Peasant": "Soldier", "Soldier": "Fugitive",
+    "Fugitive": "Disciple", "Disciple": "Teacher",
+}
+TRAVELLER_PILE = 5          # "5 copies each of the Traveller upgrades"
+
+
+def traveller_chain(head):
+    """Every upgrade above `head`, in order — the piles its presence adds."""
+    out, cur = [], TRAVELLERS.get(head)
+    while cur is not None:
+        out.append(cur)
+        cur = TRAVELLERS.get(cur)
+    return out
+
 # The cards each shuffled Dark Ages pile is built from. Named constants rather
 # than a types scan so a set that reuses a type can't quietly join a pile.
 KNIGHTS = ["Dame Anna", "Dame Josephine", "Dame Molly", "Dame Natalie",
@@ -936,10 +1104,51 @@ BUYABLE_LANDSCAPE_KINDS = ("event", "project")
 # turn/game". Both are per player.
 LANDSCAPE_ONCE = ("turn", "game")
 
-# Empty until ph. 7 (Adventures) ships the first 20 Events. Everything that
-# reads it is written and tested against synthetic entries in test_landscapes.py
-# — the 3H discipline: the seams the next phase lands on are exercised now.
-LANDSCAPES = {}
+LANDSCAPES = {
+    # --- ADVENTURES: the first 20 Events (phase 7) ---------------------------
+    # `once` is the BUY restriction (compendium p32: "once per turn / once per
+    # game means you can only buy it once per turn / once per game"), per player.
+    "Alms":            {"kind": "event", "cost": 0, "expansion": "adventures", "once": "turn",
+                        "text": "Once per turn: If you have no Treasures in play, gain a card costing up to $4."},
+    "Borrow":          {"kind": "event", "cost": 0, "expansion": "adventures", "once": "turn",
+                        "text": "Once per turn: +1 Buy. If your -1 Card token isn't on your deck, put it there and +$1."},
+    "Quest":           {"kind": "event", "cost": 0, "expansion": "adventures",
+                        "text": "You may discard an Attack, two Curses, or six cards. If you do, gain a Gold."},
+    "Save":            {"kind": "event", "cost": 1, "expansion": "adventures", "once": "turn",
+                        "text": "Once per turn: +1 Buy. Set aside a card from your hand, and put it into your hand at end of turn (after drawing)."},
+    "Scouting Party":  {"kind": "event", "cost": 2, "expansion": "adventures",
+                        "text": "+1 Buy. Look at the top 5 cards of your deck. Discard 3 and put the rest back in any order."},
+    "Travelling Fair": {"kind": "event", "cost": 2, "expansion": "adventures",
+                        "text": "+2 Buys. When you gain a card this turn, you may put it onto your deck."},
+    "Bonfire":         {"kind": "event", "cost": 3, "expansion": "adventures",
+                        "text": "Trash up to 2 Coppers you have in play."},
+    "Expedition":      {"kind": "event", "cost": 3, "expansion": "adventures",
+                        "text": "Draw 2 extra cards for your next hand."},
+    "Ferry":           {"kind": "event", "cost": 3, "expansion": "adventures",
+                        "text": "Move your -$2 cost token to an Action Supply pile.\n(Cards from that pile cost $2 less on your turns.)"},
+    "Plan":            {"kind": "event", "cost": 3, "expansion": "adventures",
+                        "text": "Move your Trashing token to an Action Supply pile.\n(When you gain a card from that pile, you may trash a card from your hand.)"},
+    "Mission":         {"kind": "event", "cost": 4, "expansion": "adventures", "once": "turn",
+                        "text": "Once per turn: If the previous turn wasn't yours, take another turn after this one, during which you can't buy cards."},
+    "Pilgrimage":      {"kind": "event", "cost": 4, "expansion": "adventures", "once": "turn",
+                        "text": "Once per turn: Turn your Journey token over (it starts face up); then if it's face up, choose up to 3 differently named cards you have in play and gain a copy of each."},
+    "Ball":            {"kind": "event", "cost": 5, "expansion": "adventures",
+                        "text": "Take your -$1 token. Gain 2 cards each costing up to $4."},
+    "Raid":            {"kind": "event", "cost": 5, "expansion": "adventures",
+                        "text": "Gain a Silver per Silver you have in play. Each other player puts their -1 Card token on their deck."},
+    "Seaway":          {"kind": "event", "cost": 5, "expansion": "adventures",
+                        "text": "Gain an Action card costing up to $4. Move your +1 Buy token to its pile.\n(When you play a card from that pile, you first get +1 Buy.)"},
+    "Trade":           {"kind": "event", "cost": 5, "expansion": "adventures",
+                        "text": "Trash up to 2 cards from your hand. Gain a Silver per card you trashed."},
+    "Lost Arts":       {"kind": "event", "cost": 6, "expansion": "adventures",
+                        "text": "Move your +1 Action token to an Action Supply pile.\n(When you play a card from that pile, you first get +1 Action.)"},
+    "Training":        {"kind": "event", "cost": 6, "expansion": "adventures",
+                        "text": "Move your +$1 token to an Action Supply pile.\n(When you play a card from that pile, you first get +$1.)"},
+    "Inheritance":     {"kind": "event", "cost": 7, "expansion": "adventures", "once": "game",
+                        "text": "Once per game: Set aside a non-Command Action card from the Supply costing up to $4. Move your Estate token to it.\n(During your turns, Estates are also Actions that play the set-aside card, leaving it there.)"},
+    "Pathfinding":     {"kind": "event", "cost": 8, "expansion": "adventures",
+                        "text": "Move your +1 Card token to an Action Supply pile.\n(When you play a card from that pile, you first get +1 Card.)"},
+}
 
 
 def landscape_pool(expansions):
@@ -986,6 +1195,8 @@ KINGDOM = {
                   if c["kingdom"] and c["expansion"] == "darkages"]
                  + [p for p, d in PILES.items()
                     if d["kingdom"] and d["expansion"] == "darkages"]),
+    "adventures": [n for n, c in CARDS.items()
+                   if c["kingdom"] and c["expansion"] == "adventures"],
 }
 
 
@@ -1045,9 +1256,20 @@ REQUIREMENTS = {
 REQUIREMENT_ORDER = ("actions", "buys", "draw")
 
 
+# A CALL ability is not a play ability, so its bonuses don't count toward a
+# requirement. Adventures' Coin of the Realm is the case: it prints "+2
+# Actions", but only when you CALL it off the Tavern mat, having played it as a
+# Treasure — a player who asked to be guaranteed a village would be handed one
+# that is not a village at all. Same principle as excluding Throne Room from
+# the Actions pool: being narrow only ever adds a card the player asked for.
+_CALL_CLAUSE = re.compile(r"[^.\n]*\bcall this\b[^.\n]*[.\n]?", re.I)
+
+
 def _printed_bonus(text, word):
-    """The largest printed "+N <word>s" on a card (0 if it prints none)."""
-    return max([int(n) for n in re.findall(rf"\+(\d+) {word}s?\b", text)] or [0])
+    """The largest printed "+N <word>s" a card gives when PLAYED (0 if none)."""
+    return max([int(n) for n in
+                re.findall(rf"\+(\d+) {word}s?\b", _CALL_CLAUSE.sub("", text))]
+               or [0])
 
 
 def grants(name, requirement):

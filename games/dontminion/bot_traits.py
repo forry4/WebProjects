@@ -71,6 +71,12 @@ TRASHERS = {
     "Procession": "tfb", "Rebuild": "tfb",
     "Death Cart": "weak", "Rats": "weak",
     "Mercenary": "multi",
+    # Adventures. Transmogrify is the "tfb" one (trash a card, gain one costing
+    # up to $1 more, into your hand); Amulet, Ratcatcher and Raze each trash a
+    # single card. Bonfire and Trade are EVENTS, so they are not cards a bot
+    # classifies here at all.
+    "Transmogrify": "tfb",
+    "Amulet": "weak", "Ratcatcher": "weak", "Raze": "weak",
 }
 
 # Attack kind — what the attack DOES to its victims. Drives both the defensive
@@ -104,16 +110,29 @@ ATTACKS = {
     "Dame Natalie": "trash", "Dame Sylvia": "trash", "Sir Bailey": "trash",
     "Sir Destry": "trash", "Sir Martin": "trash", "Sir Michael": "trash",
     "Sir Vander": "trash",
+    # Adventures. Bridge Troll and Relic hand out TOKENS rather than cards —
+    # filed under "discard" and "topdeck" respectively for the defensive read
+    # they actually produce (you get less this turn / you draw one fewer).
+    # Giant is "trash" for its harsher half, though it also Curses.
+    "Bridge Troll": "discard", "Relic": "topdeck",
+    "Giant": "trash", "Warrior": "trash",
+    "Swamp Hag": "curse", "Haunted Woods": "topdeck", "Soldier": "discard",
 }
 
 # Cards that answer an Attack from hand (the reaction window / immunity).
-DEFENSE = {"Moat", "Lighthouse", "Guard Dog", "Diplomat"}
+# Adventures: Caravan Guard is the Guard Dog shape (it plays itself and grants
+# no immunity), and Champion is unconditional immunity for the rest of the game.
+DEFENSE = {"Moat", "Lighthouse", "Guard Dog", "Diplomat",
+           "Caravan Guard", "Champion"}
 
 # Gains a card from the supply without buying it.
 GAINERS = {
     "Workshop", "Ironworks", "Artisan", "Smugglers", "Weaver", "Wheelwright",
     "Haggler", "Border Village", "Mint", "War Chest", "Anvil", "Tiara",
     "Berserker", "Develop", "Trader", "Remodel", "Upgrade", "Replace",
+    # Adventures
+    "Artificer", "Disciple", "Duplicate", "Hero", "Magpie", "Messenger",
+    "Port", "Transmogrify", "Treasure Hunter", "Treasure Trove",
     "Expand", "Forge", "Farmland", "Bureaucrat", "Bandit", "Blockade",
     "Pirate", "Jack of All Trades", "Treasure Map", "Lurker", "Mine",
     # Cornucopia & Guilds
@@ -143,6 +162,11 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
                 # on. Altar is NOT one: its gain costs a card from your hand,
                 # so the deck never grows, exactly like the remodel family.
                 "Armory", "Hermit"}
+# Adventures adds NONE, deliberately. Every gainer it ships pays for the gain:
+# Artificer discards a card per $1, Hero and Treasure Hunter give you Treasures
+# rather than a pile of your choice, Duplicate needs a gain to copy, and Port
+# and Magpie only ever drain their OWN pile. Counting one of those is how the
+# Bureaucrat entry once fired a Gardens rush on a board with no rush.
 
 # Looks at / discards / reorders cards to improve what you draw. The
 # reshuffle-control rules (R4: "don't overcartograph") key on these.
@@ -155,6 +179,10 @@ SIFTERS = {
     # Dark Ages
     "Catacombs", "Ironmonger", "Mystic", "Sage", "Scavenger", "Storeroom",
     "Survivors", "Vagrant", "Wandering Minstrel",
+    # Adventures: Dungeon and Fugitive both draw-then-discard, and a called
+    # Guide replaces your whole hand. Gear is NOT one — it sets cards aside for
+    # next turn rather than improving what you draw now.
+    "Dungeon", "Fugitive", "Guide",
 }
 
 # Victory cards whose value is NOT a fixed number — the alt-VP article's
@@ -168,6 +196,8 @@ ALT_VP = {
     # Dark Ages. Dame Josephine is a flat 2 VP, so it is not an alt-VP card —
     # it is a Victory card that happens to live in the Knights pile.
     "Feodum": "per_3_silvers",
+    # Adventures: the first VP that depends on WHERE the card is
+    "Distant Lands": "on_tavern_mat_vp",
 }
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
@@ -188,7 +218,11 @@ DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
              "Advisor", "Carnival", "Journeyman", "Housecarl",
              # Alchemy: Apprentice scales with what it trashed, Scrying Pool
              # with how many Actions sit on top of the deck
-             "Apprentice", "Scrying Pool"}
+             "Apprentice", "Scrying Pool",
+             # Adventures: a called Guide draws 5 whatever your hand was, and
+             # Storyteller draws one card per $1 it takes off you — neither
+             # prints a "+N Cards" a text scan could find
+             "Guide", "Storyteller"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
@@ -235,6 +269,17 @@ BM_TERMINALS = {
     # bot buys no engine. Pillage (0.10) and Storeroom (0.05) are absent for
     # the same reason.
     "Cultist": 76,
+    # Adventures, measured at 300 games each. Only six of the set's cards are
+    # even shaped like a BM terminal (a terminal that draws, or a terminal
+    # attack) and three of them earn their place. The other three are absent
+    # and each is instructive: Ranger is a WASH (0.5333) because its +5 Cards
+    # only arrives every other turn; Gear (0.4558) hands next turn's hand to
+    # this turn's; and Bridge Troll (0.1983) is the set's clearest "engine part
+    # wearing an attack's clothes" — a money deck buys nothing with the +1 Buy
+    # and cannot use the cost reduction it isn't spending on Actions.
+    "Swamp Hag": 91,
+    "Giant": 78,
+    "Haunted Woods": 76,
     "Wharf": 87,
     "Vault": 82,
     "Charlatan": 81,
@@ -276,10 +321,64 @@ BM_TERMINALS = {
 # of those are classified above, so all of them belong here; the pile name
 # itself does not (traits() is a function of a card, and the bots reach a pile
 # through pile_traits).
-REVIEWED = frozenset(
-    [c for names in KINGDOM.values() for c in names if c in CARDS]
-    + KNIGHTS + RUINS + SHELTERS + ["Spoils", "Madman", "Mercenary"]
-)
+# IT IS AN EXPLICIT LIST, AND IT HAS TO BE. Phase 6 rebuilt this as a
+# comprehension over KINGDOM — which is exactly what the test compares it
+# against, so `every - REVIEWED` was empty by construction and the guard could
+# never fail. Dark Ages passed it while 55 unreviewed cards shipped. Reviewing a
+# card is a HUMAN act; the record of it therefore has to be data, not a
+# derivation of the thing it is meant to check.
+REVIEWED = frozenset([
+    "Abandoned Mine", "Advisor", "Alchemist", "Altar", "Anvil", "Apothecary",
+    "Apprentice", "Armory", "Artisan", "Astrolabe", "Baker",
+    "Band of Misfits", "Bandit", "Bandit Camp", "Bank", "Baron", "Bazaar",
+    "Beggar", "Berserker", "Bishop", "Blockade", "Border Village", "Bridge",
+    "Bureaucrat", "Butcher", "Candlestick Maker", "Caravan", "Carnival",
+    "Cartographer", "Catacombs", "Cauldron", "Cellar", "Chapel", "Charlatan",
+    "City", "Clerk", "Collection", "Conspirator", "Corsair", "Council Room",
+    "Count", "Counterfeit", "Courtier", "Courtyard", "Crossroads",
+    "Crystal Ball", "Cultist", "Cutpurse", "Dame Anna", "Dame Josephine",
+    "Dame Molly", "Dame Natalie", "Dame Sylvia", "Death Cart", "Develop",
+    "Diplomat", "Duke", "Expand", "Fairgrounds", "Familiar", "Farm",
+    "Farmhands", "Farmland", "Farrier", "Feodum", "Ferryman", "Festival",
+    "Fishing Village", "Fool's Gold", "Footpad", "Forager", "Forge",
+    "Fortress", "Gardens", "Golem", "Grand Market", "Graverobber",
+    "Guard Dog", "Haggler", "Hamlet", "Harbinger", "Haven", "Herald",
+    "Herbalist", "Hermit", "Highway", "Hoard", "Horn of Plenty", "Hovel",
+    "Hunting Grounds", "Hunting Party", "Infirmary", "Inn", "Investment",
+    "Ironmonger", "Ironworks", "Island", "Jack of All Trades", "Jester",
+    "Journeyman", "Joust", "Junk Dealer", "King's Court", "Laboratory",
+    "Library", "Lighthouse", "Lookout", "Lurker", "Madman", "Magnate",
+    "Marauder", "Margrave", "Market", "Market Square", "Masquerade",
+    "Menagerie", "Mercenary", "Merchant", "Merchant Guild", "Merchant Ship",
+    "Militia", "Mill", "Mine", "Mining Village", "Minion", "Mint", "Moat",
+    "Moneylender", "Monkey", "Monument", "Mystic", "Native Village",
+    "Necropolis", "Nobles", "Nomads", "Oasis", "Outpost", "Overgrown Estate",
+    "Patrol", "Pawn", "Peddler", "Philosopher's Stone", "Pillage", "Pirate",
+    "Plaza", "Poacher", "Poor House", "Procession", "Quarry", "Rabble",
+    "Rats", "Rebuild", "Remake", "Remodel", "Replace", "Rogue",
+    "Ruined Library", "Ruined Market", "Ruined Village", "Sage", "Sailor",
+    "Salvager", "Scavenger", "Scheme", "Scrying Pool", "Sea Chart",
+    "Sea Witch", "Secret Passage", "Sentry", "Shanty Town", "Shop",
+    "Sir Bailey", "Sir Destry", "Sir Martin", "Sir Michael", "Sir Vander",
+    "Smithy", "Smugglers", "Soothsayer", "Souk", "Spice Merchant", "Spoils",
+    "Squire", "Stables", "Steward", "Stonemason", "Storeroom", "Survivors",
+    "Swindler", "Tactician", "Throne Room", "Tiara", "Tide Pools",
+    "Torturer", "Trader", "Trading Post", "Trail", "Transmute",
+    "Treasure Map", "Treasury", "Tunnel", "University", "Upgrade", "Urchin",
+    "Vagrant", "Vassal", "Vault", "Village", "Vineyard",
+    "Wandering Minstrel", "War Chest", "Warehouse", "Watchtower", "Weaver",
+    "Wharf", "Wheelwright", "Wishing Well", "Witch", "Witch's Hut",
+    "Worker's Village", "Workshop", "Young Witch",
+    # --- Adventures (ph. 7) ---
+    "Amulet", "Artificer", "Bridge Troll", "Caravan Guard", "Champion",
+    "Coin of the Realm", "Disciple", "Distant Lands", "Dungeon", "Duplicate",
+    "Fugitive", "Gear", "Giant", "Guide", "Haunted Woods", "Hero",
+    "Hireling", "Lost City", "Magpie", "Messenger", "Miser", "Page",
+    "Peasant", "Port", "Ranger", "Ratcatcher", "Raze", "Relic",
+    "Royal Carriage", "Soldier", "Storyteller", "Swamp Hag", "Teacher",
+    "Transmogrify", "Treasure Hunter", "Treasure Trove", "Warrior",
+    "Wine Merchant",
+])
 
 
 # ── the trait record ─────────────────────────────────────────────────────────

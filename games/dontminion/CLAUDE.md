@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages)
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages + Adventures)
 
-2–4 players, 238 cards. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 276 cards + 20 Events. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -12,7 +12,7 @@ rulings); card texts cross-checked against dominionstrategy.com/card-lists/.
 |---|---|
 | `cards.py` | static data ONLY (schema below): `CARDS`, `PILES`, `LANDSCAPES`; `DATA_COMPLETE` sentinel; `BANDIT_VICTIM_CHOOSES` ruling |
 | `engine.py` | the kernel: rules, frames, attack window, validation, scoring, `player_view` |
-| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py`, `effects_alchemy.py`, `effects_darkages.py` | ONE module per expansion, each owning a disjoint card set |
+| `effects_base.py`, `effects_intrigue.py`, `effects_seaside.py`, `effects_prosperity.py`, `effects_hinterlands.py`, `effects_cornucopia.py`, `effects_alchemy.py`, `effects_darkages.py`, `effects_adventures.py` | ONE module per expansion, each owning a disjoint card set |
 | `effects.py` | merges the registries; duplicate registration raises |
 | `bot.py` | the bots: random-legal (easy/normal/hard) + `bmplus`, the only shipped opponent; the Big Money ladder stays as the arena's reference rung |
 | `main.py` | FastAPI sub-app: rooms/WS/persistence/multi-bot scheduler |
@@ -124,7 +124,8 @@ only cost function; never read `CARDS[c]["cost"]` for a comparison).
 
 **Kernel helpers for card code** (game mutations go ONLY through these + the `push_*` family):
 `draw(game,pid,n)` · `look_top(game,pid,n)` (→ seat `aside`; excluded from mid-look shuffles) ·
-`gain(game,pid,card,dest="discard"|"hand"|"deck")->bool` (False on empty pile — "gain nothing") ·
+`gain(game,pid,card,dest="discard"|"hand"|"deck",**extra)->bool` (False on empty pile — "gain
+nothing"; `**extra` rides the gain EVENT, for a card marking a gain it caused — Port) ·
 `gain_from_trash` · `trash(game,pid,cards,zone="hand")` · `trash_from_supply(game,card)` ·
 `discard(game,pid,cards,zone="hand",public=False)` (hand discards log count only) ·
 `topdeck(game,pid,card,zone="hand",public=False)` · `reveal(game,pid,cards,source)` (log-only;
@@ -137,6 +138,8 @@ revealed hand cards STAY in hand) · `play_action_card(game,pid,card,from_zone="
 `add_actions/add_buys/add_coins` (each logs a public `plus` line — the client's
 "gets +$2 / +1 Action" sub-effect lines come from these, so don't bypass them) ·
 `opponents(game,pid)` (turn order) · `count_empty_piles` ·
+`take_seat_token` / `flip_journey` / `play_set_aside` / `take_from_pile_aside` /
+`request_extra_turn(game,pid,source=,no_buy=)` / `estate_token_card` (ph. 7) ·
 `to_tavern(game,pid,card,zone="in_play")` / `call_card(game,pid,card)` /
 `discard_from_tavern` / `on_tavern` (ph. 6H — calling is NOT playing, see Kernel v6H) ·
 `move_token(game,pid,kind,pile)` / `pile_tokens` / `token_pile` / `seat_token` /
@@ -191,6 +194,69 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v7 — the phase-7 (Adventures) delta. FROZEN.** The set consumes 6H wholesale (Reserves
+on the Tavern mat, Events on `LANDSCAPE_FX`, tokens on `attach`, Travellers on 5H's interruptible
+Clean-up + ph. 3's `exchange`) and **needs no SCHEMA bump** — every key it reads was added by
+v10. What it did add:
+
+- **`until="forever"` watchers and `add_duration_fx(..., forever=True)`** — a REST-OF-THE-GAME
+  ability (Champion, Hireling). `_start_of_turn` marked every entry `done` unconditionally,
+  which discarded the card at the next clean-up; the flag lives on the ENTRY because "this stays
+  in play" is a property of the physical card, so a throne-roomed Hireling doubles the fx on one
+  entry and draws +2 every turn. A `forever` watcher also survives its owner's turn start, which
+  is what expires every other one.
+- **Three SEAT tokens with behaviour** (`seat["tokens"]`, storage from 6H): **−1 Card** eats the
+  next DRAW inside `draw()` and nothing else — a reveal or a look leaves it, an otherwise-empty
+  deck does NOT reshuffle to feed it, and it comes off even with nothing left to draw. **−$1** is
+  applied in `add_coins` and is "only removed when you get $1 or MORE, not when you get $0", so a
+  Miser with an empty mat leaves it alone. **Journey** is stored as its DOWN state
+  (`journey_down`) so absence means the face-up start — which is what a fresh seat and an old
+  save both correctly mean; `flip_journey` returns the NEW face. `take_seat_token` returns False
+  when you already have it ("an effect that makes you take it does nothing").
+- **The kernel contributes to ability POOLS on its own behalf** (`_collect_token_abilities`). A
+  token is not a card, so it can have no `TRIGGERS` entry — but its ability is concurrent with
+  every card ability the same occurrence triggers, so it has to arrive through the pool rather
+  than be applied inline. The four "+" tokens are `before_play` abilities (p33 puts them in the
+  same class as Urchin and Champion) and `commutes`, since taking +1 Action can never change
+  what +1 Card does. Plan's Trashing token is the `gain` one, and it is the exception the
+  compendium calls out — its 2022 version "can also be on an opponent's turn".
+- **`request_extra_turn(game, pid, source=, no_buy=)`** — Mission. Outpost's own transient is
+  left untouched deliberately (a save can be caught mid-turn holding it), and Outpost's 3-card
+  draw is still Outpost's alone. `turn_ctx["no_buy"]` bans buying CARDS only: Events stay
+  buyable, which is what the card says.
+- **`turn_ctx["end_hand"]`** — Save's "put it into your hand at END OF TURN (after drawing)", so
+  the saved card is an EXTRA card in the new hand rather than one of the five.
+- **`gain(game, pid, pile, **extra)`** — `**extra` rides the `gain` EVENT, so a card can mark a
+  gain it caused and read the mark back in its own when-gain condition. Port needs exactly one
+  bit of that ("when you gain a Port DUE TO Port's when-gain, it doesn't trigger again"), and a
+  transient on the game dict would NOT do: the would-gain protocol can PARK the physical gain,
+  so the emit may happen long after the call returned.
+- **INHERITANCE — a game-wide type injection, not an identity system.** `types_of` adds
+  `action`+`command` to **Estate** while the turn player has an Estate token, which changes
+  EVERY Estate in the game (opponents', in play, in the Supply, in the trash) and only on that
+  owner's turns — keyed on `game["turn"]`, exactly like the −$2 token in `cost()`, so `types_of`
+  keeps its two-argument signature. It stops once the game is OVER, which is the compendium's
+  Vineyard ruling ("Estates are not Action cards when you score, as it's not your turn at the
+  end of the game"). `play_set_aside` is `play_from_supply`'s twin for a card set aside FROM the
+  Supply, and `take_from_pile_aside` puts it there without a gain ("this is not considered
+  gaining a card"). An Estate played by someone who is not the token owner "goes into play but
+  does nothing", which falls out of `play_set_aside` returning False.
+- **`"distant_lands"` joins the computed VP kinds** — the first VP that depends on WHERE a card
+  is rather than on what else you own, so it is counted from the `tavern` zone in `_vp_of`
+  rather than from the flat owned list, which cannot say where anything is.
+- **New card types**: `reserve` and `traveller`, both read only by the cards themselves.
+
+**THE 2022/2023 ERRATA ARE THE STORY OF THIS SET, and reading them FIRST is what made it data
+rather than nine bugs.** Ten Adventures cards differ from every card-list site and from the 2015
+rulebook: Bonfire, Bridge Troll, Haunted Woods, Inheritance, Messenger, Plan, Port, Storyteller,
+Swamp Hag (2022) and Mission (2023). The 2022 pass did two things across the catalogue —
+"when-buy triggers were changed to when-gain, and while-in-play timers were removed" — so
+Haunted Woods, Swamp Hag, Messenger, Port and Plan's token trigger on a GAIN (the first two on a
+BOUGHT gain, which is why an Event purchase does not set them off); Bridge Troll's cost
+reduction is turn-scoped like Highway's and cumulative with a throne-room; Bonfire only trashes
+Coppers; Storyteller gives +1 Card instead of the +$1 it used to pay itself with. `cards.py`
+carries the per-card list.
 
 **Kernel v6H — the LANDSCAPE kernel. FROZEN.** Hardening with no consumer: `cards.LANDSCAPES`
 is EMPTY and nothing on any board today uses a line of it. Everything here is contract-tested
@@ -466,7 +532,9 @@ against what ships. Deleting a row is how you hand the work back in.
   built; do not assume it works.
 
 **Kernel v2 — DURATIONS (Seaside; the contract for later expansions too):**
-`add_duration_fx(game,pid,card,stage,data=None)` — register a start-of-NEXT-turn ability on the
+`add_duration_fx(game,pid,card,stage,data=None,forever=False)` — register a start-of-NEXT-turn
+ability (`forever=True` = "at the start of EACH of your turns for the rest of the game" — the
+entry is never marked done, so the card stays on the table: Hireling, Champion) on the
 duration card currently being played (callable from on_play or any later stage of the same play;
 the physical-card setup entry is created eagerly by `play_action_card`/`_play_one_treasure` for
 duration-typed cards, and Throne Room replays add to the SAME entry). At the owner's next turn
@@ -704,6 +772,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | ~~A2~~ | ~~A gained card's own when-gain vs a hand reaction on the same gain~~ | **RETIRED (phase 2 of the ability pool)** — the player now chooses, per p23 §2. `test_watchtower_and_inn_the_player_chooses_and_each_order_differs` plays the compendium's worked Example 1 down BOTH branches. | — |
 | ~~A3~~ | ~~Two of the player's own triggers firing simultaneously~~ | **RETIRED (phase 2)** — same pool. Registration order survives only as the pool's OPTION order (the first option is the historical default). | — |
 | A4 | **Butcher**: do the Coffers you spend for its "remodel" ALSO pay you the +$1 each? | **Yes** — one rule for spending. `_butcher_spend` goes through the same accounting as the `spend` move: tokens off the mat, +$1 each, and the count also raises the gain's cost limit. | The global rule is unconditional ("each spent token gives you +$ and is immediately removed") and Butcher only adds a use for the COUNT. But the compendium's phrasing cuts the other way — "any Coffers tokens you get from Butcher that you don't use to 'remodel' a card, you save for later to spend for +$ **as normal**" reads as though the ones spent on Butcher were spent for something else instead. We took the branch that keeps ONE rule for spending rather than two. Pinned by `test_butcher_gives_two_coffers_and_remodels_per_coffers_spent`. |
+| A6 | **Outpost played AND Mission bought on the same turn** — you get ONE extra turn (no third turn in a row); is it a Mission turn (no buying cards) or an Outpost one? | **A Mission turn**: `extra_no_buy` is set whenever the granted turn was requested by Mission, even if Outpost also asked. Outpost's 3-card draw still applies. | Each card describes the turn IT gives, and the rules never say which one "wins" when both fire and only one turn is taken. We took the stricter reading — a restriction that is simply swallowed is the more surprising outcome, and the player chose to buy Mission. Pinned by `test_outpost_and_mission_on_one_turn_give_one_mission_turn`. |
 | A5 | **"costing $N or MORE"** with a Potion in the cost — is a {$3,P} card "costing $3 or more"? | **Yes** — `cost_ge` reads the COIN component alone, so Sage finds a Familiar and a Knight can trash one. | The compendium states the Potion rule for UPPER bounds only ("up to $N" = coins ≤ N and potions == 0); it says nothing about a lower bound, and both readings are defensible. Ours keeps a range like Knights' "from $3 to $6" excluding Potion cards, because its `cost_le` half still does. Pinned by `test_sage_digs_for_a_three_or_more` + the cost-vector tests. |
 
 **B. Deliberate simplifications — the rules are clear, we do something simpler**
@@ -714,7 +783,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
 | B5 | **Stop-moving rule: a card that moved away and BACK is still lost track of** (wiki Stop moving rule; compendium p26 Example 6) | `find_card_zone` is PRESENCE-based — it can't tell "still there" from "left and returned", so a returned card would wrongly be movable/playable | Unreachable in the 139-card pool (no shipped sequence returns a card to its trigger zone inside one window; the official examples need Royal Carriage / Counterfeit-class cards). Revisit when a set ships a card that can round-trip a zone mid-window — the fix is a per-window move counter, not more zone checks. |
-| B6 | **Coffers may be spent "even in the middle of resolving an ability"** | `spendable()` additionally requires NO open decision, so the `spend` move is refused while a frame is pending | The compendium's examples of mid-ability spending are Black Market, Capital City, Diadem, Fortune and Storyteller — **none of which we ship**, so the restriction is currently unreachable. The one card that genuinely needs to spend mid-resolution, Butcher, asks for the amount inside its own decision frame instead. Revisit at the first card that can want $ while a prompt is open. Pinned by `test_the_spend_move_is_not_offered_while_a_decision_is_open`. |
+| ~~B6~~ | ~~**Coffers may be spent "even in the middle of resolving an ability"**~~ | **RETIRED ph. 7 — the restriction became reachable and was removed.** It was safe while every card the compendium names for mid-ability spending (Black Market, Capital City, Diadem, Fortune, **Storyteller**) was one we didn't ship. Adventures ships Storyteller, which pays your whole money pool for cards, and the compendium says outright that you may spend Coffers in the middle of resolving it. `spendable()` now allows it; what replaced the restriction is narrower and is about the ACTOR — while a frame is open only the player it belongs to may act, so an open OPPONENT decision still blocks you. Three places had to agree or the move is offered and then refused (the reader, `legal_moves`, and `apply_move`'s pending gate). Pinned by `test_coffers_may_be_spent_in_the_middle_of_resolving_an_ability` + `test_you_still_cannot_spend_while_an_OPPONENT_is_deciding`. | — |
 | B7 | **Urchin's before-play ability with TWO Urchins in play** | The offer opens ONCE per Attack played, not once per Urchin | Zones hold NAMES, so two copies of one card are only a count — the pool would have to carry per-copy identity to offer two trashes. The trigger correctly fires when the played Attack IS an Urchin and a second one is on the table (that second copy is "another Attack card"), and correctly does NOT fire on a throne-room replay. Costs one Mercenary in the rare double-Urchin turn. Pinned by `test_urchin_does_not_trigger_on_a_throne_roomed_replay_of_itself`. |
 | ~~B4~~ | ~~Concurrent same-player abilities: the player chooses resolution order (p23 §2)~~ | **RETIRED — all four phases of the ability pool shipped.** Start-of-turn duration fx (1), every emit-driven event (2), multi-card discard/trash batches via `emit_batch` (3 — `test_batch_discard_reactions_are_the_players_choice_not_click_order`), and turn_start reactions folded into the same pool as the fx (4 — `test_turn_start_reaction_and_duration_fx_share_one_pool`: a Clerk and a Wharf are one choice, and the cross-player park order is current-player-first per p23 §3, where the old separate emit let reactions cut ahead). | — |
 
@@ -1158,6 +1227,9 @@ Vassal that played nothing passed). And derive parametrize counts from the data
 (`range(len(_chunks()))`) — the hardcoded `range(13)` + skip only guarded the roster shrinking, so
 the next expansion's kingdoms would have gone unsoaked in silence.
 
+`test_cards_adventures_a/b.py` (the ph. 7 batches — half A is the cards whose interest is
+their own play ability plus the three seat tokens, half B the Reserves and their call windows,
+the Traveller chains, the 20 Events, the pile tokens and Inheritance),
 `test_landscapes.py` (THE LANDSCAPE KERNEL — every ph. 6H seam, none of which a shipped card
 consumes yet: the setup dealer and its no-entropy proof, `buy_landscape` and its gates, the
 enumerator/handler agreement sweep, the Tavern mat and calling, `before_play`/`action_resolved`,

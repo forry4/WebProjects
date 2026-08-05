@@ -20,7 +20,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 5 | **Alchemy** (11 of 12 + Potion) | cost VECTOR dimension 1 (Potion) — landed inside cost_le/cost_eq/cost_lt + the new `*_card` forms; Potion production/payment in the buy flow. ⚠ **POSSESSION DEFERRED** (user decision) — see `cards.DEFERRED` | **SHIPPED** 2026-08-02 + audited (11 of 12 — Possession deferred) |
 | 6 | **Dark Ages** (35 piles + Ruins/Shelters/Spoils/Madman/Mercenary) | on-trash triggers (the `trash` emit + `from:"self"`), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H); added `cost_ge`, `from_trash`, `deck_to_discard`, the `play_attack` before-play window and two reaction modes | **SHIPPED** 2026-08-04 + audited |
 | 6H | **HARDENING: the LANDSCAPE kernel + board-row UI** (no new cards) | pays the two ph.-7 ledger rows standalone: `cards.LANDSCAPES` + `game["landscapes"]` (a purchasable thing that is NOT a card and NOT a pile), the `buy_landscape` move (printed cost — "cannot be changed by cards like Bridge" — + once-per-turn/game gates with ONE reader), the Tavern mat seat zone + the `from:"tavern"` call window, the `action_resolved` continuation-emit, `play_attack`→`before_play` generalization, Adventures-token storage + the `-cost` hook in `cost()`, and the landscapes/tavern/token frontend | **SHIPPED** 2026-08-04 |
-| 7 | Adventures (30 + 20 Events + Travellers) | **kernel-complete after 6H — a registry-and-data batch.** The 20 Events ride `LANDSCAPE_FX` + `buy_landscape`; the 9 Reserves ride the `tavern` zone + `from:"tavern"` windows + `action_resolved`; the 6 token Events ride `move_token` + the `-cost` hook; the Travellers ride `add_pile(supply=False)` (3H) + `exchange` (ph. 3); Mission rides the Outpost machinery; Inheritance rides `play_from_supply` (5H). Per-card spots still to spec THERE, not before: Distant Lands (a Reserve that scores ON the mat), Hireling (a Duration that never leaves play), Miser's Copper mat, Wine Merchant's discard from the mat | planned — next |
+| 7 | **Adventures** (30 + 8 Travellers + 20 Events) | Reserves + the Tavern mat and `from:"tavern"` call windows (6H), the 20 Events on `LANDSCAPE_FX` + `buy_landscape` (6H), Traveller chains on `add_pile(supply=False)` (3H) + `exchange` (ph. 3) + the interruptible Clean-up (5H), Adventures tokens (6H) — plus the ph.-7 kernel delta: `until="forever"` durations (Champion/Hireling), the −1 Card / −$1 / Journey seat tokens, Mission's no-buy extra turn, Save's end-of-turn hand return, Inheritance's Estate-token type injection, and `gain(**extra)`. **RETIRED deviation B6** (Coffers mid-ability, for Storyteller) | **SHIPPED** 2026-08-04 |
 | 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
 | 10 | Menagerie (30 + Events + 20 Ways) | Exile mat (+ discard-from-exile on gain), Horses non-supply (3H), Ways (alternative play modes — rides the identity system) | planned |
@@ -395,6 +395,79 @@ and "the feature works".
 
 **Gates:** package suite (1291, +48), full repo suite (2362), `npm run smoke` + `npm run screens`
 (with a new dormant-row pin), and all **27 real prod saves** replayed v1/v2/v5/v7/v8 → 10.
+
+## Phase 7 — Adventures: SHIPPED 2026-08-04
+
+**58 definitions**: 30 kingdom cards, the 8 Traveller upgrades (non-Supply piles of 5) and the
+**first 20 landscapes** the game has ever had. 276 cards, 9 sets.
+
+**The 6H bet paid off, but the "registry-only" claim on the old roadmap row did not.** Reserves,
+Events, Travellers and tokens all landed on paths built and contract-tested one phase earlier,
+and none of them needed a kernel change. What still did:
+
+- **`until="forever"` durations** — Champion and Hireling stay in play for the rest of the game.
+  `_start_of_turn` marked every entry `done` unconditionally, which discarded them at the next
+  clean-up; a `forever` flag on the ENTRY (a property of the physical card, so a throne-roomed
+  Hireling doubles its fx) keeps both the fx and the card.
+- **Three seat tokens with real behaviour** — the −1 Card token eats the next DRAW and nothing
+  else (a reveal leaves it, an otherwise-empty deck does not reshuffle to feed it, and it comes
+  off even with nothing to draw), the −$1 token is "only removed when you get $1 or more, not
+  when you get $0", and the Journey token is stored as its DOWN state so absence means the
+  face-up start.
+- **Mission's extra turn** — `request_extra_turn(source=, no_buy=)`. Outpost's own transient was
+  left untouched deliberately: a save can be caught mid-turn holding it.
+- **Inheritance** — a game-wide type injection in `types_of` keyed on `game["turn"]`, plus
+  `play_set_aside`. It is NOT an identity system: the 2019 errata retired that reading, and
+  ph. 5H had already ruled the system unnecessary. Estates stop being Actions once the game is
+  over, which is the compendium's Vineyard ruling.
+- **`gain(**extra)`** — a card marking a gain it caused and reading the mark back in its own
+  when-gain condition (Port's "the when-gain doesn't trigger again"). A transient on the game
+  dict would NOT do: the would-gain protocol can park the physical gain, so the emit may happen
+  long after the call returned.
+
+**TEN CARDS DIFFER FROM EVERY CARD-LIST SITE AND THE 2015 RULEBOOK.** The compendium's ch. V
+lists Bonfire, Bridge Troll, Haunted Woods, Inheritance, Messenger, Plan, Port, Storyteller and
+Swamp Hag among the 2022 printings, and Mission among the 2023 no-third-turn changes. The 2022
+pass did two things across the catalogue — "when-buy triggers were changed to when-gain, and
+while-in-play timers were removed" — and both bite here: Haunted Woods, Swamp Hag, Messenger,
+Port and Plan's token now trigger on a GAIN; Bridge Troll's cost reduction is turn-scoped like
+Highway's; Bonfire only trashes Coppers; Storyteller gives +1 Card instead of the +$1 it used to
+pay itself with. Reading the errata chapter FIRST, before writing a line, is what made this a
+data decision rather than nine bugs.
+
+**Two real defects, both found by fuzzing rather than by tests, and both PRE-DATING this set:**
+
+- **A persisting Duration was counted TWICE while Clean-up was interrupted.** ph. 5H made
+  Clean-up interruptible, but `_cleanup_durations` promotes an entry while the card is still in
+  `in_play` — so a consumer's open decision froze the game with the card in both places, and
+  `game["vp"]` is recomputed after every move. Adventures made it reachable in an ordinary
+  random game (a Traveller's exchange offer holds Clean-up open while a Champion persists). The
+  card now leaves `in_play` as it is promoted.
+- **...and fixing that exposed a second, worse one.** The sweep re-read `in_play` and subtracted
+  `kept_out` AGAIN, so a seat holding two copies of one Duration (one persisting, one not) had
+  the second copy **destroyed** by `seat["in_play"] = []`. The frame now carries a `pulled` flag
+  — expand/contract, because a mid-clean-up frame can genuinely be sitting in a live save.
+- The promotion also **rebuilt the entry from three hand-copied keys**, silently dropping
+  `watchers` (so nothing could ask a promoted entry whether it had any) and, once ph. 7 added
+  it, `forever`. It carries the whole entry now.
+
+**A GUARD THAT COULD NEVER FAIL.** `bot_traits.REVIEWED` was rebuilt in ph. 6 as a comprehension
+over `KINGDOM` — which is exactly what `test_every_kingdom_card_is_reviewed` compares it against,
+so the difference was empty by construction. Dark Ages passed it while 55 unreviewed cards
+shipped. It is an explicit list of 260 names again, and it was re-verified by deleting one name
+and watching the test go red. **Reviewing a card is a human act; the record of it cannot be a
+derivation of the thing it is meant to check.**
+
+**Bots.** `BM_TERMINALS` gained three measured entries at n=300 — **Swamp Hag 91, Giant 78,
+Haunted Woods 76** — and the three rejections are the instructive half: Ranger is a WASH (0.5333,
+its +5 Cards only arrives every other turn), Gear 0.4558, and **Bridge Troll 0.1983**, the set's
+clearest engine-part-wearing-an-attack's-clothes. `bmplus` beats plain money **0.796** on
+Adventures boards with the mirror reading exactly 0.5000.
+
+**Gates:** package suite (1408, +110), full repo suite (2479), 480 forced-Adventures fuzz games
++ 224 mixed-set ones under the conservation census with zero failures, `npm run smoke` +
+`npm run screens` (with a REAL Adventures board rendering its Event row), and all **27 real prod
+saves** replayed. **No SCHEMA bump** — every key this set reads was added by 6H's v10.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 

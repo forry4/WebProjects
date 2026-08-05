@@ -758,14 +758,11 @@ try {
 			check("the pile count never covers a card's type or cost",
 				pills.length === 0, JSON.stringify(pills));
 
-			// ── the landscape row ships DORMANT (ph. 6H) ──────────────────────────
-			// No set has a landscape until Adventures, so `game.landscapes` is empty
-			// on every board today and the row must render NOTHING — not an empty
-			// flex container with its own padding and border, which would push the
-			// whole Supply down on every game for a feature nobody can use yet. The
-			// row's real rendering gets pinned when ph. 7 lands the data; this is
-			// the half that can be pinned now, and it is the half that can regress
-			// silently. Token badges are the same story on the same boards.
+			// ── the landscape row: EMPTY here, real on an Adventures board ────────
+			// This board is Base Set only, so it has no Events and the row must
+			// render NOTHING — not an empty flex container with its own padding and
+			// border, which would push the whole Supply down on every game that
+			// isn't using landscapes. Token badges are the same story.
 			const dormant = await page.evaluate(() => ({
 				rows: document.querySelectorAll(".dm-lscape-row").length,
 				faces: document.querySelectorAll(".dm-lscape").length,
@@ -773,7 +770,7 @@ try {
 				supplyTop: document.querySelector(".dm-supply")
 					?.firstElementChild?.className ?? null,
 			}));
-			check("an empty landscape row renders nothing at all",
+			check("a board with no landscapes renders no landscape row at all",
 				dormant.rows === 0 && dormant.faces === 0 && dormant.tokens === 0
 				&& /dm-basics/.test(dormant.supplyTop || ""),
 				JSON.stringify(dormant));
@@ -961,6 +958,80 @@ try {
 			await sleep(300);
 		}
 		check("no page errors while rendering the board", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
+	// ── the landscape row on a REAL Adventures board (ph. 7) ──────────────────
+	// The empty-state pin above is the layout-shift guard; it says nothing about
+	// whether the row WORKS, and a component that throws on its first real
+	// landscape would satisfy it perfectly. Adventures ships 20 Events, so the
+	// row is now reachable by any player and owes a real render.
+	//
+	// An Adventures-only board deals at least one Event on 99.65% of seeds
+	// (measured over 20k), so this asserts the BICONDITIONAL rather than
+	// demanding one: a face implies a well-formed row, and no face implies no
+	// row. Never deal-dependent, and it exercises the real render path on all
+	// but ~1 run in 300 — the same shape as the body-text truncation check.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "adv-harness", name: "Adv", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".dm-checks", { timeout: 15_000 }).catch(() => {});
+		// Adventures ON, Base Set OFF — an Adventures-only pool, so the Event
+		// deal is over the set that actually has Events.
+		for (const label of ["Adventures", "Base Set"]) {
+			await page.locator(".dm-checks .dm-check", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".dm-checks .dm-check-on")].map((b) => b.textContent.trim()));
+		check("the Adventures expansion is selectable",
+			picked.length === 1 && /Adventures/.test(picked[0]), JSON.stringify(picked));
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("an Adventures game deals a board", dealt);
+
+		if (dealt) {
+			const ls = await page.evaluate(() => {
+				const row = document.querySelector(".dm-lscape-row");
+				const faces = [...document.querySelectorAll(".dm-lscape")];
+				const supply = document.querySelector(".dm-supply");
+				return {
+					rows: document.querySelectorAll(".dm-lscape-row").length,
+					firstChildIsRow: !!row && supply.firstElementChild === row,
+					insideBoard: !!row
+						&& row.getBoundingClientRect().width <= supply.getBoundingClientRect().width + 1,
+					faces: faces.map((f) => ({
+						name: f.querySelector(".dm-ls-name")?.textContent || "",
+						cost: f.querySelector(".dm-ls-cost")?.textContent || "",
+						kind: f.querySelector(".dm-ls-kind")?.textContent || "",
+						text: (f.querySelector(".dm-ls-text")?.textContent || "").length,
+						overflows: f.scrollHeight > f.clientHeight + 1,
+					})),
+				};
+			});
+			const wellFormed = ls.faces.length > 0
+				&& ls.rows === 1 && ls.firstChildIsRow && ls.insideBoard
+				&& ls.faces.every((f) => f.name && /^\$\d+$/.test(f.cost) && f.kind
+					&& f.text > 0 && !f.overflows);
+			check("an Event renders in the landscape row, above the Supply and inside it",
+				ls.faces.length === 0 ? ls.rows === 0 : wellFormed, JSON.stringify(ls));
+		}
+		check("no page errors on an Adventures board", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}

@@ -168,14 +168,44 @@ def test_a_coffers_earned_off_turn_is_KEPT_where_a_coin_would_evaporate():
     assert g["coins"] == 0
 
 
-def test_the_spend_move_is_not_offered_while_a_decision_is_open():
+def test_coffers_may_be_spent_in_the_middle_of_resolving_an_ability():
+    """RETIRED DEVIATION B6 (ph. 7). Coffers are spendable "at any time during
+    your turn", and until Adventures we additionally refused it while a
+    decision was open — safely, because every card the compendium names for
+    mid-ability spending (Black Market, Capital City, Diadem, Fortune,
+    Storyteller) was one we didn't ship. Adventures ships STORYTELLER, which
+    pays your whole money pool for cards, so a Coffers spent under its prompt
+    is a card drawn; the compendium says outright that you may do it.
+
+    Three things have to line up or the move is offered and then refused: the
+    reader, the enumerator, and apply_move's pending gate."""
     g = fresh(kingdom=KPLAIN)
     g["coffers"][A] = 3
     give_hand(g, A, ["Cellar", "Copper"])
     assert play(g, A, "Cellar")[0]
     assert g["pending"], "Cellar opens a discard choice"
-    assert engine.spendable(g, A) == {}
+    assert engine.spendable(g, A) == {"coffers": 3}
+    assert {"type": "spend", "what": "coffers", "n": 1} in engine.legal_moves(g, A)
     ok, err = mv(g, A, {"type": "spend", "what": "coffers", "n": 1})
+    assert ok, err
+    assert g["coins"] == 1 and g["coffers"][A] == 2
+    assert g["pending"], "spending must not have eaten the open decision"
+    assert mv(g, A, {"type": "decision", "cards": []})[0]
+
+
+def test_you_still_cannot_spend_while_an_OPPONENT_is_deciding():
+    """The narrower rule that replaced B6: a frame belongs to one player, and
+    while it is theirs nobody else may act at all. Without this, `spendable`
+    would offer a move `apply_move`'s pending gate then refuses."""
+    g = fresh(kingdom=["Militia", "Village", "Smithy", "Market", "Moat",
+                       "Cellar", "Festival", "Laboratory", "Mine", "Baker"])
+    g["coffers"][A] = 2
+    give_hand(g, A, ["Militia"])
+    give_hand(g, B, ["Copper", "Copper", "Copper", "Estate", "Estate"])
+    assert play(g, A, "Militia")[0]
+    assert g["pending_pid"] == B
+    assert engine.spendable(g, A) == {}
+    ok, _ = mv(g, A, {"type": "spend", "what": "coffers", "n": 1})
     assert not ok
 
 

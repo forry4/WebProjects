@@ -444,6 +444,13 @@
   color: var(--muted, #9a8f7a); border: 1px solid var(--border, #3a342a);
 }
 .dm-tok-mine { color: #1a1408; background: var(--gold, #c9a84c); border-color: var(--gold, #c9a84c); }
+/* the Adventures tokens that sit in front of a PLAYER, in their sidebar box */
+.dm-seat-tok {
+  font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 5px;
+  border-radius: 8px; white-space: nowrap;
+  background: rgba(20,16,10,.6); color: var(--gold-light, #e8c96a);
+  border: 1px solid var(--border, #3a342a);
+}
 
 /* ── LANDSCAPES (Events, Projects, ...) ──
    Landscape ORIENTATION: they are wide where a card is tall, which is what

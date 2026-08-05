@@ -36,8 +36,9 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
   the tamperer's own opponent (the move is still validated server-side before it's applied).
 - **Games**: Spender (Splendor), Castles of Crimson (Castles of Burgundy), Where Wolf? (One Night
   Ultimate Werewolf), Spender Duel (Splendor Duel), Dontminion (Dominion — Base, Intrigue,
-  Seaside, Prosperity, Hinterlands and Cornucopia & Guilds in 2E, plus Alchemy and Dark
-  Ages; 238 cards, more sets landing per phase).
+  Seaside, Prosperity, Hinterlands and Cornucopia & Guilds in 2E, plus Alchemy, Dark
+  Ages and Adventures; 276 cards + the first 20 LANDSCAPE cards (Events), more sets
+  landing per phase).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 

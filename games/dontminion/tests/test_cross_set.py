@@ -2302,3 +2302,182 @@ def test_the_bots_finish_every_dark_ages_chunk():
             ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
             assert ok, err
         assert g["over"], f"chunk {i} never finished: {kingdom}"
+
+
+# ── Adventures (ph. 7) × everything else ──────────────────────────────────────
+
+ADV_FILL = ["Magpie", "Port", "Ranger", "Artificer", "Lost City", "Miser",
+            "Raze", "Amulet", "Dungeon"]
+
+
+def _adv(kingdom, expansions=("adventures", "base"), landscapes=(), seed=5):
+    return engine.new_game([A, B], list(expansions), seed=seed,
+                           kingdom=list(kingdom), landscapes=list(landscapes))
+
+
+def test_a_throne_roomed_reserve_reaches_the_mat_only_once():
+    """A Reserve played WITHOUT MOVING INTO PLAY never reaches the mat, so the
+    Throne Room's replay cannot put a second copy there — and there is only one
+    physical card to put anyway."""
+    g = _adv(["Ratcatcher", "Throne Room"] + ADV_FILL[:8])
+    give_hand(g, A, ["Throne Room", "Ratcatcher"])
+    g["seats"][A]["deck"] = ["Copper"] * 8
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Ratcatcher"])[0]
+    assert g["seats"][A]["tavern"] == ["Ratcatcher"]
+    assert len(g["seats"][A]["hand"]) == 2, "the cantrip ran twice"
+
+
+def test_band_of_misfits_cannot_send_a_reserve_to_the_mat():
+    """play_from_supply leaves the card ON ITS PILE, so the Reserve's own "put
+    this on your Tavern mat" finds nothing to move."""
+    g = _adv(["Band of Misfits", "Ratcatcher"] + ADV_FILL[:8],
+             expansions=("adventures", "darkages"))
+    give_hand(g, A, ["Band of Misfits"])
+    g["seats"][A]["deck"] = ["Copper"] * 8
+    before = engine.pile_count(g, "Ratcatcher")
+    assert mv(g, A, {"type": "play_action", "card": "Band of Misfits"})[0]
+    if g["pending_pid"] == A and "Ratcatcher" in str(g["pending"][-1]["constraint"]):
+        assert decide(g, A, pile="Ratcatcher")[0]
+    assert g["seats"][A]["tavern"] == []
+    assert engine.pile_count(g, "Ratcatcher") == before, "it stayed on its pile"
+
+
+def test_champion_makes_you_unaffected_by_an_opponents_attack():
+    from games.dontminion import effects
+    g = _adv(["Militia"] + ADV_FILL, expansions=("adventures", "base"))
+    engine.add_pile(g, "Champion", count=5)
+    g["turn"] = B
+    effects.EFFECTS["Champion"](g, B)
+    engine._drive(g)
+    g["turn"] = A
+    give_hand(g, A, ["Militia"])
+    give_hand(g, B, ["Copper", "Copper", "Copper", "Estate", "Estate"])
+    assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
+    assert len(g["seats"][B]["hand"]) == 5, "unaffected"
+
+
+def test_champion_survives_the_clean_up_sweep_forever():
+    from games.dontminion import effects
+    g = _adv(ADV_FILL + ["Village"], expansions=("adventures", "base"))
+    engine.add_pile(g, "Champion", count=5)
+    effects.EFFECTS["Champion"](g, A)
+    engine._drive(g)
+    for _ in range(6):
+        if g["over"]:
+            break
+        g["phase"] = "buy"
+        mv(g, g["turn"], {"type": "end_phase"})
+        drain_decisions(g)
+    assert any(e["card"] == "Champion" for e in g["seats"][A]["duration"])
+    assert "Champion" not in g["seats"][A]["discard"]
+    assert engine.attack_protected(g, A) is True
+
+
+def test_bridge_troll_and_highway_stack_and_both_are_turn_scoped():
+    g = _adv(["Bridge Troll", "Highway"] + ADV_FILL[:8],
+             expansions=("adventures", "hinterlands"))
+    give_hand(g, A, ["Bridge Troll", "Highway"])
+    g["actions"] = 2
+    g["seats"][A]["deck"] = ["Copper"] * 8
+    assert engine.cost(g, "Gold") == 6
+    assert mv(g, A, {"type": "play_action", "card": "Bridge Troll"})[0]
+    assert mv(g, A, {"type": "play_action", "card": "Highway"})[0]
+    assert engine.cost(g, "Gold") == 4
+
+
+def test_the_cost_token_stacks_with_bridge_and_prices_an_ordered_pile():
+    """The -$2 token sits on a PILE, so it has to be read before the pile name
+    collapses into its face card — and Knights is the ordered pile that makes
+    the two differ."""
+    g = _adv(["Knights"] + ADV_FILL, expansions=("adventures", "darkages"))
+    engine.move_token(g, A, "-cost", "Knights")
+    g["turn"] = A
+    top = engine.pile_top(g, "Knights")
+    assert engine.cost(g, "Knights") == CARDS[top]["cost"] - 2
+    g["turn_ctx"]["bridges"] = 1
+    assert engine.cost(g, "Knights") == max(0, CARDS[top]["cost"] - 3)
+
+
+def test_a_plus_action_token_and_urchin_share_one_before_play_pool():
+    """ph. 6H merged `play_attack` into `before_play`, and the Adventures tokens
+    joined the same class (p33). Both firing for one play is the pool's job: the
+    token commutes and runs first, Urchin still gets its offer."""
+    def _play_militia(with_token):
+        g = _adv(["Urchin", "Militia"] + ADV_FILL[:8],
+                 expansions=("adventures", "darkages", "base"))
+        if with_token:
+            engine.move_token(g, A, "+action", "Militia")
+        g["seats"][A]["in_play"] = ["Urchin", "Urchin"]
+        give_hand(g, A, ["Militia"])
+        give_hand(g, B, ["Copper"] * 5)
+        assert mv(g, A, {"type": "play_action", "card": "Militia"})[0]
+        return g
+    # A/B rather than an absolute: playing an Action SPENDS one from the pool,
+    # so the token's +1 only shows up as a difference against the control.
+    with_tok, without = _play_militia(True), _play_militia(False)
+    assert with_tok["actions"] == without["actions"] + 1, "the token's +1 Action ran"
+    # ...and Urchin's before-play offer still opened, from the same pool
+    for g in (with_tok, without):
+        assert g["pending_pid"] == A and g["pending"][-1]["card"] == "Urchin"
+
+
+def test_a_traveller_topdecked_by_scheme_never_gets_its_exchange():
+    """Scheme moves the card off the table, so it is not DISCARDED from play and
+    "when you discard this from play" correctly cannot fire."""
+    g = _adv(["Page", "Scheme"] + ADV_FILL[:8],
+             expansions=("adventures", "hinterlands"))
+    give_hand(g, A, ["Scheme", "Page"])
+    g["actions"] = 2
+    g["seats"][A]["deck"] = ["Copper"] * 10
+    assert mv(g, A, {"type": "play_action", "card": "Scheme"})[0]
+    assert mv(g, A, {"type": "play_action", "card": "Page"})[0]
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "end_phase"})[0]
+    for _ in range(10):
+        f = g["pending"][-1] if g["pending"] else None
+        if f is None:
+            break
+        if f["card"] == "Scheme":
+            assert decide(g, A, cards=["Page"])[0]
+        elif f["card"] == "Page":
+            assert decide(g, A, ids=["no"])[0]
+        else:
+            drain_decisions(g)
+    assert "Page" in engine.owned_cards(g, A)
+    assert engine.pile_count(g, "Treasure Hunter") == 5, "no exchange happened"
+
+
+def test_watchtower_can_react_to_a_card_gained_by_an_event():
+    """Buying an Event is not a gain — but what the Event then DOES is, so the
+    would-gain protocol sees it exactly as it sees any other gain."""
+    g = _adv(["Watchtower"] + ADV_FILL, expansions=("adventures", "base"),
+             landscapes=["Ball"])
+    give_hand(g, A, ["Watchtower"])
+    g["turn"], g["phase"], g["coins"], g["buys"] = A, "buy", 5, 1
+    assert mv(g, A, {"type": "buy_landscape", "name": "Ball"})[0]
+    assert decide(g, A, pile="Silver")[0]
+    assert g["pending_pid"] == A
+    assert "Watchtower" in json.dumps([f["card"] for f in g["pending"]])
+
+
+def test_the_bots_finish_every_adventures_chunk():
+    """The whole roster under the shipped tier, in the shape the server runs."""
+    from games.dontminion import bot
+    from games.dontminion.cards import KINGDOM, LANDSCAPES
+    names = sorted(KINGDOM["adventures"])
+    chunks = [names[i:i + 10] if i + 10 <= len(names) else names[-10:]
+              for i in range(0, len(names), 10)]
+    ls = sorted(LANDSCAPES)
+    for i, kingdom in enumerate(chunks):
+        for j in range(0, len(ls), 4):
+            g = engine.new_game([A, B], ["adventures"], seed=700 + i * 10 + j,
+                                kingdom=kingdom, landscapes=ls[j:j + 2])
+            rng = random.Random(i * 10 + j)
+            for _ in range(8000):
+                if g["over"]:
+                    break
+                pid = g["pending_pid"] or g["turn"]
+                ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
+                assert ok, err
+            assert g["over"], f"chunk {i} / {ls[j:j+2]} never finished: {kingdom}"
