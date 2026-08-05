@@ -780,6 +780,22 @@ function fmtLog(e, names) {
       const k = e.count ?? e.n;                    // pre-fix entries kept it in n
       return `${who} gets +${k} Coffers (${e.total} total)`;
     }
+    // EXILE (Menagerie): a public mat that is still YOURS — Exiled cards
+    // score. Coming in is not a gain; going out to the discard is a real
+    // discard, which is why only that direction has when-discard triggers.
+    case "exile":
+      return `${who} Exiles ${listCards(e.cards || [])}`;
+    // WAYS: "you may choose to resolve the Way instead of resolving the play
+    // ability of the Action card" — the card is still played either way
+    case "way": return `${who} plays ${art(e.card)} using ${e.name}`;
+    // Way of the Chameleon swaps +Cards for +$ and back, for the whole turn
+    case "chameleon_swap":
+      return e.got === "coins"
+        ? `${who} takes +$${e.count} instead of +${e.count} Card${e.count === 1 ? "" : "s"} (Way of the Chameleon)`
+        : `${who} draws ${e.count} card${e.count === 1 ? "" : "s"} instead of +$${e.count} (Way of the Chameleon)`;
+    // Snowy Village: "ignore any further +Actions you get this turn"
+    case "actions_ignored":
+      return `${who} ignores +${e.count} Action${e.count === 1 ? "" : "s"}`;
     // VILLAGERS (Renaissance): the other half of the Coffers mat. Spent for
     // +1 Action each, and only in your Action phase.
     case "villagers": {

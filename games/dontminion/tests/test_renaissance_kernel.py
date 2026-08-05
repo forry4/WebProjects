@@ -700,7 +700,7 @@ def test_schema_13_fills_villagers_artifacts_and_fleet():
         del g["turn_ctx"][k]
     g["schema"] = 12
     engine.migrate(g)
-    assert g["schema"] == 13
+    assert g["schema"] == engine.SCHEMA
     assert g["villagers"] == {A: 0, B: 0}
     assert g["artifacts"] == {}
     assert g["fleet"] is None

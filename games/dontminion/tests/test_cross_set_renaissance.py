@@ -1455,7 +1455,7 @@ def test_a_full_renaissance_board_round_trips_through_json_and_migrate():
     play(g, A, "Border Guard")
     drain(g)
     blob = json.loads(json.dumps(g))
-    assert blob["schema"] == engine.SCHEMA == 13
+    assert blob["schema"] == engine.SCHEMA == 14
     before = _census(g)
     engine.migrate(blob)
     assert blob == json.loads(json.dumps(g)), "migrate changed a current blob"

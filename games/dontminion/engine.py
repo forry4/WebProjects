@@ -46,7 +46,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 13
+SCHEMA = 14
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -67,6 +67,9 @@ SCHEMA = 13
 #  13 = Renaissance (ph. 9): game["villagers"] (the second spendable mat),
 #       game["artifacts"] (the unique pass-around objects) and game["fleet"]
 #       (the after-game-end round, None until it triggers). Fill-only
+#  14 = Menagerie (ph. 10): seat["exile"] (the Exile mat — a real OWNED zone
+#       that scores), game["last_turn_trashes"] (Goatherd) and
+#       game["mouse_card"] (Way of the Mouse's set-aside card). Fill-only
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -127,6 +130,11 @@ _GAME_FILLS = {
     "villagers": lambda g: {p: 0 for p in g.get("players", [])},
     "artifacts": lambda g: {},
     "fleet": lambda g: None,
+    # Menagerie (ph. 10): how many cards each player trashed on their LAST
+    # completed turn (Goatherd — the `last_turn_gains` shape, a COUNT because
+    # that is all the card asks), and Way of the Mouse's set-aside card.
+    "last_turn_trashes": lambda g: {},
+    "mouse_card": lambda g: None,
 }
 _SEAT_FILLS = {
     "aside": list,
@@ -143,6 +151,10 @@ _SEAT_FILLS = {
     # Empires (ph. 8): set aside now, RETURNED TO ITS PILE at Clean-up
     # (Encampment). Distinct from cleanup_aside, which goes to the discard.
     "cleanup_return": list,
+    # Menagerie (ph. 10): the EXILE MAT. A real OWNED zone — "cards on your
+    # Exile mat are yours" — so it joins owned_cards, both conservation
+    # censuses and the score. Public, like the Tavern mat.
+    "exile": list,
 }
 
 
@@ -1140,6 +1152,10 @@ def _gain_now(game, pid, pile, dest, via_buy=False, overpay=0, **extra):
         seat["deck"].insert(0, card)
     elif dest == "dur_aside":
         seat.setdefault("dur_aside", []).append(card)   # Blockade gains straight to set-aside
+    elif dest == "set_aside":
+        seat["set_aside"].append(card)     # ph. 10, Reap: gained face up, played next turn
+    elif dest == "exile":
+        seat["exile"].append(card)         # ph. 10: a GAIN that lands on the mat
     else:
         raise ValueError(f"bad gain dest {dest!r}")
     if pid == game["turn"]:
@@ -1313,6 +1329,11 @@ def trash(game, pid, cards, zone="hand", **extra):
         game["trash"].append(c)
     if cards:
         _log(game, pid, "trash", cards=list(cards))
+        # ph. 10: the live per-turn count Goatherd reads back as
+        # `last_turn_trashes` ("cards the player to your right trashed on
+        # their last turn"). Counted for the TURN PLAYER's turn regardless of
+        # who trashed — that is whose turn it was.
+        game["turn_ctx"]["trashes"] = game["turn_ctx"].get("trashes", 0) + len(cards)
         # same simultaneity rule as discard (the Steward ruling: "both cards
         # must be trashed simultaneously, and on-trash effects resolved
         # afterwards") — one pool per player across the batch. Dark Ages' seam.
@@ -1495,6 +1516,61 @@ def on_tavern(game, pid, card):
     return card in game["seats"][pid]["tavern"]
 
 
+# --- THE EXILE MAT (ph. 10 — Menagerie) --------------------------------------
+#
+# "Exiling a card means putting it on your Exile mat. Cards on your Exile mat
+# are YOURS, but Exiling cards from the Supply is NOT considered gaining cards.
+# Neither is discarding cards from your Exile mat." (ch. IV EXILE)
+#
+# So the mat is a real owned zone — it scores, it joins `owned_cards` and both
+# conservation censuses — while sitting outside the gain/discard economy in one
+# direction only: coming IN is not a gain, going OUT to the discard IS a
+# discard for triggers ("when you discard cards from your Exile mat,
+# when-discard abilities such as Faithful Hound, Trail, Tunnel, Village Green
+# and Weaver trigger"), which is why that direction goes through `discard()`.
+
+def exile(game, pid, cards, zone="hand"):
+    """Put cards on pid's Exile mat. `zone="supply"` takes the top card of the
+    named pile instead — "Exiling cards from the Supply is not considered
+    gaining cards", so NO `gain` emit, the `exchange` discipline (a gain here
+    would fire every when-gain watcher in the game for a card nobody gained).
+
+    Emits `exile` per card, which Invest consumes ("when another player gains
+    OR INVESTS IN a copy of it, +2 Cards")."""
+    seat = game["seats"][pid]
+    moved = []
+    for c in cards:
+        if zone == "supply":
+            got = _pile_take(game, c)
+            if got is None:
+                continue
+            moved.append(got)
+        else:
+            if c not in seat[zone]:
+                continue
+            seat[zone].remove(c)
+            moved.append(c)
+    if not moved:
+        return []
+    seat["exile"].extend(moved)
+    _log(game, pid, "exile", cards=list(moved), source=zone)
+    emit_batch(game, "exile", pid, moved, source=zone)
+    return moved
+
+
+def discard_from_exile(game, pid, cards):
+    """Off the mat into the discard pile. A REAL discard for triggers, so it
+    routes through `discard()` — only the INBOUND direction is exempt from the
+    gain/discard economy."""
+    return discard(game, pid, list(cards), zone="exile", public=True)
+
+
+def on_exile(game, pid, card):
+    """How many copies of `card` pid has in Exile. The `when` of the mat's own
+    ability and of every "a copy of it in Exile" reader."""
+    return game["seats"][pid]["exile"].count(card)
+
+
 def call_card(game, pid, card):
     """CALL a card off the Tavern mat: it moves to play, and the ability the
     caller runs next is the card's CALL ability.
@@ -1577,6 +1653,15 @@ def _grant(game, pid, key, n, log_key):
 
 
 def add_actions(game, n, pid=None):
+    # SNOWY VILLAGE (ph. 10): "ignore any further +Actions you get this turn"
+    # — the grant is DROPPED, not zeroed later, so a Village played after it
+    # gives nothing. It binds the turn player only (an off-turn bonus already
+    # evaporates in `_grant`), and ph. 9's Villagers obey it too because
+    # spending one is "+1 Action" and routes through here.
+    if n > 0 and game["turn_ctx"].get("ignore_actions") \
+            and _acting(game, pid) == game["turn"]:
+        _log(game, game["turn"], "actions_ignored", count=n)
+        return
     _grant(game, pid, "actions", n, "actions")
 
 
@@ -1584,10 +1669,63 @@ def add_buys(game, n, pid=None):
     _grant(game, pid, "buys", n, "buys")
 
 
+def add_cards(game, n, pid=None):
+    """**+N CARDS — the PRINTED bonus, and the twin of `add_coins`.**
+
+    This is NOT the same thing as `draw()`, and the difference is the whole
+    reason it exists. Card code has always called `draw()` for three different
+    printed things: "+3 Cards" (Smithy), "draw 2 cards" (a card that says draw
+    without a plus) and "draw until you have 6" (Library). Way of the
+    Chameleon changes exactly ONE of them — "all +Cards you get this turn are
+    +$ instead, and vice versa (keeping their values)… Only card drawing
+    denoted with '+' is changed to +$. For instance 'draw 2 cards' is
+    unchanged" — and nothing at the call site could tell them apart.
+
+    So: **card code granting a printed "+N Cards" calls THIS; a card that
+    draws without a printed plus calls `draw()`.** The AST guard
+    `test_every_plus_cards_grant_uses_add_cards` holds the line, with an
+    explicit allowlist of the genuine non-"+" draws — otherwise the next set's
+    Smithy silently opts out of Chameleon and nothing fails.
+
+    Off-turn it still draws: drawing is not a per-turn POOL (a Caravan Guard
+    reaction draws on someone else's turn), which is why this does not go
+    through `_grant`. The Chameleon swap only applies to the turn player,
+    since a swapped +Cards becomes +$ and $ off-turn evaporates by rule."""
+    if n <= 0:
+        return []
+    who = _acting(game, pid)
+    if who == game["turn"] and game["turn_ctx"].get("chameleon"):
+        # "+Cards … are +$ instead (keeping their values)". Straight to
+        # _grant, NOT add_coins: the swap is one-way per grant, and routing
+        # through add_coins would bounce it back here. The −$1 token still
+        # applies to the RESULT ("a Militia gives +2 Cards and will trigger
+        # your −1 Card token but not your −$ token" — read the other way for
+        # a card that printed +$), so the token handling is duplicated here
+        # deliberately rather than skipped.
+        if game["seats"][who]["tokens"].get("-coin"):
+            del game["seats"][who]["tokens"]["-coin"]
+            _log(game, who, "minus_coin_token")
+            n -= 1
+        _log(game, who, "chameleon_swap", got="coins", count=n)
+        _grant(game, who, "coins", n, "coins")
+        return []
+    return draw(game, who, n)
+
+
 def add_coins(game, n, pid=None):
     """n may be NEGATIVE (Souk deducts per card in hand). The money pool floors
     at $0 — "your money pool can never go below $0, but if you had any $ before
-    playing Souk, you might lose more than $X when deducting"."""
+    playing Souk, you might lose more than $X when deducting".
+
+    **The Chameleon swap runs the other way too** — "and vice versa" — but
+    only for a POSITIVE printed +$: "−$, as on Poor House or Souk, is not
+    changed by this Way"."""
+    if n > 0 and _acting(game, pid) == game["turn"] \
+            and game["turn_ctx"].get("chameleon"):
+        who = _acting(game, pid)
+        _log(game, who, "chameleon_swap", got="cards", count=n)
+        draw(game, who, n)        # the −1 Card token applies inside draw()
+        return
     if n < 0:
         if _acting(game, pid) != game["turn"]:
             return
@@ -1663,9 +1801,15 @@ def _spend_debt(game, pid, n):
 
 
 def _spend_villagers(game, pid, n):
-    """n Villagers off the mat -> +n Actions."""
+    """n Villagers off the mat -> +n Actions.
+
+    Through `add_actions`, not a raw increment: spending a Villager IS "+1
+    Action", so Snowy Village's "ignore any further +Actions you get this
+    turn" has to eat it — which it only can if this goes through the one
+    grant path. The tokens come off the mat either way, as they would at the
+    table."""
     game["villagers"][pid] -= n
-    game["actions"] += n
+    add_actions(game, n, pid)
 
 
 # THE SPENDABLE REGISTRY — one entry per "counter you spend during your turn"
@@ -2612,6 +2756,7 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                             {"stage": spec["stage"], "verb": verb, "zone": src,
                              "extra": {**extra, "gained": subject, "gainer": actor}})
     _collect_token_abilities(game, pools, event, actor, subject, add)
+    _collect_exile_abilities(game, pools, event, actor, subject, add)
     whens = getattr(effects, "WATCHER_WHENS", {})
     for w in list(game["watchers"]):
         if w["event"] != event or not w.get("stage"):
@@ -2636,6 +2781,54 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
 # is why they join the same pool rather than being applied inside the play.
 _TOKEN_BONUS = {"+card": ("cards", 1), "+action": ("actions", 1),
                 "+buy": ("buys", 1), "+coin": ("coins", 1)}
+
+
+def _collect_exile_abilities(game, pools, event, actor, subject, add):
+    """THE EXILE MAT'S OWN WHEN-GAIN ABILITY (ph. 10) — the kernel contributing
+    to a pool on its own behalf, the `_collect_token_abilities` shape.
+
+    "When you gain a card, you may discard all other copies from your mat."
+    The mat is not a card, not a landscape and not an artifact, so it can have
+    no registry entry — but its ability is CONCURRENT with everything else the
+    gain triggered (ch. VI lists it beside Watchtower, Sheepdog and Sleigh), so
+    it has to arrive through the pool rather than inline.
+
+    "OTHER copies" is the boundary Gatekeeper 6 pins: "your Exile mat only
+    allows you to discard 'other copies', meaning not the one you just
+    gained" — irrelevant here because the gained card is in a deck zone, not on
+    the mat, but it is why this counts what is ON THE MAT and never subtracts.
+    Gated on there being a copy there at all, so an ordinary board pays one
+    list lookup."""
+    if event != "gain" or actor is None or subject is None:
+        return
+    if not game["seats"][actor]["exile"].count(subject):
+        return
+    add(actor, 0, "__exile", "discard_copies",
+        {"card": subject, "actor": actor})
+
+
+def _k_exile_discard_copies(game, pid, frame, choice):
+    """The mat's ability, offered. "You can't choose to just discard some of
+    them" — so it is a yes/no, never a choose_cards."""
+    card = frame["data"]["card"]
+    n = game["seats"][pid]["exile"].count(card)
+    if not n:
+        return                       # an earlier pick already moved them
+    push_choose_option(
+        game, pid, "__exile", "answer",
+        options=[{"id": "yes",
+                  "label": f"Discard {n} {card} from your Exile mat"},
+                 {"id": "no", "label": "Keep them Exiled"}],
+        data={"card": card})
+
+
+def _k_exile_answer(game, pid, frame, choice):
+    if choice["ids"][0] != "yes":
+        return
+    card = frame["data"]["card"]
+    n = game["seats"][pid]["exile"].count(card)
+    if n:
+        discard_from_exile(game, pid, [card] * n)
 
 
 def _collect_token_abilities(game, pools, event, actor, subject, add):
@@ -3272,6 +3465,49 @@ def _would_resolve_gate(game, pid, card, immune=None, replay=False):
     return True
 
 
+def push_way_offer(game, pid, way, card, stage):
+    """THE WAY OFFER (ph. 10) — "when you play an Action card, you may choose
+    to resolve the Way INSTEAD of resolving the play ability of the Action
+    card".
+
+    Every Way's `would_resolve` stage calls this. It is a two-option prompt
+    rather than a move because a Way is a TIMED WINDOW like every other
+    would-resolve consumer, and has to be ordered in the ability pool against
+    whatever else that occurrence collected (an Enchantress; a second Way on a
+    forced board). That is the ph.-6H `call` finding again: a window is a
+    trigger, not a `legal_moves` entry, and the move surface does not grow.
+
+    Picking the Way calls `cancel_pending_play` and runs `stage` — the
+    Enchantress template. Picking "normally" returns and the parked
+    `__play/resolve` continuation runs the real ability.
+
+    **A DECISION ON EVERY ACTION PLAY IS THIS SET'S PRODUCT COST, and it is
+    the rule.** With a Way dealt, every Action play stops to ask."""
+    push_choose_option(
+        game, pid, way, "__way_offer",
+        options=[{"id": "normal", "label": f"Play {card} normally"},
+                 {"id": "way", "label": f"Play {card} using {way}"}],
+        data={"card": card, "stage": stage})
+
+
+def _k_way_offer(game, pid, frame, choice):
+    """Answer to the Way offer. Displays under the WAY's own name (a kernel
+    `__*` stage falls back to ("*", stage) in `_stage_fn`)."""
+    if choice["ids"][0] != "way":
+        return                       # the parked play ability runs as normal
+    way = frame["card"]
+    # "You just resolve the Way instead" — the card still counts as PLAYED, is
+    # in play, bumped actions_played, and its after-play abilities still fire.
+    cancel_pending_play(game)
+    _log(game, pid, "way", name=way, card=frame["data"]["card"])
+    fn = _stage_fn(way, frame["data"]["stage"])
+    _run_stage(game, way, frame["data"]["stage"], pid,
+               {"kind": "auto", "pid": pid, "card": way,
+                "stage": frame["data"]["stage"],
+                "constraint": {}, "data": {"card": frame["data"]["card"]}},
+               None)
+
+
 def cancel_pending_play(game):
     """"…instead of following its instructions" — Enchantress, and every Way.
 
@@ -3694,7 +3930,15 @@ def _fresh_turn_ctx():
             # Horn's topdeck ("You may only put one Border Guard onto your
             # deck each turn with Horn").
             "played_actions": [], "citadel_used": False,
-            "innovation_used": False, "horn_used": False}
+            "innovation_used": False, "horn_used": False,
+            # Menagerie (ph. 10). `chameleon` swaps every +Cards this player
+            # gets for +$ and vice versa for the REST OF THE TURN, not just
+            # the play ("only +Cards and +$ you get THIS TURN are changed…
+            # if you play Merchant Ship, you get +2 Cards this turn, but +$
+            # next turn as normal"). `ignore_actions` is Snowy Village's
+            # "ignore any further +Actions you get this turn". `trashes` is
+            # the live count feeding `last_turn_trashes` (Goatherd).
+            "chameleon": False, "ignore_actions": False, "trashes": 0}
 
 
 def _h_play_action(game, pid, move):
@@ -4212,6 +4456,9 @@ KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
 KERNEL_STAGES[("*", "__offer_window")] = _k_offer_window
 KERNEL_STAGES[("*", "__inplay_push")] = _k_inplay_push
 KERNEL_STAGES[("*", "__star_pick")] = _k_star_pick
+KERNEL_STAGES[("__exile", "discard_copies")] = _k_exile_discard_copies
+KERNEL_STAGES[("__exile", "answer")] = _k_exile_answer
+KERNEL_STAGES[("*", "__way_offer")] = _k_way_offer
 
 
 _HANDLERS = {
@@ -4359,6 +4606,10 @@ def _k_cleanup_sweep(game, pid, frame, choice):
                         if w.get("until") != "turn_end"]
     # Smugglers: this turn's gains become pid's "last completed turn" record
     game["last_turn_gains"][pid] = game.pop("_turn_gains", [])
+    # ...and Goatherd's twin: how many cards were trashed on the turn now
+    # ending. A COUNT, because that is all the card asks ("+1 Card per card
+    # the player to your right trashed on their last turn").
+    game["last_turn_trashes"][pid] = game["turn_ctx"].get("trashes", 0)
     # Outpost: the 3-card clean-up draw ALWAYS applies once played; the extra
     # turn only if the PREVIOUS turn wasn't also pid's (no 3rd turn in a row)
     prev = game.get("last_turn_pid")
@@ -4802,6 +5053,10 @@ def owned_cards(game, pid):
     # a card on the Tavern mat is OWNED — it is still yours, it still scores
     # (Distant Lands scores ON the mat), and the bots' deck reads must see it
     owned += s["tavern"]
+    # ...and so is a card in EXILE (ph. 10): "Cards on your Exile mat are
+    # YOURS" — they score, and a conservation census that missed them would
+    # report every Exile as a lost card
+    owned += s["exile"]
     for entry in s["duration"]:
         owned.append(entry["card"])
         owned += entry.get("riders", [])
@@ -4887,11 +5142,14 @@ def player_view(game, viewer):
     which with turn_revealed drives the client's Undo button. Everything
     reveals at over.
 
-    `landscapes`, `debt`, every seat's `tavern` and every seat's `tokens` ship
-    AS-IS and that is correct, not an omission: landscapes sit face up on the
-    table, Debt tokens sit in front of you where everyone can count them (and
-    everyone must, since they stop you buying), mat contents are face up (p28)
-    and tokens are public markers. Ph. 9 adds `villagers` (mat tokens are open
+    `landscapes`, `debt`, every seat's `tavern`, every seat's `exile` (ph. 10 —
+    ch. II lists "all cards you have set aside face up (including on any player
+    mats)" as open information, and the Exile mat is face up) and every seat's
+    `tokens` ship AS-IS and that is correct, not an omission: landscapes sit
+    face up on the table, Debt tokens sit in front of you where everyone can
+    count them (and everyone must, since they stop you buying), mat contents
+    are face up (p28) and tokens are public markers. Ph. 9 adds `villagers`
+    (mat tokens are open
     information like Coffers), `artifacts` (they sit in front of their holder)
     and `fleet` (the round roster is table state) to the same list — including
     each project's `bought_by` cube record inside `landscapes`. They are
@@ -5276,6 +5534,10 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "villagers": {p: 0 for p in players},
         "artifacts": {a: None for a in cards_artifacts_for(in_play_cards)},
         "fleet": None,
+        # Menagerie (ph. 10): how many cards each player trashed on their last
+        # completed turn (Goatherd), and Way of the Mouse's set-aside card.
+        "last_turn_trashes": {},
+        "mouse_card": None,
         "vp": {},
         "log": [],
         "log_depth": 0,
@@ -5358,7 +5620,10 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
                               "cleanup_return": [],
                               # ph. 6H: the Tavern mat (public) + this seat's
                               # Adventures tokens (-1 Card, -$1, Journey)
-                              "tavern": [], "tokens": {}}
+                              "tavern": [], "tokens": {},
+                              # ph. 10: the EXILE mat (public, and OWNED —
+                              # "cards on your Exile mat are yours")
+                              "exile": []}
         # "If Shelters are used, each player starts with 3 Shelters — a Hovel, a
         # Necropolis, and an Overgrown Estate — instead of the 3 Estates. (Don't
         # include those Estates in the game.)" The Estate PILE is untouched: it
