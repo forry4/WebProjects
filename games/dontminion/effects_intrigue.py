@@ -336,8 +336,10 @@ def _lurker_pick(game, pid, frame, choice):
 
 
 def _lurker_trash_pile(game, pid, frame, choice):
-    E.trash_from_supply(game, choice["pile"])
-    E._log(game, pid, "supply_trash", card=choice["pile"])
+    # `pid` emits the trash: a card trashed out of the Supply is trashed, so
+    # its own on-trash ability fires and Tomb (ph. 8) sees it. Lurker shipped
+    # without this because nothing in the pool consumed a Supply trash yet.
+    E.trash_from_supply(game, choice["pile"], pid)
 
 
 def _lurker_gain_trash(game, pid, frame, choice):

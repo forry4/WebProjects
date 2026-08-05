@@ -102,10 +102,13 @@ def _supply_names(game, pred=None):
 
 def _action_supply_piles(game):
     """Piles an Adventures token may be moved to: "an ACTION Supply pile".
-    Read through the pile FACE, so an ordered pile counts as what it shows —
-    and an EMPTY pile still counts, because "tokens may be put on an empty
-    pile" and the face is retained."""
-    return sorted(n for n in game["supply"] if E.has_type(game, n, "action"))
+
+    Read through the PILE's own identity, not its face: "split piles follow the
+    Randomizer card", so a Catapult/Rocks pile is an Action pile even when the
+    Rocks (a Treasure) are showing — "you can put your +$1 token on the
+    Catapult/Rocks pile, and then get +$1 when you play a Catapult or a Rocks".
+    An EMPTY pile still counts, because "tokens may be put on an empty pile"."""
+    return sorted(n for n in game["supply"] if E.pile_has_type(game, n, "action"))
 
 
 # ══ $2 ═══════════════════════════════════════════════════════════════════════
@@ -801,12 +804,26 @@ def _hireling_each(game, pid, frame, choice):
 # ph. 5H interruptible Clean-up: `cleanup_discard` fires while the card is
 # still in in_play, so the exchange can take it from there.
 
-def _traveller_when(game, pid, ctx):
-    card = ctx.get("subject")
-    into = TRAVELLERS.get(card)
-    # no offer when the upgrade's pile is empty — "you may exchange it" cannot
-    # be done at all then, and a prompt for an impossible choice is noise
-    return into is not None and E.pile_top(game, into) is not None
+def _traveller_when(card):
+    """Does THIS Traveller's exchange offer belong to this occurrence?
+
+    The spec is registered `from:"in_play"`, and that source asks only "is the
+    card on the table" — so it is consulted on EVERY `cleanup_discard` the
+    Clean-up emits, one per card in play, not just on this Traveller's own. The
+    identity test is therefore load-bearing: without it a Soldier and a Fugitive
+    on the table each collected BOTH offers from BOTH emits (N travellers in
+    play ⇒ N² of them), and since `_traveller_offer` reads the EMIT's subject
+    rather than the option that was picked, choosing "Fugitive" in the ordering
+    prompt exchanged the Soldier. Reported from a real game.
+    """
+    def when(game, pid, ctx):
+        if ctx.get("subject") != card:
+            return False
+        # no offer when the upgrade's pile is empty — "you may exchange it"
+        # cannot be done at all then, and a prompt for an impossible choice is
+        # noise
+        return E.pile_top(game, TRAVELLERS[card]) is not None
+    return when
 
 
 def _traveller_offer(game, pid, ctx):
@@ -1433,7 +1450,7 @@ TRIGGERS.update({
 # pushed by a function that can read which card triggered it.
 for _t in list(TRAVELLERS):
     TRIGGERS[_t] = [{"on": "cleanup_discard", "from": "in_play",
-                     "push": _traveller_offer, "when": _traveller_when}]
+                     "push": _traveller_offer, "when": _traveller_when(_t)}]
 
 # Caravan Guard is a REACTION THAT PLAYS ITSELF (p53): played from hand when
 # another player plays an Attack, no Action spent, no immunity granted, and

@@ -354,6 +354,77 @@ def test_no_exchange_is_offered_when_the_upgrade_pile_is_empty():
     assert frame(g) is None, "a prompt for an impossible choice is noise"
 
 
+# Two Travellers finishing their journey on the same table. The whole in-play
+# row is discarded SIMULTANEOUSLY, so the offers are concurrent and the player
+# orders them (p23 §2) — and the order is a real decision, not noise: exchanging
+# the Fugitive returns it to its pile, which is what lets the Soldier exchange
+# into it. Both tests are regressions on one bug, reported from a live game.
+
+def _drain_prompts(g, pid, limit=24):
+    """Answer pid's Clean-up prompts with their FIRST option until none are
+    left, and return how many were answered."""
+    for n in range(limit):
+        f = frame(g)
+        if f is None or f["pid"] != pid:
+            return n
+        assert f["kind"] == "choose_option", f
+        ok, err = decide(g, pid, ids=[f["constraint"]["options"][0]["id"]])
+        assert ok, err
+    raise AssertionError("the Clean-up prompts never drained")
+
+
+def test_two_travellers_in_play_are_ONE_ordering_choice_and_you_get_the_one_you_pick():
+    """REGRESSION. The exchange spec is registered `from:"in_play"`, and that
+    source only asks "is the card on the table" — so it was consulted on EVERY
+    `cleanup_discard` the Clean-up emits, one per card in play. A Soldier and a
+    Fugitive therefore each collected an offer from the OTHER's emit as well:
+    two pools of two, four prompts for two cards. Worse, `_traveller_offer`
+    reads the EMIT's subject rather than the option that was picked, so
+    choosing "Fugitive" exchanged the Soldier and the leftovers then logged
+    `lost_track` at the player."""
+    g = fresh()
+    g["seats"][A]["in_play"] = ["Soldier", "Fugitive"]
+    give_deck(g, A, ["Copper"] * 10)
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "end_phase"})[0]
+
+    f = frame(g)
+    assert f["card"] == "__abilities", "both exchanges belong to one pool"
+    labels = [o["label"] for o in f["constraint"]["options"]]
+    assert sorted(labels) == ["Fugitive", "Soldier"], labels
+    pick = next(o["id"] for o in f["constraint"]["options"]
+                if o["label"] == "Fugitive")
+    assert decide(g, A, ids=[pick])[0]
+    assert frame(g)["card"] == "Fugitive", \
+        f"picked Fugitive, was offered {frame(g)['card']}"
+    assert decide(g, A, ids=["yes"])[0]
+    assert "Disciple" in g["seats"][A]["discard"]
+
+    # ...and only THEN the Soldier's own offer, which the returned Fugitive is
+    # now available for
+    assert frame(g)["card"] == "Soldier"
+    assert decide(g, A, ids=["yes"])[0]
+    ex = [(e["card"], e["into"]) for e in g["log"] if e.get("event") == "exchange"]
+    assert ex == [("Fugitive", "Disciple"), ("Soldier", "Fugitive")], ex
+    assert not [e for e in g["log"] if e.get("event") == "lost_track"]
+
+
+def test_each_traveller_copy_in_play_is_offered_exactly_once():
+    """REGRESSION on the same bug, counted: N Traveller copies in play produced
+    one offer per (copy x distinct Traveller name), i.e. N^2 prompts for N
+    cards, most of them resolving a card that had already left the table."""
+    g = fresh()
+    g["seats"][A]["in_play"] = ["Peasant", "Peasant", "Fugitive"]
+    give_deck(g, A, ["Copper"] * 10)
+    g["phase"] = "buy"
+    assert mv(g, A, {"type": "end_phase"})[0]
+    _drain_prompts(g, A)
+    ex = sorted(e["card"] for e in g["log"] if e.get("event") == "exchange")
+    assert ex == ["Fugitive", "Peasant", "Peasant"], ex
+    assert not [e for e in g["log"] if e.get("event") == "lost_track"]
+    assert not g["seats"][A]["in_play"], "Clean-up still swept the table"
+
+
 def test_the_traveller_chain_walks_all_the_way_to_champion():
     g = fresh()
     for a, b in cards.TRAVELLERS.items():
@@ -801,7 +872,12 @@ def test_an_adventures_board_deals_events_from_the_randomizer_mix():
 
 
 def test_every_event_has_an_ability_registered():
-    assert set(cards.LANDSCAPES) == set(effects.LANDSCAPE_FX)
+    """Every BUYABLE landscape owes an ability. A Landmark (ph. 8) is never
+    bought — its ability is a scoring fn or a trigger — so the equality is
+    against the buyable kinds rather than the whole table."""
+    buyable = {n for n, d in cards.LANDSCAPES.items()
+               if d["kind"] in cards.BUYABLE_LANDSCAPE_KINDS}
+    assert buyable == set(effects.LANDSCAPE_FX)
 
 
 def test_a_full_adventures_game_round_trips_through_json_and_migrate():

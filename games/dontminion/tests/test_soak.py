@@ -35,7 +35,8 @@ def _census(game):
         # asked from opposite ends, and a zone missing from either goes unseen.
         for zone in ("deck", "hand", "discard", "in_play", "aside",
                      "dur_aside", "island", "village_mat",
-                     "set_aside", "cleanup_aside", "tavern"):
+                     "set_aside", "cleanup_aside", "cleanup_return",
+                     "tavern"):
             total.update(seat.get(zone, []))
         # duration entries hold real cards; dur_setup cards are still in in_play
         for entry in seat.get("duration", []):

@@ -1028,6 +1028,159 @@ CARDS.update({
                         "expansion": "adventures", "kingdom": False},
 })
 
+# --- EMPIRES (phase 8) --------------------------------------------------------
+#
+# 24 Supply piles = 18 ordinary ones + the five SPLIT piles + Castles, which is
+# 36 card definitions. See EMPIRES_SPLITS / CASTLES below for the piles; the
+# split halves and the Castles are `kingdom: False` because the thing that gets
+# DEALT is the pile, not the card (the same shape as Knights in ph. 6).
+#
+# SIXTEEN OF THESE DIFFER FROM EVERY CARD-LIST SITE AND FROM BOTH EMPIRES
+# RULEBOOKS, because the set straddles three errata passes (compendium ch. V):
+#
+#   2021 — Farmers' Market, Mountain Pass, Opulent Castle, Temple.
+#          Opulent Castle reveals the Victory cards AS it discards them.
+#          Farmers' Market and Temple gained the word "SUPPLY" ("the Temple
+#          Supply pile"), which is not cosmetic for us: both cards cost $3/$4,
+#          so either can be drawn as FERRYMAN's extra pile — a pile that is in
+#          the game and NOT in the Supply — and then there is no Supply pile to
+#          gather onto. Same for Gladiator's trash (2025, same erratum).
+#   2022 — Charm, Forum, Groundskeeper, Tax (+ the Landmarks Basilica,
+#          Colonnade, Defiled Shrine). THE WHEN-BUY → WHEN-GAIN PASS: every one
+#          of these used to trigger on a BUY. Charm's rider now fires on your
+#          next GAIN, Forum's +1 Buy is a when-gain, and Groundskeeper SETS UP
+#          an ability for the rest of the turn (cumulative with a throne-room,
+#          and only Victory cards gained AFTER it was played count) rather than
+#          being a while-in-play timer.
+#   2025 — Capital, Chariot Race, Gladiator, Overlord (+ Ritual).
+#          Chariot Race now DRAWS the card instead of revealing it and putting
+#          it in hand — so the -1 Card token can deny the bonuses. Capital LOST
+#          its "then pay off Debt" clause (the 2024 rule made it redundant:
+#          you may pay off Debt at any time during your turn). Overlord follows
+#          Band of Misfits and can no longer play a Duration.
+CARDS.update({
+    # --- the four DEBT-COSTED Actions ({0D} costs — no coins at all) ---------
+    "Engineer":          {"cost": 0, "debt": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain a card costing up to $4.\nYou may trash this. If you do, gain a card costing up to $4.",
+                        "expansion": "empires", "kingdom": True},
+    "City Quarter":      {"cost": 0, "debt": 8, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\nReveal your hand. +1 Card per Action card revealed.",
+                        "expansion": "empires", "kingdom": True},
+    "Overlord":          {"cost": 0, "debt": 8, "types": ["action", "command"], "coins": 0, "vp": 0,
+                        "text": "Play a non-Command, non-Duration Action card from the Supply costing up to $5, leaving it there.",
+                        "expansion": "empires", "kingdom": True},
+    "Royal Blacksmith":  {"cost": 0, "debt": 8, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+5 Cards\nReveal your hand; discard the Coppers.",
+                        "expansion": "empires", "kingdom": True},
+    # --- $3 ------------------------------------------------------------------
+    "Chariot Race":      {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nDraw a card, revealing it. The player to your left reveals the top card of their deck. If your card costs more, +$1 and +1 VP.",
+                        "expansion": "empires", "kingdom": True},
+    "Enchantress":       {"cost": 3, "types": ["action", "attack", "duration"], "coins": 0, "vp": 0,
+                        "text": "Until your next turn, the first time each other player plays an Action card on their turn, they get +1 Card and +1 Action instead of following its instructions.\nAt the start of your next turn, +2 Cards.",
+                        "expansion": "empires", "kingdom": True},
+    "Farmers' Market":   {"cost": 3, "types": ["action", "gathering"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\nIf there is 4 VP or more on the Farmers' Market Supply pile, take it and trash this. Otherwise, add 1 VP to the pile and then +$1 per 1 VP on it.",
+                        "expansion": "empires", "kingdom": True},
+    # --- $4 ------------------------------------------------------------------
+    "Sacrifice":         {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Trash a card from your hand. If it's an\nAction card, +2 Cards and +2 Actions;\nTreasure card, +$2;\nVictory card, +2 VP.",
+                        "expansion": "empires", "kingdom": True},
+    "Temple":            {"cost": 4, "types": ["action", "gathering"], "coins": 0, "vp": 0,
+                        "text": "+1 VP\nTrash from 1 to 3 differently named cards from your hand.\nAdd 1 VP to the Temple Supply pile.\nWhen you gain this, take the VP from the Temple Supply pile.",
+                        "expansion": "empires", "kingdom": True},
+    "Villa":             {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\n+1 Buy\n+$1\nWhen you gain this, put it into your hand, +1 Action, and if it's your Buy phase return to your Action phase.",
+                        "expansion": "empires", "kingdom": True},
+    # --- $5 ------------------------------------------------------------------
+    "Archive":           {"cost": 5, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nSet aside the top 3 cards of your deck face down (you may look at them). Now and at the start of your next two turns, put one into your hand.",
+                        "expansion": "empires", "kingdom": True},
+    "Capital":           {"cost": 5, "types": ["treasure"], "coins": 6, "vp": 0,
+                        "text": "$6\n+1 Buy\nWhen you discard this from play, take 6 Debt.",
+                        "expansion": "empires", "kingdom": True},
+    "Charm":             {"cost": 5, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "When you play this, choose one: +1 Buy and +$2; or the next time you gain a card this turn, you may also gain a differently named card with the same cost.",
+                        "expansion": "empires", "kingdom": True},
+    "Crown":             {"cost": 5, "types": ["action", "treasure"], "coins": 0, "vp": 0,
+                        "text": "If it's your Action phase, you may play an Action from your hand twice.\nIf it's your Buy phase, you may play a Treasure from your hand twice.",
+                        "expansion": "empires", "kingdom": True},
+    "Forum":             {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+3 Cards\n+1 Action\nDiscard 2 cards.\nWhen you gain this, +1 Buy.",
+                        "expansion": "empires", "kingdom": True},
+    "Groundskeeper":     {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nThis turn, when you gain a Victory card, +1 VP.",
+                        "expansion": "empires", "kingdom": True},
+    "Legionary":         {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+$3\nYou may reveal a Gold from your hand. If you do, each other player discards down to 2 cards in hand, then draws a card.",
+                        "expansion": "empires", "kingdom": True},
+    "Wild Hunt":         {"cost": 5, "types": ["action", "gathering"], "coins": 0, "vp": 0,
+                        "text": "Choose one: +3 Cards and add 1 VP to the Wild Hunt Supply pile; or gain an Estate, taking the VP from the pile.",
+                        "expansion": "empires", "kingdom": True},
+
+    # --- the five SPLIT piles: five of the cheap half on top of five of the
+    # dear half. Both halves are `kingdom: False` — EMPIRES_SPLITS deals the
+    # PILE, whose name is not a card (see PILES).
+    "Encampment":        {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+2 Actions\nReveal a Gold or Plunder from your hand. If you don't, set this aside, and return it to the Supply at the start of Clean-up.",
+                        "expansion": "empires", "kingdom": False},
+    "Plunder":           {"cost": 5, "types": ["treasure"], "coins": 2, "vp": 0,
+                        "text": "$2\n+1 VP",
+                        "expansion": "empires", "kingdom": False},
+    "Patrician":         {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top card of your deck. If it costs $5 or more, put it into your hand.",
+                        "expansion": "empires", "kingdom": False},
+    "Emporium":          {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+$1\nWhen you gain this, if you have at least 5 Action cards in play, +2 VP.",
+                        "expansion": "empires", "kingdom": False},
+    "Settlers":          {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nLook through your discard pile. You may reveal a Copper from it and put it into your hand.",
+                        "expansion": "empires", "kingdom": False},
+    "Bustling Village":  {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+3 Actions\nLook through your discard pile. You may reveal a Settlers from it and put it into your hand.",
+                        "expansion": "empires", "kingdom": False},
+    "Catapult":          {"cost": 3, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+$1\nTrash a card from your hand. If it costs $3 or more, each other player gains a Curse. If it's a Treasure, each other player discards down to 3 cards in hand.",
+                        "expansion": "empires", "kingdom": False},
+    "Rocks":             {"cost": 4, "types": ["treasure"], "coins": 1, "vp": 0,
+                        "text": "$1\nWhen you gain or trash this, gain a Silver; put it onto your deck if it's your Buy phase, otherwise into your hand.",
+                        "expansion": "empires", "kingdom": False},
+    "Gladiator":         {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nReveal a card from your hand. The player to your left reveals a copy of it from their hand. If they don't, +$1 and trash a Gladiator from the Supply.",
+                        "expansion": "empires", "kingdom": False},
+    "Fortune":           {"cost": 8, "debt": 8, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "+1 Buy\nWhen you play this, double your $ (once per turn).\nWhen you gain this, gain a Gold per Gladiator you have in play.",
+                        "expansion": "empires", "kingdom": False},
+
+    # --- the CASTLES pile: eight different Victory cards, sorted by cost with
+    # the cheapest on top. Humble and King's Castle count Castles, which is a
+    # TYPE, so both are computed VP kinds rather than numbers.
+    "Humble Castle":     {"cost": 3, "types": ["treasure", "victory", "castle"], "coins": 1, "vp": "humble_castle",
+                        "text": "$1\nWorth 1 VP per Castle you have.",
+                        "expansion": "empires", "kingdom": False},
+    "Crumbling Castle":  {"cost": 4, "types": ["victory", "castle"], "coins": 0, "vp": 1,
+                        "text": "1 VP\nWhen you gain or trash this, +1 VP and gain a Silver.",
+                        "expansion": "empires", "kingdom": False},
+    "Small Castle":      {"cost": 5, "types": ["action", "victory", "castle"], "coins": 0, "vp": 2,
+                        "text": "2 VP\nTrash this or a Castle from your hand. If you do, gain a Castle.",
+                        "expansion": "empires", "kingdom": False},
+    "Haunted Castle":    {"cost": 6, "types": ["victory", "castle"], "coins": 0, "vp": 2,
+                        "text": "2 VP\nWhen you gain this on your turn, gain a Gold, and each other player with 5 or more cards in hand puts 2 cards from their hand onto their deck.",
+                        "expansion": "empires", "kingdom": False},
+    "Opulent Castle":    {"cost": 7, "types": ["action", "victory", "castle"], "coins": 0, "vp": 3,
+                        "text": "3 VP\nDiscard any number of Victory cards, revealing them. +$2 per card discarded.",
+                        "expansion": "empires", "kingdom": False},
+    "Sprawling Castle":  {"cost": 8, "types": ["victory", "castle"], "coins": 0, "vp": 4,
+                        "text": "4 VP\nWhen you gain this, gain a Duchy or 3 Estates.",
+                        "expansion": "empires", "kingdom": False},
+    "Grand Castle":      {"cost": 9, "types": ["victory", "castle"], "coins": 0, "vp": 5,
+                        "text": "5 VP\nWhen you gain this, reveal your hand. +1 VP per Victory card in your hand and in play.",
+                        "expansion": "empires", "kingdom": False},
+    "King's Castle":     {"cost": 10, "types": ["victory", "castle"], "coins": 0, "vp": "kings_castle",
+                        "text": "Worth 2 VP per Castle you have.",
+                        "expansion": "empires", "kingdom": False},
+})
+
 # THE TRAVELLER CHAINS — "when you discard this from play, you may EXCHANGE it
 # for the next one". `from -> into`; each upgrade is its own non-Supply pile of
 # TRAVELLER_PILE cards, included whenever the chain's head is in the kingdom.
@@ -1071,10 +1224,57 @@ SHELTERS = ["Hovel", "Necropolis", "Overgrown Estate"]
 # Everything that walks a kingdom list therefore has to tolerate a name that is
 # a pile: `grants` returns False for one, `expansion_of` answers for it, and
 # the bots go through bot_traits.pile_traits.
-PILES = {
-    "Knights": {"cost": 5, "expansion": "darkages", "kingdom": True,
-                "members": KNIGHTS, "size": len(KNIGHTS)},
+# EMPIRES' split piles: five of the cheap half on top of five of the dear half
+# ("if one of these piles is in the Supply, put the five cheaper cards on top").
+# The pile's NAME is the randomizer's, which is why it is a PILES entry and not
+# a CARDS one — `_priced` resolves a name that IS a card to itself, so a pile
+# called "Encampment" would keep showing $2 with a Plunder on top.
+EMPIRES_SPLITS = {
+    "Encampment/Plunder":        ("Encampment", "Plunder"),
+    "Patrician/Emporium":        ("Patrician", "Emporium"),
+    "Settlers/Bustling Village": ("Settlers", "Bustling Village"),
+    "Catapult/Rocks":            ("Catapult", "Rocks"),
+    "Gladiator/Fortune":         ("Gladiator", "Fortune"),
 }
+SPLIT_EACH = 5           # "put the FIVE cheaper cards on top" (5 + 5)
+
+# The Castles pile, cheapest on top. "In a 2-player game, use one of each of the
+# 8 unique cards" — otherwise two of each.
+CASTLES = ["Humble Castle", "Crumbling Castle", "Small Castle", "Haunted Castle",
+           "Opulent Castle", "Sprawling Castle", "Grand Castle", "King's Castle"]
+
+# PILES — dealt like a kingdom card, but the pile's NAME IS NOT A CARD.
+#
+# "Knight" and "Ruins" are TYPES, not names (compendium): there is no card
+# called "Knights", so the pile cannot have a CARDS entry — engine._priced
+# resolves a name that IS a card to itself, which would make the pile show its
+# own printed cost instead of its top card's (a Sir Martin on top costs $4).
+# Everything that walks a kingdom list therefore has to tolerate a name that is
+# a pile: `grants` returns False for one, `expansion_of` answers for it, and
+# the bots go through bot_traits.pile_traits.
+#
+# `cost` and `types` are THE RANDOMIZER'S, not the top card's, and ph. 8 is
+# where that distinction started to matter (compendium ch. IV, SPLIT PILES:
+# PILE TYPE AND COST — "split piles instead follow the Randomizer card"). Three
+# of the five Empires splits show a TREASURE once the bottom half surfaces, but
+# the pile stays an ACTION pile: "you can put your +$1 token on the
+# Catapult/Rocks pile, and then get +$1 when you play a Catapult OR A ROCKS".
+# It decides Defiled Shrine's and Obelisk's setup, every Adventures token, the
+# Young Witch Bane and the Ferryman pile. Read it through `pile_types` /
+# `pile_printed_cost`, never off the face.
+PILES = {
+    "Knights": {"cost": 5, "types": ["action", "attack", "knight"],
+                "expansion": "darkages", "kingdom": True,
+                "members": KNIGHTS, "size": len(KNIGHTS)},
+    "Castles": {"cost": 3, "types": ["victory", "castle"],
+                "expansion": "empires", "kingdom": True,
+                "members": CASTLES, "size": len(CASTLES)},
+}
+for _pile, (_cheap, _dear) in EMPIRES_SPLITS.items():
+    PILES[_pile] = {"cost": CARDS[_cheap]["cost"],
+                    "types": list(CARDS[_cheap]["types"]),
+                    "expansion": "empires", "kingdom": True,
+                    "members": [_cheap, _dear], "size": 2 * SPLIT_EACH}
 
 
 # --- LANDSCAPES (phase 6H) ----------------------------------------------------
@@ -1153,6 +1353,84 @@ LANDSCAPES = {
                         "text": "Once per game: Set aside a non-Command Action card from the Supply costing up to $4. Move your Estate token to it.\n(During your turns, Estates are also Actions that play the set-aside card, leaving it there.)"},
     "Pathfinding":     {"kind": "event", "cost": 8, "expansion": "adventures",
                         "text": "Move your +1 Card token to an Action Supply pile.\n(When you play a card from that pile, you first get +1 Card.)"},
+
+    # --- EMPIRES: 13 Events + 21 LANDMARKS (phase 8) -------------------------
+    # The first Debt-costed landscapes ({8D} Annex/Donate, {5D} Triumph,
+    # {$4,3D} Wedding) and the first landmarks the game has ever dealt.
+    "Advance":         {"kind": "event", "cost": 0, "expansion": "empires",
+                        "text": "You may trash an Action card from your hand. If you do, gain an Action card costing up to $6."},
+    "Delve":           {"kind": "event", "cost": 2, "expansion": "empires",
+                        "text": "+1 Buy\nGain a Silver."},
+    "Tax":             {"kind": "event", "cost": 2, "expansion": "empires",
+                        "text": "Setup: Add 1 Debt to each Supply pile.\nAdd 2 Debt to a Supply pile.\nWhen a player gains a card in their Buy phase, they take the Debt from its pile."},
+    "Banquet":         {"kind": "event", "cost": 3, "expansion": "empires",
+                        "text": "Gain 2 Coppers and a non-Victory card costing up to $5."},
+    "Ritual":          {"kind": "event", "cost": 4, "expansion": "empires",
+                        "text": "Gain a Curse. If you do, trash a card from your hand. +1 VP per $1 it costs."},
+    "Salt the Earth":  {"kind": "event", "cost": 4, "expansion": "empires",
+                        "text": "+1 VP\nTrash a Victory card from the Supply."},
+    "Windfall":        {"kind": "event", "cost": 5, "expansion": "empires",
+                        "text": "If your deck and discard pile are empty, gain 3 Golds."},
+    "Conquest":        {"kind": "event", "cost": 6, "expansion": "empires",
+                        "text": "Gain 2 Silvers. +1 VP per Silver you've gained this turn."},
+    "Dominate":        {"kind": "event", "cost": 14, "expansion": "empires",
+                        "text": "Gain a Province. If you do, +9 VP."},
+    "Wedding":         {"kind": "event", "cost": 4, "debt": 3, "expansion": "empires",
+                        "text": "+1 VP\nGain a Gold."},
+    "Triumph":         {"kind": "event", "cost": 0, "debt": 5, "expansion": "empires",
+                        "text": "Gain an Estate. If you did, +1 VP per card you've gained this turn."},
+    "Annex":           {"kind": "event", "cost": 0, "debt": 8, "expansion": "empires",
+                        "text": "Look through your discard pile. Shuffle all but up to 5 cards from it into your deck. Gain a Duchy."},
+    "Donate":          {"kind": "event", "cost": 0, "debt": 8, "expansion": "empires",
+                        "text": "At the start of your next turn, before anything else, put all cards from your deck and discard pile into your hand, trash any number of them, then shuffle your hand into your deck and draw 5 cards."},
+
+    # LANDMARKS. A Landmark is never bought — "a Landmark's ability is always
+    # active for all players" — so `landmark` is not in BUYABLE_LANDSCAPE_KINDS
+    # and there is no cost. Eleven of them are pure `LANDSCAPE_SCORING`
+    # functions; the other ten trigger during the game, and six of those store
+    # their own VP ("put 6 tokens multiplied by the number of players").
+    "Aqueduct":        {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 8 VP on the Silver pile and 8 VP on the Gold pile.\nWhen you gain a Treasure, move 1 VP from its pile to this.\nWhen you gain a Victory card, take the VP from this."},
+    "Arena":           {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nAt the start of your Buy phase, you may discard an Action card. If you do, take 2 VP from this."},
+    "Bandit Fort":     {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, -2 VP for each Silver and each Gold you have."},
+    "Basilica":        {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nWhen you gain a card in your Buy phase, if you have $2 or more, take 2 VP from this."},
+    "Baths":           {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nWhen you end your turn without having gained a card, take 2 VP from this."},
+    "Battlefield":     {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nWhen you gain a Victory card, take 2 VP from this."},
+    "Colonnade":       {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nWhen you gain an Action card in your Buy phase, if you have a copy of it in play, take 2 VP from this."},
+    "Defiled Shrine":  {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Move 2 VP from here to each Action Supply pile.\nWhen you gain an Action card, move 1 VP from its pile to this.\nWhen you gain a Curse in your Buy phase, take the VP from this."},
+    "Fountain":        {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 15 VP if you have at least 10 Coppers."},
+    "Keep":            {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 5 VP per differently named Treasure you have, that you have more copies of than each other player (ties count)."},
+    "Labyrinth":       {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Put 6 VP per player on this.\nWhen you gain a 2nd card in one of your turns, take 2 VP from this."},
+    "Mountain Pass":   {"kind": "landmark", "expansion": "empires",
+                        "text": "When you are the first player to gain a Province, each player, starting with the player to your left, bids once, up to 40 Debt, ending with you. The highest bidder gets +8 VP and takes the Debt."},
+    "Museum":          {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 2 VP per differently named card you have."},
+    "Obelisk":         {"kind": "landmark", "expansion": "empires",
+                        "text": "Setup: Choose a random Action Supply pile.\nWhen scoring, 2 VP per card you have from that pile."},
+    "Orchard":         {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 4 VP per differently named Action card you have 3 or more copies of."},
+    "Palace":          {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 3 VP per set of Copper-Silver-Gold you have."},
+    "Tomb":            {"kind": "landmark", "expansion": "empires",
+                        "text": "When you trash a card, +1 VP."},
+    "Tower":           {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 1 VP per non-Victory card you have from empty Supply piles."},
+    "Triumphal Arch":  {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, 3 VP per copy you have of the 2nd most common Action card among your differently named Action cards (ties are broken favourably)."},
+    "Wall":            {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, -1 VP per card you have after the first 15."},
+    "Wolf Den":        {"kind": "landmark", "expansion": "empires",
+                        "text": "When scoring, -3 VP per card you have exactly 1 copy of."},
 }
 
 
@@ -1202,6 +1480,12 @@ KINGDOM = {
                     if d["kingdom"] and d["expansion"] == "darkages"]),
     "adventures": [n for n, c in CARDS.items()
                    if c["kingdom"] and c["expansion"] == "adventures"],
+    # Empires deals 24 piles: 18 ordinary kingdom cards plus the six piles
+    # whose name is not a card — the five splits and Castles (see PILES).
+    "empires": ([n for n, c in CARDS.items()
+                 if c["kingdom"] and c["expansion"] == "empires"]
+                + [p for p, d in PILES.items()
+                   if d["kingdom"] and d["expansion"] == "empires"]),
 }
 
 
@@ -1314,6 +1598,11 @@ def cards_granting(requirement, pool=None):
 
 def pile_size(name, n_players):
     """Supply pile size for a card, by player count (2-4)."""
+    if name == "Castles":
+        # "In a 2-player game, use one of each of the 8 unique cards" —
+        # otherwise two of each. The only pile whose SIZE varies with the
+        # player count without its contents being a straight multiple.
+        return len(CASTLES) * (1 if n_players == 2 else 2)
     if name in PILES:
         return PILES[name]["size"]        # Knights: one shuffled pile of 10
     card = CARDS[name]

@@ -931,6 +931,50 @@ try {
 					before: logBefore?.lines.slice(-3), after: logAfter?.lines.slice(-5),
 				}));
 
+			// ...and it FOLLOWS that newest line, including after a scroll the
+			// READER did not cause. The list renders only the newest 200 lines, so
+			// past 200 entries every turn evicts lines off the top and Chrome's
+			// scroll ANCHORING pulls scrollTop back on its own to hold the visible
+			// text still. Reading that as "they scrolled up to re-read" latched the
+			// log in place for the rest of the game — and only on a PC, because iOS
+			// Safari implements no scroll anchoring. Simulated directly (a scroll
+			// with no preceding gesture) rather than by playing 200 turns, and the
+			// log is forced to overflow so the check can't be vacuous on a short one.
+			// force a scroller regardless of how much this deal has logged, and start
+			// it pinned at the bottom so the move away from it is a REAL change the
+			// browser reports (React sets no style prop on this element, so the
+			// inline max-height survives every re-render)
+			await page.evaluate(() => {
+				const el = document.querySelector(".dm-log");
+				el.style.maxHeight = "60px";
+				el.scrollTop = el.scrollHeight;
+			});
+			await sleep(200);
+			const logPre = await page.evaluate(() => {
+				const el = document.querySelector(".dm-log");
+				if (!el) return null;
+				el.scrollTop = 0;   // ...as scroll anchoring does: no gesture, real event
+				return { n: el.querySelectorAll(".dm-log-line").length,
+					canScroll: el.scrollHeight > el.clientHeight + 4 };
+			});
+			await sleep(300);       // let that scroll event dispatch
+			// ending the turn is the reliable log generator here — the buy phase is
+			// already spent by the tap test above, and the bot's reply logs plenty
+			await page.locator(".dm-turnbtns .btn", { hasText: /end turn/i })
+				.click({ timeout: 10_000 }).catch(() => {});
+			await sleep(2500);
+			const follow = await page.evaluate(() => {
+				const el = document.querySelector(".dm-log");
+				const r = { gap: +(el.scrollHeight - el.scrollTop - el.clientHeight).toFixed(1),
+					n: el.querySelectorAll(".dm-log-line").length };
+				el.style.maxHeight = "";
+				return r;
+			});
+			check("the log still follows the newest line after a scroll the reader did not cause",
+				!!logPre && logPre.canScroll && follow.n > logPre.n && follow.gap < 48,
+				JSON.stringify({ canScroll: logPre?.canScroll, lines: [logPre?.n, follow.n],
+					gapFromBottom: follow.gap }));
+
 			// Phone width stacks your piles / hand / buttons into one column, and the
 			// count pills hang BELOW their slot — so "hand N" landed on top of the
 			// buttons (measured 6px into them). Nothing in the column may overlap.
@@ -1032,6 +1076,89 @@ try {
 				ls.faces.length === 0 ? ls.rows === 0 : wellFormed, JSON.stringify(ls));
 		}
 		check("no page errors on an Adventures board", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
+	// ── a REAL Empires board (ph. 8): landmarks and Debt prices ───────────────
+	// Two render paths arrive with this set and neither existed before it:
+	//   * a LANDMARK in the landscape row — a landscape that is never bought, so
+	//     it prints NO price at all and shows its VP store instead. The
+	//     Adventures block above asserts every face carries a `$N`, which is
+	//     exactly the assumption a landmark breaks;
+	//   * a DEBT price on a Supply face — an orange hexagon, and for the four
+	//     {ND} Actions it REPLACES the coin cost rather than sitting beside it
+	//     (Engineer is {4D}, not "$0 + 4D"), so a board full of them must not
+	//     render a row of misleading zeroes.
+	// Both are asserted as well-formedness biconditionals rather than demanding
+	// a particular deal, the same shape the rest of this file uses.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "emp-harness", name: "Emp", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".dm-checks", { timeout: 15_000 }).catch(() => {});
+		for (const label of ["Empires", "Base Set"]) {
+			await page.locator(".dm-checks .dm-check", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".dm-checks .dm-check-on")].map((b) => b.textContent.trim()));
+		check("the Empires expansion is selectable",
+			picked.length === 1 && /Empires/.test(picked[0]), JSON.stringify(picked));
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("an Empires game deals a board", dealt);
+
+		if (dealt) {
+			const board = await page.evaluate(() => {
+				const faces = [...document.querySelectorAll(".dm-lscape")].map((f) => ({
+					name: f.querySelector(".dm-ls-name")?.textContent || "",
+					kind: f.querySelector(".dm-ls-kind")?.textContent || "",
+					cost: f.querySelector(".dm-ls-cost")?.textContent || "",
+					vp: f.querySelector(".dm-ls-vp")?.textContent || "",
+					text: (f.querySelector(".dm-ls-text")?.textContent || "").length,
+					overflows: f.scrollHeight > f.clientHeight + 1,
+				}));
+				const debts = [...document.querySelectorAll(".dm-supply .dm-card")]
+					.filter((c) => c.querySelector(".dm-cost-d"))
+					.map((c) => ({
+						badge: c.querySelector(".dm-cost-d text")?.textContent || "",
+						solo: !!c.querySelector(".dm-cost-d-solo"),
+						coin: c.querySelector(".dm-cost")?.textContent || "",
+					}));
+				return { rows: document.querySelectorAll(".dm-lscape-row").length, faces, debts };
+			});
+			// every face is well formed, and a landmark prints NO price
+			const facesOk = board.faces.every((f) =>
+				f.name && f.kind && f.text > 0 && !f.overflows
+				&& (f.kind === "landmark"
+					? f.cost === ""
+					: /^\$\d+( \+ \d+D)?$|^\d+D$/.test(f.cost)));
+			check("a landmark renders with a VP store and no price at all",
+				board.faces.length === 0
+					? board.rows === 0
+					: board.rows === 1 && facesOk,
+				JSON.stringify(board.faces));
+			// a Debt badge is a positive number, and a {ND} card shows NO coin
+			check("a Debt-costed pile shows a Debt badge instead of a misleading $0",
+				board.debts.every((d) => /^[1-9]\d*$/.test(d.badge)
+					&& (d.solo ? d.coin === "" : d.coin !== "")),
+				JSON.stringify(board.debts));
+		}
+		check("no page errors on an Empires board", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}

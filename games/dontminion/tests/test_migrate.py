@@ -27,6 +27,7 @@ V9_KEYS_GAME = ("shelters",)
 V10_KEYS_GAME = ("landscapes",)
 V10_KEYS_SEAT = ("tavern", "tokens")
 V11_KEYS_GAME = ("debt",)
+V12_KEYS_SEAT = ("cleanup_return",)
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -39,6 +40,10 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 12:
+        for seat in g["seats"].values():
+            for k in V12_KEYS_SEAT:
+                seat.pop(k, None)
     if to_version < 11:
         for k in V11_KEYS_GAME:
             g.pop(k, None)
@@ -94,7 +99,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 11
+    assert _fresh()["schema"] == engine.SCHEMA == 12
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -108,7 +113,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
               + V8_KEYS_GAME + V9_KEYS_GAME + V10_KEYS_GAME + V11_KEYS_GAME):
         assert k in g, k
     for seat in g["seats"].values():
-        for k in V2_KEYS_SEAT + V7_KEYS_SEAT + V10_KEYS_SEAT:
+        for k in V2_KEYS_SEAT + V7_KEYS_SEAT + V10_KEYS_SEAT + V12_KEYS_SEAT:
             assert k in seat, k
     assert g["vp_tokens"] == {A: 0, B: 0}
     assert g["colony"] is False and g["curse_is_treasure"] is False
@@ -119,7 +124,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8, 9, 10])
+@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8, 9, 10, 11])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -340,6 +345,40 @@ def test_a_pre_debt_save_gains_the_debt_counter():
     engine.migrate(old)
     assert old["debt"] == {A: 0, B: 0}
     _drive(old, moves=120)
+
+
+def test_a_pre_empires_save_gains_the_cleanup_return_zone():
+    """ph. 8 adds seat["cleanup_return"] — cards that go back to their PILE at
+    Clean-up rather than to the discard (Encampment). The Clean-up sweep walks
+    it for EVERY seat on every turn end, so a save that predates it would
+    KeyError there; the fill is what makes an old game keep ending turns."""
+    old = _downgrade(_fresh(), 11)
+    for seat in old["seats"].values():
+        assert "cleanup_return" not in seat
+    engine.migrate(old)
+    for seat in old["seats"].values():
+        assert seat["cleanup_return"] == []
+    _drive(old, moves=120)
+
+
+def test_an_empires_position_with_split_piles_and_landmarks_round_trips():
+    """A whole Empires board through JSON and migrate: ordered split piles, the
+    Castles pile, per-pile VP and Debt attachments, landscape stores, and the
+    Debt counter."""
+    g = engine.new_game(
+        [A, B], ["empires"], seed=17, landscapes=["Aqueduct", "Tax"],
+        kingdom=["Encampment/Plunder", "Catapult/Rocks", "Gladiator/Fortune",
+                 "Castles", "Engineer", "Villa", "Temple", "Forum",
+                 "Archive", "Capital"])
+    _drive(g, moves=200)
+    blob = json.loads(json.dumps(g))
+    engine.migrate(blob)
+    assert blob["schema"] == engine.SCHEMA
+    for name in ("Encampment/Plunder", "Castles"):
+        assert blob["piles"][name]["contents"] == g["piles"][name]["contents"]
+    assert blob["debt"] == g["debt"]
+    assert blob["landscapes"] == g["landscapes"]
+    _drive(blob, moves=60)
 
 
 def test_a_dark_ages_position_with_shuffled_piles_round_trips():

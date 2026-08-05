@@ -37,8 +37,8 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 - **Games**: Spender (Splendor), Castles of Crimson (Castles of Burgundy), Where Wolf? (One Night
   Ultimate Werewolf), Spender Duel (Splendor Duel), Dontminion (Dominion — Base, Intrigue,
   Seaside, Prosperity, Hinterlands and Cornucopia & Guilds in 2E, plus Alchemy, Dark
-  Ages and Adventures; 276 cards + the first 20 LANDSCAPE cards (Events), more sets
-  landing per phase).
+  Ages, Adventures and Empires; 312 cards + 54 LANDSCAPE cards (33 Events and 21
+  Landmarks), more sets landing per phase).
   Plus **Books** (a ranking/suggestions page) and **WWSD** (a browser autoplayer for a friend's
   external Splendor site).
 

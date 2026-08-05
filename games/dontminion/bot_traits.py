@@ -57,6 +57,9 @@ TRASHERS = {
     "Masquerade": "weak", "Lookout": "weak", "Sentry": "weak",
     "Jack of All Trades": "weak", "Sailor": "weak", "Treasure Map": "weak",
     "Lurker": "weak",           # trashes from the SUPPLY, not your deck
+    # Empires
+    "Sacrifice": "tfb", "Catapult": "tfb", "Small Castle": "tfb",
+    "Temple": "multi",
     # Cornucopia & Guilds
     "Butcher": "tfb", "Remake": "tfb", "Stonemason": "tfb",
     "Infirmary": "weak",
@@ -90,6 +93,11 @@ ATTACKS = {
     "Minion": "discard", "Cutpurse": "discard",
     "Bandit": "trash", "Swindler": "trash", "Corsair": "trash",
     "Bureaucrat": "topdeck", "Rabble": "topdeck", "Clerk": "topdeck",
+    # Empires. Enchantress is its own kind: it neither junks nor empties a
+    # hand, it REPLACES the victim's first Action each turn with a cantrip,
+    # which is a tempo attack nothing else in the pool does. Only truthiness
+    # and the `curse` test are read off this, so a new kind is safe.
+    "Enchantress": "replace", "Legionary": "discard", "Catapult": "curse",
     # Cornucopia & Guilds. Jester is filed under "curse" for the DEFENSIVE
     # read that matters — on a Victory card it hands out a Curse, and the
     # alternative (a copy of what they discarded) is not reliably junk.
@@ -133,6 +141,8 @@ GAINERS = {
     # Adventures
     "Artificer", "Disciple", "Duplicate", "Hero", "Magpie", "Messenger",
     "Port", "Transmogrify", "Treasure Hunter", "Treasure Trove",
+    # Empires
+    "Engineer", "Charm", "Small Castle",
     "Expand", "Forge", "Farmland", "Bureaucrat", "Bandit", "Blockade",
     "Pirate", "Jack of All Trades", "Treasure Map", "Lurker", "Mine",
     # Cornucopia & Guilds
@@ -161,7 +171,11 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
                 # is optional) — the two Dark Ages cards a rush can be built
                 # on. Altar is NOT one: its gain costs a card from your hand,
                 # so the deck never grows, exactly like the remodel family.
-                "Armory", "Hermit"}
+                "Armory", "Hermit",
+                # Empires: Engineer gains any pile up to $4 and can then trash
+                # ITSELF for a second one, so the deck grows without spending a
+                # card from hand — the Workshop shape, twice.
+                "Engineer"}
 # Adventures adds NONE, deliberately. Every gainer it ships pays for the gain:
 # Artificer discards a card per $1, Hero and Treasure Hunter give you Treasures
 # rather than a pile of your choice, Duplicate needs a gain to copy, and Port
@@ -171,6 +185,9 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
 # Looks at / discards / reorders cards to improve what you draw. The
 # reshuffle-control rules (R4: "don't overcartograph") key on these.
 SIFTERS = {
+    # Empires: two cards that fish a known card out of the discard pile, one
+    # that peeks at the top, and Archive, which parcels out a known three.
+    "Settlers", "Bustling Village", "Patrician", "Archive",
     "Apothecary", "Golem",
     "Cellar", "Warehouse", "Cartographer", "Oasis", "Lookout", "Sentry",
     "Harbinger", "Vault", "Stables", "Inn", "Tide Pools", "Sea Chart",
@@ -193,6 +210,10 @@ ALT_VP = {
     "Tunnel": "reaction_vp", "Farmland": "on_gain_vp",
     "Fairgrounds": "per_5_distinct", "Demesne": "per_gold",
     "Vineyard": "per_3_actions",
+    # Empires: the two Castles that count CASTLES (a type), including
+    # themselves. The other six print a flat number and are ordinary Victory
+    # cards that happen to share a pile.
+    "Humble Castle": "per_castle", "King's Castle": "per_castle_x2",
     # Dark Ages. Dame Josephine is a flat 2 VP, so it is not an alt-VP card —
     # it is a Victory card that happens to live in the Knights pile.
     "Feodum": "per_3_silvers",
@@ -201,7 +222,11 @@ ALT_VP = {
 }
 
 # Accumulates VP tokens — never lost, never clogs the deck (a slog's engine).
-VP_TOKENS = {"Monument", "Bishop", "Collection", "Investment"}
+VP_TOKENS = {"Monument", "Bishop", "Collection", "Investment",
+             # Empires is the VP-token set: three cards GATHER tokens on their
+             # own pile and cash them out, three hand them straight to you.
+             "Temple", "Wild Hunt", "Farmers' Market",
+             "Chariot Race", "Plunder", "Groundskeeper", "Emporium"}
 
 # Draws a variable number of cards, so it prints no "+N Cards" and the derived
 # `draw` flag misses it entirely. Library is a top-tier drawer that a
@@ -222,14 +247,23 @@ DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
              # Adventures: a called Guide draws 5 whatever your hand was, and
              # Storyteller draws one card per $1 it takes off you — neither
              # prints a "+N Cards" a text scan could find
-             "Guide", "Storyteller"}
+             "Guide", "Storyteller",
+             # Empires: City Quarter draws one per Action in your hand, and
+             # Archive parcels three cards out over three turns
+             "City Quarter", "Archive"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
 # clothes (Quarry discounts Actions BM never buys; Investment/War Chest/Crystal
 # Ball push decisions a money deck gains nothing from).
 BM_TREASURES = {"Fool's Gold", "Bank", "Hoard", "Farm", "Collection",
-                "Astrolabe", "Cauldron", "Anvil", "Tiara"}
+                "Astrolabe", "Cauldron", "Anvil", "Tiara",
+                # Empires: Plunder is a Silver that also scores. Capital is
+                # DELIBERATELY absent — $6 for $5 is the best rate in the game
+                # and the 6 Debt it hands back locks your next buy entirely,
+                # which this bot does not model; a money deck that cannot buy
+                # is worse than one that bought a Gold.
+                "Plunder"}
 
 # How good a card is as Big Money's ONE terminal, higher = better. Cards absent
 # from this table are not BM terminals at all and `bm_terminal_rank` returns 0
@@ -280,6 +314,19 @@ BM_TERMINALS = {
     "Swamp Hag": 91,
     "Giant": 78,
     "Haunted Woods": 76,
+    # Empires, measured at 300 games each. Three earn their place, and the two
+    # REJECTIONS are the set's real lesson: **a Debt cost is close to fatal for
+    # a money deck.** Royal Blacksmith (0.0433) and City Quarter (0.0067) are
+    # both {8D} and both score at the very bottom of every sweep this repo has
+    # run — worse than Death Cart — because taking 8 Debt blocks the tier from
+    # buying ANYTHING until it has paid $8 it would otherwise have spent on
+    # Gold. The card is fine; the price is a whole turn of buying. Sacrifice
+    # (0.5467) is a wash and is absent for the usual reason.
+    # The five split piles and Castles are not candidates at all — an ordered
+    # pile's face changes, so it is nobody's reliable terminal (ph. 3H).
+    "Forum": 70,
+    "Legionary": 65,
+    "Wild Hunt": 64,
     "Wharf": 87,
     "Vault": 82,
     "Charlatan": 81,
@@ -378,6 +425,18 @@ REVIEWED = frozenset([
     "Royal Carriage", "Soldier", "Storyteller", "Swamp Hag", "Teacher",
     "Transmogrify", "Treasure Hunter", "Treasure Trove", "Warrior",
     "Wine Merchant",
+    # --- Empires (ph. 8) — the 18 ordinary kingdom cards... ---
+    "Archive", "Capital", "Charm", "Chariot Race", "City Quarter", "Crown",
+    "Enchantress", "Engineer", "Farmers' Market", "Forum", "Groundskeeper",
+    "Legionary", "Overlord", "Royal Blacksmith", "Sacrifice", "Temple",
+    "Villa", "Wild Hunt",
+    # ...the ten split-pile halves (a bot meets BOTH halves of a pile, so both
+    # owe a review even though only the pile is dealt)...
+    "Bustling Village", "Catapult", "Emporium", "Encampment", "Fortune",
+    "Gladiator", "Patrician", "Plunder", "Rocks", "Settlers",
+    # ...and the eight Castles.
+    "Crumbling Castle", "Grand Castle", "Haunted Castle", "Humble Castle",
+    "King's Castle", "Opulent Castle", "Small Castle", "Sprawling Castle",
 ])
 
 

@@ -52,6 +52,7 @@ const EXPANSIONS = [
   { id: "alchemy", name: "Alchemy" },
   { id: "darkages", name: "Dark Ages" },
   { id: "adventures", name: "Adventures" },
+  { id: "empires", name: "Empires" },
 ];
 // Adventures tokens that sit ON a Supply pile (engine.TOKEN_KINDS). Public
 // markers, so they render for every player; the glyph is the token's own
@@ -198,8 +199,28 @@ function DmCardFace({ name, card, onClick, onInfo, selected, disabled, highlight
         <div className="dm-types">
           {types.map((t) => <span key={t} className="dm-type">{TYPE_LABEL[t] || t}</span>)}
         </div>
-        <span className="dm-cost">{card ? card.cost : ""}</span>
+        {/* A card whose whole price is Debt prints NO coin cost at all
+            (Engineer is {4D}, not "$0 + 4D"), so the coin column is dropped
+            rather than showing a misleading 0. */}
+        <span className="dm-cost">
+          {card ? (card.cost === 0 && card.debt > 0 ? "" : card.cost) : ""}
+        </span>
       </div>
+      {/* Debt is the third cost dimension (Empires) — an orange hexagon, the
+          colour and shape the physical cards use, sitting where a Potion
+          would. You do not pay it to buy: you TAKE it, and then cannot buy
+          anything until it is paid off. */}
+      {card?.debt > 0 && (
+        <span className={"dm-cost-d" + (card.cost === 0 ? " dm-cost-d-solo" : "")}
+          title={`costs ${card.debt} Debt`}>
+          <svg viewBox="0 0 24 24" role="img" aria-label={`costs ${card.debt} Debt`}>
+            <path d="M12 1 L22 6.5 L22 17.5 L12 23 L2 17.5 L2 6.5 Z"
+                  fill="#d8722f" stroke="#8d4413" strokeWidth="1.4" />
+            <text x="12" y="16.6" textAnchor="middle" fontSize="12" fontWeight="800"
+                  fill="#fff">{card.debt}</text>
+          </svg>
+        </span>
+      )}
       {/* A Potion is part of the cost (Alchemy): a little bottle sitting just
           ABOVE the coin. It is absolutely placed so it never grows the foot row —
           the rules text reflows AROUND its corner (see .dm-has-potion) instead of
@@ -520,6 +541,8 @@ function fmtLog(e, names) {
       ? `${who} gains ${art(e.card)} from the trash, onto their deck`
       : `${who} gains ${art(e.card)} from the trash`;
     case "return_to_pile": return `${who} returns ${art(e.card)} to its pile`;
+    case "set_aside_return": return `${who} sets ${art(e.card)} aside, to return it to the Supply in Clean-up`;
+    case "enchanted": return `${who} gets +1 Card and +1 Action instead of resolving ${art(e.card)}`;
     // taking a card OUT of the trash without gaining it (Fortress)
     case "from_trash": return e.dest === "hand"
       ? `${who} takes ${art(e.card)} from the trash into their hand`
@@ -890,6 +913,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // Adventures tokens ON a pile: pile.attach.tokens = {pid: [kind, ...]}. Every
   // player's, flattened — they are public markers, and whose is whose matters
   // (a -$2 token only discounts on its OWNER's turns).
+  // Gathered VP and Tax's Debt, both on the pile's public `attach` (ph. 7H).
+  const pileVp = (name) => game?.piles?.[name]?.attach?.vp ?? 0;
+  const pileDebt = (name) => game?.piles?.[name]?.attach?.debt ?? 0;
   const pileTokens = (name) => {
     const toks = game?.piles?.[name]?.attach?.tokens || {};
     return Object.entries(toks)
@@ -1091,12 +1117,30 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // exceeded the old 80px gate, so the log stopped following on a phone. And
   // the scroll is deferred to rAF — iOS Safari drops a scrollTop set that races
   // the DOM update, the other half of why mobile wasn't scrolling.
+  // ...and "the reader scrolled up" means a scroll THE READER CAUSED. The
+  // browser moves scrollTop on its own too, and on a PC that is what broke
+  // this: the list renders only the newest 200 lines, so once a game passes
+  // 200 entries every turn EVICTS lines off the top — and Chrome/Firefox
+  // SCROLL ANCHORING compensates by pulling scrollTop back to keep the visible
+  // text still, which fires a scroll event reporting a large distance from the
+  // bottom. A position-only test read that as "they scrolled up to re-read"
+  // and latched the log in place for the rest of the game. iOS Safari
+  // implements no scroll anchoring, which is exactly why the log kept
+  // following on a phone and stopped on a desktop.
+  // So: reaching the bottom always re-arms (whoever scrolled), and only a
+  // scroll within a real gesture — wheel, drag, touch — may un-arm.
   const logLen = (game?.log || []).length;
   const logPinRef = useRef("");
   const logStickRef = useRef(true);
+  const logGestureAtRef = useRef(0);
+  const onLogGesture = useCallback(() => { logGestureAtRef.current = Date.now(); }, []);
   const onLogScroll = useCallback((e) => {
     const el = e.currentTarget;
-    logStickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (atBottom) { logStickRef.current = true; return; }
+    // 1.5s covers wheel inertia and touch momentum, which keep scrolling well
+    // after the gesture's own events have stopped
+    if (Date.now() - logGestureAtRef.current < 1500) logStickRef.current = false;
   }, []);
   useEffect(() => {
     const el = logRef.current;
@@ -1451,6 +1495,22 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {/* Adventures tokens sitting ON this pile. Top-LEFT, deliberately: the
             Bane marker owns top-right and the count pill straddles the bottom
             edge, so this is the only corner left free. */}
+        {/* VP tokens GATHERED on this pile (Farmers' Market/Temple/Wild Hunt
+            gather their own; Aqueduct and Defiled Shrine seed other piles) and
+            Tax's Debt. Both are public per-pile state and both change what the
+            pile is worth buying, so they sit on the face. */}
+        {(pileVp(name) > 0 || pileDebt(name) > 0) && (
+          <span className="dm-pile-attach">
+            {pileVp(name) > 0 && (
+              <span className="dm-pile-vp" title="VP tokens on this pile">
+                &#9733;<Pop n={pileVp(name)} /></span>
+            )}
+            {pileDebt(name) > 0 && (
+              <span className="dm-pile-debt" title="Debt the next buyer takes">
+                <Pop n={pileDebt(name)} />D</span>
+            )}
+          </span>
+        )}
         {pileTokens(name).length > 0 && (
           <span className="dm-tokens">
             {pileTokens(name).map(({ pid, kind }, i) => (
@@ -1473,6 +1533,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const d = landscapeData[name] || {};
     const buyable = landscapeBuyable(name);
     const spent = landscapeSpent(name);
+    const st = game?.landscapes?.[name] || {};
+    const store = st.vp || 0;
+    // An Event prints a price; a LANDMARK prints none, because it cannot be
+    // bought at all. Debt (Empires) is the third dimension and reads "5D".
+    const priceLabel = st.kind === "landmark" ? ""
+      : [d.cost || !d.debt ? "$" + (d.cost ?? 0) : "",
+         d.debt ? d.debt + "D" : ""].filter(Boolean).join(" + ");
     const cls = "dm-lscape dm-ls-" + (d.kind || "event")
       + (buyable ? " dm-ls-buyable" : "") + (spent ? " dm-ls-spent" : "");
     // The face carries its own rules text and `title` carries the full version,
@@ -1488,7 +1555,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
         <span className="dm-ls-text">{d.text || ""}</span>
         <span className="dm-ls-foot">
           <span className="dm-ls-kind">{d.kind || "event"}</span>
-          <span className="dm-ls-cost">${d.cost ?? "?"}</span>
+          {priceLabel && <span className="dm-ls-cost">{priceLabel}</span>}
+          {/* What a Landmark shows instead of a price: the VP tokens left on
+              it. Arena and Battlefield drain over a game, and "if there are
+              none left you get nothing", so the count is real information. */}
+          {store > 0 && (
+            <span className="dm-ls-vp" title="VP tokens left on this landmark">
+              &#9733; <Pop n={store} />
+            </span>
+          )}
         </span>
         {spent && <span className="dm-ls-tick" title="you have bought this">✓</span>}
       </button>
@@ -1977,7 +2052,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
-          <div className="dm-log" ref={logRef} onScroll={onLogScroll}>
+          {/* the gesture handlers are what tell a reader's scroll apart from
+              the browser's own — see onLogScroll */}
+          <div className="dm-log" ref={logRef} onScroll={onLogScroll}
+               onWheel={onLogGesture} onPointerDown={onLogGesture}
+               onTouchMove={onLogGesture}>
             {/* CHRONOLOGICAL: oldest at the top, newest appended at the bottom,
                 and the view auto-scrolls to keep the newest line visible. Reads
                 the way the turn actually happened, which matters here because

@@ -15,10 +15,13 @@ ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
                  "looter", "ruins", "knight", "shelter",
                  # Adventures: Reserve (waits on the Tavern mat to be CALLED)
                  # and Traveller (exchanges upward when discarded from play)
-                 "reserve", "traveller"}
+                 "reserve", "traveller",
+                 # Empires: Castle (the eight cards of the Castles pile) and
+                 # Gathering (a card that accumulates VP tokens on its own pile)
+                 "castle", "gathering"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
                       "hinterlands", "cornucopia", "alchemy", "darkages",
-                      "adventures"}
+                      "adventures", "empires"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
 OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
@@ -336,6 +339,47 @@ EXPECTED = {
     'Disciple': (5, ['action', 'traveller']),
     'Teacher': (6, ['action', 'reserve']),
     "Spoils": (0, ['treasure']),
+
+    # --- Empires (18 ordinary kingdom cards) ---
+    # The four Debt-costed Actions print NO coin cost at all: {4D} and {8D}.
+    'Engineer': (0, ['action']),
+    'City Quarter': (0, ['action']),
+    'Overlord': (0, ['action', 'command']),
+    'Royal Blacksmith': (0, ['action']),
+    'Chariot Race': (3, ['action']),
+    'Enchantress': (3, ['action', 'attack', 'duration']),
+    "Farmers' Market": (3, ['action', 'gathering']),
+    'Sacrifice': (4, ['action']),
+    'Temple': (4, ['action', 'gathering']),
+    'Villa': (4, ['action']),
+    'Archive': (5, ['action', 'duration']),
+    'Capital': (5, ['treasure']),
+    'Charm': (5, ['treasure']),
+    'Crown': (5, ['action', 'treasure']),
+    'Forum': (5, ['action']),
+    'Groundskeeper': (5, ['action']),
+    'Legionary': (5, ['action', 'attack']),
+    'Wild Hunt': (5, ['action', 'gathering']),
+    # --- Empires: the five split piles (cheap half on top) ---
+    'Encampment': (2, ['action']),
+    'Plunder': (5, ['treasure']),
+    'Patrician': (2, ['action']),
+    'Emporium': (5, ['action']),
+    'Settlers': (2, ['action']),
+    'Bustling Village': (5, ['action']),
+    'Catapult': (3, ['action', 'attack']),
+    'Rocks': (4, ['treasure']),
+    'Gladiator': (3, ['action']),
+    'Fortune': (8, ['treasure']),          # {$8, 8D}
+    # --- Empires: the Castles pile, cheapest on top ---
+    'Humble Castle': (3, ['treasure', 'victory', 'castle']),
+    'Crumbling Castle': (4, ['victory', 'castle']),
+    'Small Castle': (5, ['action', 'victory', 'castle']),
+    'Haunted Castle': (6, ['victory', 'castle']),
+    'Opulent Castle': (7, ['action', 'victory', 'castle']),
+    'Sprawling Castle': (8, ['victory', 'castle']),
+    'Grand Castle': (9, ['victory', 'castle']),
+    "King's Castle": (10, ['victory', 'castle']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -351,10 +395,11 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 276
+    assert len(cards.CARDS) == 312
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
               "prosperity": [], "hinterlands": [], "cornucopia": [],
-              "alchemy": [], "darkages": [], "adventures": []}
+              "alchemy": [], "darkages": [], "adventures": [],
+              "empires": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     # 34 kingdom + 10 Knights + 5 Ruins + 3 Shelters + Spoils/Madman/Mercenary
@@ -369,13 +414,17 @@ def test_card_count_and_expansion_counts():
     assert len(by_exp["alchemy"]) == 12         # 11 shipped + Potion; see DEFERRED
     # 30 kingdom + the 8 Traveller upgrades (non-Supply piles of 5)
     assert len(by_exp["adventures"]) == 38
+    # 18 ordinary kingdom cards + the 10 split-pile halves + the 8 Castles
+    assert len(by_exp["empires"]) == 36
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
 def test_kingdom_lists_match_flags_no_duplicates():
     for exp, want in (("base", 26), ("intrigue", 26), ("seaside", 27),
                       ("prosperity", 25), ("hinterlands", 26),
-                      ("cornucopia", 26), ("alchemy", 11), ("darkages", 35)):
+                      ("cornucopia", 26), ("alchemy", 11), ("darkages", 35),
+                      # 18 ordinary piles + 5 split piles + Castles
+                      ("empires", 24)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -438,6 +487,9 @@ def test_schema_field_completeness_and_validity():
                               ("Distant Lands", "distant_lands"),
                               ("Duke", "duke"), ("Fairgrounds", "fairgrounds"),
                               ("Feodum", "feodum"), ("Gardens", "gardens"),
+                              # Empires: both count CASTLES, which is a type
+                              ("Humble Castle", "humble_castle"),
+                              ("King's Castle", "kings_castle"),
                               ("Vineyard", "vineyard")]
 
 
@@ -447,7 +499,12 @@ def test_static_vp_values():
                    "Farmland": 2, "Tunnel": 2,          # Hinterlands
                    # Dark Ages: a Knight that is also a Victory card, and a
                    # Shelter printed as a literal 0 VP
-                   "Dame Josephine": 2, "Overgrown Estate": 0}
+                   "Dame Josephine": 2, "Overgrown Estate": 0,
+                   # Empires: the six Castles with a printed number (Humble and
+                   # King's count Castles instead, so they are computed)
+                   "Crumbling Castle": 1, "Small Castle": 2,
+                   "Haunted Castle": 2, "Opulent Castle": 3,
+                   "Sprawling Castle": 4, "Grand Castle": 5}
     for name, vp in expected_vp.items():
         assert cards.CARDS[name]["vp"] == vp, name
     # every other int-vp card is 0
@@ -495,33 +552,37 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.REQUIREMENT_ORDER == ("actions", "buys", "draw")
     assert set(cards.REQUIREMENTS) == set(cards.REQUIREMENT_ORDER)
     assert cards.cards_granting("actions") == [
-        "Bandit Camp", "Bazaar", "Border Village", "City", "Crossroads",
-        "Diplomat", "Farmhands", "Festival", "Fishing Village", "Fortress",
-        "Inn", "Lost City", "Mining Village", "Native Village", "Nobles",
-        "Plaza", "Port", "Shanty Town", "Squire", "University", "Village",
-        "Wandering Minstrel", "Worker's Village"]
+        "Bandit Camp", "Bazaar", "Border Village", "City", "City Quarter",
+        "Crossroads", "Diplomat", "Farmhands", "Festival", "Fishing Village",
+        "Fortress", "Inn", "Lost City", "Mining Village", "Native Village",
+        "Nobles", "Plaza", "Port", "Sacrifice", "Shanty Town", "Squire",
+        "University", "Villa", "Village", "Wandering Minstrel",
+        "Worker's Village"]
     # ...and NOT Coin of the Realm, whose "+2 Actions" is on its CALL ability.
     # A call is not a play, so a player guaranteed "+2 Actions" would otherwise
     # be handed a Treasure and no village at all — see cards._CALL_CLAUSE.
     assert "Coin of the Realm" not in cards.cards_granting("actions")
     assert cards.cards_granting("buys") == [
         "Astrolabe", "Baron", "Bridge", "Bridge Troll", "Candlestick Maker",
-        "Cauldron", "City", "Collection", "Council Room", "Counterfeit",
-        "Courtier", "Farrier", "Festival", "Forager", "Grand Market",
-        "Hamlet", "Herbalist", "Margrave", "Market", "Market Square",
-        "Merchant Guild", "Messenger", "Nomads", "Pawn", "Peasant", "Ranger",
-        "Salvager", "Souk", "Spice Merchant", "Squire", "Storeroom",
-        "Tactician", "Tiara", "Wharf", "Wine Merchant", "Worker's Village"
+        "Capital", "Cauldron", "Charm", "City", "Collection", "Council Room",
+        "Counterfeit", "Courtier", "Farmers' Market", "Farrier", "Festival",
+        "Forager", "Forum", "Grand Market", "Hamlet", "Herbalist", "Margrave",
+        "Market", "Market Square", "Merchant Guild", "Messenger", "Nomads",
+        "Pawn", "Peasant", "Ranger", "Salvager", "Souk", "Spice Merchant",
+        "Squire", "Storeroom", "Tactician", "Tiara", "Villa", "Wharf",
+        "Wine Merchant", "Worker's Village"
     ]
     assert cards.cards_granting("draw") == [
         "Alchemist", "Apprentice", "Catacombs", "Council Room", "Courtyard",
-        "Cultist", "Diplomat", "Dungeon", "Ferryman", "Gear", "Guard Dog",
+        "Cultist", "Diplomat", "Dungeon", "Enchantress", "Ferryman", "Forum",
+        "Gear", "Guard Dog",
         "Haunted Woods", "Hunting Grounds", "Inn", "Laboratory", "Lost City",
         "Margrave", "Masquerade", "Menagerie", "Minion", "Moat", "Nobles",
-        "Patrol", "Rabble", "Ranger", "Sea Witch", "Secret Passage",
+        "Patrol", "Rabble", "Ranger", "Royal Blacksmith", "Sacrifice",
+        "Sea Witch", "Secret Passage",
         "Shanty Town", "Smithy", "Spice Merchant", "Stables", "Steward",
         "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
-        "Witch", "Witch's Hut", "Young Witch"
+        "Wild Hunt", "Witch", "Witch's Hut", "Young Witch"
     ]
 
 def test_requirement_bar_is_the_printed_bonus():

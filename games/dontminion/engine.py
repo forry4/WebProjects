@@ -26,6 +26,7 @@ import random
 
 from .cards import (
     CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
+    CASTLES, EMPIRES_SPLITS, SPLIT_EACH,
     LANDSCAPES, BUYABLE_LANDSCAPE_KINDS, TRAVELLERS, TRAVELLER_PILE,
     traveller_chain as cards_traveller_chain,
     pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
@@ -43,7 +44,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 11
+SCHEMA = 12
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -58,6 +59,9 @@ SCHEMA = 11
 #       the Adventures token stores (seat["tavern"] / seat["tokens"])
 #  11 = the DEBT vector (ph. 7H): game["debt"] — a fill-only bump, the v10 shape
 #       plus one public per-player counter
+#  12 = Empires (ph. 8): seat["cleanup_return"] — cards set aside to go back to
+#       their PILE at Clean-up (Encampment). Also a fill-only bump; every other
+#       key this set reads was added by v10/v11
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -124,6 +128,9 @@ _SEAT_FILLS = {
     # C&G: cards set aside to be played at the start of your next turn
     # (Farmhands), and the seat-level start-of-turn abilities that play them
     "set_aside": list, "start_fx": list, "cleanup_aside": list,
+    # Empires (ph. 8): set aside now, RETURNED TO ITS PILE at Clean-up
+    # (Encampment). Distinct from cleanup_aside, which goes to the discard.
+    "cleanup_return": list,
 }
 
 
@@ -585,6 +592,33 @@ def pile_top(game, name):
     if p is None or pile_count(game, name) <= 0:
         return None
     return p["contents"][0] if p["contents"] is not None else name
+
+
+def pile_types(game, name):
+    """A pile's OWN types — the randomizer's, not its top card's.
+
+    "Some abilities and setup rules refer to the type or cost of a pile.
+    Normally this is the same as that of the cards in the pile. But split piles
+    instead follow the RANDOMIZER card" (compendium, SPLIT PILES: PILE TYPE AND
+    COST § IV). Three of the five Empires splits show a Treasure once the
+    bottom half surfaces — Rocks, Plunder, Fortune — while the pile itself stays
+    an ACTION pile: "you can put your +$1 token on the Catapult/Rocks pile, and
+    then get +$1 when you play a Catapult OR A ROCKS".
+
+    So this is NOT `types_of(pile)`, which resolves through the FACE and is the
+    right answer for buying (a Fortune on top really does cost {$8,8D} and
+    really is a Treasure). Use this one for anything that asks what KIND of pile
+    something is: Defiled Shrine's and Obelisk's setup, every Adventures token
+    ("an Action Supply pile"), Trade Route, the Young Witch Bane. A pile whose
+    name is a card has no randomizer of its own, so it answers from the card."""
+    d = PILES.get(name)
+    if d is not None:
+        return list(d["types"])
+    return types_of(game, name)
+
+
+def pile_has_type(game, name, t):
+    return t in pile_types(game, name)
 
 
 def pile_of(game, card):
@@ -1166,11 +1200,23 @@ def trash(game, pid, cards, zone="hand"):
         emit_batch(game, "trash", pid, cards)
 
 
-def trash_from_supply(game, card):
+def trash_from_supply(game, card, pid=None):
+    """Trash the top card of a Supply pile — Lurker, Gladiator, Salt the Earth.
+
+    `pid` is who did the trashing, and passing it EMITS the trash. A card
+    trashed out of the Supply really is trashed: its own on-trash ability
+    fires and the trasher gets the benefit, and Tomb's "when you trash a card,
+    +1 VP" is explicit that it "triggers even when you trash a card from the
+    Supply (with Gladiator, Lurker or Salt the Earth)". The argument is
+    optional so an existing caller that has no actor to name (a test fixture
+    staging the trash pile) keeps its silent behaviour."""
     got = _pile_take(game, card)
     if got is None:
         return False
     game["trash"].append(got)
+    if pid is not None:
+        _log(game, pid, "supply_trash", card=got)
+        emit(game, "trash", actor=pid, subject=got)
     return True
 
 
@@ -1237,6 +1283,24 @@ def take_aside(game, pid, cards, dest="hand"):
     # redacted (owner-only pre-over), exactly like draw.
     if dest == "hand" and cards:
         _log(game, pid, "to_hand", count=len(cards), cards=list(cards))
+
+
+def to_hand(game, pid, card, zone="discard"):
+    """Move a card the player ALREADY has into their hand — Villa's when-gain
+    "put it into your hand", Settlers fishing a Copper out of the discard pile.
+
+    Distinct from `gain(dest="hand")`, which is a gain: this card is already
+    yours and no trigger fires for it moving. Returns False when the card is
+    not where the caller thought (the lose-track guard's job is the caller's:
+    "when you put Villa into your hand, cards like Watchtower lose track of
+    it", and the reverse is just as real)."""
+    seat = game["seats"][pid]
+    if card not in seat[zone]:
+        return False
+    seat[zone].remove(card)
+    seat["hand"].append(card)
+    _log(game, pid, "to_hand", count=1, cards=[card])
+    return True
 
 
 def deck_from_aside(game, pid, order):
@@ -1940,6 +2004,69 @@ def set_aside(game, pid, cards, zone="hand", until=None):
         _log(game, pid, "set_aside", count=len(cards), private_to=[pid],
              cards=list(cards))
     return list(cards)
+
+
+def return_at_cleanup(game, pid, card, zone="in_play"):
+    """Set a card aside now and RETURN IT TO ITS PILE at Clean-up — Encampment's
+    "set this aside, and return it to the Supply at the start of Clean-up".
+
+    A separate zone from `cleanup_aside` (ph. 4) because the destination is
+    different, not the timing: that one goes to the owner's DISCARD (Joust's
+    Province), this one leaves the player's deck entirely. It is a seat zone
+    rather than a game-level list because the sweep runs at ONE seat's
+    Clean-up and "if you somehow play Encampment during another player's turn
+    and set it aside, you return it in THAT player's Clean-up phase" — which is
+    exactly what the all-seats half of the sweep already does for in-play
+    cards.
+
+    The card is still OWNED while it waits (it is your card until it goes
+    back), so `owned_cards` counts it and the conservation census sees it."""
+    seat = game["seats"][pid]
+    seat[zone].remove(card)
+    seat["cleanup_return"].append(card)
+    _log(game, pid, "set_aside_return", card=card)
+
+
+def finish_duration(game, pid, card):
+    """End a `forever` duration entry: its fx stop repeating and the card
+    discards at the next Clean-up like any spent Duration.
+
+    Archive is why this exists. "Now and at the start of your next TWO turns"
+    is neither the one-shot `add_duration_fx` nor ph. 7's rest-of-the-game
+    `forever` — it is a repeat that ENDS, and it ends on a condition the card
+    itself owns ("Archive will only stay in play as long as it has cards set
+    aside"). So the entry rides `forever=True` to survive the turn start, and
+    its own stage calls this the moment the set-aside runs out.
+
+    The MOST RECENT matching entry, so two Archives finish independently."""
+    for entry in reversed(game["seats"][pid]["duration"]
+                          + _dur_setup_list(game, pid)):
+        if entry["card"] == card and entry.get("forever"):
+            entry["forever"] = False
+            entry["fx"] = []
+            entry["done"] = True
+            return True
+    return False
+
+
+def return_to_action_phase(game, pid):
+    """"…and if it's your Buy phase, return to your Action phase" — Villa.
+
+    The phase has only ever advanced, and this is the first card that walks it
+    back. "You return to your Action phase, keeping the Actions, Buys and $ you
+    had left, plus the +1 Action from Villa", so nothing is reset — including
+    `turn_ctx["bought"]`, which is CLEARED: that flag exists to stop Treasures
+    being played after a buy, and re-entering the Buy phase gives you its
+    treasure half again.
+
+    Only on your own turn ("if you gain Villa when it's not your turn, the +1
+    Action is not usable, and you don't get an Action phase")."""
+    if game["over"] or pid != game["turn"] or game["phase"] != "buy":
+        return False
+    game["phase"] = "action"
+    game["turn_ctx"]["bought"] = False
+    _log(game, pid, "phase", phase="action")
+    return True
 
 
 def take_set_aside(game, pid, cards, dest="hand"):
@@ -2720,10 +2847,11 @@ def _before_play_then_ability(game, pid, card, replay=False):
                   replay=replay, attack=False)
     if pools:
         push_auto(game, pid, "__play", "ability",
-                  data={"card": card, "cur_dur": game.get("_cur_dur")})
+                  data={"card": card, "replay": replay,
+                        "cur_dur": game.get("_cur_dur")})
         _park_pools(game, pools)
         return
-    _run_play_ability(game, pid, card)
+    _run_play_ability(game, pid, card, replay=replay)
 
 
 def _restore_cur_dur(game, frame):
@@ -2754,10 +2882,72 @@ def _restore_cur_dur(game, frame):
         game["_cur_dur"] = frame["data"]["cur_dur"]
 
 
-def _run_play_ability(game, pid, card):
+def _would_resolve_gate(game, pid, card, immune=None, replay=False):
+    """THE WOULD-RESOLVE WINDOW (ph. 8) — the last thing that can happen before
+    a played card's own ability runs, and the only place an ability can be
+    REPLACED rather than merely preceded.
+
+    The compendium gives it its own timing class, distinct from before-play:
+    "Enchantress is triggered when you WOULD RESOLVE the played Action card. So
+    if you play an Enchanted Attack card, Reactions are resolved first, as
+    normal. Good Harvest, Kiln, Urchin and Adventures tokens are also resolved
+    first." Its other listed members are all Ways ("Ways are triggered at the
+    same time as Enchantress, replacing what you do"), Highwayman and
+    Enlightenment — so this one event is also the ph.-10 Ways seam.
+
+    Returns True when the ability has been PARKED underneath a pool of
+    consumers. Same shape as 6H's before_play gate and for the same reason: a
+    pool parked in front of an inline call would resolve after it, i.e.
+    backwards — so the ability is only parked when the emit actually collects
+    something, and a board with no consumer runs byte-identically to before.
+
+    `immune` distinguishes the two ability shapes: None is an ordinary play
+    (which also emits play_treasure), a list is an ATTACK's play ability with
+    its per-play immunity set."""
+    pools = {}
+    _emit_collect(game, pools, "would_resolve", actor=pid, subject=card,
+                  replay=replay, attack=immune is not None)
+    if not pools:
+        return False
+    push_auto(game, pid, "__play", "resolve",
+              data={"card": card, "replay": replay,
+                    "immune": None if immune is None else list(immune),
+                    "cur_dur": game.get("_cur_dur")})
+    _park_pools(game, pools)
+    return True
+
+
+def cancel_pending_play(game):
+    """"…instead of following its instructions" — Enchantress, and every Way.
+
+    Flags the parked would-resolve continuation so the card's play ability is
+    never run. The card still counts as PLAYED (it is in play, `actions_played`
+    is already bumped, and "a card is considered played even before it's
+    resolved"), and everything else about the play is untouched: reactions have
+    already resolved, before-play abilities have already resolved, and the
+    `action_resolved` emit parked under all of it still fires — "after-play
+    abilities such as Coin of the Realm, Royal Carriage, Citadel or Flagship
+    still trigger after you play an Enchanted Action card".
+
+    The twin of `cancel_pending_gain` in the would-gain protocol, and returns
+    False the same way when there is nothing parked to cancel."""
+    for f in reversed(game["pending"]):
+        if f["card"] == "__play" and f["stage"] == "resolve":
+            f["data"]["cancelled"] = True
+            return True
+    return False
+
+
+def _run_play_ability(game, pid, card, replay=False):
     """A non-Attack card's own play ability (and the play_treasure emit that
     follows a Treasure's). Split out so it can run inline OR from a parked
     frame — the two must be the same code, not two copies that drift."""
+    if _would_resolve_gate(game, pid, card, replay=replay):
+        return
+    _do_play_ability(game, pid, card)
+
+
+def _do_play_ability(game, pid, card):
     from . import effects as _fx
     fn = _fx.EFFECTS.get(card)
     if fn is None and not has_type(game, card, "treasure"):
@@ -2768,9 +2958,32 @@ def _run_play_ability(game, pid, card):
         emit(game, "play_treasure", actor=pid, subject=card)
 
 
+def _do_attack_ability(game, pid, card, immune):
+    game["_atk_immune"] = list(immune)
+    try:
+        _effect_fn(card)(game, pid)
+    finally:
+        game.pop("_atk_immune", None)
+
+
+def _k_play_resolve(game, pid, frame, choice):
+    """The would-resolve continuation. `cancelled` is Enchantress (or, later, a
+    Way) having replaced what this card does — the play stands, its ability
+    simply never runs."""
+    _restore_cur_dur(game, frame)
+    d = frame["data"]
+    if d.get("cancelled"):
+        return
+    if d["immune"] is None:
+        _do_play_ability(game, pid, d["card"])
+    else:
+        _do_attack_ability(game, pid, d["card"], d["immune"])
+
+
 def _k_play_ability_frame(game, pid, frame, choice):
     _restore_cur_dur(game, frame)
-    _run_play_ability(game, pid, frame["data"]["card"])
+    _run_play_ability(game, pid, frame["data"]["card"],
+                      replay=frame["data"].get("replay", False))
 
 
 def _k_play_resolved(game, pid, frame, choice):
@@ -3033,11 +3246,14 @@ def _k_legacy_diplomat_discard(game, pid, frame, choice):
 
 def _k_play_ability(game, pid, frame, choice):
     _restore_cur_dur(game, frame)
-    game["_atk_immune"] = list(frame["data"]["immune"])
-    try:
-        _effect_fn(frame["data"]["card"])(game, pid)
-    finally:
-        game.pop("_atk_immune", None)
+    d = frame["data"]
+    # the would-resolve window sits BELOW the reaction windows and above the
+    # ability — "if you play an Enchanted Attack card, Reactions are resolved
+    # first, as normal", and only then can the play be replaced
+    if _would_resolve_gate(game, pid, d["card"], immune=d["immune"],
+                           replay=d.get("replay", False)):
+        return
+    _do_attack_ability(game, pid, d["card"], d["immune"])
 
 
 def attack_opponents(game, pid, card, per_opp_stage, data=None, immune=None):
@@ -3083,6 +3299,9 @@ KERNEL_STAGES = {
     # the "directly after resolving" continuation
     ("__play", "ability"): _k_play_ability_frame,
     ("__play", "resolved"): _k_play_resolved,
+    # ph. 8: the WOULD-RESOLVE continuation — the half of a play that
+    # Enchantress (and, at ph. 10, a Way) can replace outright
+    ("__play", "resolve"): _k_play_resolve,
     # ph. 7: the Adventures tokens' own abilities (a token is not a card, so
     # the kernel contributes these to the ability pool itself)
     ("__token", "bonus"): _k_token_bonus,
@@ -3472,10 +3691,24 @@ def _h_buy_landscape(game, pid, move):
     return True, None
 
 
+def _enter_buy_phase(game, pid, auto=False):
+    """action -> buy, and the ONE place the transition is announced.
+
+    "At the start of your Buy phase" is a real timing point (Arena, ph. 8), and
+    it has two entrances — the player ending their Action phase and the
+    kernel's auto-advance — so both had to route through one function or the
+    event would fire on only one of them. It can also happen TWICE in a turn
+    now that Villa can send you back to your Action phase, which is correct:
+    "you can only do this once at the start of your Buy phase" is per entrance,
+    and Arena's entry names Villa among the cards that give you another."""
+    game["phase"] = "buy"
+    _log(game, pid, "phase", phase="buy", **({"auto": True} if auto else {}))
+    emit(game, "buy_phase_start", actor=pid)
+
+
 def _h_end_phase(game, pid, move):
     if game["phase"] == "action":
-        game["phase"] = "buy"
-        _log(game, pid, "phase", phase="buy")
+        _enter_buy_phase(game, pid)
     elif not _push_cleanup_choices(game, pid):
         _end_turn(game, pid)
     return True, None
@@ -3529,11 +3762,12 @@ def _maybe_auto_buy(game):
     into the CAUSING move, that move's undo snapshot restores the pre-move
     action phase (no separate skip to unwind)."""
     if game["over"] or game["phase"] != "action" or game["pending"]:
-        return
+        return False
     hand = game["seats"][game["turn"]]["hand"]
     if game["actions"] <= 0 or not any(has_type(game, c, "action") for c in hand):
-        game["phase"] = "buy"
-        _log(game, game["turn"], "phase", phase="buy", auto=True)
+        _enter_buy_phase(game, game["turn"], auto=True)
+        return True
+    return False
 
 
 def _end_turn(game, pid):
@@ -3568,8 +3802,16 @@ def _end_turn(game, pid):
     # (Tunnel/Trail/Weaver) are all "other than during a Clean-up phase" and
     # must NOT see this. Fired BEFORE the cards move, so a consumer can still
     # find them in in_play — and now actually relocate them.
-    for c in inplay:
-        emit(game, "cleanup_discard", actor=pid, subject=c)
+    #
+    # ONE BATCH, not an emit per card: the whole table is discarded
+    # SIMULTANEOUSLY, so every card's consumers trigger together and belong in
+    # ONE pool — a Soldier and a Fugitive both finishing their journey are the
+    # player's ordering choice, and it is a real one (exchanging the Fugitive
+    # returns it to its pile, which is what lets the Soldier exchange into it).
+    # Per-card emit() made each card its own pool, ordering them by in_play
+    # position instead — the ledger-B4 accident, in the shape emit_batch exists
+    # to prevent.
+    emit_batch(game, "cleanup_discard", pid, inplay)
 
 
 def _k_cleanup_sweep(game, pid, frame, choice):
@@ -3600,6 +3842,16 @@ def _k_cleanup_sweep(game, pid, frame, choice):
         _log(game, pid, "discard", cards=list(seat["cleanup_aside"]))
         seat["discard"].extend(seat["cleanup_aside"])
         seat["cleanup_aside"] = []
+    # ...and cards that go back to their PILE instead of to the discard
+    # (Encampment). Every seat, not just the turn player's: an Encampment set
+    # aside on someone else's turn "is returned in THAT player's Clean-up".
+    for other, s in game["seats"].items():
+        for c in list(s.get("cleanup_return", ())):
+            if not return_to_pile(game, other, c, zone="cleanup_return"):
+                # no pile would take it back — keep the card in the game
+                # rather than dropping it out of the census
+                s["cleanup_return"].remove(c)
+                s["discard"].append(c)
     # OTHER seats' in_play too: a REACTION THAT PLAYS ITSELF was played during
     # THIS turn and "you discard the card in that turn's Clean-up phase" —
     # this turn's, not the reactor's. Left behind it would still be on the
@@ -3758,7 +4010,11 @@ def apply_move(game, pid, move):
         ok, err = handler(game, pid, move)
     if ok:
         _drive(game)
-        _maybe_auto_buy(game)
+        if _maybe_auto_buy(game):
+            # the auto-advance can itself have consumers (Arena's start-of-Buy
+            # -phase offer), and it runs AFTER the drive that would have
+            # resolved them — so drive again rather than leave a parked frame
+            _drive(game)
         _post_move(game)
     elif pushed and game.get("undo_stack"):
         game["undo_stack"].pop()   # a rejected move mutated nothing
@@ -3982,6 +4238,8 @@ def owned_cards(game, pid):
     # Seaside zones + mats (migrate guarantees these on every loaded save)
     owned += s["dur_aside"] + s["island"] + s["village_mat"]
     owned += s["set_aside"] + s["cleanup_aside"]   # C&G set-asides
+    # ph. 8: still yours until Clean-up puts it back on its pile (Encampment)
+    owned += s.get("cleanup_return", [])
     # a card on the Tavern mat is OWNED — it is still yours, it still scores
     # (Distant Lands scores ON the mat), and the bots' deck reads must see it
     owned += s["tavern"]
@@ -4005,6 +4263,9 @@ def _vp_of(game, pid):
     golds = owned.count("Gold")
     silvers = owned.count("Silver")
     actions = sum(1 for c in owned if has_type(game, c, "action"))
+    # "Worth 1 VP per Castle you have" — Castle is a TYPE, and both counting
+    # Castles count THEMSELVES (a lone Humble Castle is worth 1)
+    castles = sum(1 for c in owned if has_type(game, c, "castle"))
     # "differently named cards you have" (Fairgrounds) — the whole deck, by name
     distinct = len(set(owned))
     total = 0
@@ -4022,6 +4283,10 @@ def _vp_of(game, pid):
             total += actions // 3
         elif v == "feodum":
             total += silvers // 3
+        elif v == "humble_castle":
+            total += castles
+        elif v == "kings_castle":
+            total += 2 * castles
         elif v == "distant_lands":
             if on_mat.get(c):
                 on_mat[c] -= 1          # this copy is one of the ones on the mat
@@ -4094,6 +4359,11 @@ def player_view(game, viewer):
     # it just does not draw the Potion. Only non-zero entries ship.
     g["potion_costs"] = {c: potion_cost(game, c) for c in game["piles"]
                          if potion_cost(game, c)}
+    # ...and the DEBT half (Empires), the same shape for the same reason. An
+    # Empires board is unreadable without it: Engineer's whole price is {4D},
+    # so `costs` alone shows it as free.
+    g["debt_costs"] = {c: debt_cost(game, c) for c in game["piles"]
+                       if debt_cost(game, c)}
     # What the VIEWER may spend right now, straight from THE reader. Shipped
     # rather than re-derived client-side: the rule moved in ph. 7 (Coffers are
     # spendable mid-ability now, for Storyteller), and a client carrying its
@@ -4456,6 +4726,20 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         add_pile(game, "Ruins", contents=ruins_pile, supply=True, members=RUINS)
     if knights_pile:
         add_pile(game, "Knights", contents=knights_pile, supply=True, members=KNIGHTS)
+    # Empires: the five SPLIT piles and Castles. Ordered piles like Ruins and
+    # Knights, but their order is PRINTED rather than shuffled — "put the five
+    # cheaper cards on top", "sort them by cost with the cheapest card on top"
+    # — so they draw no entropy and can be built from the kingdom alone.
+    for name in kingdom:
+        if name in EMPIRES_SPLITS:
+            cheap, dear = EMPIRES_SPLITS[name]
+            add_pile(game, name, supply=True, members=[cheap, dear],
+                     contents=[cheap] * SPLIT_EACH + [dear] * SPLIT_EACH)
+        elif name == "Castles":
+            # "In a 2-player game, use one of each of the 8 unique cards"
+            each = 1 if n == 2 else 2
+            add_pile(game, name, supply=True, members=CASTLES,
+                     contents=[c for c in CASTLES for _ in range(each)])
     # Adventures: "if Page is in the Supply, add the Treasure Hunter, Warrior,
     # Hero and Champion piles (5 each)" — the Traveller chain, outside the
     # Supply, so a Workshop can never reach one and only an exchange can.
@@ -4492,6 +4776,8 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
                               # C&G: Farmhands' set-aside + its start-of-turn play
                               "set_aside": [], "start_fx": [],
                               "cleanup_aside": [],
+                              # ph. 8: back to its PILE at Clean-up (Encampment)
+                              "cleanup_return": [],
                               # ph. 6H: the Tavern mat (public) + this seat's
                               # Adventures tokens (-1 Card, -$1, Journey)
                               "tavern": [], "tokens": {}}

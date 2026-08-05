@@ -169,6 +169,10 @@ def choose_big_money(game, pid, rng=None):
     moves = engine.legal_moves(game, pid)
     # Every coin first — the ladder reads the FULL turn total, so a buy before
     # the treasures are down would read the wrong rung.
+    # DEBT (Empires) FIRST — see _pay_off_debt.
+    debt = _pay_off_debt(game, pid, moves)
+    if debt is not None:
+        return debt
     for m in moves:
         if m["type"] == "play_all_treasures":
             return m
@@ -394,6 +398,28 @@ def _bm_plus_buy(game, pid, policy=None):
     return want
 
 
+def _pay_off_debt(game, pid, moves):
+    """Debt (Empires) FIRST, or the bot never buys again.
+
+    "When you have Debt tokens you can't buy anything. This is the only effect
+    of having Debt" — so a tier that ignores it and buys an Engineer is locked
+    out of the whole Supply for the rest of the game, quietly: no error, no
+    stall, it just ends every turn with its coins unspent. Paying off as much
+    as it can, as soon as it can, is also very close to optimal — the tokens do
+    nothing but block, and money cannot be carried between turns.
+
+    `spendable` is THE reader (it caps the payment at what this player can
+    actually afford), so its value IS the largest legal payment. Returns None
+    when there is no Debt or no money for it."""
+    if not game["debt"].get(pid):
+        return None
+    n = engine.spendable(game, pid).get("debt", 0)
+    if n <= 0:
+        return None
+    move = {"type": "spend", "what": "debt", "n": n}
+    return move if move in moves else None
+
+
 def _buy_or_fall_back(game, pid, want, moves):
     """Turn a wanted pile into a move, falling back to the money ladder.
 
@@ -429,6 +455,10 @@ def choose_bm_plus(game, pid, rng=None, policy=None):
             return plays[0]
         return {"type": "end_phase"}
 
+    # DEBT (Empires) FIRST — see _pay_off_debt.
+    debt = _pay_off_debt(game, pid, moves)
+    if debt is not None:
+        return debt
     for m in moves:
         if m["type"] == "play_all_treasures":
             return m
@@ -582,6 +612,10 @@ def choose_strategist(game, pid, rng=None, force=None):
                     return m
         return {"type": "end_phase"}
 
+    # DEBT (Empires) FIRST — see _pay_off_debt.
+    debt = _pay_off_debt(game, pid, moves)
+    if debt is not None:
+        return debt
     for m in moves:
         if m["type"] == "play_all_treasures":
             return m
@@ -611,6 +645,10 @@ def choose_champion(game, pid, rng=None):
     moves = engine.legal_moves(game, pid)
     if game["phase"] != "buy":
         return choose_strategist(game, pid, r, force=force)
+    # DEBT (Empires) FIRST — see _pay_off_debt.
+    debt = _pay_off_debt(game, pid, moves)
+    if debt is not None:
+        return debt
     for m in moves:
         if m["type"] == "play_all_treasures":
             return m

@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages + Adventures)
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages + Adventures + Empires)
 
-2–4 players, 276 cards + 20 Events. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 312 cards + 33 Events + 21 Landmarks. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -27,10 +27,11 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **11**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+`engine.SCHEMA` (now **12**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
 5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages,
-10 = the landscape kernel, 11 = the Debt vector — a FILL-ONLY bump, the v10 shape plus
-`game["debt"]`) is the game-dict shape version,
+10 = the landscape kernel, 11 = the Debt vector, 12 = Empires — both of the last two are
+FILL-ONLY bumps, v11 adding `game["debt"]` and v12 `seat["cleanup_return"]`)
+is the game-dict shape version,
 stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
@@ -198,6 +199,88 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v8 — the phase-8 (Empires) delta. FROZEN.** The set consumes 7H wholesale — Debt, the
+scoring pipeline, `LANDSCAPE_SETUP`, the pile/landscape VP stores and `from:"landscape"` all
+arrived with a consumer for the first time and needed **no change at all**. **SCHEMA 12**, a
+fill-only bump for one seat zone. What the set DID need, six items, each with a consumer:
+
+- **A PILE'S TYPE AND COST FOLLOW ITS RANDOMIZER, NOT ITS FACE** — `pile_types` /
+  `pile_has_type`, reading a new `PILES[name]["types"]`. "Split piles instead follow the
+  Randomizer card" (SPLIT PILES: PILE TYPE AND COST § IV), and three of the five Empires
+  splits show a **Treasure** once the bottom half surfaces while the pile stays an **Action**
+  pile: "you can put your +$1 token on the Catapult/Rocks pile, and then get +$1 when you play
+  a Catapult OR A ROCKS". `types_of(pile)` still resolves through the FACE, which is the right
+  answer for BUYING (a Fortune on top really does cost {$8,8D} and really is a Treasure) —
+  these are two different questions and ph. 8 is where they stopped having the same answer.
+  Everything that asks what KIND of pile something is moves onto the new reader: Defiled
+  Shrine's and Obelisk's setup, `_action_supply_piles` (six Adventures Events). It also fixes
+  **Knights**, which has been answering from its top card since ph. 6.
+- **THE WOULD-RESOLVE WINDOW — `emit("would_resolve")` + `cancel_pending_play`.** Enchantress
+  replaces what the played card does, and the compendium gives that its own timing class,
+  strictly after before-play AND after reactions: "Enchantress is triggered when you WOULD
+  RESOLVE the played Action card. So if you play an Enchanted Attack card, Reactions are
+  resolved first, as normal. Good Harvest, Kiln, Urchin and Adventures tokens are also
+  resolved first." Same park-only-when-a-consumer-is-collected shape as 6H's `before_play`, so
+  a board without Enchantress is byte-identical; the parked half is `("__play","resolve")` and
+  `cancel_pending_play` flags it, the twin of `cancel_pending_gain`. The card still counts as
+  PLAYED — it is in play, `actions_played` is bumped, and the `action_resolved` emit parked
+  under everything still fires ("after-play abilities such as Coin of the Realm, Royal Carriage
+  or Citadel still trigger after you play an Enchanted Action card"). **This is the ph.-10 WAYS
+  kernel arriving early** — "Ways are triggered at the same time as Enchantress, replacing what
+  you do" — and `add_watcher` now takes a play-time event, since the Enchantress sits in the
+  ATTACKER's play area while the actor is an opponent (neither `in_play` nor `self` can see
+  that).
+- **RETURNING TO THE ACTION PHASE MID-TURN — `return_to_action_phase`.** Villa. The phase had
+  only ever advanced. "You return to your Action phase, keeping the Actions, Buys and $ you had
+  left", and `turn_ctx["bought"]` clears with it, because that flag exists to stop Treasures
+  being played after a buy and re-entering the Buy phase gives you its treasure half again.
+  Own turn only ("if you gain Villa when it's not your turn, the +1 Action is not usable, and
+  you don't get an Action phase").
+- **A MULTI-TURN DURATION THAT ENDS ITSELF — `finish_duration`.** Archive's "now and at the
+  start of your next TWO turns" is neither `add_duration_fx`'s one-shot nor ph. 7's
+  rest-of-the-game `forever`: it rides `forever=True` to survive the turn start and its own
+  stage ends it when the set-aside runs out ("Archive will only stay in play as long as it has
+  cards set aside"). The three cards live in `dur_aside` for the census, but their NAMES are
+  recorded per-fx so two Archives keep **separate sets** — zones hold names, so the flat zone
+  alone would pool all six into one heap.
+- **RETURN TO THE SUPPLY AT CLEAN-UP — `return_at_cleanup` + `seat["cleanup_return"]`.**
+  Encampment. A separate zone from ph. 4's `cleanup_aside` because the DESTINATION differs, not
+  the timing: that one goes to the owner's discard, this one leaves the deck entirely. Swept
+  for EVERY seat, since "if you play Encampment during another player's turn and set it aside,
+  you return it in THAT player's Clean-up phase". **The SCHEMA 12 key.**
+- **`emit("buy_phase_start")` + `_enter_buy_phase`.** Arena. "At the start of your Buy phase" is
+  a real timing point with TWO entrances — the player ending their Action phase and the
+  kernel's auto-advance — so both had to route through one function or the event would fire on
+  only one of them. It can now fire twice in a turn, which is correct: Arena's own entry names
+  Villa among the cards that give you another Buy phase.
+- **...and one correctness fix with no new API: `trash_from_supply(game, card, pid)` EMITS.**
+  A card trashed out of the Supply really is trashed — its own on-trash ability fires and the
+  trasher gets the benefit — and Tomb is explicit that it "triggers even when you trash a card
+  from the Supply (with Gladiator, Lurker or Salt the Earth)". Lurker (ph. 1) shipped without
+  it because nothing in the pool consumed a Supply trash until now; `pid` is optional so a
+  fixture staging the trash pile keeps its silent behaviour.
+
+**THE ERRATA ARE AGAIN THE STORY, and this set straddles THREE passes** (compendium ch. V).
+Sixteen of ~70 objects differ from every card-list site and from both Empires rulebooks:
+**2021** Farmers' Market, Mountain Pass, Opulent Castle, Temple; **2022** Charm, Forum,
+Groundskeeper, Tax + the Landmarks Basilica, Colonnade, Defiled Shrine; **2025** Capital,
+Chariot Race, Gladiator, Overlord, Ritual. Three things generalise:
+- **The 2022 pass's condition is "in your Buy phase", not "when you buy"** — a Workshop gain in
+  the Buy phase counts, a gain on an opponent's turn does not. Four triggers read it, through
+  one helper.
+- **The word SUPPLY on Farmers' Market, Temple and Gladiator is not cosmetic HERE**, because
+  all three cost $3 or $4 and can therefore be drawn as **Ferryman's extra pile** — in the game
+  and outside the Supply, with no Supply pile to gather onto or trash from. `_supply_pile_for`
+  is the guard, and this is a cross-set corner an errata-blind port would have got wrong.
+- **Chariot Race now DRAWS its card**, which is the only reason the −1 Card token can deny its
+  bonuses; **Capital LOST its "then pay off Debt" clause** to the 2024 rules change.
+
+**The bots learned one thing: `_pay_off_debt`, run before anything else in the Buy phase.**
+A tier that ignores Debt and buys an Engineer is locked out of the whole Supply for the rest of
+the game — quietly, with no error and no stall, just ending every turn with its coins unspent.
+Split piles and Castles stay OUT of `BM_TERMINALS` by the ph.-3H rule that a face which changes
+is nobody's reliable terminal.
 
 **Kernel v7H — the DEBT vector + the SCORING PIPELINE. FROZEN.** Hardening with no consumer,
 in the 3H/5H/6H mold: no card and no landscape in the data carries a `debt` key, nothing
@@ -499,10 +582,16 @@ put-back lesson, in the opposite direction.
 
 **Kernel v5H — Clean-up and Command. FROZEN.**
 - **CLEAN-UP IS INTERRUPTIBLE.** `_end_turn` parks the sweep as a `("__cleanup","sweep")`
-  continuation and emits **`cleanup_start`** (new) then `cleanup_discard` per in-play card,
-  all before anything moves. A consumer may push a real decision frame and RELOCATE a card:
+  continuation and emits **`cleanup_start`** (new) then `cleanup_discard` for the whole in-play
+  row as ONE `emit_batch`, all before anything moves. A consumer may push a real decision frame
+  and RELOCATE a card:
   with the prompt open, nothing is discarded, no new hand is drawn and the turn is not yet
-  counted. The sweep RE-READS the table rather than trusting a snapshot. Alchemist rides
+  counted. **The batch is load-bearing, not tidiness**: the table is discarded SIMULTANEOUSLY, so
+  every card's consumers belong in ONE pool and the player orders them (p23 §2). A per-card emit
+  ordered them by in_play POSITION instead — the ledger-B4 accident — and with two Travellers
+  finishing their journey that order is a real decision (exchanging the Fugitive returns it to
+  its pile, which is what lets the Soldier exchange into it).
+  The sweep RE-READS the table rather than trusting a snapshot. Alchemist rides
   `cleanup_start`; Scheme and Herbalist stay on the per-play `buy_phase_end` watcher on
   purpose (their triggers are per-play, not per-card, so one prompt with the whole list is
   the same decision with fewer clicks).
@@ -727,6 +816,19 @@ event's SUBJECT is this card — the whole Hinterlands when-gain theme and Dark 
 needs `stage`). `COST_MODS[card] = fn(game, priced_name) -> reduction` is the while-in-play
 cost-modifier seam (Quarry-class), summed per copy on ANY table inside `cost()`.
 
+⚠ **`from:"in_play"` ASKS ONLY "is the card on the table" — it is SUBJECT-BLIND.** That is right
+for Treasury/Hoard ("while this is in play, when you gain a card…") and wrong for anything whose
+ability is about ITSELF, which is what `"self"` is for. A spec that needs the push function to
+read which card triggered it (the Travellers' `_traveller_offer`, which is one function shared by
+all eight) must therefore carry its OWN identity test in `when` — `ctx["subject"] == card`,
+closed over at registration. Without it the spec fires on **every** emit of that event: the
+Clean-up emits one `cleanup_discard` per card in play, so a Soldier and a Fugitive on the table
+each collected an offer from the other's emit as well (N Travellers in play ⇒ N² prompts), and
+the offer resolved the EMIT's subject rather than the option the player picked — choosing
+"Fugitive" exchanged the Soldier, then logged `lost_track` at the player for the leftovers.
+Reported from a real game and fixed 2026-08-05; pinned by two tests in
+`test_cards_adventures_b.py`.
+
 **Kernel v3 (Prosperity):** `add_vp_tokens(game,pid,n)` (public, score-counted, never lost) ·
 `cost_le`/`cost_eq` are THE cost comparators (raw `cost() <= n` in card code is a review
 reject — the Potion vector landed inside them in ph. 5 and the Debt one in ph. 7H, with
@@ -888,7 +990,8 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 
 | # | Rule | What we do | Cost |
 |---|---|---|---|
-| B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). Neither exists yet. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
+| B1 | **Scheme** triggers "when you discard it from play" | A per-play `buy_phase_end` watcher (the pre-2016 "choose at the start of Clean-up" timing) | The compendium says the two have "no practical difference", and in today's pool `buy_phase_end` genuinely coincides. It diverges only if a card discards an Action from play mid-turn, or a Cavalry/Villa-class card returns you to your Action phase (which makes end-of-buy fire more than once). **Ph. 8 shipped the Villa half and it does NOT bite** — `buy_phase_end` is emitted only on the buy→Clean-up transition, so a Villa that sends you back to your Action phase still produces exactly one end-of-buy per turn (pinned by `test_villa_does_not_make_the_end_of_buy_fire_twice`). The other half, a card that discards an Action from play mid-turn, still does not exist. Root cause is `_end_turn` not being interruptible — see the ledger in EXPANSIONS.md. |
+| B8 | **Donate (2021)** resolves "at the start of your next turn, BEFORE any other start-of-turn abilities" | It joins the same start-of-turn ability POOL as everything else, so with a second ability pending the player CHOOSES the order | The pool is a superset of the required behaviour — resolving Donate first is always available and is what a player wants (it is why the 2021 version exists) — so this only diverges if they deliberately pick something else first. Honouring the "before" strictly would mean a second, privileged start-of-turn queue for one Event; the pool exists precisely so that concurrent abilities are the player's call (p23 §2). Revisit if a later set adds another ability with a stated precedence. Pinned by `test_donate_rebuilds_your_deck_at_the_start_of_your_next_turn`. |
 | B2 | Deck and discard **counts** are owner-only officially | Shown to everyone | A digital-port convenience, consistent with showing live VP. Recorded in the original plan §6. |
 | B3 | A **cost read for a "remodel"** should be read at the moment it is used | Develop / Farmland / Trader capture the trashed card's cost **before** the trash resolves | Only observable if trashing a card can change costs mid-resolution; nothing in the 139-card pool does. Revisit when a cost-changing on-trash card lands. |
 | B5 | **Stop-moving rule: a card that moved away and BACK is still lost track of** (wiki Stop moving rule; compendium p26 Example 6) | `find_card_zone` is PRESENCE-based — it can't tell "still there" from "left and returned", so a returned card would wrongly be movable/playable | Unreachable in the 139-card pool (no shipped sequence returns a card to its trigger zone inside one window; the official examples need Royal Carriage / Counterfeit-class cards). Revisit when a set ships a card that can round-trip a zone mid-window — the fix is a per-window move counter, not more zone checks. |
@@ -953,9 +1056,17 @@ renders nothing rather than a partial line if any score is missing.
 **The log renders CHRONOLOGICALLY** — oldest at the top, newest appended at the bottom, view
 auto-scrolled to follow it (and pinned to the bottom on entering a game). It reversed to
 newest-first until 2026-08; the ordering matters because sub-effects INDENT under the play that
-caused them (`d` depth), and newest-first put every effect ABOVE its own cause. The autoscroll only
-fires when the reader is already within 80px of the bottom, measured live, so scrolling up to
-re-read a turn isn't yanked away by the opponent's next move. **The brightened line and the
+caused them (`d` depth), and newest-first put every effect ABOVE its own cause. Scrolling up to
+re-read a turn isn't yanked away by the opponent's next move — but **"the reader scrolled up"
+must mean a scroll THE READER CAUSED, and a position-only test cannot say that.** The list
+renders only the newest 200 lines, so past 200 entries every turn EVICTS lines off the top, and
+Chrome/Firefox **scroll anchoring** then moves `scrollTop` on its own to hold the visible text
+still. Read as intent, that latched the log in place for the rest of the game — and only on a
+PC, because iOS Safari implements no scroll anchoring, which is exactly why this survived the
+mobile autoscroll fix. So: reaching the bottom always re-arms, and only a scroll inside a real
+gesture window (wheel / pointerdown / touchmove on the log, 1.5s for inertia) may un-arm.
+`screens.mjs` pins it by firing a genuine no-gesture scroll and asserting the log still follows
+(non-vacuous — it fails against the position-only version). **The brightened line and the
 slide-in animation key off `:last-child`** — they were `:first-child` under the old order, so
 flipping without moving them highlights the OLDEST line forever. The other four games are still
 newest-first. `screens.mjs` pins the order by asserting the on-screen lines before a BUY are a

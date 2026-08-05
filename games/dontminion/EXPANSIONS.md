@@ -22,7 +22,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 6H | **HARDENING: the LANDSCAPE kernel + board-row UI** (no new cards) | pays the two ph.-7 ledger rows standalone: `cards.LANDSCAPES` + `game["landscapes"]` (a purchasable thing that is NOT a card and NOT a pile), the `buy_landscape` move (printed cost — "cannot be changed by cards like Bridge" — + once-per-turn/game gates with ONE reader), the Tavern mat seat zone + the `from:"tavern"` call window, the `action_resolved` continuation-emit, `play_attack`→`before_play` generalization, Adventures-token storage + the `-cost` hook in `cost()`, and the landscapes/tavern/token frontend | **SHIPPED** 2026-08-04 |
 | 7 | **Adventures** (30 + 8 Travellers + 20 Events) | Reserves + the Tavern mat and `from:"tavern"` call windows (6H), the 20 Events on `LANDSCAPE_FX` + `buy_landscape` (6H), Traveller chains on `add_pile(supply=False)` (3H) + `exchange` (ph. 3) + the interruptible Clean-up (5H), Adventures tokens (6H) — plus the ph.-7 kernel delta: `until="forever"` durations (Champion/Hireling), the −1 Card / −$1 / Journey seat tokens, Mission's no-buy extra turn, Save's end-of-turn hand return, Inheritance's Estate-token type injection, and `gain(**extra)`. **RETIRED deviation B6** (Coffers mid-ability, for Storyteller) | **SHIPPED** 2026-08-04 |
 | 7H | **HARDENING: the DEBT vector + the scoring pipeline** (no new cards) | pays the two ph.-8 ledger rows standalone: the cost vector's third dimension inside the SAME six comparators (`debt_cost`, printed, no reduction reaches it), `game["debt"]` + the buyer-level buy gate + the payoff via a real `_SPENDABLES` registry (the 2024 "any time during your turn" timing), `effects.LANDSCAPE_SCORING` summed into `_total_vp`, `LANDSCAPE_SETUP`, landscape/pile VP + Debt stores on 6H's state and 3H's `attach`, and the `from:"landscape"` trigger source. SCHEMA 11 (fill-only) | **SHIPPED** 2026-08-05 |
-| 8 | Empires (24 + Events + 21 Landmarks) | **registry + data on 7H's seams**: 24 kingdom entries (five 5/5 split piles + the 8-Castle pile as 3H pile DATA), the Debt-costed Events, the 21 Landmarks (scoring fns + setup fns + landscape triggers), gathering-pile gather logic on `attach` VP, `BM_TERMINALS` measurements, `REVIEWED` grown by hand. Read the Empires errata FIRST (ch. V — the set spans the 2022 when-buy→when-gain pass) | planned |
+| 8 | **Empires** (24 piles + 13 Events + 21 Landmarks) | **7H's seams took their first consumers with NO change** (Debt, LANDSCAPE_SCORING, LANDSCAPE_SETUP, the VP stores, `from:"landscape"`). Six kernel additions were still needed: pile identity follows the RANDOMIZER (`pile_types`), the `would_resolve` window + `cancel_pending_play` (Enchantress — and the ph.-10 Ways kernel, early), `return_to_action_phase` (Villa), `finish_duration` (Archive), `return_at_cleanup` (Encampment) and `emit("buy_phase_start")` (Arena). SCHEMA 12 (fill-only) | **SHIPPED** 2026-08-05 |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
 | 10 | Menagerie (30 + Events + 20 Ways) | Exile mat (+ discard-from-exile on gain), Horses non-supply (3H), Ways (alternative play modes — rides the identity system) | planned |
 | 11 | Nocturne (33 + Boons/Hexes/Heirlooms) | ⚠ **BIGGEST PHASE**: Night phase (turn-structure change: phase enum, auto-advance, legal_moves, bot, undo, frontend), Boon/Hex shared decks (new persisted RNG streams + receive flow), Heirlooms setup, Spirits non-supply, Zombies start in trash, Exorcist exchange | planned |
@@ -550,6 +550,81 @@ duration-and-attack-heavy fuzz (random 3-set combos, 2p/3p/4p) clean, a syntheti
 board where random-legal bots take Debt and pay their way out, all **27 real prod saves**
 replayed at v11, `npm run smoke` + `npm run screens`. The Debt chip and payoff control are
 dormant UI, hand-verified like 6H's landscape row.
+
+## Phase 8 — EMPIRES: SHIPPED 2026-08-05
+
+**24 Supply piles (36 card definitions), 13 Events and the game's first 21 LANDMARKS.** 312
+cards, 10 sets, 54 landscapes.
+
+**7H's bet paid in full, and this time the roadmap row was ALSO wrong in the other direction.**
+It said "registry + data on 7H's seams"; six kernel items were needed. But the things 7H
+pre-built took their first consumers with **no change whatsoever** — Debt (`debt_cost`, the six
+comparators, the buy gate, `_SPENDABLES`), `LANDSCAPE_SCORING` (11 Landmarks are nothing else),
+`LANDSCAPE_SETUP` (9 of them), the pile and landscape VP stores, `add_pile_debt`, and
+`from:"landscape"` (8 Landmarks). That is the hardening-phase argument holding twice in a row:
+what gets built one phase early against synthetics lands free, and what doesn't gets found
+mid-batch. The full list of what was needed is `CLAUDE.md` "Kernel v8"; the two that generalise:
+
+- **A PILE'S IDENTITY IS NOT ITS FACE.** `types_of(pile)` resolves through the top card, which
+  is right for buying and wrong for every setup rule and token rule. Three of the five split
+  piles show a Treasure once the dear half surfaces while the pile stays an ACTION pile. The
+  distinction had been latent since ph. 6 — **Knights has been answering from its top card the
+  whole time** — and only became observable when a set shipped a pile whose halves differ in
+  TYPE. New reader, one line changed in each of the two consumers.
+- **THE WOULD-RESOLVE WINDOW IS THE WAYS KERNEL (ph. 10), TWO PHASES EARLY.** Enchantress needs
+  to replace what a played card does, and the compendium puts that in its own timing class —
+  after before-play, after reactions — alongside "all Ways". So ph. 10 now inherits a built and
+  tested `emit("would_resolve")` + `cancel_pending_play` instead of scoping one.
+
+**THE SET STRADDLES THREE ERRATA PASSES — 16 of ~70 objects differ from every card-list site
+and from BOTH Empires rulebooks.** 2021 (Farmers' Market, Mountain Pass, Opulent Castle,
+Temple), 2022 (Charm, Forum, Groundskeeper, Tax, Basilica, Colonnade, Defiled Shrine) and 2025
+(Capital, Chariot Race, Gladiator, Overlord, Ritual). Reading ch. V before writing a line is
+what kept this data rather than sixteen bugs, and the one nobody would have guessed:
+
+- **"the Farmers' Market SUPPLY pile" (2021) is a real rule, not tidier wording.** Farmers'
+  Market, Temple and Gladiator all cost $3 or $4, so **any of them can be drawn as FERRYMAN's
+  extra pile** — a pile that is in the game and NOT in the Supply. Gathering VP onto it, or
+  trashing a Gladiator from it, would be operating on a pile nobody can buy from. A cross-set
+  corner that exists only because we ship C&G 2E, and that an errata-blind port gets wrong.
+- The 2022 pass's condition is **"in your Buy phase"**, which is not "when you buy": a Workshop
+  gain in the Buy phase counts and a gain on an opponent's turn does not.
+
+**One latent defect found and fixed on the way**: `trash_from_supply` emitted NOTHING, so a
+card trashed out of the Supply never ran its own on-trash ability. Lurker has been able to do
+that since ph. 1; it was invisible because no card or landmark consumed a Supply trash until
+Tomb. It takes an optional `pid` and emits when given one.
+
+**And one of this set's own, found by the fuzz census rather than by a test: CROWN pushed its
+replay AFTER the first play.** LIFO then ran the second play before the first had resolved, so
+a Crowned Oasis opened its second discard prompt against a hand snapshot the first prompt was
+about to invalidate — and answering it crashed the move (`list.remove(x): x not in list`). The
+fix is the ordering rule this repo has now learned three times (ph. 3's put-back, ph. 6's
+gain-after-trash): **push the continuation FIRST so it sits below what the play pushes**, which
+is exactly what Throne Room has always done. Pinned by a regression test verified red against
+the old order.
+
+**A degenerate state worth naming, because it is RULES-FAITHFUL and looks like a hang:** buy
+Donate, trash your entire deck, and hold Debt. You then have no cards, so no income; Debt
+blocks every buy; and no pile can ever empty, so no game-end condition can fire. Two random
+bots reached it in the fuzz. Real Dominion has the identical property — there is nothing to
+fix — but it means a fuzz harness on a Donate board must assert PROGRESS (turns advancing)
+rather than termination, which is what these runs do.
+
+**The bots owed one rule and would otherwise have been crippled silently.** Debt blocks ALL
+buying, so a tier that bought an Engineer and never paid it off would end every remaining turn
+with its coins unspent — no error, no stall, no test failure, just a bot that stops playing.
+`_pay_off_debt` runs before anything else in the Buy phase for all four policy tiers. Split
+piles and Castles stay out of `BM_TERMINALS` under the ph.-3H rule that a face which changes is
+nobody's reliable terminal.
+
+**Gates:** package suite (**1603**, +143), full repo suite (**2674**), a 408-game fuzz census
+over real boards across every set (2p/3p/4p, random + bmplus) with zero failures, a **306-game
+forced-landscape fuzz** that puts each of the 34 Empires landscapes on a board one at a time
+(paired with Museum and Tomb so the scoring pipeline and the trash trigger run on every board)
+— zero failures, all **28 real prod saves** replayed at v12, `npm run smoke`, and `npm run
+screens` with a REAL Empires board asserting the two render paths this set adds: a landmark
+that prints no price at all, and a Debt badge that REPLACES the coin cost on a {ND} card.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 

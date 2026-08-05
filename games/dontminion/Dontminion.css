@@ -318,6 +318,20 @@
   pointer-events: none; z-index: 2;
 }
 .dm-cost-p svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* the DEBT component of a cost (Empires): an orange hexagon in the same slot
+   the Potion uses. The two never appear together on a printed card, so they
+   share the position rather than stacking. A pure-Debt card prints no coin at
+   all, so the hexagon drops down into the coin's place. */
+.dm-cost-d {
+  position: absolute; right: var(--cf-pad, 4px);
+  bottom: calc(var(--cf-pad, 4px) + var(--coin-sz) + 2px);
+  width: var(--coin-sz); height: var(--coin-sz);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 2;
+}
+/* ...and when the card prints NO coin cost, it drops into the coin's slot. */
+.dm-cost-d.dm-cost-d-solo { bottom: var(--cf-pad, 4px); }
+.dm-cost-d svg { width: 100%; height: 100%; display: block; overflow: visible; }
 /* Carve the potion's bottom-right footprint out of the rules-text flow so the
    text wraps AROUND it and keeps using the rest of the card. A ::before float
    survives FitBodyText's textContent rewrites (a pseudo-element is not a child
@@ -443,6 +457,20 @@
   position: absolute; top: 2px; left: 3px; z-index: 2;
   display: flex; gap: 2px; pointer-events: none;
 }
+/* gathered VP and Tax's Debt sitting ON a pile (Empires). Top-RIGHT, the one
+   corner the token strip (top-left), the Bane marker and the count pill leave
+   free on a pile that has no Bane. */
+.dm-pile-attach {
+  position: absolute; top: 2px; right: 3px; z-index: 2;
+  display: flex; gap: 3px; pointer-events: none;
+}
+.dm-pile-vp, .dm-pile-debt {
+  font-size: 9px; font-weight: 800; line-height: 1; padding: 1px 4px;
+  border-radius: 6px; background: rgba(20, 16, 10, .82);
+  border: 1px solid var(--border, #3a342a);
+}
+.dm-pile-vp { color: var(--gold-light, #e8c96a); }
+.dm-pile-debt { color: #e8a06a; }
 .dm-tok {
   font-size: 9px; font-weight: 800; line-height: 1; padding: 1px 3px;
   border-radius: 6px; background: rgba(20,16,10,.82);
@@ -482,6 +510,8 @@
 .dm-ls-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
 .dm-ls-kind { font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #9a8f7a); }
 .dm-ls-cost { font-size: 12px; font-weight: 800; color: var(--gold, #c9a84c); }
+/* a LANDMARK's VP store, shown where an Event shows its price */
+.dm-ls-vp { font-size: 12px; font-weight: 800; color: var(--gold-light, #e8c96a); }
 .dm-ls-buyable { border-color: var(--gold, #c9a84c); box-shadow: 0 0 0 1px var(--gold, #c9a84c) inset; }
 .dm-ls-spent { opacity: .45; cursor: default; }
 .dm-ls-tick { position: absolute; top: 4px; right: 6px; font-size: 12px; color: var(--gold, #c9a84c); }
