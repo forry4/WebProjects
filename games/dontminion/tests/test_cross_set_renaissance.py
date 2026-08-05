@@ -11,13 +11,43 @@ Every test names the rule it encodes and the compendium ruling it comes from
 (Knutsen v11.1; page numbers are the PDF's printed page, one higher than the
 0-based index).
 
-HEADLINE FINDINGS (see the docstrings, each marked FOUND BUG):
+THREE DEFECTS FOUND, each with a FAILING test marked FOUND BUG in its
+docstring (the integrator fixes them; this file only pins them):
 
-  * **Improve x Peddler** — "cost reductions for this turn, or from cards in
-    play, still apply in Clean-up (EXCEPT Peddler's cost reduction)" (Improve,
-    p. 108). `game["phase"]` never leaves `"buy"` during Clean-up, so
-    Peddler's `DYN_COSTS` discount is still live when Improve reads costs and
-    Improve can "remodel" a $3 into a Peddler.
+  1. **Improve x Peddler** (Prosperity x Renaissance) —
+     `test_improve_must_not_see_peddlers_buy_phase_discount_in_cleanup`.
+     "Cost reductions for this turn, or from cards in play, still apply in
+     Clean-up (EXCEPT Peddler's cost reduction)" (Improve 6, p. 108).
+     `game["phase"]` never leaves `"buy"` during Clean-up, so Peddler's
+     `DYN_COSTS` discount is still live when Improve prices the Supply and a
+     $3 Village can be "remodelled" into a Peddler.
+  2. **Inheritance x Capitalism** (Adventures x Renaissance) —
+     `test_an_inherited_estate_is_a_treasure_when_capitalism_changes_its_card`.
+     "If you have your Estate token on an Action card which Capitalism changes
+     into a Treasure, all your Estates are also Treasures" (p. 179). The two
+     `types_of` injections don't compose: Capitalism is asked about the literal
+     name "Estate", which is not in `CAPITALISM_CARDS`.
+  3. **Scepter x a called Reserve** (Adventures x Renaissance) —
+     `test_scepter_may_not_replay_a_card_that_left_play_and_came_back`.
+     "'Still in play' means the Action card can't have left play after you
+     played it, even if it has entered play again … if you play a Duplicate or
+     Royal Carriage and call it the same turn, you still can't replay it with
+     Scepter" (Scepter 5, p. 141). This is standing-list row B5 (the stop-
+     moving rule) becoming REACHABLE, exactly as that row predicted.
+
+TWO DELIBERATE DEVIATIONS are pinned as PASSING tests rather than reported as
+bugs, and are candidate rows for CLAUDE.md's standing list:
+
+  * `test_a_cargo_ship_still_catches_the_card_improve_gained_from_remodelling_it`
+    — the 2025 Duration rule ("a played Duration's later effects stop if the
+    card fails to be in play") is not implemented anywhere in the engine, so a
+    card set aside on a Cargo Ship that Improve has just trashed comes back to
+    hand instead of staying set aside for the rest of the game.
+  * `test_scheme_and_alchemist_always_resolve_before_improve` — Scheme /
+    Alchemist / Herbalist ride `buy_phase_end` (row B1) while Improve rides the
+    real `cleanup_start`, so the player never gets the pool ordering the rules
+    give them, and Improve 7's "remodel an Alchemist and it loses track of
+    itself" is unreachable.
 """
 
 import copy
@@ -389,6 +419,36 @@ def test_scepter_replaying_a_duration_piles_onto_the_one_physical_card():
         {"card": "Caravan", "fx": [], "watchers": 0, "riders": [], "done": True}]
 
 
+def test_scepter_may_replay_a_card_that_is_not_finished_resolving():
+    """Scepter 6 (p. 141): "Scepter can replay a card that isn't finished being
+    resolved yet, such as the Crown, Black Market, Coronet, … or Storyteller."
+    Storyteller (ADVENTURES) plays up to 3 Treasures from hand, so it can play
+    the Scepter that then replays IT — the frame stack has to let the replayed
+    card's frames sit over the still-parked remainder of the first play.
+
+    Flagged in the scope doc as "the hardest corner in the set"; it works."""
+    g = fresh(["Storyteller", "Scepter", "Village", "Smithy", "Market",
+               "Laboratory", "Festival", "Bishop", "Patron", "Improve"],
+              ["renaissance", "adventures", "base"])
+    give_hand(g, A, ["Storyteller", "Scepter", "Copper"])
+    give_deck(g, A, ["Copper"] * 12)
+    g["seats"][A]["discard"] = []
+    play(g, A, "Storyteller")
+    assert decide(g, A, ids=["Scepter"])[0]      # Storyteller plays the Scepter
+    assert frame(g)["card"] == "Storyteller", "the rest of the play is parked"
+    assert decide(g, A, ids=["done"])[0]
+    assert frame(g)["card"] == "Scepter"
+    assert decide(g, A, ids=["replay"])[0]
+    assert frame(g)["constraint"]["cards"] == ["Storyteller"], \
+        "a card still resolving is still 'played this turn and in play'"
+    assert decide(g, A, cards=["Storyteller"])[0]
+    assert frame(g)["card"] == "Storyteller", "the replay resolved for real"
+    assert decide(g, A, ids=["done"])[0]
+    drain(g)
+    assert g["seats"][A]["in_play"] == ["Storyteller", "Scepter"], \
+        "one physical Storyteller, played once and replayed once"
+
+
 def test_scepter_may_not_replay_a_card_that_left_play_and_came_back():
     """FOUND BUG (Adventures x Renaissance) — deviation B5 becoming REACHABLE.
 
@@ -442,7 +502,7 @@ def _improve_board():
 
 
 def test_improve_may_remodel_a_cargo_ship_that_set_nothing_aside():
-    """Cargo Ship 5 (p. 68): "Cargo Ship is discarded in Clean-up if you haven't
+    """Cargo Ship 5 (p. 69): "Cargo Ship is discarded in Clean-up if you haven't
     set aside any cards, which means you may 'remodel' it with Improve."
     Improve's candidate set is `leaving_play`, and a Cargo Ship that caught
     nothing never registered a duration fx — so it is exactly what is about to
@@ -742,6 +802,49 @@ def test_innovation_playing_a_gained_attack_opens_the_reaction_window():
     assert len(g["seats"][B]["hand"]) == 5, "Moat blocked the Innovation Militia"
 
 
+def test_innovation_plays_a_gained_duration_and_it_persists():
+    """A Duration played by Innovation is played like any other: it goes to
+    `in_play`, registers its fx on its own `dur_setup` entry, and its later
+    ability fires next turn."""
+    g = fresh(["Caravan"] + INNO_K[1:], ["renaissance", "seaside", "base"],
+              landscapes=["Innovation"])
+    give_cube(g, "Innovation", A)
+    give_hand(g, A, ["Copper"])
+    to_buy(g, A)
+    g["coins"] = 4
+    assert mv(g, A, {"type": "buy", "card": "Caravan"})[0]
+    assert frame(g)["card"] == "Innovation"
+    assert decide(g, A, ids=["yes"])[0]
+    drain(g)
+    assert g["seats"][A]["in_play"] == ["Caravan"]
+    assert len(g["seats"][A]["dur_setup"]) == 1
+    end_turn(g, A)
+    drain(g)
+    end_turn(g, B)
+    drain(g)
+    assert g["turn"] == A
+    assert len(g["seats"][A]["hand"]) == 6, "Caravan's +1 Card next turn"
+
+
+def test_seers_ceiling_is_the_whole_cost_vector_but_its_floor_is_the_coins():
+    """Seer's "from $2 to $4" is TWO different rules (standing-list row A5): the
+    $4 ceiling is the full cost VECTOR, so an ALCHEMY {$3,P} Familiar is out,
+    while the $2 floor reads the coin component alone. `cost_le` and `cost_ge`
+    already encode both — this is the explicit Alchemy-on-the-board test the
+    scope doc asks for."""
+    g = fresh(["Seer", "Familiar", "Village", "Smithy", "Market", "Laboratory",
+               "Festival", "Bishop", "Patron", "Improve"],
+              ["renaissance", "alchemy", "base"])
+    assert engine.cost(g, "Familiar") == 3 and engine.potion_cost(g, "Familiar") == 1
+    give_hand(g, A, ["Seer"])
+    give_deck(g, A, ["Copper", "Familiar", "Silver", "Estate", "Copper", "Copper"])
+    play(g, A, "Seer")
+    assert not g["pending"], "only the Familiar went back, so no ordering choice"
+    assert g["seats"][A]["hand"] == ["Copper", "Silver", "Estate"], \
+        "Silver ($3) and Estate ($2) in, {$3,P} Familiar out"
+    assert g["seats"][A]["deck"][0] == "Familiar"
+
+
 # =============================================================================
 # FLEET — the game-end restructure meets the extra-turn family
 # =============================================================================
@@ -751,7 +854,7 @@ FLEET_K = ["Village", "Smithy", "Market", "Laboratory", "Festival", "Bishop",
 
 
 def test_the_fleet_round_roster_starts_after_the_last_regular_turn():
-    """Fleet (p. 92): "only players who have bought Fleet get a regular turn in
+    """Fleet (p. 93): "only players who have bought Fleet get a regular turn in
     this round. The first player to get a Fleet turn is the next player after
     the player who last had a regular turn." And "once the last Fleet turn has
     been played, the game is immediately over"."""
@@ -779,7 +882,7 @@ def test_the_fleet_round_roster_starts_after_the_last_regular_turn():
 
 
 def test_a_queued_outpost_turn_resolves_before_the_fleet_round():
-    """Fleet (p. 92): "any extra turns (from … Outpost …) that were already in
+    """Fleet (p. 93): "any extra turns (from … Outpost …) that were already in
     queue, which would normally not be resolved if the game had ended, will now
     be resolved." The Outpost turn keeps its own 3-card hand."""
     g = fresh(["Outpost"] + FLEET_K[:9], ["renaissance", "seaside", "base"],
@@ -865,7 +968,7 @@ def test_buying_fleet_after_the_round_has_begun_grants_nothing():
 # =============================================================================
 
 def test_star_chart_picks_when_inn_shuffles_your_discard_into_your_deck():
-    """Star Chart (p. 149): "This also works when you shuffle your existing deck
+    """Star Chart (p. 150): "This also works when you shuffle your existing deck
     with Annex, Donate, Famine or Inn." `shuffle_into_deck` pushes the pick
     frame itself, so anything the caller must do afterwards has to be a
     continuation pushed BEFORE the call (Kernel v9)."""
@@ -1100,7 +1203,7 @@ def test_villagers_may_be_spent_in_the_middle_of_storyteller():
 # =============================================================================
 
 def test_sewers_fires_once_per_card_of_a_chapel_batch():
-    """Sewers 4 (p. 143): "If you trash several cards at once—e.g. with
+    """Sewers 4 (p. 144): "If you trash several cards at once—e.g. with
     Chapel—Sewers triggers once for each … so that you may afterwards use
     Sewers to trash one card per card trashed with Chapel." And "trashing with
     Sewers will not trigger Sewers again" — the `trash(**extra)` mark, without
@@ -1121,7 +1224,7 @@ def test_sewers_fires_once_per_card_of_a_chapel_batch():
 
 
 def test_sewers_fires_on_a_lurker_supply_trash():
-    """Sewers 3: "Sewers triggers even when you trash a card from the Supply
+    """Sewers 3 (p. 144): "Sewers triggers even when you trash a card from the Supply
     (with Gladiator, Lurker or Salt the Earth)" — the ph.-8 correctness fix
     that made `trash_from_supply` emit."""
     g = fresh(["Lurker"] + SPEND_K[:9], ["renaissance", "intrigue", "base"],
@@ -1199,8 +1302,13 @@ def test_throne_room_over_every_new_frame_pushing_action():
     mode this catches is a conjured or destroyed card, which no per-card test
     that only inspects one zone can see."""
     from games.dontminion.tests.test_soak import _census, _assert_piles_agree
-    assert set(THRONED) <= set(cards.KINGDOM["renaissance"]), \
-        "the sweep list drifted from the roster"
+    # DERIVED from the roster, not hand-maintained: the only cards a Throne
+    # Room cannot play are the three Treasures, so anything else the set adds
+    # later shows up here as a failure rather than as silent under-coverage.
+    roster = set(cards.KINGDOM["renaissance"])
+    assert set(THRONED) <= roster, "the sweep list drifted from the roster"
+    assert roster - set(THRONED) == {"Ducat", "Scepter", "Spices"}, \
+        "an Action was dropped from the Throne Room sweep"
     for card in THRONED:
         kingdom = ["Throne Room", card, "Chapel", "Village", "Market",
                    "Laboratory", "Festival", "Bishop", "Moat", "Militia"]

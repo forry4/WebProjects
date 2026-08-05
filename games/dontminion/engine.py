@@ -1467,8 +1467,27 @@ def to_tavern(game, pid, card, zone="in_play"):
         return False
     seat[zone].remove(card)
     seat["tavern"].append(card)
+    if zone == "in_play" and pid == game["turn"]:
+        # IT LEFT PLAY, and a called Reserve is the one class in the pool that
+        # comes BACK. "'Still in play' means the Action card can't have left
+        # play after you played it, EVEN IF IT HAS ENTERED PLAY AGAIN … if you
+        # play a Duplicate or Royal Carriage and call it the same turn, you
+        # still can't replay it with Scepter" (Scepter 5). A presence check
+        # cannot see that, which is standing-row B5 — and Scepter is where the
+        # row stopped being unreachable. Recorded as a MULTISET of names, so
+        # two Royal Carriages with only one called still leave one legal
+        # target ("a card name is not a card COPY").
+        game["turn_ctx"].setdefault("left_play", []).append(card)
     _log(game, pid, "to_tavern", card=card)
     return True
+
+
+def continuously_in_play(game, pid, card):
+    """How many copies of `card` have been in play CONTINUOUSLY since they
+    were played this turn — i.e. what Scepter's "still in play" asks. Copies
+    that left and returned (a called Reserve) do not count."""
+    on_table = game["seats"][pid]["in_play"].count(card)
+    return on_table - game["turn_ctx"].get("left_play", []).count(card)
 
 
 def on_tavern(game, pid, card):
@@ -1824,7 +1843,16 @@ def types_of(game, card):
     # when you score for Vineyards, as it's not your turn at the end of the
     # game".
     if card == "Estate" and not game["over"] and estate_token_card(game):
-        return types + ["action", "command"]
+        types = types + ["action", "command"]
+        # ...and the two injections COMPOSE: "if you have your Estate token on
+        # an Action card which CAPITALISM changes into a Treasure, all your
+        # Estates are also Treasures" (Estate token, p179). The Capitalism
+        # clause below cannot see this on its own — it asks about the literal
+        # name, and "Estate" is not in CAPITALISM_CARDS; the card that matters
+        # is the one the token sits on.
+        if estate_token_card(game) in CAPITALISM_CARDS and _capitalism_on(game):
+            types = types + ["treasure"]
+        return types
     # CAPITALISM (ph. 9): "During your turns, Actions with +$ amounts in their
     # text are also Treasures." The Inheritance signature trick again — keyed
     # on the TURN player owning the cube, changing every copy EVERYWHERE
@@ -3644,6 +3672,15 @@ def _fresh_turn_ctx():
             # HAND after the clean-up draw, and Mission's "during which you
             # can't buy cards" (Events and Projects are still buyable).
             "end_hand": [], "no_buy": False,
+            # Clean-up has STARTED. `phase` cannot say this: it is still
+            # "buy" from the moment _end_turn is entered until the hand-off
+            # assigns the next turn's, and ph. 5H made the gap long enough to
+            # hold real decisions. Peddler is the consumer — "cost reductions
+            # for this turn, or from cards in play, still apply in Clean-up
+            # EXCEPT Peddler's", because Peddler's own text says "during your
+            # Buy phase" — and Improve, which remodels at cleanup_start, is
+            # what made the difference observable.
+            "cleanup": False,
             # Renaissance (ph. 9): Action names in play order (Scepter's
             # replay targets; [0] is Citadel's first-play), and the per-turn
             # once flags for Citadel's replay, Innovation's play-on-gain and
@@ -4212,6 +4249,10 @@ def _end_turn(game, pid):
     Alchemist, Herbalist) worked around it with a `buy_phase_end` watcher.
     """
     seat = game["seats"][pid]
+    # Clean-up has begun — see turn_ctx["cleanup"]. Set FIRST, before anything
+    # can observe a cost: a consumer of `cleanup_start` (Improve) prices cards
+    # while this is open, and `phase` still reads "buy" throughout.
+    game["turn_ctx"]["cleanup"] = True
     # durations: discard resolved entries, keep this turn's setups on the table
     kept_out = _cleanup_durations(game, pid)
     # `pulled` says the persisting cards have ALREADY left in_play (they now do,

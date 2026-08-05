@@ -1056,10 +1056,13 @@ def _scepter(game, pid):
 
 
 def _scepter_targets(game, pid):
-    in_play = list(game["seats"][pid]["in_play"])
     out = []
     for name in game["turn_ctx"]["played_actions"]:
-        if name in out or name not in in_play:
+        # "Still in play" means CONTINUOUSLY in play — a Royal Carriage or
+        # Duplicate played and then called the same turn left play, and "you
+        # still can't replay it with Scepter" even though it is back on the
+        # table (Scepter 5). Presence alone cannot say that.
+        if name in out or E.continuously_in_play(game, pid, name) <= 0:
             continue
         if not E.has_type(game, name, "action"):
             continue

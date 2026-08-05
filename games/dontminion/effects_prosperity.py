@@ -595,7 +595,14 @@ def _peddler(game, pid):
 
 
 def _peddler_discount(game):
-    if game["phase"] != "buy":
+    # "DURING YOUR BUY PHASE, this costs $2 less per Action card you have in
+    # play" — and Clean-up is not the Buy phase, which the compendium calls
+    # out by name: "cost reductions for this turn, or from cards in play,
+    # still apply in Clean-up (EXCEPT Peddler's cost reduction)" (Improve 6).
+    # `game["phase"]` alone cannot tell them apart — it still reads "buy"
+    # from the moment Clean-up starts until the next turn is handed over —
+    # so the kernel's turn_ctx flag is the second half of the test.
+    if game["phase"] != "buy" or game["turn_ctx"].get("cleanup"):
         return 0
     seat = game["seats"][game["turn"]]
     on_table = list(seat["in_play"])
