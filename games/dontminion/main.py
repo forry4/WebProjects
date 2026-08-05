@@ -79,9 +79,19 @@ def _valid_difficulty(value) -> str:
     return value if value in AI_DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
+# The sets a room may be created with, in RELEASE order — which is the order
+# the create screen renders them in, so this stays an explicit tuple rather
+# than `sorted(cards.KINGDOM)`.
+#
+# IT IS A GATE, NOT A LABEL: `_valid_expansions` filters the client's request
+# through it, so a set missing here is silently unplayable however correct the
+# engine is — the request falls back to base+intrigue with no error anywhere.
+# `test_every_shipped_expansion_is_creatable` asserts it against
+# `cards.KINGDOM` for exactly that reason (Renaissance shipped and this was
+# missed; `npm run screens` caught it, nothing in the Python suite could).
 KNOWN_EXPANSIONS = ("base", "intrigue", "seaside", "prosperity", "hinterlands",
                     "cornucopia", "alchemy", "darkages", "adventures",
-                    "empires")
+                    "empires", "renaissance")
 
 
 def _valid_expansions(value) -> list[str]:

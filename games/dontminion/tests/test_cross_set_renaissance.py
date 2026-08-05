@@ -735,7 +735,11 @@ def test_innovation_playing_a_gained_attack_opens_the_reaction_window():
     assert frame(g)["card"] == "Innovation"
     assert decide(g, A, ids=["yes"])[0]
     assert g["pending_pid"] == B, "no reaction window for the Innovation play"
-    assert frame(g)["card"] == "Moat"
+    assert frame(g)["card"] == "__attack"
+    assert opt_ids(g) == ["react:Moat", "decline"]
+    assert decide(g, B, ids=["react:Moat"])[0]
+    drain(g)
+    assert len(g["seats"][B]["hand"]) == 5, "Moat blocked the Innovation Militia"
 
 
 # =============================================================================
@@ -825,24 +829,35 @@ def test_the_fleet_round_also_triggers_on_a_colony_ending():
     assert g["over"]
 
 
-def test_buying_fleet_during_the_fleet_round_grants_nothing():
-    """"The round's roster was fixed when the round began" — a Project buy runs
-    no `LANDSCAPE_FX` at all, and `_fleet_owners` is only consulted once, at the
-    end check that opened the round."""
-    g = fresh(FLEET_K, ["renaissance", "base"], landscapes=["Fleet"])
-    give_cube(g, "Fleet", A)
-    g["supply"]["Province"] = 0
+def test_buying_fleet_after_the_round_has_begun_grants_nothing():
+    """"The round's roster was fixed when the round began." A Project buy runs
+    no `LANDSCAPE_FX` at all and `_fleet_owners` is consulted exactly once, at
+    the end check that opened the round — so A, buying Fleet during the Outpost
+    turn that is already queued, gets no Fleet turn of their own."""
+    g = fresh(["Outpost"] + FLEET_K[:9], ["renaissance", "seaside", "base"],
+              landscapes=["Fleet"])
+    give_cube(g, "Fleet", B)
+    give_hand(g, A, ["Outpost", "Copper"])
+    play(g, A, "Outpost")
+    g["supply"]["Province"] = 1
+    to_buy(g, A)
+    g["coins"] = 8
+    assert mv(g, A, {"type": "buy", "card": "Province"})[0]
     end_turn(g, A)
     drain(g)
-    assert g["fleet"] == {"remaining": [], "on_turn": True} and g["turn"] == A
+    assert g["turn"] == A and g["extra_turn"]
+    assert g["fleet"]["remaining"] == [B]
     to_buy(g, A)
     g["coins"] = 5
     assert mv(g, A, {"type": "buy_landscape", "name": "Fleet"})[0]
-    assert g["landscapes"]["Fleet"]["bought_by"] == [A, A] or \
-        g["landscapes"]["Fleet"]["bought_by"] == [A]
+    assert g["landscapes"]["Fleet"]["bought_by"] == [B, A]
+    assert g["fleet"]["remaining"] == [B], "the roster did not grow"
     end_turn(g, A)
     drain(g)
-    assert g["over"], "no second Fleet turn for a cube bought during the round"
+    assert g["turn"] == B and g["fleet"]["on_turn"]
+    end_turn(g, B)
+    drain(g)
+    assert g["over"], "no Fleet turn for a cube bought during the round"
 
 
 # =============================================================================
@@ -885,9 +900,8 @@ def test_star_chart_picks_through_donates_whole_deck_shuffle():
     end_turn(g, A)
     drain(g)
     end_turn(g, B)
-    drain(g, cap=400) if g["pending"] else None
-    assert g["turn"] == A
-    # Donate's own trash choice, then the Star Chart pick on the reshuffle
+    # Donate's own trash choice, then the Star Chart pick on the reshuffle it
+    # does AFTERWARDS — the continuation-pushed-BEFORE-the-call shape
     seen = []
     for _ in range(20):
         if not g["pending"]:
@@ -897,7 +911,8 @@ def test_star_chart_picks_through_donates_whole_deck_shuffle():
             assert decide(g, A, cards=["Estate"])[0]
         else:
             assert decide(g, A, cards=[])[0]
-    assert "Star Chart" in seen, "no pick offered on Donate's reshuffle"
+    assert seen == ["Donate", "Star Chart"], seen
+    assert g["turn"] == A
     assert g["seats"][A]["hand"][0] == "Estate", "the pick was drawn first"
 
 
@@ -952,11 +967,13 @@ def test_a_buy_phase_reveal_and_a_trash_pay_no_patron_coffers():
     give_hand(g, A, ["Investment", "Patron", "Copper"])
     to_buy(g, A)
     assert mv(g, A, {"type": "play_treasure", "card": "Investment"})[0]
-    assert decide(g, A, ids=["vp"])[0] if frame(g)["kind"] == "choose_option" \
-        else decide(g, A, cards=["Patron"])[0]
+    assert decide(g, A, cards=["Copper"])[0]      # Investment's own trash
+    assert opt_ids(g) == ["coin", "vp"]
+    assert decide(g, A, ids=["vp"])[0]            # ...trash it, reveal the hand
     drain(g)
     revealed = [e for e in events(g, "reveal") if "Patron" in (e.get("cards") or [])]
     assert revealed, "control: the hand really was revealed"
+    assert g["phase"] == "buy"
     assert g["coffers"][A] == 0, "a Buy-phase reveal pays nothing"
 
     g = fresh(["Investment", "Patron", "Chapel", "Smithy", "Market",
@@ -993,3 +1010,380 @@ def test_every_reveal_call_site_is_the_single_choke_point_for_patron():
         # ...and nothing hand-rolls the log entry instead
         assert not re.search(r"_log\([^)]*['\"]reveal['\"]", src), \
             f"{m.__name__} logs a reveal without going through reveal()"
+
+
+# =============================================================================
+# VILLAGERS x COFFERS x DEBT — three spendable counters at once
+# =============================================================================
+
+SPEND_K = ["Patron", "Village", "Smithy", "Market", "Laboratory", "Festival",
+           "Bishop", "Seer", "Improve", "Moat"]
+
+
+def test_villagers_are_action_phase_only_while_coffers_and_debt_are_not():
+    """Kernel v9's trap: Coffers got the 2022 "at any time during your turn"
+    change and Villagers DID NOT — "Villager tokens can be spent at any time in
+    your ACTION PHASE". Debt payoff got the 2024 change and is legal in either
+    phase. The gate lives in `avail`, so the Buy phase simply offers no
+    villager move — the enumerator and the handler read the same reader."""
+    g = fresh(SPEND_K, ["renaissance", "empires", "base"], landscapes=["Fair"])
+    engine.add_villagers(g, 2, A)
+    engine.add_coffers(g, 2, A)
+    engine.add_debt(g, A, 2)
+    g["coins"] = 3
+    assert engine.spendable(g, A) == {"coffers": 2, "debt": 2, "villagers": 2}
+    to_buy(g, A)
+    assert engine.spendable(g, A) == {"coffers": 2, "debt": 2}
+    assert not any(m.get("what") == "villagers" for m in engine.legal_moves(g, A))
+    assert mv(g, A, {"type": "spend", "what": "villagers", "n": 1}) == \
+        (False, "nothing to spend")
+
+
+def test_debt_blocks_buying_a_project_and_paying_it_off_uses_no_buy():
+    """Debt § IV: "when you have Debt tokens, you can't buy anything (cards,
+    Events or Projects)". `debt_blocks_buying` binds the BUYER, so Projects
+    (ph. 9) are covered by the ph.-7H gate for free — and the payoff itself
+    touches neither `buys` nor `turn_ctx["bought"]`."""
+    g = fresh(SPEND_K, ["renaissance", "empires", "base"], landscapes=["Fair"])
+    engine.add_debt(g, A, 2)
+    to_buy(g, A)
+    g["coins"] = 6
+    buys0 = g["buys"]
+    assert mv(g, A, {"type": "buy_landscape", "name": "Fair"}) == \
+        (False, "pay off your Debt first")
+    assert not any(m["type"] == "buy_landscape" for m in engine.legal_moves(g, A))
+    assert mv(g, A, {"type": "spend", "what": "debt", "n": 2})[0]
+    assert g["debt"][A] == 0 and g["coins"] == 4 and g["buys"] == buys0
+    assert not g["turn_ctx"]["bought"], "paying off Debt is not buying"
+    assert mv(g, A, {"type": "buy_landscape", "name": "Fair"})[0]
+    assert g["landscapes"]["Fair"]["bought_by"] == [A]
+
+
+def test_a_project_may_be_bought_on_a_mission_turn_but_a_card_may_not():
+    """Mission (ADVENTURES) bans buying CARDS only — `turn_ctx["no_buy"]`. A
+    Project is a landscape, and "buying an Event is not buying a card"."""
+    g = fresh(SPEND_K, ["renaissance", "adventures", "base"],
+              landscapes=["Mission", "Fair"])
+    to_buy(g, A)
+    g["coins"] = 12
+    g["buys"] = 3
+    assert mv(g, A, {"type": "buy_landscape", "name": "Mission"})[0]
+    end_turn(g, A)
+    drain(g)
+    assert g["turn"] == A and g["turn_ctx"]["no_buy"]
+    to_buy(g, A)
+    g["coins"] = 10
+    assert mv(g, A, {"type": "buy", "card": "Village"}) == \
+        (False, "you can't buy cards this turn")
+    assert mv(g, A, {"type": "buy_landscape", "name": "Fair"})[0]
+
+
+def test_villagers_may_be_spent_in_the_middle_of_storyteller():
+    """The mid-ability spend (standing-list row B6 was retired for exactly this
+    card) composes with the new phase gate: Storyteller resolves in the ACTION
+    phase, so a Villager spend inside it is legal and gives +1 Action."""
+    g = fresh(["Storyteller"] + SPEND_K[:9], ["renaissance", "adventures", "base"])
+    engine.add_villagers(g, 2, A)
+    engine.add_coffers(g, 1, A)
+    give_hand(g, A, ["Storyteller", "Copper", "Copper"])
+    play(g, A, "Storyteller")
+    assert g["phase"] == "action" and g["pending_pid"] == A
+    assert engine.spendable(g, A) == {"coffers": 1, "villagers": 2}
+    actions0 = g["actions"]
+    assert mv(g, A, {"type": "spend", "what": "villagers", "n": 1})[0]
+    assert g["actions"] == actions0 + 1
+    assert g["villagers"][A] == 1
+
+
+# =============================================================================
+# SEWERS x every trasher in the game
+# =============================================================================
+
+def test_sewers_fires_once_per_card_of_a_chapel_batch():
+    """Sewers 4 (p. 143): "If you trash several cards at once—e.g. with
+    Chapel—Sewers triggers once for each … so that you may afterwards use
+    Sewers to trash one card per card trashed with Chapel." And "trashing with
+    Sewers will not trigger Sewers again" — the `trash(**extra)` mark, without
+    which it chains until the hand is empty."""
+    g = fresh(["Chapel"] + SPEND_K[:9], ["renaissance", "base"],
+              landscapes=["Sewers"])
+    give_cube(g, "Sewers", A)
+    give_hand(g, A, ["Chapel"] + ["Copper"] * 4 + ["Estate"] * 4)
+    play(g, A, "Chapel")
+    assert decide(g, A, cards=["Copper"] * 4)[0]
+    offers = 0
+    while g["pending"] and offers < 8:
+        assert frame(g)["card"] == "Sewers"
+        offers += 1
+        assert decide(g, A, cards=["Estate"])[0]
+    assert offers == 4, "one Sewers offer per card of the batch"
+    assert sorted(g["trash"]) == ["Copper"] * 4 + ["Estate"] * 4
+
+
+def test_sewers_fires_on_a_lurker_supply_trash():
+    """Sewers 3: "Sewers triggers even when you trash a card from the Supply
+    (with Gladiator, Lurker or Salt the Earth)" — the ph.-8 correctness fix
+    that made `trash_from_supply` emit."""
+    g = fresh(["Lurker"] + SPEND_K[:9], ["renaissance", "intrigue", "base"],
+              landscapes=["Sewers"])
+    give_cube(g, "Sewers", A)
+    give_hand(g, A, ["Lurker", "Estate"])
+    play(g, A, "Lurker")
+    assert decide(g, A, ids=["trash"])[0]
+    assert decide(g, A, pile="Smithy")[0]
+    assert frame(g)["card"] == "Sewers"
+    assert decide(g, A, cards=["Estate"])[0]
+    assert sorted(g["trash"]) == ["Estate", "Smithy"]
+
+
+def test_a_sewers_trash_of_a_fortress_puts_it_back_in_hand():
+    """Sewers 5 names the case: "if you initially trashed cards like Cultist,
+    Overgrown Estate or Rats, you resolve all when-trash abilities … in any
+    order". Fortress (DARK AGES) moves ITSELF on trash, and a Sewers trash is a
+    real trash, so it comes straight back."""
+    g = fresh(["Fortress", "Chapel"] + SPEND_K[:8],
+              ["renaissance", "darkages", "base"], landscapes=["Sewers"])
+    give_cube(g, "Sewers", A)
+    give_hand(g, A, ["Chapel", "Fortress", "Estate"])
+    play(g, A, "Chapel")
+    assert decide(g, A, cards=["Estate"])[0]
+    assert frame(g)["card"] == "Sewers"
+    assert decide(g, A, cards=["Fortress"])[0]
+    drain(g)
+    assert g["trash"] == ["Estate"], "the Fortress did not stay in the trash"
+    assert "Fortress" in g["seats"][A]["hand"]
+
+
+def test_priests_own_trash_and_the_sewers_trash_it_causes_both_pay_nothing():
+    """Priest 4 / EFFECTS ARE IMMEDIATE, twice over: Priest's own trash precedes
+    the ongoing ability, and so does a Sewers trash chained off it. The watcher
+    is armed by a continuation parked UNDER the trash frame, which is what buys
+    both — and a LATER trash then pays +$2."""
+    g = fresh(["Priest", "Chapel"] + SPEND_K[:8], ["renaissance", "base"],
+              landscapes=["Sewers"])
+    give_cube(g, "Sewers", A)
+    give_hand(g, A, ["Priest", "Estate", "Estate", "Copper"])
+    play(g, A, "Priest")
+    assert g["coins"] == 2
+    assert decide(g, A, cards=["Estate"])[0]        # Priest's own trash
+    assert frame(g)["card"] == "Sewers"
+    assert decide(g, A, cards=["Estate"])[0]        # chained off it
+    drain(g)
+    assert g["coins"] == 2, "neither trash preceded the ongoing ability"
+    assert [w for w in g["watchers"] if w["card"] == "Priest"]
+    # ...and now the ability is live
+    g["phase"], g["actions"] = "action", 1
+    give_hand(g, A, ["Chapel", "Copper"])
+    play(g, A, "Chapel")
+    assert decide(g, A, cards=["Copper"])[0]
+    while g["pending"]:
+        assert decide(g, A, cards=[])[0]
+    assert g["coins"] == 4
+
+
+# =============================================================================
+# THRONE ROOM / KING'S COURT over the new frame-pushers and Durations
+# =============================================================================
+
+THRONED = ["Acting Troupe", "Border Guard", "Cargo Ship", "Experiment",
+           "Flag Bearer", "Hideout", "Improve", "Inventor", "Lackeys",
+           "Mountain Village", "Old Witch", "Patron", "Priest", "Recruiter",
+           "Research", "Scholar", "Sculptor", "Seer", "Silk Merchant",
+           "Swashbuckler", "Treasurer", "Villain"]
+
+
+def test_throne_room_over_every_new_frame_pushing_action():
+    """The sweep the playbook requires every phase. Each Renaissance Action is
+    played twice by a Throne Room on a real board and driven to rest with
+    uniform decisions, under the soak's card-conservation census — the failure
+    mode this catches is a conjured or destroyed card, which no per-card test
+    that only inspects one zone can see."""
+    from games.dontminion.tests.test_soak import _census, _assert_piles_agree
+    assert set(THRONED) <= set(cards.KINGDOM["renaissance"]), \
+        "the sweep list drifted from the roster"
+    for card in THRONED:
+        kingdom = ["Throne Room", card, "Chapel", "Village", "Market",
+                   "Laboratory", "Festival", "Bishop", "Moat", "Militia"]
+        kingdom = list(dict.fromkeys(kingdom))[:10]
+        while len(kingdom) < 10:
+            for extra in ("Smithy", "Cellar", "Workshop", "Harbinger"):
+                if extra not in kingdom:
+                    kingdom.append(extra)
+                    break
+        g = fresh(kingdom, ["renaissance", "base", "prosperity"], seed=13)
+        give_hand(g, A, ["Throne Room", card, "Copper", "Estate", "Silver"])
+        give_deck(g, A, ["Copper", "Estate", "Silver", "Gold"] * 3)
+        g["seats"][A]["discard"] = ["Copper", "Estate"]
+        baseline = _census(g)          # AFTER staging: the fixture is the board
+        ok, err = mv(g, A, {"type": "play_action", "card": "Throne Room"})
+        assert ok, (card, err)
+        assert decide(g, A, cards=[card])[0], card
+        drain(g, rng=random.Random(5), cap=300)
+        assert _census(g) == baseline, f"{card}: card conservation broken"
+        _assert_piles_agree(g)
+        # one physical card => at most one dur_setup entry for it
+        setups = [e for e in g["seats"][A].get("dur_setup", [])
+                  if e["card"] == card]
+        assert len(setups) <= 1, f"{card}: a throne-room minted a second entry"
+
+
+# =============================================================================
+# WATCHTOWER / the would-gain protocol x every new gain
+# =============================================================================
+
+def test_watchtower_can_trash_a_sculptor_gain_made_to_hand():
+    """Sculptor gains "to your hand", and Watchtower (PROSPERITY) reacts to the
+    gain wherever it lands. Sculptor's "If it's a Treasure, +1 Villager" reads
+    the GAINED CARD ("'It' refers to the gained card"), so the Villager is paid
+    even though Watchtower then trashes it."""
+    g = fresh(["Sculptor", "Watchtower"] + SPEND_K[:8],
+              ["renaissance", "prosperity", "base"])
+    give_hand(g, A, ["Sculptor", "Watchtower"])
+    play(g, A, "Sculptor")
+    assert decide(g, A, pile="Silver")[0]
+    assert frame(g)["card"] == "Watchtower"
+    assert decide(g, A, ids=["play"])[0]
+    assert opt_ids(g) == ["trash", "topdeck", "keep"]
+    assert decide(g, A, ids=["trash"])[0]
+    drain(g)
+    assert g["trash"] == ["Silver"]
+    assert "Silver" not in g["seats"][A]["hand"]
+    assert g["villagers"][A] == 1, "the Villager is read off the gained card"
+
+
+def test_watchtower_reaches_the_experiment_chain_and_treasurers_trash_gain():
+    """Two more new gains through the same protocol: Experiment's when-gain
+    chain (each gain is its own would-gain window) and Treasurer's "gain a
+    Treasure from the trash TO YOUR HAND" ("when-gain abilities will
+    trigger")."""
+    g = fresh(["Experiment", "Treasurer", "Watchtower"] + SPEND_K[:7],
+              ["renaissance", "prosperity", "base"])
+    give_hand(g, A, ["Watchtower"])
+    assert gain(g, A, "Experiment")
+    # the first gain pools Experiment's own when-gain against Watchtower's
+    # reaction (p23 §2 — the player's order); resolve the chain first
+    assert frame(g)["card"] == "__abilities"
+    assert [o["label"] for o in frame(g)["constraint"]["options"]] == \
+        ["Experiment", "Watchtower"]
+    assert decide(g, A, ids=["0"])[0]
+    windows = 0
+    while g["pending"] and windows < 8:
+        assert frame(g)["card"] == "Watchtower", frame(g)["card"]
+        windows += 1
+        assert decide(g, A, ids=["decline"])[0]
+    assert windows == 2, "one window per Experiment of the chain"
+    assert g["seats"][A]["discard"] == ["Experiment", "Experiment"]
+
+    g = fresh(["Experiment", "Treasurer", "Watchtower"] + SPEND_K[:7],
+              ["renaissance", "prosperity", "base"])
+    g["trash"] = ["Gold"]
+    give_hand(g, A, ["Treasurer", "Watchtower"])
+    play(g, A, "Treasurer")
+    assert decide(g, A, ids=["recover"])[0]
+    assert decide(g, A, cards=["Gold"])[0]
+    assert frame(g)["card"] == "Watchtower", "no would-gain window for the trash gain"
+    assert decide(g, A, ids=["play"])[0]
+    assert decide(g, A, ids=["topdeck"])[0]
+    drain(g)
+    assert g["seats"][A]["deck"][0] == "Gold"
+    assert g["trash"] == []
+
+
+# =============================================================================
+# UNDO — what marks the turn revealed
+# =============================================================================
+
+def test_the_new_looking_and_revealing_cards_all_clear_the_undo_stack():
+    """`_mark_revealed` locks AND clears the stack on any draw / look / reveal:
+    nothing this turn is undoable once information was exposed. Every new card
+    that digs owes it, and the control below is what makes the claim mean
+    something."""
+    g = fresh(["Seer", "Border Guard", "Patron", "Village", "Smithy", "Market",
+               "Laboratory", "Festival", "Bishop", "Improve"],
+              ["renaissance", "base"])
+    give_deck(g, A, ["Copper", "Estate", "Silver", "Gold"] * 3)
+    for card in ("Seer", "Border Guard"):
+        g["turn_revealed"] = False
+        g["undo_stack"] = []
+        g["phase"], g["actions"] = "action", 1
+        give_hand(g, A, [card, "Copper"])
+        assert mv(g, A, {"type": "play_action", "card": card})[0]
+        assert g["turn_revealed"], f"{card} looked at cards without marking it"
+        assert g["undo_stack"] == [], f"{card} left the turn undoable"
+        drain(g)
+
+    # the control: Patron neither draws nor looks, so its play stays undoable
+    g = fresh(["Seer", "Border Guard", "Patron", "Village", "Smithy", "Market",
+               "Laboratory", "Festival", "Bishop", "Improve"],
+              ["renaissance", "base"])
+    give_hand(g, A, ["Patron", "Copper"])
+    assert mv(g, A, {"type": "play_action", "card": "Patron"})[0]
+    assert not g["turn_revealed"] and g["undo_stack"]
+    assert mv(g, A, {"type": "undo_turn"})[0]
+    assert g["seats"][A]["hand"] == ["Patron", "Copper"]
+    assert g["villagers"][A] == 0 and g["coins"] == 0
+
+
+# =============================================================================
+# SAVE-BLOB COMPATIBILITY
+# =============================================================================
+
+def test_a_full_renaissance_board_round_trips_through_json_and_migrate():
+    """A mixed board carrying every new game key — `villagers`, `artifacts`,
+    `fleet`, project cubes, landscape tokens — is JSON-safe and survives
+    `migrate` unchanged, then keeps playing. The game dict being JSON-safe is
+    what makes reconnect and save/load safe."""
+    from games.dontminion.tests.test_soak import _census
+    g = fresh(["Border Guard", "Treasurer", "Patron", "Improve", "Seer",
+               "Cargo Ship", "Village", "Smithy", "Market", "Moat"],
+              ["renaissance", "base"],
+              landscapes=["Sinister Plot", "Capitalism"])
+    give_cube(g, "Sinister Plot", A)
+    give_cube(g, "Capitalism", A)
+    engine.add_villagers(g, 3, A)
+    engine.take_artifact(g, A, "Horn")
+    engine.add_landscape_tokens(g, "Sinister Plot", A, 2)
+    give_hand(g, A, ["Border Guard", "Copper"])
+    play(g, A, "Border Guard")
+    drain(g)
+    blob = json.loads(json.dumps(g))
+    assert blob["schema"] == engine.SCHEMA == 13
+    before = _census(g)
+    engine.migrate(blob)
+    assert blob == json.loads(json.dumps(g)), "migrate changed a current blob"
+    assert _census(blob) == before
+    # ...and it is still a playable game
+    for _ in range(20):
+        if blob["over"]:
+            break
+        pid = blob["pending_pid"] or blob["turn"]
+        m = random.Random(9).choice(engine.legal_moves(blob, pid))
+        ok, err = engine.apply_move(blob, pid, m)
+        assert ok, err
+
+
+def test_a_schema_12_blob_migrates_forward_and_plays_on():
+    """A live prod game predates every later phase. SCHEMA 13 is a FILL-ONLY
+    bump for three game keys plus four `turn_ctx` flags, and the fills are
+    unconditional — an Empires-era save has none of them and the kernel (no
+    longer defensive) would `KeyError` at the first Villager check."""
+    g = fresh(["Village", "Smithy", "Market", "Laboratory", "Festival",
+               "Bishop", "Moat", "Militia", "Cellar", "Workshop"],
+              ["base"])
+    old = json.loads(json.dumps(g))
+    old["schema"] = 12
+    for k in ("villagers", "artifacts", "fleet"):
+        old.pop(k, None)
+    for k in ("played_actions", "citadel_used", "innovation_used", "horn_used"):
+        old["turn_ctx"].pop(k, None)
+    engine.migrate(old)
+    assert old["schema"] == engine.SCHEMA
+    assert old["villagers"] == {A: 0, B: 0}
+    assert old["artifacts"] == {}, "no Renaissance card, so no artifact is live"
+    assert old["fleet"] is None
+    assert old["turn_ctx"]["played_actions"] == []
+    for k in ("citadel_used", "innovation_used", "horn_used"):
+        assert old["turn_ctx"][k] is False
+    give_hand(old, A, ["Militia", "Copper"])
+    assert engine.apply_move(old, A, {"type": "play_action", "card": "Militia"})[0]
+    assert old["pending_pid"] == B

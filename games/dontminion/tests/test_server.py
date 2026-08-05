@@ -63,6 +63,25 @@ def _run(coro):
 
 # --- option coercers + create ---------------------------------------------------
 
+def test_every_shipped_expansion_is_creatable():
+    """`KNOWN_EXPANSIONS` is a GATE, not a label: `_valid_expansions` filters
+    the client's request through it, so a shipped set missing from it is
+    silently unplayable — the create request falls back to base+intrigue with
+    no error on any path, and every engine test still passes because the
+    engine's own `KINGDOM` has the set.
+
+    That is exactly what happened when Renaissance landed. `npm run screens`
+    caught it (the picker offered nothing to click); nothing in the Python
+    suite could, which is why this test exists. It is the ph.-3 "ask what the
+    frontend hardcodes" lesson, one layer down: THE BACKEND HARDCODED IT TOO."""
+    from games.dontminion import cards
+    assert set(m.KNOWN_EXPANSIONS) == set(cards.KINGDOM), \
+        sorted(set(cards.KINGDOM) ^ set(m.KNOWN_EXPANSIONS))
+    # ...and each one really survives the coercer, in both directions
+    for exp in cards.KINGDOM:
+        assert m._valid_expansions([exp]) == [exp], exp
+
+
 def test_create_coerces_bad_options():
     ws = _FakeWS()
     assert _run(m._handle_create(ws, "R1", "host", {
