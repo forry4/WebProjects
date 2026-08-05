@@ -155,6 +155,12 @@ def test_the_public_landscape_tavern_and_token_state_reaches_every_socket():
     game["seats"][B]["tavern"] = ["Village"]
     game["seats"][C]["tokens"] = {"-card": True}
     engine.move_token(game, A, "-cost", "Copper")
+    # ph. 7H: Debt (per player) and the VP / Debt a landmark puts on a pile.
+    # Same argument — Debt sits in front of you where everyone can count it,
+    # and everyone must, since it is why that player is not buying anything.
+    engine.add_debt(game, B, 4)
+    engine.add_pile_vp(game, "Gold", 8)
+    engine.add_pile_debt(game, "Silver", 1)
     _run(m.broadcast_state("WIRE4"))
     for viewer, ws in sockets.items():
         last = ws.rooms_seen()[-1]["game"]
@@ -163,6 +169,9 @@ def test_the_public_landscape_tavern_and_token_state_reaches_every_socket():
         assert last["seats"][B]["tavern"] == ["Village"]
         assert last["seats"][C]["tokens"] == {"-card": True}
         assert last["piles"]["Copper"]["attach"]["tokens"] == {A: ["-cost"]}
+        assert last["debt"] == {A: 0, B: 4, C: 0}
+        assert last["piles"]["Gold"]["attach"]["vp"] == 8
+        assert last["piles"]["Silver"]["attach"]["debt"] == 1
 
 
 def test_spectator_view_is_fully_redacted():

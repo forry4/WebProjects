@@ -21,7 +21,8 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 6 | **Dark Ages** (35 piles + Ruins/Shelters/Spoils/Madman/Mercenary) | on-trash triggers (the `trash` emit + `from:"self"`), Shelters setup, Madman/Mercenary/Spoils non-supply (3H), Ruins + Knights ordered piles (3H), Band of Misfits rides `play_from_supply` (5H); added `cost_ge`, `from_trash`, `deck_to_discard`, the `play_attack` before-play window and two reaction modes | **SHIPPED** 2026-08-04 + audited |
 | 6H | **HARDENING: the LANDSCAPE kernel + board-row UI** (no new cards) | pays the two ph.-7 ledger rows standalone: `cards.LANDSCAPES` + `game["landscapes"]` (a purchasable thing that is NOT a card and NOT a pile), the `buy_landscape` move (printed cost — "cannot be changed by cards like Bridge" — + once-per-turn/game gates with ONE reader), the Tavern mat seat zone + the `from:"tavern"` call window, the `action_resolved` continuation-emit, `play_attack`→`before_play` generalization, Adventures-token storage + the `-cost` hook in `cost()`, and the landscapes/tavern/token frontend | **SHIPPED** 2026-08-04 |
 | 7 | **Adventures** (30 + 8 Travellers + 20 Events) | Reserves + the Tavern mat and `from:"tavern"` call windows (6H), the 20 Events on `LANDSCAPE_FX` + `buy_landscape` (6H), Traveller chains on `add_pile(supply=False)` (3H) + `exchange` (ph. 3) + the interruptible Clean-up (5H), Adventures tokens (6H) — plus the ph.-7 kernel delta: `until="forever"` durations (Champion/Hireling), the −1 Card / −$1 / Journey seat tokens, Mission's no-buy extra turn, Save's end-of-turn hand return, Inheritance's Estate-token type injection, and `gain(**extra)`. **RETIRED deviation B6** (Coffers mid-ability, for Storyteller) | **SHIPPED** 2026-08-04 |
-| 8 | Empires (24 + Events + 21 Landmarks) | Debt = cost vector dimension 2 + debt-payoff in the buy flow, split piles + Castles (3H), Landmarks (scoring pipeline hook), gathering VP tokens on piles | planned |
+| 7H | **HARDENING: the DEBT vector + the scoring pipeline** (no new cards) | pays the two ph.-8 ledger rows standalone: the cost vector's third dimension inside the SAME six comparators (`debt_cost`, printed, no reduction reaches it), `game["debt"]` + the buyer-level buy gate + the payoff via a real `_SPENDABLES` registry (the 2024 "any time during your turn" timing), `effects.LANDSCAPE_SCORING` summed into `_total_vp`, `LANDSCAPE_SETUP`, landscape/pile VP + Debt stores on 6H's state and 3H's `attach`, and the `from:"landscape"` trigger source. SCHEMA 11 (fill-only) | **SHIPPED** 2026-08-05 |
+| 8 | Empires (24 + Events + 21 Landmarks) | **registry + data on 7H's seams**: 24 kingdom entries (five 5/5 split piles + the 8-Castle pile as 3H pile DATA), the Debt-costed Events, the 21 Landmarks (scoring fns + setup fns + landscape triggers), gathering-pile gather logic on `attach` VP, `BM_TERMINALS` measurements, `REVIEWED` grown by hand. Read the Empires errata FIRST (ch. V — the set spans the 2022 when-buy→when-gain pass) | planned |
 | 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
 | 10 | Menagerie (30 + Events + 20 Ways) | Exile mat (+ discard-from-exile on gain), Horses non-supply (3H), Ways (alternative play modes — rides the identity system) | planned |
 | 11 | Nocturne (33 + Boons/Hexes/Heirlooms) | ⚠ **BIGGEST PHASE**: Night phase (turn-structure change: phase enum, auto-advance, legal_moves, bot, undo, frontend), Boon/Hex shared decks (new persisted RNG streams + receive flow), Heirlooms setup, Spirits non-supply, Zombies start in trash, Exorcist exchange | planned |
@@ -469,12 +470,78 @@ Adventures boards with the mirror reading exactly 0.5000.
 `npm run screens` (with a REAL Adventures board rendering its Event row), and all **27 real prod
 saves** replayed. **No SCHEMA bump** — every key this set reads was added by 6H's v10.
 
+## Phase 7H — the DEBT vector + the scoring pipeline (no new cards) — SHIPPED 2026-08-05
+
+Hardening, in the 3H/5H/6H mold, and **ph. 7's postmortem is the argument for doing it**: the
+roadmap called Adventures "registry-only" and it wasn't — six kernel additions were needed
+mid-batch — while everything that HAD been pre-built in 6H (Reserves, Events, tokens,
+Travellers) landed without touching the kernel. So Empires' 24 kingdom cards + Events + 21
+Landmarks now land on paths that were already exercised. No card and no landscape in the data
+carries a `debt` key, nothing registers a scoring fn, and the `landmark` kind stays undealt.
+
+**The Debt vector cost SIX comparator clauses and nothing else, and that is the whole point of
+the ph.-2 discipline.** Raw `cost() <= n` in card code has been a review-reject since phase 2
+precisely so a future cost dimension would land in one place; Potion proved it in ph. 5 and Debt
+proved it again here, both with **zero call-site changes across nine effects modules**. The
+compendium's own worked comparisons ({$4} and {4D} both lower than {$4,4D}; {$5} and {$4,4D}
+incomparable) are the tests, verbatim.
+
+**Two rules that a card-list site would have got wrong**, which is the ph.-7 errata lesson
+applied before the fact rather than after:
+
+- **Paying off Debt happens "at any time during your turn", including mid-ability, and uses up
+  no Buy.** That is the **2024 rules change**. The 2016 rulebook and the card-list sites confine
+  payoff to the second part of the Buy phase — build from those and Capital's own "you may pay
+  it off" becomes unreachable at the moment it fires. `_h_spend` touches neither `game["buys"]`
+  nor `turn_ctx["bought"]`, so a player who pays off in the Buy phase may still play Treasures.
+- **The buy gate is about the BUYER, not about a pile.** "You can't buy anything (cards, Events
+  or Projects)" is one predicate consulted by both handlers and by `legal_moves`, NOT a
+  `BUY_GATES` entry — that registry is per-card and would have needed an entry per pile, missing
+  Events entirely. As a side effect ph. 9's Projects are already covered, since they buy through
+  the landscape handler.
+
+**The `spend` move surface finally got the registry it always implied.** Ph. 4 shipped it naming
+Villagers, Favors and this Debt payoff as the three things it was built for, and `_h_spend` then
+hardcoded Coffers. `_SPENDABLES = {kind: {"avail", "apply"}}` makes `spendable`/`_h_spend`
+generic; `_spend_moves` needed no change at all. Debt's `avail` is `min(coins, debt)`, so a $0
+player is offered **nothing** — which is the livelock guard, the same shape as the
+`play_all_treasures` no-op that once stuck two live prod games.
+
+**The scoring hook is continuous, not end-of-game, and that is free.** `LANDSCAPE_SCORING` is
+summed into `_total_vp`, which `_post_move` already recomputes after every move — so a
+Landmark's VP displays live all game and `score_game` reads the same number. The one edge is the
+ph.-7 Inheritance lesson: a scoring fn must not change value at `game["over"]`, and the
+type-sensitive case is already pinned by `types_of`'s over-gate.
+
+**A fix that fell out of writing the log line:** `coffers` and `spend` logged their count as
+`n=`, and `_log` stamps the log SEQUENCE into `entry["n"]` LAST — so the client had been
+rendering the sequence number ("gets +917 Coffers"). Both log `count=` now; `fmtLog` reads
+`e.count ?? e.n` so entries already in prod render exactly as they did.
+
+**Found but NOT fixed here — a pre-existing ph.-7 defect.** The real-board fuzz census turned up
+one card-conservation break, reproduced identically on the unmodified tree: **Royal Carriage
+replaying a Duration Attack mints a SECOND `dur_setup` entry**, so the card is owned twice and
+an extra copy reaches the deck. `play_action_card(from_zone=None)` sets `_cur_dur` to the
+existing entry correctly, but an Attack's play ability is PARKED under the reaction window, and
+by the time it runs and calls `add_duration_fx` the pointer has been cleared — `_dur_entry_for`
+then appends a fresh entry. Repro: 4p, `['adventures','alchemy','base']`, seed 4, random bot
+rng 0, move 343. It is card behaviour in a shipped set, not a 7H seam, so it is left for its own
+change with its own Throne-Room-×-every-Duration cross-set test.
+
+**Gates:** package suite (1455, +47), full repo suite (2526), a 348-game fuzz census over real
+boards (every set, sampled pairs, rolling triples, all-sets; 2p/3p/4p; random + bmplus) with
+**one failure, the pre-existing Royal Carriage break above** and nothing else — no Debt token
+reached a real board, as asserted per move — plus a synthetic-Debt fuzz board where
+random-legal bots take Debt and pay their way out, all **27 real prod saves** replayed at v11,
+`npm run smoke` + `npm run screens`. The Debt chip and payoff control are dormant UI,
+hand-verified like 6H's landscape row.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |
 |---|---|---|
 | ~~Replacement effects (would-gain)~~ **PAID ph. 2** — park/window/cancel_pending_gain, contract-tested | Trader (ph. 3) | done |
-| ~~Cost comparison helpers~~ **PAID ph. 2** — cost_le/cost_eq everywhere | Alchemy/Empires | done (the vector itself lands ph. 5/8, confined to two functions) |
+| ~~Cost comparison helpers~~ **PAID ph. 2** — cost_le/cost_eq everywhere; **BOTH vector dimensions have now landed inside them** (Potion ph. 5, Debt ph. 7H) with zero call-site changes across nine effects modules, which is the return on banning raw `cost() <= n` three phases before either was needed | Alchemy/Empires | done |
 | ~~Client-side price math~~ **PAID post-ph. 2** — `player_view` ships `costs`; the client never re-derives | Peddler bug (found live) | done |
 | ~~Undo/save bloat~~ **PAID (pre-ph. 3)** — snapshots store `_log_len` and undo truncates; measured 487 KB → 150 KB on a late-game blob, per save-write | was live | done |
 | ~~Versioned save migration~~ **PAID (pre-ph. 3)** — `SCHEMA`=3 + `engine.migrate()` at load; 28 defensive gets retired; `test_migrate.py` downgrades a CURRENT game to each old shape. EVERY PHASE OWES: bump + migrate step + test | was growing | done |
@@ -489,12 +556,12 @@ saves** replayed. **No SCHEMA bump** — every key this set reads was added by 6
 | ~~The put-back jumped the discard's when-discard triggers~~ **PAID ph. 3** — `discard_then_putback` encodes "first discard, THEN put cards back" ONCE; four cards (Sentry, Lookout, Rabble, Cartographer) each had their own copy and all four had it backwards | Tunnel/Trail via Cartographer — found by the CROSS-SET step, not per-set tests | done |
 | ~~Non-supply gain sources~~ **PAID ph. 3H** — `gain_from` + a second count index, so "a card from the Supply" excludes them by construction rather than by remembering | Rewards (ph. 4) | done |
 | ~~Pile abstraction~~ **PAID ph. 3H** — `game["piles"]`: ordered `contents` + retained `face` + `members` + `attach`; cost/type resolve through the face, the census unpacks it, the wire never sees the order | Ruins/Knights (ph. 6), scheduled early deliberately | done |
-| ~~**Move-surface trio**~~ **PAID — `spend` ph. 4, `buy_landscape` ph. 6H, and `call` TURNED OUT NOT TO BE A MOVE.** `spend` gave Villagers/Favors/Debt-payoff one surface + `spendable()` as THE reader. `buy_landscape` is the same shape for Events/Projects, with `landscape_gate()` as THE reader. The third was mis-scheduled by this row: every Reserve call in the game is a timed WINDOW, so it belongs in the ability POOL (ordered against everything else the occurrence triggered) and not in `legal_moves` — it shipped as the trigger source `from:"tavern"` instead, and the move surface did not grow | spend: ph. 4 · buy_landscape: ph. 6H · call: n/a | done |
+| ~~**Move-surface trio**~~ **PAID — `spend` ph. 4, `buy_landscape` ph. 6H, and `call` TURNED OUT NOT TO BE A MOVE.** `spend` gave Villagers/Favors/Debt-payoff one surface + `spendable()` as THE reader — and ph. 7H turned the hardcoded-Coffers handler into the `_SPENDABLES` registry the row had promised, so each remaining counter is now one dict entry. `buy_landscape` is the same shape for Events/Projects, with `landscape_gate()` as THE reader. The third was mis-scheduled by this row: every Reserve call in the game is a timed WINDOW, so it belongs in the ability POOL (ordered against everything else the occurrence triggered) and not in `legal_moves` — it shipped as the trigger source `from:"tavern"` instead, and the move surface did not grow | spend: ph. 4 · buy_landscape: ph. 6H · call: n/a | done |
 | ~~Card identity / "play-as"~~ **PAID ph. 5H — AND THE ROW'S PREMISE WAS WRONG.** It described the PRE-2019 Band of Misfits, which turned itself into another card. The current one does not: "unlike the first version, this version does not change itself to another card, nor does it play itself. Instead it PLAYS AN ACTION CARD from the Supply" — and Inheritance's Estates resolve to the same shape ("play the card with your Estate token, leaving it there"). So no identity system was needed at all: `play_from_supply` + `command_may_play` + `playable_from_supply`, ~40 lines. **Ways (ph. 10) is a DIFFERENT and smaller mechanism** — substitute a card's play ability, not change what it is — and should be designed then, not now | Band of Misfits (ph. 6) | done |
 | **`play_all_treasures` suppression must become a STATE predicate.** Today it's a static card list (`MANUAL_TREASURES` — treasures that push a decision). Highwayman negates the FIRST Treasure its victim plays, so which treasure goes first becomes a real choice and the button must not make it for them — a condition the card list cannot express, since it depends on game state and LIFTS once the negation is spent. Wanted: `autoplay_block(game, pid) -> reason \| None`, fed by both the static set and watcher-registered blocks, read by `legal_moves` + the handler + shipped in `player_view` (state-dependent ⇒ NOT `/catalog`, unlike the static set) so the button hides AND says why. Also fixes the ordering row below if the block carries an order | Highwayman (ph. 12) | ph. 12 pre-work — but build it at the FIRST set that adds an order-sensitive treasure |
 | ~~Autoplay ORDER is hand order~~ **PAID (post-ph. 2)** — `AUTOPLAY_LAST` registry + a stable sort in the handler; Bank now plays after the rest ($6 → $10 on the measured hand, matching optimal play). Adding a Treasure with an ability now means choosing a bucket: manual / autoplay-last / autoplay — see CLAUDE.md | Bank (was live) | done |
 | ~~**Landscape cards** (Events/Landmarks/Projects/Ways/Traits/Prophecies/Allies) + the board-row UI~~ **PAID ph. 6H** — `cards.LANDSCAPES` (all six kinds framed, only `event` wired) + `game["landscapes"]` + the official randomizer-mix deal + `buy_landscape` + the wide board row, all contract-tested against synthetic landscapes. The "global trigger source" half of this row was already **PAID ph. 4** (`TRIGGERS from:"game"`, Footpad) — the row predated it | Adventures (ph. 7) | done |
-| **Scoring pipeline hook** (Landmarks add/subtract at game end beyond card VP + tokens) | Empires (ph. 8) | ph. 8 pre-work |
+| ~~**Scoring pipeline hook**~~ **PAID ph. 7H** — `effects.LANDSCAPE_SCORING = {name: fn(game, pid) -> int}`, summed into `_total_vp` for every landscape DEALT (no ownership test: "a Landmark's ability is always active for all players"). Because `_post_move` already recomputes `game["vp"]` after every move, during-game landmark VP display fell out for free and "at game end" turned out to be the wrong framing — the constraint is only that a scoring fn must not change value at `over`. Shipped with `LANDSCAPE_SETUP`, the landscape/pile VP + Debt stores, and the `from:"landscape"` trigger source | Empires (ph. 8) | done |
 | **Turn structure** — Night phase breaks the action/buy enum, auto-advance, bot, undo gating, frontend phase logic | Nocturne (ph. 11) | ph. 11, sized as its own kernel campaign |
 | **Shared side-decks with persisted RNG** (Boons/Hexes ph. 11, Loot ph. 13, Black Market ph. 15) — same `_make_rng/_save_rng` discipline, new streams | Nocturne (ph. 11) | ph. 11 |
 

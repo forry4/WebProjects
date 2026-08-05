@@ -423,6 +423,11 @@
 /* Coffers and the later spendable counters (Villagers, Favors): a count plus
    its spend controls, kept on one baseline with the rest of the bar. */
 .dm-counter { display: inline-flex; align-items: baseline; gap: 6px; }
+/* DEBT (Empires): read as a WARNING rather than as a resource — it is the one
+   counter that stops you doing something, so it must not look like money.
+   Same class on the seat row and in the resource bar. */
+.dm-debt { color: #e0736a; white-space: nowrap; }
+.dm-resbar .dm-debt b { color: #ff9a90; }
 /* Young Witch's Bane marker — a lavender "B" in the pile's top-right corner
    (the Potion cost now renders as a coin on the card face itself) */
 .dm-bane {

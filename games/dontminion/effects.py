@@ -43,6 +43,14 @@ WATCHER_WHENS = {}
 # is not a card (see cards.LANDSCAPES), so it cannot live in EFFECTS without
 # making every `card in EFFECTS` test wrong.
 LANDSCAPE_FX = {}
+# ph. 7H: landscape_name -> fn(game, pid) -> int — what a LANDMARK adds to (or
+# subtracts from) a player's score. Summed into engine._total_vp for every
+# landscape DEALT to the game, so it is live all game, not only at the end.
+LANDSCAPE_SCORING = {}
+# ph. 7H: landscape_name -> fn(game, rng) — a landscape whose SETUP needs the
+# board (Obelisk picks an Action pile, Tax and Aqueduct write pile attachments).
+# Run by new_game once every pile exists, before the opening deal.
+LANDSCAPE_SETUP = {}
 
 for _m in _MODULES:
     for _name, _fn in _m.EFFECTS.items():
@@ -85,3 +93,11 @@ for _m in _MODULES:
         if _name in LANDSCAPE_FX:
             raise RuntimeError(f"dontminion: duplicate LANDSCAPE_FX entry {_name!r}")
         LANDSCAPE_FX[_name] = _fn
+    for _name, _fn in getattr(_m, "LANDSCAPE_SCORING", {}).items():
+        if _name in LANDSCAPE_SCORING:
+            raise RuntimeError(f"dontminion: duplicate LANDSCAPE_SCORING entry {_name!r}")
+        LANDSCAPE_SCORING[_name] = _fn
+    for _name, _fn in getattr(_m, "LANDSCAPE_SETUP", {}).items():
+        if _name in LANDSCAPE_SETUP:
+            raise RuntimeError(f"dontminion: duplicate LANDSCAPE_SETUP entry {_name!r}")
+        LANDSCAPE_SETUP[_name] = _fn

@@ -549,8 +549,28 @@ function fmtLog(e, names) {
     // the -1 Card / -$1 tokens being spent by the thing they were waiting for
     case "minus_card_token": return `${who} removes their -1 Card token instead of drawing`;
     case "minus_coin_token": return `${who} removes their -$1 token, losing $1`;
-    case "coffers": return `${who} gets +${e.n} Coffers (${e.total} total)`;
-    case "spend": return `${who} spends ${e.n} ${e.what === "coffers" ? "Coffers" : e.what}`;
+    case "coffers": {
+      const k = e.count ?? e.n;                    // pre-fix entries kept it in n
+      return `${who} gets +${k} Coffers (${e.total} total)`;
+    }
+    case "spend": {
+      const k = e.count ?? e.n;                    // pre-fix entries kept it in n
+      // paying off Debt is a spend too — $1 per token, and it uses up no Buy
+      if (e.what === "debt") return `${who} pays off ${k} Debt`;
+      return `${who} spends ${k} ${e.what === "coffers" ? "Coffers" : e.what}`;
+    }
+    // DEBT (Empires): taken instead of paying, and you can't buy anything until
+    // it is paid off. Public — everyone needs to see who is stuck.
+    case "debt":
+      return `${who} takes ${e.count} Debt (${e.total} total)`;
+    // VP / Debt tokens sitting on a Supply pile or on a landscape — table
+    // state with no owner, so these read without a player
+    case "pile_vp":
+      return `${e.count} VP ${e.count === 1 ? "is" : "are"} put on the ${e.pile} pile (${e.total} total)`;
+    case "pile_debt":
+      return `${e.count} Debt ${e.count === 1 ? "token is" : "tokens are"} put on the ${e.pile} pile (${e.total} total)`;
+    case "landscape_vp":
+      return `${e.count} VP ${e.count === 1 ? "is" : "are"} put on ${e.name} (${e.total} total)`;
     case "set_aside": return e.cards
       ? `${who} sets aside ${listCards(e.cards)}`
       : `${who} sets aside ${e.count} card${e.count === 1 ? "" : "s"}`;
@@ -784,6 +804,17 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // the middle of resolving an ability now, for Storyteller — and a client
   // carrying its own copy of it is the Peddler-cost bug's exact shape.
   const canSpend = (game?.spendable?.coffers ?? 0) > 0 && !over;
+  // Debt (Empires) — the same shape one dimension over: a public counter with
+  // a payoff you may make "at any time during your turn", $1 per token and
+  // costing no Buy. How much you may pay RIGHT NOW is the server's number
+  // (engine.spendable caps it by your money), never re-derived here.
+  const myDebt = game?.debt?.[myId] ?? 0;
+  const payableDebt = over ? 0 : (game?.spendable?.debt ?? 0);
+  // MIRRORS engine.debt_blocks_buying: with any Debt you may buy nothing at
+  // all — no card, no Event, no Project. Display only (the server refuses the
+  // move regardless), but without it every pile lights up as affordable and
+  // the click bounces, which reads as a broken board rather than a rule.
+  const debtBlocks = myDebt > 0;
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -844,7 +875,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     if (!["event", "project"].includes(st.kind)) return false;
     if (d.once === "turn" && st.bought_turn === game.turn_number) return false;
     if (d.once === "game" && (st.bought_by || []).includes(myId)) return false;
-    return inBuy && game.buys > 0 && (d.cost ?? 99) <= game.coins;
+    return inBuy && !debtBlocks && game.buys > 0 && (d.cost ?? 99) <= game.coins;
   };
   // "spent" for the player: a once-per-game Event they have already bought is
   // shown dimmed and ticked rather than silently un-clickable.
@@ -1217,7 +1248,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
       if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
       setCardInfo(pileFace(pile)); return;
     }
-    if (inBuy && game.buys > 0 && pileLeft(pile) > 0 && isSupplyPile(pile) && affordable(pile)) {
+    if (inBuy && !debtBlocks && game.buys > 0 && pileLeft(pile) > 0
+        && isSupplyPile(pile) && affordable(pile)) {
       mv({ type: "buy", card: pile }); return;
     }
     setCardInfo(pileFace(pile));
@@ -1395,7 +1427,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const count = pileLeft(name);
     const promptPiles = iAmActor && constraint?.piles ? constraint.piles : null;
     const highlight = promptPiles ? promptPiles.includes(name)
-      : (inBuy && game.buys > 0 && count > 0 && isSupplyPile(name) && affordable(name));
+      : (inBuy && !debtBlocks && game.buys > 0 && count > 0
+         && isSupplyPile(name) && affordable(name));
     const disabled = promptPiles ? !promptPiles.includes(name)
       : (count === 0 || !isSupplyPile(name));
     return (
@@ -1478,6 +1511,13 @@ export default function Dontminion({ myId, authUser, onExit }) {
         <span className="dm-vp" title="victory points">🛡 <Pop n={game.vp?.[pid] ?? 0} /> VP</span>
         {(game.vp_tokens?.[pid] || 0) > 0 && (
           <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ <Pop n={game.vp_tokens[pid]} /></span>
+        )}
+        {/* DEBT (Empires): public, and it stops that player buying ANYTHING
+            until it is paid off at $1 per token — which is exactly why it is
+            on every seat's row and not only your own. */}
+        {(game.debt?.[pid] || 0) > 0 && (
+          <span className="dm-debt" title="Debt — can't buy anything until it's paid off ($1 per token)">
+            🪙 <Pop n={game.debt[pid]} /> Debt</span>
         )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
         {/* Adventures tokens that sit in front of a PLAYER rather than on a
@@ -1994,6 +2034,28 @@ export default function Dontminion({ myId, authUser, onExit }) {
                         title={`Spend all ${myCoffers} Coffers`}
                         onClick={() => mv({ type: "spend", what: "coffers", n: myCoffers })}>
                         all
+                      </button>
+                    )}
+                  </span>
+                )}
+                {/* Debt: not a resource you spend on cards — it is a debt that
+                    blocks every buy until it's gone. Pay off any amount up to
+                    what you can afford, at any time in your turn, for no Buy. */}
+                {myDebt > 0 && (
+                  <span className="dm-counter dm-debt" title="Debt — you can't buy anything until this is paid off ($1 per token)">
+                    Debt <b><Pop n={myDebt} /></b>
+                    {payableDebt > 0 && (
+                      <button className="btn btn-gold btn-sm dm-spend"
+                        title={`Pay off ${payableDebt} Debt for $${payableDebt}`}
+                        onClick={() => mv({ type: "spend", what: "debt", n: payableDebt })}>
+                        pay ${payableDebt}
+                      </button>
+                    )}
+                    {payableDebt > 1 && (
+                      <button className="btn btn-outline btn-sm dm-spend"
+                        title="Pay off 1 Debt for $1"
+                        onClick={() => mv({ type: "spend", what: "debt", n: 1 })}>
+                        one
                       </button>
                     )}
                   </span>

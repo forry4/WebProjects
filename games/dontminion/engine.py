@@ -30,6 +30,7 @@ from .cards import (
     traveller_chain as cards_traveller_chain,
     pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
     grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
+    debt_of as cards_debt, landscape_debt as cards_landscape_debt,
     expansion_of as cards_expansion, printed_cost as cards_printed_cost,
     landscape_pool as cards_landscape_pool, landscape_kind as cards_landscape_kind,
 )
@@ -42,7 +43,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 10
+SCHEMA = 11
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -55,6 +56,8 @@ SCHEMA = 10
 #   9 = Dark Ages (game["shelters"] — the Shelter starting decks)
 #  10 = the LANDSCAPE kernel (ph. 6H): game["landscapes"], the Tavern mat and
 #       the Adventures token stores (seat["tavern"] / seat["tokens"])
+#  11 = the DEBT vector (ph. 7H): game["debt"] — a fill-only bump, the v10 shape
+#       plus one public per-player counter
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -103,6 +106,11 @@ _GAME_FILLS = {
     # name -> {"kind", + per-landscape state}. Public table info. An old save
     # was dealt none, and none exists to deal until ph. 7.
     "landscapes": lambda g: {},
+    # the DEBT vector (ph. 7H): Debt tokens per player, PUBLIC, game-level like
+    # coffers/vp_tokens. No shipped card or Event costs Debt until Empires
+    # (ph. 8), so an old save owes none — but the buy gate reads it on every
+    # buy, so it has to exist rather than be defaulted at each read site.
+    "debt": lambda g: {p: 0 for p in g.get("players", [])},
 }
 _SEAT_FILLS = {
     "aside": list,
@@ -728,6 +736,74 @@ def pile_attachment(game, name, key, default=None):
     return p["attach"].get(key, default) if p else default
 
 
+def _pile_counter(game, name, key, n):
+    """Add n to a numeric pile attachment, deleting it at zero so an untouched
+    pile ships no key at all (the same tidiness `move_token` keeps). Returns the
+    new total; total on an unknown pile, which stays a no-op returning 0."""
+    p = game["piles"].get(name)
+    if p is None:
+        return 0
+    total = p["attach"].get(key, 0) + n
+    if total:
+        p["attach"][key] = total
+    else:
+        p["attach"].pop(key, None)
+    return total
+
+
+def pile_vp(game, name):
+    """VP tokens sitting ON a Supply pile (Aqueduct, Defiled Shrine, and the
+    gathering piles, which gather onto themselves). Public — it rides `attach`,
+    which already ships in the pile view."""
+    return pile_attachment(game, name, "vp", 0)
+
+
+def add_pile_vp(game, name, n):
+    """Put n VP tokens on a pile. False if there is no such pile (a landmark
+    naming one this board did not deal)."""
+    if name not in game["piles"] or n <= 0:
+        return False
+    _pile_counter(game, name, "vp", n)
+    _log(game, None, "pile_vp", pile=name, count=n, total=pile_vp(game, name))
+    return True
+
+
+def take_pile_vp(game, pid, name, n=None):
+    """Move VP tokens off a pile onto pid (n=None takes them all). Returns how
+    many actually moved — an empty pile gives nothing, which is what "take the
+    VP from it" means when someone got there first."""
+    k = pile_vp(game, name) if n is None else min(n, pile_vp(game, name))
+    if k <= 0:
+        return 0
+    _pile_counter(game, name, "vp", -k)
+    add_vp_tokens(game, pid, k)
+    return k
+
+
+def pile_debt(game, name):
+    """Debt tokens sitting ON a Supply pile (Tax puts one on every pile)."""
+    return pile_attachment(game, name, "debt", 0)
+
+
+def add_pile_debt(game, name, n=1):
+    if name not in game["piles"] or n <= 0:
+        return False
+    _pile_counter(game, name, "debt", n)
+    _log(game, None, "pile_debt", pile=name, count=n, total=pile_debt(game, name))
+    return True
+
+
+def take_pile_debt(game, pid, name, n=None):
+    """Move a pile's Debt tokens onto pid (Tax: the buyer takes them). Returns
+    how many moved. Goes through add_debt, so it logs and is public."""
+    k = pile_debt(game, name) if n is None else min(n, pile_debt(game, name))
+    if k <= 0:
+        return 0
+    _pile_counter(game, name, "debt", -k)
+    add_debt(game, pid, k)
+    return k
+
+
 def _pile_take(game, name):
     """Remove the top card from a pile and return its NAME (None if empty).
     THE take — with _pile_return it is the only writer of an ordered pile's
@@ -1329,7 +1405,54 @@ def add_coffers(game, n, pid=None):
         return
     pid = _acting(game, pid)
     game["coffers"][pid] = game["coffers"].get(pid, 0) + n
-    _log(game, pid, "coffers", n=n, total=game["coffers"][pid])
+    # `count`, not `n` — _log stamps the log SEQUENCE into entry["n"] last, so
+    # an `n=` kwarg never survives (the client was rendering the sequence)
+    _log(game, pid, "coffers", count=n, total=game["coffers"][pid])
+
+
+def add_debt(game, pid, n):
+    """Take n Debt tokens (Empires). PUBLIC, per player, an unlimited pool.
+
+    "+xD" / "take x Debt" is real card text (Capital, Tax; Rising Sun reuses the
+    term), so this is public API rather than a buy-flow internal. There is
+    deliberately no remove_debt twin: paying Debt off is the `spend` MOVE below
+    — a player decision, timed and repeatable — and a card that lets you pay it
+    off (Capital's "you may pay it off") does so by offering that same choice."""
+    if n <= 0:
+        return
+    game["debt"][pid] = game["debt"].get(pid, 0) + n
+    _log(game, pid, "debt", count=n, total=game["debt"][pid])
+
+
+def _spend_coffers(game, pid, n):
+    """n Coffers off the mat -> +$n."""
+    game["coffers"][pid] -= n
+    add_coins(game, n, pid)
+
+
+def _spend_debt(game, pid, n):
+    """Pay off n Debt at $1 per token. NOT add_coins(-n): that clamps at $0 and
+    logs an off-turn bonus, and the amount is already capped by `avail`."""
+    game["coins"] -= n
+    game["debt"][pid] -= n
+
+
+# THE SPENDABLE REGISTRY — one entry per "counter you spend during your turn"
+# (the `spend` move surface, ph. 4). `avail` is how many you may spend RIGHT
+# NOW, `apply` performs it; `spendable` and `_h_spend` are then generic, which
+# is what the ph. 4 comment promised when it named Villagers (ph. 9), Favors
+# (ph. 12) and this Debt payoff as the three cards it was built for.
+#
+# Debt's `avail` is capped by your money as well as by your tokens, because the
+# payoff costs $1 each — and coins only exist as a pool on your own turn, which
+# `spendable`'s turn/actor gate already enforces. avail == 0 therefore
+# enumerates NO move, which is what keeps a $0 player from looping on it.
+_SPENDABLES = {
+    "coffers": {"avail": lambda game, pid: game["coffers"].get(pid, 0),
+                "apply": _spend_coffers},
+    "debt": {"avail": lambda game, pid: min(game["coins"], game["debt"].get(pid, 0)),
+             "apply": _spend_debt},
+}
 
 
 def spendable(game, pid):
@@ -1353,21 +1476,33 @@ def spendable(game, pid):
     it belongs to may act at all, so spending is offered to the pending player
     (when that is the turn player) rather than to whoever's turn it is. Without
     that, `apply_move`'s pending gate would refuse the move it had just
-    offered."""
+    offered.
+
+    The same timing covers the Debt payoff: "you may pay off Debt at any time
+    during your turn", explicitly including "in the middle of resolving an
+    ability" (DEBT § IV — the 2024 rules change; before it, payoff was confined
+    to the second part of the Buy phase, which is what the 2016 rulebook and
+    every card-list site still describe)."""
     if game["over"] or pid != game["turn"]:
         return {}
     if game["pending_pid"] is not None and game["pending_pid"] != pid:
         return {}          # someone else is deciding; you cannot act at all
     out = {}
-    if game["coffers"].get(pid, 0) > 0:
-        out["coffers"] = game["coffers"][pid]
+    for kind, spec in _SPENDABLES.items():
+        have = spec["avail"](game, pid)
+        if have > 0:
+            out[kind] = have
     return out
 
 
 def _h_spend(game, pid, move):
     """The generic spend move — one surface for every "spendable counter" the
-    later sets add (Villagers ph. 9, Favors ph. 12, Debt payoff ph. 8), so each
-    one is a registry entry rather than a new move type."""
+    later sets add (Debt payoff ph. 7H/8, Villagers ph. 9, Favors ph. 12), so
+    each one is a `_SPENDABLES` entry rather than a new move type.
+
+    Paying off Debt does NOT use up a Buy and is NOT buying, so this handler
+    touches neither `game["buys"]` nor `turn_ctx["bought"]` — a player who pays
+    their Debt off in the Buy phase may still play their Treasures."""
     what = move.get("what")
     avail = spendable(game, pid)
     if what not in avail:
@@ -1378,9 +1513,10 @@ def _h_spend(game, pid, move):
         return False, "bad amount"
     if not 1 <= n <= avail[what]:
         return False, f"you don't have {n} {what}"
-    game["coffers"][pid] -= n
-    _log(game, pid, "spend", what=what, n=n)
-    add_coins(game, n, pid)
+    # `count`, not `n`: _log sets entry["n"] to the log SEQUENCE last, so an
+    # `n=` kwarg is silently overwritten (see its comment).
+    _log(game, pid, "spend", what=what, count=n)
+    _SPENDABLES[what]["apply"](game, pid, n)
     return True, None
 
 
@@ -1534,75 +1670,97 @@ def potion_cost(game, card):
     return cards_potion(_priced(game, card))
 
 
-# THE COST VECTOR (compendium, POTIONS § IV). A cost is {coins, potions}: a
-# printed cost of just {Potion} is {$0, 1P}, and a plain $3 is {$3, 0P}. Three
-# rules follow, and they live HERE rather than in thirty batch call sites —
-# which is the whole reason cost_le/cost_eq/cost_lt were introduced in ph. 2:
+def debt_cost(game, card):
+    """The DEBT component of a cost (Empires) — the THIRD dimension of the cost
+    vector, and the exact twin of potion_cost. "Debt functions like another kind
+    of cost, just like Potion" and "cards that reduce $ costs (like Bridge)
+    don't affect Debt costs" (DEBT § IV), so this is the PRINTED value: nothing
+    in `cost()`'s discount stack — Bridge, Quarry, Ferry's −$2 token, Peddler's
+    dynamic self-cost — reaches it."""
+    return cards_debt(_priced(game, card))
+
+
+# THE COST VECTOR (compendium, POTIONS § IV + DEBT § IV). A cost is {coins,
+# potions, debt}: a printed cost of just {Potion} is {$0, 1P, 0D}, {4D} is
+# {$0, 0P, 4D}, and a plain $3 is {$3, 0P, 0D}. Three rules follow, and they
+# live HERE rather than in thirty batch call sites — which is the whole reason
+# cost_le/cost_eq/cost_lt were introduced in ph. 2:
 #
-#   "up to $3"        -> coins <= 3 AND potions == 0
+#   "up to $3"        -> coins <= 3 AND potions == 0 AND debt == 0
 #   "exactly $1 more" -> "the same cost plus $1", so {$3,P} is exactly $1 more
 #                        than {$2,P} but NOT than {$2}
 #   "lower than"      -> no component higher and at least one lower, so {$4,P}
 #                        and {$5} are INCOMPARABLE — neither is lower
 #
-# The number forms below are "…$N", which by the first rule means no Potion.
-# When the reference is a CARD rather than a number, use the *_card forms —
-# that is where the second and third rules actually bite.
+# Debt obeys all three the same way Potion does, which the compendium states
+# outright: "Both {$4} and {4D} are lower than {$4, 4D}. However, {$5} is not
+# lower than {$4, 4D} (nor vice versa)."
+#
+# The number forms below are "…$N", which by the first rule means no Potion and
+# no Debt. When the reference is a CARD rather than a number, use the *_card
+# forms — that is where the second and third rules actually bite.
 
 def cost_le(game, card, coins):
     """'costing up to $coins' — the ONLY way card code may bound a cost against
-    a number. A card with a Potion in its cost is NEVER "up to $N"."""
-    return potion_cost(game, card) == 0 and cost(game, card) <= coins
+    a number. A card with a Potion OR Debt in its cost is NEVER "up to $N"."""
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) <= coins)
 
 
 def cost_eq(game, card, coins):
     """'costing exactly $coins' against a NUMBER (Stonemason's overpay). For
     "exactly $N more than THIS card", use cost_eq_card — the two differ the
-    moment a Potion is involved."""
-    return potion_cost(game, card) == 0 and cost(game, card) == coins
+    moment a Potion or a Debt is involved."""
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) == coins)
 
 
 def cost_lt(game, card, coins):
     """'costing LESS than $coins'. Distinct from cost_le: "cheaper" excludes an
     equal cost. For "cheaper than THIS card", use cost_lt_card."""
-    return potion_cost(game, card) == 0 and cost(game, card) < coins
+    return (potion_cost(game, card) == 0 and debt_cost(game, card) == 0
+            and cost(game, card) < coins)
 
 
 def cost_ge(game, card, coins):
     """'costing $coins or MORE' — a LOWER bound, which reads the coin component
-    alone. The Potion rule the other three enforce ("up to $N" excludes every
-    Potion card) is a rule about UPPER bounds: a {$3,P} card is not "up to $3",
-    but nothing about it is below $3 either, so Sage finds it. A range like
-    Knights' "from $3 to $6" is written as cost_ge + cost_le, and the upper
-    half is what (correctly) keeps the Potion cards out. Recorded as an open
-    ambiguity in CLAUDE.md — the compendium states the rule for upper bounds
-    only."""
+    alone. The Potion (and now Debt) rule the other three enforce ("up to $N"
+    excludes every Potion and Debt card) is a rule about UPPER bounds: a {$3,P}
+    card is not "up to $3", but nothing about it is below $3 either, so Sage
+    finds it. A range like Knights' "from $3 to $6" is written as cost_ge +
+    cost_le, and the upper half is what (correctly) keeps them out. Recorded as
+    an open ambiguity in CLAUDE.md (A5, which Debt inherits unchanged) — the
+    compendium states the rule for upper bounds only."""
     return cost(game, card) >= coins
 
 
 def cost_eq_card(game, card, ref, delta=0):
     """'costing exactly $delta more than `ref`' — Remake, Upgrade, Develop,
     Farmland, Swindler (delta 0). "Costing exactly $1 more" means "having the
-    same cost plus $1", so the POTION component must MATCH."""
+    same cost plus $1", so the POTION and DEBT components must MATCH."""
     return (potion_cost(game, card) == potion_cost(game, ref)
+            and debt_cost(game, card) == debt_cost(game, ref)
             and cost(game, card) == cost(game, ref) + delta)
 
 
 def cost_le_card(game, card, ref, delta=0):
     """'costing up to $delta more than `ref`' — Remodel, Expand, Butcher.
-    "Up to $2 more than {$3,P}" means "up to {$5,P}": the potion component may
-    not be HIGHER than the reference's."""
+    "Up to $2 more than {$3,2D}" means "up to {$5,2D}": neither the potion nor
+    the debt component may be HIGHER than the reference's."""
     return (potion_cost(game, card) <= potion_cost(game, ref)
+            and debt_cost(game, card) <= debt_cost(game, ref)
             and cost(game, card) <= cost(game, ref) + delta)
 
 
 def cost_lt_card(game, card, ref):
     """'a cheaper card than `ref`' — Border Village, Berserker, Haggler,
     Stonemason. A vector is LOWER only if no component is higher and at least
-    one is lower, so {$4,P} is not cheaper than {$5} (nor the reverse)."""
-    c1, p1 = cost(game, card), potion_cost(game, card)
-    c2, p2 = cost(game, ref), potion_cost(game, ref)
-    return c1 <= c2 and p1 <= p2 and (c1 < c2 or p1 < p2)
+    one is lower, so {$4,P} is not cheaper than {$5} (nor the reverse), and
+    neither {$5} nor {$4,4D} is lower than the other."""
+    c1, p1, d1 = cost(game, card), potion_cost(game, card), debt_cost(game, card)
+    c2, p2, d2 = cost(game, ref), potion_cost(game, ref), debt_cost(game, ref)
+    return (c1 <= c2 and p1 <= p2 and d1 <= d2
+            and (c1 < c2 or p1 < p2 or d1 < d2))
 
 
 # --- the DURATION kernel (Seaside; reused by later expansions) ----------------
@@ -1943,6 +2101,21 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                 # Bane) is in the game without being one of the dealt 10, and
                 # "in games using this" plainly covers it.
                 if actor is not None and card in game["supply"] \
+                        and (when is None or when(game, actor, ctx)):
+                    add(actor, 0, card, spec["stage"],
+                        {**extra, "actor": actor, "subject": subject},
+                        commutes=spec.get("commutes", False))
+            elif src == "landscape":
+                # A LANDMARK's ability (ph. 7H): the from:"game" shape, keyed on
+                # the landscape having been DEALT instead of on a Supply pile.
+                # "A Landmark's ability is always active for all players", so
+                # nobody owns it — the ability goes to the event's ACTOR
+                # (Aqueduct: "when YOU gain a Treasure") and lands in that
+                # player's pool like any other consumer, displaying under the
+                # landmark's own name. `card` here is a LANDSCAPE name, which
+                # can never collide with a card name: they are different tables
+                # and the merge in effects.py refuses a duplicate key either way.
+                if actor is not None and card in game["landscapes"] \
                         and (when is None or when(game, actor, ctx)):
                     add(actor, 0, card, spec["stage"],
                         {**extra, "actor": actor, "subject": subject},
@@ -3004,9 +3177,25 @@ def _h_play_all_treasures(game, pid, move):
     return True, None
 
 
+def debt_blocks_buying(game, pid):
+    """Why pid may not buy ANYTHING right now, or None. "When you have Debt
+    tokens, you can't buy anything (cards, Events or Projects). This is the only
+    effect of having Debt" (DEBT § IV).
+
+    It lives here rather than in `BUY_GATES` because that registry is per-CARD —
+    it answers "may this pile be bought" (Grand Market's no-Copper rule). This
+    is a rule about the BUYER, so it binds every pile and every landscape at
+    once, which is also how Projects (ph. 9) are covered for free: they buy
+    through `_h_buy_landscape`."""
+    return "pay off your Debt first" if game["debt"].get(pid) else None
+
+
 def _h_buy(game, pid, move):
     if game["phase"] != "buy":
         return False, "not in your buy phase"
+    err = debt_blocks_buying(game, pid)
+    if err:
+        return False, err
     card = move.get("card")
     # `supply` is the index of BUYABLE piles, so a non-supply pile (Spoils,
     # Horses, Rewards) fails here without needing its own check — the only
@@ -3037,6 +3226,13 @@ def _h_buy(game, pid, move):
     game["potions"] -= p
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
+    # DEBT (Empires): "you don't pay anything to cover the Debt cost. Instead
+    # you take that many Debt tokens. (If the cost also includes $, you have to
+    # pay that.)" — so the coin check above is the COIN component alone and an
+    # {8D} card is buyable with $0. Taking the tokens is part of paying for the
+    # card, hence here rather than in _finish_buy: a when-gain ability (which
+    # _finish_buy fires) must already see the Debt.
+    add_debt(game, pid, debt_cost(game, card))
     # OVERPAY (Guilds/C&G): a `$N+` card lets you pay MORE than it costs. The
     # payment happens HERE, while paying for the card; the ability it buys is a
     # when-gain ability that reads how much you overpaid (the 2022 retiming —
@@ -3103,6 +3299,67 @@ def landscape_cost(game, name):
     return LANDSCAPES[name]["cost"]
 
 
+def landscape_vp(game, name):
+    """VP tokens sitting ON a landscape — the Arena/Battlefield-class store
+    ("setup: put 6 VP per player on this"). Per-landscape state lives in
+    game["landscapes"][name], where 6H put it; a landscape that stores nothing
+    still has no such key, so this reads through a default."""
+    st = game["landscapes"].get(name)
+    return st.get("vp", 0) if st else 0
+
+
+def add_landscape_vp(game, name, n):
+    """Put n VP tokens on a landscape (its setup, or a card putting them back).
+    False if this game was not dealt it."""
+    st = game["landscapes"].get(name)
+    if st is None or n <= 0:
+        return False
+    st["vp"] = st.get("vp", 0) + n
+    _log(game, None, "landscape_vp", name=name, count=n, total=st["vp"])
+    return True
+
+
+def take_landscape_vp(game, name, pid, n=None):
+    """Take VP tokens off a landscape onto pid (n=None takes them all).
+    Returns how many moved — "if there are none left you get nothing", which
+    is the whole point of a store that drains."""
+    have = landscape_vp(game, name)
+    k = have if n is None else min(n, have)
+    if k <= 0:
+        return 0
+    st = game["landscapes"][name]
+    st["vp"] = have - k
+    if not st["vp"]:
+        del st["vp"]
+    add_vp_tokens(game, pid, k)
+    return k
+
+
+def landscape_scoring(game, pid):
+    """The SCORING PIPELINE HOOK (ph. 7H) — what the LANDMARKS on this table add
+    to or subtract from pid's score.
+
+    `effects.LANDSCAPE_SCORING = {name: fn(game, pid) -> int}`, summed over
+    every landscape DEALT to this game: "a Landmark's ability is always active
+    for all players", so there is no ownership test — being on the table is the
+    whole condition, exactly like `from:"game"` reads the Supply.
+
+    It is folded into `_total_vp`, which `_post_move` recomputes after every
+    move, so DURING-game landmark VP display falls out for free. A "when
+    scoring" landmark is then just a function of final deck composition, and
+    recomputing it continuously is a superset that costs nothing — with one
+    edge a scoring fn must respect: it must not CHANGE VALUE at game over. The
+    one type-sensitive interaction (Inheritance making Estates Actions, which an
+    Obelisk-class count would see) is already pinned by `types_of`'s over-gate,
+    which stops the injection once the game is over."""
+    if not game["landscapes"]:
+        return 0                       # the common case: no landscape dealt
+    from . import effects
+    fns = getattr(effects, "LANDSCAPE_SCORING", {})
+    return sum(fn(game, pid) for name, fn in fns.items()
+               if name in game["landscapes"])
+
+
 def landscape_gate(game, pid, name):
     """Why pid may not BUY this landscape right now, or None if they may.
 
@@ -3141,6 +3398,12 @@ def _h_buy_landscape(game, pid, move):
     phase in which you may still play Treasures."""
     if game["phase"] != "buy":
         return False, "not in your buy phase"
+    # the Debt gate binds "cards, Events or Projects" alike — see
+    # debt_blocks_buying, and note it is checked BEFORE the landscape gate so
+    # the message says why you can't buy anything rather than why not this
+    err = debt_blocks_buying(game, pid)
+    if err:
+        return False, err
     name = move.get("name")
     err = landscape_gate(game, pid, name)
     if err:
@@ -3153,6 +3416,11 @@ def _h_buy_landscape(game, pid, move):
     game["coins"] -= c
     game["buys"] -= 1
     game["turn_ctx"]["bought"] = True
+    # Empires' Debt-costed Events (Triumph, Annex, Ritual) — the same rule as a
+    # card's: the coins are paid, the Debt is taken. A landscape's price is the
+    # PRINTED one in both components, so this reads cards.landscape_debt and
+    # never debt_cost() (which prices a card through the pile face).
+    add_debt(game, pid, cards_landscape_debt(name))
     st = game["landscapes"][name]
     st["bought_turn"] = game["turn_number"]
     if pid not in st["bought_by"]:
@@ -3563,7 +3831,13 @@ def legal_moves(game, pid):
             # nothing else makes it a no-op, and a bot that prefers it loops.
             if any(c not in manual_treasures() for c in treasures):
                 mv.append({"type": "play_all_treasures"})
-        if game["buys"] > 0 and not game["turn_ctx"]["no_buy"]:
+        # Debt blocks buying ANYTHING, so it gates both enumerations below —
+        # the handlers refuse the move, and an enumerator that disagreed would
+        # hand the bot a no-op (the play_all_treasures livelock). Note the
+        # DEBT COMPONENT of a price needs no affordability test: you never pay
+        # it, you take the tokens.
+        in_debt = debt_blocks_buying(game, pid) is not None
+        if game["buys"] > 0 and not game["turn_ctx"]["no_buy"] and not in_debt:
             for pile in sorted(game["supply"]):
                 if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"] \
                         and potion_cost(game, pile) <= game["potions"] \
@@ -3572,7 +3846,7 @@ def legal_moves(game, pid):
         # ...and the landscapes, which cost a Buy the same way but are not
         # cards and have no pile. Their price is the PRINTED one — and they
         # stay buyable on a Mission turn, which bans buying CARDS only.
-        if game["buys"] > 0:
+        if game["buys"] > 0 and not in_debt:
             for name in sorted(game["landscapes"]):
                 if landscape_gate(game, pid, name) is None \
                         and landscape_cost(game, name) <= game["coins"]:
@@ -3721,7 +3995,8 @@ def _vp_of(game, pid):
 
 
 def _total_vp(game, pid):
-    return _vp_of(game, pid) + game["vp_tokens"].get(pid, 0)
+    return (_vp_of(game, pid) + game["vp_tokens"].get(pid, 0)
+            + landscape_scoring(game, pid))
 
 
 def _post_move(game):
@@ -3751,12 +4026,14 @@ def player_view(game, viewer):
     which with turn_revealed drives the client's Undo button. Everything
     reveals at over.
 
-    `landscapes`, every seat's `tavern` and every seat's `tokens` ship AS-IS and
-    that is correct, not an omission: landscapes sit face up on the table, mat
-    contents are face up (p28) and tokens are public markers. They are listed
-    here because "build, not filter" means a new key's publicity is a decision
-    someone made, and `test_view_wire` asserts these three against the
-    SERIALIZED payload of a real game."""
+    `landscapes`, `debt`, every seat's `tavern` and every seat's `tokens` ship
+    AS-IS and that is correct, not an omission: landscapes sit face up on the
+    table, Debt tokens sit in front of you where everyone can count them (and
+    everyone must, since they stop you buying), mat contents are face up (p28)
+    and tokens are public markers. They are listed here because "build, not
+    filter" means a new key's publicity is a decision someone made, and
+    `test_view_wire` asserts them against the SERIALIZED payload of a real
+    game."""
     g = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
     g["undo_depth"] = len(game.get("undo_stack") or [])
     g.pop("rng_state", None)
@@ -4111,6 +4388,9 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         "ferryman_pile": ferryman_pile,   # Ferryman's pile (is NOT in the Supply)
         "footpad_draw": "Footpad" in kingdom,     # its game-wide when-gain rule
         "vp_tokens": {p: 0 for p in players},
+        # Empires (ph. 7H): Debt tokens, public, per player. Nothing on any
+        # board today can give you one — the seam ships before its consumers.
+        "debt": {p: 0 for p in players},
         "vp": {},
         "log": [],
         "log_depth": 0,
@@ -4152,6 +4432,19 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         add_pile(game, "Mercenary", count=10)
     if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
         add_pile(game, "Spoils", count=15)
+    # LANDSCAPE SETUP (ph. 7H): `effects.LANDSCAPE_SETUP = {name: fn(game, rng)}`
+    # — a landscape whose setup needs the BOARD (Obelisk picks a random Action
+    # Supply pile; Tax puts a Debt token on every pile; Aqueduct puts 8 VP on
+    # the Gold pile). Ordered here on purpose: after every pile exists, before
+    # the opening deal. The rng is re-saved only when a setup actually ran, so
+    # a board with no such landscape draws the same starting hands as ever.
+    from . import effects
+    _ls_setup = getattr(effects, "LANDSCAPE_SETUP", {})
+    if any(name in _ls_setup for name in game["landscapes"]):
+        for name in game["landscapes"]:
+            if name in _ls_setup:
+                _ls_setup[name](game, rng)
+        _save_rng(game, rng)
     for pid in players:
         game["seats"][pid] = {"deck": [], "hand": [], "discard": [],
                               "in_play": [], "aside": [], "turns_taken": 0,

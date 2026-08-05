@@ -27,9 +27,10 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **10**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+`engine.SCHEMA` (now **11**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
 5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages,
-10 = the landscape kernel) is the game-dict shape version,
+10 = the landscape kernel, 11 = the Debt vector — a FILL-ONLY bump, the v10 shape plus
+`game["debt"]`) is the game-dict shape version,
 stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
 kernel may assume the CURRENT shape: **do not add defensive `.get()` for a key `migrate`
@@ -144,6 +145,9 @@ revealed hand cards STAY in hand) · `play_action_card(game,pid,card,from_zone="
 `discard_from_tavern` / `on_tavern` (ph. 6H — calling is NOT playing, see Kernel v6H) ·
 `move_token(game,pid,kind,pile)` / `pile_tokens` / `token_pile` / `seat_token` /
 `set_seat_token` (ph. 6H) · `landscape_cost` / `landscape_gate` (ph. 6H — THE readers) ·
+`add_debt(game,pid,n)` / `debt_cost` / `debt_blocks_buying` · `add_landscape_vp` /
+`take_landscape_vp` / `landscape_vp` · `add_pile_vp` / `take_pile_vp` / `pile_vp` /
+`add_pile_debt` / `take_pile_debt` / `pile_debt` · `landscape_scoring` (ph. 7H) ·
 `attack_opponents(game,pid,card,per_opp_stage,data=None,immune=None)` (a card whose attack part
 runs in a LATER stage — Minion, Replace — must capture `list(game["_atk_immune"])` into its frame
 data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
@@ -194,6 +198,89 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v7H — the DEBT vector + the SCORING PIPELINE. FROZEN.** Hardening with no consumer,
+in the 3H/5H/6H mold: no card and no landscape in the data carries a `debt` key, nothing
+registers a scoring fn, and no `landmark` is dealt on any board. Everything here is
+contract-tested against synthetics in `tests/test_debt.py` (31) and the ph.-7H half of
+`tests/test_landscapes.py`. **SCHEMA 11** — a fill-only bump for `game["debt"]`.
+
+- **A COST IS NOW `{coins, potions, debt}`.** `debt_cost(game, card)` is the exact twin of
+  `potion_cost` — the PRINTED value, because "cards that reduce $ costs (like Bridge) don't
+  affect Debt costs", so nothing in `cost()`'s discount stack (Bridge, Quarry, Ferry's −$2
+  token, `DYN_COSTS`) reaches it. Data: an optional `"debt"` int on `CARDS[name]` and on
+  `LANDSCAPES[name]`, read through `cards.debt_of` / `cards.landscape_debt` — never indexed.
+  The comparators each grow one clause, which is the whole reason ph. 2 banned raw
+  `cost() <= n` in card code:
+
+  | comparator | Debt clause | compendium |
+  |---|---|---|
+  | `cost_le` / `cost_eq` / `cost_lt` (numbers) | `debt_cost == 0` | "up to $N" is an upper bound on the whole vector |
+  | `cost_eq_card` | components must MATCH | "exactly $1 more" = "the same cost plus $1" |
+  | `cost_le_card` | may not be HIGHER than the ref's | "up to $2 more than {$3,2D}" = "up to {$5,2D}" |
+  | `cost_lt_card` | no component higher, at least one lower | "Both {$4} and {4D} are lower than {$4,4D}. However, {$5} is not lower than {$4,4D} (nor vice versa)" |
+  | `cost_ge` | none — COINS alone | stated for upper bounds only; **A5 now covers Debt too, same reasoning** |
+
+- **`game["debt"] = {pid: 0}`** — public, game-level like `coffers`/`vp_tokens`, shipped
+  as-is in `player_view` (Debt sits in front of you and everyone must be able to count it:
+  it is why that player is not buying). `add_debt(game, pid, n)` is public API, not a
+  buy-flow internal — "+xD" / "take x Debt" is real card text (Capital, Tax). There is
+  deliberately **no `remove_debt`**: paying off is a MOVE, and a card that pays it off
+  (Capital) offers that same choice.
+- **The buy flow grows two lines in each of `_h_buy` and `_h_buy_landscape`.** The GATE
+  first — `debt_blocks_buying(game, pid)`, "when you have Debt tokens, you can't buy
+  anything (cards, Events or Projects). This is the only effect of having Debt." It is NOT
+  a `BUY_GATES` entry: that registry is per-CARD, and this is a rule about the BUYER, so it
+  binds every pile and every landscape at once — which is also how ph. 9's Projects are
+  covered for free. Then the TAKE, after the coins are paid: the affordability check reads
+  the COIN component alone, so an {8D} card is buyable with $0. `legal_moves` consults the
+  same gate (the enumerator/handler agreement rule). **Gaining bypasses all of it** —
+  "gaining a Debt-cost card without buying it doesn't give you Debt" — which falls out of
+  `gain` not knowing about Debt, and is pinned anyway.
+- **`_SPENDABLES` — the registry `spend` always implied.** `{kind: {"avail", "apply"}}`;
+  `spendable`/`_h_spend` are now generic, and `_spend_moves` needed no change. Debt's
+  `avail` is `min(coins, debt)` — so **avail 0 enumerates nothing**, which is the livelock
+  guard for a $0 player. **Paying off uses no Buy and is not buying**: the handler touches
+  neither `game["buys"]` nor `turn_ctx["bought"]`, so Treasures stay playable afterwards.
+  Legal in EITHER phase and MID-ABILITY — "at any time during your turn … you can even pay
+  off Debt in the middle of resolving an ability". **This is the 2024 rules change**; the
+  2016 rulebook and every card-list site confine payoff to the second part of the Buy
+  phase. Ph. 9's Villagers and ph. 12's Favors are now one dict entry each.
+- **`effects.LANDSCAPE_SCORING = {name: fn(game, pid) -> int}`** — THE scoring-pipeline
+  hook, summed into `_total_vp` for every landscape DEALT ("a Landmark's ability is always
+  active for all players", so there is no ownership test — the `from:"game"` shape). Because
+  `_post_move` recomputes `game["vp"]` after every move, during-game landmark VP display
+  falls out for free, and a "when scoring" landmark is just a function of final deck
+  composition. **The one edge: a scoring fn must not change value at game over** — the
+  ph.-7 Inheritance lesson, already pinned by `types_of`'s over-gate.
+- **`effects.LANDSCAPE_SETUP = {name: fn(game, rng)}`** — run by `new_game` after every pile
+  exists and before the opening deal (Obelisk needs the rng + an Action-pile query; Tax and
+  Aqueduct write pile attach). It re-saves the rng **only when a setup actually ran**, which
+  is the deal-preservation proof for this phase, the same shape as 6H's `deal_landscapes`
+  returning `[]`.
+- **Stores.** `add_landscape_vp` / `take_landscape_vp` on `game["landscapes"][name]["vp"]`
+  (the Arena/Battlefield class — an empty store gives nothing, takes are capped) and
+  `add_pile_vp` / `take_pile_vp` / `add_pile_debt` / `take_pile_debt` on 3H's `attach`
+  (Aqueduct/Defiled Shrine/gathering piles; Tax's per-pile Debt). Both delete their key at
+  zero, so an untouched pile ships none — and the token cleanup in `move_token` must not
+  take a pile's VP with it (pinned).
+- **`from:"landscape"` — a landmark on the trigger bus.** The `from:"game"` shape keyed on
+  `card in game["landscapes"]` instead of the Supply. The ability goes to the event's ACTOR
+  (Aqueduct: "when YOU gain a Treasure…"), lands in that player's pool like any other
+  consumer, and displays under the landmark's own name.
+- **Frontend, dormant like 6H's landscape row**: a Debt chip on every seat row (public) plus
+  a payoff control in the resource bar driven by the SERVER's `spendable.debt`; `debtBlocks`
+  mirrors `debt_blocks_buying` so the board greys out instead of bouncing the click.
+  `fmtLog` cases for `debt` / `pile_vp` / `pile_debt` / `landscape_vp` and a Debt wording
+  for `spend`. **Also fixed here: `coffers` and `spend` logged their count as `n=`, which
+  `_log` overwrites with the log SEQUENCE last** — the client had been rendering that
+  sequence number. Both now log `count=`, and `fmtLog` reads `e.count ?? e.n` so old entries
+  render as they did.
+- 7H ships **no landmark, no Debt card and no Event** — the `landmark` kind stays undealt
+  until Empires, exactly as 6H shipped zero Events. **What ph. 8 must VERIFY, not rebuild**:
+  split piles + Castles are 3H ordered piles priced through their face (pinned by
+  `test_an_ordered_piles_cost_follows_its_current_face`), `attach` already ships on the
+  wire, and Landmarks deal as landscapes by construction.
 
 **Kernel v7 — the phase-7 (Adventures) delta. FROZEN.** The set consumes 6H wholesale (Reserves
 on the Tavern mat, Events on `LANDSCAPE_FX`, tokens on `attach`, Travellers on 5H's interruptible
@@ -411,10 +498,11 @@ put-back lesson, in the opposite direction.
   is choosable. `"command"` is an allowed card type awaiting its first card in ph. 6.
 
 **Kernel v5 — the phase-5 (Alchemy) delta: THE COST VECTOR. FROZEN.**
-A cost is `{coins, potions}`. `cost()` still returns the COIN component, so every existing
-caller is unchanged; `potion_cost(game, card)` is the second dimension (printed — cost
-reductions only ever touch coins). The compendium's three rules (POTIONS § IV) live in
-engine.py and nowhere else:
+A cost is `{coins, potions}` — **and, since ph. 7H, `{coins, potions, debt}`; see Kernel
+v7H for the third dimension, which obeys every rule below identically.** `cost()` still
+returns the COIN component, so every existing caller is unchanged; `potion_cost(game, card)`
+is the second dimension (printed — cost reductions only ever touch coins). The compendium's
+three rules (POTIONS § IV) live in engine.py and nowhere else:
 - **"up to $N"** = coins ≤ N **and potions == 0**. So `cost_le`/`cost_eq`/`cost_lt` — the
   NUMBER forms — now exclude every Potion card, which is what makes "gain a card costing up to
   $4" correct on an Alchemy board with no call-site change anywhere.
@@ -526,7 +614,8 @@ against what ships. Deleting a row is how you hand the work back in.
 - `emit`s available: `gain` (via_buy/dest), `buy`, `play_treasure`, `trash`, `discard` (per card,
   AFTER the whole batch moves), `cleanup_start`, `cleanup_discard`, `buy_phase_end`, `turn_start`,
   `would_gain`, `before_play` (attack/replay — ph. 6H, was `play_attack`), `action_resolved`
-  (replay — ph. 6H). Sources: `"self"`, `"in_play"`, `"hand"`, `"game"`, `"tavern"` (ph. 6H).
+  (replay — ph. 6H). Sources: `"self"`, `"in_play"`, `"hand"`, `"game"`, `"tavern"` (ph. 6H),
+  `"landscape"` (ph. 7H — a LANDMARK, keyed on being dealt).
   ⚠ **`cleanup_discard` fires but `_end_turn` is NOT interruptible** — `emit` parks an auto frame
   and the sweep doesn't drive frames, so a consumer cannot yet MOVE the card. Scheme needs that
   built; do not assume it works.
@@ -621,7 +710,8 @@ cost-modifier seam (Quarry-class), summed per copy on ANY table inside `cost()`.
 
 **Kernel v3 (Prosperity):** `add_vp_tokens(game,pid,n)` (public, score-counted, never lost) ·
 `cost_le`/`cost_eq` are THE cost comparators (raw `cost() <= n` in card code is a review
-reject — the future Potion/Debt vector lands inside them) · `has_type`/`types_of`/`coins_of`
+reject — the Potion vector landed inside them in ph. 5 and the Debt one in ph. 7H, with
+zero call-site changes: the discipline paid for itself twice) · `has_type`/`types_of`/`coins_of`
 are THE type/coin queries (game-wide injections live there: `game["curse_is_treasure"]`,
 Charlatan's rule, set at new_game from the kingdom) · `turn_ctx["quarries"]` (turn-scoped
 Action discount, applied inside cost()) · `buy_gate()` consults `BUY_GATES` in _h_buy AND
@@ -773,7 +863,7 @@ pinning the current behaviour, so changing your mind means changing a test on pu
 | ~~A3~~ | ~~Two of the player's own triggers firing simultaneously~~ | **RETIRED (phase 2)** — same pool. Registration order survives only as the pool's OPTION order (the first option is the historical default). | — |
 | A4 | **Butcher**: do the Coffers you spend for its "remodel" ALSO pay you the +$1 each? | **Yes** — one rule for spending. `_butcher_spend` goes through the same accounting as the `spend` move: tokens off the mat, +$1 each, and the count also raises the gain's cost limit. | The global rule is unconditional ("each spent token gives you +$ and is immediately removed") and Butcher only adds a use for the COUNT. But the compendium's phrasing cuts the other way — "any Coffers tokens you get from Butcher that you don't use to 'remodel' a card, you save for later to spend for +$ **as normal**" reads as though the ones spent on Butcher were spent for something else instead. We took the branch that keeps ONE rule for spending rather than two. Pinned by `test_butcher_gives_two_coffers_and_remodels_per_coffers_spent`. |
 | A6 | **Outpost played AND Mission bought on the same turn** — you get ONE extra turn (no third turn in a row); is it a Mission turn (no buying cards) or an Outpost one? | **A Mission turn**: `extra_no_buy` is set whenever the granted turn was requested by Mission, even if Outpost also asked. Outpost's 3-card draw still applies. | Each card describes the turn IT gives, and the rules never say which one "wins" when both fire and only one turn is taken. We took the stricter reading — a restriction that is simply swallowed is the more surprising outcome, and the player chose to buy Mission. Pinned by `test_outpost_and_mission_on_one_turn_give_one_mission_turn`. |
-| A5 | **"costing $N or MORE"** with a Potion in the cost — is a {$3,P} card "costing $3 or more"? | **Yes** — `cost_ge` reads the COIN component alone, so Sage finds a Familiar and a Knight can trash one. | The compendium states the Potion rule for UPPER bounds only ("up to $N" = coins ≤ N and potions == 0); it says nothing about a lower bound, and both readings are defensible. Ours keeps a range like Knights' "from $3 to $6" excluding Potion cards, because its `cost_le` half still does. Pinned by `test_sage_digs_for_a_three_or_more` + the cost-vector tests. |
+| A5 | **"costing $N or MORE"** with a Potion **or Debt** in the cost — is a {$3,P} card "costing $3 or more"? Is a {$2,4D} one "costing $2 or more"? | **Yes to both** — `cost_ge` reads the COIN component alone, so Sage finds a Familiar, a Knight can trash one, and a Debt-costed card is reachable the same way. | The compendium states the exclusion rule for UPPER bounds only ("up to $N" = coins ≤ N and potions == 0 and debt == 0); it says nothing about a lower bound, and both readings are defensible. **Debt inherits this row unchanged rather than getting one of its own** — same rule, same silence, same reasoning ("Debt functions like another kind of cost, just like Potion"). Ours keeps a range like Knights' "from $3 to $6" excluding both, because its `cost_le` half still does. Pinned by `test_sage_digs_for_a_three_or_more`, the cost-vector tests, and `test_cost_ge_reads_the_coin_component_alone`. |
 
 **B. Deliberate simplifications — the rules are clear, we do something simpler**
 

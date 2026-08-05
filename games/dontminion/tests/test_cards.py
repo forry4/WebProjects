@@ -22,7 +22,8 @@ ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
 OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
-                   "potion"}       # the Potion component of a cost (Alchemy)
+                   "potion",       # the Potion component of a cost (Alchemy)
+                   "debt"}         # the Debt component of a cost (Empires)
 
 REMOVED_1E = [
     # Base 1E -> 2E removals

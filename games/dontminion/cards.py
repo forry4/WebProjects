@@ -32,6 +32,10 @@ Schema (frozen contract — see plan par.9):
   LANDSCAPES = {name: {kind, cost, text, expansion}}
       — NOT cards and NOT piles (no copies, never gained, never in a zone); see
         the LANDSCAPES block near the bottom of this file.
+  Optional cost dimensions, on BOTH tables: "potion" (Alchemy) and "debt"
+  (Empires) — a cost is the vector {coins, potions, debt}, and both extra
+  components are read through accessors (potion_of/debt_of, landscape_debt)
+  rather than by indexing, so an entry without one costs zero of it.
   pile_size(name, n_players) -> int
   DATA_COMPLETE: bool — True only when every set's cards are present and verified.
 """
@@ -1084,7 +1088,8 @@ PILES = {
 # there, an existing structure had to LEARN to tolerate a foreign name; here the
 # foreign thing arrives before its first consumer, so it gets its own table.
 #
-#   LANDSCAPES[name] = {"kind": ..., "cost": int, "text": str, "expansion": str}
+#   LANDSCAPES[name] = {"kind": ..., "cost": int, "text": str, "expansion": str,
+#                       "debt": int (optional — Empires' Debt-costed Events)}
 #
 # `kind` is the whole taxonomy up front, so the schema does not have to change
 # per set even though the machinery arrives per set:
@@ -1230,6 +1235,22 @@ def potion_of(name):
     one cost {$N, 0 Potions}, which is what makes "up to $N" exclude every
     Potion card — see engine.cost_le."""
     return CARDS[name].get("potion", 0)
+
+
+def debt_of(name):
+    """The DEBT component of a card's printed cost (Empires). "Debt functions
+    like another kind of cost, just like Potion" (DEBT § IV), so a printed cost
+    of {4D} is {$0, 0 Potions, 4 Debt} and an ordinary card is {$N, 0, 0}."""
+    return CARDS[name].get("debt", 0)
+
+
+def landscape_debt(name):
+    """The DEBT component of a LANDSCAPE's printed cost — Empires' Debt-costed
+    Events (Triumph, Annex, Ritual). A sibling of `landscape_cost` rather than a
+    vector return, because a landscape's price is the PRINTED one and never
+    passes through engine.cost() (p32: "its cost cannot be changed by cards like
+    Bridge"), so the two components never travel together."""
+    return LANDSCAPES[name].get("debt", 0)
 
 
 # --- kingdom REQUIREMENTS (create-time "at least one card that gives ...") ----

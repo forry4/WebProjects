@@ -47,6 +47,13 @@ LS = {
                "text": "+1 Buy."},
     "Byway": {"kind": "way", "cost": 0, "expansion": "base",
               "text": "You may play an Action as if it were a Village."},
+    # ph. 7H: the LANDMARK kind, framed since 6H and wired now. A landmark is
+    # never bought — its ability is simply on, for everyone, all game.
+    "Cairn": {"kind": "landmark", "cost": 0, "expansion": "base",
+              "text": "When scoring, 2 VP per 3 Estates you have."},
+    "Wellspring": {"kind": "landmark", "cost": 0, "expansion": "base",
+                   "text": "Setup: put 6 VP per player here. When you gain a "
+                           "Treasure, take 1 VP from here."},
 }
 # a stand-in for a Reserve card: a real CARD (zones hold real names) that this
 # module temporarily teaches to sit on the Tavern mat and be called.
@@ -62,13 +69,16 @@ def reg():
     `from .cards import LANDSCAPES` pointing at the original object."""
     saved = (dict(cards.LANDSCAPES), dict(effects.LANDSCAPE_FX),
              {k: list(v) for k, v in effects.TRIGGERS.items()},
-             dict(effects.STAGES))
+             dict(effects.STAGES), dict(effects.LANDSCAPE_SCORING),
+             dict(effects.LANDSCAPE_SETUP))
     cards.LANDSCAPES.update(copy.deepcopy(LS))
     yield effects
     for store, old in ((cards.LANDSCAPES, saved[0]),
                        (effects.LANDSCAPE_FX, saved[1]),
                        (effects.TRIGGERS, saved[2]),
-                       (effects.STAGES, saved[3])):
+                       (effects.STAGES, saved[3]),
+                       (effects.LANDSCAPE_SCORING, saved[4]),
+                       (effects.LANDSCAPE_SETUP, saved[5])):
         store.clear()
         store.update(old)
 
@@ -692,6 +702,257 @@ def test_seat_tokens_are_stored_and_public(reg):
         == {"-card": True}
     engine.set_seat_token(g, A, "-card", None)
     assert g["seats"][A]["tokens"] == {}
+
+
+# ── the SCORING PIPELINE hook (ph. 7H) ────────────────────────────────────────
+
+def test_a_landmarks_scoring_fn_reaches_both_seats_live_and_at_the_end(reg):
+    """`effects.LANDSCAPE_SCORING` is summed into _total_vp, which _post_move
+    recomputes after every move — so a landmark's VP shows DURING the game for
+    free, and `score_game` reads the same number at the end. "A Landmark's
+    ability is always active for all players", so there is no ownership test."""
+    reg.LANDSCAPE_SCORING["Cairn"] = \
+        lambda game, pid: 2 * (engine.owned_cards(game, pid).count("Estate") // 3)
+    g = fresh(landscapes=["Cairn"])
+    # a fresh deck holds 3 Estates: 3 VP of card VP + 2 VP of landmark, per seat
+    assert g["vp"] == {A: 3 + 2, B: 3 + 2}
+    engine.gain(g, A, "Estate")
+    engine.gain(g, A, "Estate")
+    engine.gain(g, A, "Estate")
+    engine._post_move(g)
+    assert g["vp"][A] == 6 + 4, "the landmark must re-score as the deck changes"
+    assert g["vp"][B] == 3 + 2
+    scores = engine.score_game(g)
+    assert scores[A]["vp"] == 10 and scores[B]["vp"] == 5
+
+
+def test_a_landmark_that_is_not_dealt_scores_nothing(reg):
+    """Being ON THE TABLE is the whole condition — the same shape as
+    from:"game" reading the Supply. A registered fn for a landscape this game
+    was not dealt must never be summed."""
+    reg.LANDSCAPE_SCORING["Cairn"] = lambda game, pid: 100
+    g = fresh(landscapes=[])                      # no landscapes dealt
+    assert g["landscapes"] == {}
+    assert g["vp"] == {A: 3, B: 3}
+    assert engine.landscape_scoring(g, A) == 0
+
+
+def test_a_scoring_fn_does_not_change_value_at_game_over(reg):
+    """The ph.-7 Inheritance lesson: `types_of` stops injecting once the game is
+    over, so a landmark that counts by TYPE must read the same before and after.
+    Anything else means the final score differs from the one the players were
+    watching all game."""
+    reg.LANDSCAPE_SCORING["Cairn"] = \
+        lambda game, pid: sum(1 for c in engine.owned_cards(game, pid)
+                              if engine.has_type(game, c, "victory"))
+    g = fresh(landscapes=["Cairn"])
+    before = engine.landscape_scoring(g, A)
+    g["over"] = True
+    assert engine.landscape_scoring(g, A) == before
+
+
+def test_a_landscape_setup_fn_runs_after_the_piles_exist(reg):
+    """`effects.LANDSCAPE_SETUP` — Obelisk needs the rng and an Action-pile
+    query, Tax and Aqueduct write pile attachments. Ordered after every pile is
+    built and before the opening deal, so all three can see the board."""
+    seen = {}
+
+    def _setup(game, rng):
+        seen["piles"] = set(game["piles"])
+        seen["pick"] = rng.choice(sorted(p for p in game["supply"]
+                                         if engine.has_type(game, p, "action")))
+        engine.add_pile_vp(game, "Gold", 8)
+        game["landscapes"]["Wellspring"]["pile"] = seen["pick"]
+
+    reg.LANDSCAPE_SETUP["Wellspring"] = _setup
+    g = fresh(landscapes=["Wellspring"])
+    assert "Gold" in seen["piles"] and "Village" in seen["piles"]
+    assert engine.pile_vp(g, "Gold") == 8
+    assert g["landscapes"]["Wellspring"]["pile"] == seen["pick"]
+    # ...and the choice is a function of the seed, like the rest of setup
+    g2 = fresh(landscapes=["Wellspring"])
+    assert g2["landscapes"]["Wellspring"]["pile"] == seen["pick"]
+
+
+def test_a_board_with_no_setup_landscape_draws_no_extra_entropy(reg):
+    """The behaviour-preservation proof for the setup pass. It re-saves the rng
+    only when a setup actually RAN, so a board with no setup landscape — which
+    is every board that exists today — deals exactly the hands it always did.
+
+    Proved two ways per seed: a registered setup for an UNDEALT landscape must
+    not run at all (the fn raises if it does), and a DEALT landscape with no
+    setup entry must leave every seat byte-identical to a board with none."""
+    def _must_not_run(game, rng):
+        raise AssertionError("a setup ran for a landscape that was not dealt")
+
+    for seed in (1, 7, 99):
+        plain = engine.new_game([A, B], ["base"], seed=seed, kingdom=list(K10),
+                                landscapes=[])
+        reg.LANDSCAPE_SETUP["Wellspring"] = _must_not_run
+        same = engine.new_game([A, B], ["base"], seed=seed, kingdom=list(K10),
+                               landscapes=[])
+        assert json.dumps(same["seats"], sort_keys=True) == \
+            json.dumps(plain["seats"], sort_keys=True)
+        del reg.LANDSCAPE_SETUP["Wellspring"]
+        dealt = engine.new_game([A, B], ["base"], seed=seed, kingdom=list(K10),
+                                landscapes=["Errand"])
+        assert json.dumps(dealt["seats"], sort_keys=True) == \
+            json.dumps(plain["seats"], sort_keys=True), \
+            "putting a landscape on the table moved the opening deal"
+
+
+# ── landscape VP stores + pile-attached VP and Debt ───────────────────────────
+
+def test_a_landscape_vp_store_fills_drains_and_gives_nothing_when_empty(reg):
+    """The Arena/Battlefield class: "put 6 VP per player on this", taken one at
+    a time until it runs out. Taking moves them to the PLAYER, as real VP
+    tokens — which is why an empty store simply gives nothing."""
+    g = fresh(landscapes=["Wellspring"])
+    assert engine.landscape_vp(g, "Wellspring") == 0
+    assert engine.add_landscape_vp(g, "Wellspring", 12) is True
+    assert engine.landscape_vp(g, "Wellspring") == 12
+    assert engine.take_landscape_vp(g, "Wellspring", A, 2) == 2
+    assert g["vp_tokens"][A] == 2 and engine.landscape_vp(g, "Wellspring") == 10
+    assert engine.take_landscape_vp(g, "Wellspring", B) == 10, "n=None takes all"
+    assert engine.landscape_vp(g, "Wellspring") == 0
+    assert "vp" not in g["landscapes"]["Wellspring"], "an empty store keeps no key"
+    assert engine.take_landscape_vp(g, "Wellspring", A, 3) == 0
+    assert g["vp_tokens"][A] == 2
+    # ...and a landscape this game was not dealt is a no-op, never a KeyError
+    assert engine.add_landscape_vp(g, "Errand", 4) is False
+    assert engine.take_landscape_vp(g, "Errand", A) == 0
+
+
+def test_a_landscape_vp_store_is_capped_by_what_is_there(reg):
+    g = fresh(landscapes=["Wellspring"])
+    engine.add_landscape_vp(g, "Wellspring", 3)
+    assert engine.take_landscape_vp(g, "Wellspring", A, 10) == 3
+    assert g["vp_tokens"][A] == 3
+
+
+def test_pile_vp_and_pile_debt_round_trip_and_ride_the_wire(reg):
+    """Aqueduct/Defiled Shrine put VP on Supply piles and Tax puts Debt on
+    every pile; both ride 3H's `attach`, which already ships. Asserted through
+    the SERIALIZED view of a real game rather than a synthetic dict."""
+    g = fresh(landscapes=["Errand"])
+    assert engine.add_pile_vp(g, "Gold", 8) is True
+    assert engine.add_pile_debt(g, "Village", 2) is True
+    assert engine.pile_vp(g, "Gold") == 8 and engine.pile_debt(g, "Village") == 2
+    for viewer in (A, B, None):
+        view = json.loads(json.dumps(engine.player_view(g, viewer)))
+        assert view["piles"]["Gold"]["attach"]["vp"] == 8
+        assert view["piles"]["Village"]["attach"]["debt"] == 2
+    # save/load: a plain JSON round trip plus migrate must not move any of it
+    blob = json.loads(json.dumps(g))
+    engine.migrate(blob)
+    assert blob == json.loads(json.dumps(g))
+    # taking moves them onto the player, through the public counters
+    assert engine.take_pile_vp(g, A, "Gold", 3) == 3
+    assert g["vp_tokens"][A] == 3 and engine.pile_vp(g, "Gold") == 5
+    assert engine.take_pile_debt(g, B, "Village") == 2
+    assert g["debt"][B] == 2 and engine.pile_debt(g, "Village") == 0
+    assert "debt" not in g["piles"]["Village"]["attach"], "an empty count keeps no key"
+    # an unknown pile is a no-op both ways (a landmark naming an undealt pile)
+    assert engine.add_pile_vp(g, "Nonesuch", 1) is False
+    assert engine.take_pile_vp(g, A, "Nonesuch") == 0
+    assert engine.take_pile_debt(g, A, "Nonesuch") == 0
+
+
+def test_pile_attachments_coexist_with_the_adventures_tokens(reg):
+    """`attach` is one dict per pile, so the VP a gathering pile holds and the
+    tokens Adventures puts on it have to share it without either clobbering the
+    other — and `move_token`'s empty-key cleanup must not take the VP with it."""
+    g = fresh()
+    engine.add_pile_vp(g, "Village", 4)
+    engine.move_token(g, A, "-cost", "Village")
+    assert engine.pile_vp(g, "Village") == 4
+    assert engine.pile_tokens(g, "Village", A) == ["-cost"]
+    engine.move_token(g, A, "-cost", "Smithy")            # moved off Village
+    assert engine.pile_tokens(g, "Village", A) == []
+    assert engine.pile_vp(g, "Village") == 4, "the token cleanup ate the VP"
+
+
+# ── from:"landscape" — a landmark on the trigger bus ──────────────────────────
+
+def test_a_landmark_trigger_fires_for_the_gaining_player_only(reg):
+    """The from:"game" shape keyed on the landscape being DEALT. The ability
+    goes to the event's ACTOR (Aqueduct: "when YOU gain a Treasure...") and
+    lands in that player's pool like any other consumer."""
+    reg.STAGES[("Wellspring", "gained")] = \
+        lambda game, pid, fr, ch: engine.take_landscape_vp(game, "Wellspring", pid, 1)
+    reg.TRIGGERS["Wellspring"] = [
+        {"on": "gain", "from": "landscape", "stage": "gained", "commutes": True,
+         "when": lambda game, pid, ctx: engine.has_type(game, ctx["subject"], "treasure")}]
+    g = fresh(landscapes=["Wellspring"])
+    engine.add_landscape_vp(g, "Wellspring", 12)
+    engine.gain(g, A, "Silver")
+    engine._drive(g)
+    assert g["vp_tokens"][A] == 1 and g["vp_tokens"][B] == 0
+    engine.gain(g, B, "Gold")
+    engine._drive(g)
+    assert g["vp_tokens"][B] == 1
+    # ...and its `when` is honoured: a Victory card is not a Treasure
+    engine.gain(g, A, "Estate")
+    engine._drive(g)
+    assert g["vp_tokens"][A] == 1
+
+
+def test_a_landmark_trigger_does_nothing_when_it_was_not_dealt(reg):
+    reg.STAGES[("Wellspring", "gained")] = \
+        lambda game, pid, fr, ch: engine.add_vp_tokens(game, pid, 5)
+    reg.TRIGGERS["Wellspring"] = [{"on": "gain", "from": "landscape",
+                                   "stage": "gained", "commutes": True}]
+    g = fresh()                                   # Wellspring is NOT on the table
+    engine.gain(g, A, "Silver")
+    engine._drive(g)
+    assert g["vp_tokens"][A] == 0
+
+
+def test_a_landmark_trigger_pools_with_a_hand_reaction_on_the_same_gain(reg):
+    """One occurrence, two of the player's abilities: p23 §2 says THEY choose
+    the order, so both must arrive through the ability pool — a landmark that
+    resolved inline would silently take the first slot."""
+    reg.STAGES[("Wellspring", "gained")] = \
+        lambda game, pid, fr, ch: engine.add_vp_tokens(game, pid, 1)
+    reg.TRIGGERS["Wellspring"] = [{"on": "gain", "from": "landscape",
+                                   "stage": "gained"}]
+    reg.STAGES[(WATCHED, "react")] = \
+        lambda game, pid, fr, ch: engine.add_coins(game, 2, pid)
+    reg.TRIGGERS[WATCHED] = [{"on": "gain", "from": "hand", "who": "actor",
+                              "stage": "react"}]
+    g = fresh(landscapes=["Wellspring"])
+    g["seats"][A]["hand"] = [WATCHED]
+    buy_phase(g, A, coins=0)
+    engine.gain(g, A, "Silver")
+    engine._drive(g)
+    f = frame(g)
+    assert f is not None and f["card"] == "__abilities", \
+        "two abilities from one gain must be the player's ordering choice"
+    ids = [o["id"] for o in f["constraint"]["options"]]
+    assert len(ids) == 2
+
+
+# ── a split pile prices itself through its FACE (the paid-row pin) ────────────
+
+def test_an_ordered_piles_cost_follows_its_current_face(reg):
+    """Empires' five 5/5 split piles and the 8-Castle pile are ph.-8 SETUP DATA,
+    not new code: 3H already prices a pile through the card on top, and retains
+    that face when the pile empties. This is the verification the ph.-8 spec
+    leans on — a passing contract test, not a new mechanism."""
+    g = fresh()
+    engine.add_pile(g, "Split", contents=["Cellar", "Cellar", "Market", "Market"],
+                    supply=True, members=["Cellar", "Market"])
+    assert engine.pile_top(g, "Split") == "Cellar"
+    assert engine.cost(g, "Split") == 2               # Cellar's price
+    engine._pile_take(g, "Split")
+    engine._pile_take(g, "Split")
+    assert engine.pile_top(g, "Split") == "Market"
+    assert engine.cost(g, "Split") == 5               # the uncovered half
+    engine._pile_take(g, "Split")
+    engine._pile_take(g, "Split")
+    assert engine.pile_count(g, "Split") == 0
+    assert engine.cost(g, "Split") == 5, "an empty pile keeps its last face's price"
+    assert engine.player_view(g, A)["costs"]["Split"] == 5
 
 
 # ── the bots ──────────────────────────────────────────────────────────────────
