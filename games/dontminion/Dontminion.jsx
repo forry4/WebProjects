@@ -53,6 +53,7 @@ const EXPANSIONS = [
   { id: "darkages", name: "Dark Ages" },
   { id: "adventures", name: "Adventures" },
   { id: "empires", name: "Empires" },
+  { id: "renaissance", name: "Renaissance" },
 ];
 // Adventures tokens that sit ON a Supply pile (engine.TOKEN_KINDS). Public
 // markers, so they render for every player; the glyph is the token's own
@@ -877,6 +878,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // move regardless), but without it every pile lights up as affordable and
   // the click bounces, which reads as a broken board rather than a rule.
   const debtBlocks = myDebt > 0;
+  // Villagers (Renaissance) — the other half of the Coffers mat, spent for
+  // +1 Action each. The SERVER decides when: unlike Coffers they are ACTION
+  // PHASE ONLY (they never got Coffers' 2022 "any time during your turn"
+  // change), and that rule lives in engine.spendable, not here.
+  const myVillagers = game?.villagers?.[myId] ?? 0;
+  const spendableVillagers = over ? 0 : (game?.spendable?.villagers ?? 0);
   const inBuy = !!game && game.phase === "buy" && game.turn === myId && !game.pending_pid && !over;
   const inAction = !!game && game.phase === "action" && game.turn === myId && !game.pending_pid && !over;
   const bought = !!game?.turn_ctx?.bought;
@@ -1600,6 +1607,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
               &#9733; <Pop n={store} />
             </span>
           )}
+          {/* PROJECT CUBES (Renaissance): a Project's ability is active for
+              whoever has a cube on it, for the rest of the game — so the
+              cubes ARE the state and every player needs to see them. One
+              coloured dot per owner, in seat order. */}
+          {st.kind === "project" && (st.bought_by || []).length > 0 && (
+            <span className="dm-ls-cubes">
+              {seatOrder.filter((p) => (st.bought_by || []).includes(p)).map((p) => (
+                <span key={p} className={"dm-cube dm-cube-" + (seatOrder.indexOf(p) % 4)}
+                  title={`${names[p] || p} has a cube on ${name}`} />
+              ))}
+            </span>
+          )}
+          {/* Sinister Plot's counters — per player, next to their cube */}
+          {(st.tokens?.[myId] || 0) > 0 && (
+            <span className="dm-ls-vp" title="your tokens here">
+              ● <Pop n={st.tokens[myId]} />
+            </span>
+          )}
         </span>
         {spent && <span className="dm-ls-tick" title="you have bought this">✓</span>}
       </button>
@@ -1634,6 +1659,28 @@ export default function Dontminion({ myId, authUser, onExit }) {
             🪙 <Pop n={game.debt[pid]} /> Debt</span>
         )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
+        {/* VILLAGERS (Renaissance) — the other half of the Coffers mat. Public
+            like Coffers: an opponent sitting on six Villagers is about to
+            take a very long turn, and that is information the table has. */}
+        {(game.villagers?.[pid] || 0) > 0 && (
+          <span className="dm-opp-turns" title="Villagers — each is +1 Action in their Action phase">
+            🧑 <Pop n={game.villagers[pid]} /></span>
+        )}
+        {(game.coffers?.[pid] || 0) > 0 && (
+          <span className="dm-opp-turns" title="Coffers — each is +$1, spendable any time in their turn">
+            🪙 <Pop n={game.coffers[pid]} /></span>
+        )}
+        {/* ARTIFACTS (Renaissance): one copy of each exists and it sits in
+            front of whoever took it last — public, and taken FROM the
+            previous holder, so the badge has to move rather than duplicate. */}
+        {Object.entries(game.artifacts || {})
+          .filter(([, holder]) => holder === pid)
+          .map(([a]) => (
+            <span key={a} className="dm-seat-tok"
+              title={`${a} — ${catalog?.artifacts?.[a]?.text || "Artifact"}`}>
+              🏳 {a}
+            </span>
+          ))}
         {/* Adventures tokens that sit in front of a PLAYER rather than on a
             pile. Public markers, so they render for every seat — and the two
             negative ones matter enough to the reader that hiding them would be
@@ -2149,6 +2196,29 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       <button className="btn btn-outline btn-sm dm-spend"
                         title={`Spend all ${myCoffers} Coffers`}
                         onClick={() => mv({ type: "spend", what: "coffers", n: myCoffers })}>
+                        all
+                      </button>
+                    )}
+                  </span>
+                )}
+                {/* Villagers: Coffers' twin one column over — spent for +1
+                    Action each, and only in your Action phase. The buttons
+                    key on the SERVER's spendable count, so the phase rule is
+                    never duplicated here. */}
+                {myVillagers > 0 && (
+                  <span className="dm-counter" title="Villagers — spend in your Action phase for +1 Action each">
+                    Villagers <b><Pop n={myVillagers} /></b>
+                    {spendableVillagers > 0 && (
+                      <button className="btn btn-gold btn-sm dm-spend"
+                        title="Spend 1 Villager for +1 Action"
+                        onClick={() => mv({ type: "spend", what: "villagers", n: 1 })}>
+                        +1 Action
+                      </button>
+                    )}
+                    {spendableVillagers > 1 && (
+                      <button className="btn btn-outline btn-sm dm-spend"
+                        title={`Spend all ${spendableVillagers} Villagers`}
+                        onClick={() => mv({ type: "spend", what: "villagers", n: spendableVillagers })}>
                         all
                       </button>
                     )}

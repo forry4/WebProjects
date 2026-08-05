@@ -757,6 +757,10 @@ async def catalog():
         # Bridge", so unlike a pile it needs no per-game price on the wire. The
         # game dict ships only which ones are on the table and their state.
         "landscapes": cards.LANDSCAPES,
+        # ARTIFACTS (Renaissance) — static, and a THIRD table for the same
+        # reason landscapes got a second one: an Artifact is neither a card
+        # nor a landscape. The game dict ships only who holds each one.
+        "artifacts": cards.ARTIFACTS,
         # kingdom requirements the create screen may ask for, in dealing order
         # (the picker is built from THIS, so adding one needs no frontend edit)
         "requirements": [{"id": r, "label": cards.REQUIREMENTS[r]["label"]}

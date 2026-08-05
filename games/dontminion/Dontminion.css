@@ -506,6 +506,16 @@
 .dm-ls-cost { font-size: 12px; font-weight: 800; color: var(--gold, #c9a84c); }
 /* a LANDMARK's VP store, shown where an Event shows its price */
 .dm-ls-vp { font-size: 12px; font-weight: 800; color: var(--gold-light, #e8c96a); }
+/* PROJECT CUBES: one per owner. A Project's ability is on for whoever has a
+   cube, for the rest of the game, so these are permanent table state — and
+   they are per PLAYER, hence the seat-indexed colours. */
+.dm-ls-cubes { display: inline-flex; gap: 3px; align-items: center; }
+.dm-cube { width: 8px; height: 8px; border-radius: 2px; display: inline-block;
+  border: 1px solid rgba(0, 0, 0, .45); }
+.dm-cube-0 { background: #d9534f; }
+.dm-cube-1 { background: #4a90d9; }
+.dm-cube-2 { background: #5cb85c; }
+.dm-cube-3 { background: #e8c96a; }
 .dm-ls-buyable { border-color: var(--gold, #c9a84c); box-shadow: 0 0 0 1px var(--gold, #c9a84c) inset; }
 .dm-ls-spent { opacity: .45; cursor: default; }
 .dm-ls-tick { position: absolute; top: 4px; right: 6px; font-size: 12px; color: var(--gold, #c9a84c); }
