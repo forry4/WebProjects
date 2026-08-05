@@ -49,27 +49,31 @@ def _actor(game):
     return game["pending_pid"] or game["turn"]
 
 
-def _donate_deadlock(game):
-    """THE ONE RULES-FAITHFUL STATE THAT NEVER ENDS (documented ph. 8).
+def _economically_frozen(game, since):
+    """Is this the RULES-FAITHFUL stall rather than a livelock?
 
-    Buy Donate, trash your whole deck, and hold the Debt: you have no cards,
-    so no income; Debt blocks every buy; and with nothing being gained no pile
-    can ever empty, so no end condition can fire. Real Dominion has exactly
-    this property — there is nothing here to fix — so a harness that lands on
-    a Donate board must assert PROGRESS (turns advancing) rather than
-    termination.
+    Dominion really can reach a state it never leaves. Buy Donate, trash your
+    whole deck, and hold the Debt (ph. 8): no cards means no income, Debt
+    blocks every buy, and with nothing being gained no pile can ever empty, so
+    no end condition can fire. A board full of trashers reaches the same place
+    by a different road — a uniform-random bot fires them indiscriminately
+    until both decks are gone (ph. 9, on a Renaissance board of Hideout /
+    Improve / Priest / Recruiter). Real Dominion has this property; there is
+    nothing here to fix.
 
-    It is asserted NARROWLY on purpose: Donate dealt, and EVERY player both in
-    Debt and holding no cards at all. Anything less specific would quietly
-    excuse a real livelock, which is the failure this soak exists to catch."""
-    if "Donate" not in game["landscapes"]:
+    The discriminator is ECONOMIC, not a list of card names — a name list goes
+    stale with the next set, and both of the above are the same state reached
+    two ways. A LIVELOCK is a bot cycling no-op moves INSIDE one turn, so
+    turns stop advancing (that is the failure this soak exists to catch, and
+    it has caught it: `play_all_treasures` with only manual treasures in hand
+    stuck two live prod games). A stall still advances turns and simply cannot
+    gain anything ever again. So: many turns passed, and not one card was
+    gained in any of them."""
+    turns0, gains0 = since
+    if game["turn_number"] - turns0 < 50:
         return False
-    for pid, seat in game["seats"].items():
-        if not game["debt"].get(pid):
-            return False
-        if any(seat[z] for z in ("deck", "hand", "discard", "in_play")):
-            return False
-    return True
+    gains = sum(1 for e in game["log"] if e.get("event") == "gain")
+    return gains == gains0
 
 
 def _random_move(game, pid, rng):

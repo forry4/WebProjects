@@ -369,6 +369,23 @@ BM_TERMINALS = {
     "Forum": 70,
     "Legionary": 65,
     "Wild Hunt": 64,
+    # Renaissance, measured at 300 games each. **Old Witch (0.9125) is the
+    # strongest card this sweep has ever measured** — a Witch that also lets
+    # its victims un-junk still beats every other terminal in the roster,
+    # because against a money deck the Curses are what matter and the
+    # may-trash rarely fires. The four REJECTIONS are the set's lesson, and
+    # they all fail the same way: **Coffers and Villagers are DEFERRED value
+    # a money deck never collects.** Villain (0.1033) is the worst card in
+    # any sweep here, below even Footpad — its +2 Coffers is money next turn
+    # and its discard attack barely dents a deck of Treasures. Priest
+    # (0.3733) needs a trashing deck it hasn't got, Recruiter (0.4200) pays
+    # in Villagers this tier cannot spend (it holds one terminal), and Patron
+    # (0.4475) is a Reaction on an event a money deck never causes. Scholar
+    # (0.5342) and Seer (0.5150) are washes and absent for the usual reason.
+    "Old Witch": 91,
+    "Swashbuckler": 63,
+    "Lackeys": 57,
+    "Silk Merchant": 56,
     "Wharf": 87,
     "Vault": 82,
     "Charlatan": 81,
