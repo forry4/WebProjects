@@ -10,7 +10,19 @@
    Nothing here may set display/grid-template-columns/gap: this sheet is
    concatenated AFTER the shared one, so a base rule would out-order the shared
    MEDIA rules and pin the lobby to three columns on a phone. */
-.dm-lobby-cols { padding: 12px 18px 40px; max-width: 1280px; margin: 0 auto; width: 100%; }
+/* FULL-BLEED, like Spender's and CoC's lobbies (both `max-width:none`) and Duel's
+   (no cap at all). This carried `max-width:1280px;margin:0 auto` and was the only
+   three-column lobby that stopped short of the screen edge — the columns got
+   narrower on a wide monitor while the space beside them went unused. The cap is
+   lobby-only, so the game board's own width rules are untouched. */
+.dm-lobby-cols { padding: 12px 18px 40px; width: 100%; }
+/* ...and the tab bar has to match that inset. Every other game gets its side
+   padding from a PAGE wrapper (.browser / .coc-wrap / .duel), so their tab bar
+   and columns line up for free; Dontminion's lobby root has none and the padding
+   lives on the grid itself, which is why the bar it used to own carried an
+   explicit `margin: 0 18px`. Keep them equal or the bar runs to the screen edge
+   while the cards below it sit inset. */
+.dm .lby-tabs { margin-left: 18px; margin-right: 18px; }
 .dm-toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
