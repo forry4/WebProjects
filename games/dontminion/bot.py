@@ -420,6 +420,26 @@ def _pay_off_debt(game, pid, moves):
     return move if move in moves else None
 
 
+def _spend_villagers(game, pid, moves):
+    """Villagers (Renaissance) when the Action phase would otherwise end.
+
+    Called only once no `play_action` is legal, which for these tiers means
+    exactly one thing: an Action card is in hand and the Action pool is empty.
+    A Villager IS that Action ("each spent Villager gives you +1 Action"), and
+    they are Action-phase-only, so spending one now is strictly better than
+    ending the phase holding them — money cannot be carried between turns and
+    neither, in practice, can a Villager you never spend.
+
+    Unlike Debt this is waste rather than a lock, which is why it sits after
+    the play loop instead of before it. One at a time: the next iteration
+    re-enters with a `play_action` available."""
+    n = engine.spendable(game, pid).get("villagers", 0)
+    if n <= 0:
+        return None
+    move = {"type": "spend", "what": "villagers", "n": 1}
+    return move if move in moves else None
+
+
 def _buy_or_fall_back(game, pid, want, moves):
     """Turn a wanted pile into a move, falling back to the money ladder.
 
@@ -453,6 +473,9 @@ def choose_bm_plus(game, pid, rng=None, policy=None):
             plays.sort(key=lambda m: (traits(m["card"])["terminal"],
                                       -traits(m["card"])["plus_cards"]))
             return plays[0]
+        villagers = _spend_villagers(game, pid, moves)
+        if villagers is not None:
+            return villagers
         return {"type": "end_phase"}
 
     # DEBT (Empires) FIRST — see _pay_off_debt.
@@ -610,6 +633,9 @@ def choose_strategist(game, pid, rng=None, force=None):
             for m in plays:
                 if not _skip_for_reshuffle(game, pid, m["card"]):
                     return m
+        villagers = _spend_villagers(game, pid, moves)
+        if villagers is not None:
+            return villagers
         return {"type": "end_phase"}
 
     # DEBT (Empires) FIRST — see _pay_off_debt.

@@ -80,6 +80,15 @@ TRASHERS = {
     # classifies here at all.
     "Transmogrify": "tfb",
     "Amulet": "weak", "Ratcatcher": "weak", "Raze": "weak",
+    # Renaissance. Recruiter and Priest are the "tfb" ones — each converts a
+    # trashed card into a scaling payoff (Villagers per $1; +$2 on every trash
+    # for the rest of the turn). Hideout and Improve trash exactly one, and
+    # Hideout's is a real cost on a Victory card (it hands you a Curse back).
+    # Ducat is DELIBERATELY absent: its trash is a when-GAIN ability that fires
+    # once, on one Copper, and a plan that read it as a thinner would be
+    # counting a card it can only use the turn it buys it.
+    "Recruiter": "tfb", "Priest": "tfb",
+    "Hideout": "weak", "Improve": "weak",
 }
 
 # Attack kind — what the attack DOES to its victims. Drives both the defensive
@@ -125,6 +134,10 @@ ATTACKS = {
     "Bridge Troll": "discard", "Relic": "topdeck",
     "Giant": "trash", "Warrior": "trash",
     "Swamp Hag": "curse", "Haunted Woods": "topdeck", "Soldier": "discard",
+    # Renaissance. Only two Attacks in the set: Old Witch is a Witch that also
+    # lets its victims un-junk (still a curser for the defensive read), and
+    # Villain forces a $2+ discard, which is the Militia read.
+    "Old Witch": "curse", "Villain": "discard",
 }
 
 # Cards that answer an Attack from hand (the reaction window / immunity).
@@ -154,6 +167,11 @@ GAINERS = {
     "Altar", "Armory", "Bandit Camp", "Beggar", "Count", "Dame Natalie",
     "Graverobber", "Hermit", "Marauder", "Procession", "Rats", "Rebuild",
     "Rogue",
+    # Renaissance. Inventor and Sculptor gain any pile up to $4 (Sculptor
+    # straight to hand); Experiment gains a second copy of itself; Improve
+    # remodels a card leaving play; Treasurer takes a Treasure out of the
+    # TRASH, which is a gain by rule ("when-gain abilities will trigger").
+    "Inventor", "Sculptor", "Experiment", "Improve", "Treasurer",
 }
 
 # The subset that can gain ANY pile of its own choosing, repeatably, without
@@ -175,7 +193,14 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
                 # Empires: Engineer gains any pile up to $4 and can then trash
                 # ITSELF for a second one, so the deck grows without spending a
                 # card from hand — the Workshop shape, twice.
-                "Engineer"}
+                "Engineer",
+                # Renaissance: Inventor and Sculptor are both the Workshop
+                # shape — any pile up to $4, every play, costing no card from
+                # hand. Sculptor gains to HAND, which if anything makes it the
+                # better rush engine. Improve is excluded (its gain costs the
+                # Action leaving play), and so is Experiment (it only ever
+                # drains its OWN pile — the Port/Magpie rule).
+                "Inventor", "Sculptor"}
 # Adventures adds NONE, deliberately. Every gainer it ships pays for the gain:
 # Artificer discards a card per $1, Hero and Treasure Hunter give you Treasures
 # rather than a pile of your choice, Duplicate needs a gain to copy, and Port
@@ -200,6 +225,11 @@ SIFTERS = {
     # Guide replaces your whole hand. Gear is NOT one — it sets cards aside for
     # next turn rather than improving what you draw now.
     "Dungeon", "Fugitive", "Guide",
+    # Renaissance. Border Guard and Seer both look at the top of the deck and
+    # keep the useful ones; Mountain Village fishes a KNOWN card out of the
+    # discard pile (the Hermit/Scavenger shape); Cargo Ship parks a gained
+    # card in next turn's hand rather than in the discard pile.
+    "Border Guard", "Seer", "Mountain Village", "Cargo Ship",
 }
 
 # Victory cards whose value is NOT a fixed number — the alt-VP article's
@@ -250,7 +280,13 @@ DRAW_TO_X = {"Library", "Watchtower", "Jack of All Trades", "Magnate",
              "Guide", "Storyteller",
              # Empires: City Quarter draws one per Action in your hand, and
              # Archive parcels three cards out over three turns
-             "City Quarter", "Archive"}
+             "City Quarter", "Archive",
+             # Renaissance: Scholar discards its hand for a flat 7 (a real
+             # drawer no "+N Cards" scan can see), Seer takes however many of
+             # the top 3 are priced $2-$4, Research parcels out cards equal to
+             # what it trashed, and Mountain Village nets exactly one either
+             # way — from the discard pile if it can, off the deck if not
+             "Scholar", "Seer", "Research", "Mountain Village"}
 
 # Kingdom Treasures a money deck genuinely wants (the Terminal-Draw-BM
 # article's list) vs the ones that are engine parts wearing a Treasure's
@@ -263,7 +299,13 @@ BM_TREASURES = {"Fool's Gold", "Bank", "Hoard", "Farm", "Collection",
                 # and the 6 Debt it hands back locks your next buy entirely,
                 # which this bot does not model; a money deck that cannot buy
                 # is worse than one that bought a Gold.
-                "Plunder"}
+                "Plunder",
+                # Renaissance: Spices is a $2 Treasure with a +Buy and two
+                # Coffers on the way in — strictly better than a Silver for a
+                # money deck. Ducat and Scepter are NOT: Ducat prints $0
+                # (its Coffers is one deferred coin) and Scepter's whole value
+                # is replaying an Action a money deck never has.
+                "Spices"}
 
 # How good a card is as Big Money's ONE terminal, higher = better. Cards absent
 # from this table are not BM terminals at all and `bm_terminal_rank` returns 0
@@ -437,6 +479,14 @@ REVIEWED = frozenset([
     # ...and the eight Castles.
     "Crumbling Castle", "Grand Castle", "Haunted Castle", "Humble Castle",
     "King's Castle", "Opulent Castle", "Small Castle", "Sprawling Castle",
+    # --- Renaissance (ph. 9) — all 25 are ordinary kingdom piles; the 20
+    # Projects are landscapes and the 5 Artifacts are neither, so neither
+    # kind reaches traits() at all.
+    "Acting Troupe", "Border Guard", "Cargo Ship", "Ducat", "Experiment",
+    "Flag Bearer", "Hideout", "Improve", "Inventor", "Lackeys",
+    "Mountain Village", "Old Witch", "Patron", "Priest", "Recruiter",
+    "Research", "Scepter", "Scholar", "Sculptor", "Seer", "Silk Merchant",
+    "Spices", "Swashbuckler", "Treasurer", "Villain",
 ])
 
 
