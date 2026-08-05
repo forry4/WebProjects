@@ -1181,6 +1181,117 @@ CARDS.update({
                         "expansion": "empires", "kingdom": False},
 })
 
+# --- RENAISSANCE (phase 9) ----------------------------------------------------
+#
+# 25 kingdom piles, all of size 10 (the compendium states every pile-size
+# exception as a special-setup line — "if Rats is in the Supply, use all 20
+# cards" — and Renaissance's SPECIAL SETUP section has none, Experiment
+# included). No second edition, so nothing is trimmed; no Victory kingdom
+# cards, no Events, no Landmarks, no Heirlooms. The 20 Projects are LANDSCAPES
+# and the 5 Artifacts are neither cards nor landscapes — see ARTIFACTS.
+#
+# SEVEN OBJECTS DIFFER FROM THEIR ORIGINAL 2018 PRINTING (compendium ch. V);
+# the texts below are the CURRENT ones:
+#
+#   2019 — Lantern. It now "triggers when you play ANY Border Guard instead of
+#          changing just your Border Guards", so a Border Guard played out of
+#          the trash or from the Supply is modified if the PLAYER holds it.
+#   2021 — Citadel, Innovation. Citadel was changed to play the card twice and
+#          then, "because of an unintended effect, CHANGED BACK IN 2022" — the
+#          current card replays it after it resolves (the ph.-6H
+#          `action_resolved` seam). Innovation dropped its "set aside" clause.
+#   2022 — Experiment, Exploration, Patron (+ Citadel's revert). Experiment
+#          returns "to its PILE" rather than to the Supply, which is what lets
+#          it work with Ferryman's extra pile; Exploration counts every card
+#          GAINED in the Buy phase, not just bought ones; and Patron pays
+#          Coffers only "during an Action phase", which is what kills the old
+#          Pursue infinite and means a Buy-phase reveal (Loan, Venture) pays
+#          nothing.
+#   2024 — Scepter, with Rising Sun. It is now itself a COMMAND card and may
+#          only replay non-Command cards, "to prevent you from using Scepter
+#          to replay itself infinitely when Enlightenment is active". Ch. V
+#          notes this was NOT PRINTED YET; we ship current texts by directive.
+#
+# Villagers are the second spendable mat and are ACTION-PHASE ONLY — they never
+# received Coffers' 2022 "any time during your turn" change. See Kernel v9.
+CARDS.update({
+    "Border Guard":      {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nReveal the top 2 cards of your deck. Put one into your hand and discard the other. If both were Actions, take the Lantern or Horn.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Ducat":             {"cost": 2, "types": ["treasure"], "coins": 0, "vp": 0,
+                        "text": "+1 Coffers\n+1 Buy\nWhen you gain this, you may trash a Copper from your hand.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Lackeys":           {"cost": 2, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nWhen you gain this, +2 Villagers.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Acting Troupe":     {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+4 Villagers\nTrash this.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Cargo Ship":        {"cost": 3, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+$2\nOnce this turn, when you gain a card, you may set it aside face up (on this). At the start of your next turn, put it into your hand.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Experiment":        {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nReturn this to its pile.\nWhen you gain this, gain another Experiment (that doesn't come with another).",
+                        "expansion": "renaissance", "kingdom": True},
+    "Improve":           {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nAt the start of Clean-up, you may trash an Action card you would discard from play this turn, to gain a card costing exactly $1 more than it.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Flag Bearer":       {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nWhen you gain or trash this, take the Flag.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Hideout":           {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nTrash a card from your hand. If it's a Victory card, gain a Curse.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Inventor":          {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain a card costing up to $4, then cards cost $1 less this turn.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Mountain Village":  {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Actions\nLook through your discard pile and put a card from it into your hand; if you can't, +1 Card.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Patron":            {"cost": 4, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "+1 Villager\n+$2\nWhen something causes you to reveal this (using the word \"reveal\") in an Action phase, +1 Coffers.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Priest":            {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nTrash a card from your hand.\nFor the rest of this turn, when you trash a card, +$2.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Research":          {"cost": 4, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nTrash a card from your hand. Per $1 it costs, set aside a card from your deck face down (on this). At the start of your next turn, put those cards into your hand.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Silk Merchant":     {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Buy\nWhen you gain or trash this, +1 Coffers and +1 Villager.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Old Witch":         {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+3 Cards\nEach other player gains a Curse and may trash a Curse from their hand.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Recruiter":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nTrash a card from your hand. +1 Villager per $1 it costs.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Scepter":           {"cost": 5, "types": ["treasure", "command"], "coins": 0, "vp": 0,
+                        "text": "Choose one: +$2; or replay a non-Command Action card you played this turn that's still in play.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Scholar":           {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Discard your hand. +7 Cards.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Sculptor":          {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain a card to your hand costing up to $4. If it's a Treasure, +1 Villager.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Seer":              {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\nReveal the top 3 cards of your deck. Put the ones costing from $2 to $4 into your hand. Put the rest back in any order.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Spices":            {"cost": 5, "types": ["treasure"], "coins": 2, "vp": 0,
+                        "text": "$2\n+1 Buy\nWhen you gain this, +2 Coffers.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Swashbuckler":      {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+3 Cards\nIf your discard pile has any cards in it: +1 Coffers, then if you have at least 4 Coffers tokens, take the Treasure Chest.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Treasurer":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$3\nChoose one: Trash a Treasure from your hand; or gain a Treasure from the trash to your hand; or take the Key.",
+                        "expansion": "renaissance", "kingdom": True},
+    "Villain":           {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+2 Coffers\nEach other player with 5 or more cards in hand discards one costing $2 or more (or reveals they can't).",
+                        "expansion": "renaissance", "kingdom": True},
+})
+
 # THE TRAVELLER CHAINS — "when you discard this from play, you may EXCHANGE it
 # for the next one". `from -> into`; each upgrade is its own non-Supply pile of
 # TRAVELLER_PILE cards, included whenever the chain's head is in the kingdom.
@@ -1431,6 +1542,53 @@ LANDSCAPES = {
                         "text": "When scoring, -1 VP per card you have after the first 15."},
     "Wolf Den":        {"kind": "landmark", "expansion": "empires",
                         "text": "When scoring, -3 VP per card you have exactly 1 copy of."},
+
+    # --- RENAISSANCE: the game's first 20 PROJECTS (phase 9) -----------------
+    # A Project is bought ONCE and then always on: "you activate the Project by
+    # placing an unused Project cube of your player color on it. This Project's
+    # ongoing ability now applies to you for the rest of the game." You get two
+    # cubes and may not buy the same one twice — both are properties of the
+    # KIND, enforced in `landscape_gate`, not `once` rows here.
+    "Cathedral":       {"kind": "project", "cost": 3, "expansion": "renaissance",
+                        "text": "At the start of your turn, trash a card from your hand."},
+    "City Gate":       {"kind": "project", "cost": 3, "expansion": "renaissance",
+                        "text": "At the start of your turn, +1 Card, then put a card from your hand onto your deck."},
+    "Pageant":         {"kind": "project", "cost": 3, "expansion": "renaissance",
+                        "text": "At the end of your Buy phase, you may pay $1 for +1 Coffers."},
+    "Sewers":          {"kind": "project", "cost": 3, "expansion": "renaissance",
+                        "text": "When you trash a card other than with this, you may trash a card from your hand."},
+    "Star Chart":      {"kind": "project", "cost": 3, "expansion": "renaissance",
+                        "text": "When shuffling, you may pick one of the cards to go on top."},
+    "Exploration":     {"kind": "project", "cost": 4, "expansion": "renaissance",
+                        "text": "At the end of your Buy phase, if you didn't gain any cards during it, +1 Coffers and +1 Villager."},
+    "Fair":            {"kind": "project", "cost": 4, "expansion": "renaissance",
+                        "text": "At the start of your turn, +1 Buy."},
+    "Silos":           {"kind": "project", "cost": 4, "expansion": "renaissance",
+                        "text": "At the start of your turn, discard any number of Coppers, revealed, and draw that many cards."},
+    "Sinister Plot":   {"kind": "project", "cost": 4, "expansion": "renaissance",
+                        "text": "At the start of your turn, add a token here, or remove your tokens here for +1 Card each."},
+    "Academy":         {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "When you gain an Action card, +1 Villager."},
+    "Capitalism":      {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "During your turns, Actions with +$ amounts in their text are also Treasures."},
+    "Fleet":           {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "After the game ends, there's an extra round of turns just for players with this."},
+    "Guildhall":       {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "When you gain a Treasure, +1 Coffers."},
+    "Piazza":          {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "At the start of your turn, reveal the top card of your deck. If it's an Action, play it."},
+    "Road Network":    {"kind": "project", "cost": 5, "expansion": "renaissance",
+                        "text": "When another player gains a Victory card, +1 Card."},
+    "Barracks":        {"kind": "project", "cost": 6, "expansion": "renaissance",
+                        "text": "At the start of your turn, +1 Action."},
+    "Crop Rotation":   {"kind": "project", "cost": 6, "expansion": "renaissance",
+                        "text": "At the start of your turn, you may discard a Victory card for +2 Cards."},
+    "Innovation":      {"kind": "project", "cost": 6, "expansion": "renaissance",
+                        "text": "Once during each of your turns, when you gain an Action card, you may play it."},
+    "Canal":           {"kind": "project", "cost": 7, "expansion": "renaissance",
+                        "text": "During your turns, cards cost $1 less."},
+    "Citadel":         {"kind": "project", "cost": 8, "expansion": "renaissance",
+                        "text": "The first time you play an Action card during each of your turns, replay it afterwards."},
 }
 
 
@@ -1517,6 +1675,8 @@ KINGDOM = {
                  if c["kingdom"] and c["expansion"] == "empires"]
                 + [p for p, d in PILES.items()
                    if d["kingdom"] and d["expansion"] == "empires"]),
+    "renaissance": [n for n, c in CARDS.items()
+                    if c["kingdom"] and c["expansion"] == "renaissance"],
 }
 
 

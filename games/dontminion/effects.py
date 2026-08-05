@@ -8,11 +8,15 @@ modules is a packaging bug and raises at import.
 
 from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
                effects_hinterlands, effects_cornucopia, effects_alchemy,
-               effects_darkages, effects_adventures, effects_empires)
+               effects_darkages, effects_adventures, effects_empires,
+               effects_renaissance_a, effects_renaissance_b)
 
 _MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
             effects_hinterlands, effects_cornucopia, effects_alchemy,
-            effects_darkages, effects_adventures, effects_empires)
+            effects_darkages, effects_adventures, effects_empires,
+            # Renaissance ships as two halves while the batch is in flight;
+            # they are concatenated into effects_renaissance.py at integration
+            effects_renaissance_a, effects_renaissance_b)
 
 EFFECTS = {}
 STAGES = {}
