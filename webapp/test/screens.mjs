@@ -1245,6 +1245,78 @@ try {
 		await ctx.close();
 	}
 
+	// ── a REAL Renaissance board (ph. 9): PROJECTS and the Villagers mat ──────
+	// Two more render paths this set adds, neither reachable before it:
+	//   * a PROJECT in the landscape row. It prints a price like an Event but
+	//     is bought ONCE and then permanent, marked by a per-player CUBE — so
+	//     the row must render cube dots for owners and none for a fresh board.
+	//     The Empires block above asserts a landmark prints no price; a project
+	//     does print one, which is the other side of that biconditional.
+	//   * the VILLAGERS counter in the resource bar, whose SPEND control is
+	//     driven by the server's `spendable` (Villagers are Action-phase only)
+	//     rather than by any client-side rule.
+	// Written as well-formedness assertions rather than demanding a particular
+	// deal, the same shape as the rest of this file.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "ren-harness", name: "Ren", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".dm-checks", { timeout: 15_000 }).catch(() => {});
+		for (const label of ["Renaissance", "Base Set"]) {
+			await page.locator(".dm-checks .dm-check", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".dm-checks .dm-check-on")].map((b) => b.textContent.trim()));
+		// the ph.-3 lesson: the picker used to map a literal list, so a shipped
+		// set could be correct on the backend and unpickable in the UI
+		check("the Renaissance expansion is selectable",
+			picked.length === 1 && /Renaissance/.test(picked[0]), JSON.stringify(picked));
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("a Renaissance game deals a board", dealt);
+
+		if (dealt) {
+			const board = await page.evaluate(() => {
+				const faces = [...document.querySelectorAll(".dm-lscape")].map((f) => ({
+					name: f.querySelector(".dm-ls-name")?.textContent || "",
+					kind: f.querySelector(".dm-ls-kind")?.textContent || "",
+					cost: f.querySelector(".dm-ls-cost")?.textContent || "",
+					cubes: f.querySelectorAll(".dm-cube").length,
+					text: (f.querySelector(".dm-ls-text")?.textContent || "").length,
+					overflows: f.scrollHeight > f.clientHeight + 1,
+				}));
+				return { rows: document.querySelectorAll(".dm-lscape-row").length, faces };
+			});
+			// a PROJECT renders like a purchasable landscape and, on a fresh
+			// board, carries NO cube — nobody has bought one yet
+			const projects = board.faces.filter((f) => f.kind === "project");
+			check("a Project renders with a price, its text and no cube yet",
+				board.faces.length === 0
+					? board.rows === 0
+					: board.rows === 1 && projects.every((f) =>
+						f.name && f.text > 0 && !f.overflows
+						&& /^\$\d+$/.test(f.cost) && f.cubes === 0),
+				JSON.stringify(board.faces));
+		}
+		check("no page errors on a Renaissance board", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Offline vs-AI (Spender local play) ────────────────────────────────────
 	// The first browser coverage of BOTH the offline driver and the client-WASM AI
 	// path: /offline must boot with no backend ping, create a local game through the

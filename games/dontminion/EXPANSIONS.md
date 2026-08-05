@@ -23,7 +23,7 @@ API; every set's cards verified against compendium ch. VII (current texts + ruli
 | 7 | **Adventures** (30 + 8 Travellers + 20 Events) | Reserves + the Tavern mat and `from:"tavern"` call windows (6H), the 20 Events on `LANDSCAPE_FX` + `buy_landscape` (6H), Traveller chains on `add_pile(supply=False)` (3H) + `exchange` (ph. 3) + the interruptible Clean-up (5H), Adventures tokens (6H) — plus the ph.-7 kernel delta: `until="forever"` durations (Champion/Hireling), the −1 Card / −$1 / Journey seat tokens, Mission's no-buy extra turn, Save's end-of-turn hand return, Inheritance's Estate-token type injection, and `gain(**extra)`. **RETIRED deviation B6** (Coffers mid-ability, for Storyteller) | **SHIPPED** 2026-08-04 |
 | 7H | **HARDENING: the DEBT vector + the scoring pipeline** (no new cards) | pays the two ph.-8 ledger rows standalone: the cost vector's third dimension inside the SAME six comparators (`debt_cost`, printed, no reduction reaches it), `game["debt"]` + the buyer-level buy gate + the payoff via a real `_SPENDABLES` registry (the 2024 "any time during your turn" timing), `effects.LANDSCAPE_SCORING` summed into `_total_vp`, `LANDSCAPE_SETUP`, landscape/pile VP + Debt stores on 6H's state and 3H's `attach`, and the `from:"landscape"` trigger source. SCHEMA 11 (fill-only) | **SHIPPED** 2026-08-05 |
 | 8 | **Empires** (24 piles + 13 Events + 21 Landmarks) | **7H's seams took their first consumers with NO change** (Debt, LANDSCAPE_SCORING, LANDSCAPE_SETUP, the VP stores, `from:"landscape"`). Six kernel additions were still needed: pile identity follows the RANDOMIZER (`pile_types`), the `would_resolve` window + `cancel_pending_play` (Enchantress — and the ph.-10 Ways kernel, early), `return_to_action_phase` (Villa), `finish_duration` (Archive), `return_at_cleanup` (Encampment) and `emit("buy_phase_start")` (Arena). SCHEMA 12 (fill-only) | **SHIPPED** 2026-08-05 |
-| 9 | Renaissance (25 + 20 Projects + Artifacts) | Villagers (same shape as Coffers), Projects (landscape purchase + permanent per-player abilities), Artifacts (unique pass-around objects) | planned |
+| 9 | **Renaissance** (25 + 20 Projects + 5 Artifacts) | The roadmap's three headlines were right and badly undersized: **eight** kernel items were needed. Villagers on 7H's `_SPENDABLES` (but **Action-phase only** — they never got Coffers' 2022 any-time change), project cube ownership + `recipients` scoping on `from:"landscape"`, the `from:"artifact"` source + `cards.ARTIFACTS`, **Fleet**'s after-game-end round, **Star Chart**'s interruptible shuffle (`final_draw`), **Canal** as a `cost()` clause, **Capitalism**'s `types_of` injection + Buy-phase play routing + `autoplay_treasures` (the ph.-12 ledger row, early), and the `reveal` emit. Plus two gaps the batches found: `trash(**extra)` and `duration_handle`. SCHEMA 13 (fill-only) | **SHIPPED** 2026-08-05 |
 | 10 | Menagerie (30 + Events + 20 Ways) | Exile mat (+ discard-from-exile on gain), Horses non-supply (3H), Ways (alternative play modes — rides the identity system) | planned |
 | 11 | Nocturne (33 + Boons/Hexes/Heirlooms) | ⚠ **BIGGEST PHASE**: Night phase (turn-structure change: phase enum, auto-advance, legal_moves, bot, undo, frontend), Boon/Hex shared decks (new persisted RNG streams + receive flow), Heirlooms setup, Spirits non-supply, Zombies start in trash, Exorcist exchange | planned |
 | 12 | Allies (31 + 23 Allies) | Favors (Coffers shape), Allies (shared per-game global ability), ROTATING split piles (3H's model must support rotate) | planned |
@@ -625,6 +625,53 @@ forced-landscape fuzz** that puts each of the 34 Empires landscapes on a board o
 — zero failures, all **28 real prod saves** replayed at v12, `npm run smoke`, and `npm run
 screens` with a REAL Empires board asserting the two render paths this set adds: a landmark
 that prints no price at all, and a Debt badge that REPLACES the coin cost on a {ND} card.
+
+## Phase 9 — RENAISSANCE: SHIPPED 2026-08-05
+
+**25 kingdom piles, 20 PROJECTS and the game's first 5 ARTIFACTS.** 337 cards, 11 sets, 74
+landscapes. No second edition, nothing trimmed, every pile 10.
+
+**The roadmap row named the right three headlines and undersized them by five.** "Villagers
+(same shape as Coffers), Projects, Artifacts" became **eight** kernel items — full list in
+`CLAUDE.md` "Kernel v9". What generalises:
+
+- **A CARD'S TIMING IS NOT ITS NEIGHBOUR'S, even when the mechanic is.** Villagers ARE Coffers'
+  shape — one `_SPENDABLES` entry, exactly as ph. 4 promised — but Coffers took the 2022 "at any
+  time during your turn" change and **Villagers did not**: they are Action-phase only. Copying
+  the sibling's timing would have been invisible in every test written from the mechanic.
+- **CAPITALISM PULLED A PH.-12 LEDGER ROW FORWARD, which is what that ledger is for.** An Action
+  that becomes a Treasure must never be fired by the play-all button (a changed Militia attacks;
+  a changed Smithy draws), and the static `MANUAL_TREASURES` set cannot express membership that
+  depends on game state. `autoplay_treasures` is now THE reader for the handler, `legal_moves`
+  and `player_view` — the same predicate Allies' Highwayman needs.
+- **VILLA GENUINELY ENDS A BUY PHASE, and ph. 8 pinned the opposite.** Six shipped cards print
+  "at the end of your Buy phase … **in it**" (Merchant Guild, Treasury, Hermit, Wine Merchant,
+  plus this set's Exploration and Pageant) and must see both, so `return_to_action_phase` emits
+  `buy_phase_end` now. The three cards that only RIDE that event to approximate Clean-up timing
+  (Alchemist, Herbalist, Scheme — each printed "when you discard it from play") filter on a new
+  `final` flag. **They cannot simply move to `cleanup_start`**, which is the seam that looks
+  right: `_end_turn` discards done Duration entries BEFORE emitting it, and a Duration finishing
+  at this Clean-up IS a legal Scheme target. Deviation B1 is rewritten, not retired.
+- **The batches found two gaps and reported them instead of working around them** — which is the
+  contract, and both were real. `trash(**extra)` is the missing twin of ph. 7's `gain(**extra)`
+  (Sewers' "other than with this" is unexpressible without it, and the card chains until your
+  hand is empty). `duration_handle` names a physical card's duration entry from a LATER window:
+  Cargo Ship sets a card aside on a GAIN, long after `_cur_dur` moved on, and registering blind
+  mints a second entry for one card — the ph.-7H conjured-card bug in a new place.
+
+**Seven objects differ from their 2018 printing** (ch. V), and four change the code: the 2019
+**Lantern** triggers on any Border Guard its HOLDER plays; **Citadel** was changed in 2021 to
+play the card twice and **changed back in 2022**, so the current card replays after resolution
+(ph. 6H's `action_resolved`); the 2022 **Experiment** returns "to its PILE", which is what lets
+it work with Ferryman's extra pile; and the 2024 **Scepter** is itself a Command card that may
+only replay non-Command cards — **which no card-list site shows yet**, because the compendium
+records it as "not printed yet".
+
+**A side effect worth knowing about for every future landscape set: adding 20 Projects to
+`landscape_pool` RE-DEALS every existing seed's landscapes.** The dealer simulates the
+randomizer mix literally, so pool SIZE is an input. It moved Donate onto a forced-kingdom soak
+board and surfaced ph. 8's documented Donate/Debt deadlock there; the soak asserts PROGRESS on
+that board now, exactly as the ph.-8 note said a harness must.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
