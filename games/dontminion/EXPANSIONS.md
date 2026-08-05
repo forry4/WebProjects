@@ -513,28 +513,43 @@ Landmark's VP displays live all game and `score_game` reads the same number. The
 ph.-7 Inheritance lesson: a scoring fn must not change value at `game["over"]`, and the
 type-sensitive case is already pinned by `types_of`'s over-gate.
 
-**A fix that fell out of writing the log line:** `coffers` and `spend` logged their count as
-`n=`, and `_log` stamps the log SEQUENCE into `entry["n"]` LAST — so the client had been
-rendering the sequence number ("gets +917 Coffers"). Both log `count=` now; `fmtLog` reads
-`e.count ?? e.n` so entries already in prod render exactly as they did.
+**THE FUZZ CENSUS FOUND A LIVE CARD-CONSERVATION BUG, pre-existing since ph. 7 — fixed here.**
+`_cur_dur` points `add_duration_fx` at the physical card being played, and it is set by
+`play_action_card`. That holds while a play resolves inline — but an Attack's ability is PARKED
+under the reaction windows, and anything resolving in the gap that plays a card of its own
+repoints it. **Caravan Guard is the collision**: a reaction that plays ITSELF and is a Duration.
+So a Haunted Woods played into a Caravan Guard reaction found the pointer on the reactor's
+entry, saw the names disagree, and minted a SECOND setup entry for a card played once.
 
-**Found but NOT fixed here — a pre-existing ph.-7 defect.** The real-board fuzz census turned up
-one card-conservation break, reproduced identically on the unmodified tree: **Royal Carriage
-replaying a Duration Attack mints a SECOND `dur_setup` entry**, so the card is owned twice and
-an extra copy reaches the deck. `play_action_card(from_zone=None)` sets `_cur_dur` to the
-existing entry correctly, but an Attack's play ability is PARKED under the reaction window, and
-by the time it runs and calls `add_duration_fx` the pointer has been cleared — `_dur_entry_for`
-then appends a fresh entry. Repro: 4p, `['adventures','alchemy','base']`, seed 4, random bot
-rng 0, move 343. It is card behaviour in a shipped set, not a 7H seam, so it is left for its own
-change with its own Throne-Room-×-every-Duration cross-set test.
+One mis-pointed entry is only latent — the empty eager entry is never promoted, so the count
+still comes out right. It becomes a **conjured card** when the ability runs TWICE (a Throne Room
+or Royal Carriage replay of a Duration Attack with a Duration-playing reaction inside each
+window): both entries carry fx, both promote at Clean-up, and `owned_cards` counts one physical
+card twice. Found on a 4p `adventures+alchemy+base` board, seed 4, move 343.
 
-**Gates:** package suite (1455, +47), full repo suite (2526), a 348-game fuzz census over real
-boards (every set, sampled pairs, rolling triples, all-sets; 2p/3p/4p; random + bmplus) with
-**one failure, the pre-existing Royal Carriage break above** and nothing else — no Debt token
-reached a real board, as asserted per move — plus a synthetic-Debt fuzz board where
-random-legal bots take Debt and pay their way out, all **27 real prod saves** replayed at v11,
-`npm run smoke` + `npm run screens`. The Debt chip and payoff control are dormant UI,
-hand-verified like 6H's landscape row.
+The fix is `_restore_cur_dur`: the two parked-play frames (`__attack/play_ability` and
+`__play/ability`) now carry the pointer they were pushed with and re-point it before running the
+ability. **Restore, not save-and-revert** — the pointer must stay live for the later stages the
+ability pushes (Haven's pick, Throne Room's rider marking), which is exactly what the inline
+path gives them. Guarded on the data key being PRESENT, not on its value (expand/contract: a
+live save can be sitting on an attack window right now, and `None` is a meaningful value — a
+non-Duration play sets the pointer to None). Four cross-set tests, two of which go red when the
+restore is disabled.
+
+**A third bug, from writing one log line:** `coffers`, `spend` and `end_draw` logged their count
+as `n=`, and `_log` stamps the log SEQUENCE into `entry["n"]` LAST — so the client had been
+rendering the sequence number ("gets +917 Coffers"). All three log `count=` now, `fmtLog` reads
+`e.count ?? e.n` so entries already in prod render exactly as they did, and
+`test_no_log_call_passes_a_count_as_n` is the guard, because the failure is invisible to any
+test that doesn't read the rendered string.
+
+**Gates:** package suite (1460, +52), full repo suite (2531), a 348-game fuzz census over real
+boards (every set, sampled pairs, rolling triples, all-sets; 2p/3p/4p; random + bmplus) — **zero
+failures, and no Debt token reached a real board, asserted per move** — a 220-game
+duration-and-attack-heavy fuzz (random 3-set combos, 2p/3p/4p) clean, a synthetic-Debt fuzz
+board where random-legal bots take Debt and pay their way out, all **27 real prod saves**
+replayed at v11, `npm run smoke` + `npm run screens`. The Debt chip and payoff control are
+dormant UI, hand-verified like 6H's landscape row.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 

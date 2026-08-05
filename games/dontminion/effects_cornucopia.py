@@ -526,7 +526,9 @@ def _butcher_spend(game, pid, frame, choice):
     n = min(int(choice["ids"][0]), game["coffers"].get(pid, 0))
     if n:
         game["coffers"][pid] -= n
-        E._log(game, pid, "spend", what="coffers", n=n)
+        # `count`, not `n` — _log stamps the log SEQUENCE into entry["n"]
+        # last, so an n= kwarg never survives (engine._h_spend, same fix)
+        E._log(game, pid, "spend", what="coffers", count=n)
         E.add_coins(game, n)
     # "up to $1 more than IT per Coffers you spend" — a CARD reference, so
     # trashing a Potion card can reach another one (see engine's cost vector)
@@ -655,7 +657,7 @@ def _farrier_gained(game, pid, frame, choice):
     n = frame["data"].get("overpay", 0)
     if n and pid == game["turn"]:
         game["turn_ctx"]["end_draw"] += n
-        E._log(game, pid, "end_draw", n=n)
+        E._log(game, pid, "end_draw", count=n)   # `n` is the log sequence
 
 
 # --- Ferryman ----------------------------------------------------------------

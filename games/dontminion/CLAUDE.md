@@ -272,10 +272,29 @@ contract-tested against synthetics in `tests/test_debt.py` (31) and the ph.-7H h
   a payoff control in the resource bar driven by the SERVER's `spendable.debt`; `debtBlocks`
   mirrors `debt_blocks_buying` so the board greys out instead of bouncing the click.
   `fmtLog` cases for `debt` / `pile_vp` / `pile_debt` / `landscape_vp` and a Debt wording
-  for `spend`. **Also fixed here: `coffers` and `spend` logged their count as `n=`, which
-  `_log` overwrites with the log SEQUENCE last** — the client had been rendering that
-  sequence number. Both now log `count=`, and `fmtLog` reads `e.count ?? e.n` so old entries
-  render as they did.
+  for `spend`.
+- **A PARKED PLAY MUST CARRY ITS DURATION POINTER — `_restore_cur_dur` (a live bug fixed
+  here, pre-existing since ph. 7).** `_cur_dur` says which `dur_setup` entry
+  `add_duration_fx` writes to, and `play_action_card` sets it for the physical card. That is
+  correct while a play resolves INLINE — but an Attack's ability is parked under the reaction
+  windows, and anything in the gap that plays a card repoints it. **Caravan Guard is the
+  collision: a reaction that plays ITSELF and is a Duration.** A Haunted Woods played into it
+  found the pointer on the reactor's entry, saw the names disagree, and minted a SECOND entry
+  for a card played once; with a Throne Room / Royal Carriage replay both entries carry fx,
+  both promote at Clean-up, and the card is OWNED TWICE (a conjured card — found by the fuzz
+  census on 4p `adventures+alchemy+base`, seed 4, move 343). Both parked-play frames
+  (`__attack/play_ability`, `__play/ability`) now carry the pointer and re-point it before
+  running the ability. **Restore, never save-and-revert**: it must stay live for the later
+  stages the ability pushes (Haven's pick, Throne Room's rider marking), which is what the
+  inline path gives them. Guarded on the data key being PRESENT (expand/contract — a live
+  save can be sitting on an attack window, and `None` is a meaningful value). **Any future
+  deferral of a play owes the same treatment.**
+- **`_log` kwargs: a COUNT goes in `count=`, never `n=`.** `_log` stamps the log SEQUENCE
+  into `entry["n"]` LAST so an event kwarg can never clobber a core field — which silently
+  discards an `n=`. Three sites did it (`coffers`, `spend`, `end_draw`) and the client
+  rendered the sequence ("gets +917 Coffers"). Fixed; `fmtLog` reads `e.count ?? e.n` so
+  entries already in prod render as before, and `test_no_log_call_passes_a_count_as_n` is the
+  guard — the failure is invisible to any test that doesn't read the rendered string.
 - 7H ships **no landmark, no Debt card and no Event** — the `landmark` kind stays undealt
   until Empires, exactly as 6H shipped zero Events. **What ph. 8 must VERIFY, not rebuild**:
   split piles + Castles are 3H ordered piles priced through their face (pinned by

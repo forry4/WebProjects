@@ -2481,3 +2481,133 @@ def test_the_bots_finish_every_adventures_chunk():
                 ok, err = engine.apply_move(g, pid, bot.choose(g, pid, rng, "bmplus"))
                 assert ok, err
             assert g["over"], f"chunk {i} / {ls[j:j+2]} never finished: {kingdom}"
+
+
+# --- a PARKED play ability must still know which duration entry it belongs to --
+#
+# `_cur_dur` points `add_duration_fx` at the physical card being played. That
+# holds while a play resolves inline — but an ATTACK's ability is parked under
+# the reaction windows, and anything that plays a card in the gap repoints it.
+# Caravan Guard is the collision: a reaction that PLAYS ITSELF and is a
+# Duration. Found by the ph.-7H fuzz census (4p, adventures+alchemy+base, seed
+# 4, move 343) as a CARD-CONSERVATION break — one Haunted Woods, two entries.
+
+def _owned_count(g, pid, card):
+    return engine.owned_cards(g, pid).count(card)
+
+
+def test_a_duration_attack_played_into_a_caravan_guard_reaction_makes_one_entry():
+    """THE regression. Haunted Woods (Duration Attack) is played; its ability is
+    parked under the reaction window; the opponent's Caravan Guard reacts by
+    PLAYING ITSELF, which is a Duration play and repoints `_cur_dur` at the
+    reactor's own entry. When the parked ability then registered its fx, the
+    names disagreed and a SECOND setup entry was minted for a card played once
+    — so the card was owned twice and an extra copy reached the deck."""
+    g = _adv(["Haunted Woods", "Caravan Guard"] + ADV_FILL[:8],
+             expansions=("adventures", "seaside", "base"))
+    give_hand(g, A, ["Haunted Woods"])
+    give_hand(g, B, ["Caravan Guard"])
+    g["turn"], g["phase"], g["actions"] = A, "action", 1
+    assert mv(g, A, {"type": "play_action", "card": "Haunted Woods"})[0]
+    # B is offered the reaction window and plays the Caravan Guard
+    assert g["pending_pid"] == B, g["pending_kind"]
+    opts = g["pending"][-1]["constraint"]["options"]
+    pick = next(o["id"] for o in opts if "Caravan Guard" in o["label"])
+    assert decide(g, B, ids=[pick])[0]
+    drain_decisions(g)
+
+    setups = [e["card"] for e in g["seats"][A].get("dur_setup", [])]
+    assert setups == ["Haunted Woods"], f"one play, {len(setups)} setup entries"
+    assert _owned_count(g, A, "Haunted Woods") == 1, "the card was owned twice"
+    # ...and the entry it wrote to is the one that actually holds the ability
+    entry = g["seats"][A]["dur_setup"][0]
+    assert entry["fx"] or entry["watchers"], "the fx landed on a stranger's entry"
+
+
+def test_a_throne_roomed_duration_attack_into_two_reactions_conserves_cards():
+    """THE conservation break the fuzz actually hit, staged deterministically.
+
+    One mis-pointed entry is only latent: the empty eager entry is never
+    promoted, so the count still comes out right. It becomes a CONJURED CARD
+    when the ability runs TWICE — a Throne Room (or Royal Carriage) replay of a
+    Duration Attack with a Duration-playing reaction inside each window. Then
+    both mis-pointed entries carry fx, both are promoted at Clean-up, and
+    `owned_cards` counts the one physical card twice."""
+    from collections import Counter
+
+    def census(game):
+        total = Counter(engine.pile_cards(game))
+        total.update(game["trash"])
+        for p in game["players"]:
+            total.update(engine.owned_cards(game, p))
+        return total
+
+    def react_with_caravan_guard(g):
+        opts = g["pending"][-1]["constraint"]["options"]
+        pick = next((o["id"] for o in opts if "Caravan Guard" in o["label"]), None)
+        assert pick, [o["label"] for o in opts]
+        assert decide(g, B, ids=[pick])[0]
+
+    g = _adv(["Haunted Woods", "Caravan Guard", "Throne Room"] + ADV_FILL[:7],
+             expansions=("adventures", "seaside", "base"))
+    give_hand(g, A, ["Throne Room", "Haunted Woods"])
+    give_hand(g, B, ["Caravan Guard", "Caravan Guard"])
+    g["turn"], g["phase"], g["actions"] = A, "action", 1
+    baseline = census(g)          # AFTER the staged hands — give_hand replaces one
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Haunted Woods"])[0]
+    # one reaction window PER replay (deviation A1), so B plays one Guard into
+    # each — and each of those is itself a Duration play that repoints _cur_dur
+    react_with_caravan_guard(g)
+    drain_decisions(g)
+    setups = [e["card"] for e in g["seats"][A].get("dur_setup", [])]
+    assert setups == ["Haunted Woods"], f"two replays, {len(setups)} entries"
+    assert census(g) == baseline
+
+    # ...and it stays true through the Clean-up that promotes the entries, and
+    # on into the following turns, which is where the extra copy surfaced
+    rng = random.Random(3)
+    for _ in range(400):
+        if g["over"]:
+            break
+        pid = g["pending_pid"] or g["turn"]
+        ok, err = engine.apply_move(g, pid, rng.choice(engine.legal_moves(g, pid))
+                                    if not g["pending_pid"] else
+                                    {"type": "decision",
+                                     **engine.sample_decision(g, pid, rng)})
+        assert ok, err
+        assert census(g) == baseline, "a card was conjured or destroyed"
+
+
+def test_an_old_parked_attack_frame_without_the_pointer_still_resolves():
+    """EXPAND/CONTRACT: a game can be sitting on an attack window right now,
+    with a frame this deploy did not write. The restore is keyed on the data
+    key being PRESENT, so an older frame behaves exactly as it did — which is
+    the same discipline the interrupted-Clean-up sweep's `pulled` flag uses."""
+    g = _adv(["Haunted Woods", "Moat"] + ADV_FILL[:8],
+             expansions=("adventures", "base"))
+    give_hand(g, A, ["Haunted Woods"])
+    give_hand(g, B, ["Moat"])
+    g["turn"], g["phase"], g["actions"] = A, "action", 1
+    assert mv(g, A, {"type": "play_action", "card": "Haunted Woods"})[0]
+    frame = next(f for f in g["pending"]
+                 if f["card"] == "__attack" and f["stage"] == "play_ability")
+    del frame["data"]["cur_dur"]              # as an older deploy wrote it
+    drain_decisions(g)
+    setups = [e["card"] for e in g["seats"][A].get("dur_setup", [])]
+    assert setups == ["Haunted Woods"]
+
+
+def test_a_throne_roomed_duration_attack_still_uses_one_entry():
+    """Throne Room replays pile onto the SAME physical card, and each replay
+    re-opens the attack window — so the pointer has to survive two parks."""
+    g = _adv(["Haunted Woods", "Throne Room"] + ADV_FILL[:8],
+             expansions=("adventures", "base"))
+    give_hand(g, A, ["Throne Room", "Haunted Woods"])
+    g["turn"], g["phase"], g["actions"] = A, "action", 1
+    assert mv(g, A, {"type": "play_action", "card": "Throne Room"})[0]
+    assert decide(g, A, cards=["Haunted Woods"])[0]
+    drain_decisions(g)
+    setups = [e["card"] for e in g["seats"][A].get("dur_setup", [])]
+    assert setups == ["Haunted Woods"], setups
+    assert _owned_count(g, A, "Haunted Woods") == 1

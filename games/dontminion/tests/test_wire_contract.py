@@ -120,6 +120,23 @@ def test_every_log_event_the_engine_emits_has_a_fmtLog_case():
         f"field names in the game log")
 
 
+def test_no_log_call_passes_a_count_as_n():
+    """`_log` stamps the log SEQUENCE into entry["n"] LAST, so core fields can
+    never be clobbered by an event kwarg — which means an `n=` kwarg is
+    silently thrown away. Three call sites did it anyway (`coffers`, `spend`,
+    `end_draw`) and the client rendered the sequence number: "gets +917
+    Coffers". Counts go in `count=`, and this is the guard, because the failure
+    is invisible in every test that doesn't read the rendered string."""
+    offenders = []
+    for path in sorted(pathlib.Path("games/dontminion").glob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'_log\(\s*game\s*,\s*[^,]+,\s*"([a-z_]+)"([^)]*)\)', src):
+            if re.search(r'\bn\s*=', m.group(2)):
+                offenders.append(f"{path.name}: {m.group(1)}")
+    assert not offenders, (
+        f"these _log calls pass n= and it is discarded: {offenders} — use count=")
+
+
 def test_every_bot_tier_the_picker_offers_is_one_the_server_accepts():
     """The create modal's bot ids are the same seam as any other wire field,
     and it FAILS SILENTLY: `_valid_difficulty` coerces anything it doesn't

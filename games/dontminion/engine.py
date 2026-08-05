@@ -2719,10 +2719,39 @@ def _before_play_then_ability(game, pid, card, replay=False):
     _emit_collect(game, pools, "before_play", actor=pid, subject=card,
                   replay=replay, attack=False)
     if pools:
-        push_auto(game, pid, "__play", "ability", data={"card": card})
+        push_auto(game, pid, "__play", "ability",
+                  data={"card": card, "cur_dur": game.get("_cur_dur")})
         _park_pools(game, pools)
         return
     _run_play_ability(game, pid, card)
+
+
+def _restore_cur_dur(game, frame):
+    """Re-point `_cur_dur` at the play this parked frame belongs to.
+
+    `_cur_dur` says which duration-setup entry `add_duration_fx` should write
+    to, and it is set by play_action_card / _play_one_treasure for the physical
+    card being played. That works while a play resolves inline. But a play can
+    be PARKED — under the attack window, or under a before_play pool — and
+    anything resolving in the gap that plays a card of its own repoints it:
+    Caravan Guard is a reaction that plays ITSELF and is a Duration, so a
+    Haunted Woods played into a Caravan Guard reaction found the pointer on the
+    reactor's entry, saw the card names disagree, and MINTED A SECOND ENTRY for
+    a card that was only played once — the card was then owned twice and an
+    extra copy reached the deck (a card-conservation break, found by the ph.-7H
+    fuzz census on a 4-player Adventures/Alchemy board).
+
+    Restoring rather than saving-and-reverting is deliberate: the pointer must
+    stay live for the LATER stages the ability pushes (Haven's pick, Throne
+    Room's rider marking), which is exactly what the inline path gives them.
+
+    Guarded on the key being PRESENT, not on its value: a frame written by an
+    earlier deploy can be sitting in a live save mid-attack-window, and it must
+    keep behaving the way it did when it was pushed. A value of None IS
+    meaningful — a non-Duration play sets the pointer to None, and the inline
+    path would have run its ability with None."""
+    if "cur_dur" in frame["data"]:
+        game["_cur_dur"] = frame["data"]["cur_dur"]
 
 
 def _run_play_ability(game, pid, card):
@@ -2740,6 +2769,7 @@ def _run_play_ability(game, pid, card):
 
 
 def _k_play_ability_frame(game, pid, frame, choice):
+    _restore_cur_dur(game, frame)
     _run_play_ability(game, pid, frame["data"]["card"])
 
 
@@ -2900,8 +2930,14 @@ def _open_attack_window(game, pid, card):
     immune0 = [o for o in opponents(game, pid) if attack_protected(game, o)]
     for o in immune0:
         _log(game, o, "lighthouse")
+    # `cur_dur` rides the frame because THIS PLAY'S duration-setup pointer is a
+    # property of the physical play, and the play is now split across a park:
+    # anything that runs inside the window (a reaction that PLAYS a card — a
+    # Caravan Guard is both) sets its own pointer, and the attack's ability
+    # would then register its fx against a stranger's entry. See _k_play_ability.
     push_auto(game, pid, "__attack", "play_ability",
-              data={"card": card, "immune": list(immune0)})
+              data={"card": card, "immune": list(immune0),
+                    "cur_dur": game.get("_cur_dur")})
     for o in reversed(opponents(game, pid)):
         # An ALREADY-PROTECTED player still gets the window: "it triggers
         # whenever an Attack card is played, no matter if the card would have
@@ -2996,6 +3032,7 @@ def _k_legacy_diplomat_discard(game, pid, frame, choice):
 
 
 def _k_play_ability(game, pid, frame, choice):
+    _restore_cur_dur(game, frame)
     game["_atk_immune"] = list(frame["data"]["immune"])
     try:
         _effect_fn(frame["data"]["card"])(game, pid)

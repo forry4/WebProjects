@@ -574,7 +574,10 @@ function fmtLog(e, names) {
     case "set_aside": return e.cards
       ? `${who} sets aside ${listCards(e.cards)}`
       : `${who} sets aside ${e.count} card${e.count === 1 ? "" : "s"}`;
-    case "end_draw": return `${who} will draw ${e.n} more card${e.n === 1 ? "" : "s"} at the end of the turn`;
+    case "end_draw": {
+      const k = e.count ?? e.n;                    // pre-fix entries kept it in n
+      return `${who} will draw ${k} more card${k === 1 ? "" : "s"} at the end of the turn`;
+    }
     case "trash": return `${who} trashes ${listCards(e.cards || [])}`;
     case "supply_trash": return `${who} trashes ${art(e.card)} from the Supply`;
     case "discard": {
