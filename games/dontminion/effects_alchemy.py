@@ -63,7 +63,7 @@ def _on_table(game, pid):
 # Potion to buy anything".
 
 def _alchemist(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
     E.add_watcher(game, pid, "Alchemist", "buy_phase_end",
                   stage="topdeck", until="turn_end")
@@ -103,7 +103,7 @@ def _alchemist_fires(game, watcher, ctx):
 # any order.
 
 def _apothecary(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     seen = E.look_top(game, pid, 4)
     if not seen:
@@ -145,13 +145,13 @@ def _apprentice_trash(game, pid, frame, choice):
     # ruling is explicit.
     n = E.cost(game, card) + (2 if E.potion_cost(game, card) else 0)
     if n:
-        E.draw(game, pid, n)
+        E.add_cards(game, n, pid)
 
 
 # --- Familiar ----------------------------------------------------------------
 
 def _familiar(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.attack_opponents(game, pid, "Familiar", "hit")
 

@@ -134,7 +134,7 @@ def _cotr_call(game, pid, frame, choice):
 # --- Page / Peasant (the two Traveller heads) --------------------------------
 
 def _page(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
 
 
@@ -146,7 +146,7 @@ def _peasant(game, pid):
 # --- Ratcatcher --------------------------------------------------------------
 
 def _ratcatcher(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     _to_tavern_if_in_play(game, pid, "Ratcatcher")
 
@@ -262,7 +262,7 @@ def _amulet_trash(game, pid, frame, choice):
 # --- Caravan Guard -----------------------------------------------------------
 
 def _caravan_guard(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_duration_fx(game, pid, "Caravan Guard", "next")
 
@@ -290,7 +290,7 @@ def _dungeon_again(game, pid, frame, choice):
 
 
 def _dungeon_cycle(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     hand = game["seats"][pid]["hand"]
     if hand:
         n = min(2, len(hand))
@@ -305,7 +305,7 @@ def _dungeon_discard(game, pid, frame, choice):
 # --- Gear --------------------------------------------------------------------
 
 def _gear(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     hand = game["seats"][pid]["hand"]
     if not hand:
         return                          # registers nothing: Gear doesn't persist
@@ -328,7 +328,7 @@ def _gear_back(game, pid, frame, choice):
 # --- Guide -------------------------------------------------------------------
 
 def _guide(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     _to_tavern_if_in_play(game, pid, "Guide")
 
@@ -377,7 +377,7 @@ def _duplicate_call(game, pid, frame, choice):
 # --- Magpie ------------------------------------------------------------------
 
 def _magpie(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     seen = E.look_top(game, pid, 1)
     if not seen:
@@ -460,7 +460,7 @@ def _miser_mode(game, pid, frame, choice):
 # --- Port --------------------------------------------------------------------
 
 def _port(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
 
 
@@ -481,7 +481,7 @@ def _port_gain(game, pid, frame, choice):
 def _ranger(game, pid):
     E.add_buys(game, 1)
     if E.flip_journey(game, pid):
-        E.draw(game, pid, 5)
+        E.add_cards(game, 5, pid)
 
 
 # --- Transmogrify ------------------------------------------------------------
@@ -526,7 +526,7 @@ def _transmogrify_take(game, pid, frame, choice):
 # --- Artificer ---------------------------------------------------------------
 
 def _artificer(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
     hand = game["seats"][pid]["hand"]
@@ -625,7 +625,7 @@ def _haunted_woods(game, pid):
 
 
 def _haunted_woods_next(game, pid, frame, choice):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
 
 
 def _haunted_woods_when(game, w, ctx):
@@ -651,7 +651,7 @@ def _haunted_woods_order(game, pid, frame, choice):
 # --- Lost City ---------------------------------------------------------------
 
 def _lost_city(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 2)
 
 
@@ -709,7 +709,7 @@ def _royal_carriage_call(game, pid, frame, choice):
 # 2022: +1 Card instead of the +$1 the old one paid itself with.
 
 def _storyteller(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     _storyteller_offer(game, pid, 3)
 
@@ -796,7 +796,7 @@ def _hireling(game, pid):
 
 
 def _hireling_each(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 # ══ THE TRAVELLERS ═══════════════════════════════════════════════════════════
@@ -853,7 +853,7 @@ def _treasure_hunter(game, pid):
 
 
 def _warrior(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     n = sum(1 for c in game["seats"][pid]["in_play"]
             if E.has_type(game, c, "traveller"))
     if n:
@@ -926,7 +926,7 @@ def _soldier_discard(game, pid, frame, choice):
 
 
 def _fugitive(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:

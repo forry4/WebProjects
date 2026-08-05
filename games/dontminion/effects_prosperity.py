@@ -123,11 +123,11 @@ def _bishop_opp_trash(game, pid, frame, choice):
 # Empty-pile count evaluated ONCE at play time (effects are immediate).
 
 def _city(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     empty = E.count_empty_piles(game)
     if empty >= 1:
-        E.draw(game, pid, 1)
+        E.add_cards(game, 1, pid)
     if empty >= 2:
         E.add_buys(game, 1)
         E.add_coins(game, 1)
@@ -192,7 +192,7 @@ def _forge_gain(game, pid, frame, choice):
 # the kernel consults it in the buy handler and legal_moves; gains bypass it).
 
 def _grand_market(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_buys(game, 1)
     E.add_coins(game, 2)
@@ -225,7 +225,7 @@ def _quarry(game, pid):
 # discard every Action/Treasure, the rest go back in the OWNER's order.
 
 def _rabble(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.attack_opponents(game, pid, "Rabble", "hit")
 
 
@@ -257,7 +257,7 @@ def _rabble_hit(game, pid, frame, choice):
 # denied that.
 
 def _vault(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     for o in reversed(E.opponents(game, pid)):
         if game["seats"][o]["hand"]:
             E.push_choose_option(game, o, "Vault", "opp_opt",
@@ -318,7 +318,7 @@ def _war_chest_gain(game, pid, frame, choice):
 # --- Worker's Village --------------------------------------------------------
 
 def _workers_village(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     E.add_buys(game, 1)
 
@@ -547,7 +547,7 @@ def _magnate(game, pid):
     if not hand:
         return                                 # reveal nothing, draw 0
     E.reveal(game, pid, hand, "hand")
-    E.draw(game, pid, sum(1 for c in hand if E.has_type(game, c, "treasure")))
+    E.add_cards(game, sum(1 for c in hand if E.has_type(game, c, "treasure")), pid)
 
 
 # --- Mint --------------------------------------------------------------------
@@ -589,7 +589,7 @@ def _mint_on_gain(game, pid, frame, choice):
 # by cost().
 
 def _peddler(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
 

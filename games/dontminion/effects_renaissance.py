@@ -68,8 +68,10 @@ def _gain_piles_up_to(game, coins):
 # "+2 Cards. — When you gain this, +2 Villagers."
 
 def _lackeys(game, pid):
-    # the draw ENDS the ability, so it is the final_draw form (Star Chart)
-    E.final_draw(game, pid, 2)
+    # a printed "+2 Cards" (so Chameleon swaps it) that also ENDS the ability
+    # (so a Star Chart owner gets their pick at the shuffle it may cause) —
+    # `add_cards(final=True)` is both seams at once
+    E.add_cards(game, 2, pid, final=True)
 
 
 def _lackeys_gain(game, pid, frame, choice):
@@ -108,7 +110,7 @@ def _flag_bearer_take(game, pid, frame, choice):
 # gain a Curse."
 
 def _hideout(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     hand = _hand(game, pid)
     if hand:
@@ -134,7 +136,7 @@ def _hideout_curse(game, pid, frame, choice):
 # "+2 Cards. +1 Buy. — When you gain or trash this, +1 Coffers and +1 Villager."
 
 def _silk_merchant(game, pid):
-    E.draw(game, pid, 2)          # not final: the +1 Buy follows it
+    E.add_cards(game, 2, pid)          # not final: the +1 Buy follows it
     E.add_buys(game, 1)
 
 
@@ -150,7 +152,7 @@ def _silk_merchant_bonus(game, pid, frame, choice):
 # hand."
 
 def _old_witch(game, pid):
-    E.draw(game, pid, 3)          # not final: the attack follows it
+    E.add_cards(game, 3, pid)          # not final: the attack follows it
     E.attack_opponents(game, pid, "Old Witch", "hit")
 
 
@@ -179,7 +181,7 @@ def _old_witch_trash(game, pid, frame, choice):
 # "+2 Cards. Trash a card from your hand. +1 Villager per $1 it costs."
 
 def _recruiter(game, pid):
-    E.draw(game, pid, 2)          # not final: the trash follows it
+    E.add_cards(game, 2, pid)          # not final: the trash follows it
     hand = _hand(game, pid)
     if hand:
         E.push_choose_cards(game, pid, "Recruiter", "trash", list(hand),
@@ -213,7 +215,7 @@ def _scholar(game, pid):
 
 
 def _scholar_draw(game, pid, frame, choice):
-    E.final_draw(game, pid, 7)    # the draw ENDS the ability
+    E.add_cards(game, 7, pid, final=True)   # a printed +7, and it ENDS the ability
 
 
 # --- Sculptor ($5) -----------------------------------------------------------
@@ -254,7 +256,7 @@ def _spices_gain(game, pid, frame, choice):
 # have at least 4 Coffers tokens, take the Treasure Chest."
 
 def _swashbuckler(game, pid):
-    E.draw(game, pid, 3)          # not final: the discard-pile test follows it
+    E.add_cards(game, 3, pid)          # not final: the discard-pile test follows it
     # "If your discard pile is empty AFTER drawing, you do nothing further" —
     # the +3 Cards can shuffle the discard pile away, and then there is none.
     if not game["seats"][pid]["discard"]:
@@ -394,7 +396,7 @@ def _crop_rotation_do(game, pid, frame, choice):
 
 
 def _crop_rotation_draw(game, pid, frame, choice):
-    E.final_draw(game, pid, 2)    # the draw ENDS the ability
+    E.add_cards(game, 2, pid, final=True)   # a printed +2, and it ENDS the ability
 
 
 # --- Silos ($4) --------------------------------------------------------------
@@ -769,7 +771,7 @@ def _cargo_ship_return(game, pid, frame, choice):
 # Enchanted play) still gives the bonuses and simply has nothing to return.
 
 def _experiment(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
     E.return_to_pile(game, pid, "Experiment", zone="in_play")
 
@@ -888,7 +890,7 @@ def _mountain_village(game, pid):
     E.add_actions(game, 2)
     disc = game["seats"][pid]["discard"]
     if not disc:
-        E.final_draw(game, pid, 1)      # the draw ENDS the ability
+        E.add_cards(game, 1, pid, final=True)   # printed +1, ENDS the ability
         return
     E.push_choose_cards(game, pid, "Mountain Village", "take", _names(disc), 1, 1,
                         "put into your hand")
@@ -1100,7 +1102,7 @@ def _scepter_replay(game, pid, frame, choice):
 # `cost_le` and `cost_ge` already encode both.
 
 def _seer(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     moved = E.look_top(game, pid, 3)
     if not moved:
@@ -1299,7 +1301,7 @@ def _road_network_when(game, pid, ctx):
 
 
 def _road_network_draw(game, pid, frame, choice):
-    E.final_draw(game, pid, 1)
+    E.add_cards(game, 1, pid, final=True)
 
 
 # --- City Gate ($3) ----------------------------------------------------------
@@ -1307,7 +1309,7 @@ def _road_network_draw(game, pid, frame, choice):
 # deck." A plain draw, NOT final_draw: work follows it.
 
 def _city_gate_start(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     hand = _names(game["seats"][pid]["hand"])
     if not hand:
         return
@@ -1342,7 +1344,7 @@ def _sinister_plot_answer(game, pid, frame, choice):
         return
     n = E.take_landscape_tokens(game, "Sinister Plot", pid)
     if n:
-        E.final_draw(game, pid, n)      # the draw ENDS the ability
+        E.add_cards(game, n, pid, final=True)   # printed +1 each, ENDS the ability
 
 
 # --- Piazza ($5) -------------------------------------------------------------

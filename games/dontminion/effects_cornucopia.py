@@ -164,7 +164,7 @@ def _advisor_pick(game, left, frame, choice):
 # engine.new_game — it happens before anyone plays anything.
 
 def _baker(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coffers(game, 1)
 
@@ -208,7 +208,7 @@ def _carnival(game, pid):
 # only if you actually discarded.
 
 def _hamlet(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     _hamlet_offer(game, pid, "action")
 
@@ -244,7 +244,7 @@ def _hamlet_discard(game, pid, frame, choice):
 # from every card in hand. Everything else revealed is discarded.
 
 def _hunting_party(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     seat = game["seats"][pid]
     E.reveal(game, pid, sorted(seat["hand"]), "hand")
@@ -271,7 +271,7 @@ def _hunting_party(game, pid):
 # this is a plain pile choice rather than an ordered pile's top card.
 
 def _joust(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
     if "Province" not in game["seats"][pid]["hand"]:
@@ -302,7 +302,7 @@ def _menagerie(game, pid):
     E.add_actions(game, 1)
     hand = list(game["seats"][pid]["hand"])
     E.reveal(game, pid, sorted(hand), "hand")
-    E.draw(game, pid, 3 if _distinct(hand) == len(hand) else 1)
+    E.add_cards(game, 3 if _distinct(hand) == len(hand) else 1, pid)
 
 
 # --- Merchant Guild ----------------------------------------------------------
@@ -341,7 +341,7 @@ def _merchant_guild_fires(game, watcher, ctx):
 # +1 Card +2 Actions; you MAY discard a Treasure for +1 Coffers ("DO X FOR").
 
 def _plaza(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     treasures = sorted({c for c in game["seats"][pid]["hand"]
                         if E.has_type(game, c, "treasure")})
@@ -403,7 +403,7 @@ def _remake_again(game, pid, frame, choice):
 # another Shop.
 
 def _shop(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_coins(game, 1)
     table = set(_on_table(game, pid))
     playable = sorted({c for c in game["seats"][pid]["hand"]
@@ -455,7 +455,7 @@ def _courser_pick(game, pid, frame, choice):
         if key not in picked:
             continue
         if key == "cards":
-            E.draw(game, pid, 2)
+            E.add_cards(game, 2, pid)
         elif key == "actions":
             E.add_actions(game, 2)
         elif key == "coins":
@@ -480,7 +480,7 @@ def _demesne(game, pid):
 
 def _housecarl(game, pid):
     actions = [c for c in _on_table(game, pid) if E.has_type(game, c, "action")]
-    E.draw(game, pid, _distinct(actions))
+    E.add_cards(game, _distinct(actions), pid)
 
 
 # --- Rewards: Huge Turnip ----------------------------------------------------
@@ -616,7 +616,7 @@ def _coronet_replay(game, pid, frame, choice):
 # gained to your hand.
 
 def _farmhands(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
 
 
@@ -656,7 +656,7 @@ def _farmhands_play_it(game, pid, frame, choice):
 # are cards for NEXT turn (engine._end_turn reads turn_ctx["end_draw"]).
 
 def _farrier(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_buys(game, 1)
 
@@ -674,7 +674,7 @@ def _farrier_gained(game, pid, frame, choice):
 # nothing else in the game can reach it.
 
 def _ferryman(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
     hand = sorted(game["seats"][pid]["hand"])
     if not hand:
@@ -718,7 +718,7 @@ def _footpad_down_to_3(game, opp, frame, choice):
 
 
 def _footpad_game_draw(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 def _footpad_in_action_phase(game, pid, ctx):
@@ -732,7 +732,7 @@ def _footpad_in_action_phase(game, pid, ctx):
 # pile and may be chosen.
 
 def _herald(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     seen = E.look_top(game, pid, 1)
     if not seen:
@@ -799,7 +799,7 @@ def _horn_gain(game, pid, frame, choice):
 # play draws and then optionally trashes, resolved in turn.
 
 def _infirmary(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     hand = sorted(game["seats"][pid]["hand"])
     if not hand:
         return
@@ -971,7 +971,7 @@ def _stonemason_overpay_gain(game, pid, frame, choice):
 # captures the immune set at play time (the Minion/Replace rule).
 
 def _young_witch(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     immune = list(game.get("_atk_immune", []))
     hand = sorted(game["seats"][pid]["hand"])
     if not hand:

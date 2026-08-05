@@ -83,7 +83,7 @@ def _astrolabe_turn_start(game, pid, frame, choice):
 # --- Bazaar ------------------------------------------------------------------
 
 def _bazaar(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     E.add_coins(game, 1)
 
@@ -91,13 +91,13 @@ def _bazaar(game, pid):
 # --- Caravan -----------------------------------------------------------------
 
 def _caravan(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_duration_fx(game, pid, "Caravan", "turn_start")
 
 
 def _caravan_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 # --- Cutpurse ----------------------------------------------------------------
@@ -133,7 +133,7 @@ def _fishing_village_turn_start(game, pid, frame, choice):
 # --- Haven -------------------------------------------------------------------
 
 def _haven(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     # Empty hand after the draw: no frame, no fx — "failed to set up", the
@@ -237,7 +237,7 @@ def _salvager_trash(game, pid, frame, choice):
 # --- Sea Chart ---------------------------------------------------------------
 
 def _sea_chart(game, pid):
-    E.draw(game, pid, 1)                # draw first, THEN reveal the new top
+    E.add_cards(game, 1, pid)                # draw first, THEN reveal the new top
     E.add_actions(game, 1)
     looked = E.look_top(game, pid, 1)
     if not looked:
@@ -255,7 +255,7 @@ def _sea_chart(game, pid):
 # The Curses are play-time only; the duration half is the delayed sifter.
 
 def _sea_witch(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.attack_opponents(game, pid, "Sea Witch", "curse")
     E.add_duration_fx(game, pid, "Sea Witch", "turn_start")
 
@@ -265,7 +265,7 @@ def _sea_witch_curse(game, pid, frame, choice):
 
 
 def _sea_witch_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 2)                # draw first; discards may be any cards
+    E.add_cards(game, 2, pid)                # draw first; discards may be any cards
     hand = game["seats"][pid]["hand"]
     if hand:
         E.push_choose_cards(game, pid, "Sea Witch", "discard",
@@ -275,7 +275,7 @@ def _sea_witch_turn_start(game, pid, frame, choice):
 # --- Tide Pools --------------------------------------------------------------
 
 def _tide_pools(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.add_actions(game, 1)
     E.add_duration_fx(game, pid, "Tide Pools", "turn_start")
 
@@ -290,7 +290,7 @@ def _tide_pools_turn_start(game, pid, frame, choice):
 # --- Warehouse ---------------------------------------------------------------
 
 def _warehouse(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -301,13 +301,13 @@ def _warehouse(game, pid):
 # --- Wharf -------------------------------------------------------------------
 
 def _wharf(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_buys(game, 1)
     E.add_duration_fx(game, pid, "Wharf", "turn_start")
 
 
 def _wharf_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_buys(game, 1)
 
 # ==========================================================================
@@ -359,7 +359,7 @@ def _corsair(game, pid):
 
 
 def _corsair_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 def _corsair_hit(game, pid, frame, choice):
@@ -408,7 +408,7 @@ def _monkey(game, pid):
 
 
 def _monkey_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 def _monkey_peek(game, pid, frame, choice):
@@ -416,7 +416,7 @@ def _monkey_peek(game, pid, frame, choice):
     order = game["players"]
     right = order[order.index(d["owner"]) - 1]  # the seat BEFORE the owner (wraps)
     if d["actor"] == right:                     # whoever's turn it is
-        E.draw(game, d["owner"], 1)
+        E.add_cards(game, 1, d["owner"])
 
 
 # --- Native Village --------------------------------------------------------------
@@ -596,7 +596,7 @@ def _tactician(game, pid):
 
 
 def _tactician_turn_start(game, pid, frame, choice):
-    E.draw(game, pid, 5)
+    E.add_cards(game, 5, pid)
     E.add_actions(game, 1)
     E.add_buys(game, 1)
 
@@ -621,7 +621,7 @@ def _treasure_map(game, pid):
 # --- Treasury --------------------------------------------------------------------
 
 def _treasury(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
 

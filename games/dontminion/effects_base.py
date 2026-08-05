@@ -58,16 +58,16 @@ from . import engine as E
 # ==========================================================================
 
 def _smithy(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
 
 
 def _village(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
 
 
 def _moat(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
 
 
 def _militia(game, pid):
@@ -88,7 +88,7 @@ def _militia_discard(game, pid, frame, choice):
 
 
 def _witch(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.attack_opponents(game, pid, "Witch", "curse")
 
 
@@ -160,7 +160,7 @@ def _cellar_discard(game, pid, frame, choice):
     # All chosen cards are discarded at once, THEN the draw — so a mid-draw
     # shuffle includes the just-discarded cards (rulebook clarification).
     E.discard(game, pid, picked)
-    E.draw(game, pid, len(picked))
+    E.add_cards(game, len(picked), pid)
 
 
 def _chapel(game, pid):
@@ -177,7 +177,7 @@ def _chapel_trash(game, pid, frame, choice):
 
 
 def _harbinger(game, pid):
-    E.draw(game, pid, 1)          # first — its shuffle may consume the discard
+    E.add_cards(game, 1, pid)          # first — its shuffle may consume the discard
     E.add_actions(game, 1)
     discard_pile = game["seats"][pid]["discard"]
     if discard_pile:
@@ -193,7 +193,7 @@ def _harbinger_topdeck(game, pid, frame, choice):
 
 
 def _merchant(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     # The play_treasure handler pays +$1 per merchant on the first Silver.
     game["turn_ctx"]["merchants"] += 1
@@ -246,7 +246,7 @@ def _moneylender_trash(game, pid, frame, choice):
 
 
 def _poacher(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
     n = E.count_empty_piles(game)      # read at the card's own resolution
@@ -284,7 +284,7 @@ def _remodel_gain(game, pid, frame, choice):
 
 
 def _laboratory(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
 
 
@@ -295,7 +295,7 @@ def _festival(game, pid):
 
 
 def _market(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_buys(game, 1)
     E.add_coins(game, 1)
@@ -377,7 +377,7 @@ def _bandit_trash_rest(game, pid, card):
 # --- Council Room -------------------------------------------------------------
 
 def _council_room(game, pid):
-    E.draw(game, pid, 4)
+    E.add_cards(game, 4, pid)
     E.add_buys(game, 1)
     for o in E.opponents(game, pid):            # mandatory draw — NOT an attack
         E.draw(game, o, 1)
@@ -455,7 +455,7 @@ def _mine_gain(game, pid, frame, choice):
 # --- Sentry -------------------------------------------------------------------
 
 def _sentry(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     moved = E.look_top(game, pid, 2)
     if not moved:

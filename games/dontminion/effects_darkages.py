@@ -156,7 +156,7 @@ def _band_of_misfits_play(game, pid, frame, choice):
 # --- Bandit Camp -------------------------------------------------------------
 
 def _bandit_camp(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     E.gain_from(game, pid, "Spoils")
 
@@ -198,7 +198,7 @@ def _catacombs_mode(game, pid, frame, choice):
         E.take_aside(game, pid, looked, dest="hand")
         return
     E.discard(game, pid, looked, zone="aside", public=True)
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
 
 
 def _catacombs_on_trash(game, pid, frame, choice):
@@ -313,7 +313,7 @@ def _counterfeit_second(game, pid, frame, choice):
 # order", which attack_opponents already guarantees.
 
 def _cultist(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.push_auto(game, pid, "Cultist", "chain")
     E.attack_opponents(game, pid, "Cultist", "hit")
 
@@ -341,7 +341,7 @@ def _cultist_chain_pick(game, pid, frame, choice):
 
 
 def _cultist_on_trash(game, pid, frame, choice):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
 
 
 # --- Death Cart --------------------------------------------------------------
@@ -428,7 +428,7 @@ def _forager_pay(game, pid):
 # This is not gaining it. It was still trashed."
 
 def _fortress(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
 
 
@@ -553,7 +553,7 @@ def _hermit_when(game, watcher, ctx):
 # --- Hunting Grounds ---------------------------------------------------------
 
 def _hunting_grounds(game, pid):
-    E.draw(game, pid, 4)
+    E.add_cards(game, 4, pid)
 
 
 def _hunting_grounds_on_trash(game, pid, frame, choice):
@@ -575,7 +575,7 @@ def _hunting_grounds_pick(game, pid, frame, choice):
 # card with several of the types gets all of them.
 
 def _ironmonger(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     looked = E.look_top(game, pid, 1)
     if not looked:
@@ -599,14 +599,14 @@ def _ironmonger_mode(game, pid, frame, choice):
     if E.has_type(game, card, "treasure"):
         E.add_coins(game, 1)
     if E.has_type(game, card, "victory"):
-        E.draw(game, pid, 1)
+        E.add_cards(game, 1, pid)
 
 
 # --- Junk Dealer -------------------------------------------------------------
 # "You get +1 Action and +$1 even if you don't have a card in your hand to trash."
 
 def _junk_dealer(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
     hand = game["seats"][pid]["hand"]
@@ -639,7 +639,7 @@ def _marauder_hit(game, pid, frame, choice):
 # itself while another copy is in hand.
 
 def _market_square(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_buys(game, 1)
 
@@ -786,7 +786,7 @@ def _procession_gain(game, pid, frame, choice):
 # reveal a hand of all Rats). First gain, THEN trash. Its pile is 20 cards.
 
 def _rats(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.gain(game, pid, "Rats")
     hand = game["seats"][pid]["hand"]
@@ -802,7 +802,7 @@ def _rats_trash(game, pid, frame, choice):
 
 
 def _rats_on_trash(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 # --- Rebuild -----------------------------------------------------------------
@@ -1003,7 +1003,7 @@ def _storeroom_paid(game, pid, frame, choice):
 # played Attack does anything (engine._emit_play_attack).
 
 def _urchin(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.attack_opponents(game, pid, "Urchin", "hit")
 
@@ -1058,7 +1058,7 @@ _VAGRANT_TYPES = ("curse", "ruins", "shelter", "victory")
 
 
 def _vagrant(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     looked = E.look_top(game, pid, 1)
     if not looked:
@@ -1074,7 +1074,7 @@ def _vagrant(game, pid):
 # --- Wandering Minstrel ------------------------------------------------------
 
 def _wandering_minstrel(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     looked = E.look_top(game, pid, 3)
     if not looked:
@@ -1192,13 +1192,13 @@ def _dame_sylvia(game, pid):
 
 def _sir_bailey(game, pid):
     _knight_attack(game, pid, "Sir Bailey")
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
 
 
 def _sir_destry(game, pid):
     _knight_attack(game, pid, "Sir Destry")
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
 
 
 def _sir_martin(game, pid):
@@ -1241,7 +1241,7 @@ def _abandoned_mine(game, pid):
 
 
 def _ruined_library(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 def _ruined_market(game, pid):
@@ -1287,7 +1287,7 @@ def _necropolis(game, pid):
 
 
 def _overgrown_estate_on_trash(game, pid, frame, choice):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
 
 
 def _hovel_when(game, pid, ctx):
@@ -1317,7 +1317,7 @@ def _madman(game, pid):
     # NOT OPTIONAL "IF YOU DO": the draw happens only if the return succeeded
     # (a Madman played without moving into play draws nothing).
     if E.return_to_pile(game, pid, "Madman", zone="in_play"):
-        E.draw(game, pid, len(game["seats"][pid]["hand"]))
+        E.add_cards(game, len(game["seats"][pid]["hand"]), pid)
 
 
 def _mercenary(game, pid):
@@ -1339,7 +1339,7 @@ def _mercenary_trash(game, pid, frame, choice):
         # "With one card in hand you can choose to trash that card, but then
         # Mercenary would do nothing further."
         return
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_coins(game, 2)
     E.attack_opponents(game, pid, "Mercenary", "hit",
                        immune=frame["data"].get("immune", []))

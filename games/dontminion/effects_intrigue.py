@@ -55,7 +55,7 @@ def _gain_piles(game, pred):
 # --- Courtyard ------------------------------------------------------------------
 
 def _courtyard(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     hand = game["seats"][pid]["hand"]
     if hand:
         E.push_choose_cards(game, pid, "Courtyard", "topdeck",
@@ -82,7 +82,7 @@ def _pawn(game, pid):
 def _pawn_pick(game, pid, frame, choice):
     for cid in choice["ids"]:
         if cid == "card":
-            E.draw(game, pid, 1)
+            E.add_cards(game, 1, pid)
         elif cid == "action":
             E.add_actions(game, 1)
         elif cid == "buy":
@@ -98,7 +98,7 @@ def _shanty_town(game, pid):
     hand = game["seats"][pid]["hand"]
     E.reveal(game, pid, list(hand), "hand")
     if not any(E.has_type(game, c, "action") for c in hand):
-        E.draw(game, pid, 2)
+        E.add_cards(game, 2, pid)
 
 
 # --- Steward ----------------------------------------------------------------------
@@ -114,7 +114,7 @@ def _steward(game, pid):
 def _steward_pick(game, pid, frame, choice):
     cid = choice["ids"][0]
     if cid == "cards":
-        E.draw(game, pid, 2)
+        E.add_cards(game, 2, pid)
     elif cid == "coins":
         E.add_coins(game, 2)
     else:
@@ -132,7 +132,7 @@ def _steward_trash(game, pid, frame, choice):
 # --- Wishing Well -----------------------------------------------------------------
 
 def _wishing_well(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.push_name_card(game, pid, "Wishing Well", "wish")
 
@@ -185,7 +185,7 @@ def _bridge(game, pid):
 def _conspirator(game, pid):
     E.add_coins(game, 2)
     if game["turn_ctx"]["actions_played"] >= 3:   # includes this play
-        E.draw(game, pid, 1)
+        E.add_cards(game, 1, pid)
         E.add_actions(game, 1)
 
 
@@ -207,13 +207,13 @@ def _ironworks_gain(game, pid, frame, choice):
     if "treasure" in types:
         E.add_coins(game, 1)
     if "victory" in types:
-        E.draw(game, pid, 1)
+        E.add_cards(game, 1, pid)
 
 
 # --- Mill -------------------------------------------------------------------------
 
 def _mill(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.push_choose_option(game, pid, "Mill", "pick",
                          options=[{"id": "discard", "label": "Discard 2 cards, for +$2"},
@@ -239,7 +239,7 @@ def _mill_discard(game, pid, frame, choice):
 # --- Mining Village -----------------------------------------------------------------
 
 def _mining_village(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
     if "Mining Village" in game["seats"][pid]["in_play"]:
         E.push_choose_option(game, pid, "Mining Village", "pick",
@@ -265,7 +265,7 @@ def _nobles(game, pid):
 
 def _nobles_pick(game, pid, frame, choice):
     if choice["ids"][0] == "cards":
-        E.draw(game, pid, 3)
+        E.add_cards(game, 3, pid)
     else:
         E.add_actions(game, 2)
 
@@ -273,7 +273,7 @@ def _nobles_pick(game, pid, frame, choice):
 # --- Upgrade ----------------------------------------------------------------------
 
 def _upgrade(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -349,7 +349,7 @@ def _lurker_gain_trash(game, pid, frame, choice):
 # --- Masquerade -------------------------------------------------------------------
 
 def _masquerade(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     order = [pid] + E.opponents(game, pid)
     ring = [p for p in order if game["seats"][p]["hand"]]
     if len(ring) >= 2:
@@ -424,7 +424,7 @@ def _swindler_gain(game, pid, frame, choice):
 # --- Diplomat (action side) ---------------------------------------------------------
 
 def _diplomat(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     if len(game["seats"][pid]["hand"]) <= 5:
         E.add_actions(game, 2)
 
@@ -432,7 +432,7 @@ def _diplomat(game, pid):
 # --- Secret Passage -----------------------------------------------------------------
 
 def _secret_passage(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -509,7 +509,7 @@ def _minion_pick(game, pid, frame, choice):
     hand = list(game["seats"][pid]["hand"])
     if hand:
         E.discard(game, pid, hand)
-    E.draw(game, pid, 4)
+    E.add_cards(game, 4, pid)
     E.attack_opponents(game, pid, "Minion", "hit", immune=frame["data"]["immune"])
 
 
@@ -523,7 +523,7 @@ def _minion_hit(game, pid, frame, choice):
 # --- Patrol -----------------------------------------------------------------------
 
 def _patrol(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     moved = E.look_top(game, pid, 4)
     if not moved:
         return
@@ -583,7 +583,7 @@ def _replace_curse(game, pid, frame, choice):
 # --- Torturer ---------------------------------------------------------------------
 
 def _torturer(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.attack_opponents(game, pid, "Torturer", "hit")
 
 

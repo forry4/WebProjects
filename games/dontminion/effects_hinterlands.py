@@ -134,7 +134,7 @@ def _piles(game, want=None, pred=None):
 # DISCARD (p50) — push_choose_cards clamps mn/mx to a short hand.
 
 def _oasis(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
     hand = game["seats"][pid]["hand"]
@@ -154,7 +154,7 @@ def _oasis_discard(game, pid, frame, choice):
 # Rabble's exact shape with a player-chosen discard set instead of a filter.
 
 def _cartographer(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     looked = E.look_top(game, pid, 4)
     if not looked:
@@ -180,7 +180,7 @@ def _cartographer_discard(game, pid, frame, choice):
 # Watchtower ruling turns on exactly that).
 
 def _margrave(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.add_buys(game, 1)
     E.attack_opponents(game, pid, "Margrave", "hit")
 
@@ -214,7 +214,7 @@ def _crossroads(game, pid):
     hand = list(game["seats"][pid]["hand"])
     if hand:
         E.reveal(game, pid, hand, "hand")
-    E.draw(game, pid, sum(1 for c in hand if E.has_type(game, c, "victory")))
+    E.add_cards(game, sum(1 for c in hand if E.has_type(game, c, "victory")), pid)
     if n == 1:
         E.add_actions(game, 3)
 
@@ -224,7 +224,7 @@ def _crossroads(game, pid):
 # docstring: this is Bridge's counter, deliberately.
 
 def _highway(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     game["turn_ctx"]["bridges"] += 1
 
@@ -237,7 +237,7 @@ def _highway(game, pid):
 # the Border Village itself was gained to the deck (GAIN ON WHEN-GAIN, p49).
 
 def _border_village(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 2)
 
 
@@ -261,7 +261,7 @@ def _border_village_gain(game, pid, frame, choice):
 # fully resolves first — it can change which piles are non-empty.
 
 def _wheelwright(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -386,7 +386,7 @@ def _farmland_gain(game, pid, frame, choice):
 # cards into your deck, you still shuffle" — p109).
 
 def _inn(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 2)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -456,7 +456,7 @@ def _haggler_gain(game, pid, frame, choice):
 # be captured during on_play and handed back via immune= (the Minion rule).
 
 def _witchs_hut(game, pid):
-    E.draw(game, pid, 4)
+    E.add_cards(game, 4, pid)
     hand = game["seats"][pid]["hand"]
     if hand:
         E.push_choose_cards(game, pid, "Witch's Hut", "discard",
@@ -552,9 +552,9 @@ def _cauldron_curse(game, pid, frame, choice):
 # that turn's clean-up by the kernel's all-seats sweep.
 
 def _guard_dog(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     if len(game["seats"][pid]["hand"]) <= 5:
-        E.draw(game, pid, 2)
+        E.add_cards(game, 2, pid)
 
 
 # --- registration ---------------------------------------------------------
@@ -654,7 +654,7 @@ def _stables_discard(game, pid, frame, choice):
     if not choice["cards"]:
         return                       # declined: no +3 Cards, no +1 Action
     E.discard(game, pid, choice["cards"])
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.add_actions(game, 1)
 
 
@@ -686,7 +686,7 @@ def _spice_merchant_trash(game, pid, frame, choice):
 
 def _spice_merchant_mode(game, pid, frame, choice):
     if choice["ids"][0] == "cards":
-        E.draw(game, pid, 2)
+        E.add_cards(game, 2, pid)
         E.add_actions(game, 1)
     else:
         E.add_buys(game, 1)
@@ -977,7 +977,7 @@ def _weaver_self_play(game, pid, frame, choice):
 # ==========================================================================
 
 def _trail(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)           # off-turn: evaporates (no pool to join)
 
 
@@ -1060,7 +1060,7 @@ def _berserker_on_gain(game, pid, frame, choice):
 # ==========================================================================
 
 def _scheme(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_watcher(game, pid, "Scheme", "buy_phase_end", stage="cleanup",
                   until="turn_end")

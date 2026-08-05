@@ -1669,7 +1669,7 @@ def add_buys(game, n, pid=None):
     _grant(game, pid, "buys", n, "buys")
 
 
-def add_cards(game, n, pid=None):
+def add_cards(game, n, pid=None, final=False):
     """**+N CARDS — the PRINTED bonus, and the twin of `add_coins`.**
 
     This is NOT the same thing as `draw()`, and the difference is the whole
@@ -1690,10 +1690,20 @@ def add_cards(game, n, pid=None):
     Off-turn it still draws: drawing is not a per-turn POOL (a Caravan Guard
     reaction draws on someone else's turn), which is why this does not go
     through `_grant`. The Chameleon swap only applies to the turn player,
-    since a swapped +Cards becomes +$ and $ off-turn evaporates by rule."""
+    since a swapped +Cards becomes +$ and $ off-turn evaporates by rule.
+
+    `final=True` is ph. 9's `final_draw` — a printed +Cards that ENDS its
+    ability, where a Star Chart owner gets their pick at the shuffle it may
+    cause. The two compose cleanly and the order matters: **a SWAPPED +Cards
+    draws nothing at all**, so it can cause no shuffle and needs no pick.
+    Without this argument a printed plus had to choose between the two Ways'
+    seams, and four ph.-9 cards (Lackeys, Scholar, Mountain Village, Road
+    Network) silently sat outside Chameleon."""
     if n <= 0:
         return []
     who = _acting(game, pid)
+    if final and not (who == game["turn"] and game["turn_ctx"].get("chameleon")):
+        return final_draw(game, who, n)
     if who == game["turn"] and game["turn_ctx"].get("chameleon"):
         # "+Cards … are +$ instead (keeping their values)". Straight to
         # _grant, NOT add_coins: the swap is one-way per grant, and routing
@@ -4653,11 +4663,18 @@ def _k_cleanup_finish(game, pid, frame, choice):
     outpost_played = frame["data"]["outpost"]
     extra = frame["data"]["extra"]
     extra_no_buy = frame["data"]["extra_no_buy"]
-    # "+1 Card at the end of this turn" (Farrier's overpay) — AFTER the new
-    # hand is drawn, which is the whole point of the card: the extra cards are
-    # for NEXT turn, so a Farrier overpaid by 2 leaves you holding 7.
+    # "+1 Card at the end of this turn" (Farrier's overpay; Expedition) —
+    # AFTER the new hand is drawn, which is the whole point of the card: the
+    # extra cards are for NEXT turn, so a Farrier overpaid by 2 leaves you
+    # holding 7.
+    #
+    # `add_cards`, not `draw`: both producers print a PLUS and both say "at
+    # the end of THIS TURN", so Way of the Chameleon swaps them. This is the
+    # one printed-plus grant that no card's own code performs — the kernel
+    # drains the counter — so the ph.-10 sweep of the effects modules could
+    # not have reached it.
     if game["turn_ctx"]["end_draw"]:
-        draw(game, pid, game["turn_ctx"]["end_draw"])
+        add_cards(game, game["turn_ctx"]["end_draw"], pid)
     # Save: "put it into your hand at END OF TURN (after drawing)" — so the
     # saved card is an EXTRA card in the new hand, not one of the five.
     saved = [c for c in game["turn_ctx"]["end_hand"]

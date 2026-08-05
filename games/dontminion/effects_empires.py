@@ -163,7 +163,7 @@ def _city_quarter(game, pid):
     E.add_actions(game, 2)
     hand = list(game["seats"][pid]["hand"])
     E.reveal(game, pid, hand, "City Quarter")
-    E.draw(game, pid, sum(1 for c in hand if E.has_type(game, c, "action")))
+    E.add_cards(game, sum(1 for c in hand if E.has_type(game, c, "action")), pid)
 
 
 # --- Overlord ----------------------------------------------------------------
@@ -184,7 +184,7 @@ def _overlord_play(game, pid, frame, choice):
 # --- Royal Blacksmith --------------------------------------------------------
 
 def _royal_blacksmith(game, pid):
-    E.draw(game, pid, 5)
+    E.add_cards(game, 5, pid)
     hand = list(game["seats"][pid]["hand"])
     E.reveal(game, pid, hand, "Royal Blacksmith")
     coppers = [c for c in hand if c == "Copper"]
@@ -242,7 +242,7 @@ def _enchantress(game, pid):
 
 
 def _enchantress_draw(game, pid, frame, choice):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
 
 
 def _enchantress_when(game, w, ctx):
@@ -273,7 +273,7 @@ def _enchantress_hit(game, pid, frame, choice):
         return                      # nothing left to replace
     game["turn_ctx"]["enchanted"] = True
     E._log(game, actor, "enchanted", card=frame["data"]["subject"])
-    E.draw(game, actor, 1)
+    E.add_cards(game, 1, actor)
     E.add_actions(game, 1, actor)
 
 
@@ -315,7 +315,7 @@ def _sacrifice_trash(game, pid, frame, choice):
     card = choice["cards"][0]
     E.trash(game, pid, [card])
     if E.has_type(game, card, "action"):
-        E.draw(game, pid, 2)
+        E.add_cards(game, 2, pid)
         E.add_actions(game, 2)
     if E.has_type(game, card, "treasure"):
         E.add_coins(game, 2)
@@ -555,7 +555,7 @@ def _crown_again(game, pid, frame, choice):
 # --- Forum -------------------------------------------------------------------
 
 def _forum(game, pid):
-    E.draw(game, pid, 3)
+    E.add_cards(game, 3, pid)
     E.add_actions(game, 1)
     hand = game["seats"][pid]["hand"]
     if hand:
@@ -577,7 +577,7 @@ def _forum_gain(game, pid, frame, choice):
 # is cumulative with a throne-room, which is one watcher per play.
 
 def _groundskeeper(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_watcher(game, pid, "Groundskeeper", "gain", stage="vp",
                   until="turn_end", commutes=True)
@@ -646,7 +646,7 @@ def _wild_hunt(game, pid):
 def _wild_hunt_mode(game, pid, frame, choice):
     pile = _supply_pile_for(game, "Wild Hunt")
     if choice["ids"][0] == "draw":
-        E.draw(game, pid, 3)
+        E.add_cards(game, 3, pid)
         # "you add 1 VP even if you can't draw any cards", and "this still
         # functions when the Wild Hunt pile is empty"
         if pile is not None:
@@ -663,7 +663,7 @@ def _wild_hunt_mode(game, pid, frame, choice):
 # --- Encampment / Plunder ----------------------------------------------------
 
 def _encampment(game, pid):
-    E.draw(game, pid, 2)
+    E.add_cards(game, 2, pid)
     E.add_actions(game, 2)          # "you get +2 Actions even if you set this aside"
     hand = game["seats"][pid]["hand"]
     show = sorted({c for c in hand if c in ("Gold", "Plunder")})
@@ -695,7 +695,7 @@ def _plunder(game, pid):
 # --- Patrician / Emporium ----------------------------------------------------
 
 def _patrician(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     top = E.look_top(game, pid, 1)
     if not top:
@@ -708,7 +708,7 @@ def _patrician(game, pid):
 
 
 def _emporium(game, pid):
-    E.draw(game, pid, 1)
+    E.add_cards(game, 1, pid)
     E.add_actions(game, 1)
     E.add_coins(game, 1)
 
@@ -728,7 +728,7 @@ def _from_discard(card, want):
     "look through your discard pile; you may reveal a <X> from it and put it
     into your hand"."""
     def fx(game, pid):
-        E.draw(game, pid, 1)
+        E.add_cards(game, 1, pid)
         E.add_actions(game, 1 if card == "Settlers" else 3)
         if want not in game["seats"][pid]["discard"]:
             return
