@@ -1047,18 +1047,24 @@ def test_a_split_pile_is_never_the_bots_terminal():
 
 # ── the deviations the docs promise ──────────────────────────────────────────
 
-def test_villa_does_not_make_the_end_of_buy_fire_twice():
-    """Deviation B1's other half. Scheme rides a `buy_phase_end` watcher, and
-    the row has warned since ph. 1 that a Villa-class card returning you to
-    your Action phase could make end-of-buy fire more than once. It does not:
-    the event is emitted only on the buy -> Clean-up transition."""
+def test_villa_ends_a_buy_phase_and_only_the_last_one_is_final():
+    """Deviation B1's other half, RESOLVED IN PH. 9 — and the resolution is
+    the opposite of what ph. 8 pinned here.
+
+    Villa really does end a Buy phase, and four shipped cards print "at the
+    end of your Buy phase … in it" (Merchant Guild, Treasury, Hermit, Wine
+    Merchant) plus Renaissance's Exploration and Pageant, all of which must
+    see BOTH. So the event now fires per Buy phase. What protects the three
+    cards that only RIDE it to approximate Clean-up timing (Alchemist,
+    Herbalist, Scheme — each printed "when you discard it from play") is the
+    `final` flag on the ctx, not the emit being unique."""
     g = fresh()
     fired = []
     real = engine.emit
 
     def spy(game, event, **kw):
         if event == "buy_phase_end":
-            fired.append(event)
+            fired.append(kw.get("final"))
         return real(game, event, **kw)
 
     engine.emit = spy
@@ -1070,7 +1076,33 @@ def test_villa_does_not_make_the_end_of_buy_fire_twice():
         mv(g, A, {"type": "end_phase"})     # buy -> clean-up
     finally:
         engine.emit = real
-    assert fired == ["buy_phase_end"], "exactly one end-of-buy for the turn"
+    assert fired == [False, True], "one per Buy phase, the last one final"
+
+
+def test_a_scheme_is_not_topdecked_by_a_villa_mid_turn():
+    """The behaviour the test above used to protect, pinned directly: Scheme's
+    offer must open ONCE, at the real end of the turn, even though the event
+    it rides now fires twice."""
+    g = engine.new_game([A, B], ["empires", "hinterlands"], seed=4,
+                        kingdom=["Villa", "Scheme", "Engineer", "Forum",
+                                 "Charm", "Crossroads", "Oasis", "Haggler",
+                                 "Highway", "Stables"])
+    give_hand(g, A, ["Scheme", "Copper", "Copper", "Copper", "Copper"])
+    assert mv(g, A, {"type": "play_action", "card": "Scheme"})[0]
+    assert g["phase"] == "buy", "no Action left in hand: auto-advanced"
+    coins(g, 4)
+    assert mv(g, A, {"type": "buy", "card": "Villa"})[0]
+    assert g["phase"] == "action", "Villa sent us back"
+    # THE POINT: a Buy phase just ended, and Scheme must not have been offered
+    assert g["pending_pid"] is None, "Scheme jumped in mid-turn"
+    assert mv(g, A, {"type": "end_phase"})[0]           # action -> buy again
+    assert mv(g, A, {"type": "end_phase"})[0]           # buy -> Clean-up
+    # ...and now it is, exactly once, with the Scheme still on the table
+    assert g["pending_pid"] == A and g["pending"][-1]["card"] == "Scheme"
+    assert mv(g, A, {"type": "decision", "cards": ["Scheme"]})[0]
+    # topdecked, so the Clean-up draw takes it straight back into the new hand
+    assert "Scheme" in g["seats"][A]["hand"]
+    assert "Scheme" not in g["seats"][A]["discard"]
 
 
 def test_crown_fully_resolves_the_first_play_before_the_second():

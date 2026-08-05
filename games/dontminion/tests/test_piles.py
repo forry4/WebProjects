@@ -495,9 +495,10 @@ def test_a_pile_whose_face_is_not_a_real_card_is_refused_at_setup():
     client is waiting on. Fail where the pile is named instead."""
     g = fresh()
     # names from sets we have not built. Spoils and Sir Martin stood here until
-    # Dark Ages shipped, then Encampment and Humble Castle until Empires did —
-    # so these are deliberately from ph. 9+ rather than the next set along.
+    # Dark Ages shipped, then Encampment and Humble Castle until Empires did,
+    # then Border Guard and Cathedral until Renaissance did — so these are
+    # deliberately from ph. 11+ rather than the next set along.
     with pytest.raises(ValueError):
-        engine.add_pile(g, "Border Guard", count=5)
+        engine.add_pile(g, "Devil's Workshop", count=5)
     with pytest.raises(ValueError):
-        engine.add_pile(g, "Cathedral", contents=["Sanctuary"])
+        engine.add_pile(g, "Cemetery", contents=["Haunted Mirror"])

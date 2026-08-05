@@ -872,12 +872,16 @@ def test_an_adventures_board_deals_events_from_the_randomizer_mix():
 
 
 def test_every_event_has_an_ability_registered():
-    """Every BUYABLE landscape owes an ability. A Landmark (ph. 8) is never
-    bought — its ability is a scoring fn or a trigger — so the equality is
-    against the buyable kinds rather than the whole table."""
-    buyable = {n for n, d in cards.LANDSCAPES.items()
-               if d["kind"] in cards.BUYABLE_LANDSCAPE_KINDS}
-    assert buyable == set(effects.LANDSCAPE_FX)
+    """Every EVENT owes a `LANDSCAPE_FX` — the one-shot ability buying it
+    hands you. A Landmark (ph. 8) is never bought at all, and a PROJECT
+    (ph. 9) is bought but has no buy ability: its cube switches on an ONGOING
+    one, which lives on the trigger bus or in the kernel. So the equality is
+    against the `event` kind alone, not the buyable kinds."""
+    events = {n for n, d in cards.LANDSCAPES.items() if d["kind"] == "event"}
+    assert events == set(effects.LANDSCAPE_FX)
+    projects = {n for n, d in cards.LANDSCAPES.items() if d["kind"] == "project"}
+    assert projects and not (projects & set(effects.LANDSCAPE_FX)), \
+        "a Project's ability is ongoing, never a buy ability"
 
 
 def test_a_full_adventures_game_round_trips_through_json_and_migrate():

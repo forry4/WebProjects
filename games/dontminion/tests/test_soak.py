@@ -49,6 +49,29 @@ def _actor(game):
     return game["pending_pid"] or game["turn"]
 
 
+def _donate_deadlock(game):
+    """THE ONE RULES-FAITHFUL STATE THAT NEVER ENDS (documented ph. 8).
+
+    Buy Donate, trash your whole deck, and hold the Debt: you have no cards,
+    so no income; Debt blocks every buy; and with nothing being gained no pile
+    can ever empty, so no end condition can fire. Real Dominion has exactly
+    this property — there is nothing here to fix — so a harness that lands on
+    a Donate board must assert PROGRESS (turns advancing) rather than
+    termination.
+
+    It is asserted NARROWLY on purpose: Donate dealt, and EVERY player both in
+    Debt and holding no cards at all. Anything less specific would quietly
+    excuse a real livelock, which is the failure this soak exists to catch."""
+    if "Donate" not in game["landscapes"]:
+        return False
+    for pid, seat in game["seats"].items():
+        if not game["debt"].get(pid):
+            return False
+        if any(seat[z] for z in ("deck", "hand", "discard", "in_play")):
+            return False
+    return True
+
+
 def _random_move(game, pid, rng):
     if game["pending_pid"] == pid:
         return {"type": "decision", **engine.sample_decision(game, pid, rng)}
@@ -180,6 +203,7 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
                            seed=1234 + chunk, kingdom=kingdom)
     baseline = _census(game)
     before = _fingerprint(game)
+    turns_at_start = game["turn_number"]
     rng = random.Random(4321 + chunk)
     for _ in range(MOVE_CAP):
         if game["over"]:
@@ -188,6 +212,11 @@ def test_soak_forced_kingdoms_cover_all_cards(chunk):
         ok, err = engine.apply_move(game, pid, _random_move(game, pid, rng))
         assert ok, f"random legal move rejected: {err}"
         before = _assert_invariants(game, baseline, before)
+    if _donate_deadlock(game):
+        # the documented never-ending state (see _donate_deadlock): assert
+        # PROGRESS instead, which is what distinguishes it from a livelock
+        assert game["turn_number"] > turns_at_start + 20
+        return
     assert game["over"], "game did not terminate under the move cap"
 
 

@@ -114,11 +114,12 @@ def events(g, name):
 
 def test_only_the_landscape_sets_have_landscapes():
     """6H shipped the machinery with no content; ph. 7 filled in Adventures'
-    20 Events and ph. 8 added Empires' 13 Events + 21 Landmarks. This is the
-    tripwire for the NEXT set that adds landscape data — at which point the
-    no-entropy proof below needs re-reading, since a non-empty pool is exactly
-    when the dealer stops being free."""
-    have = {"adventures", "empires"}
+    20 Events, ph. 8 added Empires' 13 Events + 21 Landmarks and ph. 9 added
+    Renaissance's 20 Projects. This is the tripwire for the NEXT set that adds
+    landscape data — at which point the no-entropy proof below needs
+    re-reading, since a non-empty pool is exactly when the dealer stops being
+    free."""
+    have = {"adventures", "empires", "renaissance"}
     assert {d["expansion"] for d in cards.LANDSCAPES.values()} == have
     for exp in cards.KINGDOM:
         g = engine.new_game([A, B], [exp], seed=5)

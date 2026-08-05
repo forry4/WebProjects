@@ -1233,8 +1233,11 @@ MANUAL_TREASURES = {"Cauldron"}
 WATCHER_WHENS = {
     ("Haggler", "gain_check"): lambda game, w, ctx: (
         ctx["actor"] == w["owner"] == game["turn"] and bool(ctx.get("via_buy"))),
+    # `final` (ph. 9): Scheme prints "when you discard it from play" and only
+    # RIDES buy_phase_end (deviation B1). Villa can end a Buy phase mid-turn,
+    # and topdecking the Scheme then would take it off a table still in use.
     ("Scheme", "cleanup"): lambda game, w, ctx: (
-        ctx["actor"] == w["owner"]
+        ctx["actor"] == w["owner"] and ctx.get("final", True)
         and any(E.has_type(game, c, "action")
                 for c in E.leaving_play(game, w["owner"]))),
 }

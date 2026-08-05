@@ -1296,7 +1296,17 @@ def shuffle_into_deck(game, pid, cards, zone="discard"):
     return list(cards)
 
 
-def trash(game, pid, cards, zone="hand"):
+def trash(game, pid, cards, zone="hand", **extra):
+    """Trash cards from a zone. `**extra` rides the `trash` EVENT, so a card
+    can mark a trash it caused and read the mark back in its own trigger — the
+    exact twin of `gain(**extra)` (ph. 7, Port), and needed for the same
+    reason: the emit can resolve long after the call returned, so a transient
+    on the game dict would not do.
+
+    Sewers is the consumer: "when you trash a card OTHER THAN WITH THIS, you
+    may trash a card from your hand" — without a mark on the event, Sewers'
+    own trash is indistinguishable from any other and it chains until the hand
+    is empty."""
     seat = game["seats"][pid]
     for c in cards:
         seat[zone].remove(c)
@@ -1306,7 +1316,7 @@ def trash(game, pid, cards, zone="hand"):
         # same simultaneity rule as discard (the Steward ruling: "both cards
         # must be trashed simultaneously, and on-trash effects resolved
         # afterwards") — one pool per player across the batch. Dark Ages' seam.
-        emit_batch(game, "trash", pid, cards)
+        emit_batch(game, "trash", pid, cards, **extra)
 
 
 def trash_from_supply(game, card, pid=None):
@@ -2067,10 +2077,33 @@ def _current_dur_entry(game):
     return lst[idx] if idx < len(lst) else None
 
 
-def _dur_entry_for(game, pid, card):
-    """The setup entry the ability being registered belongs to — the one for the
-    physical card currently being played, or a fresh one."""
-    entry = _current_dur_entry(game)
+def duration_handle(game):
+    """An opaque handle naming the duration entry of the card BEING PLAYED —
+    capture it during on_play to register fx on that same physical card from a
+    LATER WINDOW (ph. 9, Cargo Ship: "once this turn, when you gain a card…",
+    which fires long after the play returned, by which time `_cur_dur` has
+    moved on to whatever was played since).
+
+    It is the ph.-7H `_restore_cur_dur` lesson generalised: any deferral of
+    duration work owes its pointer. Returns None when nothing is being played
+    or the card is not a Duration, which is a meaningful answer — a card
+    played without moving into play has no entry to name."""
+    ptr = game.get("_cur_dur")
+    return list(ptr) if ptr else None
+
+
+def _dur_entry_for(game, pid, card, handle=None):
+    """The setup entry the ability being registered belongs to — the one named
+    by `handle`, else the one for the physical card currently being played,
+    else a fresh one."""
+    entry = None
+    if handle is not None:
+        pid_h, idx = handle
+        lst = _dur_setup_list(game, pid_h)
+        if idx < len(lst) and lst[idx]["card"] == card:
+            entry = lst[idx]
+    if entry is None and handle is None:
+        entry = _current_dur_entry(game)
     if entry is None or entry["card"] != card:
         entry = {"card": card, "fx": [], "watchers": 0, "riders": []}
         _dur_setup_list(game, pid).append(entry)
@@ -2078,10 +2111,16 @@ def _dur_entry_for(game, pid, card):
     return entry
 
 
-def add_duration_fx(game, pid, card, stage, data=None, forever=False):
+def add_duration_fx(game, pid, card, stage, data=None, forever=False, handle=None):
     """Register a next-turn ability on the duration card currently being
     played. Card code calls this from on_play (or a later stage of the same
     play — the pointer stays live for the whole resolution).
+
+    `handle` names a specific physical card's entry (see `duration_handle`),
+    for a registration that happens in a LATER WINDOW rather than during the
+    play. Without it such a call mints a SECOND entry for one physical card,
+    which promotes twice at Clean-up and conjures a copy — the ph.-7H bug in a
+    new place.
 
     `forever=True` is "at the start of EACH of your turns FOR THE REST OF THE
     GAME" (Hireling): the fx is not consumed at the turn start and the entry is
@@ -2090,7 +2129,7 @@ def add_duration_fx(game, pid, card, stage, data=None, forever=False):
     of the physical card — a throne-roomed Hireling doubles the fx on one
     entry, which is exactly the "+2 Cards at the start of each turn" the
     compendium describes."""
-    entry = _dur_entry_for(game, pid, card)
+    entry = _dur_entry_for(game, pid, card, handle)
     if forever:
         entry["forever"] = True
     entry["fx"].append({"stage": stage, "data": data or {}})
@@ -2274,13 +2313,31 @@ def return_to_action_phase(game, pid):
     Action is not usable, and you don't get an Action phase")."""
     if game["over"] or pid != game["turn"] or game["phase"] != "buy":
         return False
+    # A BUY PHASE IS ENDING, and "at the end of your Buy phase" means exactly
+    # that: "if you have several Buy phases due to Cavalry, Villa or Voyage,
+    # Exploration triggers each time, CHECKING THE BUY PHASE THAT JUST ENDED"
+    # (Exploration 4). Four shipped cards read the same boundary — Merchant
+    # Guild, Treasury and Hermit all print "in it", and Wine Merchant fires
+    # per Buy phase — so the emit belongs here as well as at the Clean-up
+    # transition.
+    #
+    # `final=False` says this is NOT the last one of the turn, and it exists
+    # for the three cards that use this event to APPROXIMATE Clean-up timing
+    # (Alchemist, Herbalist, Scheme — each printed "when you discard it from
+    # play"; deviation B1). They must fire once, at the real end of the turn.
+    # They cannot simply move to `cleanup_start`: `_end_turn` discards done
+    # Duration entries BEFORE emitting it, and a Duration finishing at this
+    # Clean-up is a legal Scheme target, so the seam that looks right loses
+    # the card. This is the cost of the approximation, now visible.
+    emit(game, "buy_phase_end", actor=pid, final=False)
     game["phase"] = "action"
     game["turn_ctx"]["bought"] = False
-    # `buy_gains` counts gains PER BUY PHASE, not per turn — Merchant Guild's
-    # "+1 Coffers per card you gained in it" and Exploration's "if you didn't
-    # gain any cards during it" both check "the Buy phase that just ended"
-    # (Exploration 4), so a Villa re-entry starts a fresh count.
+    # ...and the PER-BUY-PHASE counters restart with the new phase, after the
+    # emit that reads them. `buy_gains` feeds Merchant Guild's "+1 Coffers per
+    # card you gained in it" and Exploration's "if you didn't gain any cards
+    # during it"; `gained_victory_in_buy` is Treasury's gate.
     game["turn_ctx"]["buy_gains"] = 0
+    game["turn_ctx"]["gained_victory_in_buy"] = False
     _log(game, pid, "phase", phase="action")
     return True
 
@@ -4086,7 +4143,9 @@ def _push_cleanup_choices(game, pid):
     Returns True if frames were pushed (else callers end the turn directly)."""
     n0 = len(game["pending"])
     push_auto(game, pid, "__turn", "finish", data={})
-    emit(game, "buy_phase_end", actor=pid)
+    # `final=True` — the LAST end-of-buy-phase of the turn (a Villa return
+    # fires the same event with final=False; see return_to_action_phase)
+    emit(game, "buy_phase_end", actor=pid, final=True)
     if len(game["pending"]) == n0 + 1:
         _pop_frame(game)          # nothing triggered — unpark the finish
         return False

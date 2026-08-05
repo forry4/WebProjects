@@ -88,8 +88,13 @@ def _alchemist_answer(game, pid, frame, choice):
 def _alchemist_fires(game, watcher, ctx):
     """Join-time pool filter: no Potion in play, or the Alchemist already gone,
     means the ability visibly does nothing and must not be offered for
-    ordering against a real one."""
-    return ("Potion" in _on_table(game, watcher["owner"])
+    ordering against a real one.
+
+    `final` is the ph.-9 clause: this card prints "at the start of Clean-up"
+    and only RIDES `buy_phase_end` (deviation B1), which since Villa can fire
+    more than once in a turn. Only the last one is the turn's Clean-up."""
+    return (ctx.get("final", True)
+            and "Potion" in _on_table(game, watcher["owner"])
             and "Alchemist" in E.leaving_play(game, watcher["owner"]))
 
 
@@ -250,7 +255,10 @@ def _herbalist_answer(game, pid, frame, choice):
 
 
 def _herbalist_fires(game, watcher, ctx):
-    return bool(_herbalist_candidates(game, watcher["owner"]))
+    # `final`: "when you DISCARD a Treasure from play" is Clean-up timing,
+    # approximated on buy_phase_end (B1) — a Villa return is not it.
+    return (ctx.get("final", True)
+            and bool(_herbalist_candidates(game, watcher["owner"])))
 
 
 # --- Philosopher's Stone -----------------------------------------------------
