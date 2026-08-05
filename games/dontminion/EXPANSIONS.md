@@ -670,8 +670,43 @@ records it as "not printed yet".
 **A side effect worth knowing about for every future landscape set: adding 20 Projects to
 `landscape_pool` RE-DEALS every existing seed's landscapes.** The dealer simulates the
 randomizer mix literally, so pool SIZE is an input. It moved Donate onto a forced-kingdom soak
-board and surfaced ph. 8's documented Donate/Debt deadlock there; the soak asserts PROGRESS on
-that board now, exactly as the ph.-8 note said a harness must.
+board and surfaced ph. 8's documented Donate/Debt deadlock there. The soak's never-terminates
+check is now ECONOMIC rather than a card-name list (turns still advancing, zero gains), because
+a board of trashers reaches the identical frozen state by a different road — a random bot
+trashes both decks to nothing. A name list would have gone stale with the next set.
+
+**The three review steps each found what only they could, and all four bugs were invisible to
+the whole test suite:**
+
+- **`npm run screens` found that the set was NOT CREATABLE.** `main.py` keeps its own
+  hand-maintained tuple of playable sets and `_valid_expansions` filters every create request
+  through it, so Renaissance was silently unplayable — the request fell back to base+intrigue
+  with no error on any path, and 2874 Python tests stayed green because the ENGINE's `KINGDOM`
+  had the set all along. This is the ph.-3 "ask what the frontend hardcodes" lesson one layer
+  down: **the backend hardcoded it too.** Now asserted against `cards.KINGDOM`.
+- **The CROSS-SET batch found three**, none reachable from a per-set test: Peddler's discount
+  reached Clean-up (`game["phase"]` still reads `"buy"` from `_end_turn` until the hand-off, so
+  its own "during your Buy phase" guard never fired — and Improve, which remodels at
+  `cleanup_start`, bought a Peddler for a Village); the Inheritance and Capitalism `types_of`
+  injections did not COMPOSE; and Scepter offered a called Reserve, which is standing-row **B5**
+  going from "unreachable in the shipped pool" to reachable exactly as that row predicted.
+- **The AUDIT found the fourth, and it was in the Villa fix itself.** `emit()` only PARKS the
+  ability pool, so resetting `buy_gains` synchronously after the emit meant **Merchant Guild
+  paid 0 Coffers behind a Villa** — silently, because its join-time filter saw the pre-reset
+  value and let the ability into the pool to do nothing. The count rides the EVENT now.
+  **Generalise this**: any per-phase counter a consumer reads at resolution must travel on the
+  occurrence, never on a transient the resolution races. The audit also caught a code comment
+  quoting a Fleet ruling that is **not in ch. VII** — verified against the PDF — behind which
+  the code was granting an extra turn triggered on an early Fleet turn and dropping one
+  triggered on the last, the one reading nothing supports (now uniform, ambiguity **A8**).
+
+**Gates:** package suite (**1912**, +309), full repo suite (**2874**+), a 110-game fuzz census
+(every set alone, Renaissance paired with each of the other ten, all-sets, 2p/3p/4p, random +
+bmplus, plus each of the 20 Projects forced onto a board with cubes bought) — zero failures,
+all **30 real prod saves** replayed v1/v2/v5/v7/v8/v10/v11/v12 → 13, `npm run smoke`, and
+`npm run screens` with a REAL Renaissance board asserting the Project render path (a price, its
+text, and no cube on a fresh board). Bots: `bmplus` beats plain money **0.708** on Renaissance
+boards with the mirror reading exactly **0.5000**.
 
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
