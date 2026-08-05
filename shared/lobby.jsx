@@ -56,6 +56,32 @@ export function LobbyEmpty({ children }) {
 	return <div className="lby-empty">{children}</div>;
 }
 
+// The mobile-only segmented bar that picks WHICH lobby column shows once the grid
+// has collapsed to one. Spender, Duel and Dontminion each carried a near-verbatim
+// copy of this (identical gap/radius/padding/flex/type scale — only the accent and
+// a couple of alpha values differed), and CoC never got one at all despite having
+// the same three columns.
+//
+// `tabs` = [{ key, label, count? }]; `key` must match the column's
+// `lby-col-<key>` class, because the SHOW/HIDE is pure CSS off `tab-<key>` on the
+// grid (see .lby-cols in the stylesheet) rather than conditional rendering — a
+// hidden column stays mounted, so its scroll position and this list's paging
+// survive tab switches.
+export function LobbyTabs({ tabs, value, onChange }) {
+	return (
+		<div className="lby-tabs" role="tablist">
+			{tabs.filter(Boolean).map((t) => (
+				<button key={t.key} type="button" role="tab" aria-selected={value === t.key}
+					className={`lby-tab${value === t.key ? " sel" : ""}`}
+					onClick={() => onChange(t.key)}>
+					{t.label}
+					{t.count != null && <span className="lby-tab-count">{t.count}</span>}
+				</button>
+			))}
+		</div>
+	);
+}
+
 // Centered spinner + label — the shared game-entry loading screen.
 export function LobbyLoading({ label = "Loading…" }) {
 	return (
@@ -84,6 +110,55 @@ export function readLobbyCache(ns, scope, key, fallback) {
 }
 export function writeLobbyCache(ns, scope, key, val) {
 	try { localStorage.setItem(`lbyc.${ns}.${scope}.${key}`, JSON.stringify(val)); } catch {}
+}
+
+// ─── Progressive History reveal (all four games' History lists) ──────────────
+// Show the newest HISTORY_PAGE games, reveal another page when the reader
+// scrolls the end of the list into view, and stop at HISTORY_MAX.
+//
+// HISTORY_MAX IS ALSO EVERY BACKEND'S `list_user_history` SQL LIMIT (they were
+// 20/30/30/30 and are now 50 across the board), so the ceiling is enforced on
+// both sides: the client can never ask for a page the server didn't send, and a
+// cached old bundle against the new server simply renders all 50 at once.
+//
+// A SENTINEL + IntersectionObserver, not a scroll handler, because the four
+// lobbies scroll differently and a handler would need to know which element
+// moves: Spender's `.game-cards` is its own overflow container above 1281px and
+// the PAGE scrolls below that, CoC/Duel/Dontminion have no scroller at all so
+// only the page ever moves, and the mobile tab layouts move a third thing
+// again. The sentinel is correct in all of them and needs no CSS. (An element
+// clipped by an ancestor's `overflow` is reported as NOT intersecting, which is
+// exactly what makes Spender's inner scroller work without a special case.)
+export const HISTORY_PAGE = 10;
+export const HISTORY_MAX = 50;
+
+export function useProgressiveList(items, { page = HISTORY_PAGE, max = HISTORY_MAX } = {}) {
+	const [shown, setShown] = useState(page);
+	const sentinelRef = useRef(null);
+	const visible = items.slice(0, Math.min(shown, max));
+	const more = visible.length < Math.min(items.length, max);
+	// `shown` is a dep on purpose: an observer only calls back when intersection
+	// CHANGES, so a sentinel that is still on screen after a reveal would never
+	// fire again and the list would strand at 20. Re-observing re-reports the
+	// current state, which fills until the sentinel is off screen or max is hit
+	// — the standard behaviour, and self-limiting at HISTORY_MAX / page steps.
+	useEffect(() => {
+		const el = sentinelRef.current;
+		if (!el || !more) return;
+		if (typeof IntersectionObserver !== "function") { setShown(max); return; }
+		const io = new IntersectionObserver((entries) => {
+			if (entries.some((e) => e.isIntersecting)) setShown((n) => Math.min(n + page, max));
+		});
+		io.observe(el);
+		return () => io.disconnect();
+	}, [more, shown, page, max]);
+	// `shown` deliberately SURVIVES a refresh: the lobby re-fetches its lists on
+	// a poll/refresh, and resetting here would yank a reader three pages in back
+	// to the top every time one of their games ended.
+	const sentinel = more
+		? <div className="lby-more" ref={sentinelRef} aria-hidden="true" />
+		: null;
+	return [visible, sentinel];
 }
 
 // ─── Create-game modal kit (shared across all four games) ────────────────────

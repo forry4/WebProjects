@@ -366,7 +366,7 @@ def list_active_games() -> list[dict]:
     return out
 
 
-def list_user_history(user_id: str, limit: int = 20) -> list[dict]:
+def list_user_history(user_id: str, limit: int = _rooms.HISTORY_LIMIT) -> list[dict]:
     """Finished games (status='over') the user played in, most-recent first, with
     final scores, winner(s) and opponents — for the lobby 'History' section. Works
     for vs-AI and human games (2-4 players). Session-gated (logged-in users)."""

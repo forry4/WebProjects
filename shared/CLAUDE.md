@@ -10,6 +10,12 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   items filtered; Esc/click-outside close) + `CreateModal`/`LobbyCreateRow` (the unified "New Game" modal
   + create/join-by-code/refresh row). Token-driven via a per-game `--lby-accent` with **hard fallbacks so
   it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
+  Also **`useProgressiveList` + `HISTORY_PAGE`/`HISTORY_MAX`** — the lobby History list's 10-at-a-time
+  reveal, wired identically into all four games. **`HISTORY_MAX` must equal `core.rooms.HISTORY_LIMIT`**
+  (the SQL row cap); `core/tests/test_history_limit.py` reads this file as TEXT to hold the two
+  together, since `core/` may not import a feature. It pages off a SENTINEL + IntersectionObserver
+  rather than a scroll handler, because the four lobbies scroll different elements — see the root
+  `CLAUDE.md`.
 - **`splendor.jsx`** — Spender + Duel SHARE gems, jewel cards, and the move log
   (`GemToken`/`CardView`/`TokenPill`/`BonusPill`/`LogEntry` + CSS), lifted verbatim from Spender.jsx.
   **If a second game needs a Spender visual, EXTRACT it here — don't re-approximate it** (Duel drifted

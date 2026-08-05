@@ -1,6 +1,7 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useId } from "react";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+  useProgressiveList } from "../../shared/lobby.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
@@ -809,6 +810,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("coc", myId, "open", []));
   const [activeGames, setActiveGames] = useState(() => readLobbyCache("coc", myId, "active", []));   // ALL in-progress games (yours + others')
   const [history, setHistory] = useState(() => readLobbyCache("coc", myId, "history", []));           // your finished games (lobby History column)
+  // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
+  // backend sends — see useProgressiveList.
+  const [historyShown, historyMore] = useProgressiveList(history);
   const [reviewOnly, setReviewOnly] = useState(false);  // HTTP-loaded finished-game review (no WS)
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
@@ -2116,7 +2120,8 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               ) : history.length === 0 ? (
                 <div className="lby-empty">No finished games yet.</div>
               ) : (
-                history.map((g) => (
+                <Fragment>
+                {historyShown.map((g) => (
                   <div className="lby-card" key={g.id}>
                     <div className="lby-card-info">
                       <div className="lby-card-title">
@@ -2129,7 +2134,9 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
                       <button className="coc-btn outline sm" onClick={() => enterCocReview(g.id)}>Review</button>
                     </div>
                   </div>
-                ))
+                ))}
+                {historyMore}
+                </Fragment>
               )}
             </div>
           </div>

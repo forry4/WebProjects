@@ -5,10 +5,12 @@
 .dm-center { min-height: 60vh; display: flex; align-items: center; justify-content: center; }
 
 /* ── lobby ── */
-.dm-lobby-cols {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px; padding: 12px 18px 40px; max-width: 1280px; margin: 0 auto; width: 100%;
-}
+/* The column grid, its breakpoints and the tab bar are the shared `.lby-cols` /
+   `.lby-tabs` (shared/lobby.lobby-css.css) — only the page width is DM's own.
+   Nothing here may set display/grid-template-columns/gap: this sheet is
+   concatenated AFTER the shared one, so a base rule would out-order the shared
+   MEDIA rules and pin the lobby to three columns on a phone. */
+.dm-lobby-cols { padding: 12px 18px 40px; max-width: 1280px; margin: 0 auto; width: 100%; }
 .dm-toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--surface2, #242018); border: 1px solid var(--border, #3a342a);
@@ -51,26 +53,6 @@
 }
 .dm-check-on { color: var(--gold-light, #e8c96a); border-color: var(--gold, #c9a84c); }
 
-/* Mobile-only Open/Active/History tab bar (mirrors Spender Duel). Hidden on wide
-   screens where all three lobby columns render side by side; shown at the phone
-   breakpoint, where it drives which single section is visible. */
-.dm-lobby-tabs {
-  display: none; gap: 6px; margin: 0 18px 14px; background: var(--surface2, #242018);
-  border: 1px solid var(--border, #3a342a); border-radius: 12px; padding: 4px;
-}
-.dm-lobby-tab {
-  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  background: transparent; border: none; color: var(--text-dim, #8a7d6a); cursor: pointer;
-  font-family: 'Cinzel','Cinzel Fallback',serif; font-size: .82rem; letter-spacing: .04em;
-  padding: 9px 4px; border-radius: 9px; transition: background .15s, color .15s;
-}
-.dm-lobby-tab.sel { background: var(--lby-accent, #b08d57); color: #160f0a; font-weight: 700; }
-.dm-lobby-tab-count {
-  display: inline-flex; align-items: center; justify-content: center; min-width: 18px;
-  height: 18px; padding: 0 5px; border-radius: 9px; background: rgba(0, 0, 0, .22);
-  color: inherit; font-size: .72rem; font-weight: 600; letter-spacing: 0;
-}
-.dm-lobby-tab:not(.sel) .dm-lobby-tab-count { background: var(--surface, #1a1814); color: var(--text-dim, #8a7d6a); }
 
 /* On touch, :hover STICKS to the last-tapped button until you tap elsewhere, so a
    just-DESELECTED pick-option (a .btn-outline) kept the gold hover fill and looked
@@ -640,7 +622,6 @@
   .dm .dm-side { order: 2; }
   .dm .dm-center-col { order: 1; }
   .dm .dm-log { max-height: 180px; }
-  .dm .dm-lobby-cols { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   /* THREE cards per row, filling it — the supply, the hand, and prompt cards
@@ -702,16 +683,6 @@
   .dm .dm-cardinfo-text { font-size: 16px; line-height: 1.6; }
   .dm .dm-cardinfo .dm-prompt-actions { justify-content: center; padding: 4px 22px 22px; }
 
-  /* Lobby: reveal the Open/Active/History tab bar and let the selected tab pick
-     which of the (now single-column) sections shows — the other two are hidden. */
-  .dm .dm-lobby-tabs { display: flex; }
-  .dm .dm-lobby-cols { grid-template-columns: 1fr; gap: 0; }
-  .dm .dm-lobby-cols.tab-open > .active-section,
-  .dm .dm-lobby-cols.tab-open > .history-section,
-  .dm .dm-lobby-cols.tab-active > .open-section,
-  .dm .dm-lobby-cols.tab-active > .history-section,
-  .dm .dm-lobby-cols.tab-history > .open-section,
-  .dm .dm-lobby-cols.tab-history > .active-section { display: none; }
 }
 
 /* ── motion ────────────────────────────────────────────────────────────────

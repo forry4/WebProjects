@@ -15,14 +15,10 @@
 /* lobby — cards/sections/badges are the shared lobby kit (.lby-*, shared/lobby.jsx). */
 /* Full-bleed the shared lobby header past .duel's 14px side padding (matches Spender/CoC). */
 .duel > .lby-header{margin:0 -14px 18px}
-.duel-lobby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:18px;align-items:start}
-/* Mobile Open/Active/History tab bar (mirrors Spender's .lobby-tabs). Hidden on wide
-   screens; shown (and made to hide the other two sections) in the max-width:720 block. */
-.duel-lobby-tabs{display:none;gap:6px;margin-bottom:16px;background:var(--surface2,#241d16);border:1px solid var(--line,#3a332a);border-radius:12px;padding:4px}
-.duel-lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim,#a89a82);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
-.duel-lobby-tab.sel{background:var(--lby-accent,#bf6fd0);color:#160f18;font-weight:700}
-.duel-lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.22);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
-.duel-lobby-tab:not(.sel) .duel-lobby-tab-count{background:var(--surface,#1b1712);color:var(--text-dim,#a89a82)}
+/* The column grid, its breakpoints and the tab bar are the shared `.lby-cols` /
+   `.lby-tabs`. Nothing here may set display/grid-template-columns/gap on
+   .duel-lobby-cols: this sheet is concatenated AFTER the shared one, so a base
+   rule would out-order the shared MEDIA rules and pin three columns on a phone. */
 .duel-turnbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#3f5f33;color:#dfeecf;white-space:nowrap}
 .duel-theirbadge{font-size:.78rem;padding:2px 8px;border-radius:999px;background:#4a4136;color:#d8ccb8;white-space:nowrap}
 
@@ -336,7 +332,6 @@
      to a full-width row beneath (areas replace the old grid-column:1/-1 span). */
   .duel-cols{grid-template-columns:1fr 1fr;grid-template-rows:auto;
     grid-template-areas:"cards board" "log board" "side side"}
-  .duel-lobby-cols{grid-template-columns:1fr}
 }
 @media(max-width:720px){
   /* Phone single-column: cards, board, player boxes, then the log LAST (a big log
@@ -356,13 +351,6 @@
      fit across a narrow screen; nowrap guarantees they never split. */
   .duel-board-meta{flex-wrap:nowrap;gap:10px}
   .duel-victory-chip{font-size:.66rem;padding:3px 8px;white-space:nowrap;flex-shrink:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
-  /* Lobby: show the Open/Active/History tab bar and let the selected tab pick which of
-     the (now single-column) sections is visible — the others are hidden. */
-  .duel-lobby-tabs{display:flex}
-  .duel-lobby-cols{gap:0}
-  .duel-lobby-cols.tab-open>.active-section,.duel-lobby-cols.tab-open>.history-section,
-  .duel-lobby-cols.tab-active>.open-section,.duel-lobby-cols.tab-active>.history-section,
-  .duel-lobby-cols.tab-history>.open-section,.duel-lobby-cols.tab-history>.active-section{display:none}
   /* Topbar: the options (☰) button stays on the LEFT with the title centered beside it —
      it used to wrap onto its own line ABOVE the title (a stale rule from when this row held
      three separate Menu/Rules/Abandon buttons; now it's one small ☰, so it fits). Drop the

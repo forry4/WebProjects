@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
-  LobbyCreateRow, lobbyCreateRowCss,
+  LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
 // is its own markup — no gems here, but the frame keeps all five games' cards the
@@ -738,6 +738,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("dontminion", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("dontminion", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("dontminion", myId, "history", []));
+  // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
+  // backend sends — see useProgressiveList.
+  const [historyShown, historyMore] = useProgressiveList(history);
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
   const [reconnecting, setReconnecting] = useState(false);
@@ -1882,26 +1885,18 @@ export default function Dontminion({ myId, authUser, onExit }) {
             </div>
           </CreateModal>
         )}
-        {/* Mobile-only tab bar (mirrors Spender Duel): the three columns can't
-            sit side by side on a phone, so pick ONE section to show. Hidden on
-            wide screens (CSS) where all three columns render at once. */}
-        <div className="dm-lobby-tabs" role="tablist">
-          {[
-            ["open", "Open", openGames.length],
-            ["active", "Active", myGames.length],
-            ["history", "History", history.length],
-          ].map(([key, label, count]) => (
-            <button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
-              className={"dm-lobby-tab" + (lobbyTab === key ? " sel" : "")}
-              onClick={() => setLobbyTab(key)}>
-              {label}{count > 0 ? <span className="dm-lobby-tab-count">{count}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className={"dm-lobby-cols tab-" + lobbyTab}>
-          <div className="dm-section open-section">
+        {/* Mobile-only tab bar: the three columns can't sit side by side on a
+            phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
+        <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+          { key: "open", label: "Open", count: openGames.length || null },
+          { key: "active", label: "Active", count: myGames.length || null },
+          { key: "history", label: "History", count: history.length || null },
+        ]} />
+        <div className={"dm-lobby-cols lby-cols tab-" + lobbyTab}>
+          <div className="dm-section lby-col-open">
             <LobbySectionHd title="Open Games" note="join a table" />
             {openGames.length === 0 && <div className="lby-empty">No open games — create one!</div>}
+            <div className="lby-list">
             {openGames.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
@@ -1920,9 +1915,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
               </div>
             ))}
+            </div>
           </div>
-          <div className="dm-section active-section">
+          <div className="dm-section lby-col-active">
             <LobbySectionHd title="My Games" note={authUser?.session_token ? "in progress" : "sign in to track games"} />
+            <div className="lby-list">
             {myGames.map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
@@ -1937,17 +1934,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
               </div>
             ))}
+            </div>
             {myGames.length === 0 && <div className="lby-empty">Nothing in progress.</div>}
           </div>
-          <div className="dm-section history-section">
+          <div className="dm-section lby-col-history">
             <LobbySectionHd title="History" note="finished games" />
-            {history.map((g) => {
+            <div className="lby-list">
+            {historyShown.map((g) => {
               const line = historyScores(g);
               // Dominion breaks a VP tie on fewer turns taken, so a shared win
               // is rare but real — CoC's history has the same three states.
               const tie = g.you_won && (g.winners || []).length > 1;
               return (
-                <div key={g.id} className="lby-card">
+                <div key={g.id} className="lby-card lby-card-hist">
                   <div className="lby-card-info">
                     <div className="lby-card-title">
                       <span className={"hist-result " + (tie ? "tie" : g.you_won ? "won" : "lost")}>
@@ -1968,6 +1967,8 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 </div>
               );
             })}
+            {historyMore}
+            </div>
             {history.length === 0 && <div className="lby-empty">No finished games yet.</div>}
           </div>
         </div>

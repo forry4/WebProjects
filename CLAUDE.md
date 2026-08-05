@@ -189,7 +189,24 @@ times because three copies of `mk_room_state` each leaked differently.
 
 **Still duplicated (~25 functions, the obvious next extraction):** `save_game`, `load_game_to_memory`,
 `_persist_row` and the `list_open_games`/`list_user_games`/`list_user_history`/`list_active_games`
-family. Same shape in all four games, differing only in table name and columns.
+family. Same shape in all four games, differing only in table name and columns. **They drift exactly
+as you would expect** — the four `list_user_history` row caps were independently 20/30/30/30 until
+2026-08-05; they now all bind `core.rooms.HISTORY_LIMIT` (see the lobby History note below).
+
+**The lobby History list pages, and the cap is ONE number seen from two ends.**
+`core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;
+`HISTORY_MAX` in `shared/lobby.jsx` is where `useProgressiveList` stops revealing. They must be equal
+and `core/tests/test_history_limit.py` asserts it by reading the JSX as TEXT (core may not import a
+feature, and that holds for its tests). The list shows `HISTORY_PAGE` (10) rows and reveals another
+page when the reader scrolls the end into view — via a **SENTINEL + IntersectionObserver, not a scroll
+handler**, because the four lobbies scroll different elements (Spender's `.game-cards` is its own
+overflow container above 1281px and the page scrolls below that; CoC/Duel/Dontminion have no scroller
+at all; the mobile tab layouts move a third thing) and an element clipped by an ancestor's `overflow`
+is correctly reported as not intersecting. Where Wolf? has no History at all — it never had one.
+**Deploy needs no expand/contract**: an old cached bundle renders all 50 at once, a new bundle against
+the old server just runs out of pages sooner. Browser coverage is one `screens.mjs` block driving
+Dontminion against a STUBBED `/games/history` of 55 rows (the hook is shared, so covering it once
+covers the logic; each game's wiring is one line).
 
 **Load-bearing invariants across all four games:**
 - **Pending sub-decisions are real game-state keys**, not transient message fields — so they survive

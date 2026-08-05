@@ -1012,6 +1012,88 @@ try {
 	// landscape would satisfy it perfectly. Adventures ships 20 Events, so the
 	// row is now reachable by any player and owes a real render.
 	//
+	// ─── Lobby History pages 10 at a time, and stops at 50 ───────────────────
+	// `useProgressiveList` (shared/lobby.jsx) is wired identically into all four
+	// lobbies, so covering it once covers the logic; each game's wiring is one
+	// line. Driven against a STUBBED /games/history rather than a seeded DB: the
+	// point is the reveal, and 55 synthetic rows make both the page size and the
+	// HISTORY_MAX cap exact instead of dependent on what this box has played.
+	{
+		const ctx = await browser.newContext();
+		// a session_token so the lobby actually fetches history (a guest is short-
+		// circuited to an empty list), and a SHORT viewport so the initial 10 rows
+		// push the sentinel below the fold — otherwise a tall window can see the
+		// end of the list immediately and legitimately reveals the next page at
+		// mount, which would make "shows 10" flaky rather than wrong.
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "hist-harness", name: "Histy", session_token: "stub" })));
+		const page = await ctx.newPage();
+		await page.setViewportSize({ width: 1280, height: 500 });
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		// The shell validates the stored session on load and a definitively-dead
+		// token clears the login — but a NETWORK error never does (deliberate), so
+		// aborting is how the seeded user survives without guessing the payload.
+		await page.route("**/auth/session*", (r) => r.abort());
+		const TOTAL = 55;     // > HISTORY_MAX, so the cap is exercised too
+		await page.route("**/games/history*", (r) => r.fulfill({
+			status: 200, contentType: "application/json",
+			body: JSON.stringify({
+				ok: true,
+				games: Array.from({ length: TOTAL }, (_, i) => ({
+					id: `G${String(i).padStart(3, "0")}`,
+					players: ["Histy", "Bot 1"], opponents: ["Bot 1"],
+					your_vp: 30, scores: { Histy: 30, "Bot 1": 10 },
+					standings: [{ name: "Histy", vp: 30, you: true, won: true },
+						{ name: "Bot 1", vp: 10, you: false, won: false }],
+					you_won: true, winners: ["Histy"], updated_at: 1750000000 - i * 60,
+				})),
+			}),
+		}));
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		const rows = () => page.locator(".history-section .lby-card").count();
+		await page.waitForFunction(
+			() => document.querySelectorAll(".history-section .lby-card").length > 0,
+			null, { timeout: 20_000 }).catch(() => {});
+		const first = await rows();
+		check("History shows the first page only, not every finished game",
+			first === 10, JSON.stringify({ first, of: TOTAL }));
+
+		// scrolling the end of the list into view reveals the next page
+		await page.locator(".history-section .lby-more").scrollIntoViewIfNeeded()
+			.catch(() => {});
+		await sleep(500);
+		const second = await rows();
+		check("...and reaching the end of it reveals another page",
+			second > first && second % 10 === 0,
+			JSON.stringify({ first, second }));
+
+		// keep going until it stops growing — it must stop at HISTORY_MAX, never
+		// at the 55 the server sent
+		let last = second;
+		for (let i = 0; i < 12; i++) {
+			const sentinel = page.locator(".history-section .lby-more");
+			if (await sentinel.count() === 0) break;
+			await sentinel.scrollIntoViewIfNeeded().catch(() => {});
+			await sleep(350);
+			const n = await rows();
+			if (n === last) break;
+			last = n;
+		}
+		check("...and stops at HISTORY_MAX rather than at everything the server sent",
+			last === 50 && TOTAL > 50, JSON.stringify({ last, sent: TOTAL }));
+		check("no page errors paging through History", errors.length === 0,
+			errors[0] || "");
+		await ctx.close();
+	}
+
 	// An Adventures-only board deals at least one Event on 99.65% of seeds
 	// (measured over 20k), so this asserts the BICONDITIONAL rather than
 	// demanding one: a face implies a well-formed row, and no face implies no

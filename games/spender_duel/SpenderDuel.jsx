@@ -1,7 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+  useProgressiveList, LobbyTabs } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -346,6 +347,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [openGames, setOpenGames] = useState(() => readLobbyCache("duel", myId, "open", []));
   const [myGames, setMyGames] = useState(() => readLobbyCache("duel", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("duel", myId, "history", []));
+  // ...revealed 10 at a time as the reader reaches the end, up to the 50 the
+  // backend sends — see useProgressiveList.
+  const [historyShown, historyMore] = useProgressiveList(history);
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
   const [loadingGames, setLoadingGames] = useState(false);
   const [toast, setToast] = useState("");
@@ -1512,25 +1516,18 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             </div>
           </CreateModal>
         )}
-        {/* Mobile-only tab bar (mirrors Spender): the three columns can't fit side by side
-            on a phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
-        <div className="duel-lobby-tabs" role="tablist">
-          {[
-            ["open", "Open", openGames.length],
-            ["active", "Active", activeMine.length],
-            ["history", "History", history.length],
-          ].map(([key, label, count]) => (
-            <button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
-              className={`duel-lobby-tab${lobbyTab === key ? " sel" : ""}`}
-              onClick={() => setLobbyTab(key)}>
-              {label}{count > 0 ? <span className="duel-lobby-tab-count">{count}</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className={`duel-lobby-cols tab-${lobbyTab}`}>
-          <div className="duel-section open-section">
+        {/* Mobile-only tab bar: the three columns can't fit side by side on a
+            phone, so pick ONE section to show. Hidden on wide screens (CSS). */}
+        <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+          { key: "open", label: "Open", count: openGames.length || null },
+          { key: "active", label: "Active", count: activeMine.length || null },
+          { key: "history", label: "History", count: history.length || null },
+        ]} />
+        <div className={`duel-lobby-cols lby-cols tab-${lobbyTab}`}>
+          <div className="duel-section lby-col-open">
             <LobbySectionHd title="Open Games" />
             {openGames.length === 0 && <div className="lby-empty">No open games. Create one!</div>}
+            <div className="lby-list">
             {openGames.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
@@ -1547,8 +1544,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 </div>
               </div>
             ))}
+            </div>
           </div>
-          <div className="duel-section active-section">
+          <div className="duel-section lby-col-active">
             <LobbySectionHd title="Active Games" />
             {savedRid && savedTok && !savedListed && activeMine.length === 0 && (
               <div className="lby-card">
@@ -1560,6 +1558,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
               </div>
             )}
             {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <div className="lby-empty">No games in progress.</div>}
+            <div className="lby-list">
             {activeMine.map((g) => (
               <div className="lby-card" key={g.id}>
                 <div className="lby-card-info">
@@ -1572,12 +1571,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 </div>
               </div>
             ))}
+            </div>
           </div>
-          <div className="duel-section history-section">
+          <div className="duel-section lby-col-history">
             <LobbySectionHd title="History" />
             {history.length === 0 && <div className="lby-empty">{authUser ? "No finished games yet." : "Log in to keep game history."}</div>}
-            {history.map((g) => (
-              <div className="lby-card" key={g.id}>
+            <div className="lby-list">
+            {historyShown.map((g) => (
+              <div className="lby-card lby-card-hist" key={g.id}>
                 <div className="lby-card-info">
                   <div className="lby-card-title">
                     <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
@@ -1588,6 +1589,8 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 <div className="lby-card-actions"><button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button></div>
               </div>
             ))}
+            {historyMore}
+            </div>
           </div>
         </div>
         {toast && <div className="duel-toast">{toast}</div>}

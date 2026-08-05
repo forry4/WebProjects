@@ -18,6 +18,14 @@
 .lby-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--lby-accent,var(--gold));text-transform:uppercase}
 .lby-muted{font-size:.74rem;color:var(--text-dim)}
 
+/* The card LIST — the wrapper a column's rows live in.
+   Spender had this (as .game-cards) and the kit did not, which is the only reason
+   Spender's lobby columns could scroll and nobody else's could: .lby-card spaces
+   itself with margin-bottom, so there was no element to hang `overflow` on. Rows
+   inside a list take their spacing from the list's gap instead. */
+.lby-list{display:flex;flex-direction:column;gap:9px}
+.lby-list>.lby-card{margin-bottom:0}
+
 /* Game-card row. */
 .lby-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;display:flex;align-items:center;gap:14px;margin-bottom:9px;transition:border-color .15s,background .15s,transform .15s}
 .lby-card:hover{border-color:var(--lby-accent,var(--gold));background:var(--surface2);transform:translateY(-1px)}
@@ -32,6 +40,16 @@
 .hist-result.lost,.hist-result.tie{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
 .hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
 .hist-score-num{color:var(--text);font-weight:600}
+/* A history row's title WRAPS instead of ellipsis-truncating: it is a badge plus a
+   "vs A, B, C" run plus the scores, which at 3-4 players is genuinely longer than
+   one line, and truncating hides the scores rather than a name. Spender's lobby
+   already did this; the other three inherited the plain nowrap title and cut. */
+.lby-card-hist .lby-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
+/* useProgressiveList's sentinel — the element whose coming into view reveals the next
+   page of History. Invisible, but it must have a real box: a zero-height element that
+   an IntersectionObserver is watching still reports a rect, but 1px is the safe shape
+   and keeps it out of the way of the row margins above it. */
+.lby-more{height:1px;margin-top:-1px}
 
 /* Empty state (dashed placeholder). */
 .lby-empty{text-align:center;padding:26px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
@@ -39,12 +57,77 @@
 /* Loading screen (shown while a game boots / fetches). */
 .lby-loading{min-height:56vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text-dim);font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.12em;text-transform:uppercase}
 .lby-spinner{width:30px;height:30px;border:3px solid var(--border);border-top-color:var(--lby-accent,var(--gold));border-radius:50%;animation:lby-spin .7s linear infinite}
+/* Inline size, for a "Loading…" line or inside a button. Three separate copies of
+   this shipped (Spender's .spinner + @keyframes spin, CoC's .coc-spinner +
+   @keyframes coc-spin, and the big one above) — same shape, three animations. */
+.lby-spinner-sm{width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px}
 @keyframes lby-spin{to{transform:rotate(360deg)}}
 
 /* Turn / status pill: "-turn" = your turn (accent), "-wait" = someone else (muted). */
 .lby-badge{padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
 .lby-badge-turn{background:var(--lby-accent,var(--gold));color:var(--bg);font-weight:700}
 .lby-badge-wait{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
+
+/* ─── The lobby COLUMN GRID + its mobile tab bar ──────────────────────────────
+   One responsive ladder for every game, replacing four hand-tuned copies that had
+   drifted to different breakpoints (3-col→2-col at 1280/1040/—/980, 1-col at
+   780/760/720/640) and left DEAD BANDS where a lobby was one column with the tab
+   bar still hidden, i.e. all three sections stacked full-length (Duel 721-1120px,
+   Dontminion 641-980px).
+
+     >=1041px   3 columns — Open | Active | History
+     761-1040   2 columns — Open | Active, History spanning below
+     <=760      1 column  — the tab bar picks which section shows
+
+   PLACEMENT IS EXPLICIT AT EVERY TIER, on purpose. Grid auto-flow follows DOM
+   order, and Spender's lobby emits Open, History, Active — so column-only
+   placement wrapped Active to row 2 and it read as "pushed down below History".
+   Pinning both axes makes all four games' layouts independent of the order their
+   JSX happens to render in, which is one less thing to keep in sync. */
+.lby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
+/* a long unbreakable card title must not blow its track out — Duel's grid had no
+   min-width:0 and no per-column CSS at all */
+.lby-cols>*{min-width:0}
+.lby-cols>.lby-col-open{grid-column:1;grid-row:1}
+.lby-cols>.lby-col-active{grid-column:2;grid-row:1}
+.lby-cols>.lby-col-history{grid-column:3;grid-row:1}
+
+/* Mobile-only segmented bar: hidden until the single-column tier. */
+.lby-tabs{display:none;gap:6px;margin-bottom:18px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px}
+.lby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
+.lby-tab.sel{background:var(--lby-accent,var(--gold));color:var(--bg,#0f0e0c);font-weight:700}
+.lby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.22);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
+.lby-tab:not(.sel) .lby-tab-count{background:var(--surface);color:var(--text-dim)}
+
+/* A column's list is capped to the viewport and scrolls INTERNALLY rather than
+   growing the page — a long History otherwise made the whole lobby very tall.
+   Three-column tier only; the stacked tiers scroll the page normally.
+   scrollbar-gutter:stable reserves the bar's width so a column doesn't shift when
+   its list starts or stops scrolling. `--lby-list-max` is the per-game escape
+   hatch (a taller header wants a smaller cap) and works from either side of the
+   concatenation — CoC appends the shared sheet AFTER its own, so an ordinary
+   same-specificity override would lose there. */
+@media(min-width:1041px){
+	.lby-cols .lby-list{max-height:var(--lby-list-max,calc(100vh - 230px));overflow-y:auto;scrollbar-gutter:stable}
+	.lby-cols .lby-list::-webkit-scrollbar{width:6px}
+	.lby-cols .lby-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+}
+@media(max-width:1040px){
+	.lby-cols{grid-template-columns:1fr 1fr}
+	.lby-cols>.lby-col-history{grid-column:1 / span 2;grid-row:2}
+}
+@media(max-width:760px){
+	.lby-tabs{display:flex}
+	.lby-cols{grid-template-columns:1fr;gap:0}
+	.lby-cols>*{grid-column:1;grid-row:auto}
+	.lby-cols.tab-open>:not(.lby-col-open),
+	.lby-cols.tab-active>:not(.lby-col-active),
+	.lby-cols.tab-history>:not(.lby-col-history){display:none}
+	/* the tab already names the section — drop the redundant heading, keep its
+	   muted context line */
+	.lby-cols .lby-section-title{display:none}
+	.lby-cols .lby-section-hd{margin-bottom:10px}
+}
 
 @media(max-width:600px){
 	.lby-header{padding-left:10px;padding-right:10px;gap:7px}

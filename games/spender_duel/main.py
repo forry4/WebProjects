@@ -303,7 +303,8 @@ def list_user_history(user_id: str) -> list[dict]:
                           state_json, updated_at
                    FROM duel_games
                    WHERE (player1_id=? OR player2_id=?) AND status='over'
-                   ORDER BY updated_at DESC LIMIT 30""", (user_id, user_id))
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (user_id, user_id, _rooms.HISTORY_LIMIT))
     rows = cur.fetchall()
     conn.close()
     out = []

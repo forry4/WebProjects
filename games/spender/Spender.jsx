@@ -53,7 +53,8 @@ const GameChunkLoading = () => (
 );
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
+	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+	useProgressiveList } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -845,6 +846,9 @@ export default function SpenderApp() {
 	const [openGames, setOpenGames] = useState(() => readLobbyCache("spender", myId, "open", []));
 	const [activeGames, setActiveGames] = useState(() => readLobbyCache("spender", myId, "active", []));   // ALL in-progress games (yours + others')
 	const [historyGames, setHistoryGames] = useState(() => readLobbyCache("spender", myId, "history", [])); // your FINISHED games (vs AI or humans)
+	// History reveals 10 at a time as the reader reaches the end of the list, up
+	// to the 50 the backend sends — see useProgressiveList.
+	const [historyShown, historyMore] = useProgressiveList(historyGames);
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
 	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
@@ -2995,7 +2999,7 @@ export default function SpenderApp() {
 							<div className="empty-state">No finished games yet.</div>
 						) : (
 							<div className="game-cards">
-								{historyGames.map(g => {
+								{historyShown.map(g => {
 									// History is always YOUR games, so drop the repeated "you" —
 									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
 									const me = g.players.find(p => p.is_you);
@@ -3018,6 +3022,7 @@ export default function SpenderApp() {
 									</div>
 									);
 								})}
+								{historyMore}
 							</div>
 						)}
 					</div>

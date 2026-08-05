@@ -242,6 +242,20 @@ def release_socket(rooms: Rooms, room_id: str, pid: str, websocket,
 WS_CONNECTS_PER_MIN = 60
 WS_MESSAGES_PER_MIN = 300
 
+# How many finished games every game's `list_user_history` SQL may return. One
+# definition, four callers — the four were independently 20/30/30/30, which is
+# the exact drift this module exists to stop.
+#
+# **It is a CEILING that pairs with the client**, not a display count: the
+# lobby's History list reveals `HISTORY_PAGE` (10) rows at a time as the reader
+# scrolls to the end and stops at `HISTORY_MAX` in `shared/lobby.jsx`, which
+# must equal this. Change one and change the other — they are the same number
+# seen from the two ends, and the client can only ever page through what the
+# query sent. Deploy order does not matter (an old cached bundle renders all 50
+# at once; a new bundle against the old server just runs out of pages sooner),
+# so this needs no expand/contract window.
+HISTORY_LIMIT = 50
+
 _ws_connect_limiter = SlidingWindowLimiter(max_hits=WS_CONNECTS_PER_MIN, window_seconds=60)
 
 

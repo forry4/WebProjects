@@ -355,7 +355,8 @@ def list_user_history(user_id: str) -> list[dict]:
                    FROM dontminion_games
                    WHERE (player1_id=? OR player2_id=? OR player3_id=? OR player4_id=?)
                          AND status='over'
-                   ORDER BY updated_at DESC LIMIT 30""", (user_id,) * 4)
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (user_id,) * 4 + (_rooms.HISTORY_LIMIT,))
     rows = cur.fetchall()
     conn.close()
     out = []
