@@ -1225,9 +1225,17 @@ def _ev_donate_pick(game, pid, frame, choice):
 
 def _ev_donate_reshuffle(game, pid, frame, choice):
     seat = game["seats"][pid]
+    # The draw is a CONTINUATION pushed before the shuffle (ph. 9): a Star
+    # Chart owner's pick frame parks inside shuffle_into_deck, and the draw
+    # must resolve after the pick — push-the-continuation-FIRST, the standing
+    # ordering rule.
+    E.push_auto(game, pid, "Donate", "draw")
     # "At the end of Donate, you shuffle your HAND (not cards that might be in
     # your discard pile, such as due to Market Square)."
     E.shuffle_into_deck(game, pid, list(seat["hand"]), zone="hand")
+
+
+def _ev_donate_draw(game, pid, frame, choice):
     E.draw(game, pid, 5)            # "you'll still have 5 cards after
                                     # resolving Donate"
 
@@ -1703,6 +1711,7 @@ STAGES.update({
     ("Donate", "trash"): _ev_donate_trash,
     ("Donate", "pick"): _ev_donate_pick,
     ("Donate", "reshuffle"): _ev_donate_reshuffle,
+    ("Donate", "draw"): _ev_donate_draw,
     ("Ritual", "trash"): _ev_ritual_trash,
     ("Salt the Earth", "trash"): _ev_salt_the_earth_trash,
     ("Tax", "pile"): _ev_tax_pile,

@@ -1445,6 +1445,37 @@ def landscape_kind(name):
     return LANDSCAPES[name]["kind"] if name in LANDSCAPES else None
 
 
+# --- ARTIFACTS (phase 9) ------------------------------------------------------
+#
+# AN ARTIFACT IS NOT A CARD AND NOT A LANDSCAPE, so it gets its own table — the
+# 6H lesson a third time. It has one copy, is never gained, bought or dealt,
+# never sits in a zone, and "State and Artifact cards never belong to any player
+# and are never considered to be in play" (compendium p35). A CARDS entry would
+# hand it a cost and a kingdom flag that lie; a LANDSCAPES entry would put it in
+# the randomizer deal. `by` is the kingdom card whose SETUP brings it: "If the
+# following cards are in the game, keep these Artifact cards available"
+# (SPECIAL SETUP: RENAISSANCE) — and a Bane or Ferryman pile is in the game.
+ARTIFACTS = {
+    "Flag":           {"by": "Flag Bearer", "expansion": "renaissance",
+                       "text": "When drawing your hand, +1 Card."},
+    "Horn":           {"by": "Border Guard", "expansion": "renaissance",
+                       "text": "Once per turn, when you discard a Border Guard from play, you may put it onto your deck."},
+    "Key":            {"by": "Treasurer", "expansion": "renaissance",
+                       "text": "At the start of your turn, +$1."},
+    "Lantern":        {"by": "Border Guard", "expansion": "renaissance",
+                       "text": "Border Guards you play reveal 3 cards and discard 2. (It takes all 3 being Actions to take the Horn.)"},
+    "Treasure Chest": {"by": "Swashbuckler", "expansion": "renaissance",
+                       "text": "At the start of your Buy phase, gain a Gold."},
+}
+
+
+def artifacts_for(in_play_cards):
+    """The artifacts a game must keep available, given the cards in the game
+    (the dealt kingdom plus any setup-chosen extra pile)."""
+    have = set(in_play_cards)
+    return sorted(a for a, d in ARTIFACTS.items() if d["by"] in have)
+
+
 # Cards we have deliberately NOT implemented, and why. This is a real roster
 # hole, so it is DATA rather than a comment: `test_cards.py` asserts the set's
 # published size equals what we ship plus what is listed here, so the omission
@@ -1487,6 +1518,19 @@ KINGDOM = {
                 + [p for p, d in PILES.items()
                    if d["kingdom"] and d["expansion"] == "empires"]),
 }
+
+
+# CAPITALISM (ph. 9): "During your turns, Actions with +$ amounts in their text
+# are also Treasures." The membership test is LITERAL — the card's text carrying
+# "+$" with the plus ("It doesn't change a card that has just $ amounts without
+# the + … It also changes Teacher", whose text names the +$1 token) — so the set
+# is DERIVED from the text field over the whole catalogue: the rule reaches
+# every set in the game, not just Renaissance. Derived once at import; the
+# derivation is pinned by an explicit-list test (the ph.-7 REVIEWED lesson: a
+# guard rebuilt from the thing it checks can never fail), so a future card's
+# membership is a visible decision, not a regex accident.
+CAPITALISM_CARDS = frozenset(
+    n for n, c in CARDS.items() if "action" in c["types"] and "+$" in c["text"])
 
 
 def expansion_of(name):

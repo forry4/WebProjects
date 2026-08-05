@@ -28,6 +28,7 @@ V10_KEYS_GAME = ("landscapes",)
 V10_KEYS_SEAT = ("tavern", "tokens")
 V11_KEYS_GAME = ("debt",)
 V12_KEYS_SEAT = ("cleanup_return",)
+V13_KEYS_GAME = ("villagers", "artifacts", "fleet")
 
 
 def _fresh(expansions=("base",), kingdom=None):
@@ -40,6 +41,12 @@ def _fresh(expansions=("base",), kingdom=None):
 def _downgrade(g, to_version):
     """Strip a current blob back to what the vN engine would have persisted."""
     g = json.loads(json.dumps(g))
+    if to_version < 13:
+        for k in V13_KEYS_GAME:
+            g.pop(k, None)
+        for k in ("played_actions", "citadel_used", "innovation_used",
+                  "horn_used"):
+            g["turn_ctx"].pop(k, None)
     if to_version < 12:
         for seat in g["seats"].values():
             for k in V12_KEYS_SEAT:
@@ -99,7 +106,7 @@ def _drive(g, moves=120, seed=5):
 
 
 def test_new_games_carry_the_current_schema():
-    assert _fresh()["schema"] == engine.SCHEMA == 12
+    assert _fresh()["schema"] == engine.SCHEMA == 13
 
 
 @pytest.mark.parametrize("version", [1, 2])
@@ -110,7 +117,8 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
     g = engine.migrate(old)
     assert g["schema"] == engine.SCHEMA
     for k in (V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME + V7_KEYS_GAME
-              + V8_KEYS_GAME + V9_KEYS_GAME + V10_KEYS_GAME + V11_KEYS_GAME):
+              + V8_KEYS_GAME + V9_KEYS_GAME + V10_KEYS_GAME + V11_KEYS_GAME
+              + V13_KEYS_GAME):
         assert k in g, k
     for seat in g["seats"].values():
         for k in V2_KEYS_SEAT + V7_KEYS_SEAT + V10_KEYS_SEAT + V12_KEYS_SEAT:
@@ -124,7 +132,7 @@ def test_migrate_fills_every_key_the_kernel_reads(version):
         assert engine.pile_count(g, name) == g["supply"][name]
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8, 9, 10, 11])
+@pytest.mark.parametrize("version", [1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12])
 def test_migrated_blobs_play_through_the_current_kernel(version):
     g = engine.migrate(_downgrade(_fresh(), version))
     _drive(g)
@@ -149,7 +157,7 @@ def test_migrate_tolerates_junk():
 
 @pytest.mark.parametrize("missing", V2_KEYS_GAME + V3_KEYS_GAME + V6_KEYS_GAME
                          + V7_KEYS_GAME + V8_KEYS_GAME + V9_KEYS_GAME
-                         + V10_KEYS_GAME + V11_KEYS_GAME)
+                         + V10_KEYS_GAME + V11_KEYS_GAME + V13_KEYS_GAME)
 def test_a_stamped_blob_missing_a_key_is_still_filled(missing):
     """THE prod shape that broke this. `schema = 2` was stamped across the whole
     Seaside AND Prosperity eras, so prod carries v2 blobs that predate keys
@@ -358,6 +366,24 @@ def test_a_pre_empires_save_gains_the_cleanup_return_zone():
     engine.migrate(old)
     for seat in old["seats"].values():
         assert seat["cleanup_return"] == []
+    _drive(old, moves=120)
+
+
+def test_a_pre_renaissance_save_gains_the_mat_the_artifacts_and_the_fleet():
+    """ph. 9 adds three game-level keys the kernel indexes directly:
+    `villagers` (read by `spendable` on every enumeration and by the
+    auto-advance guard on every move), `artifacts` (read by the trigger bus's
+    artifact source and by Flag's Clean-up draw) and `fleet` (read by the
+    game-end check at every turn end). A save that predates them would
+    KeyError at the first legal_moves call, so the fill is what keeps an old
+    game playable at all."""
+    old = _downgrade(_fresh(), 12)
+    for k in V13_KEYS_GAME:
+        assert k not in old
+    engine.migrate(old)
+    assert old["villagers"] == {A: 0, B: 0}
+    assert old["artifacts"] == {} and old["fleet"] is None
+    assert old["turn_ctx"]["played_actions"] == []
     _drive(old, moves=120)
 
 

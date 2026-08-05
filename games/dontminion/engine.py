@@ -28,6 +28,8 @@ from .cards import (
     CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
     CASTLES, EMPIRES_SPLITS, SPLIT_EACH,
     LANDSCAPES, BUYABLE_LANDSCAPE_KINDS, TRAVELLERS, TRAVELLER_PILE,
+    ARTIFACTS, CAPITALISM_CARDS,
+    artifacts_for as cards_artifacts_for,
     traveller_chain as cards_traveller_chain,
     pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
     grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
@@ -44,7 +46,7 @@ _ENUM_CAP = 200
 # reads, and add the matching step to migrate(). The server migrates at LOAD,
 # so kernel code may assume the CURRENT shape — no defensive .get() for keys
 # migrate guarantees (lazily-built transients like dur_setup stay lazy).
-SCHEMA = 12
+SCHEMA = 13
 #   1 = Base + Intrigue
 #   2 = Seaside      (durations/mats/watchers/extra turns)
 #   3 = Prosperity   (VP tokens, Platinum/Colony, Charlatan's Curse rule)
@@ -62,6 +64,9 @@ SCHEMA = 12
 #  12 = Empires (ph. 8): seat["cleanup_return"] — cards set aside to go back to
 #       their PILE at Clean-up (Encampment). Also a fill-only bump; every other
 #       key this set reads was added by v10/v11
+#  13 = Renaissance (ph. 9): game["villagers"] (the second spendable mat),
+#       game["artifacts"] (the unique pass-around objects) and game["fleet"]
+#       (the after-game-end round, None until it triggers). Fill-only
 
 # Cards renamed by the publisher, old -> current. We ship current names (user
 # directive), so a persisted save written under an old name must be rewritten
@@ -115,6 +120,13 @@ _GAME_FILLS = {
     # (ph. 8), so an old save owes none — but the buy gate reads it on every
     # buy, so it has to exist rather than be defaulted at each read site.
     "debt": lambda g: {p: 0 for p in g.get("players", [])},
+    # Renaissance (ph. 9): the Villagers mat (Coffers' exact game-level shape),
+    # the Artifact holders ({name: pid|None} for the artifacts THIS game keeps
+    # available — an old save was dealt none), and the Fleet round (None until
+    # the game-end check trips with a Fleet cube on the table).
+    "villagers": lambda g: {p: 0 for p in g.get("players", [])},
+    "artifacts": lambda g: {},
+    "fleet": lambda g: None,
 }
 _SEAT_FILLS = {
     "aside": list,
@@ -937,6 +949,7 @@ def draw(game, pid, n):
             rng = _make_rng(game)
             pile = seat["discard"][:]
             rng.shuffle(pile)
+            _apply_shuffle_pick(game, pid, pile)
             seat["deck"] = pile
             seat["discard"] = []
             _save_rng(game, rng)
@@ -965,6 +978,7 @@ def look_top(game, pid, n):
             rng = _make_rng(game)
             pile = seat["discard"][:]
             rng.shuffle(pile)
+            _apply_shuffle_pick(game, pid, pile)
             seat["deck"] = pile
             seat["discard"] = []
             _save_rng(game, rng)
@@ -974,6 +988,87 @@ def look_top(game, pid, n):
     if moved:
         _mark_revealed(game)
     return moved
+
+
+# --- STAR CHART (ph. 9): "When shuffling, you may pick one of the cards to go
+# on top." The pick is a REAL DECISION, honoured at every shuffle point the
+# frame stack can reach:
+#   * the Clean-up hand draw (the card's flagship use — guarantee a key card
+#     into your next hand), via final_draw below;
+#   * any card code's FINAL draw, via final_draw (new-set code must use it for
+#     a draw that ends its ability — the frozen-API rule);
+#   * whole-deck shuffles (shuffle_into_deck — Inn/Donate-class), which push
+#     the pick frame directly after shuffling.
+# A shuffle in the MIDDLE of an ability that continues afterwards (a Smithy
+# draw flipping the deck, a look_top) shuffles uniformly and LOGS the skip —
+# a documented deviation (B9), because a decision cannot be inserted into a
+# synchronous caller without deferring the rest of that caller: the ~100
+# existing draw sites would each need the CPS rewrite the ledger row schedules
+# for ph. 15 (Stash, the next "when shuffling" consumer). A skipped pick is
+# never silent (the lost_track rule).
+
+def _star_chart_pick_applies(game, pid):
+    """May pid pick at a shuffle right now? (Cube on Star Chart; the choice
+    set — the cards being shuffled — is the caller's concern.)"""
+    return bool(game["landscapes"]) and project_owned(game, "Star Chart", pid)
+
+
+def _apply_shuffle_pick(game, pid, pile):
+    """Inside a shuffle: honour a pick the owner already made (the transient
+    parked by _k_star_pick), or log the skip when an owner shuffles where no
+    pick could be offered. The pick moves AFTER the rng.shuffle, so the
+    entropy spend is identical picked, declined or skipped — which is what
+    keeps the determinism soak honest."""
+    t = game.pop("_shuffle_pick", None)
+    if t is not None and t.get("pid") == pid:
+        card = t.get("card")
+        if card is not None and card in pile:
+            pile.remove(card)
+            pile.insert(0, card)
+        return
+    if t is not None:
+        game["_shuffle_pick"] = t          # someone else's pending pick
+    if _star_chart_pick_applies(game, pid):
+        # the deviation, visibly: the owner shuffled mid-ability, where the
+        # pick cannot be offered — indistinguishable at the table from a
+        # trigger that failed to fire, so the engine says it (lost_track rule)
+        _log(game, pid, "star_chart_skip")
+
+
+def final_draw(game, pid, n):
+    """Draw n with the Star Chart pick honoured — for a draw that ENDS its
+    ability (nothing may run after this in the calling stage: the draw may
+    park a decision frame and complete inside it). Kernel Clean-up uses it for
+    the hand draw; card code uses it for any final draw. Where no pick
+    applies, it is exactly draw()."""
+    seat = game["seats"][pid]
+    m = n - (1 if (n > 0 and seat["tokens"].get("-card")) else 0)
+    if not _star_chart_pick_applies(game, pid) or m <= len(seat["deck"]) \
+            or not seat["discard"]:
+        return draw(game, pid, n)
+    # a shuffle is coming: ask first, then the pick frame's stage draws
+    push_choose_cards(game, pid, "Star Chart", "__star_pick",
+                      sorted(seat["discard"]), 0, 1, "put on top of your shuffled deck",
+                      data={"n": n, "mode": "draw"})
+    return []
+
+
+def _k_star_pick(game, pid, frame, choice):
+    picked = (choice.get("cards") or [None])[0]
+    if picked is not None:
+        # the pick is the owner's private information until the cards show
+        _log(game, pid, "star_chart", card=picked, private_to=[pid])
+    if frame["data"]["mode"] == "draw":
+        game["_shuffle_pick"] = {"pid": pid, "card": picked}
+        draw(game, pid, frame["data"]["n"])
+        game.pop("_shuffle_pick", None)   # a -1 Card token can eat the shuffle
+    else:
+        # "deck": the deck was already shuffled (shuffle_into_deck) — move the
+        # picked card to the top
+        deck = game["seats"][pid]["deck"]
+        if picked is not None and picked in deck:
+            deck.remove(picked)
+            deck.insert(0, picked)
 
 
 def gain(game, pid, pile, dest="discard", via_buy=False, overpay=0, **extra):
@@ -1174,7 +1269,14 @@ def shuffle_into_deck(game, pid, cards, zone="discard"):
     """Shuffle `cards` from a zone into the deck (Inn's on-gain). Shuffles the
     deck EVEN WHEN `cards` IS EMPTY — "if you shuffle zero cards into your
     deck, you still shuffle" — which matters because the shuffle itself
-    randomises deck order."""
+    randomises deck order.
+
+    A Star Chart owner's pick frame parks HERE (ph. 9): "this also works when
+    you shuffle your existing deck with Annex, Donate, Famine or Inn" — the
+    whole shuffled deck is the choice set, and nothing has been drawn off it
+    yet, so a pick after the fact is exact. CALLER CONTRACT: anything that
+    must happen after this shuffle (Donate's draw-5) goes in a continuation
+    pushed BEFORE the call, or it runs before the pick resolves."""
     seat = game["seats"][pid]
     for c in cards:
         seat[zone].remove(c)
@@ -1184,6 +1286,13 @@ def shuffle_into_deck(game, pid, cards, zone="discard"):
     _save_rng(game, rng)
     _mark_revealed(game)                 # deck order changed under the player
     _log(game, pid, "shuffle_into_deck", count=len(cards))
+    if seat["deck"] and _star_chart_pick_applies(game, pid):
+        # sorted: the constraint ships to the owner, who knows the SET of
+        # cards but must not learn the freshly shuffled ORDER from it
+        push_choose_cards(game, pid, "Star Chart", "__star_pick",
+                          sorted(seat["deck"]), 0, 1,
+                          "put on top of your shuffled deck",
+                          data={"mode": "deck"})
     return list(cards)
 
 
@@ -1260,9 +1369,20 @@ def topdeck(game, pid, card, zone="hand", public=False):
 
 
 def reveal(game, pid, cards, source):
-    """Reveals are information events only — cards stay where they are."""
+    """Reveals are information events only — cards stay where they are.
+
+    Since ph. 9 a reveal is also a trigger occurrence (Patron: "when something
+    causes you to reveal this (using the word 'reveal')…"). The emit is a
+    BATCH — the cards are revealed simultaneously, so two revealed Patrons'
+    abilities land in one pool — and fires for the cards' OWNER (pid, the
+    player whose zone they came from), which is who Patron pays. The word
+    "reveal" is the whole rule: a draw, a look or a discard shows cards
+    without revealing them, which is why the emit lives HERE and nowhere else.
+    With no consumer registered the pools stay empty and nothing parks — a
+    Patron-less board is byte-identical (the 6H before_play discipline)."""
     _mark_revealed(game)
     _log(game, pid, "reveal", cards=list(cards), source=source)
+    emit_batch(game, "reveal", pid, list(cards), source=source)
 
 
 def take_aside(game, pid, cards, dest="hand"):
@@ -1474,6 +1594,18 @@ def add_coffers(game, n, pid=None):
     _log(game, pid, "coffers", count=n, total=game["coffers"][pid])
 
 
+def add_villagers(game, n, pid=None):
+    """+x Villagers — tokens onto the Villagers half of a player's mat
+    (Renaissance). Coffers' exact shape and NOT _grant for the same reason: a
+    mat persists, so a Villager earned on someone else's turn (Silk Merchant's
+    when-trash under an attack) is kept, never evaporated."""
+    if n == 0:
+        return
+    pid = _acting(game, pid)
+    game["villagers"][pid] = game["villagers"].get(pid, 0) + n
+    _log(game, pid, "villagers", count=n, total=game["villagers"][pid])
+
+
 def add_debt(game, pid, n):
     """Take n Debt tokens (Empires). PUBLIC, per player, an unlimited pool.
 
@@ -1501,6 +1633,12 @@ def _spend_debt(game, pid, n):
     game["debt"][pid] -= n
 
 
+def _spend_villagers(game, pid, n):
+    """n Villagers off the mat -> +n Actions."""
+    game["villagers"][pid] -= n
+    game["actions"] += n
+
+
 # THE SPENDABLE REGISTRY — one entry per "counter you spend during your turn"
 # (the `spend` move surface, ph. 4). `avail` is how many you may spend RIGHT
 # NOW, `apply` performs it; `spendable` and `_h_spend` are then generic, which
@@ -1516,6 +1654,17 @@ _SPENDABLES = {
                 "apply": _spend_coffers},
     "debt": {"avail": lambda game, pid: min(game["coins"], game["debt"].get(pid, 0)),
              "apply": _spend_debt},
+    # Villagers (ph. 9) are ACTION-PHASE-ONLY — "Villager tokens can be spent
+    # at any time in your Action phase. Each spent Villager gives you +1
+    # Action" (COFFERS AND VILLAGERS § IV). Coffers' "at any time during your
+    # turn" is the 2022 change and VILLAGERS NEVER GOT IT, so the phase gate
+    # lives in `avail` — which also keeps a mid-ability spend legal exactly
+    # when the ability is resolving in the Action phase ("you can even spend
+    # Coffers or Villagers in the middle of resolving an ability"), and makes
+    # a Buy-phase ability offer NO villager moves at all.
+    "villagers": {"avail": lambda game, pid: (game["villagers"].get(pid, 0)
+                                              if game["phase"] == "action" else 0),
+                  "apply": _spend_villagers},
 }
 
 
@@ -1598,6 +1747,29 @@ def add_vp_tokens(game, pid, n):
         _log(game, pid, "vp_tokens", count=n)
 
 
+def take_artifact(game, pid, name):
+    """Take an Artifact (Renaissance) — "you take the Artifact card from
+    another player if they have it", and taking one you already hold is a
+    no-op transfer that still logs (the reader can see the Flag Bearer traded
+    hands even when nothing moved). Artifacts are game-level PUBLIC objects:
+    "State and Artifact cards never belong to any player and are never
+    considered to be in play" — they sit in front of you, not in a zone.
+    Only artifacts this game keeps available exist in `game["artifacts"]`;
+    taking an inactive one is a bug, so it raises rather than conjuring."""
+    if name not in game["artifacts"]:
+        raise ValueError(f"artifact {name!r} is not in this game")
+    prev = game["artifacts"][name]
+    game["artifacts"][name] = pid
+    _log(game, pid, "artifact", name=name,
+         **({"from_pid": prev} if prev is not None and prev != pid else {}))
+
+
+def holds_artifact(game, pid, name):
+    """Does pid hold this Artifact right now? Total on unknown names (a board
+    without the granting card simply has nobody holding it)."""
+    return game["artifacts"].get(name) == pid
+
+
 def opponents(game, pid):
     """All other players, in turn order starting after pid."""
     order = game["players"]
@@ -1643,7 +1815,37 @@ def types_of(game, card):
     # game".
     if card == "Estate" and not game["over"] and estate_token_card(game):
         return types + ["action", "command"]
+    # CAPITALISM (ph. 9): "During your turns, Actions with +$ amounts in their
+    # text are also Treasures." The Inheritance signature trick again — keyed
+    # on the TURN player owning the cube, changing every copy EVERYWHERE
+    # (hands, Supply, trash, in play, opponents' zones), reverting off-turn
+    # and at `over` ("Cards are not changed by Capitalism when you score for
+    # Keep, as it's not your turn at the end of the game"). Membership is the
+    # static text-derived set (cards.CAPITALISM_CARDS).
+    if card in CAPITALISM_CARDS and not game["over"] \
+            and "treasure" not in types and _capitalism_on(game):
+        return types + ["treasure"]
     return types
+
+
+def _capitalism_on(game):
+    """Is Capitalism changing types right now? (Dealt, and the TURN player has
+    a cube on it.) The `landscapes` guard keeps the common no-landscape board
+    at one dict check."""
+    return bool(game["landscapes"]) and project_owned(game, "Capitalism",
+                                                      game["turn"])
+
+
+def capitalism_changed(game, card):
+    """Is this card an Action that Capitalism is CURRENTLY making a Treasure?
+    THE reader for the play surface: such a card is playable as a Treasure in
+    the owner's Buy phase (routed through the full Action-play machinery) but
+    must never be auto-played by play_all_treasures — it draws, attacks or
+    prompts like the Action it is."""
+    card = _priced(game, card)
+    return (card in CAPITALISM_CARDS
+            and "treasure" not in CARDS[card]["types"]
+            and not game["over"] and _capitalism_on(game))
 
 
 def has_type(game, card, t):
@@ -1707,6 +1909,15 @@ def cost(game, card):
             discount = 2 * list(toks.get(game["turn"], ())).count("-cost")
     card = _priced(game, card)
     c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"] - discount
+    # CANAL (ph. 9): "During your turns, cards cost $1 less." A Project is
+    # never in play and has no copies, so this is NOT a COST_MODS entry — it
+    # is a flat -$1 keyed on the TURN player owning the cube, the Ferry-token/
+    # Inheritance signature trick ("during your opponent's turn, costs are
+    # reduced if your OPPONENT has a cube on Canal, but not if only you have
+    # one"). It applies in Clean-up too (Improve): "cost reductions for this
+    # turn, or from cards in play, still apply in Clean-up".
+    if game["landscapes"] and project_owned(game, "Canal", game["turn"]):
+        c -= 1
     # Quarry (2022): a TURN-scoped discount — survives the Quarry leaving play
     if game["turn_ctx"].get("quarries") and "action" in CARDS[card]["types"]:
         c -= 2 * game["turn_ctx"]["quarries"]
@@ -2065,6 +2276,11 @@ def return_to_action_phase(game, pid):
         return False
     game["phase"] = "action"
     game["turn_ctx"]["bought"] = False
+    # `buy_gains` counts gains PER BUY PHASE, not per turn — Merchant Guild's
+    # "+1 Coffers per card you gained in it" and Exploration's "if you didn't
+    # gain any cards during it" both check "the Buy phase that just ended"
+    # (Exploration 4), so a Villa re-entry starts a fresh count.
+    game["turn_ctx"]["buy_gains"] = 0
     _log(game, pid, "phase", phase="action")
     return True
 
@@ -2242,7 +2458,45 @@ def _emit_collect(game, pools, event, actor=None, subject=None, **extra):
                 # landmark's own name. `card` here is a LANDSCAPE name, which
                 # can never collide with a card name: they are different tables
                 # and the merge in effects.py refuses a duplicate key either way.
-                if actor is not None and card in game["landscapes"] \
+                #
+                # A PROJECT (ph. 9) is the same source with OWNERSHIP: "A
+                # Project's ability is active for players who have a Project
+                # cube on the card", so its consumers are filtered to cube
+                # owners — and the recipient is not always the actor. The
+                # spec's optional `recipients` key names the scoping:
+                #   "owner-actor" (default) — fires for the event's actor iff
+                #       they own a cube (Academy: "when YOU gain an Action
+                #       card"; Guildhall, Sewers, Innovation);
+                #   "owners-not-actor" — fires for every cube owner EXCEPT the
+                #       actor (Road Network: "when ANOTHER player gains a
+                #       Victory card, +1 Card" — each such owner draws, in the
+                #       middle of the actor's resolution if need be).
+                # A landmark ignores the key: it has no owners to scope by.
+                if card in game["landscapes"]:
+                    st = game["landscapes"][card]
+                    if st["kind"] == "project":
+                        owners = st["bought_by"]
+                        if spec.get("recipients") == "owners-not-actor":
+                            targets = [p for p in game["players"]
+                                       if p in owners and p != actor]
+                        else:
+                            targets = [actor] if actor in owners else []
+                    else:
+                        targets = [actor] if actor is not None else []
+                    for p in targets:
+                        if when is None or when(game, p, ctx):
+                            add(p, 0, card, spec["stage"],
+                                {**extra, "actor": actor, "subject": subject,
+                                 "owner": p},
+                                commutes=spec.get("commutes", False))
+            elif src == "artifact":
+                # An ARTIFACT's ability (ph. 9): "the Artifact's ability
+                # applies to you while you have it" — fires for the event's
+                # ACTOR iff they hold the named artifact (Treasure Chest at
+                # their buy_phase_start, Horn on their cleanup_discard of a
+                # Border Guard, Key at their turn_start). `card` is an
+                # ARTIFACTS name — its own table, like a landscape's.
+                if actor is not None and game["artifacts"].get(card) == actor \
                         and (when is None or when(game, actor, ctx)):
                     add(actor, 0, card, spec["stage"],
                         {**extra, "actor": actor, "subject": subject},
@@ -2787,9 +3041,18 @@ def play_action_card(game, pid, card, from_zone="hand", count=True):
                 break
     if count and has_type(game, card, "action"):
         game["turn_ctx"]["actions_played"] += 1   # Conspirator counts ACTIONS only
-    if has_type(game, card, "treasure"):
+        # ...and the NAMES in play order (ph. 9): Scepter replays "a non-Command
+        # Action card you played this turn that's still in play", and Citadel's
+        # target is THE FIRST-PLAYED action even when a before-play reaction
+        # (Caravan Guard) puts other cards into play ahead of its resolution —
+        # "a card is considered played even before it's resolved", and this
+        # list records exactly that order.
+        game["turn_ctx"]["played_actions"].append(card)
+    if has_type(game, card, "treasure") and not capitalism_changed(game, card):
         # a Treasure played out-of-band (Sailor playing a gained Astrolabe)
-        # still produces its printed $ — and the Merchant/first-Silver hook
+        # still produces its printed $ — and the Merchant/first-Silver hook.
+        # NOT a Capitalism-changed Action: its $ comes from its own +$ text
+        # when the effect runs, not from a printed coin value.
         _log(game, pid, "play", card=card, coins=coins_of(game, card))
         _treasure_coins(game, pid, card)
     else:
@@ -3323,7 +3586,14 @@ def _fresh_turn_ctx():
             # Adventures (ph. 7): cards Save set aside to come back INTO YOUR
             # HAND after the clean-up draw, and Mission's "during which you
             # can't buy cards" (Events and Projects are still buyable).
-            "end_hand": [], "no_buy": False}
+            "end_hand": [], "no_buy": False,
+            # Renaissance (ph. 9): Action names in play order (Scepter's
+            # replay targets; [0] is Citadel's first-play), and the per-turn
+            # once flags for Citadel's replay, Innovation's play-on-gain and
+            # Horn's topdeck ("You may only put one Border Guard onto your
+            # deck each turn with Horn").
+            "played_actions": [], "citadel_used": False,
+            "innovation_used": False, "horn_used": False}
 
 
 def _h_play_action(game, pid, move):
@@ -3367,6 +3637,20 @@ def play_treasure_card(game, pid, card, from_zone="hand"):
 
 
 def _play_one_treasure(game, pid, card, from_zone="hand"):
+    # CAPITALISM (ph. 9): an Action-become-Treasure played in the Buy phase is
+    # still an ACTION PLAY — "you play these like other Treasure cards …
+    # following its instructions", it "doesn't use an Action from your Action
+    # pool", and the compendium routes it through the whole play timing (an
+    # Enchantress catches it, Urchin-class before-play fires, it counts as an
+    # Action played). So the play delegates to play_action_card — attack
+    # windows, before_play, would_resolve, duration setup and actions_played
+    # all included, no Action spent — and then announces the treasure play the
+    # way every other Treasure does. from_zone=None (a throne-room replay)
+    # keeps the same meaning on both paths.
+    if capitalism_changed(game, card):
+        play_action_card(game, pid, card, from_zone=from_zone)
+        emit(game, "play_treasure", actor=pid, subject=card)
+        return
     from . import effects
     seat = game["seats"][pid]
     if from_zone is not None:
@@ -3410,24 +3694,37 @@ def _h_play_treasure(game, pid, move):
     return True, None
 
 
+def autoplay_treasures(game, pid):
+    """The exact list play_all_treasures would play right now, in play order —
+    THE reader, consulted by the handler, legal_moves AND player_view (shipped,
+    so the client's button can never disagree with the server: the livelock
+    rule). It excludes the static MANUAL_TREASURES (Anvil-class decisions) and
+    — state-dependently — every Capitalism-changed Action: those draw, attack
+    or prompt like the Actions they are, and the button must not fire them.
+    This is the state-aware half of the ledger's `autoplay_block` row (pulled
+    forward from ph. 12 by Capitalism); Highwayman's whole-button block joins
+    it when Allies lands."""
+    manual = manual_treasures()
+    hand = game["seats"][pid]["hand"]
+    auto = [c for c in list(hand)
+            if has_type(game, c, "treasure") and c not in manual
+            and not capitalism_changed(game, c)]
+    # order-sensitive treasures go last; stable, so everything else keeps
+    # hand order (which is what determinism/replay compares on)
+    last = autoplay_last()
+    auto.sort(key=lambda c: c in last)
+    return auto
+
+
 def _h_play_all_treasures(game, pid, move):
     if game["phase"] != "buy":
         return False, "treasures are played in your buy phase"
     if game["turn_ctx"]["bought"]:
         return False, "can't play treasures after buying"
-    manual = manual_treasures()
-    hand = game["seats"][pid]["hand"]
-    # interactive treasures (Anvil-class decisions) are never autoplayed —
-    # they stay in hand for individual plays
-    auto = [c for c in list(hand)
-            if has_type(game, c, "treasure") and c not in manual]
+    auto = autoplay_treasures(game, pid)
     if not auto:
         # a no-op that reported success is what let a bot livelock here
         return False, "no treasures to autoplay"
-    # order-sensitive treasures go last; stable, so everything else keeps
-    # hand order (which is what determinism/replay compares on)
-    last = autoplay_last()
-    auto.sort(key=lambda c: c in last)
     for card in auto:
         _play_one_treasure(game, pid, card)
     return True, None
@@ -3591,6 +3888,34 @@ def take_landscape_vp(game, name, pid, n=None):
     return k
 
 
+def landscape_tokens(game, name, pid):
+    """pid's plain tokens ON a landscape (Sinister Plot's counters — "keep
+    them on Sinister Plot next to your Project cube"). Presence-based like the
+    VP store: an untouched landscape ships no key."""
+    st = game["landscapes"].get(name)
+    return st.get("tokens", {}).get(pid, 0) if st else 0
+
+
+def add_landscape_tokens(game, name, pid, n=1):
+    st = game["landscapes"][name]
+    toks = st.setdefault("tokens", {})
+    toks[pid] = toks.get(pid, 0) + n
+    _log(game, pid, "landscape_tokens", name=name, count=n, total=toks[pid])
+
+
+def take_landscape_tokens(game, name, pid):
+    """Remove ALL of pid's tokens from the landscape ("you remove all your
+    tokens"), returning how many came off."""
+    st = game["landscapes"][name]
+    toks = st.get("tokens", {})
+    k = toks.pop(pid, 0)
+    if not toks and "tokens" in st:
+        del st["tokens"]
+    if k:
+        _log(game, pid, "landscape_tokens", name=name, count=-k, total=0)
+    return k
+
+
 def landscape_scoring(game, pid):
     """The SCORING PIPELINE HOOK (ph. 7H) — what the LANDMARKS on this table add
     to or subtract from pid's score.
@@ -3616,6 +3941,28 @@ def landscape_scoring(game, pid):
                if name in game["landscapes"])
 
 
+def project_owned(game, name, pid):
+    """Does pid have a Project cube on this landscape? THE ownership reader —
+    "A Project's ability is active for players who have a Project cube on the
+    card" (p32). The cube IS the `bought_by` record `_h_buy_landscape` has
+    written since 6H; total on undealt names."""
+    st = game["landscapes"].get(name)
+    return st is not None and st["kind"] == "project" and pid in st["bought_by"]
+
+
+def _project_cubes(game, pid):
+    """How many Project cubes pid has placed (across every dealt project)."""
+    return sum(1 for st in game["landscapes"].values()
+               if st["kind"] == "project" and pid in st["bought_by"])
+
+
+# "Each player gets two Project cubes in their chosen color" (SPECIAL SETUP:
+# RENAISSANCE) — with the official <=2-landscape deal the cap is unreachable,
+# but the forced-board seam can put three or more Projects on one table, so the
+# gate still encodes it.
+_PROJECT_CUBES = 2
+
+
 def landscape_gate(game, pid, name):
     """Why pid may not BUY this landscape right now, or None if they may.
 
@@ -3631,6 +3978,16 @@ def landscape_gate(game, pid, name):
         return "no such landscape"
     if st["kind"] not in BUYABLE_LANDSCAPE_KINDS:
         return f"a {st['kind']} is not something you buy"
+    # PROJECTS (ph. 9): "You can buy two Projects during the game, but not the
+    # same one twice, and you can never remove a placed cube" (p32). Both
+    # clauses are properties of the KIND, not `once` data rows — every project
+    # in the game obeys them, so modelling them as per-landscape flags would
+    # only be somewhere for the data and the rule to disagree.
+    if st["kind"] == "project":
+        if pid in st["bought_by"]:
+            return "you already have a cube on that"
+        if _project_cubes(game, pid) >= _PROJECT_CUBES:
+            return "you have no Project cubes left"
     # "Once per turn / once per game means you can only BUY it once per turn /
     # once per game" (p32). Both are per player; only the turn player can buy,
     # so a turn is identified by its number (which an Outpost extra turn also
@@ -3682,6 +4039,14 @@ def _h_buy_landscape(game, pid, move):
     if pid not in st["bought_by"]:
         st["bought_by"].append(pid)
     _log(game, pid, "buy_landscape", name=name)
+    # A PROJECT buy places the cube and does nothing else — its ability is
+    # ONGOING ("this Project's ongoing ability now applies to you for the rest
+    # of the game"), read by its consumers through project_owned, never run at
+    # buy time. LANDSCAPE_FX stays an EVENT's one-shot buy ability. Buying
+    # Fleet during the Fleet round is exactly this and grants no turn: the
+    # round's roster was fixed when the round began.
+    if st["kind"] == "project":
+        return True, None
     from . import effects
     fn = getattr(effects, "LANDSCAPE_FX", {}).get(name)
     if fn is not None:
@@ -3740,6 +4105,7 @@ KERNEL_STAGES[("__abilities", "pool")] = _k_ability_pool
 KERNEL_STAGES[("__abilities", "pick")] = _k_ability_pick
 KERNEL_STAGES[("*", "__offer_window")] = _k_offer_window
 KERNEL_STAGES[("*", "__inplay_push")] = _k_inplay_push
+KERNEL_STAGES[("*", "__star_pick")] = _k_star_pick
 
 
 _HANDLERS = {
@@ -3764,7 +4130,12 @@ def _maybe_auto_buy(game):
     if game["over"] or game["phase"] != "action" or game["pending"]:
         return False
     hand = game["seats"][game["turn"]]["hand"]
-    if game["actions"] <= 0 or not any(has_type(game, c, "action") for c in hand):
+    # Villagers (ph. 9) are Actions-in-waiting: a player out of Actions but
+    # holding tokens AND an Action card can still act, so the phase must not
+    # advance from under them — they end it themselves if they want to.
+    can_act = game["actions"] > 0 \
+        or game["villagers"].get(game["turn"], 0) > 0
+    if not can_act or not any(has_type(game, c, "action") for c in hand):
         _enter_buy_phase(game, game["turn"], auto=True)
         return True
     return False
@@ -3898,7 +4269,29 @@ def _k_cleanup_sweep(game, pid, frame, choice):
             if entry["card"] == "Outpost" and not entry.get("done"):
                 entry["fx"] = []
                 entry["done"] = True
-    draw(game, pid, 3 if outpost_played else 5)
+    # The REST of the turn end is a second parked stage (ph. 9): the hand draw
+    # below may park a Star Chart pick frame, so everything after it — the
+    # Farrier/Save returns, the game-end check, the hand-off — has to sit in a
+    # continuation UNDER that frame (push-the-continuation-FIRST). The extra-
+    # turn flags travel in the frame data because their transients are popped
+    # above, exactly once.
+    push_auto(game, pid, "__cleanup", "finish",
+              data={"outpost": outpost_played, "extra": extra,
+                    "extra_no_buy": extra_no_buy})
+    # FLAG (ph. 9): "when drawing your hand, +1 Card" — the Clean-up hand draw
+    # counts one higher for the holder (5 -> 6; an Outpost hand 3 -> 4).
+    hand_n = (3 if outpost_played else 5) \
+        + (1 if holds_artifact(game, pid, "Flag") else 0)
+    final_draw(game, pid, hand_n)
+
+
+def _k_cleanup_finish(game, pid, frame, choice):
+    """End of turn, after the new hand is drawn: the end-of-turn returns, the
+    game-end check (with the Fleet round, ph. 9) and the hand-off."""
+    seat = game["seats"][pid]
+    outpost_played = frame["data"]["outpost"]
+    extra = frame["data"]["extra"]
+    extra_no_buy = frame["data"]["extra_no_buy"]
     # "+1 Card at the end of this turn" (Farrier's overpay) — AFTER the new
     # hand is drawn, which is the whole point of the card: the extra cards are
     # for NEXT turn, so a Farrier overpaid by 2 leaves you holding 7.
@@ -3915,17 +4308,59 @@ def _k_cleanup_sweep(game, pid, frame, choice):
     # An EXTRA turn (Outpost) does not add to the player's turn count — the
     # count exists for the fewest-turns tiebreaker, and "extra turns do not add
     # to a player's turn count, and are not used in breaking ties" (wiki Turn
-    # page; Outpost's FAQ agrees). game["extra_turn"] still describes the turn
-    # now ENDING — it is reassigned for the next turn below.
-    if not game.get("extra_turn"):
+    # page; Outpost's FAQ agrees). Fleet turns are the same by their own text
+    # ("these Fleet turns are not counted for tie-breaker"). game["extra_turn"]
+    # still describes the turn now ENDING — reassigned for the next turn below.
+    fl = game["fleet"]
+    on_fleet_turn = bool(fl and fl.get("on_turn"))
+    if not game.get("extra_turn") and not on_fleet_turn:
         seat["turns_taken"] += 1
     game["last_turn_pid"] = pid
-    if game["supply"].get("Province", 0) <= 0 or count_empty_piles(game) >= 3 \
-            or (game["colony"] and game["supply"].get("Colony", 1) <= 0):
-        _finish_game(game)
-        return
+    if fl is not None:
+        fl["on_turn"] = False
+    else:
+        # The ordinary game-end check — SKIPPED entirely while the Fleet round
+        # runs: "once the last Fleet turn has been played, the game is
+        # immediately over … it also doesn't matter if cards had been returned
+        # to the Supply so that the game-end conditions are no longer met."
+        if game["supply"].get("Province", 0) <= 0 \
+                or count_empty_piles(game) >= 3 \
+                or (game["colony"] and game["supply"].get("Colony", 1) <= 0):
+            owners = _fleet_owners(game)
+            if not owners:
+                _finish_game(game)
+                return
+            # FLEET: "the game effectively continues for one more round …
+            # only players who have bought Fleet get a regular turn in this
+            # round. The first player to get a Fleet turn is the next player
+            # after the player who last had a regular turn." Queued extra
+            # turns (the `extra` flag) still resolve first — "any extra turns
+            # that were already in queue will now be resolved".
+            order = game["players"]
+            i = order.index(pid)
+            seq = order[i + 1:] + order[:i + 1]
+            game["fleet"] = fl = {"remaining": [p for p in seq if p in owners],
+                                  "on_turn": False}
+            _log(game, None, "fleet_round", players=list(fl["remaining"]))
+    if fl is not None:
+        if not fl["remaining"] and not on_fleet_turn and not extra:
+            # nothing left to grant (defensive: normally the last fleet turn
+            # ends the game in the branch below)
+            _finish_game(game)
+            return
+        if not fl["remaining"] and on_fleet_turn:
+            # "once the last Fleet turn has been played, the game is
+            # immediately over. No more extra turns … are resolved."
+            _finish_game(game)
+            return
     order = game["players"]
-    nxt = pid if extra else order[(order.index(pid) + 1) % len(order)]
+    if extra:
+        nxt = pid
+    elif fl is not None:
+        nxt = fl["remaining"].pop(0)
+        fl["on_turn"] = True
+    else:
+        nxt = order[(order.index(pid) + 1) % len(order)]
     game["extra_turn"] = bool(extra)
     game["turn"] = nxt
     game["turn_number"] += 1
@@ -3937,13 +4372,25 @@ def _k_cleanup_sweep(game, pid, frame, choice):
     game["turn_ctx"] = _fresh_turn_ctx()
     game["turn_ctx"]["no_buy"] = bool(extra_no_buy)
     _log(game, nxt, "turn_start", turn=game["turn_number"], extra=bool(extra),
-         **({"no_buy": True} if extra_no_buy else {}))
+         **({"no_buy": True} if extra_no_buy else {}),
+         **({"fleet": True} if fl is not None and fl.get("on_turn")
+            and not extra else {}))
     _arm_undo(game)
     _start_of_turn(game, nxt)   # duration fx queue as auto frames; watchers expire
     _maybe_auto_buy(game)       # a hand with no Action cards skips straight to buy
 
 
+def _fleet_owners(game):
+    """The players with a cube on Fleet, if it is dealt — the roster of the
+    after-game-end round."""
+    st = game["landscapes"].get("Fleet")
+    if st is None or st["kind"] != "project":
+        return []
+    return list(st["bought_by"])
+
+
 KERNEL_STAGES[("__cleanup", "sweep")] = _k_cleanup_sweep
+KERNEL_STAGES[("__cleanup", "finish")] = _k_cleanup_finish
 
 
 def _finish_game(game):
@@ -4120,9 +4567,10 @@ def legal_moves(game, pid):
             for c in treasures:
                 mv.append({"type": "play_treasure", "card": c})
             # only when play_all would actually PLAY something — it skips the
-            # interactive MANUAL_TREASURES (War Chest/Anvil), so a hand holding
-            # nothing else makes it a no-op, and a bot that prefers it loops.
-            if any(c not in manual_treasures() for c in treasures):
+            # interactive MANUAL_TREASURES (War Chest/Anvil) and the
+            # Capitalism-changed Actions, so a hand holding nothing else makes
+            # it a no-op, and a bot that prefers it loops.
+            if autoplay_treasures(game, pid):
                 mv.append({"type": "play_all_treasures"})
         # Debt blocks buying ANYTHING, so it gates both enumerations below —
         # the handlers refuse the move, and an enumerator that disagreed would
@@ -4332,10 +4780,13 @@ def player_view(game, viewer):
     AS-IS and that is correct, not an omission: landscapes sit face up on the
     table, Debt tokens sit in front of you where everyone can count them (and
     everyone must, since they stop you buying), mat contents are face up (p28)
-    and tokens are public markers. They are listed here because "build, not
-    filter" means a new key's publicity is a decision someone made, and
-    `test_view_wire` asserts them against the SERIALIZED payload of a real
-    game."""
+    and tokens are public markers. Ph. 9 adds `villagers` (mat tokens are open
+    information like Coffers), `artifacts` (they sit in front of their holder)
+    and `fleet` (the round roster is table state) to the same list — including
+    each project's `bought_by` cube record inside `landscapes`. They are
+    listed here because "build, not filter" means a new key's publicity is a
+    decision someone made, and `test_view_wire` asserts them against the
+    SERIALIZED payload of a real game."""
     g = copy.deepcopy({k: v for k, v in game.items() if k != "undo_stack"})
     g["undo_depth"] = len(game.get("undo_stack") or [])
     g.pop("rng_state", None)
@@ -4343,6 +4794,7 @@ def player_view(game, viewer):
     g.pop("_cur_dur", None)
     g.pop("_outpost", None)
     g.pop("_actor", None)
+    g.pop("_shuffle_pick", None)   # never at rest; defensive like the others
     # watchers are public table state, but their data can reference hidden
     # resume info — ship only the visible identity
     g["watchers"] = [{"event": w["event"], "owner": w["owner"], "card": w["card"]}
@@ -4369,6 +4821,12 @@ def player_view(game, viewer):
     # spendable mid-ability now, for Storyteller), and a client carrying its
     # own copy of it is the Peddler-cost bug's exact shape.
     g["spendable"] = spendable(game, viewer) if viewer else {}
+    # ...and the exact list Play-all-treasures would play, from ITS reader —
+    # membership went state-dependent in ph. 9 (a Capitalism-changed Action
+    # must not be auto-played), so the static /catalog manual-treasures set no
+    # longer decides the button by itself.
+    g["autoplay"] = (autoplay_treasures(game, viewer)
+                     if viewer in game["seats"] else [])
     # Piles ship as face + count, never `contents`: an ordered pile's order
     # below the top is HIDDEN (Ruins and Knights are shuffled), and "an honest
     # client ignores it" is not security — the repo has paid for that three
@@ -4698,6 +5156,15 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         # Empires (ph. 7H): Debt tokens, public, per player. Nothing on any
         # board today can give you one — the seam ships before its consumers.
         "debt": {p: 0 for p in players},
+        # Renaissance (ph. 9): the Villagers half of the Coffers/Villagers
+        # mat; the Artifacts this game keeps available ("If the following
+        # cards are in the game, keep these Artifact cards available" — keyed
+        # on the granting card being IN THE GAME, so a Bane or Ferryman
+        # Border Guard brings the Lantern and Horn); and the Fleet round,
+        # None until the game-end check trips with a cube on Fleet.
+        "villagers": {p: 0 for p in players},
+        "artifacts": {a: None for a in cards_artifacts_for(in_play_cards)},
+        "fleet": None,
         "vp": {},
         "log": [],
         "log_depth": 0,

@@ -490,6 +490,12 @@ function listCards(cards) {
 }
 function fmtLog(e, names) {
   const who = e.pid ? (names[e.pid] || e.pid) : "";
+  const nameOf = (p) => names[p] || p;
+  const listNames = (ps) => {
+    const ns = (ps || []).map(nameOf);
+    if (ns.length <= 1) return ns.join("");
+    return ns.slice(0, -1).join(", ") + " and " + ns[ns.length - 1];
+  };
   switch (e.event) {
     case "turn_start": return `— ${who}'s turn (${e.turn}) —`;
     case "phase": return null;                       // pure plumbing, not an event
@@ -576,10 +582,18 @@ function fmtLog(e, names) {
       const k = e.count ?? e.n;                    // pre-fix entries kept it in n
       return `${who} gets +${k} Coffers (${e.total} total)`;
     }
+    // VILLAGERS (Renaissance): the other half of the Coffers mat. Spent for
+    // +1 Action each, and only in your Action phase.
+    case "villagers": {
+      const k = e.count ?? e.n;
+      return `${who} gets +${k} Villager${k === 1 ? "" : "s"} (${e.total} total)`;
+    }
     case "spend": {
       const k = e.count ?? e.n;                    // pre-fix entries kept it in n
       // paying off Debt is a spend too — $1 per token, and it uses up no Buy
       if (e.what === "debt") return `${who} pays off ${k} Debt`;
+      if (e.what === "villagers")
+        return `${who} spends ${k} Villager${k === 1 ? "" : "s"} for +${k} Action${k === 1 ? "" : "s"}`;
       return `${who} spends ${k} ${e.what === "coffers" ? "Coffers" : e.what}`;
     }
     // DEBT (Empires): taken instead of paying, and you can't buy anything until
@@ -594,6 +608,25 @@ function fmtLog(e, names) {
       return `${e.count} Debt ${e.count === 1 ? "token is" : "tokens are"} put on the ${e.pile} pile (${e.total} total)`;
     case "landscape_vp":
       return `${e.count} VP ${e.count === 1 ? "is" : "are"} put on ${e.name} (${e.total} total)`;
+    // plain tokens a player keeps on a landscape next to their cube (Sinister
+    // Plot) — a negative count is the player cashing them all in
+    case "landscape_tokens":
+      return e.count < 0
+        ? `${who} removes their ${-e.count} token${e.count === -1 ? "" : "s"} from ${e.name}`
+        : `${who} adds a token to ${e.name} (${e.total} total)`;
+    // ARTIFACTS (Renaissance): unique objects that sit in front of whoever
+    // holds them — taking one takes it FROM its previous holder
+    case "artifact":
+      return e.from_pid
+        ? `${who} takes the ${e.name} from ${nameOf(e.from_pid)}`
+        : `${who} takes the ${e.name}`;
+    // STAR CHART: the pick is private to its owner (only they saw the cards)
+    case "star_chart": return `${who} puts ${art(e.card)} on top of their shuffled deck`;
+    case "star_chart_skip":
+      return `${who} shuffles mid-ability, so Star Chart can't pick a card`;
+    // FLEET: the extra round of turns after the game would have ended
+    case "fleet_round":
+      return `The game would end — Fleet gives ${listNames(e.players)} one more turn each`;
     case "set_aside": return e.cards
       ? `${who} sets aside ${listCards(e.cards)}`
       : `${who} sets aside ${e.count} card${e.count === 1 ? "" : "s"}`;

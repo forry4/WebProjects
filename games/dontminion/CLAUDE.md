@@ -200,6 +200,98 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
 
+**Kernel v9 — the phase-9 (Renaissance) delta. FROZEN — card batches build against this.**
+**SCHEMA 13**, a fill-only bump for three game keys (`villagers`, `artifacts`, `fleet`).
+7H's `_SPENDABLES` and 6H's landscape kernel took their promised consumers with no change;
+eight items were still needed, each with a consumer in this set:
+
+- **VILLAGERS — `add_villagers(game, n, pid=None)` + `game["villagers"]` + the
+  `_SPENDABLES["villagers"]` entry.** Coffers' exact shape (a MAT, so an off-turn Villager is
+  KEPT, never evaporated) with **a different TIMING, and this is the trap**: Coffers got the
+  2022 "at any time during your turn" change and **Villagers did not** — "Villager tokens can
+  be spent at any time in your ACTION PHASE. Each spent Villager gives you +1 Action". The
+  phase gate lives in `avail`, so a Buy-phase ability offers no villager move at all while a
+  mid-ability spend inside the Action phase stays legal. `_maybe_auto_buy` also had to learn
+  them: a player out of Actions holding tokens AND an Action card can still act, so the phase
+  must not advance from under them.
+- **PROJECTS — ownership semantics on 6H's landscape kernel; `project_owned(game, name, pid)`
+  is THE reader.** The cube IS `bought_by`, which `_h_buy_landscape` has written since 6H —
+  no new store. `landscape_gate` grows two clauses *for the kind*, never as `once` data ("you
+  can buy two Projects during the game, but not the same one twice"): already-has-a-cube, and
+  the `_PROJECT_CUBES` (2) cap. **A project buy runs NO `LANDSCAPE_FX`** — that registry is an
+  Event's one-shot buy ability; a Project's ability is ongoing and its consumers read
+  `project_owned`.
+- **`from:"landscape"` GREW OWNERSHIP SCOPING, and the recipient is not always the actor.**
+  A landmark is unowned (unchanged: fires for the actor). A **project** filters to cube
+  OWNERS via the spec's optional `recipients` key: `"owner-actor"` (default — Academy,
+  Guildhall, Sewers, Innovation) or **`"owners-not-actor"`** (Road Network: "when ANOTHER
+  player gains a Victory card, +1 Card" — every other owner draws, mid-resolution if need be).
+  Each recipient's `when` is evaluated for THEM, and the ability lands in their own pool.
+- **`from:"artifact"` — a new trigger source**, the ownership shape on `game["artifacts"]`
+  (Treasure Chest on `buy_phase_start`, Horn on `cleanup_discard`, Key on `turn_start`).
+  **ARTIFACTS get their own table** (`cards.ARTIFACTS`, `{by, expansion, text}`) — the 6H
+  lesson a third time: one copy, never gained/bought/dealt, "never belong to any player and
+  are never considered to be in play", so a `CARDS` entry would lie about cost and kingdom and
+  a `LANDSCAPES` entry would deal it. `take_artifact` / `holds_artifact`; taking your own is a
+  logged no-op; `new_game` keeps available exactly those whose `by` card is IN THE GAME (a
+  Bane or Ferryman Border Guard counts). **Flag is NOT a general draw hook** — it is one clause
+  on the Clean-up hand count ("as long as you have Flag, you draw one more card in Clean-up").
+- **FLEET — the game-end restructure, and the reason `_end_turn` now has TWO parked stages.**
+  `game["fleet"] = {"remaining": [...], "on_turn": bool}`, None until the end check trips with
+  a cube on Fleet. Then: the roster is every owner in turn order **starting after the player
+  who last had a regular turn**; queued extra turns still resolve first ("any extra turns
+  already in queue will now be resolved"); fleet turns don't bump `turns_taken` ("not counted
+  for tie-breaker"); and once the last one is played **the game is immediately over — no more
+  extra turns, and it doesn't matter if the end conditions no longer hold**. Buying Fleet
+  during the round grants nothing (the roster was fixed when the round began).
+- **STAR CHART — `final_draw(game, pid, n)` is the new card-code helper, and the FROZEN RULE
+  is: a draw that ENDS its ability calls `final_draw`, never `draw`.** The pick is a real
+  decision, so it can only be offered where the rest of the caller can be parked. Full
+  fidelity at the Clean-up hand draw and at `shuffle_into_deck` (Inn/Donate-class, which
+  pushes the frame itself — so **anything that must happen after that shuffle goes in a
+  continuation pushed BEFORE the call**; Donate was reshaped for exactly this). Anywhere else
+  the shuffle is uniform and **logs `star_chart_skip`** — deviation **B9**, the lose-track
+  discipline: a skipped ability must never be silent. The pick moves its card AFTER
+  `rng.shuffle`, so entropy spend is identical picked, declined or skipped.
+- **CANAL is a `cost()` clause, NOT a `COST_MODS` entry** — that seam is per-COPY while in
+  play, and a Project is never in play and has no copies. Flat −$1 keyed on the TURN player
+  owning the cube (the Ferry-token/Inheritance signature trick: "during your opponent's turn,
+  costs are reduced if your OPPONENT has a cube on Canal, but not if only you have one").
+- **CAPITALISM — a `types_of` injection, a play-surface routing, and the ledger's
+  `autoplay_block` row arriving three phases early.** `cards.CAPITALISM_CARDS` is DERIVED from
+  the text field over the WHOLE catalogue (an Action whose text contains a literal `"+$"` —
+  "it doesn't change a card with just $ without the plus… it also changes Teacher") and pinned
+  by an explicit-list test, the ph.-7 REVIEWED lesson. `types_of` adds `treasure` during the
+  cube owner's turn, everywhere, reverting off-turn and at `over` (the **Keep** ruling — a
+  shipped Empires landmark, so a real cross-set test). `capitalism_changed(game, card)` is THE
+  reader: `_play_one_treasure` delegates such a card to **`play_action_card`** — attack window,
+  before_play, would_resolve, duration setup, `actions_played`, all of it — while **spending no
+  Action** ("this doesn't use an Action from your Action pool"), then emits `play_treasure`.
+  And **`autoplay_treasures(game, pid)` replaces the static membership test** in
+  `play_all_treasures`: it is THE reader for the handler, `legal_moves` AND `player_view`
+  (shipped as `autoplay`, since a state-dependent rule can't live in `/catalog`), because a
+  changed Militia must never be fired by the button.
+- **`emit("reveal")` from `reveal()` — Patron's class, and the word is the whole rule.** A
+  BATCH emit for the cards' OWNER (two revealed Patrons pool together). `reveal()` was already
+  the single choke point, so this is one line — but the audit owes a sweep for any
+  "reveal"-worded card that logs without calling it. Draws, looks and discards do NOT emit:
+  "discarding or trashing a Patron does not count as revealing it, even though the other
+  players can see it. Revealing your hand or discard pile DOES count."
+- **`turn_ctx` grew four keys**: `played_actions` (Action NAMES in play order — Scepter's
+  replay targets, and `[0]` is Citadel's first play, since "a card is considered played even
+  before it's resolved") and the once-per-turn flags `citadel_used` / `innovation_used` /
+  `horn_used`. Also **`buy_gains` now resets on `return_to_action_phase`** — it counts per BUY
+  PHASE, not per turn, because Exploration checks "the Buy phase that just ended" and Merchant
+  Guild counts the cards gained "in it", and Villa can give you two.
+- **Landscape token store**: `add_landscape_tokens` / `take_landscape_tokens` /
+  `landscape_tokens` on `st["tokens"] = {pid: n}` (Sinister Plot — "keep them on Sinister Plot
+  next to your Project cube"; the take removes ALL of yours). Presence-based like 7H's VP
+  store, so an untouched landscape ships no key.
+- **Wire**: `villagers`, `artifacts`, `fleet` and each project's `bought_by` cube record are
+  all PUBLIC and ship as-is (mat tokens are open information, an Artifact sits in front of its
+  holder, the round roster is table state), plus `autoplay`. Everything is contract-tested in
+  `tests/test_renaissance_kernel.py` (38) against synthetic projects and an invented artifact.
+
 **Kernel v8 — the phase-8 (Empires) delta. FROZEN.** The set consumes 7H wholesale — Debt, the
 scoring pipeline, `LANDSCAPE_SETUP`, the pile/landscape VP stores and `from:"landscape"` all
 arrived with a consumer for the first time and needed **no change at all**. **SCHEMA 12**, a
