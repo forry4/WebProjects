@@ -1272,15 +1272,17 @@ def _sewers_answer(game, pid, frame, choice):
 # --- Academy-class helpers ---------------------------------------------------
 
 def _exploration_when(game, pid, ctx):
-    """"if you didn't gain any cards during it" — `buy_gains` counts per BUY
-    PHASE, so a Villa re-entry is judged on its own phase (Exploration 4:
-    "Exploration triggers each time, checking the Buy phase that just
-    ended")."""
-    return not game["turn_ctx"]["buy_gains"]
+    """"if you didn't gain any cards during it" — the count from THE EVENT.
+    `buy_gains` counts per BUY PHASE, so a Villa re-entry is judged on its own
+    phase ("Exploration triggers each time, checking the Buy phase that just
+    ended", Exploration 4) — and the live counter is reset for that next phase
+    before this pool resolves, so reading it here would answer about the wrong
+    phase. `.get` fallback: expand/contract for a frame parked pre-deploy."""
+    return not ctx.get("buy_gains", game["turn_ctx"]["buy_gains"])
 
 
 def _exploration_take(game, pid, frame, choice):
-    if game["turn_ctx"]["buy_gains"]:
+    if frame["data"].get("buy_gains", game["turn_ctx"]["buy_gains"]):
         return
     E.add_coffers(game, 1, pid)
     E.add_villagers(game, 1, pid)

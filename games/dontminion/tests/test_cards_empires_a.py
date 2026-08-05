@@ -1047,6 +1047,35 @@ def test_a_split_pile_is_never_the_bots_terminal():
 
 # ── the deviations the docs promise ──────────────────────────────────────────
 
+def test_merchant_guild_is_paid_for_the_buy_phase_villa_ended():
+    """"If you have several Buy phases due to … Villa, a played Merchant Guild
+    triggers each time, CHECKING THE BUY PHASE THAT JUST ENDED."
+
+    The regression this pins is subtle and was SILENT: `emit` only PARKS the
+    ability pool, so a consumer that reads the live `buy_gains` reads it after
+    the next phase has already reset it. Merchant Guild's join filter saw the
+    pre-reset value and let it into the pool, and its stage then paid 0 — no
+    error, no log, just a card that stopped working behind a Villa. The count
+    rides the EVENT now, the same discipline as `gain(**extra)`."""
+    g = engine.new_game([A, B], ["cornucopia", "empires", "base"], seed=3,
+                        kingdom=["Merchant Guild", "Villa", "Cellar", "Smithy",
+                                 "Village", "Market", "Moat", "Militia",
+                                 "Festival", "Gardens"])
+    give_hand(g, A, ["Merchant Guild"])
+    assert mv(g, A, {"type": "play_action", "card": "Merchant Guild"})[0]
+    coins(g, 20)
+    g["buys"] = 5
+    engine.gain(g, A, "Cellar")
+    engine._drive(g)
+    assert g["turn_ctx"]["buy_gains"] == 1
+    assert mv(g, A, {"type": "buy", "card": "Villa"})[0]
+    assert g["phase"] == "action", "Villa sent us back"
+    engine._drive(g)
+    # the Cellar AND the Villa were both gained in the phase that just ended
+    assert g["coffers"].get(A, 0) == 2
+    assert g["turn_ctx"]["buy_gains"] == 0, "the next Buy phase starts fresh"
+
+
 def test_villa_ends_a_buy_phase_and_only_the_last_one_is_final():
     """Deviation B1's other half, RESOLVED IN PH. 9 — and the resolution is
     the opposite of what ph. 8 pinned here.

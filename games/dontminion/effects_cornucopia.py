@@ -318,7 +318,15 @@ def _merchant_guild(game, pid):
 
 
 def _merchant_guild_payout(game, pid, frame, choice):
-    n = game["turn_ctx"]["buy_gains"]
+    """"+1 Coffers per card you gained in it" — the count from THE EVENT, not
+    the live counter.
+
+    The two differ, and it cost a silent bug: a Villa return ends a Buy phase
+    and resets `buy_gains` for the next one, but `emit` only PARKS the pool,
+    so by the time this stage resolves the live counter is already 0 and this
+    paid nothing at all. The `.get` fallback is expand/contract — a save can
+    be sitting on a frame parked by the previous deploy."""
+    n = frame["data"].get("buy_gains", game["turn_ctx"]["buy_gains"])
     if n:
         E.add_coffers(game, n, pid)
 
@@ -326,7 +334,7 @@ def _merchant_guild_payout(game, pid, frame, choice):
 def _merchant_guild_fires(game, watcher, ctx):
     """Join-time pool filter: a Buy phase with no gains pays nothing, and an
     ability that will visibly do nothing must not be offered for ordering."""
-    return game["turn_ctx"]["buy_gains"] > 0
+    return ctx.get("buy_gains", game["turn_ctx"]["buy_gains"]) > 0
 
 
 # --- Plaza -------------------------------------------------------------------

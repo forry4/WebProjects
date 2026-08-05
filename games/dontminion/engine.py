@@ -2357,7 +2357,14 @@ def return_to_action_phase(game, pid):
     # Duration entries BEFORE emitting it, and a Duration finishing at this
     # Clean-up is a legal Scheme target, so the seam that looks right loses
     # the card. This is the cost of the approximation, now visible.
-    emit(game, "buy_phase_end", actor=pid, final=False)
+    # `buy_gains` rides the EVENT, and it has to: emit() only PARKS the
+    # ability pool, so a consumer reading the live counter reads it AFTER the
+    # reset below and Merchant Guild pays 0 — silently, since its join-time
+    # filter saw the pre-reset value and let it into the pool. Same discipline
+    # as `gain(**extra)` and `trash(**extra)`: a mark on the occurrence, never
+    # a transient the resolution has to race.
+    emit(game, "buy_phase_end", actor=pid, final=False,
+         buy_gains=game["turn_ctx"]["buy_gains"])
     game["phase"] = "action"
     game["turn_ctx"]["bought"] = False
     # ...and the PER-BUY-PHASE counters restart with the new phase, after the
@@ -4181,8 +4188,11 @@ def _push_cleanup_choices(game, pid):
     n0 = len(game["pending"])
     push_auto(game, pid, "__turn", "finish", data={})
     # `final=True` — the LAST end-of-buy-phase of the turn (a Villa return
-    # fires the same event with final=False; see return_to_action_phase)
-    emit(game, "buy_phase_end", actor=pid, final=True)
+    # fires the same event with final=False; see return_to_action_phase).
+    # `buy_gains` rides the event on BOTH paths so a consumer never has to
+    # know which one it is looking at.
+    emit(game, "buy_phase_end", actor=pid, final=True,
+         buy_gains=game["turn_ctx"]["buy_gains"])
     if len(game["pending"]) == n0 + 1:
         _pop_frame(game)          # nothing triggered — unpark the finish
         return False
@@ -4419,10 +4429,11 @@ def _k_cleanup_finish(game, pid, frame, choice):
     if fl is not None:
         fl["on_turn"] = False
     else:
-        # The ordinary game-end check — SKIPPED entirely while the Fleet round
-        # runs: "once the last Fleet turn has been played, the game is
-        # immediately over … it also doesn't matter if cards had been returned
-        # to the Supply so that the game-end conditions are no longer met."
+        # The ordinary game-end check — SKIPPED entirely once the Fleet round
+        # has begun: the round runs to its end whatever the piles do (nothing
+        # in it can re-empty a pile in a way that should re-arm the check, and
+        # a Fleet turn that returns cards to the Supply must not cancel the
+        # round that is already running).
         if game["supply"].get("Province", 0) <= 0 \
                 or count_empty_piles(game) >= 3 \
                 or (game["colony"] and game["supply"].get("Colony", 1) <= 0):
@@ -4442,17 +4453,17 @@ def _k_cleanup_finish(game, pid, frame, choice):
             game["fleet"] = fl = {"remaining": [p for p in seq if p in owners],
                                   "on_turn": False}
             _log(game, None, "fleet_round", players=list(fl["remaining"]))
-    if fl is not None:
-        if not fl["remaining"] and not on_fleet_turn and not extra:
-            # nothing left to grant (defensive: normally the last fleet turn
-            # ends the game in the branch below)
-            _finish_game(game)
-            return
-        if not fl["remaining"] and on_fleet_turn:
-            # "once the last Fleet turn has been played, the game is
-            # immediately over. No more extra turns … are resolved."
-            _finish_game(game)
-            return
+    # THE ROUND IS OVER when no owner is still owed a turn AND nothing is
+    # queued behind it. The `extra` clause is what makes this UNIFORM: an
+    # extra turn generated on the LAST Fleet turn is resolved exactly like one
+    # generated on any other, which is the reading ruling ③ supports —
+    # "since the game continues, any extra turns … will now be resolved",
+    # with no distinction drawn between queued-before and triggered-during.
+    # (Recorded as ambiguity A8: ch. VII's Fleet entry has exactly three
+    # clarifications and none of them names turns triggered DURING the round.)
+    if fl is not None and not fl["remaining"] and not extra:
+        _finish_game(game)
+        return
     order = game["players"]
     if extra:
         nxt = pid

@@ -410,9 +410,17 @@ def test_a_queued_extra_turn_resolves_before_the_fleet_round(reg):
     assert g["over"]
 
 
-def test_no_extra_turn_after_the_last_fleet_turn(reg):
-    """ "Once the last Fleet turn has been played, the game is immediately
-    over. No more extra turns … are resolved." """
+def test_an_extra_turn_taken_on_the_last_fleet_turn_is_still_resolved(reg):
+    """AMBIGUITY A8, pinned. Ch. VII's Fleet entry has exactly three
+    clarifications, and none of them speaks to an extra turn TRIGGERED during
+    the round — only to those "already in queue", which "will now be
+    resolved". We read the round uniformly: an extra turn generated on the
+    last Fleet turn is resolved exactly like one generated on any other, and
+    the game ends when no owner is owed a turn and nothing is queued.
+
+    The alternative reading (the round stops dead after the last Fleet turn)
+    is defensible too, and it is what this test asserted until the audit
+    showed the sentence it quoted was not in the compendium."""
     g = fresh(landscapes=["Fleet"])
     give_cube(g, "Fleet", B)
     _empty_provinces(g)
@@ -422,7 +430,10 @@ def test_no_extra_turn_after_the_last_fleet_turn(reg):
     engine.request_extra_turn(g, B, source="Mission")
     g["phase"] = "buy"
     end_turn(g, B)
-    assert g["over"]
+    assert not g["over"] and g["turn"] == B and g["extra_turn"]
+    g["phase"] = "buy"
+    end_turn(g, B)
+    assert g["over"], "and now nothing is owed"
 
 
 def test_buying_fleet_during_the_round_grants_no_turn(reg):
