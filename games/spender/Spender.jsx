@@ -54,7 +54,7 @@ const GameChunkLoading = () => (
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
-	useProgressiveList } from "../../shared/lobby.jsx";
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge } from "../../shared/lobby.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
 	splendorLogCss } from "../../shared/splendor.jsx";
@@ -305,7 +305,6 @@ const css = baseCss + lobbyCss + _cssText
 /* ─── Error/status ──────────────────────────────────────────────────────── */
 .error-msg{font-size:.88rem;color:var(--red-gem);text-align:center;padding:6px 0}
 .status-msg{font-size:.85rem;color:var(--text-dim);font-style:italic;text-align:center;padding:6px 0;display:flex;align-items:center;justify-content:center}
-.small-muted{font-size:.8rem;color:var(--text-muted)}
 .mt-8{margin-top:8px}.mt-12{margin-top:12px}
 
 /* ─── Game nav bar ──────────────────────────────────────────────────────── */
@@ -490,7 +489,7 @@ const css = baseCss + lobbyCss + _cssText
   .browser{padding:20px 14px 40px}
   .lby-header{padding-left:14px;padding-right:14px}
   .game{padding:6px}
-  .game-card{padding:10px 12px}
+  .lby-card{padding:10px 12px}
 
   /* ── Board-first compact mobile game layout ──────────────────────────────
      The board leads (bank -> cards -> nobles+actions); players, then the move
@@ -2934,42 +2933,31 @@ export default function SpenderApp() {
 					)}
 
 					{/* Mobile-only tab bar: pick one section to show in the single-column layout. */}
-					<div className="lobby-tabs" role="tablist">
-						{[
-							["open", "Open", openGames.length],
-							["active", "Active", activeGames.length],
-							["history", "History", historyGames.length],
-						].map(([key, label, count]) => (
-							<button key={key} type="button" role="tab" aria-selected={lobbyTab === key}
-								className={`lobby-tab${lobbyTab === key ? " sel" : ""}`}
-								onClick={() => setLobbyTab(key)}>
-								{label}{count > 0 ? <span className="lobby-tab-count">{count}</span> : null}
-							</button>
-						))}
-					</div>
+					<LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+						{ key: "open", label: "Open", count: openGames.length || null },
+						{ key: "active", label: "Active", count: activeGames.length || null },
+						{ key: "history", label: "History", count: historyGames.length || null },
+					]} />
 
-					<div className={`lobby-grid tab-${lobbyTab}`}>
-					<div className="browser-section open-section">
-						<div className="section-hd">
-							<span className="section-title">Open Games</span>
-							<span className="small-muted">waiting for players (2-4)</span>
-						</div>
+					<div className={`lobby-grid lby-cols tab-${lobbyTab}`}>
+					<div className="browser-section lby-col-open">
+						<LobbySectionHd title="Open Games" note="waiting for players (2-4)" />
 						{browserLoading && openGames.length === 0 ? (
-							<div className="empty-state"><span className="spinner" />Loading…</div>
+							<div className="lby-empty"><span className="lby-spinner lby-spinner-sm" />Loading…</div>
 						) : openGames.length === 0 ? (
-							<div className="empty-state">No open games right now. Create one!</div>
+							<div className="lby-empty">No open games right now. Create one!</div>
 						) : (
-							<div className="game-cards">
+							<div className="lby-list">
 								{openGames.map(g => (
-									<div key={g.id} className="game-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
+									<div key={g.id} className="lby-card">
+										<div className="lby-card-info">
+											<div className="lby-card-title">
 												{g.host_id === myId ? "Your game" : `${g.host_name}'s game`}
 												<span className="lobby-size">{g.player_count || 1}/{g.max_players || 4}</span>
 											</div>
-											<div className="game-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
+											<div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
 										</div>
-										<div className="game-card-actions">
+										<div className="lby-card-actions">
 											{g.host_id === myId
 												? <>
 													<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>
@@ -2988,17 +2976,14 @@ export default function SpenderApp() {
 							</div>
 						)}
 					</div>
-					<div className="browser-section history-section">
-						<div className="section-hd">
-							<span className="section-title">History</span>
-							<span className="small-muted">your recent games</span>
-						</div>
+					<div className="browser-section lby-col-history">
+						<LobbySectionHd title="History" note="your recent games" />
 						{(!authUser || authUser.guest) ? (
-							<div className="empty-state">Log in to see your game history.</div>
+							<div className="lby-empty">Log in to see your game history.</div>
 						) : historyGames.length === 0 ? (
-							<div className="empty-state">No finished games yet.</div>
+							<div className="lby-empty">No finished games yet.</div>
 						) : (
-							<div className="game-cards">
+							<div className="lby-list">
 								{historyShown.map(g => {
 									// History is always YOUR games, so drop the repeated "you" —
 									// just show Won/Lost vs the opponent(s) and the score (yours-theirs).
@@ -3008,15 +2993,15 @@ export default function SpenderApp() {
 									const myScore = me ? me.score : 0;
 									const oppScore = opps.length ? Math.max(...opps.map(o => o.score)) : 0;
 									return (
-									<div key={g.id} className="game-card history-card">
-										<div className="game-card-info">
-											<div className="game-card-title">
+									<div key={g.id} className="lby-card lby-card-hist">
+										<div className="lby-card-info">
+											<div className="lby-card-title">
 												<span className={`hist-result ${g.you_won ? "won" : "lost"}`}>{g.you_won ? "Won" : "Lost"}</span>
 												<span className="hist-scores">vs {oppNames} <span className="hist-score-num">{myScore}-{oppScore}</span></span>
 											</div>
-											<div className="game-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
+											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
 										</div>
-										<div className="game-card-actions">
+										<div className="lby-card-actions">
 											<button className="btn btn-outline btn-sm" onClick={() => enterReview(g.id)}>Review</button>
 										</div>
 									</div>
@@ -3036,15 +3021,12 @@ export default function SpenderApp() {
 						const others = lenGames.filter(g => !hasMe(g));
 						const ordered = [...mine, ...others];
 						return (
-							<div className="browser-section active-section">
-								<div className="section-hd">
-									<span className="section-title">Active Games</span>
-									<span className="small-muted">{ordered.length} in progress</span>
-								</div>
+							<div className="browser-section lby-col-active">
+								<LobbySectionHd title="Active Games" note={`${ordered.length} in progress`} />
 								{ordered.length === 0 ? (
-									<div className="empty-state">No games in progress.</div>
+									<div className="lby-empty">No games in progress.</div>
 								) : (
-								<div className="game-cards">
+								<div className="lby-list">
 									{ordered.map(g => {
 										// 2-4 seats; show the full matchup, marking your own seat.
 										const seats = [
@@ -3054,25 +3036,25 @@ export default function SpenderApp() {
 										const isMine = seats.some(([id]) => id === myId);
 										const turnName = (seats.find(([id]) => id === g.turn) || [])[1] || null;
 										return (
-											<div key={g.id} className="game-card">
-												<div className="game-card-info">
-													<div className="game-card-title matchup">
+											<div key={g.id} className="lby-card">
+												<div className="lby-card-info">
+													<div className="lby-card-title matchup">
 														{seats.map(([id, nm], i) => (
 															<div key={id || i}>{i > 0 ? "vs " : ""}{displayName(nm)}{id === myId ? " (you)" : ""}</div>
 														))}
 													</div>
-													<div className="game-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
+													<div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
 												</div>
-												<div className="game-card-actions">
+												<div className="lby-card-actions">
 													{isMine ? (
 														<>
 															{g.turn === myId
-																? <span className="your-turn-badge">Your Turn</span>
-																: <span className="playing-badge">Their Turn</span>}
+																? <TurnBadge mine>Your Turn</TurnBadge>
+																: <TurnBadge>Their Turn</TurnBadge>}
 															<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>Resume</button>
 														</>
 													) : (
-														<span className="playing-badge">{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</span>
+														<TurnBadge>{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</TurnBadge>
 													)}
 												</div>
 											</div>

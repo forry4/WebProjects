@@ -274,9 +274,14 @@ invite links.
 ### Lobby & multiplayer (2–4 players)
 - Spender seats 2–4 humans (AI games stay 2-player); the engine is player-count-agnostic. `_bank_for(n)`
   scales the gem bank at start; nobles are `players+1`. DB has `player3/4_*` columns.
-- 3-column lobby (**Open Games | Active Games | History**), each column caps to viewport and scrolls
-  internally. **Explicit `grid-row` on every item is REQUIRED** (DOM order ≠ column order → sparse
-  auto-flow wraps Active to row 2). Open Games is filtered by the Classic/Long toggle; Active is not.
+- 3-column lobby (**Open Games | Active Games | History**) — **all of it is the shared kit now**
+  (`.lby-cols` / `.lby-list` / `.lby-card*` / `LobbySectionHd` / `TurnBadge` / `LobbyTabs`), converted
+  2026-08-05. Spender's own `.game-card*` / `.section-hd` / `.empty-state` / `.your-turn-badge`
+  vocabulary is GONE; `.lobby-grid` and `.browser-section` survive only as margin hooks, and
+  `.lby-card-title.matchup` is the one real Spender-specific override left (Active Games puts one
+  player per line, against the shared title's nowrap). The explicit `grid-row` pinning this lobby
+  needed — its DOM order is Open, History, Active, so column-only placement wrapped Active to row 2 —
+  now lives in `.lby-cols` and applies to every game. Open Games is filtered by the Classic/Long toggle; Active is not.
 - Open lobbies live ONLY in Open Games (owner sees Return+Cancel, others Join); Active = `myGames` filtered
   to `status==="playing"`. A game lives in exactly one section.
 - **Cancel authorizes by live session OR the host's `player_id`** (open games are public; a session-only

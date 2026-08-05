@@ -10,6 +10,18 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   items filtered; Esc/click-outside close) + `CreateModal`/`LobbyCreateRow` (the unified "New Game" modal
   + create/join-by-code/refresh row). Token-driven via a per-game `--lby-accent` with **hard fallbacks so
   it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
+  **THE WHOLE LOBBY LAYOUT IS HERE as of 2026-08-05** — `.lby-cols` (the column grid + the single
+  responsive ladder: 3 columns ≥1041px, 2 columns 761–1040 with History spanning below, 1 column +
+  tabs ≤760), `.lby-list` (the card list, and the only thing the desktop internal scroll can hang
+  off — cap via `--lby-list-max`), `.lby-card-hist` (a history title WRAPS instead of truncating),
+  and `LobbyTabs` (the phone segmented bar; `key` must match the column's `lby-col-<key>` class,
+  because show/hide is pure CSS off `tab-<key>` on the grid, so a hidden column stays mounted and
+  keeps its scroll position and History paging). Spender was converted onto all of it in the same
+  pass — it had been the ORIGINAL this kit was extracted from and the only game never moved onto it.
+  **A game's own sheet must not set `display`/`grid-template-columns`/`gap` on its lobby-grid class**:
+  four of the five are concatenated AFTER this one, so a base rule out-orders these MEDIA rules and
+  pins the lobby to three columns on a phone (CoC is the exception — its sheet comes first).
+  Where Wolf? keeps its own 2-column grid (no History column) but uses `.lby-list`.
   Also **`useProgressiveList` + `HISTORY_PAGE`/`HISTORY_MAX`** — the lobby History list's 10-at-a-time
   reveal, wired identically into all four games. **`HISTORY_MAX` must equal `core.rooms.HISTORY_LIMIT`**
   (the SQL row cap); `core/tests/test_history_limit.py` reads this file as TEXT to hold the two

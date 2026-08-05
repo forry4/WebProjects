@@ -193,16 +193,42 @@ family. Same shape in all four games, differing only in table name and columns. 
 as you would expect** — the four `list_user_history` row caps were independently 20/30/30/30 until
 2026-08-05; they now all bind `core.rooms.HISTORY_LIMIT` (see the lobby History note below).
 
+**THE LOBBY IS ONE SHARED LAYOUT — `shared/lobby.jsx` + its CSS, used by all five games.**
+The column grid (`.lby-cols`), the card list (`.lby-list`), the rows (`.lby-card*`), the section
+headers (`LobbySectionHd`), the empty states (`.lby-empty`), the turn pills (`TurnBadge`) and the
+phone tab bar (`LobbyTabs`) all live there. **Spender was the last hold-out and was converted
+2026-08-05**: the kit had been extracted FROM Spender for the other four, and Spender itself was
+never moved onto it, so it carried a parallel `.game-card*` / `.section-hd` / `.empty-state` /
+`.your-turn-badge` vocabulary — four rules byte-identical to the shared ones, five differing by a
+pixel or 0.02rem, and only three real differences (the card hover, the muted note, the section-header
+baseline). Converging also deleted CoC's dead pre-kit `.coc-card*` vocabulary and two of the three
+shipped spin keyframes.
+- **One responsive ladder, in the shared sheet**: 3 columns ≥1041px, 2 columns 761–1040 (History
+  spanning below), 1 column + the tab bar ≤760. It replaced four hand-tuned copies that collapsed at
+  1280/1040/—/980 and 780/760/720/640, which left **dead bands** where a lobby was one column with
+  the tab bar still hidden — every section stacked full-length (Duel 721–1120px, Dontminion 641–980).
+- **`.lby-cols` pins BOTH grid axes at every tier**, so a lobby's layout no longer depends on the
+  order its JSX happens to render in. Spender needed that anyway (its DOM is Open, History, Active,
+  so column-only placement wrapped Active to row 2 and it read as "pushed down"); making it the
+  shared behaviour means no game has to remember.
+- **A game's CSS must not set `display`/`grid-template-columns`/`gap` on its own lobby-grid class.**
+  Four of the five sheets are concatenated AFTER the shared one, so a base rule there out-orders the
+  shared MEDIA rules and pins the lobby to three columns on a phone. CoC is the exception (its sheet
+  comes first), which is exactly the kind of asymmetry that makes this worth stating rather than
+  discovering. Per-game tuning goes through `--lby-list-max`, which works from either side.
+- Where Wolf? keeps its own 2-column grid (it has no History column) but uses `.lby-list` like
+  everyone else.
+
 **The lobby History list pages, and the cap is ONE number seen from two ends.**
 `core.rooms.HISTORY_LIMIT` (50) is the SQL row cap in every game's `list_user_history`;
 `HISTORY_MAX` in `shared/lobby.jsx` is where `useProgressiveList` stops revealing. They must be equal
 and `core/tests/test_history_limit.py` asserts it by reading the JSX as TEXT (core may not import a
 feature, and that holds for its tests). The list shows `HISTORY_PAGE` (10) rows and reveals another
 page when the reader scrolls the end into view — via a **SENTINEL + IntersectionObserver, not a scroll
-handler**, because the four lobbies scroll different elements (Spender's `.game-cards` is its own
-overflow container above 1281px and the page scrolls below that; CoC/Duel/Dontminion have no scroller
-at all; the mobile tab layouts move a third thing) and an element clipped by an ancestor's `overflow`
-is correctly reported as not intersecting. Where Wolf? has no History at all — it never had one.
+handler**, because what actually scrolls changes with the tier (the column's own `.lby-list` at the
+3-column tier, the page below it, and a third thing again once the phone tab bar takes over), and an
+element clipped by an ancestor's `overflow` is correctly reported as not intersecting. Where Wolf? has
+no History at all — it never had one.
 **Deploy needs no expand/contract**: an old cached bundle renders all 50 at once, a new bundle against
 the old server just runs out of pages sooner. Browser coverage is one `screens.mjs` block driving
 Dontminion against a STUBBED `/games/history` of 55 rows (the hook is shared, so covering it once

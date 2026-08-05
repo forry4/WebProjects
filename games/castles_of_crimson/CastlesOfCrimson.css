@@ -44,22 +44,14 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-btn.sm{padding:6px 11px;font-size:.74rem}
 /* Lobby create row — the "+ Create Game" button (opens the shared CreateModal with
    opponent/difficulty/board options), Join code, and refresh, centered. */
-/* Open Games | Active Games | History, side by side (mirrors Spender's lobby-grid). */
-.coc-lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
-.coc-lobby-col{min-width:0}
-@media (max-width:1040px){.coc-lobby-grid{grid-template-columns:1fr 1fr}}
-@media (max-width:760px){.coc-lobby-grid{grid-template-columns:1fr;gap:0}}
+/* Open Games | Active Games | History: the grid, its breakpoints, the card lists
+   and the phone tab bar are all the shared `.lby-cols` / `.lby-list` / `.lby-tabs`
+   (shared/lobby.lobby-css.css). `.coc-lobby-grid` / `.coc-lobby-col` survive only
+   as hooks for anything genuinely CoC's. */
 .coc-won{color:#7ec87e;font-weight:700}
 .coc-lost{color:#d98a8a;font-weight:700}
 .coc-section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.68rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase;margin:18px 0 8px;border-bottom:1px solid var(--border);padding-bottom:6px}
-.coc-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:12px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px}
-.coc-card-info{flex:1;min-width:0}
-.coc-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.85rem}
 .coc-card-meta{font-size:.78rem;color:var(--text-dim)}
-.coc-empty{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
-.coc-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.coc-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:coc-spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes coc-spin{to{transform:rotate(360deg)}}
 .coc-waiting{max-width:420px;margin:60px auto;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px}
 .coc-waiting-players{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px}
 .coc-waiting-player{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.72rem;color:var(--text);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:4px 12px}

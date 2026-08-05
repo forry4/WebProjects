@@ -643,7 +643,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
               <LobbySectionHd title="Open Games" note={openGames.length ? `${openGames.length} waiting` : "3–10 players"} />
               {openGames.length === 0 ? (
                 <div className="lby-empty">No open games. Start one!</div>
-              ) : openGames.map((g) => (
+              ) : <div className="lby-list">{openGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info"><div className="lby-card-title">{g.host_name || "Game"}</div>
                     <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}</div></div>
@@ -653,13 +653,13 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                       : <button className="ww-btn sm" onClick={() => startJoin(g.id)}>Join</button>}
                   </div>
                 </div>
-              ))}
+              ))}</div>}
             </div>
             <div className="ww-lobby-col">
               <LobbySectionHd title="Your Games" note={myGames.length ? `${myGames.length} active` : null} />
               {myGames.length === 0 ? (
                 <div className="lby-empty">No games yet — create or join one.</div>
-              ) : myGames.map((g) => (
+              ) : <div className="lby-list">{myGames.map((g) => (
                 <div className="lby-card" key={g.id}>
                   <div className="lby-card-info"><div className="lby-card-title">{g.status === "open" ? "Waiting room" : "In progress"}</div>
                     <div className="lby-card-meta">{g.id} · {g.players} player{g.players === 1 ? "" : "s"}{g.you_are_host ? " · host" : ""}</div></div>
@@ -668,7 +668,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
                     {g.you_are_host && g.status === "open" && <button className="ww-btn ghost sm" onClick={() => handleCancel(g.id)}>Cancel</button>}
                   </div>
                 </div>
-              ))}
+              ))}</div>}
             </div>
           </div>
         </div>

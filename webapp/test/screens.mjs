@@ -1058,16 +1058,16 @@ try {
 
 		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
 		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
-		const rows = () => page.locator(".history-section .lby-card").count();
+		const rows = () => page.locator(".lby-col-history .lby-card").count();
 		await page.waitForFunction(
-			() => document.querySelectorAll(".history-section .lby-card").length > 0,
+			() => document.querySelectorAll(".lby-col-history .lby-card").length > 0,
 			null, { timeout: 20_000 }).catch(() => {});
 		const first = await rows();
 		check("History shows the first page only, not every finished game",
 			first === 10, JSON.stringify({ first, of: TOTAL }));
 
 		// scrolling the end of the list into view reveals the next page
-		await page.locator(".history-section .lby-more").scrollIntoViewIfNeeded()
+		await page.locator(".lby-col-history .lby-more").scrollIntoViewIfNeeded()
 			.catch(() => {});
 		await sleep(500);
 		const second = await rows();
@@ -1079,7 +1079,7 @@ try {
 		// at the 55 the server sent
 		let last = second;
 		for (let i = 0; i < 12; i++) {
-			const sentinel = page.locator(".history-section .lby-more");
+			const sentinel = page.locator(".lby-col-history .lby-more");
 			if (await sentinel.count() === 0) break;
 			await sentinel.scrollIntoViewIfNeeded().catch(() => {});
 			await sleep(350);

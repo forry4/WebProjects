@@ -56,91 +56,26 @@
 .browser-username{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.8rem;color:var(--text-dim);letter-spacing:.06em;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .browser-guest-badge{font-size:.65rem;letter-spacing:.1em;color:var(--text-muted);border:1px solid var(--border);padding:2px 7px;border-radius:10px;font-family:'Cinzel','Cinzel Fallback',serif;text-transform:uppercase}
 .btn-outline.active{background:var(--gold);color:#0f0e0c}
+/* Section headers, card rows, empty states, badges, the card list and the column
+   grid are ALL the shared lobby kit now (shared/lobby.jsx + .lby-* in its CSS).
+   Spender carried a parallel vocabulary — .section-hd/.game-card*/.empty-state/
+   .your-turn-badge — because the kit was extracted FROM here for the other four
+   games and this one was never moved onto it. Four of the ten rules were
+   byte-identical and five differed by a pixel; only the card hover, the muted
+   note and the section-header baseline actually changed. */
 .browser-section{margin-bottom:32px}
-.section-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.section-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.7rem;letter-spacing:.18em;color:var(--gold);text-transform:uppercase}
-.game-cards{display:flex;flex-direction:column;gap:8px}
-.game-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:center;gap:14px;transition:border-color .15s}
-.game-card:hover{border-color:rgba(201,168,76,.4)}
-.game-card-info{flex:1;min-width:0}
-.game-card-title{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.88rem;letter-spacing:.04em;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.game-card-meta{font-size:.78rem;color:var(--text-dim)}
-.game-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
 /* Open Games: current lobby size (e.g. 1/4) next to the host name. */
 .lobby-size{margin-left:8px;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.82rem;font-weight:600;letter-spacing:0;color:var(--gold)}
-/* Active Games: one player per line (override the base nowrap/ellipsis). */
-.game-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
-/* Lobby: Open Games + History side by side (stack on narrow screens). */
-/* Lobby: left column = Open + Active stacked, right column = History on its own (so its
-   length never pushes Active Games down). The widened .browser uses the empty side space
-   WITHOUT thinning the games columns. grid-template-rows:min-content auto keeps Active
-   directly under Open even when History (spanning both rows) is much longer. Stacks <1200px. */
-/* Lobby: three adjacent columns — Open Games | Active Games | History — each its own
-   column so none pushes another down. The widened .browser uses the empty side space.
-   Collapses to 2 columns (Open|Active, History spanning below) under 1280px, then 1
-   column under 780px. */
-.lobby-grid{display:grid;grid-template-columns:2fr 2fr 1fr;gap:24px 28px;align-items:start;margin-bottom:32px}
-.lobby-grid>.browser-section{min-width:0;margin-bottom:0}
-/* Explicit grid-row on EVERY item is REQUIRED (do not remove): the DOM order is
-   Open, History, Active, so with column-only placement the sparse auto-flow cursor
-   (past col 3 after History) wraps Active down to row 2 — looking "pushed down" below
-   the tall History. Pinning rows makes placement ignore DOM order. */
-.lobby-grid>.open-section{grid-column:1;grid-row:1}
-.lobby-grid>.active-section{grid-column:2;grid-row:1}
-.lobby-grid>.history-section{grid-column:3;grid-row:1}
-/* Mobile-only tabbed lobby: a segmented bar that picks one section to show in the
-   single-column layout (see the max-width:780px block). Hidden on desktop, where all
-   three sections show side by side. */
-.lobby-tabs{display:none;gap:6px;margin-bottom:18px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px}
-.lobby-tab{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:none;color:var(--text-dim);cursor:pointer;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.82rem;letter-spacing:.04em;padding:9px 4px;border-radius:9px;transition:background .15s,color .15s}
-.lobby-tab.sel{background:var(--gold);color:#0f0e0c;font-weight:700}
-.lobby-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:rgba(0,0,0,.18);color:inherit;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;font-size:.72rem;font-weight:600;letter-spacing:0}
-.lobby-tab:not(.sel) .lobby-tab-count{background:var(--surface);color:var(--text-muted)}
-/* Each column's card list behaves like the in-game move log: capped to the viewport
-   and scrolls INTERNALLY instead of growing the page (the long History list otherwise
-   made the page very tall). Desktop 3-col only — tablet/phone stack and scroll the
-   page normally. scrollbar-gutter:stable reserves the scrollbar's space so a column
-   doesn't shift when its list starts/stops scrolling. */
-@media(min-width:1281px){
-  .lobby-grid .game-cards{max-height:calc(100vh - 230px);overflow-y:auto;scrollbar-gutter:stable}
-  .lobby-grid .game-cards::-webkit-scrollbar{width:6px}
-  .lobby-grid .game-cards::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-}
-@media(max-width:1280px){
-  .lobby-grid{grid-template-columns:1fr 1fr}
-  .lobby-grid>.open-section{grid-column:1;grid-row:1}
-  .lobby-grid>.active-section{grid-column:2;grid-row:1}
-  .lobby-grid>.history-section{grid-column:1 / span 2;grid-row:2}
-}
-@media(max-width:780px){
-  /* Single column, one section at a time selected by the tab bar above. */
-  .lobby-tabs{display:flex}
-  .lobby-grid{grid-template-columns:1fr;gap:0}
-  .lobby-grid>.browser-section{grid-column:1;grid-row:auto;margin-bottom:0}
-  /* Show only the active tab's section. */
-  .lobby-grid.tab-open>.active-section,
-  .lobby-grid.tab-open>.history-section,
-  .lobby-grid.tab-active>.open-section,
-  .lobby-grid.tab-active>.history-section,
-  .lobby-grid.tab-history>.open-section,
-  .lobby-grid.tab-history>.active-section{display:none}
-  /* The tab already labels the section — drop the big redundant heading, keep the
-     muted context line on its own. */
-  .lobby-grid .section-hd .section-title{display:none}
-  .lobby-grid .section-hd{margin-bottom:10px}
-}
-/* History cards: Won/Lost badge + the final scores (winner brighter), wraps freely. */
-.history-card .game-card-title{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;white-space:normal;overflow:visible}
-.hist-result{font-family:'Cinzel','Cinzel Fallback',serif;font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:10px;flex-shrink:0}
-.hist-result.won{background:rgba(63,156,46,.18);color:var(--green-gem)}
-.hist-result.lost{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border)}
-.hist-scores{color:var(--text-dim);font-size:.84rem;font-family:'Crimson Pro','Crimson Fallback',Georgia,serif;letter-spacing:0}
-.hist-score-num{color:var(--text);font-weight:600}
-.your-turn-badge{background:var(--gold);color:#0f0e0c;padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.12em;font-weight:700;text-transform:uppercase;white-space:nowrap}
-.playing-badge{background:var(--surface2);color:var(--text-dim);border:1px solid var(--border);padding:3px 10px;border-radius:12px;font-family:'Cinzel','Cinzel Fallback',serif;font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
-.empty-state{text-align:center;padding:28px 16px;color:var(--text-dim);font-style:italic;font-size:.9rem;background:var(--surface2);border-radius:var(--radius);border:1px dashed var(--border)}
-.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
-@keyframes spin{to{transform:rotate(360deg)}}
+/* Active Games: one player per line (override the shared title's nowrap/ellipsis). */
+.lby-card-title.matchup{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+/* The three-column grid, its breakpoints, the internal column scroll and the phone
+   tab bar are the shared `.lby-cols` / `.lby-list` / `.lby-tabs`. That grid pins BOTH
+   axes at every tier, which is what this lobby always needed anyway: the DOM order
+   here is Open, History, Active, so column-only placement wrapped Active to row 2 and
+   it read as "pushed down" below the tall History. `.lobby-grid` survives only to
+   carry the bottom margin. */
+.lobby-grid{margin-bottom:32px}
+.lobby-grid>.browser-section{margin-bottom:0}
 /* Fixed square size + centered content so swapping the ↻ glyph for the spinner
    (which carries a margin for its 'Loading…' use) doesn't resize the button and
    shift the centered button row. */
