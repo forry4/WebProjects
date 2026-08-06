@@ -19,10 +19,28 @@ from . import engine as E
 # --- card play -------------------------------------------------------------
 
 
-def policy_score(g: dict, c: int) -> float:
+def _want_win(g: dict, seat: int) -> bool:
+    """Whether the mover wants THIS trick, contract-aware.
+
+    Normal contracts: everyone wants the +2 tricks and nobody wants the -1s.
+    Null flips both seats: the declarer must never win a +2 trick (and winning
+    a -1 means LEADING the +2 that follows -- the worst seat to duck from), so
+    they duck everything; the defender wants the declarer to eat the +2s, so
+    they duck those too and win the -1s to keep the lead.
+    """
+    ev = E.trick_value(g["trick"]) > 0
+    if g["auction"]["denom"] == E.NULL_DENOM:
+        decl = g["auction"]["declarer"]
+        return not ev if seat != decl else False
+    return ev
+
+
+def policy_score(g: dict, c: int, seat: int | None = None) -> float:
     """Higher is more attractive for the player to move."""
-    want_win = E.trick_value(g["trick"]) > 0
-    r = E.rank(c) / 6.0
+    if seat is None:
+        seat = E.to_play(g)
+    want_win = _want_win(g, seat)
+    r = E.rank(c) / (E.NRANK - 1.0)
     led = g["led"]
     if led is not None:
         w = E.beats(led, c, g["trump"])
@@ -41,15 +59,15 @@ def choose_card(g: dict, seat: int) -> int:
     moves = E.legal_moves(g, seat)
     if not moves:
         raise ValueError("no legal move")
-    return max(moves, key=lambda c: (policy_score(g, c), -c))
+    return max(moves, key=lambda c: (policy_score(g, c, seat), -c))
 
 
 # --- bidding ---------------------------------------------------------------
 
-#: Rough worth of each rank as a trick-winner. The game needs LOW cards too
-#: (to force the -1 tricks onto the opponent), so the curve is deliberately
-#: shallower than a normal high-card-point count.
-_RANK_VALUE = [0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
+#: Rough worth of each rank as a trick-winner (8 entries, rank 0 = the 7). The
+#: game needs LOW cards too (to force the -1 tricks onto the opponent), so the
+#: curve is deliberately shallower than a normal high-card-point count.
+_RANK_VALUE = [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 
 
 def hand_strength(g: dict, seat: int, denom: int) -> float:
@@ -75,32 +93,71 @@ def _level_for(strength: float) -> int:
 
 
 def choose_bid(g: dict, seat: int, rng=None) -> dict:
-    """Return {"pass": True} or {"level": n, "denom": d}."""
+    """Return {"pass": True} or {"level": n, "denom": d}.
+
+    The bot never bids Null: it is a 33%-make gamble under EXACT play, and a
+    one-trick-deep policy has no business finding the other 67%.
+    """
     rng = rng or random.Random()
     opt = E.auction_options(g)
-    if not opt["denoms"]:
-        return {"pass": True}
+    bids = [b for b in opt["bids"] if b[1] != E.NULL_DENOM]
+    if not bids:
+        return {"pass": True} if opt["may_pass"] else {"pass": True}
 
-    best_d = max(opt["denoms"], key=lambda d: hand_strength(g, seat, d))
+    denoms = sorted({d for _, d in bids})
+    best_d = max(denoms, key=lambda d: hand_strength(g, seat, d))
     want = _level_for(hand_strength(g, seat, best_d))
-
-    if not opt["levels"]:
+    mine = [lvl for lvl, d in bids if d == best_d]
+    if not mine:
         return {"pass": True}
-    lo = opt["levels"][0]
     if g["auction"]["level"] == 0:
         # Opening: name what the hand is worth, floored at the minimum.
-        return {"level": max(lo, min(want, opt["levels"][-1])), "denom": best_d}
-    # Overtaking costs at least one level, so only do it when the hand
-    # genuinely supports the higher contract.
-    if want >= lo:
-        return {"level": lo, "denom": best_d}
+        return {"level": max(mine[0], min(want, mine[-1])), "denom": best_d}
+    # Overtaking: take the cheapest rung in the best denomination, but only
+    # when the hand genuinely supports that contract. A same-level overtake in
+    # a higher rank is the cheapest of all and needs the same strength.
+    if want >= mine[0]:
+        return {"level": mine[0], "denom": best_d}
     return {"pass": True}
+
+
+def choose_swap(g: dict, seat: int) -> dict:
+    """Pick the exchange that most strengthens the declared contract.
+
+    Value each candidate hand by rank-worth in the contract denomination;
+    keep the swap only if it improves on standing pat. Under Null the polarity
+    flips -- LOW cards are the good ones, so swap out the biggest.
+    """
+    a = g["auction"]
+    denom = a["denom"]
+    hand = list(g["hands"][seat])
+    is_null = denom == E.NULL_DENOM
+
+    def worth(c: int) -> float:
+        v = _RANK_VALUE[E.rank(c)]
+        if is_null:
+            return -E.rank(c)  # every high card is a liability
+        if denom < E.NOTRUMP and E.suit(c) == denom:
+            v += 0.8  # trump length is worth having
+        return v
+
+    best = {"take": None, "give": None}
+    best_gain = 0.0
+    for t in g["shown"]:
+        for h in hand:
+            gain = worth(t) - worth(h)
+            if gain > best_gain:
+                best_gain = gain
+                best = {"take": t, "give": h}
+    return best
 
 
 def act(g: dict, seat: int, rng=None):
     """One bot action for whichever phase the game is in."""
     if g["phase"] == "auction":
         return ("bid", choose_bid(g, seat, rng))
+    if g["phase"] == "swap":
+        return ("swap", choose_swap(g, seat))
     if g["phase"] == "play":
         return ("play", choose_card(g, seat))
     return (None, None)

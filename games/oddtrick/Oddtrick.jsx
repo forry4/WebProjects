@@ -23,18 +23,25 @@ const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRo
   + rulesModalCss + _cssText;
 
 const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
-const RANKS = ["8", "9", "10", "J", "Q", "K", "A"];
-const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT"];
-const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump"];
+// 32-card deck: 7 low, ace high, eight ranks per suit.
+const RANKS = ["7", "8", "9", "10", "J", "Q", "K", "A"];
+// Denominations are RANKED left to right: a same-level overtake must name one
+// further right. Null is the top rung and exists only at level 6.
+const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT", "Null"];
+const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump", "Null — win no +2 trick"];
 const NOTRUMP = 4;
+const NULL_DENOM = 5;
+const NULL_LEVEL = 6;
+const NULL_MAKE = 12;
+const NULL_SET = 10;
 
 const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, blunders often" },
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
 ];
 
-const suitOf = (c) => Math.floor(c / 7);
-const rankOf = (c) => c % 7;
+const suitOf = (c) => Math.floor(c / 8);
+const rankOf = (c) => c % 8;
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
 const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
 // Trick NUMBER t (1-based): even ones pay +2, odd ones cost 1.
@@ -112,6 +119,9 @@ function TrickStrip({ game }) {
 function ContractLine({ game }) {
   const a = game.auction || {};
   if (!a.level) return <span className="muted">no contract yet</span>;
+  if (a.denom === NULL_DENOM) {
+    return <span className="odd-contract"><b>Null</b></span>;
+  }
   const red = a.denom === 1 || a.denom === 2;
   return (
     <span className="odd-contract">
@@ -218,6 +228,10 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
   // A fresh contract clears any half-built bid.
   useEffect(() => { setBidLevel(null); setBidDenom(null); }, [game?.auction?.level, game?.auction?.to_act]);
+  // Swap-phase selection (declarer only).
+  const [swapTake, setSwapTake] = useState(null);
+  const [swapGive, setSwapGive] = useState(null);
+  useEffect(() => { setSwapTake(null); setSwapGive(null); }, [game?.phase]);
 
   const createGame = (vsAi, difficulty) => {
     const rid = roomCode();
@@ -300,6 +314,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   };
   const doPass = () => send({ action: "move", move: { kind: "pass" } });
   const doPlay = (card) => send({ action: "move", move: { kind: "play", card } });
+  const doSwap = (take, give) => send({ action: "move", move: { kind: "swap", take, give } });
 
   // ── lobby ────────────────────────────────────────────────────────────────
   if (screen === "lobby") {
@@ -432,7 +447,12 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   // ── game ─────────────────────────────────────────────────────────────────
   const oppSeat = 1 - mySeat;
   const nameOf = (seat) => players[seats[seat]] || (seat === mySeat ? "You" : "Opponent");
-  const opt = game.options || { levels: [], denoms: [], may_pass: false };
+  const opt = game.options || { bids: [], may_pass: false };
+  const bids = opt.bids || [];
+  const bidLevels = [...new Set(bids.filter((b) => b[1] !== NULL_DENOM).map((b) => b[0]))].sort((a, b) => a - b);
+  const canNull = bids.some((b) => b[1] === NULL_DENOM);
+  const denomOkAt = (l, d) => bids.some((b) => b[0] === l && b[1] === d);
+  const bidReady = bidLevel !== null && bidDenom !== null && denomOkAt(bidLevel, bidDenom);
   const legal = new Set(game.legal || []);
   const res = game.result;
 
@@ -477,25 +497,40 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               {myTurn ? (
                 <>
                   <div className="odd-bidgrid">
-                    {opt.levels.map((l) => (
+                    {bidLevels.map((l) => (
                       <button key={l} className={bidLevel === l ? "on" : ""}
-                        onClick={() => setBidLevel(l)}>{l}</button>
+                        onClick={() => {
+                          setBidLevel(l);
+                          // Keep the denom only if it stays legal at this level.
+                          if (bidDenom !== null && !denomOkAt(l, bidDenom)) setBidDenom(null);
+                        }}>{l}</button>
                     ))}
                   </div>
                   <div className="odd-denoms">
-                    {[0, 1, 2, 3, 4].map((d) => (
-                      <button key={d}
-                        className={`${bidDenom === d ? "on " : ""}${d === 1 || d === 2 ? "red" : ""}`}
-                        disabled={!opt.denoms.includes(d)}
-                        title={opt.denoms.includes(d) ? DENOM_NAME[d] : "already named by you"}
-                        onClick={() => setBidDenom(d)}>{DENOM_LABEL[d]}</button>
-                    ))}
+                    {[0, 1, 2, 3, 4].map((d) => {
+                      const ok = bidLevel !== null && denomOkAt(bidLevel, d);
+                      return (
+                        <button key={d}
+                          className={`${bidDenom === d ? "on " : ""}${d === 1 || d === 2 ? "red" : ""}`}
+                          disabled={!ok}
+                          title={ok ? DENOM_NAME[d]
+                            : bidLevel === null ? "pick a level first"
+                              : "not available at that level"}
+                          onClick={() => setBidDenom(d)}>{DENOM_LABEL[d]}</button>
+                      );
+                    })}
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <button className="btn" disabled={bidLevel === null || bidDenom === null}
-                      onClick={doBid}>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <button className="btn" disabled={!bidReady} onClick={doBid}>
                       Bid {bidLevel ?? ""}{bidDenom !== null ? DENOM_LABEL[bidDenom] : ""}
                     </button>
+                    {canNull && (
+                      <button className="btn btn-ghost odd-nullbid"
+                        title={`Win no +2 trick all round. Pays ${NULL_MAKE}; broken it pays them ${NULL_SET}. Bids as a ${NULL_LEVEL}.`}
+                        onClick={() => send({ action: "move", move: { kind: "bid", level: NULL_LEVEL, denom: NULL_DENOM } })}>
+                        Null
+                      </button>
+                    )}
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
                   </div>
                   {!opt.may_pass && <div className="muted" style={{ fontSize: "0.8rem" }}>
@@ -507,23 +542,71 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 {(game.auction.log || []).map((e, i) => (
                   <div key={i}>
                     <span>{nameOf(e.seat)}</span>
-                    <span>{e.pass ? "pass" : `${e.level}${DENOM_LABEL[e.denom]}`}</span>
+                    <span>{e.pass ? "pass"
+                      : e.denom === NULL_DENOM ? "Null"
+                        : `${e.level}${DENOM_LABEL[e.denom]}`}</span>
                   </div>
                 ))}
               </div>
             </div>
+          ) : game.phase === "swap" ? (
+            <div className="odd-auction">
+              <div className="muted">The talon</div>
+              <ContractLine game={game} />
+              {game.swap ? (
+                <>
+                  <div className="muted" style={{ fontSize: "0.85rem" }}>
+                    You won the auction. Three of the six set-aside cards — take
+                    one into hand and discard, or stand pat.
+                  </div>
+                  <div className="odd-hand" style={{ justifyContent: "center" }}>
+                    {game.swap.shown.map((c) => (
+                      <Card key={c} c={c} sel={swapTake === c}
+                        onClick={() => setSwapTake(swapTake === c ? null : c)} />
+                    ))}
+                  </div>
+                  {swapTake !== null && (
+                    <div className="muted" style={{ fontSize: "0.8rem" }}>
+                      …and discard which card from your hand?
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button className="btn" disabled={swapTake === null || swapGive === null}
+                      onClick={() => doSwap(swapTake, swapGive)}>
+                      Swap {swapTake !== null ? cardName(swapTake) : ""}{swapGive !== null ? ` for ${cardName(swapGive)}` : ""}
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => doSwap(null, null)}>
+                      Stand pat
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="muted">
+                  {nameOf(game.auction.declarer)} is looking at three of the
+                  set-aside cards…
+                </div>
+              )}
+            </div>
           ) : game.phase === "over" ? (
             <div className="odd-result">
               <div className={`odd-big ${res.made ? "made" : "set"}`}>
-                {res.made ? "Contract made" : "Contract set"}
+                {res.denom === NULL_DENOM
+                  ? (res.made ? "Null made" : "Null broken")
+                  : (res.made ? "Contract made" : "Contract set")}
               </div>
               <div className="muted">
-                {nameOf(res.declarer)} bid {res.level}{DENOM_LABEL[res.denom]} and scored {res.declarer_pts}
+                {res.denom === NULL_DENOM
+                  ? `${nameOf(res.declarer)} bid Null and won ${res.declarer_etricks} scoring trick${res.declarer_etricks === 1 ? "" : "s"}`
+                  : `${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]} and scored ${res.declarer_pts}`}
               </div>
               <div className="odd-maths">
-                {res.made
-                  ? `${res.level} × ${res.level} = ${res.scores[res.declarer]} to ${nameOf(res.declarer)}`
-                  : `${res.level - 1} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
+                {res.denom === NULL_DENOM
+                  ? (res.made
+                    ? `flat ${NULL_MAKE} to ${nameOf(res.declarer)}`
+                    : `flat ${NULL_SET} to ${nameOf(1 - res.declarer)}`)
+                  : res.made
+                    ? `${res.level} × ${res.level} = ${res.scores[res.declarer]} to ${nameOf(res.declarer)}`
+                    : `${res.level - 1} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
               </div>
               <div className="odd-scorerow" style={{ gap: "1.5rem", fontSize: "1.1rem" }}>
                 <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
@@ -572,8 +655,13 @@ export default function Oddtrick({ myId, authUser, onExit }) {
             <div className="odd-hand">
               {(game.hand || []).map((c) => (
                 <Card key={c} c={c}
+                  sel={game.phase === "swap" && swapGive === c}
                   dim={game.phase === "play" && myTurn && !legal.has(c)}
-                  onClick={myTurn && legal.has(c) ? () => doPlay(c) : null} />
+                  onClick={
+                    game.phase === "swap" && game.swap && swapTake !== null
+                      ? () => setSwapGive(swapGive === c ? null : c)
+                      : myTurn && legal.has(c) ? () => doPlay(c) : null
+                  } />
               ))}
             </div>
             <div className="odd-seatname">
@@ -588,7 +676,21 @@ export default function Oddtrick({ myId, authUser, onExit }) {
           <div className="odd-panel">
             <h4>Contract</h4>
             {game.auction.level
-              ? <>
+              ? game.auction.denom === NULL_DENOM ? <>
+                <div className="odd-scorerow">
+                  <span>{nameOf(game.auction.declarer)} must win</span>
+                  <b>no +2 trick</b>
+                </div>
+                <div className="odd-scorerow">
+                  <span>Trump</span><b>none</b>
+                </div>
+                <div className="odd-scorerow">
+                  <span>Makes it for</span><b>{NULL_MAKE}</b>
+                </div>
+                <div className="odd-scorerow">
+                  <span>Broken pays them</span><b>{NULL_SET}</b>
+                </div>
+              </> : <>
                 <div className="odd-scorerow">
                   <span>{nameOf(game.auction.declarer)} needs</span>
                   <b>{game.auction.level}</b>
@@ -601,6 +703,13 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 </div>
               </>
               : <div className="muted">Being decided…</div>}
+            {game.swapped !== null && game.swapped !== undefined && (
+              <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
+                {game.swapped
+                  ? `${nameOf(game.auction.declarer)} exchanged a card with the talon.`
+                  : `${nameOf(game.auction.declarer)} stood pat.`}
+              </div>
+            )}
           </div>
           <div className="odd-panel">
             <h4>Points</h4>

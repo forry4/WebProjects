@@ -197,6 +197,7 @@ def test_a_broadcast_never_carries_the_opponents_hand_or_the_hidden_piles():
     g = room["game"]
     E.apply_bid(g, 0, 3, 1)
     E.apply_pass(g, 1)
+    E.apply_swap(g, 0, g["shown"][0], sorted(g["hands"][0])[0])
     for _ in range(6):
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[0])
@@ -215,7 +216,13 @@ def test_a_broadcast_never_carries_the_opponents_hand_or_the_hidden_piles():
         view = json.loads(payload)["game"]
         assert view["opp_hand_n"] == len(g["hands"][oseat])
         assert "hands" not in view, "raw hands must never be on the wire"
-        assert view["out"] is None, "the out-of-play pair is secret until the end"
+        assert view["out"] is None, "the out-of-play cards are secret until the end"
+        # The shown out-cards are the DECLARER's private knowledge; the wire
+        # payload to the defender must not carry them.
+        if seat == g["auction"]["declarer"]:
+            assert view["shown"] == g["shown"]
+        else:
+            assert view["shown"] is None
         for owner in range(2):
             for j, pv in enumerate(view["piles"][owner]):
                 real = g["piles"][owner][j]

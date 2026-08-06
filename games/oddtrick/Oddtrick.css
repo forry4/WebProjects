@@ -152,3 +152,6 @@
 .odd-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
 .odd-yourturn { color: var(--accent); font-weight: 700; }
 
+/* v2: the Null bid stands apart from the number ladder */
+.odd-nullbid { border-color: #8a6fd8; color: #b9a5f2; }
+.odd-nullbid:hover { background: rgba(138, 111, 216, 0.12); }

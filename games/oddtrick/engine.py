@@ -6,6 +6,13 @@ Six positive against seven negative, so both players' totals always sum to
 exactly +5 and sweeping all thirteen tricks scores worse than taking the six
 even ones. The game is about WHICH tricks you win.
 
+Version 2 (the 2026-08-07 release, all four changes measured in
+rust-cores/oddtrick-core/CAMPAIGN.md): a 32-card deck with SIX cards out of
+play (the hidden-information sweep's efficient point), ranked denominations
+(C < D < H < S < NT < Null -- same-level overtakes in a higher rank), the Null
+contract (win no +2 trick; fixed rung 6, pays 12 / set 10), and the declarer's
+swap (shown 3 of the out-cards after the auction, may take one into hand).
+
 Ported from ``rust-cores/oddtrick-core`` (``state.rs`` + ``auction.rs``),
 which is the solver-validated reference. ``tests/test_rust_parity.py`` replays
 fixtures generated there and asserts identical states, so this file must not
@@ -23,17 +30,25 @@ from __future__ import annotations
 import random
 
 # --- cards -----------------------------------------------------------------
-# card = suit * 7 + rank, 0..27. rank 0 = 8, rank 6 = A.
+# card = suit * 8 + rank, 0..31. rank 0 = 7, rank 7 = A.
+#
+# 32 cards with 13 dealt to each player leaves SIX out of play instead of two.
+# That count is the game's entire permanent hidden-information budget (every
+# card you cannot see is your opponent's unless it is out of play), and the
+# 2026-08-07 sweep measured it saturating hard past 6 -- see
+# rust-cores/oddtrick-core/CAMPAIGN.md.
 
-NRANK = 7
+VERSION = 2  # bumped by the 32-card / ranked / Null / swap release
+
+NRANK = 8
 NSUIT = 4
-NCARD = 28
+NCARD = 32
 NOTRUMP = 4
 
-RANK_NAMES = ["8", "9", "10", "J", "Q", "K", "A"]
+RANK_NAMES = ["7", "8", "9", "10", "J", "Q", "K", "A"]
 SUIT_NAMES = ["clubs", "diamonds", "hearts", "spades"]
 SUIT_CHARS = ["c", "d", "h", "s"]
-DENOM_NAMES = SUIT_NAMES + ["no-trump"]
+DENOM_NAMES = SUIT_NAMES + ["no-trump", "Null"]
 
 NTRICKS = 13
 POOL = 5  # both players' point totals always sum to this
@@ -47,6 +62,30 @@ MAX_RAISE = 2
 
 #: Set-score multiplier per point the declarer finished short.
 SHORT_PENALTY = 4
+
+#: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
+#: overtake may also stand at the SAME level in a higher-ranked denomination.
+#: Measured: the first change that SPREAD the settled-contract distribution
+#: instead of translating its spike (level-4 hole 6.7% -> 14.2%), replicated
+#: on both deck widths.
+#:
+#: NULL: "I will win no +2 trick." A trick-COUNT condition, because the
+#: constant-sum pool makes an inverse POINT contract identical to a normal
+#: one. It bids as a single fixed rung -- level 6, above no-trump -- and pays
+#: a flat amount either way. Rung 6 is measured, not chosen: at rung 3 it was
+#: overtaken away in 100% of auctions (0 contracts in 240 rounds), at rung 8
+#: nobody could make it, and raising the price SUPPRESSES it (a 33% gamble is
+#: only worth taking when losing is cheap).
+NULL_DENOM = 5
+NULL_LEVEL = 6
+NULL_MAKE = 12
+NULL_SET = 10
+
+#: Out-of-play cards the declarer is shown after the auction; they may swap
+#: exactly one into hand (hand cards only -- the piles are the board, not the
+#: holding).
+N_OUT = 6
+N_SHOWN = 3
 
 
 def suit(c: int) -> int:
@@ -93,14 +132,21 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
         # Each pile is [bottom, top]; only the last element is playable.
         piles.append([[deck[k + 2 * i], deck[k + 2 * i + 1]] for i in range(3)])
         k += 6
-    out = deck[26:28]
+    out = deck[26:26 + N_OUT]
 
     return {
+        "v": VERSION,
         "seats": list(seats),
         "phase": "auction",
         "hands": hands,
         "piles": piles,
         "out": out,
+        # The subset of `out` shown to whoever wins the auction. Fixed at the
+        # deal so it does not depend on who wins; secret until then.
+        "shown": out[:N_SHOWN],
+        # None until the swap phase resolves; then True/False. WHICH cards
+        # moved stays hidden -- the defender learns only that a swap happened.
+        "swapped": None,
         "opener": opener,
         # The auction is real game state, not a transient message field, so it
         # survives saves and reconnects and stays server-enforced.
@@ -117,6 +163,8 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
         "leader": opener,
         "led": None,
         "pts": [0, 0],
+        # +2 tricks won by each seat -- the Null contract's condition.
+        "etricks": [0, 0],
         "history": [],
         "played": [],
         "result": None,
@@ -127,20 +175,43 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
 
 
 def auction_options(g: dict) -> dict:
-    """Everything the player to act may legally do, for the client to render."""
+    """Everything the player to act may legally do, for the client to render.
+
+    ``bids`` is an explicit list of [level, denom] pairs, NOT a levels x denoms
+    cross-product: under ranked denominations the legal set at the standing
+    level depends on which denomination stands, and Null exists at exactly one
+    rung. A client that reconstructs the set from two axes will get it wrong.
+    """
     a = g["auction"]
     if g["phase"] != "auction":
-        return {"levels": [], "denoms": [], "may_pass": False}
+        return {"bids": [], "may_pass": False}
     me = a["to_act"]
-    free = [d for d in range(5) if not (a["used"][me] >> d) & 1]
+    free = [d for d in range(NULL_DENOM + 1) if not (a["used"][me] >> d) & 1]
+    bids: list[list[int]] = []
     if a["level"] == 0:
         # The opener must bid; passing out is not offered.
-        return {"levels": list(range(MIN_LEVEL, MAX_LEVEL + 1)),
-                "denoms": free, "may_pass": False}
-    lo = a["level"] + 1
-    hi = min(MAX_LEVEL, a["level"] + MAX_RAISE)
-    return {"levels": list(range(lo, hi + 1)) if lo <= hi else [],
-            "denoms": free, "may_pass": True}
+        for d in free:
+            if d == NULL_DENOM:
+                bids.append([NULL_LEVEL, d])
+            else:
+                bids.extend([lvl, d] for lvl in range(MIN_LEVEL, MAX_LEVEL + 1))
+        return {"bids": bids, "may_pass": False}
+    # Ranked denominations: an overtake stands at the SAME level in a
+    # higher-ranked denomination, or raises by up to MAX_RAISE in any unused
+    # one. Null lives at its single rung and follows the same ordering.
+    lo, hi = a["level"], min(MAX_LEVEL, a["level"] + MAX_RAISE)
+    for d in free:
+        if d == NULL_DENOM:
+            if lo <= NULL_LEVEL <= hi and not (
+                NULL_LEVEL == a["level"] and a["denom"] >= NULL_DENOM
+            ):
+                bids.append([NULL_LEVEL, d])
+            continue
+        for lvl in range(lo, hi + 1):
+            if lvl == a["level"] and d <= a["denom"]:
+                continue  # same level: only a higher-ranked denomination outranks
+            bids.append([lvl, d])
+    return {"bids": bids, "may_pass": True}
 
 
 def can_bid(g: dict, seat: int, level: int, denom: int) -> tuple[bool, str]:
@@ -149,11 +220,8 @@ def can_bid(g: dict, seat: int, level: int, denom: int) -> tuple[bool, str]:
     a = g["auction"]
     if seat != a["to_act"]:
         return False, "not your turn"
-    opt = auction_options(g)
-    if level not in opt["levels"]:
-        return False, "illegal level"
-    if denom not in opt["denoms"]:
-        return False, "you have already named that denomination"
+    if [level, denom] not in auction_options(g)["bids"]:
+        return False, "that bid does not outrank the standing contract"
     return True, ""
 
 
@@ -179,13 +247,53 @@ def apply_pass(g: dict, seat: int) -> None:
     if a["level"] == 0:
         raise ValueError("the opener must bid")
     a["log"].append({"seat": seat, "pass": True})
+    # The declarer now sees `shown` and decides on the swap before play.
+    g["phase"] = "swap"
+
+
+def swap_options(g: dict) -> dict:
+    """What the declarer may do in the swap phase."""
+    if g["phase"] != "swap":
+        return {"shown": [], "hand": []}
+    decl = g["auction"]["declarer"]
+    return {"shown": list(g["shown"]), "hand": sorted(g["hands"][decl])}
+
+
+def apply_swap(g: dict, seat: int, take, give) -> None:
+    """Take one shown out-card into hand, discarding a HAND card in its place.
+
+    ``take is None`` declines the swap. The discarded card joins the out pile
+    face-down, so the defender learns only that a swap happened -- the round-end
+    reveal is what eventually shows which cards moved.
+    """
+    if g["phase"] != "swap":
+        raise ValueError("not the swap phase")
+    decl = g["auction"]["declarer"]
+    if seat != decl:
+        raise ValueError("only the declarer swaps")
+    if take is None:
+        g["swapped"] = False
+    else:
+        take, give = int(take), int(give)
+        if take not in g["shown"]:
+            raise ValueError("that card was not shown")
+        if give not in g["hands"][decl]:
+            raise ValueError("you may only swap a card from your hand")
+        g["hands"][decl].remove(give)
+        g["hands"][decl].append(take)
+        g["hands"][decl].sort()
+        g["out"][g["out"].index(take)] = give
+        g["shown"][g["shown"].index(take)] = give
+        g["swapped"] = True
     _start_play(g)
 
 
 def _start_play(g: dict) -> None:
     a = g["auction"]
     g["phase"] = "play"
-    g["trump"] = a["denom"]
+    # A Null contract is played at no trump: a trump suit would only add a
+    # second way for the declarer to be forced to win a trick.
+    g["trump"] = NOTRUMP if a["denom"] == NULL_DENOM else a["denom"]
     g["trick"] = 0
     g["led"] = None
     # The DECLARER leads to trick 1. Measured worth +0.93 pts under the
@@ -247,7 +355,10 @@ def apply_play(g: dict, seat: int, c: int) -> None:
         return
 
     winner = seat if beats(g["led"], c, g["trump"]) else g["leader"]
-    g["pts"][winner] += trick_value(g["trick"])
+    v = trick_value(g["trick"])
+    g["pts"][winner] += v
+    if v > 0:
+        g["etricks"][winner] += 1
     g["trick"] += 1
     g["leader"] = winner
     g["led"] = None
@@ -274,7 +385,16 @@ def _finish(g: dict) -> None:
     a = g["auction"]
     decl = a["declarer"]
     dpts = g["pts"][decl]
-    ds, fs = contract_score(a["level"], dpts)
+    if a["denom"] == NULL_DENOM:
+        # Null: made iff the declarer won no +2 trick. Flat pay both ways --
+        # it is not a level-N contract and the curves do not apply to it.
+        made = g["etricks"][decl] == 0
+        ds, fs = (NULL_MAKE, 0) if made else (0, NULL_SET)
+        short = 0
+    else:
+        made = dpts >= a["level"]
+        ds, fs = contract_score(a["level"], dpts)
+        short = max(0, a["level"] - dpts)
     scores = [0, 0]
     scores[decl] = ds
     scores[1 - decl] = fs
@@ -284,8 +404,9 @@ def _finish(g: dict) -> None:
         "level": a["level"],
         "denom": a["denom"],
         "declarer_pts": dpts,
-        "made": dpts >= a["level"],
-        "short": max(0, a["level"] - dpts),
+        "declarer_etricks": g["etricks"][decl],
+        "made": made,
+        "short": short,
         "scores": scores,
     }
 
@@ -330,6 +451,10 @@ def view_for(g: dict, seat: int) -> dict:
     """The game as one seat may see it. Never leaks a card they cannot know."""
     opp = 1 - seat
     over = g["phase"] == "over"
+    decl = g["auction"]["declarer"]
+    # The shown out-cards belong to the DECLARER's knowledge from the moment
+    # the auction settles; the defender sees them only at the round-end reveal.
+    sees_shown = over or (decl == seat and g["phase"] in ("swap", "play"))
     v = {
         "phase": g["phase"],
         "seats": g["seats"],
@@ -351,13 +476,18 @@ def view_for(g: dict, seat: int) -> dict:
         "leader": g["leader"],
         "led": g["led"],
         "pts": list(g["pts"]),
+        "etricks": list(g["etricks"]),
         "history": [list(h) for h in g["history"]],
         "result": g["result"],
-        # The out-of-play pair stays secret until the round is done.
+        # The out-of-play cards stay secret until the round is done.
         "out": list(g["out"]) if over else None,
+        "shown": list(g["shown"]) if sees_shown else None,
+        # Whether a swap happened is public; which cards moved is not.
+        "swapped": g["swapped"],
         "to_play": to_play(g) if g["phase"] == "play" else None,
         "legal": legal_moves(g, seat) if g["phase"] == "play" else [],
         "options": auction_options(g) if g["phase"] == "auction" else None,
+        "swap": swap_options(g) if g["phase"] == "swap" and seat == decl else None,
     }
     return v
 
@@ -370,11 +500,13 @@ def is_over(g) -> bool:
 
 
 def turn_seat(g) -> int | None:
-    """Whichever seat must act next, in either phase."""
+    """Whichever seat must act next, in any phase."""
     if not g or g["phase"] == "over":
         return None
     if g["phase"] == "auction":
         return g["auction"]["to_act"]
+    if g["phase"] == "swap":
+        return g["auction"]["declarer"]
     return to_play(g)
 
 
@@ -402,6 +534,9 @@ def player_view(g, pid):
         v["you"] = None
         v["legal"] = []
         v["options"] = None
+        v["swap"] = None
+        if g["phase"] != "over":
+            v["shown"] = None
         return v
     return view_for(g, s)
 
@@ -416,6 +551,8 @@ def apply_move(g, pid, move: dict) -> None:
         apply_bid(g, seat, int(move["level"]), int(move["denom"]))
     elif kind == "pass":
         apply_pass(g, seat)
+    elif kind == "swap":
+        apply_swap(g, seat, move.get("take"), move.get("give"))
     elif kind == "play":
         apply_play(g, seat, int(move["card"]))
     else:

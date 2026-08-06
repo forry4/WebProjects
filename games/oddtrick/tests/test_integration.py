@@ -83,8 +83,10 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
             if opt["may_pass"]:
                 move = {"kind": "pass"}
             else:
-                move = {"kind": "bid", "level": opt["levels"][0],
-                        "denom": opt["denoms"][0]}
+                lvl, den = opt["bids"][0]
+                move = {"kind": "bid", "level": lvl, "denom": den}
+        elif g["phase"] == "swap":
+            move = {"kind": "swap", "take": None}
         else:
             seat = E.seat_of(g, pid)
             move = {"kind": "play", "card": E.legal_moves(g, seat)[0]}
@@ -120,7 +122,10 @@ def test_a_vs_bot_room_is_creatable_and_the_bot_takes_its_turn():
         if g["phase"] == "auction":
             opt = E.auction_options(g)
             move = ({"kind": "pass"} if opt["may_pass"]
-                    else {"kind": "bid", "level": opt["levels"][0], "denom": opt["denoms"][0]})
+                    else {"kind": "bid", "level": opt["bids"][0][0],
+                          "denom": opt["bids"][0][1]})
+        elif g["phase"] == "swap":
+            move = {"kind": "swap", "take": None}
         else:
             move = {"kind": "play", "card": E.legal_moves(g, E.seat_of(g, pid))[0]}
         run(m._handle_move(ws, "B", pid, {"move": move}))

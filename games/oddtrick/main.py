@@ -196,6 +196,16 @@ def load_game_to_memory(room_id: str) -> bool:
     state = load_game_state(room_id)
     if not state:
         return False
+    # A save from before the v2 rules release (32-card deck) holds card indices
+    # this engine would misread as different cards entirely, so it cannot be
+    # resumed -- void it rather than corrupt it. The prod table was verified
+    # EMPTY when v2 shipped, so this guard exists for completeness, not for a
+    # population.
+    g = state.get("game")
+    if isinstance(g, dict) and g.get("v", 1) < engine.VERSION and g.get("phase") != "over":
+        g["phase"] = "over"
+        g.setdefault("result", None)
+        state["status"] = "over"
     ROOMS[room_id] = {
         "players": state.get("players", {}),
         "host": state.get("host"),
@@ -366,6 +376,8 @@ def _bot_move_sync(g: dict, seat: int, difficulty: str, seed: int):
     kind, mv = bot.act(g, seat, rng)
     if kind == "play":
         return {"kind": "play", "card": mv}
+    if kind == "swap":
+        return {"kind": "swap", "take": mv.get("take"), "give": mv.get("give")}
     if mv.get("pass"):
         return {"kind": "pass"}
     return {"kind": "bid", "level": mv["level"], "denom": mv["denom"]}
@@ -681,6 +693,14 @@ async def catalog():
         "max_level": engine.MAX_LEVEL,
         "max_raise": engine.MAX_RAISE,
         "short_penalty": engine.SHORT_PENALTY,
+        # v2: ranked denominations, the Null contract, and the declarer swap.
+        "ranked_denoms": True,
+        "null_denom": engine.NULL_DENOM,
+        "null_level": engine.NULL_LEVEL,
+        "null_make": engine.NULL_MAKE,
+        "null_set": engine.NULL_SET,
+        "n_out": engine.N_OUT,
+        "n_shown": engine.N_SHOWN,
         "difficulties": list(DIFFICULTIES),
     }
 

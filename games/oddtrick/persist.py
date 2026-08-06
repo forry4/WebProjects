@@ -27,7 +27,8 @@ VERSION = 1
 
 def _pack_hist(entry) -> int:
     seat, card, source = entry
-    # seat 0..1, card 0..27, source 0..3
+    # seat 0..1, card 0..31 (32-card deck), source 0..3. card<<1 tops out at
+    # 62, safely below the source field at bit 7.
     return (seat & 1) | (card << 1) | (source << 7)
 
 

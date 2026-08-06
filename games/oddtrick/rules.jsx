@@ -33,7 +33,7 @@ export default function OddtrickRules() {
 
 			<RulesSection title="The deal">
 				<p>
-					The deck is 28 cards: <b>8, 9, 10, J, Q, K, A</b> in four suits. You each get
+					The deck is 32 cards: <b>7, 8, 9, 10, J, Q, K, A</b> in four suits. You each get
 					thirteen cards, laid out in an unusual way:
 				</p>
 				<ul>
@@ -44,8 +44,9 @@ export default function OddtrickRules() {
 					<li>The <b>middle pile's bottom card is face-up from the start</b>, so you both know
 						one card that's coming. The outer two piles' bottom cards are hidden from
 						everyone — <b>including their owner</b>.</li>
-					<li><b>Two cards sit out</b> of the deal entirely, unseen, and are revealed at the
-						end. Nobody has them.</li>
+					<li><b>Six cards sit out</b> of the deal entirely, unseen, and are revealed at the
+						end. Nobody has them — and any card you can't account for might be among
+						them rather than in your opponent's hand.</li>
 				</ul>
 			</RulesSection>
 
@@ -57,10 +58,33 @@ export default function OddtrickRules() {
 				</p>
 				<RulesDefs items={[
 					{ t: "The opener must bid", d: "Passing is not allowed on the first bid, however bad the hand is." },
-					{ t: "Overtaking", d: "Raise the current number by exactly 1 or 2 — no bigger jumps — and name a denomination YOU have not named before. Or pass." },
+					{ t: "Denominations are ranked", d: "♣ < ♦ < ♥ < ♠ < NT. A bid at the same number in a higher-ranked denomination outranks the one standing." },
+					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by 1 or 2 — no bigger jumps — in any denomination YOU have not named before. Or pass." },
 					{ t: "The last bid wins", d: "That player is the declarer, their denomination is trump (or no-trump), and their number is the target." },
 					{ t: "Declarer leads", d: "The declarer leads to trick 1 — which is an odd, LOSING trick. Leading first is a real disadvantage, and it's why the auction isn't a free-for-all." },
 				]} />
+			</RulesSection>
+
+			<RulesSection title="The talon">
+				<p>
+					After the auction, the declarer is shown <b>three</b> of the six set-aside cards
+					and may take <b>one</b> into hand, discarding a hand card face-down in its place
+					(pile cards can't be swapped). The defender is told <i>that</i> a swap happened —
+					never which cards. Winning the auction buys information as well as the contract.
+				</p>
+			</RulesSection>
+
+			<RulesSection title="Null — the contract for a hopeless hand">
+				<p>
+					Instead of a number, you may bid <b>Null</b>: a promise to win <b>no +2 trick</b>
+					for the whole round. It slots into the ladder as a 6 (above no-trump 6, below 7)
+					and is played without trump. Make it and you score a flat <b>12</b>; if even one
+					scoring trick lands on you, your opponent scores <b>10</b> instead.
+				</p>
+				<p>
+					Winning a −1 trick is legal — but it puts you <b>on lead into the +2 trick that
+					follows</b>, the one seat you can't duck from. The odd tricks are not free.
+				</p>
 			</RulesSection>
 
 			<RulesSection title="Playing the cards">
