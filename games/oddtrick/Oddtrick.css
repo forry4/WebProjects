@@ -1,0 +1,157 @@
+/* Oddtrick — layout on top of shared/theme.js tokens.
+   Mobile @media blocks come BEFORE the base rules in this file, so every
+   mobile override is .odd-prefixed to out-specify the later base rule. */
+
+.odd { min-height: 100vh; color: var(--text); }
+
+/* ── mobile overrides (must precede the base rules; see above) ───────────── */
+@media (max-width: 760px) {
+  .odd .odd-table { gap: 0.5rem; padding: 0.5rem; }
+  .odd .odd-card { --cw: 42px; font-size: 0.78rem; }
+  .odd .odd-hand { gap: 0.18rem; }
+  .odd .odd-hand .odd-card:not(:first-child) { margin-left: -14px; }
+  .odd .odd-piles { gap: 0.35rem; }
+  .odd .odd-bidgrid { grid-template-columns: repeat(4, 1fr); }
+  .odd .odd-side { display: none; }
+  .odd .odd-main { grid-template-columns: 1fr; }
+  .odd .odd-trickstrip { overflow-x: auto; }
+}
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+/* No image assets: a playing card is a rank and a suit glyph, so it renders
+   in CSS at any size and stays crisp. Suits differ by GLYPH as well as
+   colour, so red/black is never the only signal. */
+.odd-card {
+  --cw: 56px;
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+  border-radius: calc(var(--cw) * 0.11);
+  background: #fdfdfa;
+  color: #17171a;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-weight: 700; line-height: 1.05;
+  user-select: none; position: relative;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.odd-card .odd-r { font-size: 0.95em; }
+.odd-card .odd-s { font-size: 1.25em; }
+.odd-card.red { color: #c0233a; }
+.odd-card.black { color: #17171a; }
+.odd-card.play { cursor: pointer; }
+.odd-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
+.odd-card.dim { opacity: 0.38; filter: grayscale(0.55); }
+.odd-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.odd-card.back {
+  background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
+  border-color: rgba(255, 255, 255, 0.18); color: transparent;
+}
+.odd-card.ghost { background: rgba(255, 255, 255, 0.05); border-style: dashed; color: var(--muted); }
+
+.odd-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem; }
+
+/* ── piles ──────────────────────────────────────────────────────────────── */
+.odd-piles { display: flex; gap: 0.6rem; justify-content: center; }
+.odd-pile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.odd-pile .odd-under {
+  font-size: 0.62rem; color: var(--muted); letter-spacing: 0.02em;
+  min-height: 1em;
+}
+.odd-pile .odd-under.known { color: var(--accent); font-weight: 700; }
+.odd-pilewrap { position: relative; }
+/* The buried card peeks out from under its cover, so "two left" reads at a glance. */
+.odd-pilewrap.two::before {
+  content: ""; position: absolute; inset: -4px -4px auto auto;
+  width: 100%; height: 100%;
+  border-radius: 6px; background: #2b3a55;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transform: translate(4px, -4px); z-index: 0;
+}
+.odd-pilewrap .odd-card { position: relative; z-index: 1; }
+
+/* ── table ──────────────────────────────────────────────────────────────── */
+.odd-main { display: grid; grid-template-columns: 1fr 260px; gap: 0.75rem; align-items: start; }
+.odd-table {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  padding: 0.9rem; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(30, 62, 46, 0.55), rgba(18, 38, 28, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.odd-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
+.odd-seatname { font-size: 0.85rem; color: var(--muted); display: flex; gap: 0.5rem; align-items: center; }
+.odd-seatname b { color: var(--text); }
+
+.odd-trick {
+  min-height: 96px; display: flex; align-items: center; justify-content: center;
+  gap: 1.2rem; position: relative;
+}
+.odd-trickinfo {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: -4px; font-size: 0.72rem; color: var(--muted);
+}
+
+/* The parity is the whole game, so the value of the trick in play is loud. */
+.odd-val { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.9rem; }
+.odd-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
+.odd-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
+
+.odd-trickstrip { display: flex; gap: 3px; margin-top: 0.3rem; }
+.odd-tick {
+  width: 15px; height: 15px; border-radius: 4px; font-size: 0.58rem;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.07); color: var(--muted); font-weight: 700;
+}
+.odd-tick.good { background: rgba(70, 190, 120, 0.22); color: #6fe0a0; }
+.odd-tick.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
+.odd-tick.now { outline: 2px solid var(--accent); }
+.odd-tick.won0 { box-shadow: inset 0 -3px 0 #6ea8ff; }
+.odd-tick.won1 { box-shadow: inset 0 -3px 0 #ffb56e; }
+
+/* ── auction ────────────────────────────────────────────────────────────── */
+.odd-auction { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; padding: 1rem; }
+.odd-contract {
+  font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.odd-bidgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem; width: 100%; max-width: 420px; }
+.odd-bidgrid button, .odd-denoms button {
+  padding: 0.5rem 0.2rem; border-radius: 9px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.07); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+}
+.odd-bidgrid button:hover:not(:disabled), .odd-denoms button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+.odd-bidgrid button.on, .odd-denoms button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.odd-bidgrid button:disabled, .odd-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
+.odd-denoms { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
+.odd-denoms button { min-width: 56px; font-size: 1.1rem; }
+.odd-denoms button.red { color: #ff8a9c; }
+.odd-denoms button.on.red { color: #08131f; }
+.odd-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
+.odd-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+
+/* ── side panel ─────────────────────────────────────────────────────────── */
+.odd-side { display: flex; flex-direction: column; gap: 0.7rem; }
+.odd-panel { padding: 0.7rem; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
+.odd-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.odd-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
+.odd-scorerow b { font-variant-numeric: tabular-nums; }
+.odd-log { max-height: 210px; overflow-y: auto; font-size: 0.78rem; display: flex; flex-direction: column; gap: 0.12rem; }
+.odd-log div { display: flex; gap: 0.4rem; color: var(--muted); }
+
+/* ── result ─────────────────────────────────────────────────────────────── */
+.odd-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+.odd-result .odd-big { font-size: 1.6rem; font-weight: 800; }
+.odd-result .made { color: #6fe0a0; }
+.odd-result .set { color: #ff9a9a; }
+.odd-maths { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.odd-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
+.odd-yourturn { color: var(--accent); font-weight: 700; }
+
+.odd-rules { max-width: 640px; line-height: 1.55; font-size: 0.92rem; }
+.odd-rules h4 { margin: 0.9rem 0 0.3rem; }
+.odd-rules code { background: rgba(255, 255, 255, 0.08); padding: 0 0.25rem; border-radius: 4px; }

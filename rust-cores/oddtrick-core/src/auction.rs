@@ -50,6 +50,25 @@ pub struct ScoreCfg {
     pub bonus: i32,
     /// Points the defender gains per point the declarer finished short.
     pub short: i32,
+    /// Penalty per point the declarer finishes ABOVE the contract. Because
+    /// only the contract outcome scores, the defence is completely indifferent
+    /// to giving tricks away, so this hands them a free weapon: burst the
+    /// contract instead of setting it. Measured to be forceable ~89% of the
+    /// time by ~3 points, which is a rounding error against a made 6 (N^2 =
+    /// 36) and ruinous against a made 1.
+    pub over: i32,
+    /// Expected points the defence can force the declarer ABOVE the contract,
+    /// once the contract is safe. Measured by `overtest`, not assumed.
+    pub burst: f64,
+    /// Let the OPENER pass. If both players pass the hand is thrown in for
+    /// 0-0. Without this a weak hand is forced to name something, and the
+    /// cheapest place to park it is the floor -- which is most of why the
+    /// level-1 cluster exists at all.
+    pub allow_open_pass: bool,
+    /// Denominations are a SHARED budget: naming one burns it for both
+    /// players, not just the namer. Turns the choice of denomination into a
+    /// denial decision and caps the whole auction at five bids.
+    pub global_denoms: bool,
     /// Lowest level the opener may name. 0 means "I will not finish negative",
     /// which is nearly free -- the point of it is to cap what the opponent can
     /// reach, not to score.
@@ -103,6 +122,10 @@ impl Default for ScoreCfg {
             bonus_at: 7,
             bonus: 5,
             short: 1,
+            over: 0,
+            burst: 2.5,
+            allow_open_pass: false,
+            global_denoms: false,
             slope: 0,
             min_level: 1,
             flat: 0,
@@ -144,17 +167,60 @@ pub fn contract_score(cfg: &ScoreCfg, n: u8, declarer_pts: i32) -> (i32, i32) {
     }
 }
 
-/// One player's belief: for each sampled world, the points each player would
-/// score as declarer in each denomination.
+/// One player's belief: for each sampled world, what each player would do as
+/// declarer in each denomination.
 #[derive(Clone)]
 pub struct HandEval {
-    /// `pts[world][denom][declarer]`
+    /// Most the declarer can guarantee against a defence trying to hold them
+    /// down. Decides whether a contract can be MADE.
     pub pts: Vec<[[i8; NDEN]; 2]>,
+    /// Least the declarer can hold themselves to against a defence trying to
+    /// BURST them. Decides how far they overshoot. Empty when `over` is 0.
+    pub floor: Vec<[[i8; NDEN]; 2]>,
+}
+
+/// Resolve a contract. Beyond what the declarer can guarantee, the defence
+/// simply holds them down; at or below it, the defence switches to BURSTING
+/// them past the contract.
+///
+/// `floor_pts` is ignored -- kept only so callers need not change. The forced
+/// overshoot is taken from `cfg.burst`, a MEASURED constant, because the
+/// obvious two-bound model is wrong: the totals a declarer can guarantee under
+/// adversarial play do not form an interval, so knowing the minimum they can
+/// shed to says nothing about whether they can pin an intermediate value.
+/// `overtest` measures the real thing at 2.3-3.5 points, near enough flat in
+/// the level bid.
+pub fn outcome(cfg: &ScoreCfg, level: u8, max_pts: i32, _floor_pts: i32) -> (i32, i32) {
+    if (level as i32) > max_pts {
+        let base = if level == 0 {
+            0
+        } else {
+            curve_val(cfg.set_curve, level as i32 - 1)
+        };
+        return (0, base + cfg.short * (level as i32 - max_pts));
+    }
+    let mut sc = curve_val(cfg.make_curve, level as i32)
+        + cfg.slope * (level as i32 - 1).max(0)
+        + cfg.flat
+        - (cfg.over as f64 * cfg.burst).round() as i32;
+    if level >= cfg.bonus_at {
+        sc += cfg.bonus;
+    }
+    (sc, 0)
 }
 
 impl HandEval {
     pub fn k(&self) -> usize {
         self.pts.len()
+    }
+
+    #[inline]
+    pub fn floor_of(&self, w: usize, declarer: usize, d: usize) -> i32 {
+        if self.floor.is_empty() {
+            i32::MIN / 4
+        } else {
+            self.floor[w][declarer][d] as i32
+        }
     }
 }
 
@@ -207,9 +273,14 @@ impl Auc {
             cfg.max_raise.max(cfg.step)
         };
         let hi = MAX_LEVEL.min(self.level.saturating_add(raise)).max(lo);
+        let blocked = if cfg.global_denoms {
+            self.used[0] | self.used[1]
+        } else {
+            self.used[self.to_act as usize]
+        };
         let mut v = Vec::new();
         for d in 0..NDEN as u8 {
-            if self.used[self.to_act as usize] & (1 << d) != 0 {
+            if blocked & (1 << d) != 0 {
                 continue;
             }
             for l in lo..=hi {
@@ -268,8 +339,17 @@ impl<'a> AuctionSolver<'a> {
             1
         };
         let mut acc = 0f64;
-        for w in self.ev.pts.iter() {
-            let (ds, fs) = contract_score(&self.cfg, a.level, w[c][d] as i32);
+        for (wi, w) in self.ev.pts.iter().enumerate() {
+            let (ds, fs) = if self.cfg.over > 0 {
+                outcome(
+                    &self.cfg,
+                    a.level,
+                    w[c][d] as i32,
+                    self.ev.floor_of(wi, c, d),
+                )
+            } else {
+                contract_score(&self.cfg, a.level, w[c][d] as i32)
+            };
             let (ds, fs) = (ds * mult * straight, fs * mult);
             let net = if c == self.me { ds - fs } else { fs - ds };
             acc += net as f64;
@@ -383,12 +463,15 @@ pub fn eval_hand(
     rng: &mut Rng,
     k: usize,
     declarer_leads: bool,
+    need_floor: bool,
 ) -> HandEval {
     let mut buf = Vec::new();
     let mut pts = Vec::with_capacity(k);
+    let mut floor: Vec<[[i8; NDEN]; 2]> = Vec::with_capacity(k);
     for _ in 0..k {
         let w = v.determinize(rng, &mut buf);
         let mut row = [[0i8; NDEN]; 2];
+        let mut frow = [[0i8; NDEN]; 2];
         for declarer in 0..2usize {
             for d in 0..NDEN {
                 let s = State {
@@ -405,12 +488,34 @@ pub fn eval_hand(
                 };
                 let diff = dd.solve(&s) as i32;
                 let p0 = (crate::state::POOL as i32 + diff) / 2;
-                row[declarer][d] = (if declarer == 0 { p0 } else { crate::state::POOL as i32 - p0 }) as i8;
+                row[declarer][d] =
+                    (if declarer == 0 { p0 } else { crate::state::POOL as i32 - p0 }) as i8;
+                if need_floor {
+                    frow[declarer][d] = forced_floor(dd, &s, declarer) as i8;
+                }
             }
         }
         pts.push(row);
+        if need_floor {
+            floor.push(frow);
+        }
     }
-    HandEval { pts }
+    HandEval { pts, floor }
+}
+
+/// The lowest final total the declarer can hold themselves to, against a
+/// defence doing everything it can to push them higher. One exact solve.
+pub fn forced_floor(dd: &mut Dd, s: &State, declarer: usize) -> i32 {
+    const LOW: i32 = -30;
+    let c = crate::dd::Contract {
+        level: LOW,
+        declarer,
+        make_base: 0,
+        over: 1,
+        set_base: 1_000_000,
+        short: 0,
+    };
+    -dd.solve_contract(s, &c) + LOW
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

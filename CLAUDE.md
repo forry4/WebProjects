@@ -1,6 +1,6 @@
 # Forrest Games — Claude Context
 
-A five-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
+A six-game multiplayer board-game website (+ a Books feature) sharing one backend, auth
 layer, and frontend shell. Real-time play over WebSockets, server-authoritative game state,
 and per-game AI opponents that range from simple heuristics to client-side neural nets
 compiled to WASM.
@@ -15,6 +15,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
+| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -83,7 +84,10 @@ games/
                        #   main.py (dontminion_app @ /dontminion) + Dontminion.jsx; expansion
                        #   picker, 2-4p, multi-bot rooms. tools/replay_prod_saves.py is the
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
-books/                 # Books feature (wired into the app, not a sub-app)
+oddtrick/            # Oddtrick — 2p parity trick-taking. engine.py is a PORT of
+                       #   rust-cores/oddtrick-core (the solver-validated reference);
+                       #   tests/test_rust_parity.py is the drift gate
+  books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
                        #   dependency direction (games -> shared, never back)

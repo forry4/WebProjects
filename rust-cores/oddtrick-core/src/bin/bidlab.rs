@@ -53,6 +53,9 @@ struct Stats {
     cmade: [u64; 14],
     doubled: f64,
     doubled_made: f64,
+    thrown_in: f64,
+    overshoot: f64,
+    overshoot_n: f64,
     /// Joint distribution: where the auction OPENED vs where it SETTLED,
     /// over all contracts. The only way to see whether a level is rare
     /// because nobody opens there or because it never survives.
@@ -104,6 +107,10 @@ fn main() {
         bonus_at: flag(&args, "--bonus-at").and_then(|s| s.parse().ok()).unwrap_or(99),
         bonus: flag(&args, "--bonus").and_then(|s| s.parse().ok()).unwrap_or(0),
         short: flag(&args, "--short").and_then(|s| s.parse().ok()).unwrap_or(4),
+        over: flag(&args, "--over").and_then(|s| s.parse().ok()).unwrap_or(0),
+        burst: flag(&args, "--burst").and_then(|s| s.parse().ok()).unwrap_or(2.5),
+        allow_open_pass: args.iter().any(|a| a == "--openpass"),
+        global_denoms: args.iter().any(|a| a == "--globaldenoms"),
         slope: 0,
         min_level: flag(&args, "--min").and_then(|s| s.parse().ok()).unwrap_or(1),
         flat: flag(&args, "--flat").and_then(|s| s.parse().ok()).unwrap_or(0),
@@ -155,20 +162,39 @@ fn main() {
                         .map(|p| {
                             let v = g.view(p);
                             let mut r = Rng::new(seed ^ ((p as u64 + 1) << 32));
-                            eval_hand(&v, &mut dd, &mut r, k, cfg.declarer_leads)
+                            eval_hand(&v, &mut dd, &mut r, k, cfg.declarer_leads, false)
                         })
                         .collect();
 
                     for swap in 0..2usize {
                         let styles = if swap == 0 { [sa, sb] } else { [sb, sa] };
                         let a_seat = if swap == 0 { 0usize } else { 1 };
-                        let opener = (idx % 2) as u8;
+                        let first = (idx % 2) as u8;
 
-                        let (mut lvl, den0) = {
-                            let mut s =
-                                AuctionSolver::new(&evs[opener as usize], cfg, opener as usize);
-                            s.open(styles[opener as usize], opener)
+                        // With `allow_open_pass`, a hand that expects to lose
+                        // by declaring anything simply declines; the turn then
+                        // passes to the other player, and if they decline too
+                        // the hand is thrown in.
+                        let mut chosen: Option<(u8, u8, u8)> = None;
+                        for who in [first, 1 - first] {
+                            let mut s = AuctionSolver::new(&evs[who as usize], cfg, who as usize);
+                            let (l, d) = s.open(styles[who as usize], who);
+                            if !cfg.allow_open_pass {
+                                chosen = Some((who, l, d));
+                                break;
+                            }
+                            if s.value(Auc::after_open(who, l, d)) > 0.0 {
+                                chosen = Some((who, l, d));
+                                break;
+                            }
+                        }
+                        let Some((opener, lvl0, den0)) = chosen else {
+                            // Passed out: nobody declares, nobody scores.
+                            st.n += 1.0;
+                            st.thrown_in += 1.0;
+                            continue;
                         };
+                        let mut lvl = lvl0;
                         let mut den = den0;
                         if opener as usize == a_seat {
                             st.opened += 1.0;
@@ -230,7 +256,15 @@ fn main() {
                         let p0 = (POOL as i32 + diff) / 2;
                         let dpts = if decl == 0 { p0 } else { POOL as i32 - p0 };
                         let made = dpts >= lvl as i32;
-                        let (ds, fs) = contract_score(&cfg, lvl, dpts);
+                        let (ds, fs) = if cfg.over > 0 {
+                            if made {
+                                st.overshoot += cfg.burst;
+                                st.overshoot_n += 1.0;
+                            }
+                            outcome(&cfg, lvl, dpts, 0)
+                        } else {
+                            contract_score(&cfg, lvl, dpts)
+                        };
                         let m = if auc.doubled { 2 } else { 1 };
                         let straight = if lvl == auc.opened_at { cfg.straight_mult } else { 1 };
                         let (ds, fs) = (ds * m * straight, fs * m);
@@ -283,8 +317,11 @@ fn main() {
         s.sacrificed += r.sacrificed;
         s.contract_level += r.contract_level;
         s.contracts += r.contracts;
+        s.thrown_in += r.thrown_in;
         s.doubled += r.doubled;
         s.doubled_made += r.doubled_made;
+        s.overshoot += r.overshoot;
+        s.overshoot_n += r.overshoot_n;
         for i in 0..14 {
             s.open_level[i] += r.open_level[i];
             s.clevel[i] += r.clevel[i];
@@ -335,6 +372,16 @@ fn main() {
         100.0 * s.doubled_made / s.doubled.max(1.0)
     );
     println!("opened in BEST denom  {:.1}%", 100.0 * s.open_best_denom / s.opened.max(1.0));
+    if cfg.allow_open_pass {
+        println!("hands thrown in       {:.1}%  (both players declined)", 100.0 * s.thrown_in / s.n);
+    }
+    if cfg.over > 0 {
+        println!(
+            "mean forced overshoot {:.2} pts on made contracts (penalty {}/pt)",
+            s.overshoot / s.overshoot_n.max(1.0),
+            cfg.over
+        );
+    }
     hist("OPENING level (A only)", &s.open_level, None);
     hist("SETTLED CONTRACT level (all contracts)", &s.clevel, Some(&s.cmade));
 

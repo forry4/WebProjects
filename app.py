@@ -130,3 +130,12 @@ try:
     LOG.info("mounted Dontminion at /dontminion")
 except Exception as _dm_err:  # pragma: no cover - optional package
     LOG.warning("Dontminion not mounted: %s", _dm_err)
+
+# Oddtrick — its self-contained sub-app mounted under /oddtrick. Same defensive
+# guard: an import error here must not take down the rest of the backend.
+try:
+    from games.oddtrick.main import oddtrick_app
+    app.mount("/oddtrick", oddtrick_app)
+    LOG.info("mounted Oddtrick at /oddtrick")
+except Exception as _ot_err:  # pragma: no cover - optional package
+    LOG.warning("Oddtrick not mounted: %s", _ot_err)

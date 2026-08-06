@@ -42,6 +42,7 @@ const CastlesOfCrimson = lazyChunk("CastlesOfCrimson", () => import("../castles_
 const WhereWolf = lazyChunk("WhereWolf", () => import("../wherewolf/WhereWolf.jsx"));
 const SpenderDuel = lazyChunk("SpenderDuel", () => import("../spender_duel/SpenderDuel.jsx"));
 const Dontminion = lazyChunk("Dontminion", () => import("../dontminion/Dontminion.jsx"));
+const Oddtrick = lazyChunk("Oddtrick", () => import("../oddtrick/Oddtrick.jsx"));
 const Books = lazyChunk("Books", () => import("../../books/Books.jsx"));
 
 // Shown while a game's chunk loads. Deliberately an empty full-height panel in the
@@ -87,8 +88,8 @@ const HTTP_BASE = WS_BASE.replace(/^ws/, "http").replace(/\/ws$/, "");
 // tables — GAMES[].id ≠ path for wherewolf; Spender is one site-level screen now.
 // The shell owns segment 1; each sub-game owns its own segment 2 (room id). The Spender
 // Spender's own waiting/game map to "spender" (or "puzzles" while puzzling) in applyPopRoute.
-const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles", offline: "offline" };
-const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", books: "books", puzzles: "puzzles", offline: "offline" };
+const SCREEN_FOR_MODE = { spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", oddtrick: "oddtrick", books: "books", puzzles: "puzzles", offline: "offline" };
+const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf: "werewolf", duel: "duel", dontminion: "dontminion", oddtrick: "oddtrick", books: "books", puzzles: "puzzles", offline: "offline" };
 
 // Per-game emblem — inline SVG tinted via currentColor (=the card's --accent), so no
 // raster asset / CDN (keeps the self-hosted, no-CLS constraint). Small motifs that read
@@ -2753,6 +2754,15 @@ export default function SpenderApp() {
 		return (
 			<Suspense fallback={<GameChunkLoading />}>
 				<Dontminion myId={myId} authUser={authUser} onExit={() => nav("home")} />
+			</Suspense>
+		);
+	}
+
+	// Oddtrick — self-contained 2-player trick-taking game component.
+	if (screen === "oddtrick") {
+		return (
+			<Suspense fallback={<GameChunkLoading />}>
+				<Oddtrick myId={myId} authUser={authUser} onExit={() => nav("home")} />
 			</Suspense>
 		);
 	}

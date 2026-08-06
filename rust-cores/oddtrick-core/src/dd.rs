@@ -64,8 +64,57 @@ const fn build_bounds(max: bool) -> [i16; 14] {
     a
 }
 
+/// A contract to be played out exactly, rather than for maximum points.
+///
+/// With a penalty for exceeding the contract the payoff stops being linear in
+/// the point differential, so the constant-sum trick that `search` relies on
+/// no longer applies: the value now depends on the declarer's FINAL total, and
+/// accumulated points have to enter the transposition key.
+#[derive(Clone, Copy, Debug)]
+pub struct Contract {
+    pub level: i32,
+    pub declarer: usize,
+    pub make_base: i32,
+    /// Penalty per point ABOVE the contract.
+    pub over: i32,
+    pub set_base: i32,
+    /// Defender's reward per point the declarer finished short.
+    pub short: i32,
+}
+
+impl Contract {
+    /// Declarer score minus defender score, given the declarer's final total.
+    #[inline]
+    pub fn payoff(&self, declarer_pts: i32) -> i32 {
+        if declarer_pts >= self.level {
+            self.make_base - self.over * (declarer_pts - self.level)
+        } else {
+            -(self.set_base + self.short * (self.level - declarer_pts))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CEntry {
+    key: u64,
+    val: i32,
+    flag: u8,
+}
+
+impl Default for CEntry {
+    fn default() -> Self {
+        CEntry {
+            key: 0,
+            val: 0,
+            flag: F_EMPTY,
+        }
+    }
+}
+
 pub struct Dd {
     tt: Vec<Entry>,
+    ctt: Vec<CEntry>,
+    cmask: usize,
     mask: usize,
     pub nodes: u64,
     /// Bisection switches, for isolating a value regression to one technique.
@@ -109,8 +158,11 @@ impl Dd {
     /// automatically better — past L3 every probe is a cache miss.
     pub fn new(bits: u32) -> Self {
         let n = 1usize << bits;
+        let cn = 1usize << bits.saturating_sub(1).max(10);
         Dd {
             tt: vec![Entry::default(); n],
+            ctt: vec![CEntry::default(); cn],
+            cmask: cn - 1,
             mask: n - 1,
             nodes: 0,
             use_bounds: true,
@@ -123,6 +175,90 @@ impl Dd {
         for e in self.tt.iter_mut() {
             e.flag = F_EMPTY;
         }
+        for e in self.ctt.iter_mut() {
+            e.flag = F_EMPTY;
+        }
+    }
+
+    /// Exact value of playing out a CONTRACT, as declarer score minus defender
+    /// score. Unlike `solve`, the declarer here is not maximising points -- an
+    /// over-penalty makes their payoff single-peaked at the contract level, so
+    /// they may have to deliberately shed tricks, and the defence's weapon
+    /// becomes forcing unwanted winners on them.
+    pub fn solve_contract(&mut self, s: &State, c: &Contract) -> i32 {
+        self.csearch(s, c, -1_000_000, 1_000_000)
+    }
+
+    fn csearch(&mut self, s: &State, c: &Contract, mut alpha: i32, mut beta: i32) -> i32 {
+        if s.done() {
+            return c.payoff(s.pts[c.declarer] as i32);
+        }
+        self.nodes += 1;
+
+        // Accumulated points MUST be in the key here. The sum of both players'
+        // points is fixed by the trick index, so one side's total suffices.
+        let key = key_of(s) ^ mix(0x9E37_79B9_7F4A_7C15 ^ ((s.pts[0] as i64 as u64) << 8));
+        let slot = (key as usize) & self.cmask;
+        {
+            let e = unsafe { *self.ctt.get_unchecked(slot) };
+            if e.flag != F_EMPTY && e.key == key {
+                match e.flag {
+                    F_EXACT => return e.val,
+                    F_LOWER if e.val >= beta => return e.val,
+                    F_UPPER if e.val <= alpha => return e.val,
+                    _ => {}
+                }
+            }
+        }
+
+        let (a0, b0) = (alpha, beta);
+        let mover = s.to_play() as usize;
+        let maxing = mover == c.declarer;
+
+        let mut moves = [0u8; 16];
+        let n = s.legal(&mut moves);
+        let n = self.prune_and_order(s, mover, &mut moves, n, NO_MOVE);
+
+        let mut best = if maxing { -1_000_000 } else { 1_000_000 };
+        for i in 0..n {
+            let mut t = *s;
+            t.play(moves[i]);
+            let v = self.csearch(&t, c, alpha, beta);
+            if maxing {
+                if v > best {
+                    best = v;
+                }
+                if best > alpha {
+                    alpha = best;
+                }
+            } else {
+                if v < best {
+                    best = v;
+                }
+                if best < beta {
+                    beta = best;
+                }
+            }
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        let flag = if best <= a0 {
+            F_UPPER
+        } else if best >= b0 {
+            F_LOWER
+        } else {
+            F_EXACT
+        };
+        unsafe {
+            *self.ctt.get_unchecked_mut(slot) = CEntry {
+                key,
+                val: best,
+                flag,
+            }
+        };
+        best
     }
 
     /// Exact value of the position: player 0's future point differential.

@@ -37,6 +37,7 @@ const SCREENS = [
 	{ path: "/coc", chunk: "CastlesOfCrimson", marker: ".coc" },
 	{ path: "/werewolf", chunk: "WhereWolf", marker: ".ww" },
 	{ path: "/dontminion", chunk: "Dontminion", marker: ".dm" },
+	{ path: "/oddtrick", chunk: "Oddtrick", marker: ".odd" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 ];
 

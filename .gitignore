@@ -70,3 +70,6 @@ rust-cores/duel-core/target/
 rust-cores/duel-core/target-*/
 rust-cores/duel-core/fixtures/
 rust-cores/duel-core/*.out
+
+# Oddtrick Rust-parity fixtures (regenerate with gen_fixtures)
+games/oddtrick/tests/fixtures/
