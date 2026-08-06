@@ -14,6 +14,17 @@ edition = "2021"
 # the sign of the opening-lead advantage.
 odd-positive = []
 
+# Deck width. Both players always hold 13, so a wider deck changes ONLY how
+# many cards nobody was dealt: 6 (default, 32 cards) / 2 / 10 / 14. That count
+# is the game's entire permanent hidden-information budget. Mutually exclusive —
+# the highest one set wins, so a stray `--all-features` picks rank10 rather
+# than miscompiling. `rank7` is the original 28-card game; `rank8` is now a
+# no-op kept so older sweep scripts still build.
+rank7 = []
+rank8 = []
+rank9 = []
+rank10 = []
+
 [profile.release]
 opt-level = 3
 lto = true

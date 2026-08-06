@@ -49,6 +49,9 @@ pub struct View {
     /// Public record of the round so far, for inference.
     pub history: Vec<(u8, u8, u8)>,
     pub first_leader: u8,
+    /// Out-of-play cards still unidentified, i.e. how much of `pool` belongs
+    /// to nobody. Not `NOUT` when some out-cards were dealt face up.
+    pub n_out_hidden: u32,
 }
 
 /// Cards visible to both players: every pile top, plus the middle pile's
@@ -75,7 +78,7 @@ impl View {
     pub fn of(g: &Game, me: usize) -> View {
         let truth = &g.s;
         let opp = 1 - me;
-        let known = truth.hand[me] | public_pile_cards(truth);
+        let known = truth.hand[me] | public_pile_cards(truth) | g.out_public;
         let mut s = *truth;
         s.hand[opp] = 0;
         for q in 0..2 {
@@ -93,6 +96,7 @@ impl View {
             kn: g.kn,
             history: g.history.clone(),
             first_leader: g.first_leader,
+            n_out_hidden: NOUT as u32 - g.out_public.count_ones(),
         }
     }
 
@@ -125,7 +129,7 @@ impl View {
         let nh = self.opp_hand_n as usize;
         debug_assert_eq!(
             self.pool.count_ones() as usize,
-            nh + nslots + 2,
+            nh + nslots + self.n_out_hidden as usize,
             "pool must be exactly the unplaceable cards"
         );
 

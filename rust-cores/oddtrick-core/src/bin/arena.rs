@@ -10,6 +10,7 @@
 
 use oddtrick::bots::*;
 
+use oddtrick::cards::{NCARD, NOUT, NRANK};
 use oddtrick::game::{play_round, Bot, Game};
 use oddtrick::rng::Rng;
 use oddtrick::state::POOL;
@@ -71,11 +72,18 @@ fn main() {
     let bits: u32 = flag(&args, "--tt").and_then(|s| s.parse().ok()).unwrap_or(20);
     let trump_spec = flag(&args, "--trump").unwrap_or("r".into());
     let base: u64 = flag(&args, "--seed").and_then(|s| s.parse().ok()).unwrap_or(1);
+    // How many out-of-play cards are dealt FACE UP. 0 is the shipped game;
+    // NOUT is the control that holds deck width fixed and removes only the
+    // hidden information.
+    let out_public: usize = flag(&args, "--out-public")
+        .map(|s| if s == "all" { NOUT as usize } else { s.parse().expect("--out-public") })
+        .unwrap_or(0);
+    assert!(out_public <= NOUT as usize, "only {NOUT} cards are out of play");
 
     let per = games.div_ceil(threads as u64);
     let t0 = std::time::Instant::now();
 
-    let results: Vec<(f64, u64, u64, u64)> = std::thread::scope(|sc| {
+    let results: Vec<(f64, f64, u64, u64, u64)> = std::thread::scope(|sc| {
         let mut hs = Vec::new();
         for t in 0..threads {
             let (sa, sb, ts) = (spec_a.clone(), spec_b.clone(), trump_spec.clone());
@@ -84,51 +92,66 @@ fn main() {
                 let hi = lo + per;
                 let mut a = make(&sa, 0x5EED ^ (t as u64), bits);
                 let mut b = make(&sb, 0xB0B ^ (t as u64), bits);
-                let (mut sum, mut w, mut l, mut d) = (0f64, 0u64, 0u64, 0u64);
+                let (mut sum, mut sq, mut w, mut l, mut d) = (0f64, 0f64, 0u64, 0u64, 0u64);
                 for seed in lo..hi {
                     let mut dr = Rng::new(seed);
                     let trump = match ts.as_str() {
                         "r" => (dr.next_u64() % 5) as u8,
                         s => s.parse().unwrap_or(4),
                     };
-                    // Same deal, both seatings.
+                    // Same deal, both seatings. The PAIR is the unit of
+                    // measurement: deal luck cancels within it, so the
+                    // variance that matters is the variance of the pair mean,
+                    // not of a single round.
+                    let mut pair = 0f64;
                     for swap in 0..2 {
-                        let mut g = Game::deal(&mut Rng::new(seed), trump, 0);
+                        let mut g = Game::deal_with(&mut Rng::new(seed), trump, 0, out_public);
                         let pts = if swap == 0 {
                             play_round(&mut g, &mut [&mut *a, &mut *b])
                         } else {
                             let p = play_round(&mut g, &mut [&mut *b, &mut *a]);
                             [p[1], p[0]]
                         };
-                        sum += pts[0] as f64;
+                        pair += pts[0] as f64;
                         match pts[0].cmp(&(POOL - pts[0])) {
                             std::cmp::Ordering::Greater => w += 1,
                             std::cmp::Ordering::Less => l += 1,
                             std::cmp::Ordering::Equal => d += 1,
                         }
                     }
+                    pair /= 2.0;
+                    sum += pair;
+                    sq += pair * pair;
                 }
-                (sum, w, l, d)
+                (sum, sq, w, l, d)
             }));
         }
         hs.into_iter().map(|h| h.join().unwrap()).collect()
     });
 
-    let (mut sum, mut w, mut l, mut d) = (0f64, 0u64, 0u64, 0u64);
+    let (mut sum, mut sq, mut w, mut l, mut d) = (0f64, 0f64, 0u64, 0u64, 0u64);
     for r in results {
         sum += r.0;
-        w += r.1;
-        l += r.2;
-        d += r.3;
+        sq += r.1;
+        w += r.2;
+        l += r.3;
+        d += r.4;
     }
     let n = (w + l + d) as f64;
-    let mean = sum / n;
+    let pairs = n / 2.0;
+    let mean = sum / pairs;
     // Per-round scores are bounded, so a normal-approx SE on the mean is fine
     // for deciding whether a gap is real.
+    let var = (sq / pairs - mean * mean).max(0.0);
+    let se = (var / pairs).sqrt();
     println!("{} vs {}", spec_a, spec_b);
-    println!("rounds        {} ({} deals x2 seatings)", n as u64, n as u64 / 2);
+    println!(
+        "deck          {} cards ({} ranks x4), {} out of play, {} face up",
+        NCARD, NRANK, NOUT, out_public
+    );
+    println!("rounds        {} ({} deals x2 seatings)", n as u64, pairs as u64);
     println!("mean pts (A)  {:.4}   [par = {:.1}]", mean, POOL as f64 / 2.0);
-    println!("edge          {:+.4} pts/round", mean - POOL as f64 / 2.0);
+    println!("edge          {:+.4} +/- {:.4} pts/round", mean - POOL as f64 / 2.0, se);
     println!("W-L-D         {}-{}-{}  ({:.1}% wins)", w, l, d, 100.0 * w as f64 / n);
     println!("elapsed       {:.1}s", t0.elapsed().as_secs_f64());
 }

@@ -17,6 +17,7 @@
 //! computed once and reused across both seatings — worth an exact 2x.
 
 use oddtrick::auction::*;
+use oddtrick::cards::NOTRUMP;
 use oddtrick::dd::Dd;
 use oddtrick::game::Game;
 use oddtrick::rng::Rng;
@@ -61,6 +62,28 @@ struct Stats {
     /// because nobody opens there or because it never survives.
     o2s: [[u64; 14]; 14],
     bids: [u64; 12],
+    /// Denomination of the opening bid, and of the settled contract. Under
+    /// ranked denominations these stop being flavour and become part of the
+    /// PRICE, so a flat spread here is the difference between a floor with
+    /// five rungs and a floor with one.
+    open_denom: [u64; NDEN_BID],
+    cdenom: [u64; NDEN_BID],
+    /// Openings AT the floor level, split by denomination — the direct test.
+    floor_denom: [u64; NDEN_BID],
+    /// Null contracts reached, and how many of them the declarer brought home.
+    /// The risk that a fixed-value escape hatch is simply TOO GOOD shows up
+    /// here first: a make rate near 100% means it is not a gamble at all.
+    null_contracts: u64,
+    null_made: u64,
+    /// One JSON row per played round. Aggregates answer the questions you
+    /// thought of before the run; the rows answer the ones you think of after.
+    rows: Vec<String>,
+    /// Mean (best - worst) solver value across the floor-level bids, and how
+    /// often that spread clears a point of real preference. The histogram can
+    /// be flattened by a tie-break; this cannot.
+    floor_spread: f64,
+    floor_spread_n: f64,
+    floor_spread_real: f64,
 }
 
 fn hist(name: &str, h: &[u64; 14], made: Option<&[u64; 14]>) {
@@ -103,6 +126,12 @@ fn main() {
     let sb = parse_style(&args.get(1).cloned().unwrap_or("solve".into()));
     let deals: usize = flag(&args, "--deals").and_then(|s| s.parse().ok()).unwrap_or(200);
     let k: usize = flag(&args, "--k").and_then(|s| s.parse().ok()).unwrap_or(4);
+    // Declarer is shown this many out-of-play cards and may take ONE into
+    // hand, discarding a hand card (never a pile card -- the piles are the
+    // board, not the holding).
+    let n_shown: usize = flag(&args, "--shown").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let dump = flag(&args, "--dump");
+    let dumping = dump.is_some();
     let cfg = ScoreCfg {
         bonus_at: flag(&args, "--bonus-at").and_then(|s| s.parse().ok()).unwrap_or(99),
         bonus: flag(&args, "--bonus").and_then(|s| s.parse().ok()).unwrap_or(0),
@@ -120,6 +149,11 @@ fn main() {
         allow_jump: args.iter().any(|a| a == "--jump"),
         max_raise: flag(&args, "--maxraise").and_then(|s| s.parse().ok()).unwrap_or(1),
         straight_mult: flag(&args, "--straight").and_then(|s| s.parse().ok()).unwrap_or(1),
+        rank_denoms: args.iter().any(|a| a == "--rank"),
+        allow_null: args.iter().any(|a| a == "--null"),
+        null_level: flag(&args, "--null-level").and_then(|s| s.parse().ok()).unwrap_or(3),
+        null_make: flag(&args, "--null-make").and_then(|s| s.parse().ok()).unwrap_or(12),
+        null_set: flag(&args, "--null-set").and_then(|s| s.parse().ok()).unwrap_or(10),
         make_curve: if flag(&args, "--make").as_deref() == Some("lin") {
             Curve::Linear
         } else {
@@ -154,7 +188,7 @@ fn main() {
                         break;
                     }
                     let seed = idx as u64 + 1;
-                    let g = Game::deal(&mut Rng::new(seed), 4, 0);
+                    let g = Game::deal_shown(&mut Rng::new(seed), 4, 0, n_shown);
 
                     // Computed ONCE per deal: a player's read on their own cards
                     // does not depend on which strategy occupies which seat.
@@ -162,7 +196,7 @@ fn main() {
                         .map(|p| {
                             let v = g.view(p);
                             let mut r = Rng::new(seed ^ ((p as u64 + 1) << 32));
-                            eval_hand(&v, &mut dd, &mut r, k, cfg.declarer_leads, false)
+                            eval_hand(&v, &mut dd, &mut r, k, cfg.declarer_leads, false, cfg.allow_null)
                         })
                         .collect();
 
@@ -178,6 +212,7 @@ fn main() {
                         let mut chosen: Option<(u8, u8, u8)> = None;
                         for who in [first, 1 - first] {
                             let mut s = AuctionSolver::new(&evs[who as usize], cfg, who as usize);
+                            s.tie_salt = seed.wrapping_mul(0x9E3779B9).wrapping_add(who as u64);
                             let (l, d) = s.open(styles[who as usize], who);
                             if !cfg.allow_open_pass {
                                 chosen = Some((who, l, d));
@@ -199,6 +234,10 @@ fn main() {
                         if opener as usize == a_seat {
                             st.opened += 1.0;
                             st.open_level[lvl as usize] += 1;
+                            st.open_denom[den as usize] += 1;
+                            if lvl == cfg.min_level {
+                                st.floor_denom[den as usize] += 1;
+                            }
                             let sv =
                                 AuctionSolver::new(&evs[opener as usize], cfg, opener as usize);
                             let best_d = (0..NDEN)
@@ -211,15 +250,27 @@ fn main() {
                             if best_d == den as usize {
                                 st.open_best_denom += 1.0;
                             }
+                            let mut sv2 =
+                                AuctionSolver::new(&evs[opener as usize], cfg, opener as usize);
+                            let sp = sv2.floor_spread(opener);
+                            st.floor_spread += sp;
+                            st.floor_spread_n += 1.0;
+                            // One tenth of a point: below that the opener is
+                            // choosing between bids that do the same thing.
+                            if sp >= 0.10 {
+                                st.floor_spread_real += 1.0;
+                            }
                         }
 
                         let open_lvl = lvl;
+                        let open_den = den;
                         let mut nbids = 1usize;
                         let mut auc = Auc::after_open(opener, lvl, den);
                         let mut a_overtook = false;
                         loop {
                             let actor = auc.to_act as usize;
                             let mut s = AuctionSolver::new(&evs[actor], cfg, actor);
+                            s.tie_salt = seed.wrapping_mul(0x9E3779B9).wrapping_add(actor as u64);
                             match s.respond(styles[actor], &auc) {
                                 BidAction::Pass => break,
                                 BidAction::Double => {
@@ -240,8 +291,11 @@ fn main() {
                         }
 
                         let decl = auc.declarer as usize;
+                        let is_null = den == NULL_DENOM;
                         let real = oddtrick::state::State {
-                            trump: den,
+                            // A Null contract has no trump, and NULL_DENOM is
+                            // a bidding token rather than a suit index.
+                            trump: if is_null { NOTRUMP } else { den },
                             trick: 0,
                             led: -1,
                             leader: if cfg.declarer_leads {
@@ -252,34 +306,109 @@ fn main() {
                             pts: [0, 0],
                             ..g.s
                         };
-                        let diff = dd.solve(&real) as i32;
-                        let p0 = (POOL as i32 + diff) / 2;
-                        let dpts = if decl == 0 { p0 } else { POOL as i32 - p0 };
-                        let made = dpts >= lvl as i32;
-                        let (ds, fs) = if cfg.over > 0 {
-                            if made {
-                                st.overshoot += cfg.burst;
-                                st.overshoot_n += 1.0;
-                            }
-                            outcome(&cfg, lvl, dpts, 0)
+                        // The swap is resolved EXACTLY: every (shown card,
+                        // hand card) pair is played out and the best kept.
+                        // Note the auction above was run WITHOUT knowledge of
+                        // it, so declarers here systematically under-bid --
+                        // contract levels read low and make rates read high.
+                        // The bias has one direction and is stated rather
+                        // than corrected, because making the auction
+                        // swap-aware costs 22x the evaluation.
+                        let mut swap_from = -1i32;
+                        let mut swap_to = -1i32;
+                        let real = if n_shown == 0 {
+                            real
                         } else {
-                            contract_score(&cfg, lvl, dpts)
+                            let score_of = |dd: &mut Dd, st: &oddtrick::state::State| -> i32 {
+                                if is_null {
+                                    if dd.null_no_even_makeable(st, decl) { cfg.null_make } else { -cfg.null_set }
+                                } else {
+                                    let diff = dd.solve(st) as i32;
+                                    let p0 = (POOL as i32 + diff) / 2;
+                                    let dp = if decl == 0 { p0 } else { POOL as i32 - p0 };
+                                    let (a, b) = contract_score(&cfg, lvl, dp);
+                                    a - b
+                                }
+                            };
+                            let mut best_st = real;
+                            let mut best_v = score_of(&mut dd, &real);
+                            let mut shown = g.out_shown;
+                            while shown != 0 {
+                                let oc = shown.trailing_zeros() as u8;
+                                shown &= shown - 1;
+                                let mut hand = real.hand[decl];
+                                while hand != 0 {
+                                    let hc = hand.trailing_zeros() as u8;
+                                    hand &= hand - 1;
+                                    let mut cand = real;
+                                    cand.hand[decl] =
+                                        (cand.hand[decl] & !(1u64 << hc)) | (1u64 << oc);
+                                    let v = score_of(&mut dd, &cand);
+                                    if v > best_v {
+                                        best_v = v;
+                                        best_st = cand;
+                                        swap_from = hc as i32;
+                                        swap_to = oc as i32;
+                                    }
+                                }
+                            }
+                            best_st
+                        };
+                        let (made, ds, fs) = if is_null {
+                            let ok = dd.null_no_even_makeable(&real, decl);
+                            st.null_contracts += 1;
+                            if ok {
+                                st.null_made += 1;
+                            }
+                            (ok, if ok { cfg.null_make } else { 0 },
+                                 if ok { 0 } else { cfg.null_set })
+                        } else {
+                            let diff = dd.solve(&real) as i32;
+                            let p0 = (POOL as i32 + diff) / 2;
+                            let dpts = if decl == 0 { p0 } else { POOL as i32 - p0 };
+                            let made = dpts >= lvl as i32;
+                            let (ds, fs) = if cfg.over > 0 {
+                                if made {
+                                    st.overshoot += cfg.burst;
+                                    st.overshoot_n += 1.0;
+                                }
+                                outcome(&cfg, lvl, dpts, 0)
+                            } else {
+                                contract_score(&cfg, lvl, dpts)
+                            };
+                            (made, ds, fs)
                         };
                         let m = if auc.doubled { 2 } else { 1 };
                         let straight = if lvl == auc.opened_at { cfg.straight_mult } else { 1 };
                         let (ds, fs) = (ds * m * straight, fs * m);
 
+                        if dumping {
+                            st.rows.push(format!(
+                                "{{\"seed\":{},\"swapseat\":{},\"opener\":{},\"open_lvl\":{},\"open_den\":{},\"lvl\":{},\"den\":{},\"decl\":{},\"is_null\":{},\"made\":{},\"doubled\":{},\"nbids\":{},\"ds\":{},\"fs\":{},\"swap_from\":{},\"swap_to\":{},\"a_seat\":{}}}",
+                                seed, swap, opener, open_lvl, open_den, lvl, den, decl,
+                                is_null, made, auc.doubled, nbids, ds, fs,
+                                swap_from, swap_to, a_seat
+                            ));
+                        }
                         let a_score = if decl == a_seat { ds } else { fs };
                         let b_score = if decl == a_seat { fs } else { ds };
                         st.score += (a_score - b_score) as f64;
                         st.n += 1.0;
-                        st.contract_level += lvl as f64;
-                        st.contracts += 1;
-                        st.clevel[lvl as usize] += 1;
-                        st.o2s[open_lvl as usize][lvl as usize] += 1;
+                        st.cdenom[den as usize] += 1;
                         st.bids[nbids.min(11)] += 1;
-                        if made {
-                            st.cmade[lvl as usize] += 1;
+                        // Null bids AS level `null_level` but is not a level-N
+                        // contract, so folding it into the level histograms
+                        // would invent a spike at that rung out of contracts
+                        // that have no point target at all. It is counted in
+                        // the denomination histogram and on its own line.
+                        if !is_null {
+                            st.contract_level += lvl as f64;
+                            st.contracts += 1;
+                            st.clevel[lvl as usize] += 1;
+                            st.o2s[open_lvl as usize][lvl as usize] += 1;
+                            if made {
+                                st.cmade[lvl as usize] += 1;
+                            }
                         }
                         // Counted over ALL contracts so numerator and
                         // denominator share a denominator.
@@ -311,6 +440,9 @@ fn main() {
         s.score += r.score;
         s.opened += r.opened;
         s.open_best_denom += r.open_best_denom;
+        s.floor_spread += r.floor_spread;
+        s.floor_spread_n += r.floor_spread_n;
+        s.floor_spread_real += r.floor_spread_real;
         s.declared += r.declared;
         s.made += r.made;
         s.overtook += r.overtook;
@@ -322,6 +454,9 @@ fn main() {
         s.doubled_made += r.doubled_made;
         s.overshoot += r.overshoot;
         s.overshoot_n += r.overshoot_n;
+        s.rows.extend(r.rows.iter().cloned());
+        s.null_contracts += r.null_contracts;
+        s.null_made += r.null_made;
         for i in 0..14 {
             s.open_level[i] += r.open_level[i];
             s.clevel[i] += r.clevel[i];
@@ -332,6 +467,11 @@ fn main() {
         }
         for i in 0..12 {
             s.bids[i] += r.bids[i];
+        }
+        for i in 0..NDEN_BID {
+            s.open_denom[i] += r.open_denom[i];
+            s.cdenom[i] += r.cdenom[i];
+            s.floor_denom[i] += r.floor_denom[i];
         }
     }
 
@@ -346,11 +486,12 @@ fn main() {
         if cfg.allow_double { "ON" } else { "off" }
     );
     println!(
-        "step {}, max raise {}, jump {}, straight x{}",
+        "step {}, max raise {}, jump {}, straight x{}, ranked denoms {}",
         cfg.step,
         cfg.max_raise,
         if cfg.allow_jump { "ON" } else { "off" },
-        cfg.straight_mult
+        cfg.straight_mult,
+        if cfg.rank_denoms { "ON (C<D<H<S<NT)" } else { "off" }
     );
     println!(
         "opening lead to        {}",
@@ -372,6 +513,20 @@ fn main() {
         100.0 * s.doubled_made / s.doubled.max(1.0)
     );
     println!("opened in BEST denom  {:.1}%", 100.0 * s.open_best_denom / s.opened.max(1.0));
+    println!(
+        "FLOOR choice worth      {:.3} pts (best-worst across level-{} bids); real (>=0.10) on {:.1}%",
+        s.floor_spread / s.floor_spread_n.max(1.0),
+        cfg.min_level,
+        100.0 * s.floor_spread_real / s.floor_spread_n.max(1.0)
+    );
+    if cfg.allow_null {
+        println!(
+            "NULL contracts        {} ({:.1}% of all), declarer made {:.1}%",
+            s.null_contracts,
+            100.0 * s.null_contracts as f64 / s.n.max(1.0),
+            100.0 * s.null_made as f64 / s.null_contracts.max(1) as f64
+        );
+    }
     if cfg.allow_open_pass {
         println!("hands thrown in       {:.1}%  (both players declined)", 100.0 * s.thrown_in / s.n);
     }
@@ -384,6 +539,53 @@ fn main() {
     }
     hist("OPENING level (A only)", &s.open_level, None);
     hist("SETTLED CONTRACT level (all contracts)", &s.clevel, Some(&s.cmade));
+
+    // Ranked denominations claim to give the floor level five distinguishable
+    // rungs. `floor_denom` is that claim stated as a number: an even spread is
+    // a floor with somewhere to go, a spike is the same degenerate floor
+    // wearing a suit symbol.
+    let dhist = |name: &str, h: &[u64; NDEN_BID]| {
+        let tot: u64 = h.iter().sum();
+        if tot == 0 {
+            return;
+        }
+        println!("\n-- {} --", name);
+        for d in 0..NDEN_BID {
+            if h[d] == 0 && d == NULL_DENOM as usize {
+                continue; // Null off: do not print a permanently empty rung
+            }
+            let bar: String = std::iter::repeat('#')
+                .take((50.0 * h[d] as f64 / tot as f64).round() as usize)
+                .collect();
+            println!(
+                "  {:>2}  {:>5}  ({:5.1}%)  {}",
+                denom_str(d as u8),
+                h[d],
+                100.0 * h[d] as f64 / tot as f64,
+                bar
+            );
+        }
+        // Shannon evenness over 5 bins: 1.00 is a perfectly flat spread, 0.00
+        // is everything on one rung. One number to compare configurations by.
+        let mut ent = 0f64;
+        for d in 0..NDEN_BID {
+            let p = h[d] as f64 / tot as f64;
+            if p > 0.0 {
+                ent -= p * p.ln();
+            }
+        }
+        println!(
+            "      {} total, evenness {:.3}",
+            tot,
+            ent / (NDEN as f64).ln()
+        );
+    };
+    dhist("OPENING denomination (A only)", &s.open_denom);
+    dhist(
+        &format!("OPENING denomination AT THE FLOOR (level {})", cfg.min_level),
+        &s.floor_denom,
+    );
+    dhist("SETTLED CONTRACT denomination", &s.cdenom);
 
     println!("
 -- OPENED (row) -> SETTLED (col), all contracts --");
@@ -416,5 +618,15 @@ fn main() {
             continue;
         }
         println!("  {:>2} bids  {:>5}  ({:5.1}%)", i, s.bids[i], 100.0 * s.bids[i] as f64 / bt as f64);
+    }
+
+    if let Some(path) = dump {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&path).expect("--dump path");
+        for r in &s.rows {
+            writeln!(f, "{}", r).expect("write dump row");
+        }
+        println!("
+wrote {} rows to {}", s.rows.len(), path);
     }
 }

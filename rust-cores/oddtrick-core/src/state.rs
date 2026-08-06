@@ -188,7 +188,7 @@ impl State {
 
     #[inline]
     fn remove(&mut self, p: usize, c: u8) {
-        let b = 1u32 << c;
+        let b: Mask = 1 << c;
         if self.hand[p] & b != 0 {
             self.hand[p] &= !b;
             return;

@@ -145,7 +145,11 @@ fn key_of(s: &State) -> u64 {
         let q = &s.pile[1][i];
         b = (b << 21) | ((q.n as u64) << 16) | ((q.c[1] as u64) << 8) | q.c[0] as u64;
     }
-    let h = mix(s.hand[0] as u64 | ((s.hand[1] as u64) << 28) | ((s.trump as u64) << 56));
+    // The two hands are mixed separately rather than packed into one word:
+    // they are NCARD bits each, so any packing that fits a 28-card deck
+    // overflows a wider one, and the failure mode is a silent hash collision
+    // returning another position's value.
+    let h = mix(s.hand[0]) ^ mix(s.hand[1]).rotate_left(29) ^ mix(s.trump as u64 | (1 << 60));
     let t = (s.trick as u64) | ((s.leader as u64) << 8) | ((((s.led as i16) as u16) as u64) << 16);
     // Mix each component on its own before combining. Folding two fields
     // together with XOR first would let their overlapping bit ranges alias,
@@ -257,6 +261,201 @@ impl Dd {
                 val: best,
                 flag,
             }
+        };
+        best
+    }
+
+    /// Can `declarer` guarantee taking NO TRICK AT ALL, against a defence
+    /// doing everything it can to force one on them?
+    ///
+    /// This cannot go through `Contract`, which pays off on `pts`: taking no
+    /// tricks scores zero, but so does taking one even trick and two odd ones,
+    /// and those are completely different contracts. Null is a trick-COUNT
+    /// condition and needs its own search.
+    ///
+    /// It is also much cheaper than the point game. The value is a boolean, so
+    /// there are no windows to widen and no MTD(f) driver; and a line dies the
+    /// instant a trick falls the wrong way, where the point game has to play
+    /// every deal out to trick thirteen.
+    pub fn null_makeable(&mut self, s: &State, declarer: usize) -> bool {
+        self.nsearch(s, declarer, false)
+    }
+
+    /// The reachable Null: take no SCORING trick — none of the six +2 tricks.
+    /// Odd tricks may be taken freely.
+    ///
+    /// Six tricks to dodge instead of thirteen, which is why this lives where
+    /// the zero-trick version does not (0.7%). It also carries a tension the
+    /// zero-trick version has not got: winning an odd trick makes you LEAD the
+    /// even one that follows, and leading is the one position from which you
+    /// cannot duck. So the odd tricks are not free after all — every one you
+    /// take hands you the hardest seat at the next scoring trick.
+    ///
+    /// It is the natural contract for a parity game in a way Skat's is not:
+    /// the condition is stated in the game's own currency.
+    pub fn null_no_even_makeable(&mut self, s: &State, declarer: usize) -> bool {
+        self.nsearch(s, declarer, true)
+    }
+
+    /// `scoring_only` restricts the losing condition to +2 tricks.
+    fn nsearch(&mut self, s: &State, declarer: usize, scoring_only: bool) -> bool {
+        if s.done() {
+            return true; // survived all thirteen
+        }
+        self.nodes += 1;
+
+        // Banked points are deliberately NOT in the key: two positions that
+        // differ only in points already scored are the same Null problem.
+        // The two variants are DIFFERENT problems on the same position, so
+        // they must not share transposition entries.
+        let key = key_of(s)
+            ^ mix(0x4E75_6C6C_0000 ^ declarer as u64 ^ ((scoring_only as u64) << 32));
+        let slot = (key as usize) & self.cmask;
+        {
+            let e = unsafe { *self.ctt.get_unchecked(slot) };
+            if e.flag == F_EXACT && e.key == key {
+                return e.val != 0;
+            }
+        }
+
+        let mover = s.to_play() as usize;
+        let maxing = mover == declarer;
+
+        let mut moves = [0u8; 16];
+        let n = s.legal(&mut moves);
+        // The move ORDER this produces is tuned for the point game and is
+        // merely suboptimal here, but its equivalence collapse is about which
+        // cards are interchangeable, which holds whatever the objective is.
+        let n = self.prune_and_order(s, mover, &mut moves, n, NO_MOVE);
+
+        // The declarer needs ONE surviving line; the defence needs every line
+        // to survive, so the initial value is the identity of each quantifier.
+        let mut ok = !maxing;
+        for i in 0..n {
+            let mut t = *s;
+            let completing = t.led >= 0;
+            t.play(moves[i]);
+            // Only a trick the declarer must not win ends the line. Under
+            // `scoring_only` the -1 tricks are theirs to take.
+            let fatal = completing
+                && t.leader as usize == declarer
+                && (!scoring_only || trick_value(s.trick) > 0);
+            let v = if fatal {
+                false
+            } else {
+                self.nsearch(&t, declarer, scoring_only)
+            };
+            if maxing {
+                if v {
+                    ok = true;
+                    break;
+                }
+            } else if !v {
+                ok = false;
+                break;
+            }
+        }
+
+        unsafe {
+            *self.ctt.get_unchecked_mut(slot) = CEntry {
+                key,
+                val: ok as i32,
+                flag: F_EXACT,
+            }
+        };
+        ok
+    }
+
+    /// Fewest tricks `declarer` can be held to, against a defence trying to
+    /// force as many on them as it can. `null_makeable` is the special case
+    /// where this returns 0 — measured at under 1% of hands, which is why the
+    /// general number matters: it says where a REACHABLE version of the same
+    /// contract would have to sit.
+    pub fn min_tricks(&mut self, s: &State, declarer: usize) -> i32 {
+        self.tsearch(s, declarer, false, -1, NTRICKS as i32 + 1)
+    }
+
+    /// Fewest SCORING (+2) tricks `declarer` can be held to. The parity-game
+    /// version of the same question, and the one that matters: the -1 tricks
+    /// are not what a low contract is trying to dodge.
+    pub fn min_even_tricks(&mut self, s: &State, declarer: usize) -> i32 {
+        self.tsearch(s, declarer, true, -1, NTRICKS as i32 + 1)
+    }
+
+    /// Future tricks taken by `declarer` under optimal play from both sides.
+    /// Tricks already banked are excluded, which is what keeps them out of the
+    /// key: two positions differing only in tricks already won pose the same
+    /// remaining problem.
+    fn tsearch(
+        &mut self,
+        s: &State,
+        declarer: usize,
+        scoring_only: bool,
+        mut alpha: i32,
+        mut beta: i32,
+    ) -> i32 {
+        if s.done() {
+            return 0;
+        }
+        self.nodes += 1;
+
+        let key = key_of(s)
+            ^ mix(0x7472_6963_6B73 ^ declarer as u64 ^ ((scoring_only as u64) << 32));
+        let slot = (key as usize) & self.cmask;
+        let (a0, b0) = (alpha, beta);
+        {
+            let e = unsafe { *self.ctt.get_unchecked(slot) };
+            if e.flag != F_EMPTY && e.key == key {
+                match e.flag {
+                    F_EXACT => return e.val,
+                    F_LOWER if e.val >= beta => return e.val,
+                    F_UPPER if e.val <= alpha => return e.val,
+                    _ => {}
+                }
+            }
+        }
+
+        let mover = s.to_play() as usize;
+        // The declarer wants FEW tricks, so the declarer is the minimiser here
+        // — the opposite of every other search in this file.
+        let maxing = mover != declarer;
+
+        let mut moves = [0u8; 16];
+        let n = s.legal(&mut moves);
+        let n = self.prune_and_order(s, mover, &mut moves, n, NO_MOVE);
+
+        let mut best = if maxing { -1 } else { NTRICKS as i32 + 1 };
+        for i in 0..n {
+            let mut t = *s;
+            let completing = t.led >= 0;
+            t.play(moves[i]);
+            let counts = !scoring_only || trick_value(s.trick) > 0;
+            let got = i32::from(completing && t.leader as usize == declarer && counts);
+            // The child reports the count AFTER this trick's `got`, so its
+            // window must be shifted by it -- the same trap that was live in
+            // `search` once already.
+            let v = got + self.tsearch(&t, declarer, scoring_only, alpha - got, beta - got);
+            if maxing {
+                best = best.max(v);
+                alpha = alpha.max(best);
+            } else {
+                best = best.min(v);
+                beta = beta.min(best);
+            }
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        let flag = if best <= a0 {
+            F_UPPER
+        } else if best >= b0 {
+            F_LOWER
+        } else {
+            F_EXACT
+        };
+        unsafe {
+            *self.ctt.get_unchecked_mut(slot) = CEntry { key, val: best, flag }
         };
         best
     }
@@ -442,9 +641,9 @@ impl Dd {
         for i in 0..n {
             let c = moves[i];
             if self.use_equiv && hand & (1 << c) != 0 {
-                let below = SUIT_MASK[suit(c) as usize] & inplay & ((1u32 << c) - 1);
+                let below = SUIT_MASK[suit(c) as usize] & inplay & (((1 as Mask) << c) - 1);
                 if below != 0 {
-                    let lower = 31 - below.leading_zeros();
+                    let lower = Mask::BITS - 1 - below.leading_zeros();
                     if hand & (1 << lower) != 0 {
                         continue; // the lower card plays identically
                     }

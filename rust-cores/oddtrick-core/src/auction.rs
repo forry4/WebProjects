@@ -24,6 +24,25 @@ use std::collections::HashMap;
 pub const MAX_LEVEL: u8 = if crate::state::POSITIVE_IS_ODD { 14 } else { 12 };
 pub const NDEN: usize = 5;
 
+/// NULL: "I will take no trick at all." Skat's escape hatch for a hand with no
+/// power, and the answer to the one thing every scoring experiment failed to
+/// move — the opener is forced to bid, a weak hand has nowhere to put itself,
+/// and ~42% of openings pile onto the floor as a result.
+///
+/// The constant-sum pool forecloses the obvious alternative: "I score >= N"
+/// and "my opponent scores <= 5-N" are the SAME bid, so there is no inverse
+/// contract to be had on the point scale. Null has to be a trick-COUNT
+/// condition, exactly as it is in Skat, which is why it needs its own solver.
+///
+/// What makes it a gamble here rather than a technical exercise is the piles.
+/// A player cannot see their own outer pile bottoms, so a Null can be blown up
+/// by a card they were never allowed to know they held.
+///
+/// It bids as a denomination ranked above no-trump, at one fixed level.
+pub const NULL_DENOM: u8 = 5;
+/// Denominations that can be NAMED, as against scored in `HandEval`.
+pub const NDEN_BID: usize = 6;
+
 /// How a score grows with the contract level.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Curve {
@@ -99,6 +118,34 @@ pub struct ScoreCfg {
     /// Multiplier on the make score when the opener was never overtaken.
     /// Rewards naming your value up front instead of trapping.
     pub straight_mult: i32,
+    /// RANK the denominations (C < D < H < S < NT, i.e. by index) so that an
+    /// overtake need only outrank the standing bid, not out-LEVEL it. This is
+    /// Skat's structural idea without Skat's arithmetic: the bid becomes a
+    /// price, and the price is no longer the same thing as the task.
+    ///
+    /// The point is the floor cluster. ~42% of openings sit at level 1 under
+    /// every scoring configuration tried, because the opener is forced to bid
+    /// and has nowhere to put a weak hand. Every fix so far attacked the price
+    /// and washed. This does not try to empty the floor -- it gives the floor
+    /// five distinguishable rungs, so a crowded floor stops being a degenerate
+    /// one. (18 is the most common bid in Skat too, and nobody calls that
+    /// broken: the number is not the whole bid.)
+    ///
+    /// `max_raise` still caps how far a single overtake may climb, and the
+    /// per-player no-repeat rule still caps the whole auction at five bids
+    /// each, so same-level rungs cannot make the auction drag.
+    pub rank_denoms: bool,
+    /// Offer the NULL contract (see `NULL_DENOM`).
+    pub allow_null: bool,
+    /// The level Null bids AS. It has no level of its own — like Skat's fixed
+    /// 23 it is a single rung on the ladder, and where that rung sits is what
+    /// decides which hands can afford it.
+    pub null_level: u8,
+    /// Fixed score for making Null, and for the defence when it is broken.
+    /// Held apart from the make/set curves because Null is not a level-N
+    /// contract and pricing it off N would be meaningless.
+    pub null_make: i32,
+    pub null_set: i32,
     /// Curve for MAKING a contract.
     pub make_curve: Curve,
     /// Curve for SETTING one. Keeping these independent is the whole point:
@@ -135,6 +182,11 @@ impl Default for ScoreCfg {
             allow_jump: false,
             max_raise: 1,
             straight_mult: 1,
+            rank_denoms: false,
+            allow_null: false,
+            null_level: 3,
+            null_make: 12,
+            null_set: 10,
             make_curve: Curve::Linear,
             set_curve: Curve::Linear,
         }
@@ -177,6 +229,9 @@ pub struct HandEval {
     /// Least the declarer can hold themselves to against a defence trying to
     /// BURST them. Decides how far they overshoot. Empty when `over` is 0.
     pub floor: Vec<[[i8; NDEN]; 2]>,
+    /// Whether each player could make NULL in this world. Empty when Null is
+    /// off — it is a separate search, not a column of `pts`.
+    pub null: Vec<[bool; 2]>,
 }
 
 /// Resolve a contract. Beyond what the declarer can guarantee, the defence
@@ -212,6 +267,14 @@ pub fn outcome(cfg: &ScoreCfg, level: u8, max_pts: i32, _floor_pts: i32) -> (i32
 impl HandEval {
     pub fn k(&self) -> usize {
         self.pts.len()
+    }
+
+    /// Whether `declarer` makes Null in world `w`. Absent evaluation reads as
+    /// "cannot", so a config that forgot to compute it never bids Null rather
+    /// than bidding it for free.
+    #[inline]
+    pub fn null_of(&self, w: usize, declarer: usize) -> bool {
+        !self.null.is_empty() && self.null[w][declarer]
     }
 
     #[inline]
@@ -263,7 +326,14 @@ impl Auc {
 
     /// Every (level, denomination) an overtake could name.
     pub fn options(&self, cfg: &ScoreCfg) -> Vec<(u8, u8)> {
-        let lo = self.level + cfg.step;
+        // With ranked denominations an overtake may stand at the SAME level in
+        // a higher-ranked denomination, so the floor of the range is the
+        // standing level rather than one step above it.
+        let lo = if cfg.rank_denoms {
+            self.level
+        } else {
+            self.level + cfg.step
+        };
         if lo > MAX_LEVEL {
             return Vec::new();
         }
@@ -284,8 +354,25 @@ impl Auc {
                 continue;
             }
             for l in lo..=hi {
+                // At the standing level, only a higher-ranked denomination
+                // outranks the standing bid. Above it, any denomination does.
+                if cfg.rank_denoms && l == self.level && d <= self.denom {
+                    continue;
+                }
                 v.push((l, d));
             }
+        }
+        // Null sits at one fixed rung, above no-trump at its own level. It is
+        // reachable whenever that rung outranks the standing bid AND is within
+        // the raise cap -- so a high standing contract shuts it out, which is
+        // what stops it being a free escape from any position.
+        if cfg.allow_null
+            && blocked & (1 << NULL_DENOM) == 0
+            && cfg.null_level >= lo
+            && cfg.null_level <= hi
+            && !(cfg.null_level == self.level && (!cfg.rank_denoms || self.denom >= NULL_DENOM))
+        {
+            v.push((cfg.null_level, NULL_DENOM));
         }
         v
     }
@@ -314,6 +401,15 @@ pub struct AuctionSolver<'a> {
     pub cfg: ScoreCfg,
     /// Whose point of view the returned values are from.
     pub me: usize,
+    /// Rotates the denomination scan order. The suits are SYMMETRIC in this
+    /// game, so a hand that just wants to park at the cheapest rung is
+    /// genuinely indifferent between them — and a scan that keeps the first
+    /// maximum then dumps every one of those ties on denomination 0. Measured:
+    /// 96% of floor openings came out in clubs, which is a property of the
+    /// loop, not of the game. Vary this per deal and indifference spreads
+    /// evenly instead of piling up, which is what any histogram over
+    /// denominations has to do before it can be read.
+    pub tie_salt: u64,
     memo: HashMap<Auc, f64>,
 }
 
@@ -323,8 +419,20 @@ impl<'a> AuctionSolver<'a> {
             ev,
             cfg,
             me,
+            tie_salt: 0,
             memo: HashMap::new(),
         }
+    }
+
+    /// Rotate a candidate list so that ties do not all fall on the same
+    /// denomination. Order-only: the SET of candidates is untouched, so this
+    /// cannot change which bids are legal or what any of them is worth.
+    fn rotate(&self, mut v: Vec<(u8, u8)>) -> Vec<(u8, u8)> {
+        let n = v.len() as u64;
+        if self.tie_salt != 0 && n != 0 {
+            v.rotate_left((self.tie_salt % n) as usize);
+        }
+        v
     }
 
     /// Expected (my score - their score) if the auction ends here.
@@ -338,6 +446,20 @@ impl<'a> AuctionSolver<'a> {
         } else {
             1
         };
+        // Null pays a flat amount either way: it is not a level-N contract, so
+        // neither curve applies to it.
+        if d == NULL_DENOM as usize {
+            let mut acc = 0f64;
+            for wi in 0..self.ev.k() {
+                let (ds, fs) = if self.ev.null_of(wi, c) {
+                    (self.cfg.null_make * mult, 0)
+                } else {
+                    (0, self.cfg.null_set * mult)
+                };
+                acc += (if c == self.me { ds - fs } else { fs - ds }) as f64;
+            }
+            return acc / self.ev.k() as f64;
+        }
         let mut acc = 0f64;
         for (wi, w) in self.ev.pts.iter().enumerate() {
             let (ds, fs) = if self.cfg.over > 0 {
@@ -405,7 +527,7 @@ impl<'a> AuctionSolver<'a> {
                 pick = BidAction::Double;
             }
         }
-        for (l, d) in a.options(&self.cfg) {
+        for (l, d) in self.rotate(a.options(&self.cfg)) {
             let v = self.value(a.overtake(l, d));
             if v > best {
                 best = v;
@@ -420,24 +542,67 @@ impl<'a> AuctionSolver<'a> {
     /// LOW opening in a second-best denomination show up as optimal when it is.
     pub fn best_open(&mut self, opener: u8) -> (u8, u8, f64) {
         let mut best = (self.cfg.min_level, 0u8, f64::NEG_INFINITY);
-        for level in self.cfg.min_level..=MAX_LEVEL {
-            for d in 0..NDEN as u8 {
-                let a = Auc::after_open(opener, level, d);
-                let v = self.value(a);
-                if v > best.2 {
-                    best = (level, d, v);
-                }
+        for (level, d) in self.rotate(self.openings()) {
+            let a = Auc::after_open(opener, level, d);
+            let v = self.value(a);
+            if v > best.2 {
+                best = (level, d, v);
             }
         }
         best
     }
+
+    /// How much the choice of denomination at the FLOOR level is actually
+    /// worth: (best - worst) in solver value across everything biddable at
+    /// `min_level`.
+    ///
+    /// This is the honest version of the floor question, and the histogram is
+    /// not. A denomination histogram can be flattened for free by breaking
+    /// ties differently, which changes how the floor LOOKS without giving the
+    /// opener a single new decision. A spread near zero means the five floor
+    /// bids are interchangeable and the floor is degenerate however evenly the
+    /// picture is spread; a spread well above zero means picking among them is
+    /// a real decision. That is the claim ranking has to satisfy.
+    ///
+    /// Cheap: `best_open` has already memoised every one of these positions.
+    pub fn floor_spread(&mut self, opener: u8) -> f64 {
+        let (mut hi, mut lo) = (f64::NEG_INFINITY, f64::INFINITY);
+        for (level, d) in self.openings() {
+            if level != self.cfg.min_level {
+                continue;
+            }
+            let v = self.value(Auc::after_open(opener, level, d));
+            hi = hi.max(v);
+            lo = lo.min(v);
+        }
+        if hi.is_finite() && lo.is_finite() {
+            hi - lo
+        } else {
+            0.0
+        }
+    }
+
+    /// Every opening bid available, Null included. One list so the solver and
+    /// the myopic control cannot disagree about what is legal.
+    pub fn openings(&self) -> Vec<(u8, u8)> {
+        let mut v = Vec::new();
+        for level in self.cfg.min_level..=MAX_LEVEL {
+            for d in 0..NDEN as u8 {
+                v.push((level, d));
+            }
+        }
+        if self.cfg.allow_null {
+            v.push((self.cfg.null_level, NULL_DENOM));
+        }
+        v
+    }
 }
 
 pub fn denom_str(d: u8) -> &'static str {
-    if d >= NOTRUMP {
-        "NT"
-    } else {
-        ["C", "D", "H", "S"][d as usize]
+    match d {
+        0..=3 => ["C", "D", "H", "S"][d as usize],
+        4 => "NT",
+        _ => "Null",
     }
 }
 
@@ -464,14 +629,37 @@ pub fn eval_hand(
     k: usize,
     declarer_leads: bool,
     need_floor: bool,
+    need_null: bool,
 ) -> HandEval {
     let mut buf = Vec::new();
     let mut pts = Vec::with_capacity(k);
     let mut floor: Vec<[[i8; NDEN]; 2]> = Vec::with_capacity(k);
+    let mut null: Vec<[bool; 2]> = Vec::with_capacity(k);
     for _ in 0..k {
         let w = v.determinize(rng, &mut buf);
         let mut row = [[0i8; NDEN]; 2];
         let mut frow = [[0i8; NDEN]; 2];
+        if need_null {
+            // Null is played at no trump, as in Skat: with a trump suit the
+            // declarer gets a second way to be forced to win a trick.
+            let mut nrow = [false; 2];
+            for declarer in 0..2usize {
+                let s = State {
+                    trump: NOTRUMP,
+                    trick: 0,
+                    led: -1,
+                    leader: if declarer_leads {
+                        declarer as u8
+                    } else {
+                        1 - declarer as u8
+                    },
+                    pts: [0, 0],
+                    ..w
+                };
+                nrow[declarer] = dd.null_makeable(&s, declarer);
+            }
+            null.push(nrow);
+        }
         for declarer in 0..2usize {
             for d in 0..NDEN {
                 let s = State {
@@ -500,7 +688,7 @@ pub fn eval_hand(
             floor.push(frow);
         }
     }
-    HandEval { pts, floor }
+    HandEval { pts, floor, null }
 }
 
 /// The lowest final total the declarer can hold themselves to, against a
@@ -554,13 +742,11 @@ impl<'a> AuctionSolver<'a> {
             }
             Style::Myopic => {
                 let mut best = (self.cfg.min_level, 0u8, f64::NEG_INFINITY);
-                for level in self.cfg.min_level..=MAX_LEVEL {
-                    for d in 0..NDEN as u8 {
-                        let a = Auc::after_open(opener, level, d);
-                        let v = self.settled(&a);
-                        if v > best.2 {
-                            best = (level, d, v);
-                        }
+                for (level, d) in self.rotate(self.openings()) {
+                    let a = Auc::after_open(opener, level, d);
+                    let v = self.settled(&a);
+                    if v > best.2 {
+                        best = (level, d, v);
                     }
                 }
                 (best.0, best.1)
@@ -586,7 +772,7 @@ impl<'a> AuctionSolver<'a> {
                 let mut best = self.settled(a);
                 let mut pick = BidAction::Pass;
                 dbl(self, &mut best, &mut pick);
-                for (l, d) in a.options(&self.cfg) {
+                for (l, d) in self.rotate(a.options(&self.cfg)) {
                     let v = self.settled(&a.overtake(l, d));
                     if v > best {
                         best = v;
@@ -601,7 +787,14 @@ impl<'a> AuctionSolver<'a> {
                 let mut pick = BidAction::Pass;
                 dbl(self, &mut best, &mut pick);
                 for (l, d) in a.options(&self.cfg) {
-                    if self.mean_pts(me, d as usize) < l as f64 {
+                    // Null has no point target, so "would I make this?" is the
+                    // Null solve itself rather than a comparison against l.
+                    if d == NULL_DENOM {
+                        let made = (0..self.ev.k()).filter(|&w| self.ev.null_of(w, me)).count();
+                        if made * 2 < self.ev.k() {
+                            continue;
+                        }
+                    } else if self.mean_pts(me, d as usize) < l as f64 {
                         continue;
                     }
                     let v = self.value(a.overtake(l, d));

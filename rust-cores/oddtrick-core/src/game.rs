@@ -12,8 +12,23 @@ pub struct Game {
     /// Cards played to completed or in-progress tricks.
     pub played: Mask,
     pub kn: Knowledge,
-    /// The two cards dealt out of play, revealed only at the end of the round.
+    /// The cards dealt out of play, revealed only at the end of the round.
     pub out: Mask,
+    /// The subset of `out` turned face up at the deal instead. This is the
+    /// CONTROL for the deck-width sweep: widening the deck adds out-of-play
+    /// cards, but it also thins each suit, and those are two different effects
+    /// on the game. Revealing k of the out-cards leaves the deck, the suit
+    /// lengths and the ruffing frequency exactly as they were while removing
+    /// the hidden information those cards carried, so the difference between
+    /// `out_public = 0` and `out_public = NOUT` at the SAME deck width is the
+    /// hidden information alone.
+    pub out_public: Mask,
+    /// The subset of `out` the DECLARER is shown after winning the auction,
+    /// and from which they may take one card into hand. Fixed at the deal so
+    /// that it does not depend on who wins -- but revealed to that player
+    /// only, so it is an asymmetric information advantage as well as a
+    /// hand-quality one. The defender knows a swap happened and nothing else.
+    pub out_shown: Mask,
     /// Every play so far as (mover, card, source), where source is 0 for the
     /// hand and 1..=3 for a pile. ALL of this is public - everyone sees which
     /// pile shrank - which is what makes it usable for inference.
@@ -25,8 +40,30 @@ impl Game {
     /// `trump` is 0..3 or `NOTRUMP`; `leader` opens trick 1 (in the full game
     /// that is the defender).
     pub fn deal(rng: &mut Rng, trump: u8, leader: u8) -> Game {
-        let mut deck: [u8; 28] = [0; 28];
-        for i in 0..28 {
+        Game::deal_with(rng, trump, leader, 0)
+    }
+
+    /// As `deal`, but shows `n_shown` of the out-of-play cards to whoever wins
+    /// the auction.
+    pub fn deal_shown(rng: &mut Rng, trump: u8, leader: u8, n_shown: usize) -> Game {
+        Game::deal_full(rng, trump, leader, 0, n_shown)
+    }
+
+    /// As `deal`, but turns `n_public` of the out-of-play cards face up at the
+    /// deal. `n_public == 0` is the shipped game.
+    pub fn deal_with(rng: &mut Rng, trump: u8, leader: u8, n_public: usize) -> Game {
+        Game::deal_full(rng, trump, leader, n_public, 0)
+    }
+
+    pub fn deal_full(
+        rng: &mut Rng,
+        trump: u8,
+        leader: u8,
+        n_public: usize,
+        n_shown: usize,
+    ) -> Game {
+        let mut deck = [0u8; NCARD as usize];
+        for i in 0..NCARD as usize {
             deck[i] = i as u8;
         }
         rng.shuffle(&mut deck);
@@ -51,13 +88,29 @@ impl Game {
                 k += 2;
             }
         }
-        let out = (1 << deck[26]) | (1 << deck[27]);
+        let mut out: Mask = 0;
+        let mut out_public: Mask = 0;
+        for (j, &c) in deck[k..].iter().enumerate() {
+            out |= 1 << c;
+            if j < n_public {
+                out_public |= 1 << c;
+            }
+        }
+        debug_assert_eq!(out.count_ones(), NOUT as u32);
+        let mut out_shown: Mask = 0;
+        for (j, &c) in deck[k..].iter().enumerate() {
+            if j < n_shown.min(NOUT as usize) {
+                out_shown |= 1 << c;
+            }
+        }
         Game {
             s,
             played: 0,
             kn: Knowledge::default(),
             out,
-            history: Vec::with_capacity(26),
+            out_public,
+            out_shown,
+            history: Vec::with_capacity(2 * NDEALT as usize),
             first_leader: leader,
         }
     }

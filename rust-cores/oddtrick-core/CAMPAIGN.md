@@ -268,3 +268,174 @@ and unlimited's 15.5%) but leave the floor at 36-41%.
 * **Allowing a bid of 0.** Shifted the floor down one rung and slightly
   deepened it (43.3% at 1 -> 48% across 0 and 1). Levels 3-7 were byte
   identical.
+
+---
+
+# Hidden information: how much is there, and can it be bought
+
+The complaint this answers: in a two-player trick-taker you end up knowing the
+opponent's whole hand. Skat's uncertainty is DISTRIBUTIONAL - the card exists in
+a known place-set, you just don't know which of two opponents holds it. Two
+players can only have EXISTENTIAL uncertainty: is that card dead, or is it
+theirs. So the entire permanent hidden-information budget of this game is the
+number of cards out of play, and everything else (the opponent's hand, the
+covered pile bottoms) resolves as the round runs.
+
+`arena oracle pimc:8` measures it directly. Both players always hold 13, so
+widening the deck changes ONLY the out-of-play count: features `rank8`/`rank9`/
+`rank10` give 6/10/14 out against the default's 2, and 13 tricks, the +5 pool
+and every scoring number survive untouched.
+
+**The control is the load-bearing part.** A wider deck also thins each suit,
+which makes voids rarer and ruffing scarcer - a different effect on the game
+entirely. `--out-public all` deals the out-cards FACE UP: same deck, same suit
+lengths, hidden information removed. So `gap(hidden) - gap(public)` is what the
+out-pile's secrecy is worth, and `gap(public)` is what the hand and covered
+pile bottoms are worth - which must stay FLAT across widths, because those
+holdings never change size. It did (mean 0.703, spread 0.096 against SEs of
+~0.043), so the sweep measures information and not density.
+
+| deck | out | hidden | public (control) | secrecy | marginal/card |
+|---|---|---|---|---|---|
+| 28 | 2 | 0.8493 | 0.7153 | 0.134 | - |
+| 32 | 6 | 1.1411 | 0.7464 | 0.395 | +0.065 |
+| 36 | 10 | 1.1603 | 0.6507 | 0.510 | +0.029 |
+| 40 | 14 | 1.2344 | 0.6986 | 0.536 | +0.007 |
+
+209 deals x 2 seatings per cell. Baseline reproduces the logged 0.79 oracle gap.
+
+**It saturates.** Marginal value per added dead card falls tenfold across the
+range. Do not read the first two points as a line - they are consistent with a
+line AND with the early part of a curve that bends at 8, and the bend is real
+and sits between 6 and 10.
+
+**Conclusion: 32 cards / 6 out.** Banks 0.395 of the 0.536 available at any
+width (74%) for the smallest change to the deck, and lifts total hidden
+information 34%. Going wider buys a third more secrecy for a 25% bigger deck
+and materially thinner suits.
+
+The honest limit: the out-pile can never dominate. Even at 14 out it is worth
+0.536 against the hand-and-piles component's ~0.70. More dead cards is a real
+lever but a bounded one, and it does not on its own stop the back half of a
+round from being solvable. That needs INFERENTIAL hidden information - a
+private symmetric discard, where the uncertainty is about what the opponent
+CHOSE to throw rather than about the shuffle - which is untried.
+
+## NULL is dead here, and the reachable version is not at zero
+
+Skat's escape hatch for a hand with no power. It cannot be built on the point
+scale: the pool is constant-sum, so "I score >= N" and "my opponent scores
+<= 5-N" are the same bid and there is no inverse contract to be had. Like
+Skat's, it has to be a trick-COUNT condition, which needs its own search
+(`Dd::null_makeable`) because `Contract` pays off on `pts` - and taking no
+tricks scores zero, but so does taking one even trick and two odd ones.
+
+**Measured base rate: 0.7% of hands** (`nullprobe`, 300 deals, declarer
+leading; 0.3% defending). It is not a contract, it is a lottery ticket. The
+cause is structural and will not move: 13 cards, mandatory follow-suit, and no
+discard. Skat's Null works because you play ten cards and can bury two stoppers
+in the Skat first. There is no equivalent here.
+
+Do not re-run this. The general form is what is live:
+
+| hold declarer to | declarer leads | defender leads |
+|---|---|---|
+| 0 tricks | 0.7% | 0.3% |
+| 2 tricks | 7.7% | 3.8% |
+| 3 tricks | 17.2% | 9.5% |
+| 4 tricks | 28.8% | 18.8% |
+| 5 tricks | 43.3% | 28.5% |
+
+`Dd::min_tricks`. The two lead conventions come out exact mirrors
+(`declarer_leads[k] == defender_leads[13-k]`), which is the search's own
+coherence check. "At most 3" (~17%) or "at most 4" (~29%) is the frequency band
+a non-dominant escape bid would sit in. Unbuilt - it is a design decision, not
+a measurement.
+
+## Ranked denominations: the claim failed, the effect did not
+
+C<D<H<S<NT, so an overtake need only OUTRANK the standing bid rather than
+out-level it (`--rank`). Skat's price-is-not-the-task idea without Skat's
+arithmetic.
+
+**Harness bug found first, and it would have handed this arm a free win.**
+`best_open` scanned denominations in index order and kept the first maximum, so
+every tie landed on clubs - 96% of floor openings, a property of the loop
+rather than of the game. `AuctionSolver::tie_salt` rotates the scan order per
+deal. Note the deeper trap: a denomination histogram can be flattened for free
+by breaking ties differently, which changes how the floor LOOKS without giving
+the opener one new decision. `floor_spread` (best-worst solver value across the
+floor bids) is the metric that cannot be gamed that way, and both are reported.
+
+Claim was "give level 1 five rungs". **Refuted**: clubs still takes 85.1% of
+floor openings (from 88.0%), and the floor cluster grew 37.5% -> 43.5%. There is
+a good reason - opening at the floor means you are weak and WANT to be
+overtaken, so you name the cheapest denomination to invite it. `1C` is not one
+of five rungs, it is a single bid meaning "I have nothing".
+
+But the contract distribution moved, and in the way nothing else had:
+
+| settled level | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| shipped | 9.5 | 7.5 | 22.5 | **2.5** | 26.0 | 21.5 | 10.0 |
+| ranked | 14.0 | 5.5 | 27.5 | **13.5** | 21.5 | 13.5 | 4.0 |
+
+The level-4 hole fills 2.5% -> 13.5% (~6 SE). Every earlier fix made the spike
+TRANSLATE rather than spread; this is the first that spread it. Supporting:
+opened-in-BEST-denomination 45% -> 31% (openers name where it is CHEAP, not
+where they are strong - the price/task decoupling working), overtakes 30% ->
+36%, auctions of 3+ bids 7% -> 13%, NT usage 6.5% -> 11.5%, floor_spread 0.453
+-> 0.770.
+
+200 deals. The level-4 result is solid; the floor-cluster worsening is ~1.7 SE
+and may be noise. All of it on the 28-card deck - re-confirm on 32 before
+locking, since deck width changes hand strength and hand strength is what the
+auction prices.
+
+## The v2 config, measured then shipped (2026-08-07)
+
+Shipped to prod as engine v2: 32 cards / 6 out, ranked denominations, Null at
+rung 6 (12 make / 10 set), declarer shown 3 out-cards and may swap one with a
+HAND card. The default Rust build is now this deck; `rank7` rebuilds the
+original 28-card game.
+
+Four arms at 120 deals, k=3, on 32/6/shown-3 (settled-level evenness in
+brackets): baseline [0.864], +rungs [0.897], +null [0.866], both [0.905].
+
+* **The deck + swap did real work alone**: vs the 28-card baseline, settled
+  level 2 went 7.5% -> 11.7% and level 4 went 2.5% -> 6.7% before any auction
+  change.
+* **Rungs replicated** on the wider deck: level-4 hole 6.7% -> 14.2%, level-5
+  spike 25.0% -> 20.8%, overtakes 30% -> 43%, best-denom openings 36% -> 27%,
+  floor_spread 0.478 -> 0.633.
+* **Null at its designed rung 3 was a NO-OP** — zero settled contracts in 240
+  rounds, because maxraise 2 lets the opponent take it away with a 4 or 5.
+  Even paying 500 it was opened and never survived. The rung, not the price,
+  was the problem.
+
+Null rung sweep (120 deals, rungs on):
+
+| config | contracts | made | share |
+|---|---|---|---|
+| rung 6, pays 12 | 18 | 33% | 7.5% |
+| rung 8, pays 12 | 4 | 0% | 1.7% |
+| rung 6, pays 25 | 6 | 33% | 2.5% |
+
+Rung 6 / 12 / 10 shipped. Note the 7.5% share lands on the measured 7.0%
+per-deal availability, and note what the per-row dump showed Null actually IS:
+**all 18 arrived by OVERTAKE, none by opening, at net -2.67/contract for the
+declarer** — a defensive SACRIFICE against a strong standing contract, not the
+weak-hand opening it was designed as. The weak-hand problem stays solved by
+rungs. Raising the price suppresses the bid (a 33% gamble is only worth taking
+while losing is cheap), so 12/10 is likely near the ceiling of what Null can
+pay without vanishing.
+
+**Standing caveat on every auction number in this section**: the lab auction
+is swap-UNAWARE while resolution is swap-exact (all 21 candidate swaps played
+out, best kept — 22x cheaper than a swap-aware auction). Declarers therefore
+systematically under-bid: levels read LOW, make rates read HIGH, in that one
+direction only.
+
+Per-deal JSONL dumps for every arm are in the session scratchpad
+(`rows_*.jsonl`: seed, opening bid, settled contract, declarer, made, scores,
+swap cards) — new questions can be answered from the rows without re-running.
