@@ -28,8 +28,9 @@ from .cards import (
     CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
     CASTLES, EMPIRES_SPLITS, SPLIT_EACH,
     LANDSCAPES, BUYABLE_LANDSCAPE_KINDS, TRAVELLERS, TRAVELLER_PILE,
-    ARTIFACTS, CAPITALISM_CARDS,
+    ARTIFACTS, CAPITALISM_CARDS, HORSE_PILE,
     artifacts_for as cards_artifacts_for,
+    uses_horses as cards_uses_horses,
     traveller_chain as cards_traveller_chain,
     pile_size, REQUIREMENTS, REQUIREMENT_ORDER,
     grants as cards_grant, overpays as cards_overpay, potion_of as cards_potion,
@@ -1158,6 +1159,11 @@ def _gain_now(game, pid, pile, dest, via_buy=False, overpay=0, **extra):
         seat["exile"].append(card)         # ph. 10: a GAIN that lands on the mat
     else:
         raise ValueError(f"bad gain dest {dest!r}")
+    # WAYFARER (ph. 10) reads "the last card gained this turn by ANY player,
+    # other than a Wayfarer" — which `_turn_gains` cannot answer, because that
+    # list exists for Smugglers and records only the TURN PLAYER's own gains.
+    if card != "Wayfarer":
+        game["turn_ctx"]["last_gain"] = card
     if pid == game["turn"]:
         # Smugglers: what a player gained during THEIR OWN turn
         game.setdefault("_turn_gains", []).append(card)
@@ -2080,6 +2086,40 @@ def coins_of(game, card):
     return CARDS[card]["coins"]
 
 
+def _cost_override(game, card):
+    """AN ABSOLUTE COST, replacing the whole normal calculation (ph. 10).
+
+    `DYN_COSTS` is a REDUCTION subtracted inside `cost()`, which serves
+    Destrier and Fisherman exactly — but Wayfarer is not a reduction: "after
+    any player gains a card (other than Wayfarer) on a given turn, Wayfarer
+    gets THE SAME COST", and "cost reduction only affects Wayfarer's default
+    cost of $6. If Wayfarer is copying the cost of another card, only cost
+    reduction ON THAT CARD applies (which Wayfarer would copy), not cost
+    reduction on Wayfarer itself." So it bypasses `bridges`, Canal, Quarry,
+    the -$2 Ferry token and every `COST_MODS` entry — and it is a VECTOR,
+    since "Wayfarer can have a cost with Potion or Debt in it".
+
+    `effects.COST_OVERRIDE[card] = fn(game) -> {"coins","potions","debt"} |
+    None`, where None means "use the normal path" (Wayfarer's own $6, with
+    reductions applied as usual). Consulted at the TOP of all three readers.
+
+    RECURSION GUARD: Wayfarer copying a Destrier asks `cost()` again. The
+    re-entry flag makes an override that asks about itself fall through to the
+    printed path rather than loop."""
+    from . import effects
+    fns = getattr(effects, "COST_OVERRIDE", None)
+    if not fns:
+        return None
+    fn = fns.get(_priced(game, card))
+    if fn is None or game.get("_cost_over"):
+        return None
+    game["_cost_over"] = True
+    try:
+        return fn(game)
+    finally:
+        game.pop("_cost_over", None)
+
+
 def cost(game, card):
     """THE single cost function — Bridge reduction applies everywhere, min 0.
     effects.COST_MODS is the while-in-play modifier seam (Quarry-class,
@@ -2093,6 +2133,9 @@ def cost(game, card):
     # cost $2 less ON YOUR TURNS" — it keys on whose turn it is, NOT on who is
     # asking, which is what lets cost(game, card) keep its two-argument
     # signature and its ~60 call sites.
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["coins"]
     discount = 0
     if _any_pile_tokens(game):
         pile = card if card in game["piles"] else pile_of(game, card)
@@ -2133,7 +2176,14 @@ def cost(game, card):
 def potion_cost(game, card):
     """The POTION component of a cost (Alchemy) — the second dimension of the
     cost VECTOR. Cost reductions only ever touch the COIN component, so this is
-    the printed value; Bridge does not make a Golem cost fewer Potions."""
+    the printed value; Bridge does not make a Golem cost fewer Potions.
+
+    The one dynamic source is ph. 10's `COST_OVERRIDE`, which is not a
+    reduction: Wayfarer COPIES another card's whole cost, and "Wayfarer can
+    have a cost with Potion or Debt in it"."""
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["potions"]
     return cards_potion(_priced(game, card))
 
 
@@ -2143,7 +2193,11 @@ def debt_cost(game, card):
     of cost, just like Potion" and "cards that reduce $ costs (like Bridge)
     don't affect Debt costs" (DEBT § IV), so this is the PRINTED value: nothing
     in `cost()`'s discount stack — Bridge, Quarry, Ferry's −$2 token, Peddler's
-    dynamic self-cost — reaches it."""
+    dynamic self-cost — reaches it. The one dynamic source is ph. 10's
+    `COST_OVERRIDE` (Wayfarer copies a whole cost, Debt component included)."""
+    over = _cost_override(game, card)
+    if over is not None:
+        return over["debt"]
     return cards_debt(_priced(game, card))
 
 
@@ -3412,6 +3466,42 @@ def _before_play_then_ability(game, pid, card, replay=False):
     _run_play_ability(game, pid, card, replay=replay)
 
 
+def _before_play_then_treasure(game, pid, card, replay=False):
+    """The Treasure twin of `_before_play_then_ability` (ph. 10, Kiln).
+
+    Kiln's "the next time you play a card this turn" is a card OF ANY TYPE, so
+    an ordinary Treasure play needs the before-play window too — and it needs
+    the same conditional parking, for the same reason: the coins and the
+    card's own ability run INLINE, so a pool parked in front of them would
+    resolve after them, i.e. backwards.
+
+    Returns True when the rest of the play has been parked underneath a pool;
+    False when nothing was collected, which is every board without a Kiln."""
+    pools = {}
+    _emit_collect(game, pools, "before_play", actor=pid, subject=card,
+                  replay=replay, attack=False)
+    if not pools:
+        return False
+    push_auto(game, pid, "__play", "treasure_rest",
+              data={"card": card, "cur_dur": game.get("_cur_dur")})
+    _park_pools(game, pools)
+    return True
+
+
+def _k_play_treasure_rest(game, pid, frame, choice):
+    """The rest of an ordinary Treasure play once a before-play consumer
+    (Kiln) has resolved: the coins, the card's own ability, then the
+    `play_treasure` emit — the inline tail of `_play_one_treasure`, verbatim."""
+    _restore_cur_dur(game, frame)
+    card = frame["data"]["card"]
+    from . import effects
+    _treasure_coins(game, pid, card)
+    fn = effects.EFFECTS.get(card)
+    if fn is not None:
+        _run_ability(game, pid, fn)
+    emit(game, "play_treasure", actor=pid, subject=card)
+
+
 def _restore_cur_dur(game, frame):
     """Re-point `_cur_dur` at the play this parked frame belongs to.
 
@@ -3661,6 +3751,66 @@ def play_from_supply(game, pid, pile, count=True):
     return True
 
 
+def play_mouse_card(game, pid):
+    """WAY OF THE MOUSE (ph. 10): "play the set-aside card, leaving it there."
+
+    The third member of ch. VI's PLAY A CARD WHILE LEAVING IT family, and it
+    needed its own wrapper because neither sibling fits: `play_from_supply`
+    (5H) wants a Supply pile and `play_set_aside` (ph. 7) wants a card in a
+    SEAT's set-aside zone. The Mouse card is a single game-level card that
+    belongs to nobody — `game["mouse_card"]`.
+
+    Everything that follows from "leaving it there" is the family's shared
+    behaviour: while-in-play abilities are not active, when-discard abilities
+    never trigger, and "if the played card instructs you to move it, you won't
+    be able to do so (due to the lose-track rule)" — which is LOGGED, never
+    silent. The 2025 errata bans a Duration as the Mouse card, so that corner
+    is closed at setup rather than here."""
+    card = game.get("mouse_card")
+    if not card:
+        return False
+    _log(game, pid, "play_mouse", card=card)
+    if count and has_type(game, card, "action") and pid == game["turn"]:
+        game["turn_ctx"]["actions_played"] += 1
+    _run_supply_ability(game, pid, card)
+    return True
+
+
+def link_duration(game, pid, card, handle):
+    """MASTERMIND (ph. 10): "if the card is a Duration, Mastermind stays in
+    play as long as that Duration stays in play."
+
+    A rider, like `mark_duration_rider` — but attached from a LATER WINDOW
+    (Mastermind plays the Duration a whole turn after its own entry was
+    created, from a start-of-turn stage), which is what ph. 9's
+    `duration_handle` exists for.
+
+    TRANSITIVE by construction: "if you Mastermind another Mastermind, the
+    first one stays in play as long as the Duration it played — the second
+    Mastermind — stays in play. If next turn you use the second Mastermind on
+    another Duration, BOTH Masterminds stay in play as long as that Duration
+    does." Because each link copies the riders it already carries onto the new
+    host, a chain collapses onto whichever entry is currently alive."""
+    entry = None
+    lst = _dur_setup_list(game, pid)
+    if handle is not None and handle[1] < len(lst):
+        entry = lst[handle[1]]
+    if entry is None:
+        return False
+    riders = entry.setdefault("riders", [])
+    if card not in riders:
+        riders.append(card)
+    # the chain: whatever was riding the linking card rides the new host too
+    for other in game["seats"][pid]["duration"] + lst:
+        if other is entry:
+            continue
+        if card in other.get("riders", []):
+            for r in other["riders"]:
+                if r != card and r not in riders:
+                    riders.append(r)
+    return True
+
+
 def play_set_aside(game, pid, card, count=True):
     """PLAY A CARD WHILE LEAVING IT, from a SET-ASIDE card rather than a Supply
     pile — Inheritance's Estates ("play the card with your Estate token,
@@ -3899,6 +4049,7 @@ KERNEL_STAGES = {
     # ph. 6H: the two halves of a play that a before-play consumer splits, and
     # the "directly after resolving" continuation
     ("__play", "ability"): _k_play_ability_frame,
+    ("__play", "treasure_rest"): _k_play_treasure_rest,
     ("__play", "resolved"): _k_play_resolved,
     # ph. 8: the WOULD-RESOLVE continuation — the half of a play that
     # Enchantress (and, at ph. 10, a Way) can replace outright
@@ -3948,7 +4099,10 @@ def _fresh_turn_ctx():
             # next turn as normal"). `ignore_actions` is Snowy Village's
             # "ignore any further +Actions you get this turn". `trashes` is
             # the live count feeding `last_turn_trashes` (Goatherd).
-            "chameleon": False, "ignore_actions": False, "trashes": 0}
+            "chameleon": False, "ignore_actions": False, "trashes": 0,
+            # the last card gained this turn by ANY player other than a
+            # Wayfarer — the cost Wayfarer copies
+            "last_gain": None}
 
 
 def _h_play_action(game, pid, move):
@@ -4016,6 +4170,16 @@ def _play_one_treasure(game, pid, card, from_zone="hand"):
         _dur_setup_list(game, pid).append({"card": card, "fx": [], "watchers": 0, "riders": []})
         game["_cur_dur"] = [pid, len(_dur_setup_list(game, pid)) - 1]
     _log(game, pid, "play", card=card, coins=coins_of(game, card))
+    # KILN (ph. 10): "the next time you play a card THIS TURN, you may first
+    # gain a copy of it" — **a card OF ANY TYPE**, and "before resolving the
+    # card". Until now `before_play` fired for every Action play (6H) and for
+    # an Attack-typed Treasure (Cauldron); a plain Copper emitted nothing.
+    # Conditionally parked, the 6H discipline, so a Kiln-less board is
+    # byte-identical: the coins and the ability ARE the continuation, and they
+    # run inline when nothing is collected.
+    if not has_type(game, card, "attack")             and _before_play_then_treasure(game, pid, card,
+                                           replay=from_zone is None):
+        return
     _treasure_coins(game, pid, card)
     if has_type(game, card, "attack"):
         # An ATTACK-typed Treasure (Cauldron) opens the reaction window exactly
@@ -4098,6 +4262,27 @@ def debt_blocks_buying(game, pid):
     return "pay off your Debt first" if game["debt"].get(pid) else None
 
 
+def buy_pay_alt(game, pid, card):
+    """The ALTERNATIVE PAYMENT this card offers right now, or None (ph. 10).
+
+    Animal Fair: "the cost of Animal Fair is always $7. When buying a card,
+    you are allowed to choose Animal Fair EVEN WITHOUT HAVING $7, as long as
+    you have an Action card in hand. You may choose to either pay its cost (if
+    you have $7) or trash an Action card from your hand. (You always use 1
+    Buy.)" — so the affordability check itself has to admit an escape.
+
+    THE reader, consulted by `_h_buy` AND `legal_moves`: an enumerator and a
+    handler that disagree hand the bot a move that does nothing (the
+    play_all_treasures livelock). The stage runs BEFORE the gain, because "if
+    you buy it by trashing a card, the trashing happens before any when-buy
+    abilities"."""
+    from . import effects
+    spec = getattr(effects, "BUY_PAY_ALT", {}).get(_priced(game, card))
+    if spec is None:
+        return None
+    return spec if spec["avail"](game, pid) else None
+
+
 def _h_buy(game, pid, move):
     if game["phase"] != "buy":
         return False, "not in your buy phase"
@@ -4122,7 +4307,7 @@ def _h_buy(game, pid, move):
     if err:
         return False, err
     c = cost(game, card)
-    if c > game["coins"]:
+    if c > game["coins"] and not buy_pay_alt(game, pid, card):
         return False, "can't afford it"
     p = potion_cost(game, card)
     if p > game["potions"]:
@@ -4130,6 +4315,24 @@ def _h_buy(game, pid, move):
     # you buy a PILE and get its top card — the same for every pile we ship
     # today, and the distinction an ordered pile (Knights, Castles) needs
     got = pile_top(game, card)
+    # ANIMAL FAIR (ph. 10): an alternative payment. Offered whenever it is
+    # available — "you MAY choose to either pay its cost (if you have $7) or
+    # trash an Action card from your hand", so it is a real choice even when
+    # you could pay. The Buy is spent on both branches, and the stage runs
+    # BEFORE `_finish_buy`: "if you buy it by trashing a card, the trashing
+    # happens before any when-buy abilities".
+    alt = buy_pay_alt(game, pid, card)
+    if alt is not None:
+        game["buys"] -= 1
+        game["turn_ctx"]["bought"] = True
+        push_auto(game, pid, "__buy", "finish",
+                  data={"pile": card, "card": got, "overpay": 0})
+        opts = [{"id": "alt", "label": alt["label"]}]
+        if c <= game["coins"]:
+            opts.insert(0, {"id": "pay", "label": f"Pay ${c}"})
+        push_choose_option(game, pid, got, alt["stage"], options=opts,
+                           data={"pile": card, "cost": c})
+        return True, None
     game["coins"] -= c
     game["potions"] -= p
     game["buys"] -= 1
@@ -4959,7 +5162,9 @@ def legal_moves(game, pid):
         in_debt = debt_blocks_buying(game, pid) is not None
         if game["buys"] > 0 and not game["turn_ctx"]["no_buy"] and not in_debt:
             for pile in sorted(game["supply"]):
-                if game["supply"][pile] > 0 and cost(game, pile) <= game["coins"] \
+                if game["supply"][pile] > 0 \
+                        and (cost(game, pile) <= game["coins"]
+                             or buy_pay_alt(game, pid, pile)) \
                         and potion_cost(game, pile) <= game["potions"] \
                         and buy_gate(game, pid, pile) is None:
                     mv.append({"type": "buy", "card": pile})
@@ -5610,6 +5815,26 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         add_pile(game, "Mercenary", count=10)
     if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
         add_pile(game, "Spoils", count=15)
+    # MENAGERIE (ph. 10): "if any card in the Supply uses Horses, include the
+    # Horse pile (30 cards) OUTSIDE the Supply" — so it is never buyable and
+    # never counts toward the three-empty-piles end, both free from ph. 3H's
+    # non-Supply index.
+    if any(cards_uses_horses(c) for c in in_play_cards):
+        add_pile(game, "Horse", count=HORSE_PILE)
+    # WAY OF THE MOUSE (ph. 10): "set aside an unused Action Kingdom card
+    # costing $2 or $3. Players may play that card using this Way." The 2025
+    # errata adds NON-DURATION, which ch. I's setup section was never updated
+    # for — the card and ch. VII win. Drawn from the kingdom cards this game
+    # did not deal (the Bane/Ferryman shape), and it brings its own setup rule
+    # with it, which is why it is chosen before LANDSCAPE_SETUP runs.
+    if "Way of the Mouse" in game["landscapes"]:
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)
+                and "action" in CARDS[c]["types"]
+                and "duration" not in CARDS[c]["types"]]
+        if pick:
+            game["mouse_card"] = rng.choice(pick)
+            _save_rng(game, rng)
     # LANDSCAPE SETUP (ph. 7H): `effects.LANDSCAPE_SETUP = {name: fn(game, rng)}`
     # — a landscape whose setup needs the BOARD (Obelisk picks a random Action
     # Supply pile; Tax puts a Debt token on every pile; Aqueduct puts 8 VP on

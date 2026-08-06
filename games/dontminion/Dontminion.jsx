@@ -788,6 +788,8 @@ function fmtLog(e, names) {
     // WAYS: "you may choose to resolve the Way instead of resolving the play
     // ability of the Action card" — the card is still played either way
     case "way": return `${who} plays ${art(e.card)} using ${e.name}`;
+    // Way of the Mouse plays the set-aside card, LEAVING IT THERE
+    case "play_mouse": return `${who} plays the set-aside ${e.card}, leaving it there`;
     // Way of the Chameleon swaps +Cards for +$ and back, for the whole turn
     case "chameleon_swap":
       return e.got === "coins"

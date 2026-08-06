@@ -1627,6 +1627,20 @@ ARTIFACTS = {
 }
 
 
+# MENAGERIE (ph. 10): the Horse pile is 30 cards and sits OUTSIDE the Supply
+# ("include the Horse pile (30 cards) outside the Supply"), so it is never
+# buyable and never counts toward the three-empty-piles game end.
+HORSE_PILE = 30
+
+
+def uses_horses(name):
+    """Does this card's setup bring the Horse pile? Read off the printed text
+    rather than a hand-kept list — every Horse producer says "Horse" in it, and
+    a list would be one more place to forget a card."""
+    c = CARDS.get(name)
+    return bool(c) and "Horse" in c["text"] and name != "Horse"
+
+
 def artifacts_for(in_play_cards):
     """The artifacts a game must keep available, given the cards in the game
     (the dealt kingdom plus any setup-chosen extra pile)."""
