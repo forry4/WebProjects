@@ -5,8 +5,9 @@ rules; `engine.py` is a hand port. Two implementations of the same rules drift
 silently, so this replays complete playthroughs generated there and demands
 identical results.
 
-The fixture file is gitignored. On a fresh clone this test FAILS with a message
-naming the generator rather than looking like a rules break -- regenerate with:
+The fixture file IS committed, unlike CoC's equivalent: those feed a cargo
+test, these feed pytest, so CI needs them present. Regenerate whenever the
+rules change -- a stale fixture failing here is the gate doing its job:
 
     cd rust-cores/oddtrick-core
     cargo run --release --bin gen_fixtures 400 \\

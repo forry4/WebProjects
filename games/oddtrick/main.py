@@ -94,7 +94,14 @@ def oddtrick_init_db() -> None:
 
 
 oddtrick_init_db()
-cleanup_stale_games(TABLE)   # guest 24h / registered 30d, by last activity
+try:
+    # Retention: guest 24h / registered 30d, by last activity. Guarded because
+    # this runs at IMPORT time and joins `users` — in a fresh checkout that
+    # table may not exist yet, and a retention sweep must never stop the module
+    # (or every test that imports it) from loading.
+    cleanup_stale_games(TABLE)
+except Exception as _cleanup_err:  # pragma: no cover - environment-dependent
+    LOG.warning("oddtrick retention sweep skipped at import: %s", _cleanup_err)
 
 
 # ── Persistence ──────────────────────────────────────────────────────────────
