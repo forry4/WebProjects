@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
-  createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss } from "../../shared/lobby.jsx";
+  createModalCss, CreateModal, LobbyCreateRow, lobbyCreateRowCss,
+  RulesModal, rulesModalCss } from "../../shared/lobby.jsx";
+import WhereWolfRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
@@ -208,7 +210,7 @@ function useIsMobile() {
 }
 
 // ─── Styles (baseCss first; NEVER put a backtick inside this template) ───────
-const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss;
+const css = baseCss + lobbyCss + _cssText + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function WhereWolf({ myId, authUser, onExit }) {
@@ -554,39 +556,9 @@ export default function WhereWolf({ myId, authUser, onExit }) {
   // Rules modal — defined once and rendered in the lobby AND the in-game options menu,
   // so "How to Play" is reachable during a game too.
   const wwRulesModal = showRules && (
-    <div className="ww-modal-bg" onClick={() => setShowRules(false)}>
-      <div className="ww-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>📖 How to Play — Where Wolf</h3>
-        <div className="ww-rules-body">
-          <p className="ww-rules-lead">A fast game of secret roles and lying to your friends. Everyone gets a hidden role; the werewolves want to survive, the village wants to sniff them out. <b>3–10 players, one device each.</b></p>
-          <h4>Setup</h4>
-          <ul>
-            <li>The host picks a deck of <b>players + 3</b> role cards. Each player is secretly dealt one; the extra <b>3 sit face-down in the center</b>.</li>
-            <li>The role you're <b>dealt</b> is the one you act as during the night — even if your card changes later.</li>
-          </ul>
-          <h4>Night</h4>
-          <ul>
-            <li>Roles wake in a set order and act: werewolves see each other, the <b>seer</b> peeks a card, the <b>robber</b> steals a role, the <b>troublemaker</b> swaps two other players, the <b>drunk</b> blind-swaps with the center, and more.</li>
-            <li>Swaps move the <b>card in front of you</b> — so you may end the night as a role you don't know about.</li>
-          </ul>
-          <h4>Day &amp; the vote</h4>
-          <ul>
-            <li>Everyone discusses (there's a timer) and argues about who the werewolves are.</li>
-            <li>On the signal, all players vote at once. The player(s) with the <b>most votes die</b> — a tie kills everyone tied; if no one gets 2+ votes, nobody dies. A dead <b>hunter</b> also takes down whoever they voted for.</li>
-          </ul>
-          <h4>Who wins</h4>
-          <ul>
-            <li><b>Village</b> wins if at least one <b>werewolf</b> card dies.</li>
-            <li><b>Werewolves</b> win if a werewolf is in play and none of them die (the <b>minion</b> wins with them).</li>
-            <li>The <b>tanner</b> wins only by dying — and their death blocks a werewolf win.</li>
-          </ul>
-          <p className="ww-rules-note">Your final card at dawn decides your team, so pay attention to what moved in the night.</p>
-        </div>
-        <div className="ww-row" style={{ justifyContent: "flex-end", marginTop: 6 }}>
-          <button className="ww-btn gold" onClick={() => setShowRules(false)}>Got it</button>
-        </div>
-      </div>
-    </div>
+    <RulesModal title="How to play — Where Wolf?" onClose={() => setShowRules(false)}>
+      <WhereWolfRules />
+    </RulesModal>
   );
 
   // ─── Lobby ─────────────────────────────────────────────────────────────────
@@ -613,6 +585,7 @@ export default function WhereWolf({ myId, authUser, onExit }) {
             onCreate={() => setShowCreateModal(true)}
             onJoin={(code) => startJoin(code)}
             onRefresh={fetchGames}
+            onRules={() => setShowRules(true)}
             codeMaxLength={4} />
 
           {showCreateModal && (

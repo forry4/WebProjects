@@ -8,7 +8,19 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
 - **`lobby.jsx`** — shared lobby chrome (`LobbyHeader`/`LobbySectionHd`/`LobbyEmpty`/`LobbyLoading`/
   `TurnBadge`, cache helpers) + `GameMenu` (the in-game ☰ dropdown: Return / View rules / Abandon; falsy
   items filtered; Esc/click-outside close) + `CreateModal`/`LobbyCreateRow` (the unified "New Game" modal
-  + create/join-by-code/refresh row). Token-driven via a per-game `--lby-accent` with **hard fallbacks so
+  + create/join-by-code/refresh/**rules** row).
+  **THE HOW-TO-PLAY MODAL IS SHARED TOO** (`RulesModal` + `RulesSection`/`RulesFacts`/`RulesDefs`/
+  `RulesTip` + `rulesModalCss`, appended AFTER `lobbyCreateRowCss`); each game keeps only its WORDS,
+  in a `games/<game>/rules.jsx` that rides its own lazy chunk. The panel is capped to the viewport
+  and **`.rl-body` is the only scroller** — `min-height:0` on it is load-bearing (a flex item won't
+  shrink below its content, so without it the panel grows past `max-height`, nothing scrolls and
+  "Got it" sits below the fold, which is what two of the five per-game copies did). Every lobby
+  passes `onRules`; the button is opt-in only so the component stays usable without one, and
+  `screens.mjs` drives all six lobbies precisely because a game that forgets it still renders a
+  perfectly fine lobby with no way in.
+  **On phones (≤600px) `.lby-create-row` SCROLLS SIDEWAYS instead of wrapping** — five controls stop
+  fitting at ~430px, and a wrap pushed the lists a whole row down. It uses `justify-content:safe
+  center`: plain `center` pushes the overflow off the LEFT edge, where no scroll can reach it. Token-driven via a per-game `--lby-accent` with **hard fallbacks so
   it renders in CoC's bare mount** — append its CSS AFTER the `.coc *` reset.
   **THE WHOLE LOBBY LAYOUT IS HERE as of 2026-08-05** — `.lby-cols` (the column grid + the single
   responsive ladder: 3 columns ≥1041px, 2 columns 761–1040 with History spanning below, 1 column +

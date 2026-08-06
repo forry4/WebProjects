@@ -152,6 +152,3 @@
 .odd-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
 .odd-yourturn { color: var(--accent); font-weight: 700; }
 
-.odd-rules { max-width: 640px; line-height: 1.55; font-size: 0.92rem; }
-.odd-rules h4 { margin: 0.9rem 0 0.3rem; }
-.odd-rules code { background: rgba(255, 255, 255, 0.08); padding: 0 0.25rem; border-radius: 4px; }

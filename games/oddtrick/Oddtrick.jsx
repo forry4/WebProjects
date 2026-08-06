@@ -4,8 +4,10 @@ import {
   lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyLoading,
   LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+  RulesModal, rulesModalCss,
   useProgressiveList,
 } from "../../shared/lobby.jsx";
+import OddtrickRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file, imported ?inline as a STRING and injected
@@ -17,7 +19,8 @@ const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const OT_WS = WS_RAW.replace(/\/ws$/, "/oddtrick/ws");
 const OT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/oddtrick");
 
-const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss + _cssText;
+const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss
+  + rulesModalCss + _cssText;
 
 const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
 const RANKS = ["8", "9", "10", "J", "Q", "K", "A"];
@@ -369,11 +372,12 @@ export default function Oddtrick({ myId, authUser, onExit }) {
     return (
       <div className="odd">
         <style>{styles}</style>
-        <LobbyHeader onBack={onExit} title="Oddtrick" onRules={() => setShowRules(true)} user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
+        <LobbyHeader onBack={onExit} title="Oddtrick" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
         <LobbyCreateRow
           onCreate={() => setShowCreate(true)}
           onJoin={(code) => joinGame(code.toUpperCase())}
           onRefresh={fetchGames}
+          onRules={() => setShowRules(true)}
           refreshing={loadingGames}
         />
         <LobbyTabs
@@ -396,7 +400,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
             </CmRow>
           </CreateModal>
         )}
-        {showRules && <RulesModal onClose={() => setShowRules(false)} />}
+        {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
         {toast && <div className="toast">{toast}</div>}
       </div>
     );
@@ -419,7 +423,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
           {isHost && n >= 2 && <button className="btn" onClick={() => send({ action: "start" })}>Start</button>}
           {n < 2 && <div className="muted">Waiting for an opponent…</div>}
         </div>
-        {showRules && <RulesModal onClose={() => setShowRules(false)} />}
+        {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
         {toast && <div className="toast">{toast}</div>}
       </div>
     );
@@ -618,59 +622,16 @@ export default function Oddtrick({ myId, authUser, onExit }) {
         </div>
       </div>
 
-      {showRules && <RulesModal onClose={() => setShowRules(false)} />}
+      {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
-function RulesModal({ onClose }) {
+function OddRulesModal({ onClose }) {
   return (
-    <CreateModal title="How Oddtrick works" onClose={onClose}>
-      <div className="odd-rules">
-        <p>
-          A trick-taking game where taking tricks is <b>not simply good</b>.
-          Even-numbered tricks pay <b>+2</b>; odd-numbered ones cost <b>1</b>.
-          Six good and seven bad, so both scores always total +5 — sweeping all
-          thirteen tricks scores 5, while taking exactly the six even ones
-          scores 12. The game is about <i>which</i> tricks you win.
-        </p>
-        <h4>Your cards</h4>
-        <p>
-          Thirteen each: seven in hand, plus three piles of two. Only a pile's
-          top card is playable; the one underneath becomes playable — and
-          visible to both of you — once the top is gone. The middle pile's
-          bottom card is face-up from the start; the outer two are hidden from
-          everyone, <i>including you</i>. Two cards are set aside unseen.
-        </p>
-        <h4>The auction</h4>
-        <p>
-          The opener names a number and a suit (or no-trump), promising to
-          finish with <b>at least</b> that many points. You may pass, or
-          overtake by raising the number by <b>one or two</b> and naming a
-          denomination you have not used yet. Whoever holds the last bid
-          declares — and <b>leads to trick one</b>.
-        </p>
-        <h4>Playing</h4>
-        <p>
-          Follow suit if you can — and a pile's exposed top card counts as a
-          card you hold. Otherwise play anything, including trump. Highest
-          trump wins, else the highest card of the suit led. The winner leads
-          next.
-        </p>
-        <h4>Scoring</h4>
-        <p>
-          Make the contract and you score <code>N × N</code>. Fall short and
-          your <i>opponent</i> scores <code>(N − 1) + 4</code> per point you
-          missed by.
-        </p>
-        <h4>The thing to notice</h4>
-        <p>
-          You need high cards to win the +2 tricks, but you also need <b>low</b>
-          {" "}ones: leading your smallest card into an odd trick forces your
-          opponent to win it and eat the penalty. A hand of pure aces is bad.
-        </p>
-      </div>
-    </CreateModal>
+    <RulesModal title="How to play — Oddtrick" onClose={onClose}>
+      <OddtrickRules />
+    </RulesModal>
   );
 }

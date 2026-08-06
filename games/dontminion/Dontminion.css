@@ -587,7 +587,6 @@
 .dm-score-row { cursor: pointer; transition: background .12s; }
 .dm-score-row:hover { background: var(--surface2, #242018); }
 .dm-score-deck { color: var(--text-dim, #8a7d6a); font-size: 12px; text-align: right; white-space: nowrap; }
-.dm-rules p { margin: 8px 0; line-height: 1.5; }
 
 /* ── game-over: a player's final deck (name → count over every zone) ── */
 .dm-deckview { max-width: 460px; }

@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } fr
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
+  RulesModal, rulesModalCss,
   useProgressiveList, LobbyTabs } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
@@ -11,6 +12,7 @@ import {
   splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
   splendorLogCss,
 } from "../../shared/splendor.jsx";
+import DuelRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
@@ -297,7 +299,8 @@ const css = _cssText;
 
 // Spender's shared card/gem/log rules come FIRST, then Duel's own layout on top.
 const duelStyles = baseCss + lobbyCss + splendorPanelCss + splendorCardCss + splendorCardExtraCss
-  + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss + lobbyCreateRowCss;
+  + splendorPillCss + splendorLogCss + css + gameMenuCss + createModalCss + lobbyCreateRowCss
+  + rulesModalCss;
 
 // ─── Log formatting ─────────────────────────────────────────────────────────
 // One log record -> {name, action}, matching Spender's formatLogMove shape so the
@@ -1437,25 +1440,9 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         </div>
       )}
       {showRules && (
-        <div className="duel-backdrop" onClick={() => setShowRules(false)}>
-          <div className="duel-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, maxHeight: "80vh", overflowY: "auto" }}>
-            <h3>How to play</h3>
-            <p><b>Win</b> by any of: <b>20 prestige points</b>, <b>10 crowns</b>, or <b>10 points on cards of one color</b>.</p>
-            <p><b>On your turn</b> — optionally first (in this order): spend <b>Privileges</b> ({"⚜"}) to take 1 gem/pearl each, and/or <b>Replenish</b> the board from the bag (your opponent gains a Privilege). Then do ONE of:</p>
-            <p>• <b>Take up to 3 tokens</b> in an unbroken straight line (any direction, no gold). Taking 3 of a color or 2 pearls hands your opponent a Privilege.<br />
-              • <b>Take 1 gold + reserve a card</b> (click a gold token, then a face-up card or a deck). Reserves are secret; max 3.<br />
-              • <b>Purchase a card</b> from the pyramid or your reserve. Gold is a wild. Spent tokens go back in the bag.</p>
-            <p><b>Cards</b> give permanent bonuses (discounts), points, crowns, and abilities: {ABILITY_GLYPH.again} another turn,{" "}
-              {/* take_same has no text glyph — it's a circle in the takeable gem's color */}
-              <span className="card-ability" style={{ position: "static", display: "inline-flex" }}>
-                +<span className="card-ability-gem" style={{ background: GEM_HEX.green }} />
-              </span>{" "}
-              take a token of that card's color, {ABILITY_GLYPH.privilege} take a Privilege, {ABILITY_GLYPH.steal} steal a token.
-              Rainbow (wild) cards attach to a color you already own and count as it from then on.</p>
-            <p><b>Crowns:</b> at 3 and again at 6 crowns, claim a Royal card. <b>Hand limit:</b> 10 tokens at end of turn.</p>
-            <div className="duel-modal-row"><button className="btn btn-gold" onClick={() => setShowRules(false)}>Close</button></div>
-          </div>
-        </div>
+        <RulesModal title="How to play — Spender Duel" onClose={() => setShowRules(false)}>
+          <DuelRules />
+        </RulesModal>
       )}
     </>
   );
@@ -1487,6 +1474,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
           onCreate={() => setShowCreateModal(true)}
           onJoin={(code) => joinGame(code)}
           onRefresh={fetchGames}
+          onRules={() => setShowRules(true)}
           refreshing={loadingGames} />
 
         {showCreateModal && (

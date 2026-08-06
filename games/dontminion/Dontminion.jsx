@@ -4,11 +4,13 @@ import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs,
+  RulesModal, rulesModalCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
 // is its own markup — no gems here, but the frame keeps all five games' cards the
 // same physical object on screen.
 import { splendorCardCss } from "../../shared/splendor.jsx";
+import DontminionRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file, imported `?inline` (a string injected by this
@@ -761,7 +763,7 @@ function useSocket(onMessage) {
 
 // ─── Styles (no backticks anywhere in the css string) ───────────────────────
 const dmStyles = baseCss + lobbyCss + splendorCardCss + _cssText
-  + gameMenuCss + createModalCss + lobbyCreateRowCss;
+  + gameMenuCss + createModalCss + lobbyCreateRowCss + rulesModalCss;
 
 // ─── Main component ─────────────────────────────────────────────────────────
 export default function Dontminion({ myId, authUser, onExit }) {
@@ -1831,16 +1833,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
 
   const renderRules = () => (
-    <CreateModal title="How to play" onClose={() => setShowRules(false)}>
-      <div className="dm-rules">
-        <p>Build the best deck. Each turn: play one Action (A), then buy a card (B), then everything you played and held is discarded and you draw 5 (C).</p>
-        <p><b>Action phase</b> — play Action cards from your hand (you start with 1 Action; cards can grant more).</p>
-        <p><b>Buy phase</b> — play Treasures for coins, then buy cards from the Supply into your discard pile. No Treasures after you buy.</p>
-        <p>The game ends when the Province pile — or any three piles — empty. Most victory points in your whole deck wins.</p>
-        <p>Attack cards hit the other players; a Moat (revealed from hand) blocks an attack against you.</p>
-        <p><b>Reading a card</b> — right-click it (or press and hold on a touch screen) to see its full text, any time, anywhere on the board. A plain click does whatever the card is for right now: play it, buy it, or pick it.</p>
-      </div>
-    </CreateModal>
+    <RulesModal title="How to play — Dontminion" onClose={() => setShowRules(false)}>
+      <DontminionRules />
+    </RulesModal>
   );
 
   // ─── screens ───────────────────────────────────────────────────────────────
@@ -1859,11 +1854,10 @@ export default function Dontminion({ myId, authUser, onExit }) {
     return (
       <div className="app dm" style={{ "--lby-accent": "#b08d57" }}>
         <style>{dmStyles}</style>
-        {/* No Rules button in the lobby — the how-to-play is reachable from the
-            in-game Menu (☰), where a player who's actually at a table needs it. */}
         <LobbyHeader onBack={onExit} title="Dontminion" user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : "Guest"} />
         <LobbyCreateRow onCreate={() => setShowCreateModal(true)} onJoin={joinGame}
-          onRefresh={fetchGames} refreshing={loadingGames} />
+          onRefresh={fetchGames} refreshing={loadingGames}
+          onRules={() => setShowRules(true)} />
         {showCreateModal && (
           <CreateModal title="New Game" onClose={() => setShowCreateModal(false)}>
             <CmRow label="Opponent">
@@ -2052,6 +2046,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             {history.length === 0 && <div className="lby-empty">No finished games yet.</div>}
           </div>
         </div>
+        {showRules && renderRules()}
         {toast && <div className="dm-toast">{toast}</div>}
       </div>
     );

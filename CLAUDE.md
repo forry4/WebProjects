@@ -197,6 +197,16 @@ family. Same shape in all four games, differing only in table name and columns. 
 as you would expect** — the four `list_user_history` row caps were independently 20/30/30/30 until
 2026-08-05; they now all bind `core.rooms.HISTORY_LIMIT` (see the lobby History note below).
 
+**THE HOW-TO-PLAY MODAL IS SHARED — `RulesModal` in `shared/lobby.jsx`, reached from a Rules button
+in every lobby's create row (right of ↻).** Chrome only: each game's WORDS live in its own
+`games/<game>/rules.jsx`. The panel is capped to the viewport and `.rl-body` is the ONLY scroller
+(`min-height:0` is load-bearing — a flex item won't shrink below its content, so without it the panel
+grows past `max-height`, nothing scrolls, and the close button sits below the fold). On phones the
+create row scrolls SIDEWAYS rather than wrapping — with five controls it stops fitting at ~430px —
+via `justify-content:safe center`, because plain `center` pushes the overflow off the unreachable
+LEFT edge. `screens.mjs` drives all six lobbies: the button is optional on the component, so a game
+that forgets to pass `onRules` renders a perfectly fine lobby with no way into the rules.
+
 **THE LOBBY IS ONE SHARED LAYOUT — `shared/lobby.jsx` + its CSS, used by all five games.**
 The column grid (`.lby-cols`), the card list (`.lby-list`), the rows (`.lby-card*`), the section
 headers (`LobbySectionHd`), the empty states (`.lby-empty`), the turn pills (`TurnBadge`) and the

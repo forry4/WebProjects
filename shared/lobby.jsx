@@ -24,6 +24,7 @@ import _lobbyCssText from "./lobby.lobby-css.css?inline";
 import _createModalCssText from "./lobby.create-modal-css.css?inline";
 import _lobbyCreateRowCssText from "./lobby.lobby-create-row-css.css?inline";
 import _gameMenuCssText from "./lobby.game-menu-css.css?inline";
+import _rulesModalCssText from "./lobby.rules-modal-css.css?inline";
 
 export const lobbyCss = _lobbyCssText;
 
@@ -169,15 +170,18 @@ export function useProgressiveList(items, { page = HISTORY_PAGE, max = HISTORY_M
 // the selected states + Create button. Append `createModalCss` to the game's CSS.
 export const createModalCss = _createModalCssText;
 
-// The lobby create/join/refresh row — one shared control bar across all four games:
-//   [ + Create Game (gold) ]  [ CODE ] [ Join ]  [ ↻ ]
-// The create button is ALWAYS gold (not the per-game accent), matching CoC. `onJoin`
-// receives the trimmed, upper-cased code; `codeMaxLength` is 6 everywhere except Where
-// Wolf (4). Token-driven with hard fallbacks so it renders in CoC's bare mount too.
+// The lobby create/join/refresh/rules row — one shared control bar across all six games:
+//   [ + Create Game (gold) ]  [ CODE ] [ Join ]  [ ↻ ]  [ 📖 Rules ]
+// The create button is ALWAYS gold (not the per-game accent), matching CoC; Rules carries
+// the per-game accent. `onJoin` receives the trimmed, upper-cased code; `codeMaxLength` is
+// 6 everywhere except Where Wolf (4). `onRules` is optional only so the component stays
+// usable without one — every lobby passes it. Token-driven with hard fallbacks so it
+// renders in CoC's bare mount too. On phones the row SCROLLS SIDEWAYS rather than wrapping
+// (five controls stop fitting at ~430px) — see the stylesheet.
 export const lobbyCreateRowCss = _lobbyCreateRowCssText;
 
 export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false,
-	createLabel = "+ Create Game", codeMaxLength = 6 }) {
+	onRules, rulesLabel = "Rules", createLabel = "+ Create Game", codeMaxLength = 6 }) {
 	const [code, setCode] = useState("");
 	const submit = () => { const c = code.trim().toUpperCase(); if (c) onJoin(c); };
 	return (
@@ -192,8 +196,89 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 			<button type="button" className="lby-refresh" aria-label="Refresh" onClick={onRefresh}>
 				{refreshing ? <span className="lby-spinner" /> : "↻"}
 			</button>
+			{onRules && (
+				<button type="button" className="lby-rules" onClick={onRules}>
+					<span className="lby-rules-ic" aria-hidden="true">📖</span>{rulesLabel}
+				</button>
+			)}
 		</div>
 	);
+}
+
+// ─── Rules ("How to play") modal kit — shared by all six games ───────────────
+// The CHROME is shared; the CONTENT stays per-game (each game has a rules.jsx
+// next to it). One panel means one scrolling behaviour: the panel is capped to
+// the viewport and `.rl-body` is the only scroller, so a ruleset can be as long
+// as it needs to be without ever growing the page or clipping its own footer.
+// Append `rulesModalCss` to the game's CSS (after `lobbyCreateRowCss`).
+export const rulesModalCss = _rulesModalCssText;
+
+export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it", children }) {
+	useEffect(() => {
+		const onKey = (e) => { if (e.key === "Escape") onClose(); };
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [onClose]);
+	return (
+		<div className="rl-backdrop" onClick={onClose}>
+			<div className="rl-panel" role="dialog" aria-modal="true" aria-label={title}
+				onClick={(e) => e.stopPropagation()}>
+				<div className="rl-head">
+					<div className="rl-title">📖 {title}</div>
+					<button type="button" className="rl-x" aria-label="Close" onClick={onClose}>✕</button>
+				</div>
+				<div className="rl-body">{children}</div>
+				<div className="rl-foot">
+					<button type="button" className="rl-done" onClick={onClose}>{closeLabel}</button>
+				</div>
+			</div>
+		</div>
+	);
+}
+
+// An accent-headed section of the rules.
+export function RulesSection({ title, children }) {
+	return (
+		<section className="rl-sec">
+			<h4>{title}</h4>
+			{children}
+		</section>
+	);
+}
+
+// The "at a glance" strip at the top of every ruleset: players / length / goal.
+// `items` = [{ k, v }] — k is the micro uppercase label, v the value.
+export function RulesFacts({ items }) {
+	return (
+		<div className="rl-facts">
+			{items.filter(Boolean).map((it, i) => (
+				<div className="rl-fact" key={i}>
+					<span className="rl-fact-k">{it.k}</span>
+					<span className="rl-fact-v">{it.v}</span>
+				</div>
+			))}
+		</div>
+	);
+}
+
+// Term/definition grid — roles, tile types, card abilities, phases. `items` =
+// [{ t, d }]. Two columns on desktop, stacked below 560px (see the stylesheet).
+export function RulesDefs({ items }) {
+	return (
+		<dl className="rl-dl">
+			{items.filter(Boolean).map((it, i) => (
+				<React.Fragment key={i}>
+					<dt>{it.t}</dt>
+					<dd>{it.d}</dd>
+				</React.Fragment>
+			))}
+		</dl>
+	);
+}
+
+// A called-out aside inside a section ("the thing to notice").
+export function RulesTip({ children }) {
+	return <div className="rl-tip">{children}</div>;
 }
 
 // Backdrop + panel + titled header with a ✕. Backdrop click and Escape both close.

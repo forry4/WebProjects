@@ -322,16 +322,8 @@ html,body{margin:0;padding:0;background:#120c0d}
 .coc-modal h3{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:1rem;margin-bottom:6px}
 .coc-modal p{color:var(--text-dim);font-size:.88rem;margin-bottom:14px}
 .coc-modal-row{display:flex;flex-wrap:wrap;gap:8px}
-/* How-to-play (Rules) modal */
-.coc-rules{max-width:540px;display:flex;flex-direction:column;max-height:86vh}
-.coc-rules-body{overflow-y:auto;scrollbar-gutter:stable;padding-right:6px}
-.coc-rules-body p{margin-bottom:10px;line-height:1.5}
-.coc-rules-lead{color:var(--text)}
-.coc-rules-note{color:var(--text-dim);font-size:.8rem;font-style:italic;margin-bottom:0}
-.coc-rules-body h4{font-family:'Cinzel','Cinzel Fallback',serif;color:var(--gold);font-size:.9rem;margin:14px 0 6px}
-.coc-rules-body ul{margin:0 0 10px;padding-left:20px}
-.coc-rules-body li{color:var(--text-dim);font-size:.86rem;line-height:1.5;margin-bottom:4px}
-.coc-rules-body b{color:var(--text)}
+/* How-to-play is the SHARED kit now (rulesModalCss / .rl-*) — CoC's own
+   .coc-rules* vocabulary was retired with it. */
 /* non-blocking variant: clicks fall through to the board; panel pinned to the bottom */
 .coc-modal-float{background:transparent;pointer-events:none;align-items:flex-end;padding-bottom:16px}
 .coc-modal-float .coc-modal{pointer-events:auto;max-width:560px;box-shadow:0 8px 30px rgba(0,0,0,.7)}

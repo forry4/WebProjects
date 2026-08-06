@@ -446,6 +446,93 @@ try {
 		await joinCtx.close();
 	}
 
+	// ── The shared lobby Rules button + how-to-play modal ─────────────────────
+	// One kit, six lobbies — so it is worth driving all six rather than one. The
+	// three contracts that regress silently:
+	//   1. every lobby actually PASSES onRules (the button is opt-in, so a game
+	//      that forgets it renders a perfectly fine lobby with no way in);
+	//   2. the BODY is the scroller, not the page — `.rl-body` has min-height:0
+	//      and one stray CSS edit turns the panel into a page-height modal whose
+	//      "Got it" button sits below the fold (the shape every per-game copy of
+	//      this modal used to have);
+	//   3. on a phone the create row SCROLLS SIDEWAYS instead of wrapping, and
+	//      the page itself must not scroll sideways with it.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "rules-harness", name: "Rules", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/oddtrick"]) {
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
+			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
+			check(`${route} lobby offers a Rules button`, hasBtn === 1, `count ${hasBtn}`);
+			if (!hasBtn) continue;
+
+			await page.locator(".lby-rules").click({ timeout: 10_000 }).catch(() => {});
+			await page.waitForSelector(".rl-body", { timeout: 10_000 }).catch(() => {});
+			const geom = await page.evaluate(() => {
+				const panel = document.querySelector(".rl-panel");
+				const body = document.querySelector(".rl-body");
+				const done = document.querySelector(".rl-done");
+				if (!panel || !body || !done) return null;
+				return {
+					panelH: panel.getBoundingClientRect().height,
+					viewH: window.innerHeight,
+					bodyScrolls: body.scrollHeight > body.clientHeight + 1,
+					doneBottom: done.getBoundingClientRect().bottom,
+					sections: document.querySelectorAll(".rl-sec").length,
+				};
+			});
+			check(`${route} rules open with real content`, !!geom && geom.sections >= 4,
+				JSON.stringify(geom));
+			if (!geom) continue;
+			check(`${route} rules scroll INSIDE the panel`,
+				geom.bodyScrolls && geom.panelH <= geom.viewH,
+				`panel ${Math.round(geom.panelH)} view ${geom.viewH} scrolls ${geom.bodyScrolls}`);
+			check(`${route} rules keep the close button on screen`,
+				geom.doneBottom <= geom.viewH, `bottom ${Math.round(geom.doneBottom)}`);
+
+			await page.keyboard.press("Escape");
+			await page.waitForSelector(".rl-panel", { state: "detached", timeout: 5_000 })
+				.catch(() => {});
+			const stillOpen = await page.locator(".rl-panel").count().catch(() => 1);
+			check(`${route} rules close on Escape`, stillOpen === 0, `count ${stillOpen}`);
+		}
+
+		// Phones: five controls no longer fit, so the row must scroll rather than wrap.
+		await page.setViewportSize({ width: 380, height: 760 });
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
+		const row = await page.evaluate(() => {
+			const el = document.querySelector(".lby-create-row");
+			if (!el) return null;
+			// "One row" can't be equal TOPS — the controls have different heights and
+			// the row centers them. It is that every control overlaps every other
+			// vertically, which a wrap breaks and a centered nowrap row never does.
+			const boxes = [...el.children].map((c) => c.getBoundingClientRect());
+			return {
+				overflows: el.scrollWidth > el.clientWidth + 1,
+				oneRow: Math.max(...boxes.map((b) => b.top)) < Math.min(...boxes.map((b) => b.bottom)),
+				pageWide: document.documentElement.scrollWidth > window.innerWidth + 1,
+			};
+		});
+		check("the phone create row scrolls sideways", !!row && row.overflows, JSON.stringify(row));
+		check("...on ONE row (no wrap)", !!row && row.oneRow, JSON.stringify(row));
+		check("...without making the PAGE scroll sideways", !!row && !row.pageWide,
+			JSON.stringify(row));
+		check("no page errors in the rules pass", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Dontminion's expansion picker ─────────────────────────────────────────
 	// Three contracts that regress SILENTLY (a one-word edit to a useState, a CSS
 	// rule that stops the list scrolling) and that nothing else here would catch:
