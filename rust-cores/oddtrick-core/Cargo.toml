@@ -1,0 +1,25 @@
+[package]
+name = "oddtrick-core"
+version = "0.1.0"
+edition = "2021"
+
+# Deliberately dependency-free: own RNG, own thread pool. Builds offline, and
+# keeps the hot loop free of anything we can't inspect.
+[dependencies]
+
+[features]
+# Flip the parity: ODD-numbered tricks score +2 and EVEN ones -1. That is 7
+# positive tricks against 6, so the pool widens from +5 to +8 and the ceiling
+# from 12 to 14 -- and trick 1 becomes a trick you WANT, which should reverse
+# the sign of the opening-lead advantage.
+odd-positive = []
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lib]
+name = "oddtrick"
+path = "src/lib.rs"

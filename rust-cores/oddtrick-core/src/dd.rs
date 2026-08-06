@@ -1,0 +1,364 @@
+//! Double-dummy solver: exact minimax over a fully-known deal.
+//!
+//! The round is constant-sum (+5), so a single number — player 0's point
+//! differential — is all the search needs. `search` returns the differential
+//! earned *from this position onward*, deliberately excluding points already
+//! banked, so a transposition table entry is valid regardless of how the
+//! position was reached.
+//!
+//! Note the search does NOT alternate strictly: the trick winner leads next,
+//! so the same player often moves twice in a row. That rules out negamax —
+//! hence the explicit max/min.
+//!
+//! Speed comes from four things, in order of how much they mattered:
+//!   1. MTD(f) — a ladder of null-window searches instead of one wide window.
+//!   2. Static bounds: the best and worst differential still reachable from a
+//!      given trick number is known in closed form, which cuts whole subtrees.
+//!   3. A best-move hint in the table, tried first on re-entry.
+//!   4. Equivalence pruning of interchangeable hand cards.
+
+use crate::cards::*;
+use crate::state::*;
+
+const F_EMPTY: u8 = 0;
+const F_EXACT: u8 = 1;
+const F_LOWER: u8 = 2;
+const F_UPPER: u8 = 3;
+const NO_MOVE: u8 = 255;
+
+#[derive(Clone, Copy)]
+struct Entry {
+    key: u64,
+    val: i8,
+    flag: u8,
+    mv: u8,
+}
+
+impl Default for Entry {
+    fn default() -> Self {
+        Entry {
+            key: 0,
+            val: 0,
+            flag: F_EMPTY,
+            mv: NO_MOVE,
+        }
+    }
+}
+
+/// `MAXD[t]` / `MIND[t]`: the largest and smallest differential still
+/// obtainable when the trick with index `t` is about to be played. Player 0
+/// gains 2 by winning a +2 trick and gains 1 by making the opponent eat a -1
+/// trick, so each remaining trick is worth 2 or 1 in absolute terms.
+static MAXD: [i16; 14] = build_bounds(true);
+static MIND: [i16; 14] = build_bounds(false);
+
+const fn build_bounds(max: bool) -> [i16; 14] {
+    let mut a = [0i16; 14];
+    let mut t = 13usize;
+    while t > 0 {
+        t -= 1;
+        // 2 for a +2 trick, 1 for a -1 trick, whichever parity those are.
+        let w: i16 = if trick_value(t as u8) == 2 { 2 } else { 1 };
+        a[t] = a[t + 1] + if max { w } else { -w };
+    }
+    a
+}
+
+pub struct Dd {
+    tt: Vec<Entry>,
+    mask: usize,
+    pub nodes: u64,
+    /// Bisection switches, for isolating a value regression to one technique.
+    pub use_bounds: bool,
+    pub use_mtdf: bool,
+    pub use_equiv: bool,
+}
+
+#[inline(always)]
+fn mix(mut x: u64) -> u64 {
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51afd7ed558ccd);
+    x ^= x >> 29;
+    x = x.wrapping_mul(0xc4ceb9fe1a85ec53);
+    x ^ (x >> 32)
+}
+
+/// Full position key. Banked points are excluded on purpose (see module doc);
+/// `trick` is included because parity scoring makes timing matter.
+#[inline]
+fn key_of(s: &State) -> u64 {
+    // Pack the piles densely: 6 piles x (2 cards + count) fits two words.
+    let mut a: u64 = 0;
+    let mut b: u64 = 0;
+    for i in 0..3 {
+        let p = &s.pile[0][i];
+        a = (a << 21) | ((p.n as u64) << 16) | ((p.c[1] as u64) << 8) | p.c[0] as u64;
+        let q = &s.pile[1][i];
+        b = (b << 21) | ((q.n as u64) << 16) | ((q.c[1] as u64) << 8) | q.c[0] as u64;
+    }
+    let h = mix(s.hand[0] as u64 | ((s.hand[1] as u64) << 28) | ((s.trump as u64) << 56));
+    let t = (s.trick as u64) | ((s.leader as u64) << 8) | ((((s.led as i16) as u16) as u64) << 16);
+    // Mix each component on its own before combining. Folding two fields
+    // together with XOR first would let their overlapping bit ranges alias,
+    // which silently returns another position's value out of the table.
+    mix(h ^ mix(a).rotate_left(17) ^ mix(b).rotate_left(37) ^ mix(t | (1 << 40)))
+}
+
+impl Dd {
+    /// `bits` sizes the table at 2^bits entries (16 bytes each). Bigger is not
+    /// automatically better — past L3 every probe is a cache miss.
+    pub fn new(bits: u32) -> Self {
+        let n = 1usize << bits;
+        Dd {
+            tt: vec![Entry::default(); n],
+            mask: n - 1,
+            nodes: 0,
+            use_bounds: true,
+            use_mtdf: true,
+            use_equiv: true,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for e in self.tt.iter_mut() {
+            e.flag = F_EMPTY;
+        }
+    }
+
+    /// Exact value of the position: player 0's future point differential.
+    pub fn solve(&mut self, s: &State) -> i16 {
+        if self.use_mtdf {
+            self.mtdf(s, 0)
+        } else {
+            self.search(s, -64, 64)
+        }
+    }
+
+    /// MTD(f): converge on the value with a ladder of null-window probes.
+    /// Every remaining trick shifts the differential by 1 or 2, so the value's
+    /// parity is fixed by how many odd-value tricks remain — which lets the
+    /// ladder step by 2 and halve the number of probes.
+    fn mtdf(&mut self, s: &State, guess: i16) -> i16 {
+        let t = s.trick as usize;
+        let (mut lo, mut hi) = (MIND[t], MAXD[t]);
+        if lo >= hi {
+            return lo;
+        }
+        // Parity of the reachable value set: each remaining trick contributes
+        // an odd amount exactly when it is a -1 trick.
+        let par = (MAXD[t] & 1).abs();
+        let mut g = guess.clamp(lo, hi);
+        if (g & 1).abs() != par {
+            g += 1;
+        }
+        while lo < hi {
+            let beta = if g <= lo { lo + 2 } else { g };
+            let v = self.search(s, beta - 2, beta);
+            if v < beta {
+                hi = v;
+            } else {
+                lo = v;
+            }
+            g = v;
+        }
+        g
+    }
+
+    /// Value of every legal move, in the order `State::legal` produces them.
+    /// Each is solved exactly — PIMC averages these across determinizations,
+    /// so bounds from a narrowed window would be wrong to average.
+    pub fn solve_root(&mut self, s: &State, moves: &[u8], out: &mut [i16]) {
+        let mut guess = 0i16;
+        for (i, &c) in moves.iter().enumerate() {
+            let mut t = *s;
+            let g = t.play(c) as i16;
+            // Sibling moves usually score close together, so seeding MTD(f)
+            // with the previous answer saves most of the ladder.
+            let v = if self.use_mtdf {
+                g + self.mtdf(&t, guess - g)
+            } else {
+                g + self.search(&t, -64, 64)
+            };
+            out[i] = v;
+            guess = v;
+        }
+    }
+
+    fn search(&mut self, s: &State, mut alpha: i16, mut beta: i16) -> i16 {
+        if s.done() {
+            return 0;
+        }
+        // Nothing left to play for can still decide the node.
+        let t = s.trick as usize;
+        if self.use_bounds {
+            if MAXD[t] <= alpha {
+                return MAXD[t];
+            }
+            if MIND[t] >= beta {
+                return MIND[t];
+            }
+        }
+        self.nodes += 1;
+
+        let key = key_of(s);
+        let slot = (key as usize) & self.mask;
+        let mut hint = NO_MOVE;
+        {
+            let e = unsafe { *self.tt.get_unchecked(slot) };
+            if e.flag != F_EMPTY && e.key == key {
+                let v = e.val as i16;
+                match e.flag {
+                    F_EXACT => return v,
+                    F_LOWER if v >= beta => return v,
+                    F_UPPER if v <= alpha => return v,
+                    _ => {}
+                }
+                hint = e.mv;
+            }
+        }
+
+        let (a0, b0) = (alpha, beta);
+        let mover = s.to_play() as usize;
+        let maxing = mover == 0;
+
+        let mut moves = [0u8; 16];
+        let n = s.legal(&mut moves);
+        let n = self.prune_and_order(s, mover, &mut moves, n, hint);
+
+        let mut best: i16 = if maxing { -64 } else { 64 };
+        let mut best_mv = moves[0];
+        for i in 0..n {
+            let mut t = *s;
+            let g = t.play(moves[i]) as i16;
+            // The child reports the differential AFTER this trick's `g`, so its
+            // window must be shifted by g. Handing it the parent's window makes
+            // every cutoff and every static bound comparison off by the trick's
+            // value — wide windows hide it, tight ones do not.
+            let v = g + self.search(&t, alpha - g, beta - g);
+            if maxing {
+                if v > best {
+                    best = v;
+                    best_mv = moves[i];
+                }
+                if best > alpha {
+                    alpha = best;
+                }
+            } else {
+                if v < best {
+                    best = v;
+                    best_mv = moves[i];
+                }
+                if best < beta {
+                    beta = best;
+                }
+            }
+            if alpha >= beta {
+                break;
+            }
+        }
+
+        let flag = if best <= a0 {
+            F_UPPER
+        } else if best >= b0 {
+            F_LOWER
+        } else {
+            F_EXACT
+        };
+        let ent = Entry {
+            key,
+            val: best as i8,
+            flag,
+            mv: best_mv,
+        };
+        unsafe { *self.tt.get_unchecked_mut(slot) = ent };
+        best
+    }
+
+    /// Drop provably-redundant moves, then sort by how likely they are to be
+    /// best. Both are pure node-count wins; neither changes the value.
+    fn prune_and_order(
+        &self,
+        s: &State,
+        mover: usize,
+        moves: &mut [u8; 16],
+        n: usize,
+        hint: u8,
+    ) -> usize {
+        // The led card has already left its owner's holding, but it still ranks
+        // between cards and still decides this trick — so it must count when
+        // testing whether two of our cards are interchangeable. Without it, K
+        // and J look adjacent while the led Q sits between them.
+        let mut inplay = s.in_play();
+        if s.led >= 0 {
+            inplay |= 1 << (s.led as u8);
+        }
+        let hand = s.hand[mover];
+
+        // Equivalence collapse: two cards of the same suit with no in-play card
+        // between them are interchangeable — but only if BOTH sit in hand.
+        // Two pile tops are never equivalent, because they cover different
+        // cards, and a hand card is never equivalent to a pile top for the
+        // same reason. Keep the lower of each run.
+        let mut kept = [0u8; 16];
+        let mut score = [0i32; 16];
+        let mut k = 0;
+        let want_win = trick_value(s.trick) > 0;
+        for i in 0..n {
+            let c = moves[i];
+            if self.use_equiv && hand & (1 << c) != 0 {
+                let below = SUIT_MASK[suit(c) as usize] & inplay & ((1u32 << c) - 1);
+                if below != 0 {
+                    let lower = 31 - below.leading_zeros();
+                    if hand & (1 << lower) != 0 {
+                        continue; // the lower card plays identically
+                    }
+                }
+            }
+            let r = rank(c) as i32;
+            // Order by this trick's intent: on a +2 trick the mover wants it,
+            // on a -1 trick they want to duck it.
+            let mut sc = if s.led >= 0 {
+                let w = beats(s.led as u8, c, s.trump);
+                match (want_win, w) {
+                    (true, true) => 1000 - r,   // win as cheaply as possible
+                    (true, false) => r,         // can't win: keep the big ones
+                    (false, false) => 1000 + r, // duck, and dump something big
+                    (false, true) => 100 - r,   // forced to win: pay the least
+                }
+            } else {
+                let trumpish = s.trump < NOTRUMP && suit(c) == s.trump;
+                if want_win {
+                    r + if trumpish { 7 } else { 0 }
+                } else {
+                    // Lead low: the point is to force the odd trick onto them.
+                    (6 - r) - if trumpish { 7 } else { 0 }
+                }
+            };
+            // Tiebreak toward the hand — playing a pile top hands the opponent
+            // a free look at the card underneath.
+            if hand & (1 << c) != 0 {
+                sc += 1;
+            }
+            if c == hint {
+                sc += 100_000; // whatever refuted this node last time
+            }
+            kept[k] = c;
+            score[k] = sc;
+            k += 1;
+        }
+
+        for i in 1..k {
+            let (c, sc) = (kept[i], score[i]);
+            let mut j = i;
+            while j > 0 && score[j - 1] < sc {
+                kept[j] = kept[j - 1];
+                score[j] = score[j - 1];
+                j -= 1;
+            }
+            kept[j] = c;
+            score[j] = sc;
+        }
+        moves[..k].copy_from_slice(&kept[..k]);
+        k
+    }
+}
