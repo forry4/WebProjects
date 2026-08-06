@@ -20,8 +20,11 @@ a Province is the best card you can own and the most useless one in hand):
   it flips for green cards once the game starts ending.
 """
 
-from . import engine
+import re as _re
+
+from . import cards, engine
 from .bot_traits import traits
+from .cards import CARDS
 
 # ── value scales ─────────────────────────────────────────────────────────────
 
@@ -180,6 +183,72 @@ def _pick(frame, *preferred):
     return {"ids": ids[:frame["constraint"]["pick"]]}
 
 
+# Ways whose whole text is printed bonuses, so their value is fully readable
+# off the card. Everything else (Butterfly's return-and-upgrade, Goat's trash,
+# Mouse's borrowed card, Rat, Seal, Turtle, Squirrel, Camel, Worm, Chameleon,
+# Frog, Owl, Mole) is deliberately absent: we take it never rather than model
+# it badly, because DECLINING is always a legal, sane answer and playing the
+# printed card is what the buy ladder was built around.
+_VANILLA_LINE = _re.compile(r"^\+\d+ (Card|Action|Buy)s?$|^\+\$\d+$")
+
+
+def _readable_bonus(text):
+    """(cards, actions, buys, coins) if `text` is NOTHING BUT printed bonuses,
+    else None. The None is the whole point: a card or Way whose value lives in
+    prose is one this policy refuses to price."""
+    cards_ = actions = buys = coins = 0
+    for line in (l.strip() for l in text.split("\n")):
+        if not line:
+            continue
+        if not _VANILLA_LINE.match(line):
+            return None
+        if line.startswith("+$"):
+            coins += int(line[2:])
+        else:
+            n, word = int(line[1:].split()[0]), line.split()[1].rstrip("s")
+            if word == "Card":
+                cards_ += n
+            elif word == "Action":
+                actions += n
+            else:
+                buys += n
+    return (cards_, actions, buys, coins)
+
+
+def _way_choice(game, pid, frame):
+    """"normally" or "as the Way?" — and the DEFAULT IS NORMALLY.
+
+    This is a floor, not a strategy. A Way replaces the played card's whole
+    ability, so taking one is a deviation from the plan the bot bought its deck
+    for; the only case we take is the one that can be priced with certainty —
+    a VANILLA card against a VANILLA Way, where both sides are nothing but
+    printed bonuses and the comparison is arithmetic rather than judgement.
+    A Chapel, a Militia or a Remodel is therefore never Way'd, whatever the
+    Way offers, because its value is not on the +lines.
+
+    Weights are the usual BM-ish read (a card is worth a bit more than a coin,
+    an Action only matters when you have none left, a Buy is worth little to a
+    deck that buys once a turn). NOT MEASURED — `tools/bot_arena.py` is where a
+    real Way policy would be gated, and this exists so the bot is never WORSE
+    than a Menagerie-blind one in the meantime."""
+    played = (frame.get("data") or {}).get("card")
+    way = frame["card"]
+    if not played:
+        return "normal"
+    card_text = CARDS.get(played, {}).get("text", "")
+    way_text = cards.LANDSCAPES.get(way, {}).get("text", "")
+    mine, theirs = _readable_bonus(card_text), _readable_bonus(way_text)
+    if mine is None or theirs is None:
+        return "normal"
+
+    def score(b):
+        c, a, bu, co = b
+        # +Actions are worth nothing once we already have some to spare, which
+        # is what makes a Village-vs-Way-of-the-Sheep comparison honest.
+        return 1.4 * c + co + 0.3 * bu + (0.7 * a if game["actions"] <= 1 else 0.1 * a)
+    return "way" if score(theirs) > score(mine) else "normal"
+
+
 def _choose_option(game, pid, frame, rng):
     card = frame["card"]
     hand = list(game["seats"][pid]["hand"])
@@ -198,6 +267,15 @@ def _choose_option(game, pid, frame, rng):
     # ordering rarely changes the outcome — take it deterministically.
     if card == "__abilities":
         return {"ids": ids[:pick]}
+
+    # THE WAY OFFER (ph. 10). Once a Way is dealt, EVERY Action play stops to
+    # ask "normally, or as the Way?" — so a bot that falls through to
+    # `sample_decision` plays about half its Actions as whatever Way the board
+    # happens to have. That is the ph.-8 Debt shape exactly: no error, no
+    # stall, just a bot quietly throwing away the card its whole buy ladder
+    # was built around. The floor matters more than the ceiling here.
+    if frame["stage"] == "__way_offer":
+        return _pick(frame, _way_choice(game, pid, frame), "normal")
 
     # "You may play/reveal this" reactions — always yes: each is free value
     # (Trail/Weaver replay, Tunnel's Gold, Pirate's Treasure, Clerk's +$2,

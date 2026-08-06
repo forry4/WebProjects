@@ -595,9 +595,12 @@ function DmLandscape({ name, d, st, buyable, spent, seatOrder, names, myId, onBu
   const gesture = useCardInfoGesture(onInfo);
   const store = st.vp || 0;
   const kind = d.kind || st.kind || "event";
-  // An Event prints a price; a LANDMARK prints none, because it cannot be
-  // bought at all. Debt (Empires) is the third dimension and reads "5D".
-  const priceLabel = kind === "landmark" ? ""
+  // An Event or Project prints a price; a LANDMARK and a WAY print none,
+  // because neither can be bought at all. A Way's `cost` field is inert (`way`
+  // is not in BUYABLE_LANDSCAPE_KINDS), so showing its $0 would read as "free
+  // to buy" for something there is no move for. Debt (Empires) is the third
+  // dimension and reads "5D".
+  const priceLabel = ["landmark", "way"].includes(kind) ? ""
     : [d.cost || !d.debt ? "$" + (d.cost ?? 0) : "",
        d.debt ? d.debt + "D" : ""].filter(Boolean).join(" + ");
   const cls = "dm-lscape dm-ls-" + kind
@@ -2050,6 +2053,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
               <DmMatChip emoji="🍺" count={s.tavern.length} label="Tavern mat"
                 cards={s.tavern} onView={setMatView} onInfo={() => showThing("mat:tavern")} />
             )}
+            {/* The EXILE mat (Menagerie) is face up too, and it SCORES — an
+                opponent's Exiled Estates are part of the score line everyone
+                can already see, so hiding the contents would leave that number
+                unexplainable. */}
+            {(s.exile || []).length > 0 && (
+              <DmMatChip emoji="🚪" count={s.exile.length} label="Exile mat"
+                cards={s.exile} onView={setMatView} />
+            )}
           </div>
         </div>
       </div>
@@ -2603,6 +2614,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
               {(mySeat?.tavern || []).length > 0 && (
                 <DmMatChip emoji="🍺" count={mySeat.tavern.length} label="Tavern mat"
                   cards={mySeat.tavern} onView={setMatView} onInfo={() => showThing("mat:tavern")} />
+              )}
+              {/* The Exile mat, same chip for you and for an opponent: it is
+                  face up and it scores. There is no "discard from Exile"
+                  button — the mat's own ability is a timed window on a gain,
+                  so it arrives as an ordinary decision prompt. */}
+              {(mySeat?.exile || []).length > 0 && (
+                <DmMatChip emoji="🚪" count={mySeat.exile.length} label="Exile mat"
+                  cards={mySeat.exile} onView={setMatView} />
               )}
             </div>
             <div className="dm-handrow">

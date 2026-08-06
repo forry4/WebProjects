@@ -227,3 +227,70 @@ def test_every_policy_answer_is_a_legal_move(seed):
     (this soak caught exactly that in its first version).
     """
     assert _soak(1000 + seed) > 0
+
+
+# ── the Way offer (ph. 10): the floor, not a strategy ────────────────────────
+#
+# Once a Way is dealt, EVERY Action play stops to ask. A bot that falls through
+# to `sample_decision` here plays about half its Actions as whatever Way the
+# board has — the ph.-8 Debt shape: no error, no stall, just a bot throwing
+# away the card its buy ladder was built around.
+
+def _way_frame(game, way, played):
+    """The frame `push_way_offer` builds, without needing the Way implemented."""
+    engine.push_way_offer(game, A, way, played, "do")
+    engine._sync_pending(game)
+    return game["pending"][-1]
+
+
+def test_the_bot_plays_a_non_vanilla_card_normally_whatever_the_way_offers():
+    """A Chapel's value is not on its +lines, so it can never be priced against
+    a Way — and "normally" is always the sane answer."""
+    g = fresh()
+    for way in ("Way of the Sheep", "Way of the Otter", "Way of the Mole"):
+        fr = _way_frame(g, way, "Chapel")
+        assert D._way_choice(g, A, fr) == "normal", way
+        g["pending"] = []
+
+
+def test_a_vanilla_way_is_taken_when_it_beats_a_vanilla_card_and_not_otherwise():
+    """BOTH branches, on ONE pairing, with the state as the only difference —
+    a policy test that only ever sees "normal" proves nothing about the policy.
+
+    Village is +1 Card +2 Actions and nothing else; Way of the Otter is +2
+    Cards. With Actions to spare the Village's +2 Actions are nearly worthless
+    and the Way is strictly more deck, so we take it. Down to our last Action
+    they are worth full price, the two sides tie, and a tie is never a reason
+    to abandon the printed card."""
+    g = fresh(kingdom=["Smithy", "Village", "Moat", "Militia", "Witch",
+                       "Throne Room", "Gardens", "Market", "Cellar", "Festival"])
+    g["actions"] = 3
+    fr = _way_frame(g, "Way of the Otter", "Village")
+    assert D._way_choice(g, A, fr) == "way"
+    g["pending"] = []
+    g["actions"] = 1
+    fr = _way_frame(g, "Way of the Otter", "Village")
+    assert D._way_choice(g, A, fr) == "normal"
+
+
+def test_a_prose_way_is_never_taken_however_dead_the_card_is():
+    """The refusal is symmetric: a Way whose value lives in prose (Goat trashes,
+    Butterfly upgrades, Mouse borrows a card) cannot be priced either, so it is
+    declined even against a card the bot barely wants."""
+    g = fresh()
+    for way in ("Way of the Goat", "Way of the Butterfly", "Way of the Mouse",
+                "Way of the Owl", "Way of the Mole"):
+        fr = _way_frame(g, way, "Village")
+        assert D._way_choice(g, A, fr) == "normal", way
+        g["pending"] = []
+
+
+def test_the_way_offer_is_answered_by_decide_not_by_the_sampler():
+    """The contract that actually matters: `decide` must resolve the frame
+    itself. Falling through to `sample_decision` is the silent cripple."""
+    g = fresh()
+    _way_frame(g, "Way of the Sheep", "Chapel")
+    got = D.decide(g, A, random.Random(1))
+    assert got == {"ids": ["normal"]}
+    ok, err = engine.apply_move(g, A, {"type": "decision", **got})
+    assert ok, err

@@ -1552,6 +1552,84 @@ try {
 		await ctx.close();
 	}
 
+	// ── a REAL Menagerie board (ph. 10): WAYS and the Exile mat ───────────────
+	// The set is only creatable if `main.KNOWN_EXPANSIONS` carries it — which is
+	// exactly what Renaissance shipped without, and what nothing in the Python
+	// suite could see (the engine's own KINGDOM had the set, so every engine
+	// test passed while the create request silently fell back to base+intrigue).
+	// This block is the browser half of that guard.
+	//
+	// The new render path is a WAY: a landscape that is CONSULTED, never bought,
+	// so it must print NO price. A Way's `cost` field is inert (`way` is not in
+	// BUYABLE_LANDSCAPE_KINDS), so rendering its $0 would read as "free to buy"
+	// for something there is no move for — the same biconditional the Empires
+	// block asserts for landmarks and the Renaissance block for projects.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "men-harness", name: "Men", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".dm-checks", { timeout: 15_000 }).catch(() => {});
+		for (const label of ["Menagerie", "Base Set"]) {
+			await page.locator(".dm-checks .dm-check", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".dm-checks .dm-check-on")].map((b) => b.textContent.trim()));
+		check("the Menagerie expansion is selectable",
+			picked.length === 1 && /Menagerie/.test(picked[0]), JSON.stringify(picked));
+		await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+			.then(() => true).catch(() => false);
+		check("a Menagerie game deals a board", dealt);
+
+		if (dealt) {
+			const board = await page.evaluate(() => {
+				const faces = [...document.querySelectorAll(".dm-lscape")].map((f) => ({
+					kind: f.querySelector(".dm-ls-kind")?.textContent || "",
+					name: f.querySelector(".dm-ls-name")?.textContent || "",
+					cost: f.querySelector(".dm-ls-cost")?.textContent || "",
+					title: f.getAttribute("title") || "",
+					text: (f.querySelector(".dm-ls-text")?.textContent || "").length,
+					overflows: f.scrollHeight > f.clientHeight + 1,
+				}));
+				return { rows: document.querySelectorAll(".dm-lscape-row").length, faces };
+			});
+			const ways = board.faces.filter((f) => f.kind === "way");
+			// A Way prints its name and rules text but NO price — in the face AND
+			// in the tooltip, which the CSS `display:none` could never cover.
+			check("a Way renders with its text and no price at all",
+				ways.every((f) => f.name && f.text > 0 && !f.overflows
+					&& f.cost === "" && !/\$/.test(f.title.split("\n")[0])),
+				JSON.stringify(ways));
+			// ...and the row itself is well-formed whatever the deal produced
+			check("the Menagerie landscape row is well-formed",
+				board.faces.length === 0 ? board.rows === 0 : board.rows === 1,
+				JSON.stringify(board.faces.map((f) => f.kind)));
+			// The Exile mat is a public per-seat zone that SCORES, so it renders
+			// for every seat — but only once something is on it, exactly like the
+			// Tavern mat. A fresh board must show none rather than an empty chip.
+			const chips = await page.evaluate(() =>
+				[...document.querySelectorAll(".dm-mat-chip")].map((c) => c.getAttribute("title") || ""));
+			check("a fresh board shows no empty Exile chip",
+				!chips.some((t) => /Exile/i.test(t)), JSON.stringify(chips));
+		}
+		check("no page errors on a Menagerie board", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Dontminion: the detail modal is not card-only ─────────────────────────
 	// A Dominion table is not only cards, and everything else on it used to be
 	// unreadable: an Event's text is CLIPPED by its own face, a Landmark is never

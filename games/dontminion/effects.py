@@ -9,12 +9,12 @@ modules is a packaging bug and raises at import.
 from . import (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
                effects_hinterlands, effects_cornucopia, effects_alchemy,
                effects_darkages, effects_adventures, effects_empires,
-               effects_renaissance)
+               effects_renaissance, effects_menagerie)
 
 _MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
             effects_hinterlands, effects_cornucopia, effects_alchemy,
             effects_darkages, effects_adventures, effects_empires,
-            effects_renaissance)
+            effects_renaissance, effects_menagerie)
 
 EFFECTS = {}
 STAGES = {}
@@ -24,6 +24,17 @@ STAGES = {}
 TRIGGERS = {}
 COST_MODS = {}
 DYN_COSTS = {}          # card -> fn(game) -> reduction on the card's OWN cost (Peddler)
+# ph. 10: card -> fn(game) -> {"coins","potions","debt"} | None. An ABSOLUTE
+# cost replacing the whole calculation (Wayfarer copies another card's cost
+# vector), as opposed to DYN_COSTS' reduction — "cost reduction only affects
+# Wayfarer's default cost of $6", so this bypasses bridges/Canal/Quarry/the
+# -$2 token and every COST_MODS entry. None means "use the normal path".
+COST_OVERRIDE = {}
+# ph. 10: card -> {"avail": fn(game,pid)->bool, "label": str, "stage": str}.
+# An ALTERNATIVE PAYMENT inside the affordability check itself (Animal Fair:
+# "instead of paying this card's cost, you may trash an Action card from your
+# hand"). Read by _h_buy AND legal_moves through engine.buy_pay_alt.
+BUY_PAY_ALT = {}
 BUY_GATES = {}          # card -> fn(game, pid) -> error string | None (Grand Market)
 MANUAL_TREASURES = set()  # treasures play_all must skip (interactive: Anvil-class)
 # Treasures whose VALUE depends on what else is already in play, so play_all
@@ -75,6 +86,14 @@ for _m in _MODULES:
         if _name in DYN_COSTS:
             raise RuntimeError(f"dontminion: duplicate DYN_COSTS entry {_name!r}")
         DYN_COSTS[_name] = _fn
+    for _name, _fn in getattr(_m, "COST_OVERRIDE", {}).items():
+        if _name in COST_OVERRIDE:
+            raise RuntimeError(f"dontminion: duplicate COST_OVERRIDE entry {_name!r}")
+        COST_OVERRIDE[_name] = _fn
+    for _name, _spec in getattr(_m, "BUY_PAY_ALT", {}).items():
+        if _name in BUY_PAY_ALT:
+            raise RuntimeError(f"dontminion: duplicate BUY_PAY_ALT entry {_name!r}")
+        BUY_PAY_ALT[_name] = _spec
     for _name, _fn in getattr(_m, "BUY_GATES", {}).items():
         if _name in BUY_GATES:
             raise RuntimeError(f"dontminion: duplicate BUY_GATES entry {_name!r}")
