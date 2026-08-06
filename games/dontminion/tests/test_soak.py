@@ -36,7 +36,7 @@ def _census(game):
         for zone in ("deck", "hand", "discard", "in_play", "aside",
                      "dur_aside", "island", "village_mat",
                      "set_aside", "cleanup_aside", "cleanup_return",
-                     "tavern"):
+                     "tavern", "exile"):
             total.update(seat.get(zone, []))
         # duration entries hold real cards; dur_setup cards are still in in_play
         for entry in seat.get("duration", []):

@@ -1,6 +1,6 @@
-# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages + Adventures + Empires)
+# Dontminion (Dominion: Base + Intrigue + Seaside + Prosperity + Hinterlands + Cornucopia & Guilds (all 2E) + Alchemy + Dark Ages + Adventures + Empires + Renaissance + Menagerie)
 
-2–4 players, 312 cards + 33 Events + 21 Landmarks. Mounted at `/dontminion`. Plan + full domain spec:
+2–4 players, 368 cards + 114 LANDSCAPE cards (53 Events, 21 Landmarks, 20 Projects, 20 Ways) + 5 Artifacts. Mounted at `/dontminion`. Plan + full domain spec:
 `.claude-plans/i-want-to-add-luminous-pebble.md`; the FULL-CATALOG expansion roadmap (all 16
 sets, phased by kernel mechanic) is `EXPANSIONS.md`. Rules source of truth: the Knutsen
 compendium `C:\Users\Forrest\Downloads\Dominion_CompleteRules_v11.1.pdf` (ch. VII = per-card
@@ -27,10 +27,12 @@ would silently let one definition win and change what the other half's tests exe
 
 ## Save-shape versioning (`SCHEMA` + `migrate`) — READ BEFORE ADDING A GAME-DICT KEY
 
-`engine.SCHEMA` (now **12**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
+`engine.SCHEMA` (now **14**: 1 = Base+Intrigue, 2 = Seaside, 3 = Prosperity, 4 = card renames,
 5 = Hinterlands, 6 = the pile model, 7 = Cornucopia & Guilds, 8 = Alchemy, 9 = Dark Ages,
-10 = the landscape kernel, 11 = the Debt vector, 12 = Empires — both of the last two are
-FILL-ONLY bumps, v11 adding `game["debt"]` and v12 `seat["cleanup_return"]`)
+10 = the landscape kernel, 11 = the Debt vector, 12 = Empires, 13 = Renaissance,
+14 = Menagerie — the last four are all FILL-ONLY bumps: v11 `game["debt"]`,
+v12 `seat["cleanup_return"]`, v13 `villagers`/`artifacts`/`fleet`, v14
+`seat["exile"]` + `game["last_turn_trashes"]`/`game["mouse_card"]`)
 is the game-dict shape version,
 stamped by `new_game`. `engine.migrate(game)` upgrades any older persisted blob
 in place and is called by `main.load_game_to_memory` — THE migration point. Because of it the
@@ -199,6 +201,125 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   (buy, gain, the trigger bus, the game end, redaction, census, migration, all three bot tiers)
   and `test_soak_a_board_carrying_every_kind_of_pile` plays full random games on a board holding
   both shapes under the conservation census.
+
+**Kernel v10 — the phase-10 (Menagerie) delta. FROZEN — card batches build against this.**
+**SCHEMA 14**, a fill-only bump for one seat zone (`exile`) and two game keys
+(`last_turn_trashes`, `mouse_card`). Twelve items, each with a consumer in this set:
+
+- **EXILE — a new per-seat PUBLIC zone, and the first zone that is OWNED but sits outside
+  the gain/discard economy IN ONE DIRECTION ONLY.** `exile(game, pid, cards, zone="hand"|
+  "supply")` / `discard_from_exile` / `on_exile(game, pid, card)` (THE "do I have a copy
+  there" reader). Exiled cards SCORE, so the mat joins `owned_cards` **and both
+  conservation censuses** — `engine.owned_cards` and `test_soak._census` are the same claim
+  asked from opposite ends, and a zone missing from either goes unseen. Coming IN is not a
+  gain ("Exiling cards from the Supply is not considered gaining cards" — the `exchange`
+  discipline, since a gain emit here would fire every when-gain watcher in the game for a
+  card nobody gained); going OUT to the discard **is** a discard for triggers ("when you
+  discard cards from your Exile mat, when-discard abilities such as Faithful Hound, Trail,
+  Tunnel, Village Green and Weaver trigger"), which is why that direction routes through
+  `discard()`. A new `exile` emit rides the move (Invest reads it). `gain(..., dest="exile")`
+  lands a gain straight on the mat.
+- **THE MAT'S OWN ABILITY IS A KERNEL POOL CONTRIBUTOR** (`_collect_exile_abilities`), the
+  ph.-7 token shape a second time: a mat is not a card, a landscape or an artifact, so it can
+  have no `TRIGGERS` entry — but "when you gain a card, you may discard any number of copies
+  of it from your Exile mat" is CONCURRENT with everything else the gain triggered (ch. VI
+  lists it beside Watchtower, Sheepdog and Sleigh), so it must arrive through the POOL rather
+  than inline. It is a **yes/no, never a `choose_cards`**: "you can't choose to just discard
+  some of them". Gated on a copy actually being on the mat, so an ordinary board pays one
+  list lookup.
+- **`add_cards(game, n, pid=None, final=False)` — THE PRINTED "+N CARDS" PRIMITIVE, and the
+  riskiest item in the set.** Card code had always called `draw()` for three different printed
+  things — "+3 Cards" (Smithy), "draw 2 cards" and "draw until you have 6" — and **Way of the
+  Chameleon changes exactly one of them** ("only card drawing denoted with '+' is changed to
+  +$. For instance 'draw 2 cards' is unchanged"). Nothing at the call site could tell them
+  apart, so all 145 printed-plus sites were migrated and the line is held at AST level by
+  `test_every_plus_cards_grant_uses_add_cards`, with an explicit 16-entry allowlist carrying
+  each genuine non-"+" draw's printed wording. Without it the next set's Smithy silently opts
+  out of the Chameleon and nothing fails. `final=True` composes with ph. 9's `final_draw`
+  (the Star Chart pick) and **the order matters: a SWAPPED +Cards draws nothing at all**, so
+  it can cause no shuffle and needs no pick. Off-turn it still draws — drawing is not a
+  per-turn POOL — which is why it does not go through `_grant`; the swap binds the turn
+  player only, since a swapped +Cards becomes +$ and $ off-turn evaporates by rule. Both seat
+  tokens apply to the RESULT of a swap, so their handling is duplicated in `add_cards`
+  deliberately rather than skipped.
+- **WAYS — `push_way_offer(game, pid, way, card, stage)`, and NO NEW MOVE.** Ph. 8 built the
+  `would_resolve` window for Enchantress and the compendium puts Ways in that exact class
+  ("Ways are triggered at the same time as Enchantress, replacing what you do"), so a Way is
+  a `TRIGGERS` entry with `{"on":"would_resolve","from":"landscape"}` whose stage offers a
+  two-option prompt. It is a window, not a `legal_moves` entry, because it has to be ordered
+  in the ability pool against whatever else that occurrence collected — the 6H `call`
+  finding again. Picking the Way calls `cancel_pending_play` and runs the Way's stage; the
+  card **still counts as PLAYED** (in play, `actions_played` bumped, `action_resolved` still
+  fires). **A DECISION ON EVERY ACTION PLAY IS THIS SET'S PRODUCT COST, and it is the rule.**
+  Ways are not in `BUYABLE_LANDSCAPE_KINDS`, so their `cost` field is inert. Six of the twenty
+  ("this" — Butterfly, Chameleon, Frog, Horse, Rat, Turtle) mean **the played Action card,
+  not the Way** (ch. IV WAYS).
+- **KILN — `before_play` widened to a card of ANY TYPE** (`_before_play_then_treasure` +
+  `_k_play_treasure_rest`). "The next time you play a card this turn" is not just an Action,
+  so an ordinary Treasure play needs the window — and it needs the same CONDITIONAL parking
+  as 6H's Action version, for the same reason: the coins and the card's own ability run
+  INLINE, so a pool parked in front of them would resolve after them, i.e. backwards. A board
+  without a Kiln is byte-identical to before.
+- **WAYFARER — `effects.COST_OVERRIDE[card] = fn(game) -> {coins,potions,debt} | None`, an
+  ABSOLUTE cost, not a reduction.** `DYN_COSTS` subtracts inside `cost()`, which serves
+  Destrier and Fisherman exactly — but "if Wayfarer is copying the cost of another card, only
+  cost reduction ON THAT CARD applies (which Wayfarer would copy), not cost reduction on
+  Wayfarer itself", so it bypasses `bridges`, Canal, Quarry, the −$2 Ferry token and every
+  `COST_MODS` entry. It is a **VECTOR** ("Wayfarer can have a cost with Potion or Debt in
+  it"), consulted at the top of all three readers, and **recursion-guarded**: Wayfarer copying
+  a Destrier asks `cost()` again, and the re-entry flag makes an override that asks about
+  itself fall through to the printed path rather than loop.
+- **ANIMAL FAIR — `effects.BUY_PAY_ALT[card] = {"avail", "label", "stage"}`, an escape inside
+  the AFFORDABILITY CHECK ITSELF.** "You are allowed to choose Animal Fair even without having
+  $7, as long as you have an Action card in hand. You may choose to either pay its cost (if
+  you have $7) or trash an Action card from your hand. (You always use 1 Buy.)" `buy_pay_alt`
+  is THE reader, consulted by `_h_buy` AND `legal_moves` — an enumerator and a handler that
+  disagree hand the bot a move that does nothing (the `play_all_treasures` livelock). The
+  stage runs BEFORE the gain: "if you buy it by trashing a card, the trashing happens before
+  any when-buy abilities."
+- **SNOWY VILLAGE — `turn_ctx["ignore_actions"]`.** "Ignore any further +Actions you get this
+  turn" — the grant is DROPPED inside `add_actions`, not zeroed later, so a Village played
+  afterwards gives nothing, and it is LOGGED (`actions_ignored`) rather than silent. **Ph. 9's
+  Villagers obey it for free**, because spending one is "+1 Action" and routes through the
+  same function — the payoff for that routing decision, one phase later.
+- **GOATHERD — `game["last_turn_trashes"]`, `turn_ctx["trashes"]`'s twin of
+  `last_turn_gains`.** A COUNT, because that is all the card asks ("+1 Card per card the
+  player to your right trashed on their last turn"), and counted for the TURN PLAYER's turn
+  regardless of who did the trashing — that is whose turn it was.
+- **MASTERMIND — `link_duration(game, pid, card, handle)`.** "Mastermind stays in play as
+  long as that Duration stays in play": a rider like `mark_duration_rider`, but attached from
+  a LATER WINDOW (a start-of-turn stage, a whole turn after its own entry was created), which
+  is exactly what ph. 9's `duration_handle` exists for. **TRANSITIVE**, and the entry it
+  chases is the LINKING CARD'S OWN (`other["card"] == card`), never one the card merely rides
+  — a Throne Room and a Mastermind can both ride one Caravan without the Throne Room belonging
+  to the Mastermind. It **MOVES** the riders rather than copying them: a rider recorded on two
+  live entries is one physical card counted twice by the conservation census, and both
+  entries promote at Clean-up.
+- **WAY OF THE MOUSE — `play_mouse_card` + `game["mouse_card"]`.** The third member of ch.
+  VI's PLAY A CARD WHILE LEAVING IT family, and it needed its own wrapper because neither
+  sibling fits: `play_from_supply` (5H) wants a Supply pile and `play_set_aside` (ph. 7) wants
+  a card in a SEAT's zone, while the Mouse card is a single game-level card belonging to
+  nobody. Chosen at setup from the kingdom cards this game did NOT deal (the Bane/Ferryman
+  shape) and **non-Duration** — the 2025 errata, which ch. I's own setup paragraph was never
+  updated for; the card and ch. VII win. It is **not a pile** ("isn't a pile. No VP tokens
+  will accumulate if the card is Farmers' Market").
+- **THE HORSE PILE — 30 cards, OUTSIDE the Supply**, so it is never buyable and never counts
+  toward the three-empty-piles end, both free from ph. 3H's non-Supply index. ⚠ **"If any
+  cards referring to Horses are used" means EVERY CARD IN THE GAME, not just the Supply**:
+  four Events (Bargain, Demand, Ride, Stampede) gain Horses with no kingdom producer needed,
+  and Sleigh ($2) and Scrap ($3) are both eligible **Mouse cards**. `cards.uses_horses` reads
+  CARDS *or* LANDSCAPES, and the Mouse pick moved ABOVE the Horse clause in `new_game` so it
+  can be consulted. Reading the Supply alone left all three shapes gaining from a pile that
+  was never built.
+- **Wire**: every seat's `exile` is PUBLIC and ships as-is — ch. II lists "all cards you have
+  set aside face up (including on any player mats)" as open information, and the Exile mat is
+  face up. Everything above is contract-tested in `tests/test_menagerie_kernel.py` (62)
+  against synthetic Ways, Projects and an invented Horse card.
+
+⚠ **ADDING 40 LANDSCAPES RE-DEALS EVERY EXISTING SEED'S LANDSCAPES.** `deal_landscapes`
+simulates the randomizer mix literally, so pool SIZE is an input — the ph.-9 side effect
+again. Expect forced-board soak churn on the data commit; the `_WAY_CAP` of 1 and
+`_LANDSCAPE_CAP` of 2 have been in place since 6H and need no change.
 
 **Kernel v9 — the phase-9 (Renaissance) delta. FROZEN — card batches build against this.**
 **SCHEMA 13**, a fill-only bump for three game keys (`villagers`, `artifacts`, `fleet`).

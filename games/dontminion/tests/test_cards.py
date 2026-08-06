@@ -21,7 +21,7 @@ ALLOWED_TYPES = {"action", "treasure", "victory", "curse", "attack", "reaction",
                  "castle", "gathering"}
 ALLOWED_EXPANSIONS = {"basic", "base", "intrigue", "seaside", "prosperity",
                       "hinterlands", "cornucopia", "alchemy", "darkages",
-                      "adventures", "empires", "renaissance"}
+                      "adventures", "empires", "renaissance", "menagerie"}
 SCHEMA_FIELDS = {"cost", "types", "coins", "vp", "text", "expansion", "kingdom"}
 # keys a card may carry IN ADDITION to the required schema
 OPTIONAL_FIELDS = {"overpay",      # the `$N+` cost (Guilds/C&G)
@@ -406,6 +406,38 @@ EXPECTED = {
     'Swashbuckler': (5, ['action']),
     'Treasurer': (5, ['action']),
     'Villain': (5, ['action', 'attack']),
+    # Menagerie (31): 30 kingdom piles + Horse (non-Supply)
+    'Horse': (3, ['action']),
+    'Black Cat': (2, ['action', 'attack', 'reaction']),
+    'Sleigh': (2, ['action', 'reaction']),
+    'Supplies': (2, ['treasure']),
+    'Camel Train': (3, ['action']),
+    'Goatherd': (3, ['action']),
+    'Scrap': (3, ['action']),
+    'Sheepdog': (3, ['action', 'reaction']),
+    'Snowy Village': (3, ['action']),
+    'Stockpile': (3, ['treasure']),
+    'Bounty Hunter': (4, ['action']),
+    'Cardinal': (4, ['action', 'attack']),
+    'Cavalry': (4, ['action']),
+    'Groom': (4, ['action']),
+    'Hostelry': (4, ['action']),
+    'Village Green': (4, ['action', 'duration', 'reaction']),
+    'Barge': (5, ['action', 'duration']),
+    'Coven': (5, ['action', 'attack']),
+    'Displace': (5, ['action']),
+    'Falconer': (5, ['action', 'reaction']),
+    'Fisherman': (5, ['action']),
+    'Gatekeeper': (5, ['action', 'duration', 'attack']),
+    'Hunting Lodge': (5, ['action']),
+    'Kiln': (5, ['action']),
+    'Livery': (5, ['action']),
+    'Mastermind': (5, ['action', 'duration']),
+    'Paddock': (5, ['action']),
+    'Sanctuary': (5, ['action']),
+    'Destrier': (6, ['action']),
+    'Wayfarer': (6, ['action']),
+    'Animal Fair': (7, ['action']),
 }
 
 BASIC_7 = ["Copper", "Silver", "Gold", "Estate", "Duchy", "Province", "Curse"]
@@ -421,11 +453,11 @@ def test_bandit_ruling_constant():
 
 
 def test_card_count_and_expansion_counts():
-    assert len(cards.CARDS) == 337
+    assert len(cards.CARDS) == 368
     by_exp = {"basic": [], "base": [], "intrigue": [], "seaside": [],
               "prosperity": [], "hinterlands": [], "cornucopia": [],
               "alchemy": [], "darkages": [], "adventures": [],
-              "empires": [], "renaissance": []}
+              "empires": [], "renaissance": [], "menagerie": []}
     for name, c in cards.CARDS.items():
         by_exp[c["expansion"]].append(name)
     # 34 kingdom + 10 Knights + 5 Ruins + 3 Shelters + Spoils/Madman/Mercenary
@@ -446,6 +478,10 @@ def test_card_count_and_expansion_counts():
     # piles are the whole set (the 20 Projects are LANDSCAPES and the 5
     # Artifacts are neither cards nor landscapes; see cards.ARTIFACTS)
     assert len(by_exp["renaissance"]) == 25
+    # Menagerie: 30 kingdom piles + Horse, which is a card of the set but sits
+    # OUTSIDE the Supply (the 20 Events and 20 Ways are LANDSCAPES, and Way of
+    # the Mouse's set-aside card is borrowed from another set's undealt ten)
+    assert len(by_exp["menagerie"]) == 31
     assert sorted(by_exp["basic"]) == sorted(BASIC_7)
 
 
@@ -454,7 +490,8 @@ def test_kingdom_lists_match_flags_no_duplicates():
                       ("prosperity", 25), ("hinterlands", 26),
                       ("cornucopia", 26), ("alchemy", 11), ("darkages", 35),
                       # 18 ordinary piles + 5 split piles + Castles
-                      ("empires", 24), ("renaissance", 25)):
+                      ("empires", 24), ("renaissance", 25),
+                      ("menagerie", 30)):
         names = cards.KINGDOM[exp]
         assert len(names) == want
         assert len(set(names)) == want  # no duplicates
@@ -582,42 +619,38 @@ def test_requirement_pools_are_the_expected_cards():
     assert cards.REQUIREMENT_ORDER == ("actions", "buys", "draw")
     assert set(cards.REQUIREMENTS) == set(cards.REQUIREMENT_ORDER)
     assert cards.cards_granting("actions") == [
-        "Bandit Camp", "Bazaar", "Border Village", "City", "City Quarter",
-        "Crossroads", "Diplomat", "Farmhands", "Festival", "Fishing Village",
-        "Fortress", "Hideout", "Inn", "Lost City", "Mining Village",
-        "Mountain Village", "Native Village", "Nobles", "Plaza", "Port",
-        "Sacrifice", "Shanty Town", "Squire", "University", "Villa",
-        "Village", "Wandering Minstrel", "Worker's Village"]
-    # ...and NOT Coin of the Realm, whose "+2 Actions" is on its CALL ability.
-    # A call is not a play, so a player guaranteed "+2 Actions" would otherwise
-    # be handed a Treasure and no village at all — see cards._CALL_CLAUSE.
-    assert "Coin of the Realm" not in cards.cards_granting("actions")
+        'Bandit Camp', 'Bazaar', 'Border Village', 'City', 'City Quarter',
+        'Crossroads', 'Diplomat', 'Farmhands', 'Festival', 'Fishing Village',
+        'Fortress', 'Hideout', 'Hostelry', 'Hunting Lodge', 'Inn',
+        'Lost City', 'Mining Village', 'Mountain Village', 'Native Village',
+        'Nobles', 'Plaza', 'Port', 'Sacrifice', 'Shanty Town',
+        'Snowy Village', 'Squire', 'University', 'Villa', 'Village',
+        'Village Green', 'Wandering Minstrel', "Worker's Village"]
     assert cards.cards_granting("buys") == [
-        "Astrolabe", "Baron", "Bridge", "Bridge Troll", "Candlestick Maker",
-        "Capital", "Cauldron", "Charm", "City", "Collection", "Council Room",
-        "Counterfeit", "Courtier", "Ducat", "Farmers' Market", "Farrier",
-        "Festival", "Forager", "Forum", "Grand Market", "Hamlet", "Herbalist",
-        "Margrave", "Market", "Market Square", "Merchant Guild", "Messenger",
-        "Nomads", "Pawn", "Peasant", "Ranger", "Salvager", "Silk Merchant",
-        "Souk", "Spice Merchant", "Spices", "Squire", "Storeroom", "Tactician",
-        "Tiara", "Villa", "Wharf", "Wine Merchant", "Worker's Village"
-    ]
+        'Astrolabe', 'Barge', 'Baron', 'Bridge', 'Bridge Troll',
+        'Candlestick Maker', 'Capital', 'Cauldron', 'Cavalry', 'Charm',
+        'City', 'Collection', 'Council Room', 'Counterfeit', 'Courtier',
+        'Ducat', "Farmers' Market", 'Farrier', 'Festival', 'Forager', 'Forum',
+        'Grand Market', 'Hamlet', 'Herbalist', 'Margrave', 'Market',
+        'Market Square', 'Merchant Guild', 'Messenger', 'Nomads', 'Pawn',
+        'Peasant', 'Ranger', 'Salvager', 'Sanctuary', 'Scrap',
+        'Silk Merchant', 'Snowy Village', 'Souk', 'Spice Merchant', 'Spices',
+        'Squire', 'Stockpile', 'Storeroom', 'Tactician', 'Tiara', 'Villa',
+        'Wharf', 'Wine Merchant', "Worker's Village"]
     assert cards.cards_granting("draw") == [
-        "Alchemist", "Apprentice", "Catacombs", "Council Room", "Courtyard",
-        "Cultist", "Diplomat", "Dungeon", "Enchantress", "Experiment",
-        "Ferryman", "Forum",
-        "Gear", "Guard Dog",
-        "Haunted Woods", "Hunting Grounds", "Inn", "Laboratory", "Lackeys",
-        "Lost City",
-        "Margrave", "Masquerade", "Menagerie", "Minion", "Moat", "Nobles",
-        "Old Witch", "Patrol", "Rabble", "Ranger", "Recruiter",
-        "Royal Blacksmith", "Sacrifice",
-        "Scholar", "Sea Witch", "Secret Passage",
-        "Shanty Town", "Silk Merchant", "Smithy", "Spice Merchant", "Stables",
-        "Steward", "Swashbuckler",
-        "Tactician", "Tide Pools", "Torturer", "Vault", "Warehouse", "Wharf",
-        "Wild Hunt", "Witch", "Witch's Hut", "Young Witch"
-    ]
+        'Alchemist', 'Apprentice', 'Barge', 'Black Cat', 'Catacombs',
+        'Cavalry', 'Council Room', 'Courtyard', 'Cultist', 'Destrier',
+        'Diplomat', 'Dungeon', 'Enchantress', 'Experiment', 'Ferryman',
+        'Forum', 'Gear', 'Guard Dog', 'Haunted Woods', 'Hunting Grounds',
+        'Hunting Lodge', 'Inn', 'Laboratory', 'Lackeys', 'Lost City',
+        'Margrave', 'Masquerade', 'Menagerie', 'Minion', 'Moat', 'Nobles',
+        'Old Witch', 'Patrol', 'Rabble', 'Ranger', 'Recruiter',
+        'Royal Blacksmith', 'Sacrifice', 'Scholar', 'Sea Witch',
+        'Secret Passage', 'Shanty Town', 'Sheepdog', 'Silk Merchant',
+        'Smithy', 'Spice Merchant', 'Stables', 'Steward', 'Swashbuckler',
+        'Tactician', 'Tide Pools', 'Torturer', 'Vault', 'Warehouse',
+        'Wayfarer', 'Wharf', 'Wild Hunt', 'Witch', "Witch's Hut",
+        'Young Witch']
 
 def test_requirement_bar_is_the_printed_bonus():
     # the threshold really binds: a cantrip is not a village, a Moat is a drawer

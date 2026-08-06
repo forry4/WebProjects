@@ -91,7 +91,7 @@ def _valid_difficulty(value) -> str:
 # missed; `npm run screens` caught it, nothing in the Python suite could).
 KNOWN_EXPANSIONS = ("base", "intrigue", "seaside", "prosperity", "hinterlands",
                     "cornucopia", "alchemy", "darkages", "adventures",
-                    "empires", "renaissance")
+                    "empires", "renaissance", "menagerie")
 
 
 def _valid_expansions(value) -> list[str]:

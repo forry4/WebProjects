@@ -57,6 +57,14 @@ TRASHERS = {
     "Masquerade": "weak", "Lookout": "weak", "Sentry": "weak",
     "Jack of All Trades": "weak", "Sailor": "weak", "Treasure Map": "weak",
     "Lurker": "weak",           # trashes from the SUPPLY, not your deck
+    # Menagerie. EXILE COUNTS AS THINNING HERE and that is a judgement, not a
+    # slip: an Exiled card leaves the deck exactly as a trashed one does, and
+    # every rule these tags feed (deck density, "do I still want a trasher")
+    # asks about the deck, not the trash pile. It still SCORES, which is why
+    # Sanctuary is "weak" rather than better — Exiling an Estate thins without
+    # losing the point, but Exiling a Copper is all it usually does.
+    "Scrap": "tfb", "Displace": "tfb", "Bounty Hunter": "tfb",
+    "Goatherd": "weak", "Sanctuary": "weak",
     # Empires
     "Sacrifice": "tfb", "Catapult": "tfb", "Small Castle": "tfb",
     "Temple": "multi",
@@ -107,6 +115,14 @@ ATTACKS = {
     # which is a tempo attack nothing else in the pool does. Only truthiness
     # and the `curse` test are read off this, so a new kind is safe.
     "Enchantress": "replace", "Legionary": "discard", "Catapult": "curse",
+    # Menagerie. Cardinal is a DECK attack — it Exiles a $3-$6 card off the top
+    # of each opponent's deck, which is Swindler's shape (their good card is
+    # gone) rather than a junker's. Gatekeeper junks nothing either: it stops
+    # the gain landing in their deck at all, so it gets its own kind. Only
+    # truthiness and the `curse` test are read off this map, so a new kind is
+    # safe (the Enchantress precedent).
+    "Black Cat": "curse", "Coven": "curse",
+    "Cardinal": "trash", "Gatekeeper": "exile",
     # Cornucopia & Guilds. Jester is filed under "curse" for the DEFENSIVE
     # read that matters — on a Victory card it hands out a Curse, and the
     # alternative (a copy of what they discarded) is not reliably junk.
@@ -156,6 +172,11 @@ GAINERS = {
     "Port", "Transmogrify", "Treasure Hunter", "Treasure Trove",
     # Empires
     "Engineer", "Charm", "Small Castle",
+    # Menagerie. The Horse producers gain from a NON-Supply pile, which is
+    # still gaining; Camel Train is deliberately absent (it Exiles from the
+    # Supply, which is Lurker's shape and not a gain at all).
+    "Cavalry", "Displace", "Falconer", "Groom", "Hostelry", "Livery",
+    "Paddock", "Scrap", "Sleigh", "Supplies", "Wayfarer",
     "Expand", "Forge", "Farmland", "Bureaucrat", "Bandit", "Blockade",
     "Pirate", "Jack of All Trades", "Treasure Map", "Lurker", "Mine",
     # Cornucopia & Guilds
@@ -194,6 +215,15 @@ PILE_GAINERS = {"Workshop", "Ironworks", "Artisan", "Wheelwright", "Weaver",
                 # ITSELF for a second one, so the deck grows without spending a
                 # card from hand — the Workshop shape, twice.
                 "Engineer",
+                # Menagerie: Groom gains any pile up to $4 and Falconer any
+                # pile under $5, both every play and neither costing a card
+                # from hand — the Workshop shape twice over. The Horse
+                # producers (Cavalry, Paddock, Sleigh) are NOT here: Horses
+                # come from one fixed non-Supply pile that never counts toward
+                # the three-empty end, so they drain nothing a rush needs.
+                # That is the Bureaucrat rule ("gains a Silver" is not a
+                # pile-drainer) applied to a whole set.
+                "Groom", "Falconer",
                 # Renaissance: Inventor and Sculptor are both the Workshop
                 # shape — any pile up to $4, every play, costing no card from
                 # hand. Sculptor gains to HAND, which if anything makes it the
@@ -219,6 +249,10 @@ SIFTERS = {
     "Crystal Ball", "Jack of All Trades", "Patrol", "Library", "Scheme",
     "Native Village", "Haven", "Secret Passage", "Courtyard", "Wishing Well",
     # Dark Ages
+    # Menagerie: Hunting Lodge trades a bad hand for five fresh cards, and
+    # Cardinal/Sleigh reorder what you are about to draw. Barge and Village
+    # Green are pure draw, not sifting.
+    "Hunting Lodge", "Sleigh",
     "Catacombs", "Ironmonger", "Mystic", "Sage", "Scavenger", "Storeroom",
     "Survivors", "Vagrant", "Wandering Minstrel",
     # Adventures: Dungeon and Fugitive both draw-then-discard, and a called
@@ -504,6 +538,14 @@ REVIEWED = frozenset([
     "Mountain Village", "Old Witch", "Patron", "Priest", "Recruiter",
     "Research", "Scepter", "Scholar", "Sculptor", "Seer", "Silk Merchant",
     "Spices", "Swashbuckler", "Treasurer", "Villain",
+    # Menagerie (30 kingdom piles) + Horse, which is not a kingdom card but is
+    # a card the bots meet and play, like Spoils and the Traveller upgrades.
+    "Animal Fair", "Barge", "Black Cat", "Bounty Hunter", "Camel Train",
+    "Cardinal", "Cavalry", "Coven", "Destrier", "Displace", "Falconer",
+    "Fisherman", "Gatekeeper", "Goatherd", "Groom", "Horse", "Hostelry",
+    "Hunting Lodge", "Kiln", "Livery", "Mastermind", "Paddock", "Sanctuary",
+    "Scrap", "Sheepdog", "Sleigh", "Snowy Village", "Stockpile", "Supplies",
+    "Village Green", "Wayfarer",
 ])
 
 

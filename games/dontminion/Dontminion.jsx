@@ -62,6 +62,7 @@ const EXPANSIONS = [
   { id: "adventures", name: "Adventures" },
   { id: "empires", name: "Empires" },
   { id: "renaissance", name: "Renaissance" },
+  { id: "menagerie", name: "Menagerie" },
 ];
 // Adventures tokens that sit ON a Supply pile (engine.TOKEN_KINDS). Public
 // markers, so they render for every player; the glyph is the token's own

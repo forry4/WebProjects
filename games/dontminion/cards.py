@@ -1292,6 +1292,131 @@ CARDS.update({
                         "expansion": "renaissance", "kingdom": True},
 })
 
+# --- MENAGERIE (phase 10): 30 kingdom cards + the Horse pile ------------------
+#
+# All 30 piles are 10 cards: the compendium expresses every pile-size exception
+# as a special-setup line ("If Rats is in the Supply, use all 20 cards") and the
+# Menagerie SPECIAL SETUP section contains none, and the set has NO Victory-typed
+# kingdom card, so the 8/12 rule is moot.
+#
+# THE ERRATA — four objects differ from the 2020 printing, three of them from the
+# 2025 pass that no card-list site necessarily carries yet:
+#   2020 — Village Green gained a REVEAL on its Reaction. The compendium then
+#          contradicts itself: ch. VII 10 says it "was reverted back to the
+#          original version when printed in 2025", while ch. VIII's own timing
+#          model is headed "Village Green (current version, 2020)" and reads
+#          "you may reveal This. If you do: Play This". Two sources say reveal,
+#          one says reverted; we SHIP THE REVEAL (chart + ch. VIII) and pin it.
+#          Recorded as ambiguity A9.
+#   2025 — Gamble now ALWAYS discards the top card first, then plays it from the
+#          discard pile if you choose to. Pre-2025 it revealed and only
+#          discarded on a decline, so a Village Green / Trail / Weaver /
+#          Faithful Hound now reacts to Gamble's discard.
+#   2025 — Reap gains the Gold DIRECTLY to the set-aside area rather than to the
+#          discard pile and then setting it aside ("with the first version, the
+#          Gold visits your discard pile, so a when-gain ability like Sheepdog
+#          could cause it to be shuffled in and therefore lost track of").
+#   2025 — Way of the Mouse's set-aside card may no longer be a DURATION. Ch. I's
+#          setup paragraph was not updated to match; the card and ch. VII win.
+#
+# Horse's cost is $3 "for any ability that refers to its cost", and it is
+# REMOVED FROM PLAY when played — both card-code concerns, but the $3 lives here.
+CARDS.update({
+    "Horse":             {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nReturn this to its pile. (This is not in the Supply.)",
+                        "expansion": "menagerie", "kingdom": False},
+    "Black Cat":         {"cost": 2, "types": ["action", "attack", "reaction"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nIf it isn't your turn, each other player gains a Curse.\nWhen another player gains a Victory card, you may play this from your hand.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Sleigh":            {"cost": 2, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "Gain 2 Horses.\nWhen you gain a card, you may discard this, to put that card into your hand or onto your deck.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Supplies":          {"cost": 2, "types": ["treasure"], "coins": 1, "vp": 0,
+                        "text": "$1\nGain a Horse onto your deck.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Camel Train":       {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Exile a non-Victory card from the Supply.\nWhen you gain this, Exile a Gold from the Supply.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Goatherd":          {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nYou may trash a card from your hand.\n+1 Card per card the player to your right trashed on their last turn.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Scrap":             {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Trash a card from your hand. Choose a different thing per $1 it costs: +1 Card; +1 Action; +1 Buy; +$1; gain a Silver; gain a Horse.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Sheepdog":          {"cost": 3, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\nWhen you gain a card, you may play this from your hand.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Snowy Village":     {"cost": 3, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+4 Actions\n+1 Buy\nIgnore any further +Actions you get this turn.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Stockpile":         {"cost": 3, "types": ["treasure"], "coins": 3, "vp": 0,
+                        "text": "$3\n+1 Buy\nExile this.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Bounty Hunter":     {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\nExile a card from your hand. If you didn't have a copy of it in Exile, +$3.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Cardinal":          {"cost": 4, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+$2\nEach other player reveals the top 2 cards of their deck, Exiles one costing from $3 to $6, and discards the rest.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Cavalry":           {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain 2 Horses.\nWhen you gain this, +2 Cards, +1 Buy, and if it's your Buy phase return to your Action phase.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Groom":             {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Gain a card costing up to $4. If it's an...\nAction card, gain a Horse;\nTreasure card, gain a Silver;\nVictory card, +1 Card and +1 Action.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Hostelry":          {"cost": 4, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nWhen you gain this, you may discard any number of Treasures, revealed, to gain that many Horses.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Village Green":     {"cost": 4, "types": ["action", "duration", "reaction"], "coins": 0, "vp": 0,
+                        "text": "Either now or at the start of your next turn, +1 Card and +2 Actions.\nWhen you discard this other than during Clean-up, you may reveal it to play it.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Barge":             {"cost": 5, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "Either now or at the start of your next turn, +3 Cards and +1 Buy.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Coven":             {"cost": 5, "types": ["action", "attack"], "coins": 0, "vp": 0,
+                        "text": "+1 Action\n+$2\nEach other player Exiles a Curse from the Supply. If they can't, they discard their Exiled Curses.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Displace":          {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "Exile a card from your hand. Gain a differently named card costing up to $2 more than it.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Falconer":          {"cost": 5, "types": ["action", "reaction"], "coins": 0, "vp": 0,
+                        "text": "Gain a card to your hand costing less than this.\nWhen any player gains a card with 2 or more types (Action, Attack, etc.), you may play this from your hand.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Fisherman":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+$1\nDuring your turns, if your discard pile is empty, this costs $3 less.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Gatekeeper":        {"cost": 5, "types": ["action", "duration", "attack"], "coins": 0, "vp": 0,
+                        "text": "At the start of your next turn, +$3.\nUntil then, when another player gains an Action or Treasure card they don't have an Exiled copy of, they Exile it.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Hunting Lodge":     {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+2 Actions\nYou may discard your hand for +5 Cards.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Kiln":              {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nThe next time you play a card this turn, you may first gain a copy of it.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Livery":            {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$3\nThis turn, when you gain a card costing $4 or more, gain a Horse.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Mastermind":        {"cost": 5, "types": ["action", "duration"], "coins": 0, "vp": 0,
+                        "text": "At the start of your next turn, you may play an Action card from your hand three times.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Paddock":           {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$2\nGain 2 Horses.\n+1 Action per empty Supply pile.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Sanctuary":         {"cost": 5, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+1 Card\n+1 Action\n+1 Buy\nYou may Exile a card from your hand.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Destrier":          {"cost": 6, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+2 Cards\n+1 Action\nDuring your turns, this costs $1 less per card you've gained this turn.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Wayfarer":          {"cost": 6, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+3 Cards\nYou may gain a Silver.\nThis has the same cost as the last other card gained this turn, if any.",
+                        "expansion": "menagerie", "kingdom": True},
+    "Animal Fair":       {"cost": 7, "types": ["action"], "coins": 0, "vp": 0,
+                        "text": "+$4\n+1 Buy per empty Supply pile.\nInstead of paying this card's cost, you may trash an Action card from your hand.",
+                        "expansion": "menagerie", "kingdom": True},
+})
+
 # THE TRAVELLER CHAINS — "when you discard this from play, you may EXCHANGE it
 # for the next one". `from -> into`; each upgrade is its own non-Supply pile of
 # TRAVELLER_PILE cards, included whenever the chain's head is in the kingdom.
@@ -1589,6 +1714,103 @@ LANDSCAPES = {
                         "text": "During your turns, cards cost $1 less."},
     "Citadel":         {"kind": "project", "cost": 8, "expansion": "renaissance",
                         "text": "The first time you play an Action card during each of your turns, replay it afterwards."},
+
+    # --- MENAGERIE: 20 Events + 20 WAYS (phase 10) ---------------------------
+    # The first `way` landscapes the game has ever dealt. A WAY HAS NO COST AND
+    # IS NEVER BOUGHT — `way` is not in BUYABLE_LANDSCAPE_KINDS, so the `cost`
+    # below is inert and exists only because the table's shape is uniform; every
+    # reader that could spend it (`landscape_gate`, `_h_buy_landscape`) refuses
+    # the kind first. The dealer's `_WAY_CAP` of 1 has been in place since 6H.
+    #
+    # ⚠ Adding 40 landscapes to the pool RE-DEALS every existing seed's
+    # landscapes: `deal_landscapes` simulates the randomizer mix literally, so
+    # pool SIZE is an input. That is the ph.-9 side effect again, and it is why
+    # the forced-board soaks churn on this commit.
+    #
+    # "Ways that refer to 'this' (Butterfly / Chameleon / Frog / Horse / Rat /
+    # Turtle) refer to THE PLAYED ACTION CARD, not the Way card itself"
+    # (ch. IV WAYS) — six of the twenty need the emit's subject.
+    "Delay":           {"kind": "event", "cost": 0, "expansion": "menagerie",
+                        "text": "You may set aside an Action card from your hand. At the start of your next turn, play it."},
+    "Desperation":     {"kind": "event", "cost": 0, "expansion": "menagerie", "once": "turn",
+                        "text": "Once per turn: You may gain a Curse. If you do, +1 Buy and +$2."},
+    "Gamble":          {"kind": "event", "cost": 2, "expansion": "menagerie",
+                        "text": "+1 Buy\nDiscard the top card of your deck. If it's an Action or Treasure, you may play it."},
+    "Pursue":          {"kind": "event", "cost": 2, "expansion": "menagerie",
+                        "text": "+1 Buy\nName a card. Reveal the top 4 cards from your deck. Put the matches back and discard the rest."},
+    "Ride":            {"kind": "event", "cost": 2, "expansion": "menagerie",
+                        "text": "Gain a Horse."},
+    "Toil":            {"kind": "event", "cost": 2, "expansion": "menagerie",
+                        "text": "+1 Buy\nYou may play an Action card from your hand."},
+    "Enhance":         {"kind": "event", "cost": 3, "expansion": "menagerie",
+                        "text": "You may trash a non-Victory card from your hand, to gain a card costing up to $2 more than it."},
+    "March":           {"kind": "event", "cost": 3, "expansion": "menagerie",
+                        "text": "Look through your discard pile. You may play an Action card from it."},
+    "Transport":       {"kind": "event", "cost": 3, "expansion": "menagerie",
+                        "text": "Choose one: Exile an Action card from the Supply; or put an Action card you have in Exile onto your deck."},
+    "Banish":          {"kind": "event", "cost": 4, "expansion": "menagerie",
+                        "text": "Exile any number of cards with the same name from your hand."},
+    "Bargain":         {"kind": "event", "cost": 4, "expansion": "menagerie",
+                        "text": "Gain a non-Victory card costing up to $5. Each other player gains a Horse."},
+    "Invest":          {"kind": "event", "cost": 4, "expansion": "menagerie",
+                        "text": "Exile an Action card from the Supply. While it's in Exile, when another player gains or Invests in a copy of it, +2 Cards."},
+    "Seize the Day":   {"kind": "event", "cost": 4, "expansion": "menagerie", "once": "game",
+                        "text": "Once per game: Take an extra turn after this one."},
+    "Commerce":        {"kind": "event", "cost": 5, "expansion": "menagerie",
+                        "text": "Gain a Gold per differently named card you've gained this turn."},
+    "Demand":          {"kind": "event", "cost": 5, "expansion": "menagerie",
+                        "text": "Gain a Horse and a card costing up to $4, both onto your deck."},
+    "Stampede":        {"kind": "event", "cost": 5, "expansion": "menagerie",
+                        "text": "If you have 5 or fewer cards in play, gain 5 Horses onto your deck."},
+    "Reap":            {"kind": "event", "cost": 7, "expansion": "menagerie",
+                        "text": "Gain a Gold, setting it aside. At the start of your next turn, play it."},
+    "Enclave":         {"kind": "event", "cost": 8, "expansion": "menagerie",
+                        "text": "Gain a Gold. Exile a Duchy from the Supply."},
+    "Alliance":        {"kind": "event", "cost": 10, "expansion": "menagerie",
+                        "text": "Gain a Province, a Duchy, an Estate, a Gold, a Silver, and a Copper."},
+    "Populate":        {"kind": "event", "cost": 10, "expansion": "menagerie",
+                        "text": "Gain one card from each Action Supply pile."},
+
+    "Way of the Butterfly":  {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "You may return this to its pile to gain a card costing exactly $1 more than it."},
+    "Way of the Camel":      {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Exile a Gold from the Supply."},
+    "Way of the Chameleon":  {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Follow this card's instructions; each time that would give you +Cards this turn, you get +$ instead, and vice versa."},
+    "Way of the Frog":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+1 Action\nWhen you discard this from play this turn, put it onto your deck."},
+    "Way of the Goat":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Trash a card from your hand."},
+    "Way of the Horse":      {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+2 Cards\n+1 Action\nReturn this to its pile."},
+    "Way of the Mole":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+1 Action\nDiscard your hand. +3 Cards."},
+    "Way of the Monkey":     {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+1 Buy\n+$1"},
+    "Way of the Mouse":      {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Play the set-aside card, leaving it there.\nSetup: Set aside an unused non-Duration Action costing $2 or $3."},
+    "Way of the Mule":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+1 Action\n+$1"},
+    "Way of the Otter":      {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+2 Cards"},
+    "Way of the Ox":         {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+2 Actions"},
+    "Way of the Owl":        {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Draw until you have 6 cards in hand."},
+    "Way of the Pig":        {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+1 Card\n+1 Action"},
+    "Way of the Rat":        {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "You may discard a Treasure to gain a copy of this."},
+    "Way of the Seal":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+$1\nThis turn, when you gain a card, you may put it onto your deck."},
+    "Way of the Sheep":      {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+$2"},
+    "Way of the Squirrel":   {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "+2 Cards at the end of this turn."},
+    "Way of the Turtle":     {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Set this aside. If you did, play it at the start of your next turn."},
+    "Way of the Worm":       {"kind": "way", "cost": 0, "expansion": "menagerie",
+                        "text": "Exile an Estate from the Supply."},
 }
 
 
@@ -1636,9 +1858,16 @@ HORSE_PILE = 30
 def uses_horses(name):
     """Does this card's setup bring the Horse pile? Read off the printed text
     rather than a hand-kept list — every Horse producer says "Horse" in it, and
-    a list would be one more place to forget a card."""
-    c = CARDS.get(name)
-    return bool(c) and "Horse" in c["text"] and name != "Horse"
+    a list would be one more place to forget a card.
+
+    `name` may be a CARD or a LANDSCAPE: the setup line says "if any cards
+    referring to Horses are used", and four Events gain Horses. Reading the
+    TEXT and not the name is what correctly excludes **Way of the Horse**,
+    which needs no Horse pile: its "Return this to its pile" returns the played
+    Action card to ITS own pile, and "this" on a Way means the played card
+    (ch. IV WAYS), never the Way."""
+    d = CARDS.get(name) or LANDSCAPES.get(name)
+    return bool(d) and "Horse" in d["text"] and name != "Horse"
 
 
 def artifacts_for(in_play_cards):
@@ -1691,6 +1920,10 @@ KINGDOM = {
                    if d["kingdom"] and d["expansion"] == "empires"]),
     "renaissance": [n for n, c in CARDS.items()
                     if c["kingdom"] and c["expansion"] == "renaissance"],
+    # Menagerie deals 30 kingdom piles; Horse is a card of the set but sits
+    # outside the Supply (kingdom=False), so it is excluded by construction.
+    "menagerie": [n for n, c in CARDS.items()
+                  if c["kingdom"] and c["expansion"] == "menagerie"],
 }
 
 
@@ -1789,9 +2022,19 @@ _CALL_CLAUSE = re.compile(r"[^.\n]*\bcall this\b[^.\n]*[.\n]?", re.I)
 
 
 def _printed_bonus(text, word):
-    """The largest printed "+N <word>s" a card gives when PLAYED (0 if none)."""
+    """The largest printed "+N <word>s" a card gives when PLAYED (0 if none).
+
+    A **"per" clause does not count** — "+1 Buy per empty Supply pile" (Animal
+    Fair) is $0 on a fresh board, and a guarantee that can be zero is not a
+    guarantee. Same principle as excluding draw-to-X: being narrow only ever
+    adds a card the player asked for; being broad lets the promise be satisfied
+    by a card that does not keep it. Menagerie is where this first bites — the
+    eight earlier "+N X per" cards all print the clause BELOW their bar
+    (Cellar, Crossroads, Paddock…), so the lookahead changes exactly one
+    classification and no shipped board's deal."""
     return max([int(n) for n in
-                re.findall(rf"\+(\d+) {word}s?\b", _CALL_CLAUSE.sub("", text))]
+                re.findall(rf"\+(\d+) {word}s?\b(?! per\b)",
+                           _CALL_CLAUSE.sub("", text))]
                or [0])
 
 

@@ -3770,7 +3770,7 @@ def play_mouse_card(game, pid):
     if not card:
         return False
     _log(game, pid, "play_mouse", card=card)
-    if count and has_type(game, card, "action") and pid == game["turn"]:
+    if has_type(game, card, "action") and pid == game["turn"]:
         game["turn_ctx"]["actions_played"] += 1
     _run_supply_ability(game, pid, card)
     return True
@@ -3800,14 +3800,22 @@ def link_duration(game, pid, card, handle):
     riders = entry.setdefault("riders", [])
     if card not in riders:
         riders.append(card)
-    # the chain: whatever was riding the linking card rides the new host too
+    # THE CHAIN: whatever was riding the linking card rides the new host too —
+    # so the entry to look at is the LINKING CARD'S OWN (`other["card"] ==
+    # card`), never one it merely rides. A Throne Room and a Mastermind can
+    # both ride one Caravan without the Throne Room belonging to the
+    # Mastermind, and dragging every co-rider along would strand it.
+    #
+    # And it MOVES them rather than copying: a rider recorded on two live
+    # entries is one physical card counted twice by the conservation census,
+    # and both entries promote at Clean-up.
     for other in game["seats"][pid]["duration"] + lst:
-        if other is entry:
+        if other is entry or other.get("card") != card:
             continue
-        if card in other.get("riders", []):
-            for r in other["riders"]:
-                if r != card and r not in riders:
-                    riders.append(r)
+        for r in list(other.get("riders", [])):
+            if r != card and r not in riders:
+                riders.append(r)
+            other["riders"].remove(r)
     return True
 
 
@@ -5815,12 +5823,6 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         add_pile(game, "Mercenary", count=10)
     if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
         add_pile(game, "Spoils", count=15)
-    # MENAGERIE (ph. 10): "if any card in the Supply uses Horses, include the
-    # Horse pile (30 cards) OUTSIDE the Supply" — so it is never buyable and
-    # never counts toward the three-empty-piles end, both free from ph. 3H's
-    # non-Supply index.
-    if any(cards_uses_horses(c) for c in in_play_cards):
-        add_pile(game, "Horse", count=HORSE_PILE)
     # WAY OF THE MOUSE (ph. 10): "set aside an unused Action Kingdom card
     # costing $2 or $3. Players may play that card using this Way." The 2025
     # errata adds NON-DURATION, which ch. I's setup section was never updated
@@ -5835,6 +5837,23 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         if pick:
             game["mouse_card"] = rng.choice(pick)
             _save_rng(game, rng)
+    # MENAGERIE (ph. 10): "if any cards referring to Horses are used, include
+    # the Horse pile (30 cards) OUTSIDE the Supply" — so it is never buyable
+    # and never counts toward the three-empty-piles end, both free from ph.
+    # 3H's non-Supply index.
+    #
+    # **"CARDS" HERE MEANS EVERY CARD IN THE GAME, NOT JUST THE SUPPLY.** Four
+    # Events (Bargain, Demand, Ride, Stampede) gain Horses and no kingdom card
+    # need be a producer for one of them to be dealt; and the Mouse card is a
+    # single set-aside card that is not in any pile, yet Sleigh ($2) and Scrap
+    # ($3) are both eligible picks and both say Horse. Reading the Supply alone
+    # left all three shapes gaining from a pile that was never built — which is
+    # why the Mouse pick moved ABOVE this clause rather than below it.
+    _horse_users = list(in_play_cards) + list(game["landscapes"])
+    if game["mouse_card"]:
+        _horse_users.append(game["mouse_card"])
+    if any(cards_uses_horses(c) for c in _horse_users):
+        add_pile(game, "Horse", count=HORSE_PILE)
     # LANDSCAPE SETUP (ph. 7H): `effects.LANDSCAPE_SETUP = {name: fn(game, rng)}`
     # — a landscape whose setup needs the BOARD (Obelisk picks a random Action
     # Supply pile; Tax puts a Debt token on every pile; Aqueduct puts 8 VP on
