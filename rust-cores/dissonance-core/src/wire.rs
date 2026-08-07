@@ -625,6 +625,52 @@ mod fixture_replay {
     }
 
     #[test]
+    fn a_seats_own_covered_outer_bottoms_are_hidden_from_it_too() {
+        // The one asymmetry that is easy to get wrong in the observer's favour:
+        // only the MIDDLE pile's bottom is dealt face up. The outer two are face
+        // down to their OWNER as well as to the opponent, so the search must
+        // resample its own two exactly as it resamples the opponent's.
+        //
+        // Worth pinning on this side because the Python bot got it wrong in the
+        // other direction: `hand_strength` valued a hand using all three of its
+        // own bottoms, so it bid knowing two cards the rules never gave it.
+        let mut rng = Rng::new(0x0B11_11D5);
+        let mut buf = Vec::new();
+        let (mut outer_seen, mut outer_varied, mut middle_seen) = (0, 0, 0);
+        for f in fixtures().iter() {
+            let v = view_from_json(f).unwrap();
+            for i in [0usize, 2] {
+                if v.s.pile[v.me][i].n == 2 {
+                    outer_seen += 1;
+                    assert_eq!(v.s.pile[v.me][i].c[0], UNKNOWN,
+                        "the observer was handed its own covered outer bottom");
+                    // ...and it really is resampled, not merely unknown-at-parse
+                    // and then filled with a constant.
+                    let mut got = std::collections::HashSet::new();
+                    for _ in 0..12 {
+                        got.insert(v.determinize(&mut rng, &mut buf).pile[v.me][i].c[0]);
+                    }
+                    if got.len() > 1 {
+                        outer_varied += 1;
+                    }
+                }
+            }
+            if v.s.pile[v.me][1].n == 2 {
+                middle_seen += 1;
+                assert_ne!(v.s.pile[v.me][1].c[0], UNKNOWN,
+                    "the middle bottom is dealt FACE UP and must not be resampled");
+            }
+        }
+        // Non-vacuous on both arms: a fixture set with no covered piles left
+        // would pass every assertion above without testing anything.
+        assert!(outer_seen > 0 && middle_seen > 0,
+            "no covered piles in the fixtures: {outer_seen} outer, {middle_seen} middle");
+        assert!(outer_varied * 2 > outer_seen,
+            "own outer bottoms barely moved across determinizations \
+             ({outer_varied} of {outer_seen}) -- they are not being resampled");
+    }
+
+    #[test]
     fn a_suit_void_the_server_showed_is_never_dealt_back_into_that_hand() {
         // The inference this crate is allowed to make: failing to follow proves the
         // player held none of that suit IN HAND. Reading it back out of `history`

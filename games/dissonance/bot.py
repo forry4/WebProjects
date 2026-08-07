@@ -75,10 +75,33 @@ def choose_card(g: dict, seat: int) -> int:
 _RANK_VALUE = [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 
 
+#: What a card the seat cannot identify is worth: the mean of `_RANK_VALUE`.
+#:
+#: A seat holds thirteen cards but can only NAME eleven of them -- the two outer
+#: pile bottoms are dealt face down to their owner as well as to the opponent.
+#: Dropping them entirely would under-rate every hand by two cards and quietly
+#: re-tune every threshold in `_level_for`; counting them at their expectation
+#: keeps the scale where it was. It is the unconditional deck mean rather than
+#: one conditioned on what the seat can see, which is the right refinement for a
+#: tier that has any lookahead at all -- this one has none.
+_UNKNOWN_RANK_VALUE = sum(_RANK_VALUE) / len(_RANK_VALUE)
+
+
 def hand_strength(g: dict, seat: int, denom: int) -> float:
-    """Cheap estimate of the points this seat could take in `denom`."""
-    cards = E.playable(g, seat) + [p[0] for p in g["piles"][seat] if len(p) == 2]
+    """Cheap estimate of the points this seat could take in `denom`.
+
+    ONLY THE CARDS THE SEAT MAY ACTUALLY NAME. This used to read every pile
+    bottom it owned, and two of the three are face down to their owner too -- so
+    the bot bid a hand it could see two cards more of than the player across the
+    table could see of theirs. Not opponent knowledge, so it never played a card
+    it could not have played; it simply valued its own hand with information the
+    rules do not give it, in both auctions and in the talon swap.
+    """
+    cards = E.playable(g, seat) + [
+        p[0] for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i == 1]
+    unknown = sum(1 for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i != 1)
     total = sum(_RANK_VALUE[E.rank(c)] for c in cards)
+    total += unknown * _UNKNOWN_RANK_VALUE
     if denom == E.GRAND:
         # There are only four trumps in a Grand game, so LENGTH is not the
         # question -- holding any of them at all is. Each is worth roughly a

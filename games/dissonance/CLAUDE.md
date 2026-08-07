@@ -242,6 +242,61 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## The bots do not cheat — and this is TESTED, not asserted (2026-08-07)
+
+Every bot is handed the WHOLE game dict. `bot.act(g, seat)` and `_ask_the_client`
+both take `g`, because the server owns the state and there is nowhere else for it
+to come from — so **nothing structural stops a bot reading the opponent's hand;
+only the code does.** `tests/test_bot_fairness.py` is what says it still holds.
+
+**The method is INVARIANCE, not grep.** Re-deal every card the seat cannot see,
+back into the same slots, and demand the identical answer — a bot that peeked at
+any of them would have to change its mind about at least one rewrite. It catches
+a peek through any number of helper layers, which `grep hands[1 - seat]` does
+not. Driven over whole games in BOTH modes, so it covers the auction, the talon,
+the declaration, Kontra and all thirteen tricks. Two of the eight tests guard the
+guard — a planted cheat must FAIL them, or a reshuffle that quietly did nothing
+would report a clean bill of health.
+
+What a seat is entitled to: its own hand; every pile TOP; the MIDDLE pile's
+bottom (dealt face up); `shown` if it earned it; the public record. Hidden: the
+opponent's hand, **both** seats' OUTER pile bottoms, and the unshown talon.
+
+* **IT FOUND A REAL ONE.** `bot.hand_strength` valued a hand as
+  `playable() + every pile bottom it owned` — but only the middle bottom is face
+  up, so the server bot (Easy/Normal) bid knowing **two cards the rules never
+  gave it**, in both auctions and in the talon swap. Not opponent knowledge, so
+  it never played a card it could not have played; it simply rated its own hand
+  more accurately than the human across the table could rate theirs. Fixed by
+  counting the two unknowns at `_UNKNOWN_RANK_VALUE`, the deck mean — dropping
+  them outright would under-rate every hand by two cards and silently re-tune
+  every threshold in `_level_for`. Measured effect on 150 rounds/mode: classic's
+  settled level fell 4.13 → 3.77 and contracts made rose 75% → 79%; skat barely
+  moved (4.02 → 3.99, 64% → 63%).
+* **The Hard tier was already clean, by construction.** The armed request ships
+  `engine.view_for(g, seat)` — the same builder that feeds a human seat, so there
+  is no second projection to keep in step — and `wire.rs` reads a seat's own
+  outer bottoms as `UNKNOWN` and **fails closed**: if `pool` does not partition
+  into exactly `opp_hand_n + hidden_slots + n_out_hidden` it returns None and the
+  decision goes back to the server bot rather than searching a lie. The wire test
+  `a_seats_own_covered_outer_bottoms_are_hidden_from_it_too` pins the asymmetry
+  on that side too, and checks the resampling is real rather than a constant.
+* **The wire test asserts on the SERIALISED payload**, not field by field — the
+  failure this repo has already paid for is something that nests a whole-game
+  snapshot, which defeats per-field redaction while every field check passes.
+  Scanning the blob for card numbers cannot work at all: a card id and a trick
+  count are both small integers.
+* **THE MIRROR IMAGE IS REAL AND IS THE COST OF A CLIENT-SERVED TIER.** In a
+  vs-AI room on Hard, the armed request carries the BOT's view to the human's
+  browser, because the human's browser is what runs the search. So the human
+  *can* read the bot's hand out of devtools. `_handle_client_ai_ready` refuses to
+  arm unless the room really is vs-AI on a client tier, which is what keeps it
+  away from a human OPPONENT — but the bot's own opponent necessarily holds it.
+  The repo-wide framing ("tampering only weakens the tamperer's own opponent") is
+  about MOVE quality and does not cover information leakage in a hidden-info
+  game. Moving Hard server-side is the only fix, and Render's free tier
+  (~0.1 CPU) is why it is client-served in the first place.
+
 ## A game is a MATCH of rounds (2026-08-07)
 
 `MATCH_TARGET` — **100 in both modes**. A round is one deal; a game is rounds
@@ -577,9 +632,11 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (345)
+## Tests (353)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
+`test_bot_fairness.py` (8) the bots see only their own seat, by INVARIANCE over
+re-dealt hidden cards ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
 `test_integration.py` create → auction → 13 tricks → scored result → the NEXT
 round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers
