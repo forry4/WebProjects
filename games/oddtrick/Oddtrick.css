@@ -224,3 +224,30 @@
 /* Kontra is the defender's one moment of leverage; it reads as a threat. */
 .odd-kontrabtn { background: #b8434f; color: #fff; }
 .odd-kontrabtn:hover { background: #c9505c; }
+
+/* ── cards you are allowed to keep looking at ───────────────────────────────
+   All three of these render real cards rather than text codes: a rank+glyph
+   run like "10h 7s Kd" is something you decode, and a row of cards is
+   something you read. They are the same `.odd-card` object as the hand, just
+   `small`. */
+.odd-card.sm { --cw: 34px; font-size: 0.62rem; }
+
+/* The trick just gone, beside the board. */
+.odd-lasttrick { display: flex; align-items: center; gap: 0.4rem; }
+.odd-lt-play { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.odd-lt-play .muted { font-size: 0.62rem; }
+/* The winner is marked on the card itself — which of the two took it is the
+   whole point of showing them side by side. */
+.odd-lt-play.won .odd-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.odd-lt-note {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  font-size: 0.65rem; margin-left: auto; text-align: right;
+}
+.odd-lt-note .odd-val { font-size: 0.7rem; align-self: flex-end; }
+
+/* The talon, and the end-of-round reveal, share a row. */
+.odd-outrow { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.odd-reveal {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  margin-top: 0.3rem;
+}

@@ -68,6 +68,30 @@ const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
 // Trick NUMBER t (1-based): even ones pay +2, odd ones cost 1.
 const trickValue = (t0) => (t0 % 2 === 1 ? 2 : -1);
 
+/** Does `follow` beat `led`? A mirror of `engine.beats` — kept in step with it
+ *  by hand, like `trickValue` above. Only used to mark who TOOK the previous
+ *  trick, so a drift here mislabels a badge and cannot affect play: every move
+ *  is validated server-side and the points come off the wire. */
+const beats = (led, follow, trump) => {
+  const ls = suitOf(led), fs = suitOf(follow);
+  if (fs === ls) return rankOf(follow) > rankOf(led);
+  if (trump < NOTRUMP) return fs === trump && ls !== trump;
+  return false;
+};
+
+/** The two cards of the last COMPLETED trick, with who played each and who took
+ *  it. `history` is [seat, card, source] in play order, two entries per trick,
+ *  so a trailing odd entry is the card currently face up on the table. */
+function lastTrick(game) {
+  const h = game.history || [];
+  const done = Math.floor(h.length / 2);
+  if (done === 0) return null;
+  const [a, b] = [h[2 * (done - 1)], h[2 * done - 1]];
+  const winner = beats(a[1], b[1], game.trump) ? b[0] : a[0];
+  // Trick index `done - 1` is 0-based, matching `trickValue`.
+  return { plays: [a, b], winner, value: trickValue(done - 1), number: done };
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() {
   return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join("");
@@ -87,7 +111,7 @@ function Card({ c, onClick, dim, sel, small, ghost }) {
   if (ghost) return <div className={`odd-card ghost${small ? " sm" : ""}`}>?</div>;
   if (c === null || c === undefined) return <div className="odd-card back" />;
   const cls = `odd-card ${isRed(c) ? "red" : "black"}${onClick ? " play" : ""}`
-    + `${dim ? " dim" : ""}${sel ? " sel" : ""}`;
+    + `${dim ? " dim" : ""}${sel ? " sel" : ""}${small ? " sm" : ""}`;
   return (
     <div className={cls} onClick={onClick} title={cardName(c)}>
       <span className="odd-r">{RANKS[rankOf(c)]}</span>
@@ -250,6 +274,10 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
+  // Create-modal selections. Deferred until "Create Game" rather than firing on
+  // the option click — the shape every other game's modal uses.
+  const [createOpp, setCreateOpp] = useState("ai");
+  const [createDiff, setCreateDiff] = useState("normal");
   // Skat mode's half-built moves: the number, then the declaration.
   const [bidValue, setBidValue] = useState(null);
   const [declDenom, setDeclDenom] = useState(null);
@@ -526,25 +554,42 @@ export default function Oddtrick({ myId, authUser, onExit }) {
           {openCol}{activeCol}{histCol}
         </div>
         {showCreate && (
-          <CreateModal title="New game" onClose={() => setShowCreate(false)}>
+          <CreateModal title="New Game" onClose={() => setShowCreate(false)}>
+            <CmRow label="Opponent">
+              <CmSeg value={createOpp} onChange={setCreateOpp} options={[
+                { value: "friend", label: "VS Friend", title: "Head-to-head — one friend joins from the lobby (or your room code)" },
+                { value: "ai", label: "VS AI", title: "Starts instantly against the bot" },
+              ]} />
+            </CmRow>
+            {createOpp === "ai" ? (
+              <CmRow label="AI Difficulty">
+                <CmSeg value={createDiff} onChange={setCreateDiff}
+                  options={BOT_TIERS.map((t) => ({ value: t.id, label: t.name, title: t.desc }))} />
+              </CmRow>
+            ) : (
+              <span className="cm-hint">Oddtrick is head-to-head — one friend joins from the lobby.</span>
+            )}
             <CmRow label="Auction">
-              <CmSeg options={MODES.map((m) => ({ value: m.id, label: m.label, title: m.title }))}
-                value={newMode} onChange={setNewMode} />
-              <div className="muted" style={{ fontSize: "0.75rem", marginTop: "0.35rem" }}>
+              <CmSeg value={newMode} onChange={setNewMode}
+                options={MODES.map((m) => ({ value: m.id, label: m.label, title: m.title }))} />
+              <span className="cm-hint">
                 {newMode === "skat"
                   ? "Bid a number; name the game only after you win it. Then Hand, Sharp, Open — and their Kontra."
                   : "Bid a level and a denomination, ranked ♣ < ♦ < ♥ < ♠ < NT < Null."}
-              </div>
+              </span>
             </CmRow>
-            <CmRow label="Opponent">
-              <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                <button className="btn" onClick={() => createGame(false, "normal")}>A friend</button>
-                {BOT_TIERS.map((t) => (
-                  <button key={t.id} className="btn btn-ghost" title={t.desc}
-                    onClick={() => createGame(true, t.id)}>Bot · {t.name}</button>
-                ))}
-              </div>
-            </CmRow>
+            <div className="cm-footer">
+              <span className="cm-summary">
+                Creating: <b>{createOpp === "ai"
+                  ? `${BOT_TIERS.find((t) => t.id === createDiff)?.name || createDiff} bot`
+                  : "vs Friend"}</b>
+                {", "}<b>{MODE_LABEL[newMode]}</b> auction
+              </span>
+              <button type="button" className="cm-create"
+                onClick={() => createGame(createOpp === "ai", createDiff)}>
+                Create Game
+              </button>
+            </div>
           </CreateModal>
         )}
         {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
@@ -586,6 +631,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const skatBases = catalog?.skat_bases || [];
   const skatNull = catalog?.skat_null_value ?? null;
   const ct = game.contract || {};
+  const prev = lastTrick(game);
   const bidLevels = [...new Set(bids.filter((b) => b[1] !== NULL_DENOM).map((b) => b[0]))].sort((a, b) => a - b);
   const canNull = bids.some((b) => b[1] === NULL_DENOM);
   const denomOkAt = (l, d) => bids.some((b) => b[0] === l && b[1] === d);
@@ -1037,9 +1083,23 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
                 <span>{nameOf(oppSeat)} <b>{res.scores[oppSeat]}</b></span>
               </div>
-              {game.out && <div className="muted" style={{ fontSize: "0.8rem" }}>
-                Out of play: {game.out.map(cardName).join(" ")}
-              </div>}
+              {/* The six nobody was dealt, revealed. Every card you could not
+                  account for all round was either in their hand or in here, so
+                  this is the answer sheet — as cards, because a run of text
+                  codes is not something you can read a hand off. */}
+              {game.out && (
+                <div className="odd-reveal">
+                  <div className="muted">Out of play all round</div>
+                  <div className="odd-outrow">
+                    {game.out.map((c) => <Card key={c} c={c} small />)}
+                  </div>
+                  {game.shown && (
+                    <div className="muted" style={{ fontSize: "0.72rem" }}>
+                      {nameOf(res.declarer)} was shown {game.shown.map(cardName).join(" ")}
+                    </div>
+                  )}
+                </div>
+              )}
               <button className="btn" onClick={leaveToLobby}>Back to lobby</button>
             </div>
           ) : (
@@ -1160,6 +1220,48 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
+          {/* The trick just gone. It leaves the table the instant the next lead
+              arrives, and "what did they just play" is the question the log
+              answers worst — it is a flat list of cards with no trick breaks. */}
+          {prev && (
+            <div className="odd-panel">
+              <h4>Last trick</h4>
+              <div className="odd-lasttrick">
+                {prev.plays.map((p, i) => (
+                  <div key={i} className={`odd-lt-play${p[0] === prev.winner ? " won" : ""}`}>
+                    <Card c={p[1]} small />
+                    <div className="muted">{nameOf(p[0])}</div>
+                  </div>
+                ))}
+                <div className="odd-lt-note">
+                  <div>#{prev.number}</div>
+                  <div className={`odd-val ${prev.value > 0 ? "good" : "bad"}`}>
+                    {prev.value > 0 ? "+2" : "−1"}
+                  </div>
+                  <div className="muted">{nameOf(prev.winner)} took it</div>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* The talon, for the seat that bought the right to see it. It stays
+              on screen for the rest of the round: three cards you know are out
+              of play is a real holding to count from, and losing sight of them
+              the moment the swap resolves threw that away. After a swap this
+              tracks what is ACTUALLY out — your discard sits where the card you
+              took used to be. */}
+          {game.shown && game.phase !== "over" && (
+            <div className="odd-panel">
+              <h4>Set aside · you saw these</h4>
+              <div className="odd-outrow">
+                {game.shown.map((c) => <Card key={c} c={c} small />)}
+              </div>
+              {game.swapped && (
+                <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
+                  Includes the card you discarded.
+                </div>
+              )}
+            </div>
+          )}
           <div className="odd-panel">
             <h4>Points</h4>
             <div className="odd-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>

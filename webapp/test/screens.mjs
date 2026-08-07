@@ -1520,15 +1520,21 @@ try {
 		await page.getByRole("button", { name: /new game|create/i }).first()
 			.click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
-		await page.locator(".cm-seg .cm-seg-btn", { hasText: /^Skat$/ }).first()
-			.click({ timeout: 10_000 }).catch(() => {});
+		// The modal is the shared shape every other game uses: segmented rows,
+		// then one deferred "Create Game" in the footer. Selecting an option must
+		// NOT create the room on its own.
+		for (const label of [/^VS AI$/, /^Normal$/, /^Skat$/]) {
+			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
 		const picked = await page.evaluate(() =>
 			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
-		check("the skat auction is selectable in the create modal",
-			picked.includes("Skat"), JSON.stringify(picked));
+		check("the create modal carries opponent, difficulty and auction",
+			["VS AI", "Normal", "Skat"].every((x) => picked.includes(x)), JSON.stringify(picked));
+		const stillOpen = await page.locator(".cm-panel").count();
+		check("picking an option does not create the game on its own", stillOpen === 1);
 
-		await page.getByRole("button", { name: /^Bot · Normal$/ }).first()
-			.click({ timeout: 15_000 }).catch(() => {});
+		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		// A skat room deals immediately vs the bot, straight into the number
 		// ladder — a grid that classic mode never renders.
 		const ladder = await page.waitForSelector(".odd-valgrid button", { timeout: 25_000 })
@@ -1561,6 +1567,44 @@ try {
 			check("the bot answers a number bid", moved.log >= 2 && moved.phase,
 				JSON.stringify(moved));
 		}
+
+		// Drive the room to a completed trick. Skat puts FOUR phases between the
+		// last bid and trick 1 (talon, declare, Kontra, Re), each with its own
+		// control, so a loop that only clicks cards never reaches play at all —
+		// which is exactly what this check caught the first time it ran. Take
+		// whichever control is on screen.
+		const step = async (name) => {
+			const b = page.getByRole("button", { name }).first();
+			if (await b.count() === 0) return false;
+			await b.click({ timeout: 5_000 }).catch(() => {});
+			await sleep(450);
+			return true;
+		};
+		for (let i = 0; i < 60; i++) {
+			if (await page.locator(".odd-lasttrick").count() > 0) break;
+			if (await step(/^Play Hand/)) continue;           // talon
+			if (await step(/^Declare$/)) continue;            // declaration
+			if (await step(/^Let it stand$/)) continue;       // defender declines Kontra
+			if (await step(/^Accept$/)) continue;             // declarer declines Re
+			if (await step(/^Pass$/)) continue;               // settle the auction
+			const card = page.locator(".odd-seat .odd-card.play").last();
+			if (await card.count() > 0) {
+				await card.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(450);
+				continue;
+			}
+			await sleep(500);
+		}
+		const lt = await page.evaluate(() => {
+			const el = document.querySelector(".odd-lasttrick");
+			if (!el) return null;
+			return {
+				cards: el.querySelectorAll(".odd-card").length,
+				marksWinner: !!el.querySelector(".odd-lt-play.won"),
+			};
+		});
+		check("the previous trick stays visible beside the board",
+			!!lt && lt.cards === 2 && lt.marksWinner, JSON.stringify(lt));
 		check("no page errors in the skat auction", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();
