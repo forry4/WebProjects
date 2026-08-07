@@ -1669,6 +1669,52 @@ try {
 			!!lt && lt.cards === 2 && lt.marksWinner, JSON.stringify(lt));
 		check("no page errors in the skat auction", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
+
+		// Everything the board tells you must survive a PHONE. The side panel is
+		// where the last trick, the talon and the move log live, and the mobile
+		// sheet used to display:none the whole column — so three things a player
+		// paid the auction to see were desktop-only, silently.
+		await page.setViewportSize({ width: 390, height: 844 });
+		await sleep(400);
+		const onPhone = await page.evaluate(() => {
+			const vis = (sel) => {
+				const el = document.querySelector(sel);
+				if (!el) return null;
+				const r = el.getBoundingClientRect();
+				return getComputedStyle(el).display !== "none" && r.width > 0 && r.height > 0;
+			};
+			return {
+				side: vis(".odd-side"),
+				lastTrick: vis(".odd-p-last"),
+				contractChip: vis(".odd-chip"),
+				log: vis(".odd-p-log"),
+				// Deliberately hidden — duplicated by the chip and the seat rows.
+				contractPanel: vis(".odd-p-contract"),
+				pointsPanel: vis(".odd-p-points"),
+				pageScrollsSideways: document.documentElement.scrollWidth
+					> document.documentElement.clientWidth + 1,
+			};
+		});
+		check("the last trick and the log survive a phone",
+			onPhone.side === true && onPhone.lastTrick === true && onPhone.log === true,
+			JSON.stringify(onPhone));
+		check("the contract is on screen on a phone", onPhone.contractChip === true,
+			JSON.stringify(onPhone));
+		check("...and the panels the chip duplicates are dropped, not stacked twice",
+			onPhone.contractPanel === false && onPhone.pointsPanel === false,
+			JSON.stringify(onPhone));
+		check("the phone board does not scroll sideways",
+			onPhone.pageScrollsSideways === false, JSON.stringify(onPhone));
+		// The board must FILL the phone, not size itself to its content and leave
+		// a third of the screen dead below it.
+		const fill = await page.evaluate(() => {
+			const t = document.querySelector(".odd-table");
+			if (!t) return null;
+			return { table: Math.round(t.getBoundingClientRect().height),
+				view: window.innerHeight };
+		});
+		check("the board fills the phone rather than sizing to its content",
+			!!fill && fill.table >= fill.view * 0.8, JSON.stringify(fill));
 		await ctx.close();
 	}
 

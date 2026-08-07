@@ -9,14 +9,37 @@
 
 /* ── mobile overrides (must precede the base rules; see above) ───────────── */
 @media (max-width: 760px) {
-  .odd .odd-table { gap: 0.5rem; padding: 0.5rem; }
+  /* Fill the phone. The table sized itself to its CONTENT, so a 13-trick game
+     with short hands left a third of the screen dead black below the board.
+     Growing it to the viewport and spacing the rows apart puts the opponent at
+     the top, the trick in the middle and your hand at the thumb — which is
+     where a card table wants them anyway.
+     The subtraction is the header, not a magic number: .lby-header is 13px of
+     padding either side of a ~34px control, plus the notch inset it adds to its
+     own padding-top. `dvh` so the iOS URL bar collapsing does not leave a gap;
+     the `vh` line above it is the fallback for anything that lacks dvh. */
+  .odd .odd-table {
+    gap: 0.5rem; padding: 0.5rem;
+    min-height: calc(100vh - 72px);
+    min-height: calc(100dvh - 72px - env(safe-area-inset-top, 0px));
+    justify-content: space-between;
+  }
   .odd .odd-card { --cw: 42px; font-size: 0.78rem; }
   .odd .odd-hand { gap: 0.18rem; }
   .odd .odd-hand .odd-card:not(:first-child) { margin-left: -14px; }
   .odd .odd-piles { gap: 0.35rem; }
   .odd .odd-bidgrid { grid-template-columns: repeat(4, 1fr); }
   .odd .odd-valgrid { grid-template-columns: repeat(5, 1fr); max-height: 34vh; }
-  .odd .odd-side { display: none; }
+  /* The side panel STACKS below the board on a phone rather than vanishing.
+     Hiding it wholesale also hid the last trick, the talon you paid the auction
+     to see, and the move log — three things a phone player has no other way to
+     reach. Only the two that are genuinely duplicated elsewhere are dropped:
+     Contract (the chip in the middle column carries it) and Points (already on
+     both seat rows). Every rule here is `.odd `-prefixed because this @media
+     block PRECEDES the base rules, so a single-class override would lose. */
+  .odd .odd-side { display: flex; }
+  .odd .odd-p-contract, .odd .odd-p-points { display: none; }
+  .odd .odd-log { max-height: 140px; }
   .odd .odd-main { grid-template-columns: 1fr; }
   .odd .odd-trickstrip { overflow-x: auto; }
 }

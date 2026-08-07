@@ -1213,7 +1213,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
 
         {/* side panel */}
         <div className="odd-side">
-          <div className="odd-panel">
+          <div className="odd-panel odd-p-contract">
             <h4>Contract</h4>
             {isSkat && <>
               <div className="odd-scorerow">
@@ -1278,7 +1278,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               arrives, and "what did they just play" is the question the log
               answers worst — it is a flat list of cards with no trick breaks. */}
           {prev && (
-            <div className="odd-panel">
+            <div className="odd-panel odd-p-last">
               <h4>Last trick</h4>
               <div className="odd-lasttrick">
                 {prev.plays.map((p, i) => (
@@ -1304,7 +1304,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               tracks what is ACTUALLY out — your discard sits where the card you
               took used to be. */}
           {game.shown && game.phase !== "over" && (
-            <div className="odd-panel">
+            <div className="odd-panel odd-p-talon">
               <h4>Set aside · you saw these</h4>
               <div className="odd-outrow">
                 {game.shown.map((c) => <Card key={c} c={c} small />)}
@@ -1316,7 +1316,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               )}
             </div>
           )}
-          <div className="odd-panel">
+          <div className="odd-panel odd-p-points">
             <h4>Points</h4>
             <div className="odd-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>
             <div className="odd-scorerow"><span>{nameOf(oppSeat)}</span><b>{game.pts[oppSeat]}</b></div>
@@ -1324,7 +1324,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               Always adds up to +5.
             </div>
           </div>
-          <div className="odd-panel">
+          <div className="odd-panel odd-p-log">
             <h4>Tricks played</h4>
             <div className="odd-log">
               {(game.history || []).length === 0 && <div>Nothing yet.</div>}
