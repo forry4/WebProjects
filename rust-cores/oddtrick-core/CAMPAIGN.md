@@ -497,3 +497,59 @@ announcements}` instead of `{level, denomination}`.
   declarer netted -26 per contract. `SkatCfg::q` scores a declaration by its
   q-quantile world instead — the confidence dial the design note anticipated,
   here doing real work rather than acting as a strength knob.
+
+### The instrument is NOT converged, and the mean belief gap does not show it
+
+First numbers, 16 deals, q=0.0, the conservative end of the confidence dial:
+
+| worlds | made | declarer net | mean belief gap |
+|---|---|---|---|
+| k=4, tk=3 | 46.2% | **-20.46** | +0.23 |
+| k=10, tk=6 | 75.0% | **+24.00** | -0.25 |
+
+Doubling the world sample flips the sign of the headline metric. **Nothing that
+moves with k is a measurement**, and every skat number below k=10 should be
+read as direction-finding only.
+
+**The mean belief gap is the wrong diagnostic, and it was built specifically to
+answer this question.** It is near zero in BOTH arms (+0.23 / -0.25 points on a
+12-point scale) while the outcome swings 44 points, so it flatly failed to
+discriminate. The reason is selection: the declaration is chosen by a max over
+~120 candidates (5 denominations x 12 levels x Sharp), so it is picked ON the
+sampling noise. The mean residual can sit at zero while the choice is badly
+wrong — what matters is the SPREAD of the gap, not its centre. A mean-residual
+check cannot see a winner's-curse failure by construction, which is worth
+remembering before building the next one.
+
+It also produced a wrong conclusion on the way through, recorded so it is not
+re-derived: from the k=4 arm alone the make/miss arithmetic looks damning.
+Break-even is `p = (S + 4d) / (2S + 4d)`, above 50% for EVERY stake, because
+the stake is symmetric while the shortfall is a one-sided tax with no
+convexity paying for it — where classic mode has N^2 on the make. At S~40,
+d~3 that is p = 56.5% against a measured 46.2%, which reproduces the -20
+almost exactly and reads as a scoring bug in the mode. It is not one: at k=10
+the declarer makes 75% against the same 56.5% bar and nets +24. The arithmetic
+is right and the conclusion drawn from it was wrong.
+
+**What survives both sampling regimes** (and so is worth carrying forward):
+
+* **Hand is announced 92-94% of the time**, unmoved by k. The x2 is worth more
+  than the talon on nearly every hand, so the talon — a mechanic the classic
+  campaign measured as doing real work — gets skipped almost always. This is
+  the strongest measured signal against the mode as specified.
+* **Kontra fires 75-85%** against the design note's 10-20% target, and its
+  accuracy FELL to 33% at k=10. Too frequent, and at better sampling also
+  wrong.
+
+**Structural, needing no measurement at all:**
+
+* **Overbid-loses cannot fire.** The level is a free 1..12 choice and NT x 12
+  is the top rung, so every legal bid is declarable. The design note calls this
+  "Skat's sharpest rule" and rests its fourth two-player compensation on it;
+  there is no mechanism behind it here.
+* **The cheap rungs constrain nothing.** Diamonds at base 2 clears rungs 2..10
+  at levels 1..5, so a bid of 2 commits the winner to scoring one point. Price
+  density is not task density.
+
+Withdrawn pending re-measurement at converged k: the rung-2 floor cluster
+(25% of contracts), Null at 0%, Sharp at 0-7.7%. All were single-arm at k=4.
