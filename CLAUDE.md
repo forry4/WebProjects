@@ -422,6 +422,19 @@ covers the logic; each game's wiring is one line).
   The distinction to carry: a skip over code that SHIPS is a hole; a skip over an optional dep for
   non-shipping research code is a cost decision. If you add a second carve-out, add it here — an
   unlisted `skipif` is drift by definition.
+  **The rule is now MECHANICALLY ENFORCED — `core/tests/test_no_conditional_skips.py`**, because a
+  rule whose only enforcement is prose is enforced only by whoever re-reads it, and this one had
+  already drifted to prove it. It walks every module `pytest.ini` collects (122 today) and fails on
+  any `skip`/`importorskip`/`xfail` call or `skip`/`skipif`/`xfail` mark outside its `SANCTIONED`
+  map, so **a new carve-out must be added in TWO places — that map and this rule.** Two things about
+  it are load-bearing and are the local versions of lessons already paid for elsewhere: it parses the
+  **AST, not text** (the regex version of the `lost_track` guard scanned a 6-line window and comments
+  pushed two real sites out of it — and here two modules DISCUSS `pytest.skip()` in prose, which a
+  text search would flag), and its roster is **derived from `testpaths`** rather than hand-written,
+  since a hardcoded list only guards the tree SHRINKING and a new test package would join unguarded —
+  the `range(13)` bug's exact shape. A second test asserts the sanctioned skip is still *found*, so a
+  broken walk or a stale row fails instead of quietly passing. Verified non-vacuous against all four
+  skip forms plus a comment-only mention.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run smoke` AND `npm run screens`.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
