@@ -388,8 +388,23 @@ round-trip · `test_client_ai.py` (12) the Hard tier's protocol: the armed
 request, the re-validation, the stale drop, the watchdog, and the picker/server
 tier agreement.
 
-Rust side, `cargo test --features bridge` runs `wire::fixture_replay` — the
-wire-reader gate above.
+Rust side, `cargo test --features bridge` runs `wire::fixture_replay` (the
+wire-reader gate above) plus `tests/engine.rs`, the 13-test mirror of
+`test_engine.py`.
+
+**RUN IT. CI DOES NOT BUILD RUST, so a broken Rust test target is invisible
+here in a way a Python one never is** — nothing goes red, the suite simply
+stops existing. `tests/engine.rs` had not COMPILED since the deck-width
+campaign (`2a8957b`) took masks from 32 to 64 bits: it kept a `let mut covered
+= 0u32`, which stopped type-checking against `Mask`, and the whole target — all
+13 tests — silently dropped out of every run for the entire v2 release. Behind
+it sat a second stale assertion (`v.len() == 28`, "26 dealt + 2 out of play")
+that had been wrong since the deck went to 32 and had never once been executed.
+
+Both are now DERIVED from `NCARD` / `NDEALT` / `NOUT` rather than written as
+literals, so they hold under the `rank7` / `rank9` / `rank10` builds too — which
+is not a hypothetical, since a literal 28 is wrong under three of the four and
+`rank7` is exactly the 28-card game the pre-sweep numbers were measured on.
 
 Browser side, `webapp/test/screens.mjs` drives the skat **create-modal segment**
 through to a dealt room and a first bid — a mounted screen says nothing about

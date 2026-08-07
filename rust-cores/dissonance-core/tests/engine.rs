@@ -33,9 +33,20 @@ fn deal_partitions_the_deck() {
             m &= m - 1;
         }
         v.sort_unstable();
-        assert_eq!(v.len(), 28, "26 dealt + 2 out of play");
+        // DERIVED, never a literal. This said 28 ("26 dealt + 2 out of play")
+        // from the 28-card era and was still saying it long after the deck went
+        // to 32 — the target had stopped compiling, so nothing ever ran it. The
+        // `rank7`/`rank9`/`rank10` features move NCARD too, and a literal is
+        // wrong under three of the four builds.
+        let dealt = 2 * usize::from(NDEALT);
+        assert_eq!(
+            v.len(),
+            usize::from(NCARD),
+            "{dealt} dealt + {} out of play",
+            NOUT
+        );
         v.dedup();
-        assert_eq!(v.len(), 28, "no duplicated card");
+        assert_eq!(v.len(), usize::from(NCARD), "no duplicated card");
         assert_eq!(g.s.hand[0].count_ones(), 7);
         assert_eq!(g.s.hand[1].count_ones(), 7);
         for p in 0..2 {
@@ -282,7 +293,9 @@ fn the_true_deal_is_always_a_legal_determinization() {
                     );
                 }
             }
-            let mut covered = 0u32;
+            // `Mask`, not u32 — masks went 64-bit with the 32-card deck, and a
+            // hardcoded width here stopped compiling the moment they did.
+            let mut covered: Mask = 0;
             for q in 0..2 {
                 for i in [0usize, 2] {
                     if let Some(c) = g.s.pile[q][i].covered() {
