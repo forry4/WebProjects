@@ -8,23 +8,23 @@ the six even ones scores 12. The game is about *which* tricks you win.
 
 **Renamed from Oddtrick (2026-08-07)** — the working name is gone from the route
 (`/dissonance`), the `MODES` entry, the home card, the package, the Rust crate,
-the `.dis-*` CSS prefix and the table. Three things still carry the old name ON
-PURPOSE, all of them inside the committed wasm and none of them reachable from
-a rename:
+the `.dis-*` CSS prefix and the table. Two things still carry the old name ON
+PURPOSE, and a third resolved itself exactly as this section predicted:
 
-* **`odd_pick_card` / `odd_best_card` / `odd_pool`** are the wasm EXPORT names,
+* **`odd_pick_card` / `odd_pick_bid` / `odd_best_card` / `odd_pool`** are the
+  wasm EXPORT names,
   baked into the artifact's export table. The Rust source keeps them for the
   same reason: source and artifact have to agree, and renaming one without
   rebuilding the other breaks the Hard tier at runtime with an import error.
   Rename them in `src/wasm.rs`, the glue and the worker in ONE commit that also
   ships a fresh `wasm-pack` build, or not at all.
-* **`"./oddtrick_bg.js"`** in `webapp/public/wasm/dissonance.js` is the wasm's
-  declared import-module key, matched against the glue's own object key — never
-  against a filename. It is length-prefixed inside the binary, so it only moves
-  at a rebuild. The FILES were renamed (`dissonance.js` / `dissonance_bg.wasm` /
-  `dissonance-worker.js`) because those are plain strings in the glue and the
-  worker; the lib name in `Cargo.toml` is now `dissonance`, so the next
-  `wasm-pack` build emits exactly those filenames and this key resolves itself.
+* ~~**`"./oddtrick_bg.js"`**, the wasm's declared import-module key~~ — RESOLVED
+  as predicted. It is length-prefixed inside the binary and matched against the
+  glue's own object key, never against a filename, so it could only move at a
+  rebuild; the Hard auction shipped one and it now reads `"./dissonance_bg.js"`.
+  Anything rebuilding this artifact must ship the glue and the `.wasm` from the
+  SAME `wasm-pack` run — they are a matched ABI pair, and a mixed pair fails at
+  `init()`, which the client-AI path degrades silently from.
 * **`main.LEGACY_TABLE`** — prod rows live in `oddtrick_games`, so
   `dissonance_init_db` ADOPTS that table via `ALTER TABLE ... RENAME TO` before
   its own `CREATE TABLE IF NOT EXISTS` can mint an empty one beside it. Guarded
@@ -484,10 +484,63 @@ heuristic. The reference measured the one-trick-deep policy **69.8% behind
   never deploys anything on its own. Same filename ⇒ browsers may serve the
   cached old wasm (~10 min Pages TTL).
 
+## The Hard AUCTION (2026-08-07)
+
+`bid.rs`, served over the same protocol as the card play. The old bot scored a
+hand by summing a rank curve and mapping it onto a level through hand-placed
+thresholds — guesses, driving four decisions at once. This samples deals and
+SOLVES each one in every denomination (most the declarer can guarantee, plus
+"could they duck to Null in this trump"), then prices every option the server
+says is legal. No thresholds.
+
+* **The server owns the options AND their moves.** `engine.auction_payoff_options`
+  returns each legal action priced by `payoff_terms`' own arithmetic, each
+  carrying the move it stands for, so the browser ranks an index and sends back
+  a move it was handed. Four move shapes across two auction modes, and no rule
+  about any of them crosses the wire. `_validated_bot_move` re-runs whatever
+  comes back through the ENGINE on a throwaway copy — a client-side allowlist
+  would have been the second copy of the rules all over again.
+* **The talon and the swap stay server-side ON PURPOSE.** They are decisions
+  about INFORMATION: what declining to look is worth depends on a game that has
+  not been named yet, so there is no contract for the solver to price them
+  against.
+* **PERFORMANCE — a world costs a different amount here**, and getting that
+  wrong is what the first wired version did. A card decision solves the deal
+  once (74ms native); an auction decision solves it in every denomination
+  (417ms). Inheriting the card tier's 8-world cap put **7.5–9.2s** on a bid,
+  past the point where the watchdog took decisions back (6 of 8 answered). Three
+  things fixed it, and it now runs **~1.0s for the first decision and ~0 for the
+  rest, 14 of 14 answered**:
+  - **A separate `CLIENT_AI_AUCTION_WORLDS` (3).** The estimate is a whole-hand
+    question and much less noisy than a mid-play one; the design lab's own
+    sweeps ran at k=4.
+  - **The solve is CACHED on what the seat HOLDS** (`hand_key`). An auction asks
+    the same question of the same cards every round — five or six in classic,
+    more up a skat ladder — and only the option list changes, which is
+    arithmetic. The talon swap changes the hand and so invalidates it by
+    construction. This is the big one.
+  - **MTD(f) seeds each denomination from the last** (−6%, exact). The same hand
+    is worth a similar amount in hearts and spades, so the first solve pays for
+    the other four. `solve_root` had done this between sibling moves since the
+    campaign.
+  - **A BIGGER TT IS SLOWER — do not relitigate.** 2^19 and 2^20 each cut nodes
+    (2.55M → 2.43M → 2.38M) and each ran SLOWER in wall clock (423 → 472 → 491
+    ms/world): cache locality dominates at this size. 2^18 stays.
+* **The approximation, stated:** `solve` gives what a declarer can guarantee
+  with both sides playing for POINTS, which is not either side playing for the
+  contract. Pricing every candidate exactly needs a `solve_contract` per
+  (denomination, level) per world against ~50 options; the points solve is the
+  proxy and the payoff arithmetic is exact on top. `auction.rs` has made the
+  same trade since the design campaign.
+* **Passing is valued at zero**, so the bot passes rather than buy a contract
+  that prices negative. It does NOT price what passing hands the opponent —
+  that needs their eval too, at double the cost. The classic opener must bid, so
+  there it takes the best option regardless.
+
 ## Not built yet
 
-* **A Hard auction.** `auction.rs` / `skat.rs` already hold solvers over
-  `eval_hand`; what is missing is a measurement that the cost is worth paying at
-  a bid, and a `SkatCfg` tied to the engine's own price table rather than the
-  crate's default.
+* **Pricing the pass.** See above: the bot knows what a contract is worth to it,
+  not what letting the opponent have it costs.
+* **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
+  never Open, and the multiplier is priced without modelling the extra risk.
 * Match play across rounds (currently one round per room), and a `/review`.

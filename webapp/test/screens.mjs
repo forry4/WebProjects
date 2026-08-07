@@ -54,7 +54,7 @@ async function waitForHttp(url, timeoutMs, label) {
 }
 
 async function launchBrowser() {
-	try { return await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); }
+	try { return await chromium.launch(); }
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }
 

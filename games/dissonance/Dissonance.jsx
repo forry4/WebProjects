@@ -514,17 +514,54 @@ export default function Dissonance({ myId, authUser, onExit }) {
     // that only measure it — which is what lets it duck for the Null
     // consolation, and lets a defender play to force one +2 trick on a declarer
     // who is ducking. The terms come straight from `engine.payoff_terms`.
-    const view = JSON.stringify({ view: as.view, payoff: as.payoff });
+    const view = JSON.stringify({ view: as.view, payoff: as.payoff, auction: as.auction });
     const t0 = performance.now();
     // The server's cap counts WORLDS in total, and worlds are summed across the
     // pool, so split it rather than handing every worker the whole budget.
     const perWorker = Math.max(1, Math.ceil((as.max_worlds || 8) / pool.length));
     (async () => {
       try {
+        // An AUCTION decision ranks the options the server priced; a card
+        // decision ranks the legal cards. Same pooling either way — both index
+        // spaces are the server's or a pure function of the position, so index
+        // i means the same thing in every worker.
+        const kind = as.auction ? "bid" : "search";
         const parts = await Promise.all(pool.map((wk, i) => wk.request({
-          kind: "search", view, budget: as.budget_ms, maxWorlds: perWorker,
+          kind, view, budget: as.budget_ms, maxWorlds: perWorker,
           seed: ((as.decision * 2654435761) ^ (i * 40503 + 1)) >>> 0,
         }).catch(() => null)));
+        if (as.auction) {
+          const ok = parts.filter((p) => p && p.sums && p.sums.length);
+          if (!ok.length) return;
+          const k = ok[0].sums.length;
+          const sum = new Array(k).fill(0);
+          let worlds = 0;
+          for (const p of ok) {
+            if (p.sums.length !== k) continue;   // stale worker — see below
+            for (let a2 = 0; a2 < k; a2++) sum[a2] += p.sums[a2];
+            worlds += p.worlds;
+          }
+          let best = 0;
+          for (let a2 = 1; a2 < k; a2++) if (sum[a2] > sum[best]) best = a2;
+          const opt = as.auction.options[best];
+          // Every branch sends a move the SERVER handed us; nothing here knows
+          // what a bid or a declaration is.
+          //   - Kontra/Re: the option is the standing contract and the decision
+          //     is the SIGN. Declining is worth exactly zero, so a value at or
+          //     below zero takes the `decline` move.
+          //   - Bidding: pass rather than buy a contract that prices negative,
+          //     when passing is legal at all (a classic opener must bid).
+          let move = opt?.move;
+          if (opt?.decline && !(sum[best] > 0)) move = opt.decline;
+          else if (as.auction.pass && !(sum[best] > 0)) move = as.auction.pass;
+          if (!move) return;
+          console.info(`[oddtrick client-AI] ${ok.length} workers, ${worlds} worlds, `
+            + `${k} options in ${Math.round(performance.now() - t0)}ms ->`, move);
+          const wait0 = CLIENT_AI_MIN_MS - (performance.now() - t0);
+          if (wait0 > 0) await new Promise((r) => setTimeout(r, wait0));
+          send({ action: "ai_move", decision: as.decision, move });
+          return;
+        }
         const good = parts.filter((p) => p && p.moves && p.sum);
         if (!good.length) return;              // every worker failed -> server bot
         const k = good[0].moves.length;

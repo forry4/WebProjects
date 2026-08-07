@@ -215,6 +215,34 @@ pub fn contract_from_json(v: &Value) -> Option<Contract> {
     })
 }
 
+/// The auction candidates the server says are legal, each already priced by
+/// `engine.payoff_terms` for the contract it would produce.
+///
+/// Read positionally and never re-derived: the index is the pooling key across
+/// workers and the answer the client sends back, so the option list must mean
+/// the same thing on both sides of the wire. An option missing a field is
+/// DROPPED rather than defaulted — a zero `make` would quietly price a real
+/// contract at nothing and the bot would simply never choose it.
+pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
+    let arr = match v.as_array() {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for o in arr {
+        let n = |k: &str| o.get(k).and_then(|x| x.as_i64()).map(|x| x as i32);
+        match (n("denom"), n("target"), n("make"), n("set_base"), n("short"), n("null")) {
+            (Some(d), Some(t), Some(m), Some(sb), Some(sh), Some(nu)) if (0..=4).contains(&d) => {
+                out.push(crate::bid::Option_ {
+                    denom: d as u8, target: t, make: m, set_base: sb, short: sh, null: nu,
+                });
+            }
+            _ => return Vec::new(),   // a malformed list is not a partial one
+        }
+    }
+    out
+}
+
 // ── HandEval, across workers ─────────────────────────────────────────────────
 //
 // An auction decision is a solver over SAMPLED WORLDS, and the worlds are the

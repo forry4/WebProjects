@@ -35,7 +35,7 @@ use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::POOL;
 use crate::view::View;
-use crate::wire::{contract_from_json, view_from_json};
+use crate::wire::{contract_from_json, options_from_json, view_from_json};
 
 /// Transposition table size, per worker. 2^18 entries is ~4MB for the plain
 /// table plus ~2MB for the contract one — times a pool of at most four workers.
@@ -47,6 +47,15 @@ thread_local! {
     /// One solver per worker, reused across calls. The table stays warm between
     /// the worlds of a decision, which is most of what it is for.
     static DD: RefCell<Dd> = RefCell::new(Dd::new(TT_BITS));
+    /// The last auction solve, keyed on the cards it was about.
+    ///
+    /// AN AUCTION ASKS THE SAME QUESTION SEVERAL TIMES. A classic auction runs
+    /// five or six rounds and a skat ladder more, and the hand does not change
+    /// while it does — only the option list does, and pricing options against
+    /// solved deals is arithmetic. Without this every round paid the full solve
+    /// again, which is where a bid's 7.5-9.2s went. The key is what the seat
+    /// HOLDS, so the talon swap invalidates it by construction.
+    static LAST_BID: RefCell<Option<(u64, Vec<crate::bid::World>)>> = RefCell::new(None);
 }
 
 fn err(msg: &str) -> String {
@@ -143,6 +152,72 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
         }
     });
     list(&sums, k.max(1))
+}
+
+/// Price every auction option the server offered, over `k` sampled deals.
+///
+/// `{"sums":[f64...],"worlds":k}`, indexed by the SERVER'S option list — which
+/// is the pooling key across workers and the answer the client sends back, so
+/// nothing here re-derives it. Signed for the seat being asked, so higher is
+/// better for them whether they are the one declaring (a bid, a declaration) or
+/// the one deciding whether to double it (Kontra).
+///
+/// An empty option list is not an error: it is a seat whose only legal action
+/// is to pass, and the caller reads that off the same emptiness.
+#[wasm_bindgen]
+pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
+    let v: serde_json::Value = match serde_json::from_str(request_json) {
+        Ok(v) => v,
+        Err(_) => return err("bad request"),
+    };
+    let view = match view_from_json(v.get("view").unwrap_or(&v)) {
+        Some(x) => x,
+        None => return err("not a searchable position"),
+    };
+    let auc = match v.get("auction") {
+        Some(a) => a,
+        None => return err("no auction request"),
+    };
+    let opts = options_from_json(auc.get("options").unwrap_or(&serde_json::Value::Null));
+    // Whoever would be DECLARING under these options — not necessarily the seat
+    // being asked. A defender deciding on Kontra is pricing the opponent's
+    // contract, so the solve is from the opponent's side and only the sign at
+    // the end belongs to the asker.
+    let declarer = auc.get("declarer").and_then(|x| x.as_u64()).unwrap_or(view.me as u64) as usize;
+    if declarer > 1 {
+        return err("no such declarer");
+    }
+    let sign = if view.me == declarer { 1.0 } else { -1.0 };
+    let mut rng = Rng::new(seed.to_bits() ^ 0x2545_F491_4F6C_DD1D);
+    let wanted = crate::bid::wanted_denoms(&opts);
+    let key = crate::bid::hand_key(&view, wanted, declarer, k.max(1));
+    let mut cached = false;
+    let sums = LAST_BID.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some((k0, worlds)) = slot.as_ref() {
+            if *k0 == key && !opts.is_empty() {
+                cached = true;
+                return crate::bid::price(&opts, worlds);
+            }
+        }
+        if opts.is_empty() {
+            return Vec::new();
+        }
+        let worlds = DD.with(|dd| {
+            let mut dd = dd.borrow_mut();
+            crate::bid::solve_worlds(&view, &mut dd, &mut rng, k.max(1), wanted, declarer)
+        });
+        let out = crate::bid::price(&opts, &worlds);
+        *slot = Some((key, worlds));
+        out
+    });
+    let body = sums
+        .iter()
+        .map(|x| (x * sign).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{\"sums\":[{}],\"worlds\":{},\"cached\":{}}}",
+            body, if opts.is_empty() { 0 } else { k.max(1) }, cached)
 }
 
 /// The card the pooled sums choose: highest total, ties to the earliest legal

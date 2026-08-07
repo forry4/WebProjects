@@ -29,7 +29,7 @@
 //   won't (the main thread drops this worker; with none ready it never announces
 //   client_ai_ready and the SERVER plays the bot — the pre-existing path).
 
-import init, { odd_pick_card, odd_best_card } from "./dissonance.js";
+import init, { odd_pick_card, odd_best_card, odd_pick_bid } from "./dissonance.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -61,6 +61,14 @@ self.onmessage = async (e) => {
         worlds += r.worlds;
       } while (worlds < cap && Date.now() - t0 < budget);
       self.postMessage({ id: msg.id, moves, sum, worlds });
+    } else if (msg.kind === "bid") {
+      // An auction decision. One call per world budget rather than the card
+      // search's chunked loop: a world here is five full solves, so the
+      // granularity that keeps the endgame responsive would only add overhead.
+      const cap = (msg.maxWorlds >>> 0) || 2;
+      const r = JSON.parse(odd_pick_bid(String(msg.view), cap, Number(msg.seed) || 1));
+      if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
+      self.postMessage({ id: msg.id, sums: r.sums, worlds: r.worlds });
     } else if (msg.kind === "pick") {
       const card = odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
       self.postMessage({ id: msg.id, card });

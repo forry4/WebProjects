@@ -824,13 +824,83 @@ def payoff_terms(g: dict) -> dict:
     a = g["auction"]
     if mode_of(g) == "skat":
         ct = g["contract"]
-        stake = ct["value"] * ct["mult"] * skat_doubling(ct)
-        return {"declarer": a["declarer"], "target": skat_target(g),
+        terms = _terms_for("skat", a["denom"], a["level"], ct["sharp"],
+                           ct["mult"], skat_doubling(ct))
+    else:
+        terms = _terms_for("classic", a["denom"], a["level"])
+    return terms | {"declarer": a["declarer"]}
+
+
+def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
+               mult: int = 1, doubling: int = 1) -> dict:
+    """`payoff_terms` for a contract that has NOT been agreed yet.
+
+    The auction has to price candidates, and `payoff_terms` can only read a
+    settled one off the game. Same arithmetic, taken apart so both callers get
+    their numbers from one place -- a second copy is how the bot ends up ranking
+    options against a scoring rule the room does not use.
+    """
+    if mode == "skat":
+        stake = SKAT_BASE[denom] * level * mult * doubling
+        return {"denom": denom, "level": level,
+                "target": level + (SHARP_BONUS if sharp else 0),
                 "make": stake, "set_base": stake,
                 "short": SHORT_PENALTY, "null": SKAT_NULL_VALUE}
-    return {"declarer": a["declarer"], "target": a["level"],
-            "make": a["level"] * a["level"], "set_base": max(0, a["level"] - 1),
+    return {"denom": denom, "level": level, "target": level,
+            "make": level * level, "set_base": max(0, level - 1),
             "short": SHORT_PENALTY, "null": NULL_MAKE}
+
+
+def auction_payoff_options(g: dict) -> list[dict]:
+    """Every action open to the seat on turn, PRICED, each carrying ITS MOVE.
+
+    The Hard tier's auction ranks these. The server owns which options exist,
+    what each pays AND the move each one is, so the browser holds no rule at all
+    -- it picks an index and sends back the move it was handed. That is the same
+    discipline the card search follows (the server ships `payoff_terms` rather
+    than the scoring being reimplemented in Rust), applied to a decision with
+    four different move shapes across two auction modes.
+
+    The list is POSITIONAL: its index is the pooling key across the worker pool
+    and the answer that comes back, so it is built exactly once, here.
+    """
+    phase = g["phase"]
+    skat = mode_of(g) == "skat"
+    out = []
+    if phase == "auction":
+        opt = auction_options(g)
+        if skat:
+            # A number is only a price: what it is WORTH is the best game it
+            # buys, so each rung is priced at its cheapest declaration in every
+            # denomination that can still reach it.
+            for v in opt["values"]:
+                for d in skat_declarable(v):
+                    out.append(_terms_for("skat", d["denom"], d["min_level"])
+                               | {"move": {"kind": "bid", "value": v}})
+        else:
+            for lvl, d in opt["bids"]:
+                out.append(_terms_for("classic", d, lvl)
+                           | {"move": {"kind": "bid", "level": lvl, "denom": d}})
+    elif phase == "declare":
+        for d in skat_declarable(g["auction"]["value"]):
+            for lvl in range(d["min_level"], MAX_LEVEL + 1):
+                for sharp in (False, True):
+                    mult = skat_multiplier(g["contract"]["hand"], sharp, False)
+                    out.append(_terms_for("skat", d["denom"], lvl, sharp, mult)
+                               | {"move": {"kind": "declare", "denom": d["denom"],
+                                           "level": lvl, "sharp": sharp, "open": False}})
+    elif phase in ("kontra", "re"):
+        # ONE option: the contract exactly as it stands. Its value signed for
+        # the seat being asked is the whole decision -- a defender doubles a
+        # contract that is bad for the declarer, and the `on: False` branch
+        # needs no evaluation because declining is worth precisely zero.
+        a, ct = g["auction"], g["contract"]
+        kind = "re" if phase == "re" else "kontra"
+        out.append(_terms_for("skat", a["denom"], a["level"], ct["sharp"],
+                              ct["mult"], skat_doubling(ct))
+                   | {"move": {"kind": kind, "on": True},
+                      "decline": {"kind": kind, "on": False}})
+    return out
 
 
 def payoff(terms: dict, declarer_pts: int, declarer_scored: bool) -> int:

@@ -287,3 +287,94 @@ def test_every_tier_the_picker_offers_is_one_the_server_accepts():
     client = set(re.findall(r'const CLIENT_AI_TIERS = \[([^\]]*)\]', jsx))
     assert client, "CLIENT_AI_TIERS moved"
     assert set(re.findall(r'"([a-z]+)"', client.pop())) == set(m.CLIENT_AI_TIERS)
+
+
+# --- the auction, searched in the browser too --------------------------------
+
+
+def _auction_room(mode="skat", seed=5):
+    """A vs-AI room parked on the BOT's auction turn."""
+    g = E.new_game(["alice", m.AI_PID], random.Random(seed), opener=1, mode=mode)
+    assert g["phase"] == "auction" and E.turn_pid(g) == m.AI_PID
+    room = {"players": {"alice": "Alice"}, "sockets": {}, "status": "playing",
+            "host": "alice", "game": g, "meta": {"alice": {"token": "tok"}},
+            "vs_ai": True, "ai_player": m.AI_PID, "ai_difficulty": "hard",
+            "mode": mode}
+    m.ROOMS["r1"] = room
+    return room
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_an_auction_decision_ships_priced_options_that_each_carry_their_move(mode):
+    """The browser holds NO rule about what a bid is. It ranks the options and
+    sends back one of the moves it was handed, so the four move shapes across
+    two auction modes stay entirely server-side."""
+    room = _auction_room(mode)
+    room["client_ai"] = True
+    task = _arm(room)
+    auc = room["_ai_search"]["auction"]
+    assert auc["phase"] == "auction" and auc["options"]
+    for o in auc["options"]:
+        # Priced by `payoff_terms`' own arithmetic...
+        assert {"target", "make", "set_base", "short", "null"} <= set(o)
+        # ...and carrying the move it stands for.
+        assert o["move"]["kind"] == "bid"
+    # A card-play request ships `payoff`; an auction one cannot, because there
+    # is no contract yet for those terms to describe.
+    assert "payoff" not in room["_ai_search"]
+
+    run(m._handle_ai_move(_FakeWS(), "r1", "alice",
+                          {"decision": 1, "move": auc["options"][0]["move"]}))
+    assert run(task) == auc["options"][0]["move"]
+
+
+def test_every_option_the_server_offers_is_a_move_the_engine_accepts():
+    """The list is generated, not hand-written, so it can drift into offering a
+    bid the auction refuses — and the bot would then answer with it and be
+    silently dropped to the server tier for that decision."""
+    for mode in ("classic", "skat"):
+        room = _auction_room(mode)
+        g = room["game"]
+        opts = E.auction_payoff_options(g)
+        assert opts
+        for o in opts:
+            assert m._validated_bot_move(g, m.AI_PID, o["move"]) is not None, o
+
+
+def test_an_auction_move_the_engine_refuses_is_treated_like_silence():
+    room = _auction_room("classic")
+    room["client_ai"] = True
+    for bad in ({"kind": "bid", "level": 99, "denom": 0},
+                {"kind": "play", "card": 0},
+                {"kind": "declare", "denom": 0, "level": 1},
+                {"nonsense": True}, "bid", None):
+        task = _arm(room)
+        run(m._handle_ai_move(_FakeWS(), "r1", "alice",
+                              {"decision": room["_ai_search"]["decision"], "move": bad}))
+        assert run(task) is None, bad
+
+
+def test_the_talon_and_the_swap_stay_on_the_server():
+    """Both are decisions about INFORMATION, not about a contract: what
+    declining to look is worth depends on a game that has not been named yet,
+    so there is no payoff for the solver to price them against."""
+    assert "talon" not in m.CLIENT_AI_PHASES and "swap" not in m.CLIENT_AI_PHASES
+    assert set(m.CLIENT_AI_PHASES) == {"auction", "declare", "kontra", "re"}
+    g = E.new_game(["alice", m.AI_PID], random.Random(5), opener=0, mode="skat")
+    E.apply_skat_bid(g, 0, 12)
+    E.apply_pass(g, 1)
+    assert g["phase"] == "talon"
+    assert E.auction_payoff_options(g) == []
+
+
+def test_an_auction_world_budget_is_its_own_and_far_smaller():
+    """A card decision solves the deal once; an auction decision solves it in
+    every denomination — measured 417ms against 74ms natively. The first wired
+    version inherited the card cap and spent 7.5-9.2s on a bid, which the
+    watchdog then timed out."""
+    assert m.CLIENT_AI_AUCTION_WORLDS < m.CLIENT_AI_MAX_WORLDS
+    room = _auction_room("skat")
+    room["client_ai"] = True
+    task = _arm(room)
+    assert room["_ai_search"]["max_worlds"] == m.CLIENT_AI_AUCTION_WORLDS
+    task.cancel()      # nobody answers this one; don't leave it pending

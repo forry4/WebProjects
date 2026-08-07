@@ -508,8 +508,17 @@ impl Dd {
 
     /// Exact value of the position: player 0's future point differential.
     pub fn solve(&mut self, s: &State) -> i16 {
+        self.solve_from(s, 0)
+    }
+
+    /// `solve`, seeded. MTD(f) converges by a ladder of null-window probes, so
+    /// starting near the answer skips most of the rungs — `solve_root` has done
+    /// this between sibling moves since the campaign. The auction wants it
+    /// between DENOMINATIONS: the same hand is worth a similar amount in hearts
+    /// and in spades, so the first solve pays for the other four.
+    pub fn solve_from(&mut self, s: &State, guess: i16) -> i16 {
         if self.use_mtdf {
-            self.mtdf(s, 0)
+            self.mtdf(s, guess)
         } else {
             self.search(s, -64, 64)
         }

@@ -8,6 +8,7 @@
 //! the information set plus its determinizer, `bots` are the players.
 
 pub mod auction;
+pub mod bid;
 pub mod bots;
 pub mod cards;
 pub mod dd;

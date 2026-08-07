@@ -17,6 +17,37 @@ export function odd_best_card(pooled_json) {
 }
 
 /**
+ * Price every auction option the server offered, over `k` sampled deals.
+ *
+ * `{"sums":[f64...],"worlds":k}`, indexed by the SERVER'S option list — which
+ * is the pooling key across workers and the answer the client sends back, so
+ * nothing here re-derives it. Signed for the seat being asked, so higher is
+ * better for them whether they are the one declaring (a bid, a declaration) or
+ * the one deciding whether to double it (Kontra).
+ *
+ * An empty option list is not an error: it is a seat whose only legal action
+ * is to pass, and the caller reads that off the same emptiness.
+ * @param {string} request_json
+ * @param {number} k
+ * @param {number} seed
+ * @returns {string}
+ */
+export function odd_pick_bid(request_json, k, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_pick_bid(ptr0, len0, k, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Solve `k` sampled worlds and return the per-move value sums.
  *
  * `view_json` is the armed request: `{"view": ..., "payoff": ...}`. A bare
@@ -75,7 +106,7 @@ function __wbg_get_imports() {
     };
     return {
         __proto__: null,
-        "./oddtrick_bg.js": import0,
+        "./dissonance_bg.js": import0,
     };
 }
 

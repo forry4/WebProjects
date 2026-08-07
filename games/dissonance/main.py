@@ -64,6 +64,12 @@ DEFAULT_DIFFICULTY = "normal"
 #: dressed up as a serving one.
 CLIENT_AI_TIERS = ("hard",)
 
+#: Phases beyond `play` whose decision the browser searches. The talon and the
+#: swap are deliberately absent: they are choices about INFORMATION, and what
+#: declining to look is worth depends on a game that has not been named yet, so
+#: there is no contract for the solver to price them against.
+CLIENT_AI_PHASES = ("auction", "declare", "kontra", "re")
+
 #: How long the room waits for the browser to answer one decision before the
 #: server bot finishes it. Generous: the whole point of the tier is that the
 #: search takes real time, and the fallback costs strength, not correctness.
@@ -73,6 +79,15 @@ CLIENT_AI_TIMEOUT = 12.0
 #: the millisecond budget is only there so a slow phone still answers.
 CLIENT_AI_BUDGET_MS = 2500
 CLIENT_AI_MAX_WORLDS = 8
+
+#: ...and far fewer for an AUCTION decision, because a world costs a different
+#: amount there. A card decision solves the deal ONCE; an auction decision has
+#: to solve it in every denomination -- measured at 417ms natively against 74ms,
+#: and the first wired version inherited the card cap and spent 7.5-9.2s on a
+#: bid. Three worlds is one per worker on a typical pool, and the estimate is
+#: much less noisy than a mid-play one anyway: it is a whole-hand question, and
+#: the design lab's own `eval_hand` sweeps ran at k=4.
+CLIENT_AI_AUCTION_WORLDS = 3
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
@@ -517,19 +532,39 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             "decision": seq,
             "seat": seat,
             "budget_ms": CLIENT_AI_BUDGET_MS,
-            "max_worlds": CLIENT_AI_MAX_WORLDS,
+            "max_worlds": (CLIENT_AI_MAX_WORLDS if g["phase"] == "play"
+                           else CLIENT_AI_AUCTION_WORLDS),
             # The bot's OWN redacted view -- the same builder that feeds a human
             # seat, so there is no second projection to keep in step and the bot
             # provably searches only what its seat may know.
             "view": engine.view_for(g, seat),
+        }
+        if g["phase"] == "play":
             # The SCORING RULE, as numbers, straight from the function `_finish`
             # scores with. The search optimises the payoff this room will pay
             # rather than the trick points that merely measure it -- and shipping
             # the terms instead of reimplementing them in Rust is what keeps the
             # two from drifting. Public: it is derivable from the contract, which
-            # both seats can already see.
-            "payoff": engine.payoff_terms(g),
-        }
+            # both seats can already see. Only meaningful once a contract EXISTS,
+            # which is why it is not on an auction request.
+            room["_ai_search"]["payoff"] = engine.payoff_terms(g)
+        else:
+            # An AUCTION decision: every legal action, priced, each carrying its
+            # own move. The browser ranks them and sends back one of the moves it
+            # was handed, so no rule about what a bid IS crosses the wire.
+            opts = engine.auction_payoff_options(g)
+            room["_ai_search"]["auction"] = {
+                "phase": g["phase"],
+                # Whoever would be DECLARING under these options -- not always
+                # the seat being asked. A defender weighing Kontra is pricing the
+                # OPPONENT's contract; only the sign at the end is theirs.
+                "declarer": (g["auction"]["declarer"] if g["phase"] in ("kontra", "re")
+                             else seat),
+                "options": opts,
+                "pass": ({"kind": "pass"}
+                         if g["phase"] == "auction"
+                         and engine.auction_options(g)["may_pass"] else None),
+            }
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()
         mine = seq
@@ -572,16 +607,24 @@ async def _schedule_bot_turn(room_id: str) -> None:
             difficulty = _valid_difficulty(room.get("ai_difficulty"))
             snapshot = json.loads(json.dumps(g))
             position_before = _position_key(g)
-            # Only CARD PLAY goes to the browser. The auction, the talon and the
-            # declaration are still the server's heuristic tier: their search is
-            # `eval_hand`, ten exact solves per sampled world against card play's
-            # one, and shipping it would put multiple seconds on a bid. Hard is
-            # therefore a card-play tier today, which is where the reference
-            # measured the gap (the policy is 69.8% behind pimc:8).
+            # Card play AND the auction now. The talon (look/Hand) and the swap
+            # stay on the server: both are decisions about information rather
+            # than about a contract, and neither has a payoff the solver can
+            # price -- what Hand is worth depends on the game you have not named
+            # yet. Everything else is armed if there is a real choice in it.
+            phase = g["phase"]
+            if phase == "play":
+                choices = len(engine.legal_moves(g, seat))
+            elif phase in CLIENT_AI_PHASES:
+                opts = engine.auction_payoff_options(g)
+                # Kontra ships one option and the decision is its SIGN, so a
+                # single option is a real choice there and nowhere else.
+                choices = len(opts) + (1 if phase in ("kontra", "re") else 0)
+            else:
+                choices = 0
             use_client = (difficulty in CLIENT_AI_TIERS
                           and bool(room.get("client_ai"))
-                          and g["phase"] == "play"
-                          and len(engine.legal_moves(g, seat)) > 1)
+                          and choices > 1)
 
         t0 = time.monotonic()
         move = None
@@ -892,6 +935,24 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
     asyncio.create_task(_schedule_bot_turn(room_id))
 
 
+def _validated_bot_move(g, ai, move):
+    """The browser's answer, or None to mean "the server should do this one".
+
+    NOTHING about the shape is trusted. The auction has four move kinds across
+    two modes and a client-side allowlist would be a second copy of the rules --
+    so the check is the ENGINE itself, run against a throwaway copy of the game.
+    A move that would raise there is treated exactly like silence.
+    """
+    if not g or not ai or not isinstance(move, dict):
+        return None
+    try:
+        probe = json.loads(json.dumps(g))
+        engine.apply_move(probe, ai, move)
+    except Exception:
+        return None
+    return move
+
+
 async def _handle_ai_move(ws, room_id, pid, msg):
     """The browser's answer to the armed decision.
 
@@ -911,15 +972,16 @@ async def _handle_ai_move(ws, room_id, pid, msg):
             return
         if msg.get("decision") != armed.get("decision"):
             return                       # stale -- a superseded decision
-        card = msg.get("card")
         g = room.get("game")
         ai = room.get("ai_player")
-        move = None
-        if (isinstance(card, int) and g and ai
-                and g.get("phase") == "play"
-                and card in engine.legal_moves(g, armed["seat"])):
-            move = {"kind": "play", "card": card}
-        else:
+        # `card` is the card-play shape and `move` the general one; a browser on
+        # a cached bundle still speaks the first, so both are read.
+        card = msg.get("card")
+        proposed = msg.get("move")
+        if proposed is None and isinstance(card, int):
+            proposed = {"kind": "play", "card": card}
+        move = _validated_bot_move(g, ai, proposed)
+        if move is None:
             LOG.info("dissonance client AI answered with a move the engine "
                      "refuses; the server finishes it (%s)", room_id)
         room["_ai_pending_move"] = move
