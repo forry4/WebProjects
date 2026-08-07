@@ -102,9 +102,36 @@ def test_every_card_is_played_and_points_sum_to_the_pool(seed):
         return
     r = g["result"]
     assert r["ended_early"] and r["made"], "only a contract that cannot fail stops early"
+    assert g["trick"] <= E.NTRICKS - 2, \
+        "a round must never be cut short with a single trick left to play"
     # The floor it stopped on: no more +2 tricks, every remaining -1 taken.
     neg_left = sum(1 for t in range(g["trick"], E.NTRICKS) if E.trick_value(t) < 0)
     assert g["pts"][r["declarer"]] - neg_left >= r["level"]
+
+
+def test_the_last_trick_is_always_played_out():
+    """Stopping one trick from home saves nothing and costs the hand its last
+    beat -- the trick where the shortfall and the Null consolation are still
+    live, and so the one most worth seeing.
+
+    Driven at the predicate rather than through random play, because the
+    position this guards (settled with exactly one trick left) is common enough
+    to matter and rare enough that a seed sweep is not proof it was checked.
+    """
+    g = E.new_game(["a", "b"], random.Random(3), opener=0)
+    E.apply_bid(g, 0, 1, 0)
+    E.apply_pass(g, 1)
+    decl = g["auction"]["declarer"]
+
+    # Way past a level-1 target, so only the trick count can hold the round open.
+    g["pts"][decl] = 99
+    for remaining in (2, 1, 0):
+        g["trick"] = E.NTRICKS - remaining
+        settled = E._score_is_settled(g)
+        if remaining <= 1:
+            assert not settled, f"stopped with {remaining} trick(s) left"
+        else:
+            assert settled, "a contract that cannot fail should still settle early"
 
 
 def test_a_round_both_completes_and_settles_early_across_random_play():
@@ -467,9 +494,70 @@ def test_the_swap_moves_exactly_one_card_each_way():
     assert take in g["hands"][0] and give not in g["hands"][0]
     assert give in g["out"] and take not in g["out"]
     assert len(g["out"]) == len(before_out) == E.N_OUT
-    assert give in g["shown"], "the discard is now among the cards the declarer saw"
+    assert give not in g["shown"], \
+        "the discard came out of HAND — it was never a card the declarer was shown"
     assert g["swapped"] is True and g["phase"] == "play"
     assert len(g["hands"][0]) == 7, "hand size is unchanged"
+
+
+def test_a_swap_does_not_rewrite_the_record_of_what_was_shown():
+    """`shown` is history, `out` is the current position — they diverge here.
+
+    They used to be kept in step, which meant the round-end reveal ("was shown
+    X Y Z") named the card the declarer had just discarded out of their own
+    hand. A card that was never in the talon could be reported as one they were
+    shown, which is worse than useless: it is a false read on the one piece of
+    hidden information the defender gets to see at the end.
+    """
+    g = E.new_game(["a", "b"], random.Random(21), opener=0)
+    E.apply_bid(g, 0, 4, 3)
+    E.apply_pass(g, 1)
+    shown_at_deal = list(g["shown"])
+    take, give = g["shown"][2], sorted(g["hands"][0])[-1]
+
+    E.apply_swap(g, 0, take, give)
+
+    assert g["shown"] == shown_at_deal, "the record of what was shown moved"
+    assert g["swap_take"] == take and g["swap_give"] == give
+    # ...while `out` tracks the real position, discard included.
+    assert give in g["out"] and take not in g["out"]
+
+
+def test_standing_pat_records_no_moved_cards():
+    g = E.new_game(["a", "b"], random.Random(23), opener=0)
+    E.apply_bid(g, 0, 4, 3)
+    E.apply_pass(g, 1)
+    shown_at_deal = list(g["shown"])
+
+    E.apply_swap(g, 0, None, None)
+
+    assert g["swapped"] is False
+    assert g["swap_take"] is None and g["swap_give"] is None
+    assert g["shown"] == shown_at_deal
+
+
+def test_which_cards_moved_stays_secret_until_the_round_is_over():
+    """The defender learns THAT a swap happened, never which cards — that is the
+    whole reason the discard goes face-down. Shipping it early would hand them a
+    card of the declarer's hand and one they know is out, for free."""
+    g = E.new_game(["a", "b"], random.Random(21), opener=0)
+    E.apply_bid(g, 0, 4, 3)
+    E.apply_pass(g, 1)
+    take, give = g["shown"][2], sorted(g["hands"][0])[-1]
+    E.apply_swap(g, 0, take, give)
+
+    for seat in (0, 1):
+        v = E.view_for(g, seat)
+        assert v["swapped"] is True, "that a swap happened is public"
+        assert v["swap_take"] is None and v["swap_give"] is None, \
+            f"seat {seat} was told which cards moved mid-round"
+
+    g = _play_out(g, random.Random(21))
+    assert g["phase"] == "over"
+    for seat in (0, 1):
+        v = E.view_for(g, seat)
+        assert v["swap_take"] == take and v["swap_give"] == give, \
+            "the reveal must show what actually moved"
 
 
 def test_the_swap_rejects_pile_cards_and_unshown_cards():

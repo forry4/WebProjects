@@ -127,11 +127,13 @@ function timeAgo(ts) {
 
 // ─── pieces ─────────────────────────────────────────────────────────────────
 
-function Card({ c, onClick, dim, sel, small, ghost }) {
+// There is deliberately no `dim` prop: every face-up card renders identically,
+// playable or not. See the note in the stylesheet.
+function Card({ c, onClick, sel, small, ghost }) {
   if (ghost) return <div className={`dis-card ghost${small ? " sm" : ""}`}>?</div>;
   if (c === null || c === undefined) return <div className="dis-card back" />;
   const cls = `dis-card ${isRed(c) ? "red" : "black"}${onClick ? " play" : ""}`
-    + `${dim ? " dim" : ""}${sel ? " sel" : ""}${small ? " sm" : ""}`;
+    + `${sel ? " sel" : ""}${small ? " sm" : ""}`;
   return (
     <div className={cls} onClick={onClick} title={cardName(c)}>
       {/* The index sits in the TOP-RIGHT corner, which is what lets a pile
@@ -146,7 +148,7 @@ function Card({ c, onClick, dim, sel, small, ghost }) {
   );
 }
 
-function Pile({ pile, onPlay, playable }) {
+function Pile({ pile, onPlay }) {
   if (!pile || pile.n === 0) {
     return (
       <div className="dis-pile">
@@ -170,7 +172,7 @@ function Pile({ pile, onPlay, playable }) {
             <Card c={knownUnder ? under : null} />
           </div>
         )}
-        <Card c={pile.top} onClick={onPlay} dim={onPlay ? false : !playable} />
+        <Card c={pile.top} onClick={onPlay} />
       </div>
     </div>
   );
@@ -385,6 +387,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // only ships `talon` / `declare` to that seat, and Kontra/Re go by phase.
   const myKontra = isSkat && game?.phase === "kontra" && !iDeclare;
   const myRe = isSkat && game?.phase === "re" && iDeclare;
+  // Did the declarer actually SEE the talon? Classic always shows it to them;
+  // skat only if they looked, and declining to look is what Hand means. The
+  // round-end reveal must not say "was shown" about a Hand game.
+  const sawTalon = !isSkat || !!game?.looked;
 
   const onMessage = useCallback((msg) => {
     if (msg.type === "error") { setToast(msg.message || "error"); setConnecting(false); return; }
@@ -872,6 +878,11 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const bidReady = bidLevel !== null && bidDenom !== null && denomOkAt(bidLevel, bidDenom);
   const legal = new Set(game.legal || []);
   const res = game.result;
+  // A round that stopped early banked the SCORE but not the final tally: the
+  // contract was already safe, and the tricks nobody played would still have
+  // moved the trick points. Printing the running total as if it were the final
+  // one reads as a miscount, so say what is actually true — at least this many.
+  const scored = (n) => (res?.ended_early ? `at least ${n}` : `${n}`);
   // THE BEAT BLOCKS PLAY, and that is what makes it a beat rather than a race.
   // The hold is 700ms and a trick takes ~600ms at full tilt, so a player who
   // answers before it expires was leading the NEXT trick behind a screen still
@@ -922,7 +933,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <div className="muted" style={{ fontSize: "0.72rem" }}>Open — played face up</div>
             )}
             <div className="dis-piles">
-              {game.piles[oppSeat].map((p, i) => <Pile key={i} pile={p} playable={false} />)}
+              {game.piles[oppSeat].map((p, i) => <Pile key={i} pile={p} />)}
             </div>
           </div>
 
@@ -1269,7 +1280,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   {`${res.level}${DENOM_LABEL[res.denom]}`}
                   {multParts(res).length ? ` ${multParts(res).join(" + ")}` : ""}
                   {res.kontra ? (res.re ? " · Kontra + Re" : " · Kontra") : ""}
-                  {` and scored ${res.declarer_pts} of the ${res.target} promised`}
+                  {` and scored ${scored(res.declarer_pts)} of the ${res.target} promised`}
                   {res.null ? ` — taking no scoring trick at all` : ""}
                 </div>
                 {/* THE WHOLE CHAIN, from the denomination's base price. Skat's
@@ -1289,7 +1300,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 </div>
               </> : <>
                 <div className="muted">
-                  {`${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]} and scored ${res.declarer_pts}`}
+                  {`${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]} and scored ${scored(res.declarer_pts)}`}
                   {res.null ? ` — taking no scoring trick at all` : ""}
                 </div>
                 <div className="dis-maths">
@@ -1320,11 +1331,30 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <div className="dis-outrow">
                     {game.out.map((c) => <Card key={c} c={c} small />)}
                   </div>
-                  {game.shown && (
+                  {/* WHAT THE DECLARER ACTUALLY SAW AND DID — and no more than
+                      that. This line used to read `shown` straight off the
+                      state, which the engine rewrote on a swap, so it named the
+                      discarded card as one they had been shown; and it said
+                      "was shown" even for a Hand game, where the declarer never
+                      looked at the talon at all. Both are the same mistake:
+                      describing the talon from the final position instead of
+                      from what happened. */}
+                  {game.shown && (sawTalon ? (
                     <div className="muted" style={{ fontSize: "0.72rem" }}>
                       {nameOf(res.declarer)} was shown {game.shown.map(cardName).join(" ")}
+                      {game.swap_take != null && game.swap_give != null
+                        ? `, and swapped ${cardName(game.swap_take)} with ${cardName(game.swap_give)}`
+                        : game.swapped
+                          // A save written before the engine recorded which
+                          // cards moved. Say that one did, not which.
+                          ? ", and swapped one of them"
+                          : ", and stood pat"}
                     </div>
-                  )}
+                  ) : (
+                    <div className="muted" style={{ fontSize: "0.72rem" }}>
+                      {nameOf(res.declarer)} played a Hand — never looked at these
+                    </div>
+                  ))}
                 </div>
               )}
               <button className="btn" onClick={leaveToLobby}>Back to lobby</button>
@@ -1367,7 +1397,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
             <div className="dis-piles">
               {game.piles[mySeat].map((p, i) => (
                 <Pile key={i} pile={p}
-                  playable={legal.has(p?.top)}
                   onPlay={canPlay && legal.has(p?.top) ? () => doPlay(p.top) : null} />
               ))}
             </div>
@@ -1375,7 +1404,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {(game.hand || []).map((c) => (
                 <Card key={c} c={c}
                   sel={(game.phase === "swap" || game.phase === "talon") && swapGive === c}
-                  dim={game.phase === "play" && myTurn && !legal.has(c)}
                   onClick={
                     (game.phase === "swap" ? game.swap : game.phase === "talon" ? game.talon : null)
                       && swapTake !== null
@@ -1450,7 +1478,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               arrives, and "what did they just play" is the question the log
               answers worst — it is a flat list of cards with no trick breaks. */}
           {prev && (
-            <div className="dis-panel odd-p-last">
+            <div className="dis-panel dis-p-last">
               <h4>Last trick</h4>
               <div className="dis-lasttrick">
                 {prev.plays.map((p, i) => (
@@ -1472,18 +1500,22 @@ export default function Dissonance({ myId, authUser, onExit }) {
           {/* The talon, for the seat that bought the right to see it. It stays
               on screen for the rest of the round: three cards you know are out
               of play is a real holding to count from, and losing sight of them
-              the moment the swap resolves threw that away. After a swap this
-              tracks what is ACTUALLY out — your discard sits where the card you
-              took used to be. */}
+              the moment the swap resolves threw that away.
+
+              It shows WHAT YOU WERE SHOWN, which after a swap is no longer what
+              is out — the card you took is in your hand and your discard is out
+              in its place. That is the more useful of the two: you can see your
+              own hand, and this is the only record of the third card you turned
+              down. */}
           {game.shown && game.phase !== "over" && (
-            <div className="dis-panel odd-p-talon">
+            <div className="dis-panel dis-p-talon">
               <h4>Set aside · you saw these</h4>
               <div className="dis-outrow">
                 {game.shown.map((c) => <Card key={c} c={c} small />)}
               </div>
               {game.swapped && (
                 <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
-                  Includes the card you discarded.
+                  One of these is now in your hand.
                 </div>
               )}
             </div>

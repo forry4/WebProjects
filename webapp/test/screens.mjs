@@ -1685,7 +1685,7 @@ try {
 			};
 			return {
 				side: vis(".dis-side"),
-				lastTrick: vis(".odd-p-last"),
+				lastTrick: vis(".dis-p-last"),
 				contractChip: vis(".dis-chip"),
 				lastTrickCards: document.querySelectorAll(".dis-lasttrick .dis-card").length,
 				// Deliberately hidden — duplicated by the chip and the seat rows.
@@ -1894,12 +1894,35 @@ try {
 
 		// Wall-clock bounded, like the block above and for the same reason.
 		const beatDeadline = Date.now() + 180_000;
+		// EVERY FACE-UP CARD LOOKS THE SAME — no dimming, in any form. Sampled
+		// mid-round, on the first turn where piles are actually on the table:
+		// this used to be measured after the game was over, when every pile is
+		// exhausted, so it read all-zeroes on every run and could never pass.
+		// A pile's top also sits over its buried card (offset so only a corner
+		// shows), which is why see-through is called out separately — an
+		// opacity-based dim there made the two read as one smeared card.
+		let piles = null;
 		while (Date.now() < beatDeadline) {
 			const st = await page.evaluate(() => ({
 				bidding: !!document.querySelector(".dis-bidgrid button"),
 				over: !!document.querySelector(".dis-result"),
 			}));
 			if (st.over) break;
+			if (!piles && !st.bidding) {
+				const s = await page.evaluate(() => {
+					const tops = [...document.querySelectorAll(".dis-piles .dis-pilewrap")]
+						.map((w) => [...w.children].find((c) => c.classList.contains("dis-card")))
+						.filter(Boolean);
+					return {
+						n: tops.length,
+						dimmed: tops.filter((t) => t.classList.contains("dim")).length,
+						seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
+						greyed: tops.filter((t) => getComputedStyle(t).filter !== "none").length,
+						buried: document.querySelectorAll(".dis-buried").length,
+					};
+				});
+				if (s.n >= 3 && s.buried > 0) piles = s;
+			}
 			if (st.bidding) {
 				await oddBidCheaply(page);
 				await sleep(250);
@@ -1912,30 +1935,11 @@ try {
 			await sleep(90);
 		}
 
-		// A PILE'S TOP CARD MUST BE OPAQUE. It sits over the buried one, offset so
-		// only the buried card's top-right corner shows -- and an unplayable top
-		// (every pile of the opponent's, and your own between turns) was dimmed
-		// with `opacity`, so the card underneath showed straight through it and
-		// the two read as one smeared card. Pure CSS, so nothing in Python can
-		// see it; the opponent's row is the one that is always dimmed.
-		const piles = await page.evaluate(() => {
-			const rows = [...document.querySelectorAll(".dis-piles")];
-			const tops = rows.flatMap((r) => [...r.querySelectorAll(".dis-pilewrap")]
-				.map((w) => [...w.children].find((c) => c.classList.contains("dis-card")))
-				.filter(Boolean));
-			return {
-				n: tops.length,
-				dimmed: tops.filter((t) => t.classList.contains("dim")).length,
-				seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
-				// ...and the buried card is still peeking out, or the offset broke.
-				buried: document.querySelectorAll(".dis-buried").length,
-			};
-		});
-		check("a pile's top card is opaque, dimmed or not",
-			piles.n >= 3 && piles.seeThrough === 0 && piles.buried > 0,
-			JSON.stringify(piles));
-		check("...and the check is not vacuous: some top really is dimmed",
-			piles.dimmed > 0, JSON.stringify(piles));
+		check("the piles were sampled with cards still on the table",
+			piles !== null, "never caught a turn with a buried card showing");
+		check("no face-up card is dimmed, greyed or see-through",
+			piles !== null && piles.dimmed === 0 && piles.seeThrough === 0
+			&& piles.greyed === 0, JSON.stringify(piles));
 
 		const trace = await page.evaluate(() => window.__hold);
 		// Dwell of state i = when state i+1 replaced it. The last entry has no

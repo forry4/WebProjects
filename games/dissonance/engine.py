@@ -266,10 +266,18 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE) -> dict
         "out": out,
         # The subset of `out` shown to whoever wins the auction. Fixed at the
         # deal so it does not depend on who wins; secret until then.
+        #
+        # It is a RECORD OF WHAT WAS SHOWN, not a live view of the out pile, and
+        # `apply_swap` must never rewrite it -- see the note there.
         "shown": out[:N_SHOWN],
         # None until the swap phase resolves; then True/False. WHICH cards
         # moved stays hidden -- the defender learns only that a swap happened.
         "swapped": None,
+        # The two cards a swap moved: `swap_take` came out of the talon into
+        # hand, `swap_give` went the other way. Both stay None on a decline or
+        # a Hand game, and both are redacted until the round is over.
+        "swap_take": None,
+        "swap_give": None,
         "opener": opener,
         # The auction is real game state, not a transient message field, so it
         # survives saves and reconnects and stays server-enforced.
@@ -494,8 +502,15 @@ def apply_swap(g: dict, seat: int, take, give) -> None:
         g["hands"][decl].remove(give)
         g["hands"][decl].append(take)
         g["hands"][decl].sort()
+        # `out` DOES change -- the discard really is out of play now, and the
+        # round-end reveal has to show the six cards that actually sat out.
         g["out"][g["out"].index(take)] = give
-        g["shown"][g["shown"].index(take)] = give
+        # `shown` deliberately does NOT. It records the three cards the declarer
+        # was shown, and the discard was never one of them -- it came out of
+        # their hand. Rewriting it here (which this used to do) made the
+        # round-end reveal name a card the declarer had never been shown, and
+        # that card may never have been anywhere near the talon.
+        g["swap_take"], g["swap_give"] = take, give
         g["swapped"] = True
     if skat:
         # In skat mode the talon resolves BEFORE the game is named -- the whole
@@ -744,6 +759,12 @@ def _score_is_settled(g: dict) -> bool:
     """
     decl = g["auction"]["declarer"]
     if decl is None or decl < 0:
+        return False
+    # NEVER STOP WITH A SINGLE TRICK LEFT. Cutting the round one trick from home
+    # saves nothing and costs the players the hand's last beat -- and that beat
+    # is where the Null consolation and the shortfall are still live, so it is
+    # the trick most worth seeing. Below two remaining, play it out.
+    if NTRICKS - g["trick"] <= 1:
         return False
     neg_left = sum(1 for t in range(g["trick"], NTRICKS) if trick_value(t) < 0)
     target = skat_target(g) if mode_of(g) == "skat" else g["auction"]["level"]
@@ -1013,8 +1034,12 @@ def view_for(g: dict, seat: int) -> dict:
         # The out-of-play cards stay secret until the round is done.
         "out": list(g["out"]) if over else None,
         "shown": list(g["shown"]) if sees_shown else None,
-        # Whether a swap happened is public; which cards moved is not.
+        # Whether a swap happened is public; which cards moved is not -- until
+        # the round is over, when everything opens up. `.get` because a save
+        # written before these keys existed can still be mid-round on load.
         "swapped": g["swapped"],
+        "swap_take": g.get("swap_take") if over else None,
+        "swap_give": g.get("swap_give") if over else None,
         "to_play": to_play(g) if g["phase"] == "play" else None,
         "legal": legal_moves(g, seat) if g["phase"] == "play" else [],
         "options": auction_options(g) if g["phase"] == "auction" else None,

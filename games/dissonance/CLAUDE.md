@@ -189,7 +189,22 @@ round early:
 * **Null** gets no early exit of its own. It used to (as a bid it was decided the
   moment the declarer took a scoring trick), but as a consolation it is settled
   early only when no +2 trick remains — which by the parity of the trick values
-  can only ever save the thirteenth.
+  can only ever save the thirteenth, and the floor below now forbids that anyway.
+* **Never with ONE trick left** (2026-08-07). Stopping a trick from home saves
+  nothing and costs the hand its last beat — the trick where the shortfall and
+  the Null consolation are both still live, i.e. the one most worth watching.
+  `_score_is_settled` returns False below two remaining, so the earliest stop
+  leaves at least two. Pinned at the predicate by
+  `test_the_last_trick_is_always_played_out` rather than by a seed sweep: the
+  position is common enough to matter and rare enough that random play passing
+  is no evidence it was checked.
+
+**A round that stopped early reports "scored AT LEAST N".** The score is exact —
+that is the whole precondition for stopping — but the trick TOTAL is not, because
+the unplayed tricks would still have moved it. Printing the running total as if
+it were final reads as a miscount, so the result panel says "at least" whenever
+`result.ended_early` (which only ever coincides with a MADE contract, since a set
+one plays on).
 
 **`pts` sums to POOL only over a COMPLETED round.** Every conservation assertion
 has to say "a round that ran to thirteen tricks"; four tests and one fixture
@@ -202,8 +217,41 @@ most of the way through most deals and every fixture's final points diverged.
 MAX_LEVEL works because one player's ceiling is sweeping the six +2 tricks;
 `test_rust_parity` asserts that relationship rather than assuming it.
 
+## The talon reveal describes WHAT HAPPENED, not the final position
+
+`shown` is the record of the three cards the declarer was shown, fixed at the
+deal. **`apply_swap` must never rewrite it.** It used to — the taken card was
+replaced in place by the discard, keeping `shown` in step with `out` — and the
+round-end reveal then named the discarded card as one the declarer "was shown",
+when that card had come out of their own hand and may never have been near the
+talon. `out` DOES change (the discard really is out of play now, and the reveal
+has to show the six cards that actually sat out); `swap_take` / `swap_give`
+record which cards moved, and are **redacted until the round is over** — the
+defender learns THAT a swap happened and nothing more, which is the entire point
+of the discard going face-down.
+
+The same mistake had a second form: the reveal said "was shown" even for a skat
+**Hand** game, where declining to look IS the announcement and the declarer never
+saw the talon at all. The frontend gates that line on `sawTalon`
+(`!isSkat || game.looked`).
+
+Both are one error — describing the talon from the final position instead of from
+what happened. `test_engine.py` pins the record, the redaction and the decline;
+one pre-existing test asserted the old behaviour outright and was corrected.
+
 ## Do not relitigate
 
+* **No card is ever dimmed** (2026-08-07). Every face-up card renders
+  identically, playable or not; legality lives in the `play` affordance and is
+  enforced server-side. Two earlier versions of this failed differently and both
+  are recorded in the stylesheet: `opacity` let a pile's buried card show
+  straight through its top so the two read as one smeared card, and the
+  `filter: brightness()` that replaced it fixed the transparency while keeping
+  the real problem — a hand that read as two different kinds of card.
+  `screens.mjs` now guards the absence (no `dim` class, no reduced opacity, no
+  filter), sampled MID-round: the check it replaced ran after the game was over,
+  when every pile is exhausted, so it read all-zeroes on every run and could
+  never pass.
 * **Optional follow-suit is rejected.** With negative odd tricks it makes every
   odd trick fall deterministically to whoever leads it — 7 of 13 tricks lose
   all decision content.

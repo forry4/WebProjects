@@ -100,13 +100,17 @@
 @media (hover: hover) and (pointer: fine) {
   .dis-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
 }
-/* DIMMING MUST NOT BE TRANSPARENCY. A pile's top card sits ON TOP of its buried
-   one (offset down and left so only the buried card's corner shows), and an
-   unplayable top — every pile of the opponent's, and your own between turns —
-   used to be `opacity: .38`, so the card underneath showed straight through it
-   and the two read as one smeared card. Brightness on an opaque background is
-   the same visual cue and stays opaque. */
-.dis-card.dim { filter: grayscale(0.6) brightness(0.7); }
+/* NO DIMMING — every face-up card looks the same, playable right now or not.
+   Legality is carried by the `play` affordance (cursor + hover) and enforced
+   server-side, so the appearance of the card face never encodes it.
+
+   This replaces two earlier attempts, and the history is the warning: a pile's
+   top card sits ON TOP of its buried one (offset so only the buried card's
+   corner shows), so dimming the top with `opacity` let the card underneath
+   show straight through and the two read as one smeared card. Switching to
+   `filter: brightness()` fixed the transparency but kept the real problem —
+   a hand rendered as two different kinds of card. Do not reintroduce a `dim`
+   class in either form. */
 .dis-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dis-card.back {
   background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
