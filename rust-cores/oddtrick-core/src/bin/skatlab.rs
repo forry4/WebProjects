@@ -69,6 +69,10 @@ struct Stats {
     stake: f64,
     /// Auctions in which the opener declined and the opponent took it.
     open_pass: u64,
+    /// Believed minus true declarer points, summed over contracts. Positive
+    /// means the world sample flatters the declarer.
+    belief_gap: f64,
+    belief_n: f64,
     bids: [u64; 12],
     rows: Vec<String>,
 }
@@ -120,7 +124,8 @@ fn null_makes(dd: &mut Dd, base: &oddtrick::state::State, decl: usize,
 /// who never looked genuinely does not know them.
 ///
 /// Returns (chosen declaration, the state actually played, exact declarer
-/// points in the chosen denomination, whether Null exactly made).
+/// points in the chosen denomination, whether Null exactly made, and the points
+/// the declarer BELIEVED it would take in that denomination).
 #[allow(clippy::too_many_arguments)]
 fn resolve_declarer(
     dd: &mut Dd,
@@ -130,7 +135,7 @@ fn resolve_declarer(
     decl: usize,
     rng: &mut Rng,
     tk: usize,
-) -> (Decl, oddtrick::state::State, i32, bool) {
+) -> (Decl, oddtrick::state::State, i32, bool, f64) {
     // After looking, the shown cards are known out of play; before looking they
     // are not. `out_public` is exactly "out-cards this observer can place", so
     // the post-look view is the same constructor over a wider public set.
@@ -209,6 +214,26 @@ fn resolve_declarer(
     }
     let (d, take, give, _) = best.expect("every bid has at least one declaration");
 
+    // What the declarer BELIEVED it would score in the game it chose, at the
+    // same quantile it chose by. Paired against the truth below, this is the
+    // direct test of whether the world sample is optimistic -- which is the
+    // difference between "the mode is mispriced" and "the instrument is
+    // under-sampled", and not something to settle by argument.
+    let believed = if d.is_null() {
+        0.0
+    } else {
+        let worlds = if d.hand { &blind_worlds } else { &look_worlds };
+        let mut v: Vec<i32> = worlds
+            .iter()
+            .map(|w| {
+                let mut st = *w;
+                st.hand[decl] = (st.hand[decl] & !give) | take;
+                pts_in(dd, &st, d.denom, decl, cfg.declarer_leads)
+            })
+            .collect();
+        oddtrick::skat::quantile(&mut v, cfg.q)
+    };
+
     // Only now does the truth come in.
     let mut played = g.s;
     played.hand[decl] = (played.hand[decl] & !give) | take;
@@ -218,7 +243,7 @@ fn resolve_declarer(
         pts_in(dd, &played, d.denom, decl, cfg.declarer_leads)
     };
     let nm = d.is_null() && null_makes(dd, &played, decl, cfg.declarer_leads);
-    (d, played, dpts, nm)
+    (d, played, dpts, nm, believed)
 }
 
 fn main() {
@@ -312,8 +337,12 @@ fn main() {
                     let decl = auc.declarer as usize;
                     let bid = rungs[auc.vi as usize];
                     let mut trng = Rng::new(seed ^ 0xD1CE_5EED);
-                    let (d, _played, dpts, nm) =
+                    let (d, _played, dpts, nm, believed) =
                         resolve_declarer(&mut dd, &cfg, &g, bid, decl, &mut trng, tk);
+                    if !d.is_null() {
+                        st.belief_gap += believed - dpts as f64;
+                        st.belief_n += 1.0;
+                    }
 
                     let made = if d.is_null() { nm } else { dpts >= d.target(&cfg) };
                     // The defender replies from THEIR OWN sample, blind to the
@@ -415,6 +444,8 @@ fn main() {
         s.kontra_right += r.kontra_right;
         s.stake += r.stake;
         s.open_pass += r.open_pass;
+        s.belief_gap += r.belief_gap;
+        s.belief_n += r.belief_n;
         s.rows.extend(r.rows.iter().cloned());
         for i in 0..16 {
             s.clevel[i] += r.clevel[i];
@@ -448,6 +479,8 @@ fn main() {
     println!("declarer made         {:.1}%", 100.0 * s.made as f64 / c);
     println!("declarer net          {:+.2} per contract", s.decl_net / c);
     println!("mean stake            {:.1}", s.stake / c);
+    println!("belief gap            {:+.2} pts (believed - true, in the declared denomination)",
+             s.belief_gap / s.belief_n.max(1.0));
     println!();
     println!("-- Q1  ANNOUNCEMENT RATES (target: Hand a real temptation, ~15-30%) --");
     println!("  Hand              {:5.1}%   (made {:.1}%)", 100.0 * s.hand as f64 / c,
