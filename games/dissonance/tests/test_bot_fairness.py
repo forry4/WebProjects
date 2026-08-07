@@ -270,3 +270,95 @@ def test_the_view_reshuffle_would_catch_a_leak_in_the_armed_request():
             moved = True
             break
     assert moved, "a view leaking the opponent's hand went undetected"
+
+
+# --- exactly what an AUCTION decision may consult ---------------------------
+#
+# The auction is the sharpest case to state, because nothing has been played
+# yet: there is no history to make cards public, and neither mode has resolved
+# its talon (classic swaps after the auction, skat's talon phase follows it), so
+# `shown` is secret from both seats. That leaves a clean partition of the 32
+# cards from a seat's point of view.
+
+
+def _auction_partition(g: dict, seat: int):
+    """(own hand, own public pile cards, opponent's public pile cards, hidden).
+
+    "Public pile cards" is FOUR per seat: the three tops, plus the middle pile's
+    bottom, which is dealt face up to both players.
+    """
+    def publics(owner):
+        out = []
+        for i, p in enumerate(g["piles"][owner]):
+            if p:
+                out.append(p[-1])
+            if len(p) == 2 and i == 1:
+                out.append(p[0])
+        return sorted(out)
+    return (sorted(g["hands"][seat]), publics(seat), publics(1 - seat),
+            sorted(_hidden_from(g, seat)))
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_the_auction_partition_is_7_plus_4_plus_4_plus_17(mode):
+    """The arithmetic the two tests below rest on, stated once."""
+    g = E.new_game(["a", "b"], random.Random(81), opener=0, mode=mode)
+    assert g["phase"] == "auction"
+    hand, mine, theirs, hidden = _auction_partition(g, 0)
+    assert (len(hand), len(mine), len(theirs), len(hidden)) == (7, 4, 4, 17)
+    assert len(set(hand + mine + theirs + hidden)) == E.NCARD, "not a partition"
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_the_hard_tiers_auction_request_carries_exactly_the_public_cards(mode):
+    """EXACTLY: its own thirteen-card holding as far as it may name it, plus the
+    four cards face up on the opponent's side. No more (that would be cheating)
+    and no fewer (the opponent's tops are public and a bot ignoring them is
+    simply weaker than it should be).
+    """
+    g = E.new_game(["a", "b"], random.Random(82), opener=0, mode=mode)
+    hand, mine, theirs, hidden = _auction_partition(g, 0)
+    v = E.view_for(g, 0)
+
+    seen = set(v["hand"])
+    for row in v["piles"]:
+        for cell in row:
+            for key in ("top", "under"):
+                if cell[key] is not None:
+                    seen.add(cell[key])
+
+    assert seen == set(hand) | set(mine) | set(theirs), (
+        "the armed auction request does not carry exactly the public cards")
+    assert not (seen & set(hidden)), "a hidden card reached the search"
+    assert v["opp_hand"] is None and v["out"] is None and v["shown"] is None, \
+        "neither seat may see the opponent's hand or the talon during the auction"
+    # The four it may see of the opponent's, named as four.
+    opp_seen = {c["top"] for c in v["piles"][1] if c["top"] is not None}
+    opp_seen |= {c["under"] for c in v["piles"][1] if c["under"] is not None}
+    assert opp_seen == set(theirs) and len(opp_seen) == 4
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_the_server_bots_auction_ignores_the_opponents_public_cards(mode):
+    """A WEAKNESS, pinned so it is not mistaken for the fairness property.
+
+    The server bot bids off its own holding alone: swapping the opponent's
+    face-up pile tops for other cards never moves its bid. Those four cards are
+    public and it is fully entitled to them, so this is the bot seeing LESS than
+    the rules allow, not more. Stated as a test because "the bot only looks at
+    its own hand" is exactly the sort of thing that reads as a fairness
+    guarantee when it is really a to-do.
+    """
+    moved = 0
+    for trial in range(30):
+        g = E.new_game(["a", "b"], random.Random(200 + trial), opener=0, mode=mode)
+        before = _ask(g, 0)
+        rng = random.Random(trial)
+        for p in g["piles"][1]:
+            j = rng.randrange(len(g["out"]))
+            p[-1], g["out"][j] = g["out"][j], p[-1]
+        if _ask(g, 0) != before:
+            moved += 1
+    assert moved == 0, (
+        f"the server bot's bid moved on {moved}/30 deals when the opponent's "
+        f"public cards changed -- it now reads them, so update this test")
