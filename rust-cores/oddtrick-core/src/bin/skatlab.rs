@@ -265,6 +265,7 @@ fn main() {
         allow_hand: !args.iter().any(|a| a == "--no-hand"),
         bid_expects_hand: args.iter().any(|a| a == "--expect-hand"),
         q: flag(&args, "--q").and_then(|s| s.parse().ok()).unwrap_or(0.5),
+        kontra_q: flag(&args, "--kontra-q").and_then(|s| s.parse().ok()).unwrap_or(0.5),
         ..SkatCfg::default()
     };
     let threads: usize = flag(&args, "--threads").and_then(|s| s.parse().ok()).unwrap_or(
@@ -468,6 +469,7 @@ fn main() {
     println!("bases C{} D{} H{} S{} NT{}, Null {}, short {}/pt, q={}",
              cfg.bases[0], cfg.bases[1], cfg.bases[2], cfg.bases[3], cfg.bases[4],
              cfg.null_value, cfg.short, cfg.q);
+    println!("defender Kontra quantile kontra_q={} (deliberately NOT q — see skat.rs)", cfg.kontra_q);
     println!("declarer decision worlds tk={} (23 holdings x tk x 6 solves per contract)", tk);
     println!("announcements: Hand {}, Sharp {} (+{}), Open NOT MODELLED (free under double dummy)",
              if cfg.allow_hand { "on" } else { "off" },

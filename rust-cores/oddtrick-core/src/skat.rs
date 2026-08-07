@@ -78,6 +78,22 @@ pub struct SkatCfg {
     /// property of the game. A lower quantile prices the same candidates by
     /// what they survive rather than by what they promise.
     pub q: f64,
+    /// Confidence quantile for the DEFENDER's Kontra decision. Held separately
+    /// from `q`, and that separation is load-bearing rather than tidy.
+    ///
+    /// `q` is a SELF-confidence dial: low means "assume my contract goes
+    /// badly", which makes the declarer cautious. Point the same number at the
+    /// defender, who is valuing the OPPONENT's contract, and low means "assume
+    /// their contract goes badly" — maximal aggression. Sharing one number
+    /// therefore makes the two seats timid and trigger-happy at the same
+    /// setting. Measured, with both on q=0.0: the defender doubled 75-85% of
+    /// contracts while 75% of them made, i.e. worse than never doubling.
+    ///
+    /// Default 0.5, the median world. A Kontra doubles a SYMMETRIC bet, so the
+    /// risk-neutral rule is simply "double iff the contract is worth less than
+    /// nothing to the declarer", with no confidence dial at all; anything away
+    /// from the middle is a risk preference and should be set deliberately.
+    pub kontra_q: f64,
 }
 
 impl Default for SkatCfg {
@@ -93,6 +109,7 @@ impl Default for SkatCfg {
             bid_expects_hand: false,
             declarer_leads: true,
             q: 0.5,
+            kontra_q: 0.5,
         }
     }
 }
@@ -222,6 +239,13 @@ pub fn declarable(cfg: &SkatCfg, bid: i32, hand: bool) -> Vec<Decl> {
 /// Expected net (declarer minus defender) of a declaration across the sampled
 /// worlds, in the declarer's own favour.
 pub fn decl_value(ev: &HandEval, cfg: &SkatCfg, d: &Decl, declarer: usize) -> f64 {
+    decl_value_q(ev, cfg, d, declarer, cfg.q)
+}
+
+/// As `decl_value`, at an explicit quantile. The defender needs its own, and
+/// silently inheriting the declarer's is how this went wrong once already.
+pub fn decl_value_q(ev: &HandEval, cfg: &SkatCfg, d: &Decl, declarer: usize,
+                    q: f64) -> f64 {
     let mut v: Vec<i32> = (0..ev.k())
         .map(|w| {
             if d.is_null() {
@@ -231,7 +255,7 @@ pub fn decl_value(ev: &HandEval, cfg: &SkatCfg, d: &Decl, declarer: usize) -> f6
             }
         })
         .collect();
-    quantile(&mut v, cfg.q)
+    quantile(&mut v, q)
 }
 
 /// The declaration a bidder expects to make at `bid`, and what it is worth to
@@ -410,6 +434,8 @@ impl<'a> SkatSolver<'a> {
     /// not a peek. It is blind to the talon (they know only THAT a swap
     /// happened), which biases it toward doubling.
     pub fn kontra(&self, d: &Decl, declarer: usize) -> bool {
-        decl_value(self.ev, &self.cfg, d, declarer) < 0.0
+        // `kontra_q`, never `q` — see the field note. The defender is valuing
+        // the OPPONENT's contract, so the confidence dial runs the other way.
+        decl_value_q(self.ev, &self.cfg, d, declarer, self.cfg.kontra_q) < 0.0
     }
 }

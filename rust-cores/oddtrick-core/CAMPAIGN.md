@@ -553,3 +553,46 @@ is right and the conclusion drawn from it was wrong.
 
 Withdrawn pending re-measurement at converged k: the rung-2 floor cluster
 (25% of contracts), Null at 0%, Sharp at 0-7.7%. All were single-arm at k=4.
+
+### The Kontra rate was a polarity bug, not a property of the mode
+
+Flagged by an obvious inconsistency that the numbers had been carrying in plain
+sight: at k=10 the defender doubled **75%** of contracts while **75% of them
+made**, and Kontra "accuracy" came out at 33% — worse than never doubling, and
+worse than chance. A defender cannot be that wrong by accident.
+
+Cause: `SkatSolver::kontra` called `decl_value`, which reads `cfg.q`, and every
+run so far was at `--q 0.0`. So the defender judged the contract at the
+DECLARER'S WORST sampled world, where the declarer usually fails.
+
+`q` is a SELF-confidence dial. Low means "assume my contract goes badly", which
+makes the declarer cautious — and pointed at the defender, who is valuing the
+OPPONENT's contract, the identical number means "assume their contract goes
+badly", i.e. maximal aggression. One number, opposite meanings per seat. The
+earlier q sweep was monotone in exactly the direction the bug predicts and was
+read as noise:
+
+| q (shared) | doubled | correct |
+|---|---|---|
+| 0.0 | 84.6% | 54.5% |
+| 0.5 | 53.8% | 85.7% |
+| 1.0 | 64.3% | 88.9% |
+
+Split into `SkatCfg::kontra_q`, defaulting to the median. A Kontra doubles a
+SYMMETRIC bet, so the risk-neutral rule is just "double iff the contract is
+worth less than nothing to the declarer" — the middle quantile — and anything
+away from it is a risk preference that should be set on purpose.
+
+**"Kontra fires 75-85%" is therefore withdrawn**, which leaves exactly ONE
+measured finding standing across sampling regimes (Hand at 92-94%) and two
+structural ones (overbid-loses has no mechanism; the cheap rungs constrain
+nothing). Three of the four measured problems reported from this lab have now
+turned out to be instrument defects. The pattern is consistent enough to be
+worth stating as a rule: **on this instrument, assume a striking number is a
+bug until a second, differently-shaped run agrees with it.**
+
+One real bias remains in the defender's read, and it is faithful rather than a
+defect: their `HandEval` predates the talon, so they are valuing a hand the
+declarer may since have improved. They know THAT a swap happened and nothing
+else, which is exactly the shipped game — but it does bias Kontra upward, and
+the residual rate should be read with that in mind.
