@@ -439,3 +439,61 @@ direction only.
 Per-deal JSONL dumps for every arm are in the session scratchpad
 (`rows_*.jsonl`: seed, opening bid, settled contract, declarer, made, scores,
 swap cards) — new questions can be answered from the rows without re-running.
+
+## Skat mode: a second auction, and the instrument for it (2026-08-07)
+
+`src/skat.rs` + `src/bin/skatlab.rs`. The shipped auction makes level N both
+the price and the task, so naming your bid announces your plan. Skat mode
+splits them: you bid a bare NUMBER (`value = base x level`, bases D2 H3 S4 C5
+NT6 — inverting the classic ranking on purpose — Null flat 20), and only after
+winning do you declare the game that clears it. Many games clear the same
+number, so the ladder cannot be read backwards into a denomination.
+
+`HandEval` is reused verbatim. The structural fact that made `AuctionSolver`
+exact holds unchanged — once you have both sides' results in every
+denomination, the whole auction is arithmetic over that matrix — so `SkatSolver`
+is a sibling, not a second evaluator. It maximises over `{value, declaration,
+announcements}` instead of `{level, denomination}`.
+
+### What this instrument can and cannot see
+
+* **Open is not modelled, and cannot be.** It buys +1 to the multiplier for
+  playing face up, and a double-dummy defence already has perfect information —
+  so the reveal costs exactly nothing here and a solver would take it on every
+  contract. That would be a property of the instrument, not of the game. The
+  multiplier therefore runs 1..3 in the lab against 1..4 as shipped. Pricing
+  Open needs a defence that plays from an information set, which this is not.
+* **Hand and Sharp ARE measurable.** Hand costs the talon (double-dummy resolves
+  it exactly); Sharp raises the point target, which is arithmetic over the same
+  matrix.
+* **Overbid cannot fire at all.** The level is the declarer's free 1..12 choice
+  and NT x 12 is the ladder's top rung, so every legal bid is declarable.
+  Skat's sharpest rule has nothing to bite on here; the live decision in its
+  place is declaring ABOVE what the number forced, which the lab reports.
+
+### Two methodology facts that cost real runs to learn
+
+* **`eval_hand` was evaluating a contract nobody is paid on.** Its Null column
+  called `Dd::null_makeable` — take no trick AT ALL, measured 0.7% of hands —
+  while both `bidlab` and the shipped engine resolve `null_no_even_makeable`,
+  win no +2 trick (~7%). So the bidder believed Null was makeable in ~0.7% of
+  worlds and then made it 33% of the time. **Every Null conclusion in the rung
+  sweep above was drawn under that mismatch**, and "all 18 arrived by OVERTAKE,
+  none by opening" is exactly the signature of a bidder that thinks the contract
+  never makes. Fixed; the rung sweep wants re-running before its conclusions are
+  trusted.
+* **Resolving the DECLARATION exactly is clairvoyance, not optimal play.**
+  `bidlab` resolves the swap exactly, which is a small cheat over 22 options.
+  Extending that to the declaration is not: a declarer who already knows the
+  double-dummy outcome simply picks the highest-paying game it happens to make.
+  Measured, that pinned the make rate at 95.7% and Kontra accuracy at 6.2% —
+  numbers that look like findings and are artefacts. `skatlab` therefore chooses
+  under BELIEFS (a talon-aware world sample: after looking, the three shown
+  cards are known out of play) and resolves exactly only afterwards.
+* **Maximising a sample mean over ~120 declarations is a winner's curse.**
+  5 denominations x 12 levels x Sharp is a lot of candidates for a small world
+  sample, and the max of many noisy means is badly optimistic. At the mean with
+  k=3 the solver over-declared by +1.8 levels on 83% of contracts and the
+  declarer netted -26 per contract. `SkatCfg::q` scores a declaration by its
+  q-quantile world instead — the confidence dial the design note anticipated,
+  here doing real work rather than acting as a strength knob.

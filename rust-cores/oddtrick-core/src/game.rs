@@ -7,6 +7,11 @@ use crate::rng::Rng;
 use crate::state::*;
 use crate::view::{Knowledge, View};
 
+/// `Clone` so a caller can build a view over a WIDER public set than the deal
+/// has — `skatlab` copies a game with `out_public = out_shown` to get the
+/// declarer's post-look beliefs, in which the three talon cards are known out
+/// of play rather than possibly in the opponent's hand.
+#[derive(Clone)]
 pub struct Game {
     pub s: State,
     /// Cards played to completed or in-progress tricks.

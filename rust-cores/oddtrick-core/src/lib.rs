@@ -15,6 +15,7 @@ pub mod game;
 pub mod infer;
 pub mod policy;
 pub mod rng;
+pub mod skat;
 pub mod state;
 pub mod view;
 

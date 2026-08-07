@@ -642,6 +642,18 @@ pub fn eval_hand(
         if need_null {
             // Null is played at no trump, as in Skat: with a trump suit the
             // declarer gets a second way to be forced to win a trick.
+            // `null_no_even_makeable`, NOT `null_makeable`: the contract that
+            // is actually scored -- here and in the shipped engine -- is "win
+            // no +2 trick", and the zero-TRICK version is a different, far
+            // rarer condition (measured 0.7% of hands against ~7%).
+            //
+            // This used to read `null_makeable`, so the bidder evaluated a
+            // contract nobody was ever paid on: it believed Null was makeable
+            // in ~0.7% of worlds while resolution then made it 33% of the time.
+            // That mis-specification is upstream of every Null conclusion in
+            // CAMPAIGN.md's rung sweep -- in particular "all 18 arrived by
+            // OVERTAKE, none by opening" is exactly the signature of a bidder
+            // that thinks the contract never makes.
             let mut nrow = [false; 2];
             for declarer in 0..2usize {
                 let s = State {
@@ -656,7 +668,7 @@ pub fn eval_hand(
                     pts: [0, 0],
                     ..w
                 };
-                nrow[declarer] = dd.null_makeable(&s, declarer);
+                nrow[declarer] = dd.null_no_even_makeable(&s, declarer);
             }
             null.push(nrow);
         }

@@ -604,6 +604,36 @@ def test_a_skat_game_survives_the_state_json_codec():
     assert back["result"] == g["result"]
 
 
+def test_the_rust_lab_prices_the_same_ladder_this_engine_does():
+    """`rust-cores/oddtrick-core/src/skat.rs` is the measurement instrument for
+    this mode, and it carries its own copy of the price table. A drift there
+    does not break anything visibly — it silently measures a DIFFERENT game and
+    reports the numbers as if they were this one's.
+
+    Read as TEXT, the way `core/tests/test_history_limit.py` checks the history
+    cap across the Python/JSX boundary: CI has no Rust toolchain (the crates are
+    committed artefacts and are in neither deploy path filter), so a test that
+    needed `cargo` would not run.
+    """
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parents[3]
+           / "rust-cores" / "oddtrick-core" / "src" / "skat.rs")
+    assert src.exists(), f"the skat lab moved: {src}"
+    text = src.read_text(encoding="utf-8")
+
+    def const(name, pattern=r"(-?\d+)"):
+        m = re.search(rf"pub const {name}[^=]*=\s*{pattern}", text)
+        assert m, f"could not find {name} in {src.name}"
+        return m.group(1)
+
+    bases = [int(x) for x in const("SKAT_BASE", r"\[([^\]]*)\]").split(",") if x.strip()]
+    assert bases == E.SKAT_BASE, (bases, E.SKAT_BASE)
+    assert int(const("SKAT_NULL_VALUE")) == E.SKAT_NULL_VALUE
+    assert int(const("SHARP_BONUS")) == E.SHARP_BONUS
+
+
 def test_walking_out_leaves_a_result_row_every_reader_can_render():
     """A forfeit row is read by the same result panel and history card as a
     played-out one. In skat mode the panel branches on `mode` and reads six keys
