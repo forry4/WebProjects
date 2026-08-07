@@ -97,7 +97,18 @@ def test_pick_plan_is_cached_so_the_plan_cannot_drift_mid_game():
 
 # ── the finisher contract still holds ────────────────────────────────────────
 
-def test_champion_finishes_a_game():
+def test_champion_finishes_a_game(monkeypatch):
+    # The claim is that the search DRIVES A GAME TO COMPLETION — every buy above
+    # SEARCH_FROM_COINS goes through buy_candidates -> best_buy -> _one_rollout ->
+    # _play_out, and every move it returns is accepted. None of that is about how
+    # MANY paired rollouts back each decision, so the depth is pinned down here:
+    # at the shipped 12 this single test was 116s, 29% of the entire repo suite
+    # and its critical path under xdist. At 3 it is ~24s and covers the same
+    # code. (Patching the module constant is exactly what the sibling
+    # test_best_buy_reads_the_rollout_count_at_call_time proves works.)
+    # This is NOT the place to soak the engine on rollout volume — test_soak.py
+    # is, deliberately and with the conservation census.
+    monkeypatch.setattr(C, "ROLLOUTS", 3)
     g = engine.new_game([A, B], ["base"], seed=77, kingdom=K)
     rng = random.Random(77)
     for _ in range(20000):

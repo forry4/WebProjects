@@ -368,6 +368,27 @@ covers the logic; each game's wiring is one line).
 
 - **The suite is defined ONCE** in `pytest.ini` `testpaths`; both CI workflows run a bare `pytest`.
   They used to carry two hand-maintained path lists that drifted (Duel's tests ran only at deploy).
+- **The suite runs PARALLEL by default (`addopts = -n auto`) — 6m41s → ~1m04s, and `pytest-xdist` is
+  a required dependency, not an optional one.** Two things were wrong, and they are different
+  problems worth telling apart:
+  1. **It was pure CPU pinned to one core** — 6m41s wall against 6m23s user, three cores idle.
+     `-n auto` alone was ~3x and needed no test changes (every DB test already takes a `tmp_path`
+     or `:memory:`; the WS connect throttle is per-PROCESS, so workers split that budget instead of
+     contending for it; the root conftest's deck restore was already order-independent). `-n0`
+     turns it off for `--pdb` or live output.
+  2. **Two tests were 46% of the whole suite**, and under `-n auto` the longest one is the wall
+     clock — so a parallel suite makes the slowest single test the thing worth measuring, which is
+     what turned these up. Both were accidental cost, not coverage:
+     - `test_soak.py::_fingerprint` re-`json.dumps`ed the WHOLE game dict per move, and the LOG
+       grows: on the King's Court chunk that is 12k entries and a 1MB dump re-serialised 6000
+       times — **88s of the test's 112s inside `json.iterencode`, against 21s of actual engine**
+       (70.5s → 5.3s). The log is append-only, so its identity is `(length, last entry)`, and
+       every entry is still round-tripped once for JSON-safety.
+     - `test_bot_champion.py::test_champion_finishes_a_game` ran the research tier at its shipped
+       12 paired rollouts per candidate buy — 116s to assert *a game finishes* (116s → 24s at 3).
+  **The lesson to carry, not the numbers: profile the slowest test before assuming it is doing
+  real work.** Neither of these was covering anything at the cost it charged, and a serial suite
+  hid both in the aggregate.
 - **Rules/engine unit tests are the most valuable to protect** — each game has them (per-package
   `CLAUDE.md` lists what each covers), plus `core/tests/` (db/auth/ratelimit/retention, in-memory
   sqlite) and Books `tests/` (17, in-memory DB).

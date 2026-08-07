@@ -82,13 +82,32 @@ def _random_move(game, pid, rng):
     return rng.choice(engine.legal_moves(game, pid))
 
 
-def _fingerprint(game):
+def _fingerprint(game, log_from=0):
     """State identity for the progress check — and the JSON-safety assertion,
-    since it round-trips the whole dict with no coercion. undo_stack is excluded
-    because it grows on its own and would mask a move that changed nothing
-    else; it holds nothing but past copies of these same keys."""
-    return json.dumps({k: v for k, v in game.items() if k != "undo_stack"},
-                      sort_keys=True)
+    since it round-trips the dict with no coercion. Returns `(text, log_len)`;
+    feed the pair back in as the next move's `before` (see `_assert_invariants`).
+
+    undo_stack is excluded because it grows on its own and would mask a move
+    that changed nothing else; it holds nothing but past copies of these same
+    keys.
+
+    The LOG is excluded from the dump for a DIFFERENT reason — cost, not
+    masking — and nothing goes unchecked for it. Re-serialising it after every
+    move made this O(moves^2): on the King's Court chunk the log reaches 12k
+    entries and a 1MB dump, and profiling the 6000-move cap put **88s of the
+    test's 112s inside json.iterencode**, against 21s of actual engine. So:
+      * for the PROGRESS check the log's identity is (length, last entry),
+        which is exactly equivalent for an APPEND-ONLY list — and it is one, by
+        the same engine invariant `_push_undo`/`_undo_move` rely on to snapshot
+        a bare `_log_len` and restore by truncating;
+      * for JSON-SAFETY every entry is still round-tripped, once, via
+        `log_from` — it is simply no longer re-checked once per remaining move.
+    """
+    log = game["log"]
+    json.dumps(log[log_from:])          # every new entry is JSON-safe
+    body = {k: v for k, v in game.items() if k not in ("undo_stack", "log")}
+    return (json.dumps([body, len(log), log[-1] if log else None],
+                       sort_keys=True), len(log))
 
 
 def _assert_piles_agree(game):
@@ -120,9 +139,9 @@ def _assert_invariants(game, baseline, before=None):
     # MANUAL_TREASURES in hand played nothing, and the bot prefers that move.
     # (Note a decision may legitimately log nothing — declining a reaction,
     # choosing zero cards — but it still pops its frame, so the state moves.)
-    after = _fingerprint(game)
+    after = _fingerprint(game, before[1] if before is not None else 0)
     if before is not None:
-        assert after != before, "accepted move changed nothing"
+        assert after[0] != before[0], "accepted move changed nothing"
     if game["pending"]:
         top = game["pending"][-1]
         assert top["kind"] != "auto", "auto frame visible at rest"
