@@ -509,7 +509,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
     const key = `${roomData.room_id}:${as.decision}`;
     if (aiDispatchRef.current === key) return;
     aiDispatchRef.current = key;
-    const view = JSON.stringify(as.view);
+    // The seat's view AND the scoring rule it is playing for. The search
+    // optimises the payoff the server will actually apply, not the trick points
+    // that only measure it — which is what lets it duck for the Null
+    // consolation, and lets a defender play to force one +2 trick on a declarer
+    // who is ducking. The terms come straight from `engine.payoff_terms`.
+    const view = JSON.stringify({ view: as.view, payoff: as.payoff });
     const t0 = performance.now();
     // The server's cap counts WORLDS in total, and worlds are summed across the
     // pool, so split it rather than handing every worker the whole budget.

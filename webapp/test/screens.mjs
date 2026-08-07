@@ -54,7 +54,7 @@ async function waitForHttp(url, timeoutMs, label) {
 }
 
 async function launchBrowser() {
-	try { return await chromium.launch(); }
+	try { return await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); }
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }
 
@@ -1727,8 +1727,21 @@ try {
 	// the harness spun in the auction until its loop ran out, and the failure
 	// surfaced as "no tricks were ever played" rather than as a stuck auction.
 	// Settle between clicks, and confirm the button really is live.
-	const oddBidCheaply = async (page) => {
-		await page.locator(".dis-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
+	const disBidCheaply = async (page) => {
+		// NO LEVELS LEFT IS A REAL STATE, not a broken selector. Denominations are
+		// per-player no-repeat, so once this seat has named all five it can only
+		// pass — `bidLevels` empties and the whole level grid stops rendering.
+		// Reaching for it anyway burned a 5s actionability timeout an iteration,
+		// and the CALLER's "are we bidding" test keyed on the same vanished
+		// element, so the harness sat out its whole deadline in the auction and
+		// reported it as "no tricks were ever played".
+		const levels = page.locator(".dis-bidgrid button");
+		if (await levels.count() === 0) {
+			await page.getByRole("button", { name: /^Pass$/ }).first()
+				.click({ timeout: 5_000 }).catch(() => {});
+			return;
+		}
+		await levels.first().click({ timeout: 5_000 }).catch(() => {});
 		await sleep(150);
 		const denoms = page.locator(".dis-denoms button:not([disabled])");
 		const n = await denoms.count();
@@ -1763,11 +1776,30 @@ try {
 		const page = await ctx.newPage();
 		const errors = [];
 		const searches = [];
+		// THE FORK, read off the socket itself. `ai_search` frames arriving but no
+		// answers going back means the BROWSER failed; no frames at all means the
+		// server never armed, which is a completely different fix. Guessing between
+		// those two cost a whole session once.
+		const frames = { ai_search: 0, room_update: 0 };
+		page.on("websocket", (ws) => {
+			ws.on("framereceived", ({ payload }) => {
+				if (typeof payload !== "string") return;
+				if (payload.includes('"ai_search"')) frames.ai_search++;
+				if (payload.includes('"room_update"')) frames.room_update++;
+			});
+			ws.on("socketerror", (e) => errors.push(`ws: ${e}`));
+		});
 		page.on("pageerror", (e) => errors.push(String(e)));
+		// Every console line, not just ours: a module worker that throws while
+		// loading reports there and nowhere else.
+		page.on("console", (m) => {
+			const t = m.text();
+			if (t.includes("client-AI")) searches.push(t);
+			if (m.type() === "error" || /wasm|worker/i.test(t)) errors.push(`[${m.type()}] ${t.slice(0, 200)}`);
+		});
 		// Each answered decision logs its worker count, world count and latency —
 		// the only visible sign the client tier ran, and the detail a failure here
 		// needs (every other path is a silent return to the server bot).
-		page.on("console", (m) => { if (m.text().includes("client-AI")) searches.push(m.text()); });
 		const check = (name, cond, detail = "") => {
 			if (cond) console.log(`  OK   ${name}`);
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
@@ -1799,38 +1831,45 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
-		// WALL-CLOCK bounded, not iteration bounded. A decision the browser fails
-		// to answer costs the server's whole watchdog before it plays the move
-		// itself, so on a loaded box an iteration cap silently stops mid-game and
-		// reads as "the client never answered" — which is a different bug.
-		const deadline = Date.now() + 180_000;
+		// STOPS ON EVIDENCE, not on a finished game. What this block is for is
+		// whether the browser answers the bot's decisions at all; six answers say
+		// that as well as thirteen do, and playing the rest costs minutes of gate
+		// time on a box already running the beat block's game and four WASM
+		// workers. One round-trip per iteration for the same reason — at three or
+		// four the loop spent its budget on latency and timed out mid-auction,
+		// which reads identically to "the client never answered".
+		const deadline = Date.now() + 240_000;
+		const answered = async () => (await page.evaluate(
+			() => window.__acts.filter((a) => a === "ai_move").length));
 		while (Date.now() < deadline) {
-			const st = await page.evaluate(() => ({
-				// OUR TURN IN THE AUCTION -- which is NOT the same as "the level
-				// row has buttons". Once a player has named all five denominations
-				// they can neither raise (per-player no-repeat) nor overtake at
-				// the same level, so the level row is empty and their only legal
-				// move is Pass. Keying on the level row alone left this loop
-				// spinning against a live auction until its deadline, which is
-				// deal-dependent and so failed intermittently. The Pass button is
-				// the reliable tell: the auction panel renders buttons only on our
-				// turn, and the swap phase offers "Stand pat", never "Pass".
-				bidding: !!document.querySelector(".dis-bidgrid button")
+			if (await answered() >= 4) break;
+			const st = await page.evaluate(() => {
+				const q = (s) => document.querySelector(s);
+				if (q(".dis-result")) return { over: true };
+				// Stand pat FIRST: the swap panel shares `.dis-auction`.
+				const pat = [...document.querySelectorAll("button")]
+					.find((b) => /stand pat/i.test(b.textContent));
+				if (pat) { pat.click(); return { acted: true }; }
+				// Bidding needs BOTH signals, because each one alone has a state where
+				// it is absent. The level grid disappears once this seat has named
+				// all five denominations (per-player no-repeat) and only Pass is
+				// left; and at the OPENING bid there is no Pass at all — the opener
+				// must bid — while Bid stays disabled until a level and a
+				// denomination are picked. Keying on either one alone parks the
+				// harness in the auction until its deadline, which then reports as
+				// "no tricks were ever played".
+				const bidding = q(".dis-auction") && (q(".dis-bidgrid button")
 					|| [...document.querySelectorAll(".dis-auction button")]
-						.some((b) => b.textContent.trim() === "Pass"),
-				over: !!document.querySelector(".dis-result"),
-			}));
+						.some((b) => !b.disabled && /^(Pass|Bid )/.test(b.textContent.trim())));
+				if (bidding) return { bidding: true };
+				const seats = document.querySelectorAll(".dis-seat");
+				const card = seats[seats.length - 1]?.querySelector(".dis-card.play");
+				if (card) { card.click(); return { acted: true }; }
+				return {};
+			});
 			if (st.over) break;
-			if (st.bidding) {
-				await oddBidCheaply(page);
-				await sleep(250);
-				continue;
-			}
-			const pat = page.getByRole("button", { name: /stand pat/i }).first();
-			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".dis-seat").last().locator(".dis-card.play").first();
-			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
-			await sleep(120);
+			if (st.bidding) { await disBidCheaply(page); await sleep(250); continue; }
+			await sleep(st.acted ? 120 : 250);
 		}
 
 		const acts = await page.evaluate(() => {
@@ -1843,11 +1882,25 @@ try {
 		// The bot has thirteen cards to play and a couple of them are forced (the
 		// server applies those itself without asking), so most — not all — of the
 		// game must come back from the browser. Zero means the wasm never loaded.
-		check("the browser answered the bot's decisions", (acts.ai_move || 0) >= 6,
-			`${JSON.stringify(acts)} searches=${JSON.stringify(searches.slice(0, 3))}`);
-		check("a Hard game plays to a result", !!(await page.locator(".dis-result").count()));
-		check("no page errors driving the client-side search", errors.length === 0,
-			errors[0]?.slice(0, 200) || "");
+		// EVERY ARMED DECISION, not an absolute count. The server only arms a
+		// decision where the bot has a CHOICE — under mandatory follow-suit most
+		// plays are forced and it applies those itself — so how many arrive is a
+		// property of the DEAL. An absolute threshold failed on deals with more
+		// forced moves while the tier was working perfectly, and read exactly like
+		// the tier being broken. One in flight is tolerated: the loop stops on its
+		// own count, so the server can arm one more behind it.
+		const armed = frames.ai_search;
+		check("the browser answered every decision the server armed",
+			armed >= 3 && (acts.ai_move || 0) >= armed - 1,
+			`${JSON.stringify(acts)} frames=${JSON.stringify(frames)} `
+			+ `searches=${JSON.stringify(searches.slice(0, 2))} err=${JSON.stringify(errors.slice(0, 2))}`);
+		// Each answer logs its worker count, world count and latency. Zero of those
+		// with a live `client_ai_ready` is the wasm loading and the SEARCH failing,
+		// which is a different fix from the socket never being armed.
+		check("...and the searches really ran in the browser", searches.length >= armed - 1,
+			`${searches.length} logged of ${armed} armed: ${JSON.stringify(searches.slice(0, 2))}`);
+		check("no page errors driving the client-side search",
+			!errors.some((e) => !e.startsWith("[info]")), errors.slice(0, 3).join(" | ").slice(0, 300));
 		await ctx.close();
 	}
 
@@ -1903,64 +1956,85 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
-		// Wall-clock bounded, like the block above and for the same reason.
-		const beatDeadline = Date.now() + 180_000;
-		// EVERY FACE-UP CARD LOOKS THE SAME — no dimming, in any form. Sampled
-		// mid-round, on the first turn where piles are actually on the table:
-		// this used to be measured after the game was over, when every pile is
-		// exhausted, so it read all-zeroes on every run and could never pass.
-		// A pile's top also sits over its buried card (offset so only a corner
-		// shows), which is why see-through is called out separately — an
-		// opacity-based dim there made the two read as one smeared card.
+		// NO FACE-UP CARD IS DIMMED, in any form. Cards render identically whether
+		// or not they are playable; legality lives in the `play` affordance and is
+		// enforced server-side. Two earlier versions of this failed differently:
+		// `opacity` let a pile's buried card show through its top (they sit
+		// offset, so the two read as one smeared card), and the
+		// `filter: brightness()` that replaced it kept the real problem, a hand
+		// that read as two kinds of card. This guards the ABSENCE of all three.
+		// Pure CSS, so nothing in Python sees it.
+		//
+		// SAMPLED DURING PLAY, not after. By the end of a round the piles are
+		// empty and render placeholders -- no buried card behind anything, and
+		// nothing dimmed -- so the check read as vacuous exactly when the round
+		// ran to thirteen tricks and as fine when it settled early. It passed
+		// locally on an early-settling deal and went red in CI on a complete one.
 		let piles = null;
+		const samplePiles = async () => {
+			if (piles) return;
+			const p = await page.evaluate(() => {
+				const tops = [...document.querySelectorAll(".dis-piles .dis-pilewrap")]
+					.map((w) => [...w.children].find((c) => c.classList.contains("dis-card")))
+					.filter(Boolean);
+				return {
+					n: tops.length,
+					dimmed: tops.filter((t) => t.classList.contains("dim")).length,
+					seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
+					greyed: tops.filter((t) => getComputedStyle(t).filter !== "none").length,
+					buried: document.querySelectorAll(".dis-buried").length,
+				};
+			});
+			// Accept the first frame with a covered pile on the table. It must NOT
+			// also require a dimmed top the way it used to: nothing is dimmed any
+			// more, so that condition would never accept a sample and the check
+			// would fail as "never caught a turn" rather than passing.
+			if (p.n >= 3 && p.buried > 0) piles = p;
+		};
+
+		// ONE ROUND-TRIP PER ITERATION for the common case. This block runs right
+		// after the Hard one, which leaves four WASM workers' worth of heat on the
+		// box, and at three or four round-trips a turn the loop was spending its
+		// budget on latency rather than on the game — it timed out during the
+		// auction in CI while passing four times in a row locally. Reading the
+		// state and playing a card in the same evaluate collapses that; the cards
+		// are plain divs with an onClick, so there is no actionability to lose.
+		const beatDeadline = Date.now() + 240_000;
 		while (Date.now() < beatDeadline) {
-			const st = await page.evaluate(() => ({
-				// OUR TURN IN THE AUCTION -- which is NOT the same as "the level
-				// row has buttons". Once a player has named all five denominations
-				// they can neither raise (per-player no-repeat) nor overtake at
-				// the same level, so the level row is empty and their only legal
-				// move is Pass. Keying on the level row alone left this loop
-				// spinning against a live auction until its deadline, which is
-				// deal-dependent and so failed intermittently. The Pass button is
-				// the reliable tell: the auction panel renders buttons only on our
-				// turn, and the swap phase offers "Stand pat", never "Pass".
-				bidding: !!document.querySelector(".dis-bidgrid button")
+			await samplePiles();
+			const st = await page.evaluate(() => {
+				const q = (s) => document.querySelector(s);
+				if (q(".dis-result")) return { over: true };
+				// Stand pat FIRST: the swap panel shares `.dis-auction`.
+				const pat = [...document.querySelectorAll("button")]
+					.find((b) => /stand pat/i.test(b.textContent));
+				if (pat) { pat.click(); return { acted: true }; }
+				// Bidding needs BOTH signals, because each one alone has a state where
+				// it is absent. The level grid disappears once this seat has named
+				// all five denominations (per-player no-repeat) and only Pass is
+				// left; and at the OPENING bid there is no Pass at all — the opener
+				// must bid — while Bid stays disabled until a level and a
+				// denomination are picked. Keying on either one alone parks the
+				// harness in the auction until its deadline, which then reports as
+				// "no tricks were ever played".
+				const bidding = q(".dis-auction") && (q(".dis-bidgrid button")
 					|| [...document.querySelectorAll(".dis-auction button")]
-						.some((b) => b.textContent.trim() === "Pass"),
-				over: !!document.querySelector(".dis-result"),
-			}));
+						.some((b) => !b.disabled && /^(Pass|Bid )/.test(b.textContent.trim())));
+				if (bidding) return { bidding: true };
+				const seats = document.querySelectorAll(".dis-seat");
+				const card = seats[seats.length - 1]?.querySelector(".dis-card.play");
+				if (card) { card.click(); return { acted: true }; }
+				return {};
+			});
 			if (st.over) break;
-			if (!piles && !st.bidding) {
-				const s = await page.evaluate(() => {
-					const tops = [...document.querySelectorAll(".dis-piles .dis-pilewrap")]
-						.map((w) => [...w.children].find((c) => c.classList.contains("dis-card")))
-						.filter(Boolean);
-					return {
-						n: tops.length,
-						dimmed: tops.filter((t) => t.classList.contains("dim")).length,
-						seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
-						greyed: tops.filter((t) => getComputedStyle(t).filter !== "none").length,
-						buried: document.querySelectorAll(".dis-buried").length,
-					};
-				});
-				if (s.n >= 3 && s.buried > 0) piles = s;
-			}
-			if (st.bidding) {
-				await oddBidCheaply(page);
-				await sleep(250);
-				continue;
-			}
-			const pat = page.getByRole("button", { name: /stand pat/i }).first();
-			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".dis-seat").last().locator(".dis-card.play").first();
-			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
-			await sleep(90);
+			if (st.bidding) { await disBidCheaply(page); await sleep(250); continue; }
+			await sleep(st.acted ? 90 : 200);
 		}
 
 		check("the piles were sampled with cards still on the table",
-			piles !== null, "never caught a turn with a buried card showing");
+			!!piles && piles.buried > 0, JSON.stringify(piles));
 		check("no face-up card is dimmed, greyed or see-through",
-			piles !== null && piles.dimmed === 0 && piles.seeThrough === 0
+			!!piles && piles.dimmed === 0 && piles.seeThrough === 0
 			&& piles.greyed === 0, JSON.stringify(piles));
 
 		const trace = await page.evaluate(() => window.__hold);
@@ -1970,8 +2044,20 @@ try {
 			cards: e[1], ms: Math.round(trace[i + 1][0] - e[0]) }))
 			.filter((d) => d.cards.split(" ").length === 2);
 		const shortest = dwells.reduce((a, b) => (b.ms < a.ms ? b : a), { ms: Infinity });
+		// A failure here used to say only "0 finished tricks", which is the symptom
+		// of three different causes (a stuck auction, a timed-out loop, a trick
+		// area that stopped rendering) and told them apart not at all. Say where
+		// it actually got to, so the next red run is one read rather than one
+		// six-minute experiment.
+		const stuck = await page.evaluate(() => ({
+			mid: document.querySelector(".dis-auction, .dis-trick, .dis-result")?.className,
+			turnbar: document.querySelector(".dis-turnbar")?.textContent,
+			buttons: [...document.querySelectorAll(".dis-auction button")]
+				.map((b) => `${b.textContent.trim().slice(0, 12)}${b.disabled ? "(off)" : ""}`).slice(0, 10),
+			playable: document.querySelectorAll(".dis-card.play").length,
+		}));
 		check("a whole game was played out", dwells.length >= 8,
-			`${dwells.length} finished tricks reached the table`);
+			`${dwells.length} finished tricks, ${trace.length} frames — ${JSON.stringify(stuck)}`);
 		check("every finished trick is held, even at full tilt",
 			dwells.length >= 8 && shortest.ms >= 550,
 			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`);

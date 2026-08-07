@@ -25,6 +25,7 @@
 
 use crate::auction::HandEval;
 use crate::cards::*;
+use crate::dd::Contract;
 use crate::state::{Pile, State};
 use crate::view::{Knowledge, View};
 use serde_json::Value;
@@ -65,7 +66,18 @@ pub fn view_from_json(v: &Value) -> Option<View> {
             _ => -1,
         },
         pts: [0, 0],
+        escored: 0,   // filled from `etricks` below
     };
+    // Which seats have already won a +2 trick. Not derivable from `pts` -- a
+    // total of -1 is one +2 trick and three -1s just as easily as one -1 alone
+    // -- and it is the bit the Null consolation turns on.
+    if let Some(et) = v.get("etricks").and_then(|x| x.as_array()) {
+        for (p, n) in et.iter().enumerate().take(2) {
+            if n.as_i64().unwrap_or(0) > 0 {
+                s.escored |= 1 << p;
+            }
+        }
+    }
     s.hand[me] = mask_of(v.get("hand")?);
     let pts = v.get("pts")?.as_array()?;
     s.pts = [pts[0].as_i64()? as i8, pts[1].as_i64()? as i8];
@@ -172,6 +184,34 @@ pub fn view_from_json(v: &Value) -> Option<View> {
         history: Vec::new(),
         first_leader,
         n_out_hidden,
+    })
+}
+
+/// The scoring rule the server will actually apply, read off the armed request.
+///
+/// The numbers come from `engine.payoff_terms` -- the same function `_finish`
+/// scores with -- rather than being rebuilt here, because a second copy of the
+/// scoring is exactly the drift the card-play parity gate exists to prevent,
+/// and this one would show up only as the bot preferring slightly wrong cards.
+///
+/// `None` means there is nothing to optimise against and the caller falls back
+/// to the trick-point solve, which is the pre-2026-08-07 behaviour.
+pub fn contract_from_json(v: &Value) -> Option<Contract> {
+    let n = |k: &str| v.get(k)?.as_i64().map(|x| x as i32);
+    let declarer = v.get("declarer")?.as_i64()?;
+    if !(0..2).contains(&declarer) {
+        return None;
+    }
+    Some(Contract {
+        level: n("target")?,
+        declarer: declarer as usize,
+        make_base: n("make")?,
+        // No over-penalty in the shipped game: a made contract pays flat, so
+        // points past the target are worth exactly nothing.
+        over: 0,
+        set_base: n("set_base")?,
+        short: n("short")?,
+        null: n("null"),
     })
 }
 
@@ -309,6 +349,81 @@ pub fn hand_eval_from_json(parts: &[Value]) -> HandEval {
 // `cargo test --features bridge`. The fixtures are COMMITTED, like play.jsonl --
 // CI runs cargo with no Python step available. Regenerate them with
 // `games/dissonance/tools/gen_view_fixtures.py` whenever `view_for` changes shape.
+#[cfg(test)]
+mod payoff_parity {
+    // THE SCORING RULE, held to the engine's own answer. The terms are shipped
+    // rather than reimplemented (`_ai_search` carries `engine.payoff_terms`), so
+    // the one thing genuinely written twice is the arithmetic that turns terms
+    // plus an outcome into a number -- and getting THAT wrong is the quietest
+    // failure in the tier: the solver still returns a legal card, still looks
+    // like it is thinking, and simply optimises the wrong thing.
+    //
+    // Regenerate with `games/dissonance/tools/gen_payoff_fixtures.py`.
+    use super::*;
+
+    fn rows() -> Vec<Value> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../games/dissonance/tests/fixtures/payoff.jsonl"
+        );
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!("{path}: {e}\nRegenerate with:\n  PYTHONPATH=<repo root> python -m \
+                    games.dissonance.tools.gen_payoff_fixtures > \
+                    games/dissonance/tests/fixtures/payoff.jsonl")
+        });
+        text.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("fixture line is not JSON"))
+            .collect()
+    }
+
+    #[test]
+    fn the_solver_scores_a_finished_round_exactly_as_the_engine_does() {
+        let all = rows();
+        assert!(all.len() > 40, "only {} contracts — regenerate", all.len());
+        let (mut classic, mut skat, mut checked, mut nulls) = (0, 0, 0, 0);
+        for (i, f) in all.iter().enumerate() {
+            let c = contract_from_json(&f["terms"])
+                .unwrap_or_else(|| panic!("fixture {i}: terms did not read back"));
+            match f["mode"].as_str() {
+                Some("skat") => skat += 1,
+                _ => classic += 1,
+            }
+            for row in f["rows"].as_array().unwrap() {
+                let r = row.as_array().unwrap();
+                let pts = r[0].as_i64().unwrap() as i32;
+                let scored = r[1].as_bool().unwrap();
+                let want = r[2].as_i64().unwrap() as i32;
+                assert_eq!(
+                    c.payoff(pts, scored), want,
+                    "fixture {i}: {pts} pts, scored={scored}"
+                );
+                checked += 1;
+                if !scored {
+                    nulls += 1;
+                }
+            }
+        }
+        assert!(classic > 0 && skat > 0, "both modes must be covered");
+        // Non-vacuity: the Null branch is the whole reason this search exists,
+        // and a fixture that never exercised it would prove only the old rule.
+        assert!(nulls > 100 && checked > 1000, "{nulls} null rows of {checked}");
+    }
+
+    #[test]
+    fn a_declarer_on_no_scoring_trick_is_paid_the_consolation_not_the_set() {
+        // Stated directly as well as by table, because it is the one clause a
+        // points-searching solver could not see at any sample count.
+        for f in rows().iter() {
+            let c = contract_from_json(&f["terms"]).unwrap();
+            let null = c.null.expect("the shipped game always has a consolation");
+            assert!(c.payoff(-7, false) == null && c.payoff(0, false) == null,
+                    "the consolation must not depend on the point total");
+            assert!(c.payoff(-7, true) < 0, "and a declarer who scored is set");
+        }
+    }
+}
+
 #[cfg(test)]
 mod fixture_replay {
     use super::*;

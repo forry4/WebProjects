@@ -550,12 +550,19 @@ def test_a_skat_round_plays_from_the_deal_to_a_scored_result():
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[0])
     assert g["phase"] == "over"
-    assert g["trick"] == E.NTRICKS
-    assert sum(g["pts"]) == E.POOL
+    # `_skat` deals from an UNSEEDED rng, so this round is a different one every
+    # run -- and a round stops the moment the score can no longer change. The
+    # pool invariant is therefore only available on the complete branch. Read
+    # the helper, not six green local runs: this assertion passed here and went
+    # red in CI on the first deal that settled at trick 10.
+    if g["trick"] == E.NTRICKS:
+        assert sum(g["pts"]) == E.POOL
+    else:
+        assert g["result"]["ended_early"]
     res = g["result"]
     assert res["mode"] == "skat"
     assert res["stake"] == 12 * 2 * 4, "Sharp alone is x2; Kontra + Re is x4"
-    winner = res["declarer"] if res["made"] else 1 - res["declarer"]
+    winner = res["declarer"] if (res["made"] or res["null"]) else 1 - res["declarer"]
     assert res["scores"][winner] > 0 and res["scores"][1 - winner] == 0
 
 

@@ -19,6 +19,10 @@ export function odd_best_card(pooled_json) {
 /**
  * Solve `k` sampled worlds and return the per-move value sums.
  *
+ * `view_json` is the armed request: `{"view": ..., "payoff": ...}`. A bare
+ * view is accepted too and searched on trick POINTS, which is what this did
+ * before the payoff terms existed.
+ *
  * `{"moves":[card...],"sum":[f64...],"worlds":k}` — `moves` is `State::legal`
  * in its own order and `sum[i]` is the total, over the sampled worlds, of the
  * exact double-dummy value of playing `moves[i]`, signed so that HIGHER is

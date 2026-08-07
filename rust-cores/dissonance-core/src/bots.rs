@@ -75,6 +75,12 @@ pub struct PimcBot {
     /// Imperfect-information playouts per world per root move.
     pub playouts: usize,
     pub ptemp: f32,
+    /// When set, the search optimises this CONTRACT's payoff instead of trick
+    /// points. Points are only the yardstick: they cannot see that a declarer
+    /// past their target gains nothing more, that each point of a defender's
+    /// shortfall is worth four, or that a declarer on no +2 trick is one ducked
+    /// trick from scoring the Null consolation instead of being set.
+    pub contract: Option<crate::dd::Contract>,
     pub dd: Dd,
     pub rng: Rng,
     buf: Vec<u8>,
@@ -115,6 +121,7 @@ impl PimcBot {
             lambda,
             playouts,
             ptemp,
+            contract: None,
             dd: Dd::new(tt_bits),
             rng: Rng::new(seed),
             buf: Vec::with_capacity(16),
@@ -140,6 +147,27 @@ impl Bot for PimcBot {
             &mut self.buf,
             &mut self.worlds,
         );
+
+        // A contract solve is signed for the DECLARER; a points solve for seat
+        // 0. Same aggregation either way -- only what is being aggregated moves.
+        if let Some(c) = self.contract {
+            let sign = if v.me == c.declarer { 1i32 } else { -1i32 };
+            let mut cv = [0i32; 16];
+            let mut score = [0f64; 16];
+            for w in self.worlds.iter() {
+                self.dd.solve_root_contract(w, &m[..n], &c, &mut cv);
+                for i in 0..n {
+                    score[i] += (sign * cv[i]) as f64;
+                }
+            }
+            let mut best = 0usize;
+            for i in 1..n {
+                if score[i] > score[best] {
+                    best = i;
+                }
+            }
+            return m[best];
+        }
 
         let sign = if v.me == 0 { 1i16 } else { -1i16 };
         let mut vals = [0i16; 16];
@@ -251,6 +279,7 @@ impl OracleBot {
                 leader: 0,
                 led: -1,
                 pts: [0; 2],
+                escored: 0,
             },
         }
     }

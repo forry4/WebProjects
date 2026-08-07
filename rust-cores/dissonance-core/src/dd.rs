@@ -80,12 +80,31 @@ pub struct Contract {
     pub set_base: i32,
     /// Defender's reward per point the declarer finished short.
     pub short: i32,
+    /// What the declarer scores for taking NO +2 TRICK ALL ROUND, if the rule
+    /// is in play. `None` for the auction lab's synthetic contracts, which use
+    /// this struct to ask a different question (`forced_floor`) and must not
+    /// have a consolation appear underneath it.
+    pub null: Option<i32>,
 }
 
 impl Contract {
-    /// Declarer score minus defender score, given the declarer's final total.
+    /// Declarer score minus defender score, given the declarer's final total
+    /// and whether they ever won a +2 trick.
+    ///
+    /// THE NULL TERM IS CHECKED FIRST AND WINS, exactly as `engine._finish`
+    /// does. It can never collide with a make: only +2 tricks add points, so a
+    /// declarer on zero of them cannot have reached any target. It is also the
+    /// only part of this function that is not a function of `declarer_pts`,
+    /// which is why the flag had to go into `State` -- a solver that reads the
+    /// points alone is blind to a cliff worth up to `null + set_base + short x
+    /// level` in one bit.
     #[inline]
-    pub fn payoff(&self, declarer_pts: i32) -> i32 {
+    pub fn payoff(&self, declarer_pts: i32, declarer_scored: bool) -> i32 {
+        if let Some(n) = self.null {
+            if !declarer_scored {
+                return n;
+            }
+        }
         if declarer_pts >= self.level {
             self.make_base - self.over * (declarer_pts - self.level)
         } else {
@@ -184,6 +203,24 @@ impl Dd {
         }
     }
 
+    /// Per-move contract values for the player to move: `out[i]` is the exact
+    /// payoff (declarer minus defender) after playing `moves[i]`.
+    ///
+    /// The contract twin of `solve_root`, and the reason the served bot has one
+    /// at all: a points solver optimises the YARDSTICK. It cannot see that a
+    /// declarer three points past their target gains nothing more, that every
+    /// point of a defender's shortfall is worth four, or that a declarer who
+    /// has taken no +2 trick is one ducked trick away from scoring instead of
+    /// being set.
+    pub fn solve_root_contract(&mut self, s: &State, moves: &[u8], c: &Contract,
+                               out: &mut [i32; 16]) {
+        for (i, &m) in moves.iter().enumerate() {
+            let mut t = *s;
+            t.play(m);
+            out[i] = self.solve_contract(&t, c);
+        }
+    }
+
     /// Exact value of playing out a CONTRACT, as declarer score minus defender
     /// score. Unlike `solve`, the declarer here is not maximising points -- an
     /// over-penalty makes their payoff single-peaked at the contract level, so
@@ -195,13 +232,22 @@ impl Dd {
 
     fn csearch(&mut self, s: &State, c: &Contract, mut alpha: i32, mut beta: i32) -> i32 {
         if s.done() {
-            return c.payoff(s.pts[c.declarer] as i32);
+            return c.payoff(
+                s.pts[c.declarer] as i32,
+                s.escored & (1 << c.declarer) != 0,
+            );
         }
         self.nodes += 1;
 
         // Accumulated points MUST be in the key here. The sum of both players'
         // points is fixed by the trick index, so one side's total suffices.
-        let key = key_of(s) ^ mix(0x9E37_79B9_7F4A_7C15 ^ ((s.pts[0] as i64 as u64) << 8));
+        // So must `escored`: two positions identical in cards and points can
+        // pay off differently when one declarer has already broken their Null,
+        // and a table that conflated them would return the other one's value.
+        let key = key_of(s)
+            ^ mix(0x9E37_79B9_7F4A_7C15
+                ^ ((s.pts[0] as i64 as u64) << 8)
+                ^ ((s.escored as u64) << 40));
         let slot = (key as usize) & self.cmask;
         {
             let e = unsafe { *self.ctt.get_unchecked(slot) };
