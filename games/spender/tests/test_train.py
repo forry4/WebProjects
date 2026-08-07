@@ -440,7 +440,13 @@ def test_mlp_inference_is_pure_python_probability():
 
 
 def test_train_value_mlp_structure():
-    pytest.importorskip("numpy")
+    # (There was a `pytest.importorskip("numpy")` here. It could never fire:
+    # numpy is a hard requirement, imported unconditionally by five serving
+    # modules — `mcts`, `features`, `vsearch`, `infer_np`, `distill_features` —
+    # so a numpy-less checkout dies at COLLECTION, several hundred lines before
+    # this guard is reached. It read as "numpy is optional here", which is the
+    # opposite of true, and a guard that cannot fire is indistinguishable from
+    # one that is silently swallowing the thing it claims to guard.)
     model = train.train_value_mlp(dict(main.DEFAULT_WEIGHTS), n_games=12, hidden=4, epochs=2)
     assert model["type"] == "mlp"
     assert len(model["W1"]) == 4 and len(model["W1"][0]) == len(main.VALUE_FEATURES)
