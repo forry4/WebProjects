@@ -1586,6 +1586,35 @@ try {
 
 		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
 		await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
+		// The per-frame panel recorder, installed HERE because the reported blink
+		// is skat, ROUND 1 — the configuration this block previously drove only
+		// as far as one completed trick, so the END of a skat round had no
+		// browser coverage at all. Same open-ended signature as the classic one:
+		// markers plus a text digest, so an unpredicted intruder names itself.
+		await page.evaluate(() => {
+			window.__panels = [];
+			let lastPanel = null;
+			const panelNow = () => {
+				const has = (s) => !!document.querySelector(s);
+				const marks = [
+					has(".dis-valgrid") || has(".dis-bidgrid") ? "AUCTION" : "",
+					has(".dis-denoms") ? "denoms" : "",
+					has(".dis-clears") ? "clears" : "",
+					has(".dis-reveal") ? "reveal" : "",
+					has(".dis-result") ? "RESULT" : "",
+					has(".dis-trick") ? "board" : "",
+				].filter(Boolean).join("+");
+				const mid = document.querySelector(".dis-mid, .dis-centre, .dis-table");
+				const txt = (mid?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60);
+				return `${marks || "(no marker)"} :: ${txt}`;
+			};
+			const tick = () => {
+				const p = panelNow();
+				if (p !== lastPanel) { window.__panels.push([Math.round(performance.now()), p]); lastPanel = p; }
+				requestAnimationFrame(tick);
+			};
+			requestAnimationFrame(tick);
+		});
 		await page.getByRole("button", { name: /new game|create/i }).first()
 			.click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
@@ -1805,6 +1834,32 @@ try {
 		});
 		check("the board fills the phone rather than sizing to its content",
 			!!fill && fill.table >= fill.view * 0.8, JSON.stringify(fill));
+
+		// PLAY ROUND 1 OUT — the reported configuration. This runs LAST in the
+		// block on purpose: it ends on the result panel, and every check above
+		// needs a live mid-play board. (Putting it earlier broke "the contract is
+		// on screen on a phone", which is a fair description of what a finished
+		// game looks like.)
+		for (let i = 0; i < 200; i++) {
+			if (await page.locator(".dis-result").count() > 0) break;
+			const card = page.locator(".dis-seat .dis-card.play").last();
+			if (await card.count() > 0) {
+				await card.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(260);
+				continue;
+			}
+			await sleep(260);
+		}
+		const skatPanels = await page.evaluate(() => window.__panels || []);
+		const sRes = skatPanels.findIndex(([, p]) => p.includes("RESULT"));
+		check("a skat round 1 plays out to its result panel", sRes >= 0,
+			`tail=${JSON.stringify(skatPanels.slice(-6))}`);
+		// The transition assertion, in the configuration the blink was reported
+		// in. It names whatever it finds rather than testing a guess.
+		const sBefore = sRes > 0 ? skatPanels[sRes - 1][1] : null;
+		check("nothing gets a frame between the last trick and the skat result",
+			sRes <= 0 || sBefore.includes("board"),
+			`the frame before RESULT showed: ${sBefore} | tail=${JSON.stringify(skatPanels.slice(-8))}`);
 		await ctx.close();
 	}
 
