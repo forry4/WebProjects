@@ -196,16 +196,17 @@ longer change** — see below.
 
 ## A game is a MATCH of rounds (2026-08-07)
 
-`MATCH_TARGET` — **classic 50, skat 100**. A round is one deal; a game is rounds
+`MATCH_TARGET` — **100 in both modes**. A round is one deal; a game is rounds
 played onto a running total until one side reaches the target. Measured against
-the normal-tier bot: classic **median 5 rounds** (2–9), skat **median 11**
-(7–18). Skat's is the longer match, and it got longer when the bases were
-re-priced by colour on 2026-08-07 — it was a median of 8 under the old
-four-tier table. **Re-measure if the bases or the payoff arithmetic move**: the
-target is a product decision, but the round count it produces is not a guess.
-Per mode because the modes price on different scales — a classic round pays
-level² (up to 144, flat 12 for Null), a skat one base × level × the
-announcements (up to 60, flat 20).
+the normal-tier bot: classic **median 10 rounds** (6–16), skat **median 11**
+(6–18). **Re-measure if the bases or the payoff arithmetic move** — the target
+is a product decision, but the round count it buys is not a guess, and skat was
+a median of 8 to the same 100 before its bases were re-priced by colour.
+
+Still a per-mode DICT though both read 100, because the modes score on different
+scales and nothing requires them to agree: a classic round pays level² (up to
+144, flat 12 for Null), a skat one base × level × the announcements (up to 60,
+flat 20). They land on the same match length regardless.
 
 **WHY:** one deal can simply be bad, and the auction is the only lever either
 player has against it. Over a match the deals average out and what is left is

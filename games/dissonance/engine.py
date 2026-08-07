@@ -120,23 +120,24 @@ N_SHOWN = 3
 MODES = ("classic", "skat")
 DEFAULT_MODE = "classic"
 
-#: A game is a MATCH of rounds, played until one side reaches this. Per mode,
-#: because the two modes score on different scales: a classic round pays
-#: level^2 (1..144, with the flat 12 for Null), a skat one base x level x the
-#: announcements (2..60, flat 20 for Null).
+#: A game is a MATCH of rounds, played until one side reaches this.
 #:
-#: MEASURED against the normal-tier bot, on the colour-priced bases: classic to
-#: 50 is a median of 5 rounds (range 2-9), skat to 100 a median of 11 (7-18).
-#: Skat's is the longer match because the colour re-pricing dropped its scale --
-#: it was a median of 8 under the old four-tier table. Re-measure here if the
-#: bases or the payoff arithmetic move again; the target is a product decision
-#: but the round count is not a guess.
+#: STILL A DICT though both modes now read 100, because the two score on
+#: different scales and there is no reason they must agree: a classic round pays
+#: level^2 (1..144, flat 12 for Null), a skat one base x level x the
+#: announcements (2..60, flat 20). They happen to land on the same match length
+#: anyway -- MEASURED against the normal-tier bot on the colour-priced bases,
+#: classic is a median of 10 rounds (range 6-16) and skat 11 (6-18).
+#:
+#: Re-measure if the bases or the payoff arithmetic move: the target is a
+#: product decision, but the round count it buys is not a guess. Skat was a
+#: median of 8 to 100 before the bases were re-priced by colour.
 #:
 #: WHY A MATCH AT ALL. One round is one deal, and a deal can simply be bad --
 #: a hand with no contract in it loses to a hand with one, and the auction is
 #: the only lever either player has. Over several rounds the deals average out
 #: and what is left is the bidding judgement, which is the part worth playing.
-MATCH_TARGET = {"classic": 50, "skat": 100}
+MATCH_TARGET = {"classic": 100, "skat": 100}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:

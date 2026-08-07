@@ -1787,11 +1787,21 @@ try {
 		// answers going back means the BROWSER failed; no frames at all means the
 		// server never armed, which is a completely different fix. Guessing between
 		// those two cost a whole session once.
+		// DECISIONS, not frames. The armed request lives in ROOM STATE so every
+		// re-broadcast re-ships it — that durability is the point of it, and it
+		// means one decision can arrive on any number of frames. Counting frames
+		// made `armed` a function of how many moves the harness happened to send
+		// while the bot was thinking, so a perfectly-working tier that answered
+		// all four of its decisions read as "answered 4 of 6 armed".
 		const frames = { ai_search: 0, room_update: 0 };
+		const decisions = new Set();
 		page.on("websocket", (ws) => {
 			ws.on("framereceived", ({ payload }) => {
 				if (typeof payload !== "string") return;
-				if (payload.includes('"ai_search"')) frames.ai_search++;
+				if (payload.includes('"ai_search"')) {
+					frames.ai_search++;
+					for (const m of payload.matchAll(/"decision":\s*(\d+)/g)) decisions.add(m[1]);
+				}
 				if (payload.includes('"room_update"')) frames.room_update++;
 			});
 			ws.on("socketerror", (e) => errors.push(`ws: ${e}`));
@@ -1896,10 +1906,10 @@ try {
 		// forced moves while the tier was working perfectly, and read exactly like
 		// the tier being broken. One in flight is tolerated: the loop stops on its
 		// own count, so the server can arm one more behind it.
-		const armed = frames.ai_search;
+		const armed = decisions.size;
 		check("the browser answered every decision the server armed",
 			armed >= 3 && (acts.ai_move || 0) >= armed - 1,
-			`${JSON.stringify(acts)} frames=${JSON.stringify(frames)} `
+			`${armed} decisions on ${frames.ai_search} frames · ${JSON.stringify(acts)} `
 			+ `searches=${JSON.stringify(searches.slice(0, 2))} err=${JSON.stringify(errors.slice(0, 2))}`);
 		// Each answer logs its worker count, world count and latency. Zero of those
 		// with a live `client_ai_ready` is the wasm loading and the SEARCH failing,
@@ -2074,10 +2084,10 @@ try {
 			dwells.length >= 8 && dwells[dwells.length - 1].ms >= 550,
 			JSON.stringify(dwells[dwells.length - 1] || null));
 		// ── the round that just ended is one round of a MATCH ────────────────
-		// A game is played to 50 (100 in skat), so the result panel carries the
-		// running standing and deals again rather than sending anyone to the
-		// lobby. One round CAN settle it outright — a level-12 contract pays
-		// 144 — so this must not assume there is a next round to play.
+		// A game is played to 100, so the result panel carries the running
+		// standing and deals again rather than sending anyone to the lobby. One
+		// round CAN settle it outright — a classic level-12 contract pays 144 —
+		// so this must not assume there is a next round to play.
 		const after = await page.evaluate(() => {
 			const t = (s) => document.querySelector(s)?.textContent || "";
 			return {
