@@ -1719,6 +1719,106 @@ try {
 		await ctx.close();
 	}
 
+	// ── Oddtrick's completed-trick beat ───────────────────────────────────────
+	// A finished trick stays face up for TRICK_HOLD_MS before it moves to the
+	// side panel. It is a pure timing behaviour, so nothing in Python can see it
+	// and a mounted screen says nothing about it — and it shipped broken in two
+	// ways that only a played-out game exposes. (1) The hold stopped at phase
+	// `play`, so the trick that ENDS the game (the thirteenth, or the +2 that
+	// breaks a Null) was swapped for the result panel in the same frame: held
+	// 0ms, every other trick 700ms. (2) A player who answered inside the hold
+	// was leading the next trick behind a screen still showing the last one, so
+	// two finished tricks ran together with an 18ms frame between them.
+	// This plays a whole classic game AT FULL TILT — clicking the instant a card
+	// offers itself, which is the case that broke — and measures every dwell.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "hold-harness", name: "Hold", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		// Sample the middle of the board every frame and record each change. A
+		// polling loop from Node cannot see a state that lasts one frame, which
+		// is precisely the size of the bug.
+		await page.evaluate(() => {
+			window.__hold = [];
+			let last = null;
+			const tick = () => {
+				const t = document.querySelector(".odd-trick");
+				const s = !t ? "-" : [...t.querySelectorAll(".odd-tp .odd-card")]
+					.map((e) => e.textContent.trim()).join(" ") || "(none)";
+				if (s !== last) { window.__hold.push([performance.now(), s]); last = s; }
+				requestAnimationFrame(tick);
+			};
+			requestAnimationFrame(tick);
+		});
+
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		for (const label of [/^VS AI$/, /^Normal$/, /^Classic$/]) {
+			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
+
+		for (let i = 0; i < 300; i++) {
+			const st = await page.evaluate(() => ({
+				bidding: !!document.querySelector(".odd-bidgrid button"),
+				over: !!document.querySelector(".odd-result"),
+			}));
+			if (st.over) break;
+			if (st.bidding) {
+				// Cheapest legal contract: first level, then whatever denomination
+				// it allows. The auction is not what this block is testing.
+				await page.locator(".odd-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
+				const d = page.locator(".odd-denoms button:not([disabled])").first();
+				if (await d.count()) await d.click({ timeout: 5_000 }).catch(() => {});
+				const bid = page.getByRole("button", { name: /^Bid / }).first();
+				if (await bid.count() && await bid.isEnabled()) await bid.click({ timeout: 5_000 }).catch(() => {});
+				else await page.getByRole("button", { name: /^Pass$/ }).first()
+					.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(250);
+				continue;
+			}
+			const pat = page.getByRole("button", { name: /stand pat/i }).first();
+			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
+			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
+			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
+			await sleep(90);
+		}
+
+		const trace = await page.evaluate(() => window.__hold);
+		// Dwell of state i = when state i+1 replaced it. The last entry has no
+		// successor, so it is dropped rather than guessed at.
+		const dwells = trace.slice(0, -1).map((e, i) => ({
+			cards: e[1], ms: Math.round(trace[i + 1][0] - e[0]) }))
+			.filter((d) => d.cards.split(" ").length === 2);
+		const shortest = dwells.reduce((a, b) => (b.ms < a.ms ? b : a), { ms: Infinity });
+		check("a whole game was played out", dwells.length >= 8,
+			`${dwells.length} finished tricks reached the table`);
+		check("every finished trick is held, even at full tilt",
+			dwells.length >= 8 && shortest.ms >= 550,
+			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`);
+		// The game-ending trick is the one this most easily loses: it arrives in
+		// the same message as the result. Its dwell is the LAST two-card entry.
+		check("the trick that ends the game is held too, not replaced by the result",
+			dwells.length >= 8 && dwells[dwells.length - 1].ms >= 550,
+			JSON.stringify(dwells[dwells.length - 1] || null));
+		check("no page errors playing a game out", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

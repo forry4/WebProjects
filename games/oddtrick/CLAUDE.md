@@ -180,6 +180,35 @@ set → defender scores **(N−1) + 4 × shortfall**. Null: flat 12 / flat 10.
   jump overtakes (42.7% → 2.7%) or letting the opener pass (→ 0%) moved it, and
   both cost the maneuvering game. Shipped config keeps forced opening.
 
+## The completed-trick beat (frontend, and it is timing — nothing else can see it)
+
+A finished trick stays face up for `TRICK_HOLD_MS` (700) before it moves to the
+Last trick panel, because the server clears `led` the instant the second card
+lands. Three things about it are load-bearing, all three MEASURED in a browser
+against a live backend (`screens.mjs`, "Oddtrick's completed-trick beat"):
+
+* **The hold covers `over`, not just `play`.** The thirteenth trick and the +2
+  that breaks a Null both end the game in the SAME message that completes the
+  trick, so a hold gated on `phase === "play"` skipped the one trick a player
+  most wants to see: measured 700ms on every other trick and **0ms on the last**,
+  swapped straight for the result panel. `wasPlaying` keeps that to a game that
+  ended under you — opening a finished room from the lobby must not replay its
+  last trick at you first.
+* **The hold BLOCKS play** (`canPlay = myTurn && !heldTrick`). A trick takes
+  ~600ms at full tilt against the 450ms bot floor, so a player who answered
+  inside the hold was leading the next trick behind a screen still showing the
+  last one: their card sat invisible, the opponent's reply landed in the same
+  window, and two finished tricks ran together with a **single 18ms frame**
+  between them. Nothing is swallowed — a card with no click handler also loses
+  its `.play` affordance, so the hand visibly stops offering itself.
+* **The trick line is about the trick you are LOOKING at.** `game.trick` has
+  already moved on during a hold, so reading it there labelled the two cards
+  with the next trick's number and the next trick's ±value.
+
+The gate plays a whole game at full tilt and asserts every dwell; it reads
+695–700ms on all thirteen tricks. A polling loop from Node cannot see a state
+that lasts one frame, so it samples per `requestAnimationFrame` in the page.
+
 ## Layout
 
 | file | what |

@@ -26,10 +26,31 @@
   }
   .odd .odd-card { --cw: 42px; font-size: 0.78rem; }
   .odd .odd-hand { gap: 0.18rem; }
-  .odd .odd-hand .odd-card:not(:first-child) { margin-left: -14px; }
+  /* NO overlap. The fan used to tuck each card 14px under the next, which is
+     fine when the index is centred and fatal now that it lives in the TOP-RIGHT
+     corner — every card's index but the last was covered. A hand is at most 7
+     cards, and 7 x 42px plus gaps fits a 390px phone with room to spare, so the
+     overlap was buying nothing anyway. */
+  .odd .odd-hand { gap: 0.18rem; flex-wrap: wrap; }
   .odd .odd-piles { gap: 0.35rem; }
+  .odd .odd-pilewrap { --pk: 11px; }
   .odd .odd-bidgrid { grid-template-columns: repeat(4, 1fr); }
-  .odd .odd-valgrid { grid-template-columns: repeat(5, 1fr); max-height: 34vh; }
+  .odd .odd-valgrid { grid-template-columns: repeat(5, 1fr); }
+  /* While BIDDING the board is exactly the viewport and the ladder takes
+     whatever is left, scrolling inside itself. A viewport-relative cap cannot
+     do this: the rest of the panel (the standing bid, the collision list, the
+     buttons, the log) is content-sized and varies, so any fixed vh either
+     overflows the page on a short phone or wastes space on a tall one.
+     Measured before this: the page ran 68px past the viewport and the grid
+     showed 35 of 36 rungs, i.e. it was not scrolling at all. */
+  .odd .odd-table.ph-auction { height: calc(100dvh - 72px); }
+  .odd .odd-table.ph-auction .odd-auction {
+    min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
+    justify-content: flex-start;
+  }
+  .odd .odd-table.ph-auction .odd-valgrid {
+    flex: 1 1 auto; min-height: 3.2rem; max-height: none;
+  }
   /* The side panel STACKS below the board on a phone rather than vanishing.
      Hiding it wholesale also hid the last trick, the talon you paid the auction
      to see, and the move log — three things a phone player has no other way to
@@ -61,8 +82,13 @@
   user-select: none; position: relative;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
+.odd-ix {
+  position: absolute; top: 4%; right: 7%;
+  display: flex; flex-direction: column; align-items: center;
+  line-height: 1;
+}
 .odd-card .odd-r { font-size: 0.95em; }
-.odd-card .odd-s { font-size: 1.25em; }
+.odd-card .odd-s { font-size: 1.15em; }
 .odd-card.red { color: #c0233a; }
 .odd-card.black { color: #17171a; }
 .odd-card.play { cursor: pointer; }
@@ -79,21 +105,11 @@
 
 /* ── piles ──────────────────────────────────────────────────────────────── */
 .odd-piles { display: flex; gap: 0.6rem; justify-content: center; }
-.odd-pile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
-.odd-pile .odd-under {
-  font-size: 0.62rem; color: var(--muted); letter-spacing: 0.02em;
-  min-height: 1em;
-}
-.odd-pile .odd-under.known { color: var(--accent); font-weight: 700; }
-.odd-pilewrap { position: relative; }
-/* The buried card peeks out from under its cover, so "two left" reads at a glance. */
-.odd-pilewrap.two::before {
-  content: ""; position: absolute; inset: -4px -4px auto auto;
-  width: 100%; height: 100%;
-  border-radius: 6px; background: #2b3a55;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  transform: translate(4px, -4px); z-index: 0;
-}
+.odd-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
+/* The wrap reserves the peek offset as padding so the buried card cannot
+   overlap its neighbour or get clipped by the row. */
+.odd-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: 15px; }
+.odd-buried { position: absolute; top: 0; right: 0; z-index: 0; }
 .odd-pilewrap .odd-card { position: relative; z-index: 1; }
 
 /* ── table ──────────────────────────────────────────────────────────────── */

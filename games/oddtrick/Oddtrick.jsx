@@ -120,8 +120,14 @@ function Card({ c, onClick, dim, sel, small, ghost }) {
     + `${dim ? " dim" : ""}${sel ? " sel" : ""}${small ? " sm" : ""}`;
   return (
     <div className={cls} onClick={onClick} title={cardName(c)}>
-      <span className="odd-r">{RANKS[rankOf(c)]}</span>
-      <span className="odd-s">{SUIT_GLYPH[suitOf(c)]}</span>
+      {/* The index sits in the TOP-RIGHT corner, which is what lets a pile
+          reveal its buried card by offsetting it up and to the right — the
+          corner alone identifies the card, so the hint labels underneath the
+          piles ("1 hidden", "over 7♥") are no longer needed. */}
+      <span className="odd-ix">
+        <span className="odd-r">{RANKS[rankOf(c)]}</span>
+        <span className="odd-s">{SUIT_GLYPH[suitOf(c)]}</span>
+      </span>
     </div>
   );
 }
@@ -131,19 +137,26 @@ function Pile({ pile, onPlay, playable }) {
     return (
       <div className="odd-pile">
         <div className="odd-pilewrap"><div className="odd-card ghost">–</div></div>
-        <div className="odd-under">empty</div>
       </div>
     );
   }
   const twoLeft = pile.n === 2;
+  const under = pile.under;
+  const knownUnder = under !== null && under !== undefined;
   return (
     <div className="odd-pile">
-      <div className={`odd-pilewrap${twoLeft ? " two" : ""}`}>
+      <div className="odd-pilewrap">
+        {/* The buried card, offset up and right so its top-right index clears
+            the card covering it. That IS the label: a face shows which card is
+            coming (the middle pile, dealt face up), a back shows only that
+            something is there — which is exactly what the outer piles hide,
+            from their owner too. A one-card pile has nothing behind it. */}
+        {twoLeft && (
+          <div className="odd-buried" title={knownUnder ? cardName(under) : "face down"}>
+            <Card c={knownUnder ? under : null} />
+          </div>
+        )}
         <Card c={pile.top} onClick={onPlay} dim={onPlay ? false : !playable} />
-      </div>
-      <div className={`odd-under${pile.under !== null && pile.under !== undefined ? " known" : ""}`}>
-        {!twoLeft ? "last" : pile.under !== null && pile.under !== undefined
-          ? `over ${cardName(pile.under)}` : "1 hidden"}
       </div>
     </div>
   );
@@ -214,14 +227,41 @@ function SkatStake({ game, nameOf, rows }) {
   );
 }
 
-/** Every declaration that clears `value`, cheapest level first.
- *  This is the mode's whole point made visible: 12 is ♦6 and ♥4 and ♠3 and NT2,
- *  so naming 12 says nothing about which game is coming. */
-function clearedBy(value, bases, maxLevel) {
+/** What `value` would COMMIT you to in each denomination — the lowest level
+ *  whose base x level reaches it, which is the number of trick points you would
+ *  then have to score.
+ *
+ *  Every denomination, not only the ones that hit the number exactly. The
+ *  decision at the ladder is "if I win here, what am I promising?", and for four
+ *  of the five that answer is a level whose value OVERSHOOTS the bid — showing
+ *  only the exact hits answered it for one denomination and left the rest blank.
+ *  It also makes the cheap end legible: a bid of 2 requires level 1 in
+ *  everything, i.e. it commits you to nothing at all. */
+function levelsFor(value, bases, maxLevel) {
   if (!value || !bases?.length || !maxLevel) return [];
-  return bases.map((base, denom) => ({
-    denom, level: Math.max(1, Math.ceil(value / base)),
-  })).filter((x) => x.level <= maxLevel && x.level * bases[x.denom] === value);
+  return bases
+    .map((base, denom) => ({ denom, level: Math.max(1, Math.ceil(value / base)) }))
+    .filter((x) => x.level <= maxLevel);
+}
+
+/** What a number commits its winner to, per denomination. Rendered for the
+ *  STANDING bid as well as your own selection: while the opponent holds it, the
+ *  question you are answering is what THEIR number would cost you to take over,
+ *  and that was only ever shown for a value you had already picked. */
+function NeedsRow({ value, prefix, bases, maxLevel, nullValue }) {
+  if (!value || !bases?.length) return null;
+  return (
+    <div className="odd-clears">
+      <span className="muted">{prefix}</span>
+      {levelsFor(value, bases, maxLevel).map((x) => (
+        <span key={x.denom} className={`odd-clear${x.denom === 1 || x.denom === 2 ? " red" : ""}`}>
+          {x.level}{DENOM_LABEL[x.denom]}
+        </span>
+      ))}
+      {nullValue !== null && nullValue !== undefined && value <= nullValue
+        && <span className="odd-clear null">Null</span>}
+    </div>
+  );
 }
 
 /** Which auction a room runs. Classic is the default, so only skat is marked. */
@@ -385,14 +425,28 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   // the instant the second card lands, so without this the trick you just lost
   // (or won) vanishes mid-blink and the only record is the side panel — you
   // never actually SEE the two cards together.
+  //
+  // `over` is in here with `play` ON PURPOSE: the thirteenth trick and the +2
+  // that breaks a Null both END the game in the same message that completes the
+  // trick, so a hold that stops at `play` skips the one trick a player most
+  // wants to see and swaps straight to the result panel. Measured: every other
+  // trick held 655–700ms and the last one held 0.
   const [heldTrick, setHeldTrick] = useState(null);
+  const holdTimer = useRef(null);
+  const wasPlaying = useRef(false);
   useEffect(() => {
-    if (!game || game.phase !== "play") { setHeldTrick(null); return; }
+    const playing = game?.phase === "play";
+    // Only a game that ENDED under us gets the over-hold. Opening a finished
+    // room from the lobby would otherwise replay its last trick at you before
+    // showing the result, and a forfeit has no trick to hold at all.
+    const ending = game?.phase === "over" && wasPlaying.current;
+    wasPlaying.current = playing;
+    if (!playing && !ending) { setHeldTrick(null); return; }
     const done = lastTrick(game);
-    if (!done) return;
+    if (!done) { setHeldTrick(null); return; }
     setHeldTrick(done);
-    const t = setTimeout(() => setHeldTrick(null), TRICK_HOLD_MS);
-    return () => clearTimeout(t);
+    holdTimer.current = setTimeout(() => setHeldTrick(null), TRICK_HOLD_MS);
+    return () => clearTimeout(holdTimer.current);
   }, [game?.trick, game?.phase]);
   // Swap-phase selection (declarer only).
   const [swapTake, setSwapTake] = useState(null);
@@ -691,14 +745,24 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const bidReady = bidLevel !== null && bidDenom !== null && denomOkAt(bidLevel, bidDenom);
   const legal = new Set(game.legal || []);
   const res = game.result;
+  // THE BEAT BLOCKS PLAY, and that is what makes it a beat rather than a race.
+  // The hold is 700ms and a trick takes ~600ms at full tilt, so a player who
+  // answers before it expires was leading the NEXT trick behind a screen still
+  // showing the last one: their card sat invisible, the opponent's reply landed
+  // inside the same window, and the two finished tricks ran together with a
+  // single 18ms frame between them (measured). Nothing is swallowed — a card
+  // with no click handler also loses its `.play` affordance, so during the hold
+  // the hand plainly is not offering itself.
+  const canPlay = myTurn && !heldTrick;
 
   const trickCards = (() => {
-    if (game.phase !== "play") return [];
     // A just-finished trick outranks the next lead: both cards stay up until
-    // the hold expires, so the trick is always seen complete.
+    // the hold expires, so the trick is always seen complete — including the
+    // one that ends the game, which is why this is checked before the phase.
     if (heldTrick) {
       return heldTrick.plays.map((p) => ({ seat: p[0], c: p[1], won: p[0] === heldTrick.winner }));
     }
+    if (game.phase !== "play") return [];
     if (game.led === null || game.led === undefined) return [];
     return [{ seat: game.leader, c: game.led }];
   })();
@@ -713,7 +777,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
       {reconnecting && <div className="banner">Reconnecting…</div>}
 
       <div className="odd-main">
-        <div className="odd-table">
+        <div className={`odd-table ph-${game.phase}`}>
           {/* opponent */}
           <div className="odd-seat">
             <div className="odd-seatname">
@@ -740,9 +804,12 @@ export default function Oddtrick({ myId, authUser, onExit }) {
             <div className="odd-auction">
               <div className="muted">Auction · a number, not a game</div>
               <ContractLine game={game} />
-              {game.auction.value > 0 && (
+              {game.auction.value > 0 && (<>
                 <div className="muted">{nameOf(declSeat)} holds it at {game.auction.value}</div>
-              )}
+                <NeedsRow value={game.auction.value} bases={skatBases}
+                  maxLevel={catalog?.max_level} nullValue={skatNull}
+                  prefix={`${game.auction.value} would need`} />
+              </>)}
               {game.redeals > 0 && (
                 <div className="muted" style={{ fontSize: "0.78rem" }}>
                   Hand thrown in{game.redeals > 1 ? ` ${game.redeals} times` : ""} — redealt.
@@ -756,16 +823,10 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                         onClick={() => setBidValue(bidValue === v ? null : v)}>{v}</button>
                     ))}
                   </div>
-                  {bidValue !== null && skatBases.length > 0 && (
-                    <div className="odd-clears">
-                      <span className="muted">{bidValue} is</span>
-                      {clearedBy(bidValue, skatBases, catalog?.max_level).map((x) => (
-                        <span key={x.denom} className={`odd-clear${x.denom === 1 || x.denom === 2 ? " red" : ""}`}>
-                          {x.level}{DENOM_LABEL[x.denom]}
-                        </span>
-                      ))}
-                      {bidValue === skatNull && <span className="odd-clear null">Null</span>}
-                    </div>
+                  {bidValue !== null && bidValue !== game.auction.value && (
+                    <NeedsRow value={bidValue} bases={skatBases}
+                      maxLevel={catalog?.max_level} nullValue={skatNull}
+                      prefix={`yours would need`} />
                   )}
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                     <button className="btn" disabled={bidValue === null} onClick={doValueBid}>
@@ -1082,7 +1143,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 </div>
               )}
             </div>
-          ) : game.phase === "over" ? (
+          ) : (game.phase === "over" && !heldTrick) ? (
             <div className="odd-result">
               <div className={`odd-big ${res.made ? "made" : "set"}`}>
                 {res.abandoned_by !== null && res.abandoned_by !== undefined
@@ -1173,18 +1234,24 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                       <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
                     </div>
                   ))}
+                {/* While a finished trick is held, this line is ABOUT that
+                    trick — the server's counter has already moved on, so
+                    reading it here labelled the two cards you are looking at
+                    with the next trick's number and the next trick's value. */}
                 <div className="odd-trickinfo">
-                  Trick {game.trick + 1} of 13 ·{" "}
-                  <span className={`odd-val ${game.trick_value > 0 ? "good" : "bad"}`}>
-                    {game.trick_value > 0 ? "+2" : "−1"}
+                  Trick {heldTrick ? heldTrick.number : game.trick + 1} of 13 ·{" "}
+                  <span className={`odd-val ${(heldTrick ? heldTrick.value : game.trick_value) > 0 ? "good" : "bad"}`}>
+                    {(heldTrick ? heldTrick.value : game.trick_value) > 0 ? "+2" : "−1"}
                   </span>
                 </div>
               </div>
               <ContractChip game={game} nameOf={nameOf}
                 sharpBonus={catalog?.sharp_bonus ?? 2} />
               <div className="odd-turnbar">
-                {myTurn ? <span className="odd-yourturn">Your turn</span>
-                  : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
+                {game.phase === "over" ? <span className="muted">Last trick</span>
+                  : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
+                    : myTurn ? <span className="odd-yourturn">Your turn</span>
+                      : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
               </div>
             </>
           )}
@@ -1195,7 +1262,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               {game.piles[mySeat].map((p, i) => (
                 <Pile key={i} pile={p}
                   playable={legal.has(p?.top)}
-                  onPlay={myTurn && legal.has(p?.top) ? () => doPlay(p.top) : null} />
+                  onPlay={canPlay && legal.has(p?.top) ? () => doPlay(p.top) : null} />
               ))}
             </div>
             <div className="odd-hand">
@@ -1207,7 +1274,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                     (game.phase === "swap" ? game.swap : game.phase === "talon" ? game.talon : null)
                       && swapTake !== null
                       ? () => setSwapGive(swapGive === c ? null : c)
-                      : myTurn && legal.has(c) ? () => doPlay(c) : null
+                      : canPlay && legal.has(c) ? () => doPlay(c) : null
                   } />
               ))}
             </div>
