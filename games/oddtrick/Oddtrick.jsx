@@ -35,6 +35,12 @@ const NULL_LEVEL = 6;
 const NULL_MAKE = 12;
 const NULL_SET = 10;
 
+// How long a completed trick stays face up before it moves to the Last trick
+// panel. Long enough to read two cards, short enough not to stall the bot,
+// whose own floor is 450ms — so its next lead lands while this is still up and
+// simply waits its turn.
+const TRICK_HOLD_MS = 700;
+
 const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, blunders often" },
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
@@ -375,6 +381,19 @@ export default function Oddtrick({ myId, authUser, onExit }) {
     setBidLevel(null); setBidDenom(null); setBidValue(null);
   }, [game?.auction?.level, game?.auction?.value, game?.auction?.to_act,
       game?.redeals]);
+  // The completed trick stays on the table for a beat. The server clears `led`
+  // the instant the second card lands, so without this the trick you just lost
+  // (or won) vanishes mid-blink and the only record is the side panel — you
+  // never actually SEE the two cards together.
+  const [heldTrick, setHeldTrick] = useState(null);
+  useEffect(() => {
+    if (!game || game.phase !== "play") { setHeldTrick(null); return; }
+    const done = lastTrick(game);
+    if (!done) return;
+    setHeldTrick(done);
+    const t = setTimeout(() => setHeldTrick(null), TRICK_HOLD_MS);
+    return () => clearTimeout(t);
+  }, [game?.trick, game?.phase]);
   // Swap-phase selection (declarer only).
   const [swapTake, setSwapTake] = useState(null);
   const [swapGive, setSwapGive] = useState(null);
@@ -674,8 +693,13 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const res = game.result;
 
   const trickCards = (() => {
-    // The led card, plus this seat's answer if it has been played.
-    if (game.phase !== "play" || game.led === null || game.led === undefined) return [];
+    if (game.phase !== "play") return [];
+    // A just-finished trick outranks the next lead: both cards stay up until
+    // the hold expires, so the trick is always seen complete.
+    if (heldTrick) {
+      return heldTrick.plays.map((p) => ({ seat: p[0], c: p[1], won: p[0] === heldTrick.winner }));
+    }
+    if (game.led === null || game.led === undefined) return [];
     return [{ seat: game.leader, c: game.led }];
   })();
 
@@ -1144,7 +1168,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 {trickCards.length === 0
                   ? <div className="muted">{myTurn ? "Your lead" : "Waiting…"}</div>
                   : trickCards.map((t, i) => (
-                    <div key={i} style={{ textAlign: "center" }}>
+                    <div key={i} className={`odd-tp${t.won ? " won" : ""}`}>
                       <Card c={t.c} />
                       <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
                     </div>

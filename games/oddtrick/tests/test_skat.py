@@ -709,3 +709,77 @@ def test_a_hand_game_reaches_the_lead_without_ever_entering_a_swap():
     assert g["phase"] == "play"
     assert g["trump"] == E.NOTRUMP and g["contract"]["mult"] == 2
     assert len(g["hands"][decl]) == 7, "no card ever moved in or out"
+
+
+# --- Null ends the moment it is broken -------------------------------------
+
+
+def _drive_null(mode: str, seed: int):
+    """Play a Null contract out with a fixed policy until the engine stops."""
+    import random as _r
+    g = E.new_game(["alice", "bob"], _r.Random(seed), 0, mode=mode)
+    if mode == "skat":
+        E.apply_skat_bid(g, 0, 12)
+        E.apply_pass(g, 1)
+        E.apply_hand(g, 0)
+        E.apply_declare(g, 0, E.NULL_DENOM, 0)
+        E.apply_kontra(g, 1, False)
+    else:
+        E.apply_bid(g, 0, E.NULL_LEVEL, E.NULL_DENOM)
+        E.apply_pass(g, 1)
+        E.apply_swap(g, 0, None, None)
+    while g["phase"] == "play":
+        s = E.to_play(g)
+        E.apply_play(g, s, E.legal_moves(g, s)[-1])
+    return g
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_a_broken_null_stops_the_moment_the_declarer_takes_a_scoring_trick(mode):
+    """Null pays a FLAT amount either way, so once the declarer has won one +2
+    trick no remaining card can move the score by a point — playing them out is
+    dead time at a table where the result is already settled."""
+    broken = None
+    for seed in range(400):
+        g = _drive_null(mode, seed)
+        if not g["result"]["made"]:
+            broken = g
+            break
+    assert broken is not None, f"no seed in 400 broke a {mode} Null"
+    res = broken["result"]
+    decl = res["declarer"]
+    assert broken["phase"] == "over"
+    assert broken["trick"] < E.NTRICKS, "a broken Null should not run to thirteen"
+    assert res["ended_early"] is True
+    assert broken["etricks"][decl] == 1, "it stops at the FIRST scoring trick, not later"
+    # ...and the score is exactly what playing it out would have paid.
+    assert res["scores"][decl] == 0
+    assert res["scores"][1 - decl] > 0
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_a_made_null_still_runs_all_thirteen_tricks(mode):
+    """The early exit must be keyed on the contract being BROKEN, not on Null.
+    A Null the declarer is winning has to be played to the end — the thirteenth
+    trick can still be the one that breaks it."""
+    made = None
+    for seed in range(400):
+        g = _drive_null(mode, seed)
+        if g["result"]["made"]:
+            made = g
+            break
+    assert made is not None, f"no seed in 400 made a {mode} Null"
+    assert made["trick"] == E.NTRICKS
+    assert made["result"]["ended_early"] is False
+    assert sum(made["pts"]) == E.POOL, "a completed round still sums to the pool"
+
+
+def test_only_null_ends_early():
+    """A point contract is never decided before the last trick — the shortfall
+    term means every remaining trick can still change the score."""
+    g = _declared(value=12, denom=2, level=4)
+    while g["phase"] == "play":
+        s = E.to_play(g)
+        E.apply_play(g, s, E.legal_moves(g, s)[0])
+    assert g["trick"] == E.NTRICKS
+    assert g["result"]["ended_early"] is False

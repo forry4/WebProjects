@@ -728,8 +728,25 @@ def apply_play(g: dict, seat: int, c: int) -> None:
     g["trick"] += 1
     g["leader"] = winner
     g["led"] = None
-    if g["trick"] >= NTRICKS:
+    if g["trick"] >= NTRICKS or _null_is_already_broken(g, winner, v):
         _finish(g)
+
+
+def _null_is_already_broken(g: dict, winner: int, value: int) -> bool:
+    """A Null contract is decided the moment the declarer takes a scoring trick.
+
+    Null pays a FLAT amount either way, so once the declarer has won one +2
+    trick nothing in the remaining cards can move the score by a single point --
+    playing them out is dead time at a table where the result is settled.
+
+    Ending here is score-identical to playing on. What it is NOT is
+    pool-identical: `pts` sums to POOL only over a COMPLETED round, so a broken
+    Null stops short of +5 and anything asserting that invariant has to say
+    "a round that ran to thirteen tricks".
+    """
+    return (value > 0
+            and g["auction"]["denom"] == NULL_DENOM
+            and winner == g["auction"]["declarer"])
 
 
 # --- scoring ---------------------------------------------------------------
@@ -773,6 +790,9 @@ def _finish_skat(g: dict) -> None:
     scores[decl if made else 1 - decl] = pay
     g["phase"] = "over"
     g["result"] = {
+        # A broken Null stops short of thirteen tricks; the UI says so
+        # rather than leaving a half-played board looking like a bug.
+        "ended_early": g["trick"] < NTRICKS,
         "mode": "skat",
         "declarer": decl,
         "bid": a["value"],
@@ -815,6 +835,9 @@ def _finish(g: dict) -> None:
     scores[1 - decl] = fs
     g["phase"] = "over"
     g["result"] = {
+        # A broken Null stops short of thirteen tricks; the UI says so
+        # rather than leaving a half-played board looking like a bug.
+        "ended_early": g["trick"] < NTRICKS,
         "mode": "classic",
         "declarer": decl,
         "level": a["level"],

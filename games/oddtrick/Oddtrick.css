@@ -282,3 +282,10 @@
   font-weight: 700; color: var(--accent);
   padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
+
+/* A completed trick stays face up for a beat before moving to the Last trick
+   panel, so you actually see the two cards together — the server clears the
+   led card the instant the second one lands. The winner is outlined, which is
+   the whole reason the pause is worth having. */
+.odd-tp { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.odd-tp.won .odd-card { outline: 2px solid var(--accent); outline-offset: 2px; }
