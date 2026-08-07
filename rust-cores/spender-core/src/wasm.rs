@@ -83,19 +83,16 @@ pub fn search_visits_timed(state_json: &str, seat: usize, budget_ms: f64, max_si
 }
 
 // ─── Variant N: learned value leaf (embedded weights) ─────────────────────────
-#[derive(Deserialize)]
-struct NModel {
-    dims: Vec<usize>,
-    w: Vec<Vec<f32>>,
-    b: Vec<Vec<f32>>,
-    mu: Vec<f32>,
-    sd: Vec<f32>,
-}
+// All four nets are embedded as BINCODE of their models.rs serde structs, not JSON
+// text (~3x smaller wasm, bit-identical weights — the .json stays committed as the
+// training-side source; regen via `gen_net_bins`, pinned by the models.rs test).
+use crate::models::{from_bin, AttnModel, NModel, PVModel};
+
 /// N's value net, embedded at build time (the verified learned leaf).
-static N_MODEL_JSON: &str = include_str!("n_model.json");
+static N_MODEL_BIN: &[u8] = include_bytes!("n_model.bin");
 
 fn build_n_net() -> crate::valuenet::StandardizedMlp {
-    let m: NModel = serde_json::from_str(N_MODEL_JSON).expect("embedded n_model.json");
+    let m: NModel = from_bin(N_MODEL_BIN, "n_model");
     crate::valuenet::StandardizedMlp::new(
         crate::valuenet::Mlp::from_parts(m.dims, m.w, m.b),
         m.mu,
@@ -174,21 +171,15 @@ pub fn search_n_full_timed(state_json: &str, seat: usize, budget_ms: f64, max_si
 }
 
 // ─── Variant PV: AlphaZero policy+value net (embedded weights) ─────────────────
-#[derive(Deserialize)]
-struct PVModel {
-    mu: Vec<f32>, sd: Vec<f32>, tdims: Vec<usize>,
-    tw: Vec<Vec<f32>>, tb: Vec<Vec<f32>>,
-    vw: Vec<f32>, vb: Vec<f32>, pw: Vec<f32>, pb: Vec<f32>, n_act: usize,
-}
 /// The Plan-A AZ champion served as N: `net_night_14` (178-feat, via `feats::features_ext`) — a
 /// higher-sims (512) self-play continuation that beats the prior champion net_ext_19 ~0.55-0.58
 /// (depth-robust, 256-3200 sims) and S 0.827 @400. PURE net swap (encoder unchanged from net_ext_19).
 /// Rollback = revert this commit's pv_model.json (restores net_ext_19); net_pv_4 + the 125-feat
 /// `features_az` path also remain in the tree.
-static PV_MODEL_JSON: &str = include_str!("pv_model.json");
+static PV_MODEL_BIN: &[u8] = include_bytes!("pv_model.bin");
 
 fn build_pv_net() -> crate::valuenet::PolicyValueNet {
-    let m: PVModel = serde_json::from_str(PV_MODEL_JSON).expect("embedded pv_model.json");
+    let m: PVModel = from_bin(PV_MODEL_BIN, "pv_model");
     crate::valuenet::PolicyValueNet::from_parts(
         m.mu, m.sd, m.tdims, m.tw, m.tb, m.vw, m.vb, m.pw, m.pb, m.n_act,
     )
@@ -199,10 +190,10 @@ fn build_pv_net() -> crate::valuenet::PolicyValueNet {
 /// 21 points 0.6325 on fresh decks (600g), holds 0.58-0.65 across the 256-2048 sims-ladder. Served only
 /// when `win_points == 21` (see the branch in the PV search fns); 15-point games are byte-identical to
 /// before. Rollback = revert this commit (drops pv_model_21.json + the branch -> net_night_14 for all).
-static PV_MODEL_JSON_21: &str = include_str!("pv_model_21.json");
+static PV_MODEL_BIN_21: &[u8] = include_bytes!("pv_model_21.bin");
 
 fn build_pv_net_21() -> crate::valuenet::PolicyValueNet {
-    let m: PVModel = serde_json::from_str(PV_MODEL_JSON_21).expect("embedded pv_model_21.json");
+    let m: PVModel = from_bin(PV_MODEL_BIN_21, "pv_model_21");
     crate::valuenet::PolicyValueNet::from_parts(
         m.mu, m.sd, m.tdims, m.tw, m.tb, m.vw, m.vb, m.pw, m.pb, m.n_act,
     )
@@ -212,17 +203,9 @@ fn build_pv_net_21() -> crate::valuenet::PolicyValueNet {
 // Beats net_night_14 ~0.567 on fresh decks at depth (512/1024 sims). Per-card tokens (features_tokens)
 // + attention leaf VALUE + per-token POLICY prior. 21-pt stays on net_ext21_13 (MLP). Rollback =
 // revert this commit (drops attn_model.json + the 15-pt branch -> net_night_14 for Classic).
-#[derive(Deserialize)]
-struct AttnModel {
-    emb_w: Vec<f32>, emb_b: Vec<f32>,
-    wq: Vec<Vec<f32>>, wk: Vec<Vec<f32>>, wv: Vec<Vec<f32>>, wo: Vec<Vec<f32>>,
-    f1w: Vec<Vec<f32>>, f1b: Vec<Vec<f32>>, f2w: Vec<Vec<f32>>, f2b: Vec<Vec<f32>>,
-    sw: Vec<f32>, sb: Vec<f32>, tw: Vec<f32>, tb: Vec<f32>,
-    vw: Vec<f32>, vb: Vec<f32>, pg_w: Vec<f32>, pg_b: Vec<f32>, ptok_w: Vec<f32>, ptok_b: Vec<f32>,
-}
-static ATTN_MODEL_JSON: &str = include_str!("attn_model.json");
+static ATTN_MODEL_BIN: &[u8] = include_bytes!("attn_model.bin");
 fn build_attn_net() -> crate::attn::AttnNet {
-    let m: AttnModel = serde_json::from_str(ATTN_MODEL_JSON).expect("embedded attn_model.json");
+    let m: AttnModel = from_bin(ATTN_MODEL_BIN, "attn_model");
     crate::attn::AttnNet {
         emb_w: m.emb_w, emb_b: m.emb_b, wq: m.wq, wk: m.wk, wv: m.wv, wo: m.wo,
         f1w: m.f1w, f1b: m.f1b, f2w: m.f2w, f2b: m.f2b,

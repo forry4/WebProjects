@@ -38,7 +38,11 @@ pub mod valuenet;
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
 pub mod compact;
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod dump;
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
 pub mod encmove;
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod gamedict;
 
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;

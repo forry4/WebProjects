@@ -69,6 +69,10 @@ import HomeScreen, { SITE_NAME, GAMES } from "../../shared/HomeScreen.jsx";
 // Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
 import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 	listOfflineGames, offlineRoomData, applyOfflineMove } from "./offline.js";
+// CoC's offline driver: the hub creates its records; the CoC component plays them.
+import { createOfflineCocGame, COC_BOARD_NAMES } from "../castles_of_crimson/offline.js";
+// Duel's offline driver: same split — the hub creates, SpenderDuel plays.
+import { createOfflineDuelGame } from "../spender_duel/offline.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -744,12 +748,21 @@ export default function SpenderApp() {
 	const [puzFailMove, setPuzFailMove] = useState(null);          // the wrong move the player just tried
 	const [pinged, setPinged] = useState(false);                  // a ping arrived while the tab was hidden (drives the "waiting for you" tab alert)
 	// ── Offline vs-AI mode (local wasm engine, no socket, IndexedDB saves) ──
-	const [offline, setOffline] = useState(false);       // an offline game drives the game screen (like puzzling)
+	const [offline, setOffline] = useState(false);       // an offline SPENDER game drives the game screen (like puzzling)
 	const [offlineRecord, setOfflineRecord] = useState(null);   // the saved-game record (offline.js shape)
 	const [offlineGames, setOfflineGames] = useState(null);     // hub list (null = loading)
-	const [offlineVariant, setOfflineVariant] = useState("N");  // hub New Game options — only the
+	const [offlineGameSel, setOfflineGameSel] = useState("spender"); // hub New Game: which game
+	const [offlineVariant, setOfflineVariant] = useState("N");  // Spender tier — only the
 	const [offlineWin, setOfflineWin] = useState(15);           //   client-WASM tiers exist offline
-	const [precacheState, setPrecacheState] = useState(null);   // null | {done,total} | "ok" | "err"
+	const [offlineCocTier, setOfflineCocTier] = useState("expert"); // CoC tier (hard|expert)
+	const [offlineCocMyBoard, setOfflineCocMyBoard] = useState("1");  // CoC board picks
+	const [offlineCocOppBoard, setOfflineCocOppBoard] = useState("1");
+	const [offlineDuelTier, setOfflineDuelTier] = useState("expert"); // Duel tier (hard|expert)
+	// A CoC/Duel offline game in play: the shell mounts that game's component with this
+	// record (they own their whole screen, unlike Spender whose game screen lives here).
+	const [offlinePlay, setOfflinePlay] = useState(null);
+	// Per-game download state: {spender|coc|duel: null | {done,total} | "ok" | "err"}
+	const [precacheState, setPrecacheState] = useState({});
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -1015,6 +1028,8 @@ export default function SpenderApp() {
 	offlineRef.current = offline;
 	const offlineRecordRef = useRef(offlineRecord);
 	offlineRecordRef.current = offlineRecord;
+	const offlinePlayRef = useRef(offlinePlay);
+	offlinePlayRef.current = offlinePlay;
 	// Fresh-closure mirror for the AI-dispatch effect's offline fork (the effect's deps are
 	// tuned for the online path; a ref keeps the fork from widening them).
 	const submitOfflineAiMoveRef = useRef(null);
@@ -2051,15 +2066,29 @@ export default function SpenderApp() {
 		goSpender("game");
 	};
 
+	// Enter a saved game by record, routed by which game owns it: Spender plays on this
+	// file's game screen; a CoC/Duel record mounts that game's component instead.
+	const enterOfflineRecord = (rec) => {
+		if (rec.game === "coc" || rec.game === "duel") {
+			disconnect();                    // never share the screen with a live socket
+			setOfflinePlay(rec);
+			offlinePlayRef.current = rec;
+			return Promise.resolve();
+		}
+		return enterOfflineGame(rec);
+	};
+
 	// Enter the hub (list screen). A deep-linked save id resumes that game once loaded;
 	// a dead id just leaves you on the hub (replace the URL so reload doesn't re-try it).
 	const enterOfflineHub = (rid) => {
 		setScreen("offline");
+		setOfflinePlay(null);
+		offlinePlayRef.current = null;
 		setOfflineGames(null);
 		listOfflineGames().then((list) => setOfflineGames(list));
 		if (rid) {
 			loadOfflineGame(rid).then((rec) => {
-				if (rec) enterOfflineGame(rec);
+				if (rec) enterOfflineRecord(rec);
 				else replacePath(buildPath("offline"));
 			});
 		}
@@ -2067,12 +2096,34 @@ export default function SpenderApp() {
 
 	const createAndEnterOffline = async () => {
 		try {
+			if (offlineGameSel === "coc") {
+				const rec = await createOfflineCocGame({
+					myBoard: offlineCocMyBoard, oppBoard: offlineCocOppBoard, tier: offlineCocTier,
+				});
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
+			if (offlineGameSel === "duel") {
+				const rec = await createOfflineDuelGame({ tier: offlineDuelTier });
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
 			const rec = await createOfflineGame({ aiVariant: offlineVariant, winPoints: offlineWin });
 			pushPath(buildPath("offline", rec.id));
 			await enterOfflineGame(rec);
 		} catch (e) {
 			setToast(String(e?.message || "Couldn't start an offline game"));
 		}
+	};
+
+	// Exit a CoC/Duel offline game back to the hub (the component's onExit).
+	const exitOfflinePlayToHub = () => {
+		setOfflinePlay(null);
+		offlinePlayRef.current = null;
+		pushPath(buildPath("offline"));
+		enterOfflineHub(null);
 	};
 
 	// Human move sink (the sendMove fork). Illegal is user-visible; the engine failing to
@@ -2129,23 +2180,52 @@ export default function SpenderApp() {
 
 	// ── Offline asset precache (the "Download for offline" button) ─────────
 	// Everything else on the page is cached opportunistically by sw.js, but the wasm is
-	// only ever fetched lazily during a live vs-S/N game — a cold install has no engine.
+	// only ever fetched lazily during a live vs-AI game — a cold install has no engine.
 	// This asks the service worker to precache it deliberately (cache:"reload", bypassing
-	// the ~10-min Pages TTL) and streams progress back over a MessageChannel.
-	const startPrecache = () => {
-		const urls = ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm",
-			"fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"]
-			.map((p) => `${import.meta.env.BASE_URL}${p}`);
+	// the ~10-min Pages TTL) and streams progress back over a MessageChannel. PER GAME —
+	// nobody pays for engines they don't play (CoC's fetched model bins are ~4x the other
+	// two games combined; Spender + Duel embed their nets in the wasm). Each list carries
+	// the fonts too (tiny, and any single download must make that game FULLY offline).
+	// `warm` covers the localStorage caches the SW can't serve: CoC's board layouts (its
+	// game screen hard-gates on them) and Duel's card catalog. Sizes are the real gzip'd
+	// transfer, rounded up.
+	const OFFLINE_ASSETS = {
+		spender: {
+			label: "Spender", size: "~1 MB",
+			urls: ["wasm/spender-worker.js", "wasm/spender_core.js", "wasm/spender_core_bg.wasm"],
+		},
+		coc: {
+			label: "Castles of Crimson", size: "~5 MB",
+			urls: ["wasm/coc-worker.js", "wasm/coc_core.js", "wasm/coc_core_bg.wasm",
+				"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin"],
+			warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
+				.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
+		},
+		duel: {
+			label: "Spender Duel", size: "~1 MB",
+			urls: ["wasm/duel-worker.js", "wasm/duel_core.js", "wasm/duel_core_bg.wasm"],
+			// Same key + shape SpenderDuel.jsx's own catalog cache uses (the full /catalog body).
+			warm: () => fetch(`${HTTP_BASE}/duel/catalog`).then((r) => r.json())
+				.then((d) => { try { if (d.ok) localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {} }),
+		},
+	};
+	const FONT_URLS = ["fonts/cinzel.latin.woff2", "fonts/crimsonpro.latin.woff2", "fonts/crimsonpro-italic.latin.woff2"];
+	const startPrecache = (gameKey) => {
+		const spec = OFFLINE_ASSETS[gameKey];
+		if (!spec) return;
+		const setGame = (v) => setPrecacheState((s) => ({ ...s, [gameKey]: v }));
+		const urls = [...spec.urls, ...FONT_URLS].map((p) => `${import.meta.env.BASE_URL}${p}`);
+		spec.warm?.().catch(() => {});
 		const ctrl = navigator.serviceWorker?.controller;
-		if (!ctrl) { setPrecacheState("err"); return; }
+		if (!ctrl) { setGame("err"); return; }
 		const ch = new MessageChannel();
 		ch.port1.onmessage = (e) => {
 			const d = e.data || {};
-			if (d.ok) setPrecacheState("ok");
-			else if (d.error) setPrecacheState("err");
-			else if (d.total) setPrecacheState({ done: d.done, total: d.total });
+			if (d.ok) setGame("ok");
+			else if (d.error) setGame("err");
+			else if (d.total) setGame({ done: d.done, total: d.total });
 		};
-		setPrecacheState({ done: 0, total: urls.length });
+		setGame({ done: 0, total: urls.length });
 		ctrl.postMessage({ type: "PRECACHE_OFFLINE", urls }, [ch.port2]);
 	};
 
@@ -2237,9 +2317,13 @@ export default function SpenderApp() {
 			if (target === "offline") {
 				// Offline owns its own segment 2 (the local save id): Back out of a game →
 				// the hub; Forward (or cross-save) into a game → resume it. State-only.
+				// Covers BOTH offline surfaces: Spender (offlineRef, this file's game
+				// screen) and CoC (offlinePlayRef, the mounted component).
 				const rid = route.room;
-				if (!rid && offlineRef.current) { resetOfflineState(); enterOfflineHub(null); }
-				else if (rid && (!offlineRef.current || rid !== roomIdRef.current)) {
+				const inGame = offlineRef.current || !!offlinePlayRef.current;
+				const curRid = offlinePlayRef.current ? offlinePlayRef.current.id : roomIdRef.current;
+				if (!rid && inGame) { resetOfflineState(); enterOfflineHub(null); }
+				else if (rid && (!inGame || rid !== curRid)) {
 					resetOfflineState(); enterOfflineHub(rid);
 				}
 				return;
@@ -2267,6 +2351,7 @@ export default function SpenderApp() {
 		if (puzzlingRef.current) resetPuzzleState();
 		else if (offlineRef.current) resetOfflineState();
 		else if (inRoomScreen) leaveSpenderRoomState();
+		if (offlinePlayRef.current) { setOfflinePlay(null); offlinePlayRef.current = null; }
 		enterRoute(route);
 	};
 	applyPopRouteRef.current = applyPopRoute;
@@ -2763,6 +2848,19 @@ export default function SpenderApp() {
 		</>
 	);
 
+	// A CoC/Duel offline game in play: mount that game's component with the record. It
+	// renders its own whole screen (CoC's board layout / Duel's card catalog come from
+	// their localStorage caches, warmed by the precache).
+	if (screen === "offline" && offlinePlay) return (
+		<Suspense fallback={<GameChunkLoading />}>
+			{offlinePlay.game === "duel"
+				? <SpenderDuel myId={myId} authUser={authUser} offline={offlinePlay}
+					onExit={exitOfflinePlayToHub} />
+				: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
+					onExit={exitOfflinePlayToHub} />}
+		</Suspense>
+	);
+
 	// Local vs AI hub — start/resume/delete offline games + the offline-asset download.
 	// Reachable with NO backend (the boot gate skips the ping for /offline).
 	if (screen === "offline") return (
@@ -2779,23 +2877,63 @@ export default function SpenderApp() {
 				/>
 				<div className="browser offline-hub">
 					<div className="offline-panel">
-						<CmRow label="Opponent">
-							<div className="cm-pills">
-								{["S", "N"].map(v => (
-									<button key={v} type="button" className={`cm-pill${offlineVariant === v ? " sel" : ""}`}
-										onClick={() => setOfflineVariant(v)}>
-										<span className="cm-pill-name">{aiPersona(v)}</span>
-										<span className="cm-pill-sub">{aiTierLabel(v)}</span>
-									</button>
-								))}
-							</div>
-							<span className="cm-hint">These are the strongest opponents — the same AI that runs in your browser online.</span>
-						</CmRow>
-						<CmRow label="Length">
-							<CmSeg value={offlineWin} onChange={setOfflineWin} options={[
-								{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+						<CmRow label="Game">
+							<CmSeg value={offlineGameSel} onChange={setOfflineGameSel} options={[
+								{ value: "spender", label: "Spender" },
+								{ value: "coc", label: "Castles of Crimson" },
+								{ value: "duel", label: "Spender Duel" },
 							]} />
 						</CmRow>
+						{offlineGameSel === "duel" && (
+							<CmRow label="Difficulty">
+								<CmSeg value={offlineDuelTier} onChange={setOfflineDuelTier} options={[
+									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
+								]} />
+								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
+							</CmRow>
+						)}
+						{offlineGameSel === "spender" && (<>
+							<CmRow label="Opponent">
+								<div className="cm-pills">
+									{["S", "N"].map(v => (
+										<button key={v} type="button" className={`cm-pill${offlineVariant === v ? " sel" : ""}`}
+											onClick={() => setOfflineVariant(v)}>
+											<span className="cm-pill-name">{aiPersona(v)}</span>
+											<span className="cm-pill-sub">{aiTierLabel(v)}</span>
+										</button>
+									))}
+								</div>
+								<span className="cm-hint">These are the strongest opponents — the same AI that runs in your browser online.</span>
+							</CmRow>
+							<CmRow label="Length">
+								<CmSeg value={offlineWin} onChange={setOfflineWin} options={[
+									{ value: 15, label: "Classic 15" }, { value: 21, label: "Long 21" },
+								]} />
+							</CmRow>
+						</>)}
+						{offlineGameSel === "coc" && (<>
+							<CmRow label="Difficulty">
+								<CmSeg value={offlineCocTier} onChange={setOfflineCocTier} options={[
+									{ value: "hard", label: "Hard" }, { value: "expert", label: "Expert" },
+								]} />
+								<span className="cm-hint">The client-WASM tiers — the same nets that play online.</span>
+							</CmRow>
+							<CmRow label="Your Board">
+								<select className="input offline-select" value={offlineCocMyBoard}
+									onChange={(e) => setOfflineCocMyBoard(e.target.value)}>
+									{Object.entries(COC_BOARD_NAMES).map(([id, nm]) =>
+										<option key={id} value={id}>{id} — {nm}</option>)}
+								</select>
+							</CmRow>
+							<CmRow label="Bot's Board">
+								<select className="input offline-select" value={offlineCocOppBoard}
+									onChange={(e) => setOfflineCocOppBoard(e.target.value)}>
+									{Object.entries(COC_BOARD_NAMES).map(([id, nm]) =>
+										<option key={id} value={id}>{id} — {nm}</option>)}
+								</select>
+							</CmRow>
+						</>)}
+						{/* duel: the Difficulty row above is its whole config (always 2p, one board) */}
 						<button type="button" className="cm-create" style={{ marginTop: 10 }}
 							onClick={createAndEnterOffline}>
 							Start Game
@@ -2810,13 +2948,17 @@ export default function SpenderApp() {
 						{(offlineGames || []).map(g => (
 							<div key={g.id} className="offline-save-row">
 								<div className="offline-save-info">
-									<b>{aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}
+									{g.game === "coc"
+										? <><b>Castles</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
+										: g.game === "duel"
+											? <><b>Duel</b> · {g.tier === "hard" ? "Hard" : "Expert"}</>
+											: <><b>Spender · {aiPersona(g.aiVariant)}</b> · {g.winPoints === 21 ? "Long 21" : "Classic 15"}</>}
 									{" · "}{g.status === "over" ? "finished" : "in progress"}
 									<span className="offline-save-time"> · {timeAgo(Math.floor((g.updated || 0) / 1000))}</span>
 								</div>
 								<div className="offline-save-btns">
 									<button className="btn btn-gold btn-sm"
-										onClick={() => { pushPath(buildPath("offline", g.id)); enterOfflineGame(g); }}>
+										onClick={() => { pushPath(buildPath("offline", g.id)); enterOfflineRecord(g); }}>
 										{g.status === "over" ? "View" : "Continue"}
 									</button>
 									<button className="btn btn-ghost btn-sm" onClick={() => handleDeleteOffline(g.id)}>✕</button>
@@ -2828,15 +2970,26 @@ export default function SpenderApp() {
 					<div className="offline-panel">
 						<h3 className="offline-h">Play with no connection</h3>
 						<p className="offline-note">
-							Download the AI engine (~5 MB) so games here work fully offline — even in airplane
-							mode. Install the site to your home screen first for the best experience.
+							Download a game's AI engine so it works fully offline — even in airplane mode.
+							Install the site to your home screen first for the best experience.
 						</p>
-						{precacheState === "ok" && <span className="offline-note ok">✓ Downloaded — this page now works offline.</span>}
-						{precacheState === "err" && <span className="offline-note err">Download unavailable here — open the live site once, then retry.</span>}
-						{precacheState && typeof precacheState === "object" &&
-							<span className="offline-note">Downloading… {precacheState.done}/{precacheState.total}</span>}
-						{(precacheState == null || precacheState === "err") &&
-							<button className="btn btn-outline btn-sm" onClick={startPrecache}>Download for offline</button>}
+						{Object.entries(OFFLINE_ASSETS).map(([key, spec]) => {
+							const st = precacheState[key];
+							return (
+								<div key={key} className="offline-save-row">
+									<div className="offline-save-info"><b>{spec.label}</b> · {spec.size}</div>
+									<div className="offline-save-btns">
+										{st === "ok" && <span className="offline-note ok">✓ Ready offline</span>}
+										{st && typeof st === "object" &&
+											<span className="offline-note">Downloading… {st.done}/{st.total}</span>}
+										{st === "err" &&
+											<span className="offline-note err">Unavailable here — open the live site once, then retry. </span>}
+										{(st == null || st === "err") &&
+											<button className="btn btn-outline btn-sm" onClick={() => startPrecache(key)}>Download</button>}
+									</div>
+								</div>
+							);
+						})}
 					</div>
 				</div>
 				{toast && <div className="toast">{toast}</div>}

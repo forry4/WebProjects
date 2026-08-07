@@ -10,6 +10,9 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+# The embedded nets' wire format (see attn.rs::AttnJson): bincode stores the parsed
+# f32s verbatim (~3x smaller wasm than the JSON text, bit-identical weights).
+bincode = { version = "1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
@@ -17,11 +20,12 @@ wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bincode = "1"
 
 [features]
 # Native-only cross-impl bridge (parity fixtures + the move server). Keeps serde out
 # of the native lib otherwise.
-bridge = ["dep:serde", "dep:serde_json"]
+bridge = ["dep:serde", "dep:serde_json", "dep:bincode"]
 
 [[bin]]
 name = "parity"
@@ -37,6 +41,18 @@ required-features = ["bridge"]
 
 [[bin]]
 name = "compact_parity"
+required-features = ["bridge"]
+
+# Offline-surface gate: player_view/project/log-events writers vs the Python they
+# mirror (see src/bin/gamedict_parity.rs; fixtures via tools/gen_gamedict_fixtures.py).
+[[bin]]
+name = "gamedict_parity"
+required-features = ["bridge"]
+
+# Regenerate the embedded-net .bin files from their source JSONs (run after ANY net
+# swap — the net_bins_* lib tests fail until the bins match the JSONs again).
+[[bin]]
+name = "gen_net_bins"
 required-features = ["bridge"]
 
 # Self-play harvest for the learned value net (Phase 1). Gated behind `bridge` to keep it

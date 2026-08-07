@@ -149,6 +149,12 @@ pub struct PlayerState {
     pub region_vp: i16,
     pub color_vp: i16,
     pub livestock_vp: i16,
+    /// Shadow (same contract as the VP ledger above): the VP value of this
+    /// player's claimed color-bonus tile per color, 0 = unclaimed. Exists for the
+    /// OFFLINE render dict: the engine dict's `claimed_bonus` is `[{color, vp}]`
+    /// but the compact state keeps only the `bonus_claimed` COUNT — the colors
+    /// and first/second values are unrecoverable without this.
+    pub bonus_vp: [u8; N_GOODS],
 }
 
 impl PlayerState {
@@ -172,6 +178,7 @@ impl PlayerState {
             region_vp: 0,
             color_vp: 0,
             livestock_vp: 0,
+            bonus_vp: [0; N_GOODS],
         }
     }
 
@@ -633,6 +640,7 @@ impl State {
             self.players[seat].bonus_claimed += 1;
             self.players[seat].vp += val;
             self.players[seat].color_vp += val;
+            self.players[seat].bonus_vp[color] = val as u8;
         }
     }
 

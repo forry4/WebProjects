@@ -16,6 +16,9 @@ pub mod cards;
 pub mod dump;
 #[cfg(any(target_arch = "wasm32", feature = "bridge"))]
 pub mod gamedict;
+// The embedded nets' serde structs + the compact bincode embed format (see models.rs).
+#[cfg(any(target_arch = "wasm32", feature = "bridge"))]
+pub mod models;
 pub mod endgame;
 pub mod feats;
 pub mod engine;

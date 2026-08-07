@@ -4,3 +4,4 @@
 /pkg
 Cargo.lock
 tests/fixtures*/
+tests/gamedict_fixtures.jsonl

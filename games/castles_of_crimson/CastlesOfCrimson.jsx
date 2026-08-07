@@ -5,6 +5,9 @@ import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMen
   useProgressiveList, LobbyTabs, useLastDifficulty } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+// Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
+import { applyOfflineCocMove, armCocUndoIfMyTurn, cocOfflineRoomData, runCocBotLoop,
+  loadOfflineCocGame } from "./offline.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -803,7 +806,7 @@ const AI_TIER_OPTIONS = [
 ];
 const AI_TIER_IDS = AI_TIER_OPTIONS.map((t) => t.value);
 
-export default function CastlesOfCrimson({ myId, authUser, onExit }) {
+export default function CastlesOfCrimson({ myId, authUser, onExit, offline = null }) {
   const [board, setBoard] = useState(() => {           // {spaces, colors, castle, ...} — hydrated from cache
     try { const c = localStorage.getItem(COC_BOARDS_CACHE); if (c) return boardsWithById(JSON.parse(c)); } catch {}
     return null;
@@ -877,6 +880,53 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
 
   const playerName = authUser?.name || "Player";
+
+  // ── Offline vs-AI mode ──────────────────────────────────────────────────
+  // Mounted by the shell with `offline` = the saved-game record: no socket at all,
+  // moves apply through the local wasm engine (offline.js), and the EXISTING search
+  // loop below plays the bot from a driver-synthesized ai_search. The shell owns the
+  // URL (/offline/<id>), so the /coc deep-entry + popstate effects are gated off.
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
+  const offlineRecRef = useRef(null);              // the LIVE record (mutated by the driver)
+  const offlineTokenRef = useRef(0);               // bumps on unmount/exit → cancels stale bot loops
+  const publishOffline = useCallback(async (rec, aiSearch) => {
+    offlineRecRef.current = rec;
+    const rd = await cocOfflineRoomData(rec, myId, authUser?.name);
+    if (aiSearch) rd.ai_search = aiSearch;
+    setRoomData(rd);
+    return rd;
+  }, [myId, authUser?.name]);
+  const kickOfflineBot = useCallback(() => {
+    const token = offlineTokenRef.current;
+    const rec = offlineRecRef.current;
+    if (!rec) return;
+    runCocBotLoop(rec, myId, publishOffline, () => offlineTokenRef.current === token)
+      .catch((e) => console.debug("[coc offline-AI] bot loop:", e));
+  }, [myId, publishOffline]);
+  useEffect(() => {
+    if (!offline) return;
+    let live = true;
+    (async () => {
+      try {
+        // The prop may be a record or a saved id (shell resume passes the record).
+        const rec = typeof offline === "string" ? await loadOfflineCocGame(offline) : offline;
+        if (!rec || !live) return;
+        await armCocUndoIfMyTurn(rec);
+        setRoomId(rec.id);
+        // roomData BEFORE the screen flip: the game-screen render assumes `game`
+        // exists (the online flow sets both from one message; a "game" screen with
+        // null roomData crashes on the first unguarded game.* read).
+        await publishOffline(rec, null);
+        if (!live) return;
+        setScreen("game");
+        kickOfflineBot();
+      } catch (e) {
+        setToast(String(e?.message || "Couldn't open the offline game"));
+      }
+    })();
+    return () => { live = false; offlineTokenRef.current += 1; };
+  }, [offline]); // eslint-disable-line react-hooks/exhaustive-deps
   // The die value needed to sell a goods color (its index in the goods order + 1).
   const goodsSellNum = (color) => (board ? board.goods_colors.indexOf(color) + 1 : 0);
   // Description shown when the face-down "sold goods" pile is clicked/hovered.
@@ -1145,6 +1195,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   useEffect(() => {
     if (didInitRef.current) return;
     didInitRef.current = true;
+    if (offlineRef.current) return;   // offline: the shell owns the URL (/offline/<id>)
     const r = parsePath();
     if (r.game === "coc" && r.room) urlResume(r.room);
   }, []); // eslint-disable-line
@@ -1152,6 +1203,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // shell (whose unmount cleanup disconnects). Routed through a ref so the mount-once
   // subscription never runs a stale closure.
   popHandlerRef.current = (r) => {
+    if (offlineRef.current) return;   // offline popstate is the shell's (mode "offline")
     if (r.game !== "coc") return;
     if (r.room && r.room !== roomIdRef.current) {
       urlResume(r.room);
@@ -1173,7 +1225,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   // (`_handle_reconnect` re-triggers the server scheduler), so WITHOUT this the bot's
   // turn freezes until a manual refresh (the "hung for minutes" bug). Reconnect uses
   // the `reconnect` action (NOT `join`) so the backend actually resumes the bot.
-  const inLiveGame = !!roomId && !reviewOnly
+  const inLiveGame = !offline && !!roomId && !reviewOnly
     && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   // One reconnect attempt that reschedules itself — shared by the backoff loop AND the
   // tab-focus nudge, so neither can leave the loop dead by clearing the other's timer.
@@ -1569,7 +1621,19 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
             const conv = await pool[0].request({ kind: "chainMove", state: stateStr, prefix: JSON.stringify(prefix) });
             const mv = conv?.move;
             if (!cancelled && mv && !mv.includes('"error"')) {
-              send({ action: "ai_move", decision: as.decision, move: JSON.parse(mv) });
+              // Offline: the browser is the server — apply the compact move through
+              // the driver (validated there) and continue the bot loop. A stale or
+              // illegal submission is dropped silently, same policy as the server.
+              if (offlineRef.current) {
+                const rec = offlineRecRef.current;
+                if (rec && rec.decisionSeq === as.decision) {
+                  const res = await applyOfflineCocMove(rec, JSON.parse(mv), myId, { isAi: true });
+                  if (res.ok) { await publishOffline(res.rec, null); kickOfflineBot(); }
+                  else console.debug("[coc offline-AI] dropped:", res.err);
+                }
+              } else {
+                send({ action: "ai_move", decision: as.decision, move: JSON.parse(mv) });
+              }
             }
             return;
           }
@@ -1675,6 +1739,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
     connect(`${COC_WS}/${rid}/${myId}`, tok ? { action: "reconnect", token: tok } : { action: "join", name: playerName, session_token: authUser?.session_token });
   };
   const leaveToLobby = () => {
+    // Offline: there is no CoC lobby — every exit path (Leave / Back to lobby /
+    // Return to menu) hands back to the shell, which shows the Local-vs-AI hub.
+    // The save persists; the boot effect's cleanup token cancels any bot loop.
+    if (offlineRef.current) { onExit?.(); return; }
     setConnecting(false);
     disconnect();
     // A read-only HTTP review has no WS and must NOT clear the resume pointer of a
@@ -1707,6 +1775,20 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const mv = (move) => {
     // Any action other than the undo itself means there's now something to undo.
     if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    // Offline: apply through the local engine — the driver's publish IS the
+    // authoritative update (lands in ~ms; no optimistic preview needed), then the
+    // bot loop takes over if the turn passed.
+    if (offlineRef.current) {
+      const rec = offlineRecRef.current;
+      if (!rec) return;
+      (async () => {
+        const res = await applyOfflineCocMove(rec, move, myId, { isAi: false });
+        if (!res.ok) { setToast(res.err); return; }
+        await publishOffline(res.rec, null);
+        kickOfflineBot();
+      })().catch((e) => setToast(String(e?.message || "Move failed")));
+      return;
+    }
     // Optimistic preview: show this move's certain visible effect instantly, then let
     // the server's authoritative room_update reconcile (see handleMessage). Safe by
     // construction — the server never sees the preview; it's overwritten on the next
@@ -2305,8 +2387,11 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
           <div className="coc-top-right coc-top-abandon">
             {!over && confirmAbandon && (
               <>
-                <span className="coc-card-meta">Abandon game?</span>
-                <button className="coc-btn crimson sm" onClick={() => { send({ action: "abandon" }); setConfirmAbandon(false); }}>Yes, resign</button>
+                <span className="coc-card-meta">{offline ? "Leave this game? The save stays on this device." : "Abandon game?"}</span>
+                <button className="coc-btn crimson sm" onClick={() => {
+                  if (offline) { setConfirmAbandon(false); onExit?.(); return; }
+                  send({ action: "abandon" }); setConfirmAbandon(false);
+                }}>{offline ? "Yes, leave" : "Yes, resign"}</button>
                 <button className="coc-btn ghost sm" onClick={() => setConfirmAbandon(false)}>No</button>
               </>
             )}

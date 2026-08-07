@@ -1,8 +1,9 @@
 //! Compose a completed micro-action chain into ONE compact engine move (the JSON
 //! shape bridge.py::compact_to_move consumes). The chain must start at an
 //! engine-move boundary of `s0` (Micro::None) and end back at one — exactly what
-//! the per-decision search loop produces. Inverse direction (compact → actions)
-//! lives in tests/engine_parity.rs (and later the wasm worker protocol).
+//! the per-decision search loop produces. The inverse (`compact_to_actions`) lives
+//! below (bridge/wasm-gated — it takes serde JSON); tests/engine_parity.rs keeps its
+//! own copy for fixture replay.
 
 use crate::engine::{
     Pending, State, A_ADJUST0, A_BUY_BLACK0, A_DISCARD0, A_END_TURN, A_GOODS0, A_M6,
@@ -94,5 +95,56 @@ pub fn chain_to_compact(s0: &State, chain: &[usize]) -> String {
             }
             a => panic!("bad main action {a}"),
         },
+    }
+}
+
+/// Compact move dict → micro-action chain (the exact inverse of `chain_to_compact`;
+/// mirrors the fixture-replay copy in tests/engine_parity.rs). NON-PANICKING on
+/// malformed input — returns an empty chain, which the offline apply path rejects
+/// (a bad move from a client must surface as an error, never a wasm abort). Every
+/// produced action is still validated against `legal_actions_full` before applying.
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub fn compact_to_actions(c: &serde_json::Value) -> Vec<usize> {
+    use crate::engine::A_TAKE_HEX0 as TH;
+    let Some(t) = c["t"].as_str() else { return vec![] };
+    let g = |k: &str| c[k].as_i64().unwrap_or(-1) as isize;
+    let ok = |v: Vec<isize>| -> Vec<usize> {
+        if v.iter().any(|&x| x < 0) { vec![] } else { v.into_iter().map(|x| x as usize).collect() }
+    };
+    match t {
+        "end" => vec![A_END_TURN],
+        "skip" => vec![A_SKIP],
+        "take_hex" => ok(vec![A_SPEND_DIE0 as isize + g("die"), TH as isize + g("depot") * 2 + g("slot")]),
+        "place" => ok(vec![A_SPEND_DIE0 as isize + g("die"), A_PLACE_SLOT0 as isize + g("slot"),
+                           A_SPACE0 as isize + g("space")]),
+        "sell" => ok(vec![A_SPEND_DIE0 as isize + g("die"), A_SELL as isize]),
+        "workers" => ok(vec![A_SPEND_DIE0 as isize + g("die"), A_WORKERS as isize]),
+        "adjust" => ok(vec![A_ADJUST0 as isize + g("die") * 6 + (g("to") - 1)]),
+        "black" => ok(vec![A_BUY_BLACK0 as isize + g("slot")]),
+        "discard" => ok(vec![A_DISCARD0 as isize + g("slot")]),
+        "m6" => vec![A_M6],
+        "btake" => ok(vec![TH as isize + g("depot") * 2 + g("slot")]),
+        "castle" => ok(vec![A_SPACE0 as isize + g("space")]),
+        "ship" | "ship_adj" => ok(vec![A_SHIP_DEPOT0 as isize + g("depot")]),
+        "pick" => ok(vec![A_GOODS0 as isize + g("color")]),
+        "wh" => ok(vec![A_WH0 as isize + g("color")]),
+        "townhall" => ok(vec![A_PLACE_SLOT0 as isize + g("slot"), A_SPACE0 as isize + g("space")]),
+        "extra" => {
+            let mut out = vec![A_XVALUE0 as isize + g("value") - 1];
+            let sub = &c["sub"];
+            let gs = |k: &str| sub[k].as_i64().unwrap_or(-1) as isize;
+            match sub["t"].as_str() {
+                Some("workers") => out.push(A_WORKERS as isize),
+                Some("sell") => out.push(A_SELL as isize),
+                Some("take_hex") => out.push(TH as isize + gs("depot") * 2 + gs("slot")),
+                Some("place") => {
+                    out.push(A_PLACE_SLOT0 as isize + gs("slot"));
+                    out.push(A_SPACE0 as isize + gs("space"));
+                }
+                _ => return vec![],
+            }
+            ok(out)
+        }
+        _ => vec![],
     }
 }

@@ -14,6 +14,9 @@ import {
 } from "../../shared/splendor.jsx";
 import DuelRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
+// Offline vs-AI: the local game driver (wasm engine + IndexedDB saves) — see offline.js.
+import { applyOfflineDuelMove, armDuelUndoIfMyTurn, duelOfflineRoomData, runDuelBotLoop,
+  loadOfflineDuelGame } from "./offline.js";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -343,7 +346,7 @@ function fmtLog(e, names, cardsById, royals) {
 }
 
 // ─── Main component ─────────────────────────────────────────────────────────
-export default function SpenderDuel({ myId, authUser, onExit }) {
+export default function SpenderDuel({ myId, authUser, onExit, offline = null }) {
   const [screen, setScreen] = useState("lobby");     // lobby | waiting | game
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
@@ -423,6 +426,53 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const popHandlerRef = useRef(() => {}); // fresh-closure mirror for the mount-once popstate effect
 
   const playerName = authUser?.name || "Player";
+
+  // ── Offline vs-AI mode ──────────────────────────────────────────────────
+  // Mounted by the shell with `offline` = the saved-game record: no socket at all,
+  // moves apply through the local wasm engine (offline.js), and the EXISTING pool
+  // effect below plays the bot from a driver-synthesized ai_search. The shell owns
+  // the URL (/offline/<id>), so the /duel deep-entry + popstate effects are gated off.
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
+  const offlineRecRef = useRef(null);              // the LIVE record (mutated by the driver)
+  const offlineTokenRef = useRef(0);               // bumps on unmount/exit → cancels stale bot loops
+  const publishOffline = useCallback(async (rec, aiSearch) => {
+    offlineRecRef.current = rec;
+    const rd = await duelOfflineRoomData(rec, myId, authUser?.name);
+    if (aiSearch) rd.ai_search = aiSearch;
+    setRoomData(rd);
+    return rd;
+  }, [myId, authUser?.name]);
+  const kickOfflineBot = useCallback(() => {
+    const token = offlineTokenRef.current;
+    const rec = offlineRecRef.current;
+    if (!rec) return;
+    runDuelBotLoop(rec, myId, publishOffline, () => offlineTokenRef.current === token)
+      .catch((e) => console.debug("[duel offline-AI] bot loop:", e));
+  }, [myId, publishOffline]);
+  useEffect(() => {
+    if (!offline) return;
+    let live = true;
+    (async () => {
+      try {
+        // The prop may be a record or a saved id (shell resume passes the record).
+        const rec = typeof offline === "string" ? await loadOfflineDuelGame(offline) : offline;
+        if (!rec || !live) return;
+        await armDuelUndoIfMyTurn(rec);
+        setRoomId(rec.id);
+        // roomData BEFORE the screen flip: the game-screen render assumes `game`
+        // exists (the online flow sets both from one message; a "game" screen with
+        // null roomData crashes on the first unguarded game.* read).
+        await publishOffline(rec, null);
+        if (!live) return;
+        setScreen("game");
+        kickOfflineBot();
+      } catch (e) {
+        setToast(String(e?.message || "Couldn't open the offline game"));
+      }
+    })();
+    return () => { live = false; offlineTokenRef.current += 1; };
+  }, [offline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── derived (keep ABOVE all effects — TDZ rule) ──
   // `liveGame` is the authoritative game; `game` is what the BOARD shows — the rewound
@@ -523,9 +573,20 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
 
   const { connected, connect, send, disconnect, socketReady } = useSocket(handleMessage);
 
-  // static catalog (card data) once
+  // static catalog (card data) once — cached in localStorage so offline games can
+  // render cards with the backend unreachable (the data is static per deploy; a
+  // successful fetch always refreshes the cache).
   useEffect(() => {
-    fetch(`${DUEL_HTTP}/catalog`).then((r) => r.json()).then((d) => { if (d.ok) setCatalog(d); }).catch(() => {});
+    try {
+      const cached = localStorage.getItem("duel_catalog");
+      if (cached) setCatalog(JSON.parse(cached));
+    } catch {}
+    fetch(`${DUEL_HTTP}/catalog`).then((r) => r.json()).then((d) => {
+      if (d.ok) {
+        setCatalog(d);
+        try { localStorage.setItem("duel_catalog", JSON.stringify(d)); } catch {}
+      }
+    }).catch(() => {});
   }, []);
 
   const fetchGames = useCallback(() => {
@@ -561,12 +622,14 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   useEffect(() => {
     if (didInitRef.current) return;
     didInitRef.current = true;
+    if (offlineRef.current) return;   // offline: the shell owns the URL (/offline/<id>)
     const r = parsePath();
     if (r.game === "duel" && r.room) urlResume(r.room);
   }, []); // eslint-disable-line
   // Back/Forward while mounted: only our own segment 2 — mode changes unmount us via
   // the shell. Routed through a ref so the mount-once subscription never goes stale.
   popHandlerRef.current = (r) => {
+    if (offlineRef.current) return;   // offline popstate is the shell's (mode "offline")
     if (r.game !== "duel") return;
     if (r.room && r.room !== roomIdRef.current) {
       urlResume(r.room);
@@ -584,7 +647,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   // auto-reconnect while in a live game (load-bearing for vs-bot: the bot's turn is
   // re-driven on reconnect — the CoC "hung for minutes" lesson)
   // A review is HTTP-loaded and has no socket — never try to reconnect one.
-  const inLiveGame = !!roomId && !reviewOnly
+  const inLiveGame = !offline && !!roomId && !reviewOnly
     && (screen === "game" || screen === "waiting") && roomData?.status !== "over";
   const attemptReconnect = useCallback(() => {
     if (reconnTimer.current) { clearTimeout(reconnTimer.current); reconnTimer.current = null; }
@@ -863,7 +926,19 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
         // ai_move whose decision has been superseded.
         const wait = CLIENT_AI_MIN_MS - (performance.now() - t0);
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-        send({ action: "ai_move", decision: as.decision, move });
+        // Offline: sink the picked encmove through the driver (validated there) and
+        // continue the bot loop. A stale or illegal pick is dropped silently — the
+        // same policy as the server.
+        if (offlineRef.current) {
+          const rec = offlineRecRef.current;
+          if (rec && rec.decisionSeq === as.decision) {
+            const res = await applyOfflineDuelMove(rec, move, myId, { isAi: true });
+            if (res.ok) { await publishOffline(res.rec, null); kickOfflineBot(); }
+            else console.debug("[duel offline-AI] dropped:", res.err);
+          }
+        } else {
+          send({ action: "ai_move", decision: as.decision, move });
+        }
       } catch {}
     })();
   }, [roomData, wasmReady, send]);
@@ -871,6 +946,20 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   // ── actions ──
   const mv = (move) => {
     if (move?.type && move.type !== "undo_turn") setActedThisTurn(true);
+    // Offline: the browser is the server — apply through the driver (validated by the
+    // wasm engine's legal_moves, the server's exact policy) and continue the bot loop.
+    if (offlineRef.current) {
+      const rec = offlineRecRef.current;
+      if (!rec) return;
+      applyOfflineDuelMove(rec, move, myId)
+        .then(async (res) => {
+          if (!res.ok) { setToast(res.err || "illegal move"); return; }
+          await publishOffline(res.rec, null);
+          kickOfflineBot();
+        })
+        .catch((e) => setToast(String(e?.message || e)));
+      return;
+    }
     send({ action: "move", move });
   };
 
@@ -945,6 +1034,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const exitReview = () => { setReplaySnapshots(null); setReplayTurn(null); };
 
   const leaveToLobby = () => {
+    if (offlineRef.current) { onExit?.(); return; }   // offline: back to the shell's hub
     disconnect();
     setConnecting(false);
     pushPath(buildPath("duel"));   // leave the room URL (dedup no-op when popstate-driven)
@@ -1415,10 +1505,13 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
       {confirmAbandon && (
         <div className="duel-backdrop" onClick={() => setConfirmAbandon(false)}>
           <div className="duel-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Abandon game?</h3>
-            <p>Your opponent will be declared the winner.</p>
+            <h3>{offline ? "Leave this game?" : "Abandon game?"}</h3>
+            <p>{offline ? "The save stays on this device — resume any time." : "Your opponent will be declared the winner."}</p>
             <div className="duel-modal-row">
-              <button className="btn btn-gold" onClick={abandonGame}>Abandon</button>
+              <button className="btn btn-gold" onClick={() => {
+                if (offline) { setConfirmAbandon(false); onExit?.(); return; }
+                abandonGame();
+              }}>{offline ? "Yes, leave" : "Abandon"}</button>
               <button className="btn btn-outline" onClick={() => setConfirmAbandon(false)}>Keep playing</button>
             </div>
           </div>
@@ -1433,15 +1526,18 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
             <div className="duel-gameover-badge">{WIN_DESC[liveGame.win_condition] || ""}{liveGame.win_color ? ` (${liveGame.win_color})` : ""}</div>
             <p className="duel-muted">Final score {pointsOf(liveGame.players[liveGame.order[0]], cardsById, royals)} – {pointsOf(liveGame.players[liveGame.order[1]], cardsById, royals)} ({names[liveGame.order[0]]} vs {names[liveGame.order[1]]})</p>
             <div className="duel-modal-row">
-              <button className="btn btn-outline" onClick={() => { setGameOverDismissed(true); enterReview(roomId, true); }}>
-                Review game
-              </button>
+              {/* Review replays the SERVER's log — an offline save has no server game. */}
+              {!offline && (
+                <button className="btn btn-outline" onClick={() => { setGameOverDismissed(true); enterReview(roomId, true); }}>
+                  Review game
+                </button>
+              )}
               <button className="btn btn-gold" onClick={() => {
                 try {
                   if (localStorage.getItem("duel_roomId") === roomId) localStorage.removeItem("duel_roomId");
                 } catch {}
                 leaveToLobby();
-              }}>Back to lobby</button>
+              }}>{offline ? "Back to Local vs AI" : "Back to lobby"}</button>
             </div>
           </div>
         </div>

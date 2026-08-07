@@ -16,11 +16,20 @@
 // Protocol (main -> worker):
 //   { id, kind:"search", state, budget, maxSims, seed } -> { id, visits:[...], wins:[...] }
 //   { id, kind:"pick",   state, visits, wins }          -> { id, move }  (enc_move JSON string)
+//   ── offline driver (engine calls on the SAVE envelope; JSON strings in/out) ──
+//   { id, kind:"newGame",    seed }                                       -> { id, save }
+//   { id, kind:"legal",      save }                                       -> { id, legal }  ({actor,moves} JSON)
+//   { id, kind:"apply",      save, move, seat, pid0, pid1, shuffleSeed }  -> { id, save, events }
+//   { id, kind:"playerView", save, pid0, pid1, name0, name1, viewer }     -> { id, view }   (player_view JSON)
+//   { id, kind:"proj",       save, seat }                                 -> { id, proj }   (redacted ai_search.state)
 // Lifecycle: { ready:true } once the wasm loads, or { ready:false, error } if it won't
 //   (the main thread drops this worker; if none are ready it never announces
 //   client_ai_ready and the SERVER computes the bot's move — the pre-existing path).
 
-import init, { duel_search, duel_search_expert, duel_pick_move } from "./duel_core.js";
+// Namespace import so a cached OLD glue (without the offline exports) still loads —
+// newer entries are feature-detected at call time instead of breaking the import.
+import init, * as duel from "./duel_core.js";
+const { duel_search, duel_search_expert, duel_pick_move } = duel;
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -28,6 +37,19 @@ const readyP = new Promise((res) => (readyResolve = res));
 init()
   .then(() => { readyResolve(true); self.postMessage({ ready: true }); })
   .catch((err) => { readyResolve(false); self.postMessage({ ready: false, error: String(err) }); });
+
+// Engine-call results are `{"error":...}` JSON on bad input; surface those as
+// protocol-level errors so the driver has ONE failure path.
+const engineResult = (key, json) => {
+  if (typeof json === "string" && json.startsWith('{"error"')) {
+    return { error: JSON.parse(json).error };
+  }
+  return { [key]: json };
+};
+const need = (fn) => {
+  if (typeof fn !== "function") throw new Error("stale wasm: no offline engine");
+  return fn;
+};
 
 self.onmessage = async (e) => {
   const msg = e.data || {};
@@ -45,6 +67,28 @@ self.onmessage = async (e) => {
       const move = duel_pick_move(
         String(msg.state), JSON.stringify(msg.visits), JSON.stringify(msg.wins));
       self.postMessage({ id: msg.id, move });
+    } else if (msg.kind === "newGame") {
+      const save = need(duel.duel_new_game_json)(BigInt(msg.seed >>> 0));
+      self.postMessage({ id: msg.id, ...engineResult("save", save) });
+    } else if (msg.kind === "legal") {
+      self.postMessage({ id: msg.id, ...engineResult("legal", need(duel.duel_legal_json)(String(msg.save))) });
+    } else if (msg.kind === "apply") {
+      const out = need(duel.duel_apply_json)(
+        String(msg.save), String(msg.move), msg.seat >>> 0,
+        String(msg.pid0), String(msg.pid1), BigInt(msg.shuffleSeed >>> 0));
+      if (out.startsWith('{"error"')) {
+        self.postMessage({ id: msg.id, error: JSON.parse(out).error });
+      } else {
+        const parsed = JSON.parse(out);
+        self.postMessage({ id: msg.id, save: JSON.stringify(parsed.save), events: parsed.events });
+      }
+    } else if (msg.kind === "playerView") {
+      self.postMessage({ id: msg.id, ...engineResult("view",
+        need(duel.duel_player_view_json)(String(msg.save), String(msg.pid0), String(msg.pid1),
+          String(msg.name0), String(msg.name1), msg.viewer | 0)) });
+    } else if (msg.kind === "proj") {
+      self.postMessage({ id: msg.id, ...engineResult("proj",
+        need(duel.duel_offline_proj)(String(msg.save), msg.seat >>> 0)) });
     }
   } catch (err) {
     self.postMessage({ id: msg.id, error: String(err) });
