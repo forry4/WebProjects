@@ -158,8 +158,13 @@ def test_mcts_tier_plans_and_applies(monkeypatch):
         room = m.ROOMS[rid]
         assert room["ai_difficulty"] == "hard"
         rng = random.Random(5)
-        bot_moves_before = 0
-        for _ in range(400):
+        # Wait on CONDITIONS, never an iteration count: this used to be a fixed
+        # 400 x 5ms loop, and on a slow CI runner the budget ran out with the
+        # bot mid-search — so the `_bot_running is False` assert below read a
+        # race, not a property, and blocked a deploy (2026-08-07). The deadline
+        # only pays when something is actually broken.
+        deadline = asyncio.get_running_loop().time() + 60.0
+        while asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(0.005)
             g = room.get("game")
             if g is None or engine.is_over(g):
@@ -167,10 +172,14 @@ def test_mcts_tier_plans_and_applies(monkeypatch):
             actor = g.get("pending_pid") or g.get("turn")
             if actor == pid and not room.get("_bot_running"):
                 await m._handle_move(ws, rid, pid, {"move": rng.choice(engine.legal_moves(g, pid))})
-                bot_moves_before = sum(1 for e in g["log"] if e["pid"] == m.AI_PID)
         g = room["game"]
+        assert engine.is_over(g), "the game did not finish before the deadline"
         # the bot actually took turns via the planner (not just the finisher)
         assert sum(1 for e in g["log"] if e["pid"] == m.AI_PID) > 3
+        # the scheduler may still be unwinding its final (no-op) turn when the
+        # game ends under it — give it the same deadline to clear the flag
+        while room.get("_bot_running") and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.005)
         assert room.get("_bot_running") is False
 
     asyncio.run(run())
