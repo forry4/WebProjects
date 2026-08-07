@@ -45,8 +45,30 @@ LOG = logging.getLogger("oddtrick")
 
 TABLE = "oddtrick_games"
 AI_PID = "bot"
-DIFFICULTIES = ("easy", "normal")
+DIFFICULTIES = ("easy", "normal", "hard")
 DEFAULT_DIFFICULTY = "normal"
+
+#: Tiers whose card play is searched in the PLAYER'S BROWSER (`rust-cores/
+#: oddtrick-core` compiled to WASM). The search is an EXACT double-dummy solve
+#: per sampled world -- ~70ms for one world at trick 1 on a dev box -- so it can
+#: never run on Render's free tier, where one uvicorn process serves five games
+#: at ~0.1 CPU. It is safe because the server still validates every move through
+#: `engine.apply_move`: a tampered client only weakens its own opponent.
+#:
+#: Easy and Normal stay server-side ON PURPOSE. Their strength is the shipped
+#: ladder, and handing a one-trick-deep policy a solver is a strength change
+#: dressed up as a serving one.
+CLIENT_AI_TIERS = ("hard",)
+
+#: How long the room waits for the browser to answer one decision before the
+#: server bot finishes it. Generous: the whole point of the tier is that the
+#: search takes real time, and the fallback costs strength, not correctness.
+CLIENT_AI_TIMEOUT = 12.0
+#: What the client is asked to spend. Sampling saturates at ~8 worlds
+#: (CAMPAIGN.md), and the pool is per-worker, so the cap is the real bound and
+#: the millisecond budget is only there so a slow phone still answers.
+CLIENT_AI_BUDGET_MS = 2500
+CLIENT_AI_MAX_WORLDS = 8
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
@@ -342,7 +364,7 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]:
     room = ROOMS.get(room_id, {})
     g = room.get("game")
-    return {
+    state = {
         "room_id": room_id,
         "players": room.get("players", {}),
         "host": room.get("host"),
@@ -360,6 +382,15 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
             if viewer_pid and room.get("meta", {}).get(viewer_pid) else {}
         ),
     }
+    # The bot decision currently waiting on the browser's search. It lives in
+    # ROOM STATE rather than a one-shot message so every re-broadcast and every
+    # reconnect re-ships it -- the same durability rule the engine's pending
+    # sub-decisions follow, and the reason a dropped frame cannot strand a turn.
+    # Only ever armed on a vs-AI room, which is what keeps the BOT'S OWN VIEW
+    # (its hand) from reaching a human opponent.
+    if room.get("_ai_search"):
+        state["ai_search"] = room["_ai_search"]
+    return state
 
 
 async def broadcast_state(room_id: str, mtype: str = "room_update") -> None:
@@ -448,6 +479,62 @@ def _bot_move_sync(g: dict, seat: int, difficulty: str, seed: int):
     return {"kind": "bid", "level": mv["level"], "denom": mv["denom"]}
 
 
+async def _ask_the_client(room_id: str, seat: int) -> dict | None:
+    """Arm one card-play decision for the browser and wait for its answer.
+
+    Returns the move, or None to mean "the server should do this one" -- an
+    unarmed client, a timeout, a stale reply, or an answer the engine refuses.
+    Degradation is therefore per-DECISION and deadlock is impossible: the caller
+    always has the server bot behind it, so the turn ends either way.
+    """
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room or not room.get("client_ai"):
+            return None
+        g = room["game"]
+        # The STALENESS KEY is a monotonic per-room counter, not the ply. Every
+        # play happens to append exactly one history entry today, so a ply would
+        # work -- but nothing ENFORCES that, and two decisions sharing a key make
+        # a stale reply indistinguishable from a fresh one.
+        seq = room["_ai_decision_seq"] = room.get("_ai_decision_seq", 0) + 1
+        room["_ai_search"] = {
+            "decision": seq,
+            "seat": seat,
+            "budget_ms": CLIENT_AI_BUDGET_MS,
+            "max_worlds": CLIENT_AI_MAX_WORLDS,
+            # The bot's OWN redacted view -- the same builder that feeds a human
+            # seat, so there is no second projection to keep in step and the bot
+            # provably searches only what its seat may know.
+            "view": engine.view_for(g, seat),
+        }
+        room["_ai_pending_move"] = None
+        evt = room["_ai_move_evt"] = asyncio.Event()
+        mine = seq
+
+    await broadcast_state(room_id)
+    try:
+        await asyncio.wait_for(evt.wait(), CLIENT_AI_TIMEOUT)
+    except asyncio.TimeoutError:
+        LOG.info("oddtrick client AI timed out; the server finishes it (%s)", room_id)
+        move = None
+    else:
+        async with ROOM_LOCK:
+            r = ROOMS.get(room_id)
+            move = r.get("_ai_pending_move") if r else None
+    async with ROOM_LOCK:
+        r = ROOMS.get(room_id)
+        # Only tear down OUR decision. Two schedulers can be in flight at once
+        # (`_handle_move` starts one and so does every reconnect), and a blind
+        # clear here would disarm the other one's live request -- which does not
+        # break anything, because the `_position_key` guard still stops a stale
+        # move being applied, but it silently drops the room to the server bot.
+        if r and (r.get("_ai_search") or {}).get("decision") == mine:
+            r["_ai_search"] = None       # a late reply now reads as stale
+            r["_ai_pending_move"] = None
+            r["_ai_move_evt"] = None
+    return move
+
+
 async def _schedule_bot_turn(room_id: str) -> None:
     """Safe to call at any time; no-ops when it is not the bot's turn."""
     loop = asyncio.get_running_loop()
@@ -462,15 +549,31 @@ async def _schedule_bot_turn(room_id: str) -> None:
             difficulty = _valid_difficulty(room.get("ai_difficulty"))
             snapshot = json.loads(json.dumps(g))
             position_before = _position_key(g)
+            # Only CARD PLAY goes to the browser. The auction, the talon and the
+            # declaration are still the server's heuristic tier: their search is
+            # `eval_hand`, ten exact solves per sampled world against card play's
+            # one, and shipping it would put multiple seconds on a bid. Hard is
+            # therefore a card-play tier today, which is where the reference
+            # measured the gap (the policy is 69.8% behind pimc:8).
+            use_client = (difficulty in CLIENT_AI_TIERS
+                          and bool(room.get("client_ai"))
+                          and g["phase"] == "play"
+                          and len(engine.legal_moves(g, seat)) > 1)
 
         t0 = time.monotonic()
-        try:
-            move = await loop.run_in_executor(
-                _BOT_EXEC, _bot_move_sync, snapshot, seat, difficulty,
-                random.randrange(2 ** 31))
-        except Exception:
-            LOG.warning("oddtrick bot failed in %s", room_id, exc_info=True)
-            return
+        move = None
+        if use_client:
+            asked = await _ask_the_client(room_id, seat)
+            if asked is not None:
+                move = asked
+        if move is None:
+            try:
+                move = await loop.run_in_executor(
+                    _BOT_EXEC, _bot_move_sync, snapshot, seat, difficulty,
+                    random.randrange(2 ** 31))
+            except Exception:
+                LOG.warning("oddtrick bot failed in %s", room_id, exc_info=True)
+                return
         delay = BOT_FLOOR_SECONDS - (time.monotonic() - t0)
         if delay > 0:
             await asyncio.sleep(delay)
@@ -540,7 +643,8 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                 authed = await _handle_reconnect(websocket, room_id, pid, msg) or authed
             elif action == "auth_reconnect":
                 authed = await _handle_auth_reconnect(websocket, room_id, pid, msg) or authed
-            elif action in ("start", "move", "abandon"):
+            elif action in ("start", "move", "abandon",
+                            "client_ai_ready", "ai_move"):
                 if not authed:
                     await _send(websocket, {
                         "type": "error",
@@ -550,6 +654,10 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
                     await _handle_start(websocket, room_id, pid)
                 elif action == "move":
                     await _handle_move(websocket, room_id, pid, msg)
+                elif action == "client_ai_ready":
+                    await _handle_client_ai_ready(websocket, room_id, pid, msg)
+                elif action == "ai_move":
+                    await _handle_ai_move(websocket, room_id, pid, msg)
                 else:
                     await _handle_abandon(websocket, room_id, pid)
             else:
@@ -557,7 +665,11 @@ async def ws_room_player(websocket: WebSocket, room: str, player: str):
     except WebSocketDisconnect:
         pass
     finally:
-        _rooms.release_socket(ROOMS, room_id, pid, websocket)
+        # Stale-socket guard + client-AI disarm + empty-room cleanup, all in
+        # core/rooms.py. Disarming matters: with the tab gone there is nobody to
+        # answer, and every later decision would burn the whole watchdog before
+        # the server took over.
+        _rooms.release_socket(ROOMS, room_id, pid, websocket, disarm_client_ai=True)
 
 
 async def _handle_create(ws, room_id, pid, msg):
@@ -732,6 +844,63 @@ async def _handle_abandon(ws, room_id, pid):
         room["status"] = "over"
         save_game(room_id)
     await broadcast_state(room_id)
+
+
+async def _handle_client_ai_ready(ws, room_id, pid, msg):
+    """The browser says it has the search core loaded and will answer.
+
+    Opt-in per SOCKET, not per room: the flag is cleared when the tab goes
+    (`release_socket(disarm_client_ai=True)`) and a reconnecting client re-arms
+    itself, so a room can never sit waiting on a browser that is not there.
+    Refused unless this really is a vs-AI room on a client tier -- the armed
+    decision carries the BOT'S view, and a human opponent must never be handed a
+    reason to receive it.
+    """
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room or not room.get("vs_ai") or pid not in room.get("players", {}):
+            return
+        if _valid_difficulty(room.get("ai_difficulty")) not in CLIENT_AI_TIERS:
+            return
+        room["client_ai"] = bool(msg.get("ready", True))
+    # A decision may already be waiting: the room armed one, the tab reloaded,
+    # and the reconnect's own broadcast carries `ai_search` -- so re-scheduling
+    # here is what unsticks a room whose searcher went away mid-decision.
+    asyncio.create_task(_schedule_bot_turn(room_id))
+
+
+async def _handle_ai_move(ws, room_id, pid, msg):
+    """The browser's answer to the armed decision.
+
+    NOTHING here is trusted. The move is checked against the armed decision's
+    key (so a late reply to a superseded decision is dropped rather than
+    applied) and then against `engine.legal_moves` for the BOT's seat. An
+    invalid answer is treated exactly like silence: the waiter is released with
+    no move and the server bot plays the decision itself.
+    """
+    async with ROOM_LOCK:
+        room = ROOMS.get(room_id)
+        if not room:
+            return
+        armed = room.get("_ai_search")
+        evt = room.get("_ai_move_evt")
+        if not armed or evt is None:
+            return
+        if msg.get("decision") != armed.get("decision"):
+            return                       # stale -- a superseded decision
+        card = msg.get("card")
+        g = room.get("game")
+        ai = room.get("ai_player")
+        move = None
+        if (isinstance(card, int) and g and ai
+                and g.get("phase") == "play"
+                and card in engine.legal_moves(g, armed["seat"])):
+            move = {"kind": "play", "card": card}
+        else:
+            LOG.info("oddtrick client AI answered with a move the engine "
+                     "refuses; the server finishes it (%s)", room_id)
+        room["_ai_pending_move"] = move
+        evt.set()
 
 
 # ── REST ─────────────────────────────────────────────────────────────────────

@@ -44,7 +44,18 @@ const TRICK_HOLD_MS = 700;
 const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, blunders often" },
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
+  { id: "hard", name: "Hard", desc: "Solves the hand exactly, in your browser" },
 ];
+
+// The Hard tier's card play is searched HERE, on the player's CPU. It is an
+// exact double-dummy solve per sampled deal — ~70ms for one deal at trick 1 —
+// which is unthinkable on Render's free tier and unremarkable on a laptop.
+// Every failure path (no Worker, no wasm, a search error, a slow phone) is a
+// no-op that leaves the server's heuristic bot to play the move.
+const CLIENT_AI_TIERS = ["hard"];
+//: A flat floor per move, so the bot's pace does not advertise how fast the
+//  player's machine is — and so it never lands inside the completed-trick beat.
+const CLIENT_AI_MIN_MS = 600;
 
 // Two auctions over the same card play, picked per room. Skat mode bids a bare
 // NUMBER and only names the game after winning — so the ladder cannot be read
@@ -349,6 +360,12 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const [declSharp, setDeclSharp] = useState(false);
   const [declOpen, setDeclOpen] = useState(false);
 
+  // Client-side search: the worker pool, whether it came up, and the two
+  // idempotence keys (armed once per room+socket, dispatched once per decision).
+  const wasmPoolRef = useRef(null);
+  const [wasmReady, setWasmReady] = useState(false);
+  const clientAiArmedRef = useRef(null);
+  const aiDispatchRef = useRef(null);
   const reconnTimer = useRef(null);
   const reconnTries = useRef(0);
   const roomIdRef = useRef("");
@@ -414,6 +431,119 @@ export default function Oddtrick({ myId, authUser, onExit }) {
 
   useEffect(() => { if (screen === "lobby") fetchGames(); }, [screen, fetchGames]);
   useEffect(() => () => disconnect(), []); // eslint-disable-line
+
+  // ── client-side (WASM) bot search ──────────────────────────────────────────
+  // World-parallel: every worker searches the SAME decision from its own seed,
+  // sampling its own deals, and returns per-move value SUMS. We add them by move
+  // index — the index space is `State::legal`, a pure function of the position,
+  // so index i is the same card everywhere — and hand the totals back to the
+  // wasm to pick. The pick rule is NOT reimplemented here (see the worker).
+  useEffect(() => {
+    if (!roomData?.vs_ai || !CLIENT_AI_TIERS.includes(roomData?.ai_difficulty)
+      || wasmPoolRef.current || typeof Worker === "undefined") return;
+    const url = `${import.meta.env.BASE_URL}wasm/oddtrick-worker.js`;
+    // NEVER TAKE EVERY CORE. The solver is CPU-bound and a pool that pegs all of
+    // them starves the browser's main/compositor/raster threads, so the board
+    // stutters while the bot thinks. Only bites at <=4 cores; the cap dominates
+    // above that. Two other games shipped without this rule for months.
+    const cores = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, 4));
+    const makeWorker = () => {
+      let w;
+      try { w = new Worker(url, { type: "module" }); } catch { return null; }
+      const pending = new Map();
+      let resolveReady, nextId = 1;
+      const ready = new Promise((res) => (resolveReady = res));
+      w.onmessage = (e) => {
+        const d = e.data || {};
+        if (d.ready !== undefined) { resolveReady(!!d.ready); return; }
+        if (d.id != null && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
+      };
+      w.onerror = () => resolveReady(false);
+      return {
+        ready,
+        request(payload) {
+          const id = nextId++;
+          return new Promise((res) => { pending.set(id, res); w.postMessage({ ...payload, id }); });
+        },
+        terminate() { try { w.terminate(); } catch {} },
+      };
+    };
+    const pool = Array.from({ length: cores }, makeWorker).filter(Boolean);
+    wasmPoolRef.current = pool;
+    Promise.all(pool.map((wk) => wk.ready)).then((flags) => {
+      const live = pool.filter((_, i) => flags[i]);
+      if (live.length > 0) {
+        wasmPoolRef.current = live;
+        setWasmReady(true);
+      } else {
+        console.warn("[oddtrick client-AI] no WASM workers loaded -> server bot");
+      }
+    });
+    return () => { pool.forEach((wk) => wk.terminate()); wasmPoolRef.current = null; setWasmReady(false); };
+  }, [roomData?.vs_ai, roomData?.ai_difficulty]);
+
+  // The server disarms the client when its socket drops, so a reconnect MUST
+  // re-announce or the room quietly serves the server bot for the rest of it.
+  useEffect(() => { if (!connected) clientAiArmedRef.current = null; }, [connected]);
+  useEffect(() => {
+    if (wasmReady && connected && roomData?.room_id
+      && clientAiArmedRef.current !== roomData.room_id) {
+      clientAiArmedRef.current = roomData.room_id;
+      send({ action: "client_ai_ready" });
+    }
+  }, [wasmReady, connected, roomData?.room_id, send]);
+
+  // One armed decision at a time; the server re-ships it on every broadcast, so
+  // this must be idempotent. Keyed by ROOM as well as decision number: the
+  // counter restarts at 1 in a new room, so a bare number could collide with the
+  // last one we answered and silently skip the bot's first card.
+  useEffect(() => {
+    const as = roomData?.ai_search;
+    const pool = wasmPoolRef.current;
+    if (!as || !wasmReady || !pool || pool.length === 0) return;
+    const key = `${roomData.room_id}:${as.decision}`;
+    if (aiDispatchRef.current === key) return;
+    aiDispatchRef.current = key;
+    const view = JSON.stringify(as.view);
+    const t0 = performance.now();
+    // The server's cap counts WORLDS in total, and worlds are summed across the
+    // pool, so split it rather than handing every worker the whole budget.
+    const perWorker = Math.max(1, Math.ceil((as.max_worlds || 8) / pool.length));
+    (async () => {
+      try {
+        const parts = await Promise.all(pool.map((wk, i) => wk.request({
+          kind: "search", view, budget: as.budget_ms, maxWorlds: perWorker,
+          seed: ((as.decision * 2654435761) ^ (i * 40503 + 1)) >>> 0,
+        }).catch(() => null)));
+        const good = parts.filter((p) => p && p.moves && p.sum);
+        if (!good.length) return;              // every worker failed -> server bot
+        const k = good[0].moves.length;
+        const sum = new Array(k).fill(0);
+        let worlds = 0;
+        for (const p of good) {
+          // Same view in => same legal list, so a length mismatch means a stale
+          // worker. Pooling it would add up DIFFERENT cards' values.
+          if (p.sum.length !== k || p.moves.length !== k) continue;
+          for (let a = 0; a < k; a++) sum[a] += p.sum[a];
+          worlds += p.worlds;
+        }
+        const res = await pool[0].request({ kind: "pick", moves: good[0].moves, sum });
+        const card = res?.card;
+        if (typeof card !== "number" || card < 0) return;
+        // Every failure above is a silent return that hands the decision back to
+        // the server, so the ONE thing that says the client tier is actually
+        // running is this line.
+        console.info(`[oddtrick client-AI] ${good.length} workers, ${worlds} worlds `
+          + `in ${Math.round(performance.now() - t0)}ms -> card ${card}`);
+        // A flat floor per move: a fast machine waits, a slow one does not, so
+        // the bot's pace never leaks the device. A submit that lands after the
+        // decision was superseded is harmless — the server drops it as stale.
+        const wait = CLIENT_AI_MIN_MS - (performance.now() - t0);
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        send({ action: "ai_move", decision: as.decision, card, worlds });
+      } catch {}
+    })();
+  }, [roomData, wasmReady, send]);
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(""), 2600); return () => clearTimeout(t); } }, [toast]);
   // A fresh contract clears any half-built bid. In skat mode the standing bid
   // is `value`, not `level` — `level` stays 0 until the declaration.

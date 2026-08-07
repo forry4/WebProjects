@@ -18,6 +18,13 @@ pub mod rng;
 pub mod skat;
 pub mod state;
 pub mod view;
+// The client-serving boundary. `wire` reads the server's per-seat payload back
+// into a `View`; `wasm` is the browser entry that searches it. Native builds get
+// `wire` only under `bridge`, so the default library stays dependency-free.
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod wire;
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
 
 pub use cards::*;
 pub use dd::Dd;

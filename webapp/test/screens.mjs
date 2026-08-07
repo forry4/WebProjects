@@ -1719,6 +1719,127 @@ try {
 		await ctx.close();
 	}
 
+	// Oddtrick's cheapest legal bid, used by both blocks below. It is a helper and
+	// not four inline clicks because of a RACE that bites intermittently: the
+	// denomination buttons are disabled per LEVEL, so clicking a level and then
+	// immediately reading `:not([disabled])` can pick from the PREVIOUS render.
+	// The Bid button then stays disabled — and as the opener there is no Pass, so
+	// the harness spun in the auction until its loop ran out, and the failure
+	// surfaced as "no tricks were ever played" rather than as a stuck auction.
+	// Settle between clicks, and confirm the button really is live.
+	const oddBidCheaply = async (page) => {
+		await page.locator(".odd-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
+		await sleep(150);
+		const denoms = page.locator(".odd-denoms button:not([disabled])");
+		const n = await denoms.count();
+		for (let d = 0; d < n; d++) {
+			await denoms.nth(d).click({ timeout: 5_000 }).catch(() => {});
+			await sleep(150);
+			const bid = page.getByRole("button", { name: /^Bid / }).first();
+			if (await bid.count() && await bid.isEnabled()) {
+				await bid.click({ timeout: 5_000 }).catch(() => {});
+				return;
+			}
+		}
+		// Nothing legal at that level — pass if the rules allow it. The opener
+		// cannot, but by then some denomination above will have worked.
+		await page.getByRole("button", { name: /^Pass$/ }).first()
+			.click({ timeout: 5_000 }).catch(() => {});
+	};
+
+	// ── Oddtrick's Hard tier, searched in the browser ─────────────────────────
+	// Hard is the only bot on this site whose CARD PLAY runs client-side, and the
+	// whole path is invisible to Python: a module Worker loads wasm-pack glue, the
+	// glue fetches a .wasm from /wasm/, the page announces `client_ai_ready`, and
+	// the server then ships one armed decision at a time. Every failure in that
+	// chain degrades SILENTLY to the server's heuristic bot — a missing artifact,
+	// a stale filename, a CSP, a worker that throws — so the room keeps playing
+	// and keeps saying Hard. That is precisely why it needs a played game rather
+	// than a mounted screen.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "hard-harness", name: "Hard", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		const searches = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		// Each answered decision logs its worker count, world count and latency —
+		// the only visible sign the client tier ran, and the detail a failure here
+		// needs (every other path is a silent return to the server bot).
+		page.on("console", (m) => { if (m.text().includes("client-AI")) searches.push(m.text()); });
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		// Count the protocol rather than infer it from the board: a game that
+		// plays out perfectly is exactly what the fallback looks like.
+		await page.evaluate(() => {
+			window.__acts = [];
+			const send = WebSocket.prototype.send;
+			WebSocket.prototype.send = function (d) {
+				try { window.__acts.push(JSON.parse(d).action); } catch {}
+				return send.call(this, d);
+			};
+		});
+
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		for (const label of [/^VS AI$/, /^Hard$/, /^Classic$/]) {
+			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		check("Hard is offered in the create modal", picked.includes("Hard"), JSON.stringify(picked));
+		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
+
+		// WALL-CLOCK bounded, not iteration bounded. A decision the browser fails
+		// to answer costs the server's whole watchdog before it plays the move
+		// itself, so on a loaded box an iteration cap silently stops mid-game and
+		// reads as "the client never answered" — which is a different bug.
+		const deadline = Date.now() + 180_000;
+		while (Date.now() < deadline) {
+			const st = await page.evaluate(() => ({
+				bidding: !!document.querySelector(".odd-bidgrid button"),
+				over: !!document.querySelector(".odd-result"),
+			}));
+			if (st.over) break;
+			if (st.bidding) {
+				await oddBidCheaply(page);
+				await sleep(250);
+				continue;
+			}
+			const pat = page.getByRole("button", { name: /stand pat/i }).first();
+			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
+			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
+			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
+			await sleep(120);
+		}
+
+		const acts = await page.evaluate(() => {
+			const c = {};
+			for (const a of window.__acts) c[a] = (c[a] || 0) + 1;
+			return c;
+		});
+		check("the page announces it can search", (acts.client_ai_ready || 0) >= 1,
+			JSON.stringify(acts));
+		// The bot has thirteen cards to play and a couple of them are forced (the
+		// server applies those itself without asking), so most — not all — of the
+		// game must come back from the browser. Zero means the wasm never loaded.
+		check("the browser answered the bot's decisions", (acts.ai_move || 0) >= 6,
+			`${JSON.stringify(acts)} searches=${JSON.stringify(searches.slice(0, 3))}`);
+		check("a Hard game plays to a result", !!(await page.locator(".odd-result").count()));
+		check("no page errors driving the client-side search", errors.length === 0,
+			errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+	}
+
 	// ── Oddtrick's completed-trick beat ───────────────────────────────────────
 	// A finished trick stays face up for TRICK_HOLD_MS before it moves to the
 	// side panel. It is a pure timing behaviour, so nothing in Python can see it
@@ -1771,22 +1892,16 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
 
-		for (let i = 0; i < 300; i++) {
+		// Wall-clock bounded, like the block above and for the same reason.
+		const beatDeadline = Date.now() + 180_000;
+		while (Date.now() < beatDeadline) {
 			const st = await page.evaluate(() => ({
 				bidding: !!document.querySelector(".odd-bidgrid button"),
 				over: !!document.querySelector(".odd-result"),
 			}));
 			if (st.over) break;
 			if (st.bidding) {
-				// Cheapest legal contract: first level, then whatever denomination
-				// it allows. The auction is not what this block is testing.
-				await page.locator(".odd-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
-				const d = page.locator(".odd-denoms button:not([disabled])").first();
-				if (await d.count()) await d.click({ timeout: 5_000 }).catch(() => {});
-				const bid = page.getByRole("button", { name: /^Bid / }).first();
-				if (await bid.count() && await bid.isEnabled()) await bid.click({ timeout: 5_000 }).catch(() => {});
-				else await page.getByRole("button", { name: /^Pass$/ }).first()
-					.click({ timeout: 5_000 }).catch(() => {});
+				await oddBidCheaply(page);
 				await sleep(250);
 				continue;
 			}

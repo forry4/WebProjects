@@ -3,11 +3,23 @@ name = "oddtrick-core"
 version = "0.1.0"
 edition = "2021"
 
-# Deliberately dependency-free: own RNG, own thread pool. Builds offline, and
-# keeps the hot loop free of anything we can't inspect.
+# Deliberately dependency-free in the NATIVE default build: own RNG, own thread
+# pool, builds offline, and the hot loop holds nothing we can't inspect. The two
+# entries below are both opt-in — `bridge` for the wire reader's own tests, and
+# the wasm32 block for in-browser serving, which needs a JSON boundary and
+# wasm-bindgen by construction.
 [dependencies]
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+serde_json = "1"
 
 [features]
+# Reads `engine.view_for`'s payload back into a `View` (src/wire.rs) and tests it
+# natively. The wasm build gets the same module unconditionally.
+bridge = ["dep:serde_json"]
+
 # Flip the parity: ODD-numbered tricks score +2 and EVEN ones -1. That is 7
 # positive tricks against 6, so the pool widens from +5 to +8 and the ceiling
 # from 12 to 14 -- and trick 1 becomes a trick you WANT, which should reverse
@@ -34,3 +46,5 @@ panic = "abort"
 [lib]
 name = "oddtrick"
 path = "src/lib.rs"
+# cdylib is what wasm-pack links; rlib keeps the bins and tests building.
+crate-type = ["rlib", "cdylib"]

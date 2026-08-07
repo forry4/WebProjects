@@ -15,7 +15,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
-| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, and the two auction modes (classic / skat) |
+| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the two auction modes (classic / skat), and the browser-served Hard tier |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -100,6 +100,7 @@ rust-cores/            # Per-game Rust→WASM search crates (client-side serving
   spender-core/        #   Spender variant S/N search core
   coc-core/            #   CoC Expert (netval) search core
   duel-core/           #   Duel attention-net search core
+  oddtrick-core/       #   Oddtrick rules reference + PIMC/double-dummy Hard tier
 docs/                  # GitHub Pages build output + ai-research-log.md
 ```
 
@@ -322,8 +323,10 @@ covers the logic; each game's wiring is one line).
 - **A client-WASM worker pool must NEVER take every core.** The search is CPU-bound; a pool that pegs
   all of them starves the browser's main/compositor/raster threads and the animations stutter while the
   AI thinks. Each game sizes its own pool by hand, so the rule has to be re-applied every time: Spender
-  `min(hc-1, 4)`, Duel `min(hc-1, 4)`, CoC `hc<=4 ? hc-1 : min(hc-2, 8)`. Spender had it; **Duel and CoC
-  shipped without it for months.** Only bites at ≤4 cores (the caps dominate above that).
+  `min(hc-1, 4)`, Duel `min(hc-1, 4)`, CoC `hc<=4 ? hc-1 : min(hc-2, 8)`, Oddtrick
+  `max(1, min(hc-1, 4))`. Spender had it; **Duel and CoC shipped without it for months.** Only bites at
+  ≤4 cores (the caps dominate above that) — and the `max(1, …)` matters: a literal `min(hc-1, 4)` on a
+  single-core phone asks for a pool of ZERO workers, which is the server bot wearing the Hard label.
 - **Determinization is a correctness requirement, not a strength knob** — the AI holds the real game
   dict server-side, so it must resample everything it can't legally see (decks, opponent blind reserves,
   future dice), canonicalizing each pool before reshuffling so the search provably can't read hidden order.
@@ -340,6 +343,13 @@ covers the logic; each game's wiring is one line).
 - **The strength lever is SEARCH (sims throughput and search *soundness*), not eval re-weighting** —
   every eval-weight and eval-feature tuning campaign saturated. Duel's 2026-07-26 coherent-search and
   minimax fixes are the current proof that soundness bugs can hide under noise for a whole campaign.
+- **A client-served tier degrades PER DECISION, never per game.** The server arms one decision, waits
+  out a watchdog, and plays it itself if the browser does not answer — an unarmed client, a stale reply,
+  an illegal move and a closed tab are all the same path. The armed request lives in ROOM STATE so every
+  re-broadcast and reconnect re-ships it, and the opt-in is cleared when the socket drops
+  (`release_socket(disarm_client_ai=True)`) so a room never waits on a tab that is gone. Duel, CoC and
+  Oddtrick all run this shape; **the move is re-validated against the engine on arrival**, which is the
+  whole reason a client-side AI is safe.
 - **Benchmark offline only** (per-game `ai_selfplay` / arena / gate bins) — never in a serving path.
   Judge with CRN paired arenas + a mirror sanity that must read exactly 0.5000; the ship criterion is
   EQUAL-TIME, not equal-sims.

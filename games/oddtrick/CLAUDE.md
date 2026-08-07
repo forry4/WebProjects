@@ -236,7 +236,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (247)
+## Tests (259)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
@@ -244,15 +244,78 @@ the only signal.
 and vs bot, in **both modes** · `test_skat.py` (50) the skat phase machine: the
 derived ladder, the redeal, talon/Hand secrecy, declaration validity,
 the announcement table, Kontra/Re, the Open reveal, and a `state_json`
-round-trip.
+round-trip · `test_client_ai.py` (12) the Hard tier's protocol: the armed
+request, the re-validation, the stale drop, the watchdog, and the picker/server
+tier agreement.
+
+Rust side, `cargo test --features bridge` runs `wire::fixture_replay` — the
+wire-reader gate above.
 
 Browser side, `webapp/test/screens.mjs` drives the skat **create-modal segment**
 through to a dealt room and a first bid — a mounted screen says nothing about
-whether a new room flag can actually be created (the Renaissance lesson).
+whether a new room flag can actually be created (the Renaissance lesson) — plays
+a **whole Hard game** and counts `client_ai_ready` / `ai_move` on the socket
+(every failure in the Worker→wasm→fetch chain degrades to the server bot, so a
+game that plays out perfectly is exactly what the fallback looks like), and
+measures the **completed-trick beat** described above.
+
+## The Hard tier — an exact solver, in the player's browser (2026-08-07)
+
+`easy` / `normal` / **`hard`**. Hard's CARD PLAY is `oddtrick-core`'s `PimcBot`
+compiled to WASM and run client-side; its auction is still the server's
+heuristic. The reference measured the one-trick-deep policy **69.8% behind
+`pimc:8`**, so this is the ladder's real rung.
+
+* **Why client-side, and why it could never be otherwise.** The search is an
+  EXACT double-dummy solve per sampled deal: `bin/bench` times one full solve at
+  ~74ms natively and the wasm measures **~70ms per world at trick 1**, collapsing
+  to ~0 by trick 7. Render's free tier is ~0.1 CPU with five games on one uvicorn
+  process. The player's own cores are the only place this fits.
+* **The strength knob is the WORLD COUNT and nothing else.** Sampling saturates
+  at k≈8 (CAMPAIGN.md), so the server caps the pooled total at 8 and the worker's
+  millisecond budget only exists so a slow phone still answers.
+* **Pooling sums per-move VALUES, indexed by `State::legal`** — a pure function
+  of the position, so index *i* is the same card in every worker and in the pick.
+  Sums over disjoint world samples add, so the pooled answer is exactly what one
+  worker with the combined `k` would compute. The pick rule (highest total, ties
+  to the earliest legal move) lives in `odd_best_card`, NOT in the worker's JS —
+  a copy that drifted would be a different bot with the same name.
+* **Pool size is `max(1, min(hc-1, 4))`** — the never-take-every-core rule. Two
+  other games shipped without it for months.
+* **Only card play goes to the browser.** An auction decision is `eval_hand`:
+  ten exact solves per sampled world against card play's one, i.e. multiple
+  seconds for a bid. Hard is a card-play tier until that is measured.
+* **Nothing is trusted.** The card arrives over the human's own socket and is
+  re-validated against `legal_moves` for the BOT's seat; a refusal is treated
+  exactly like silence. A tampered client can only weaken its own opponent.
+* **Degradation is per-DECISION, so a browser can never stall a room**: an
+  unarmed client, a timeout (`CLIENT_AI_TIMEOUT`), a stale reply and an illegal
+  card all fall through to the server bot for that one decision. The armed
+  request lives in ROOM STATE (`_ai_search`), so every re-broadcast and every
+  reconnect re-ships it; `release_socket(disarm_client_ai=True)` clears the
+  opt-in when the tab goes, and a reconnecting client re-arms itself.
+* **The staleness key is a monotonic counter, not the ply.** Every play happens
+  to append exactly one history entry today, but nothing ENFORCES that, and two
+  decisions sharing a key make a late reply indistinguishable from a fresh one.
+* **The wire reader is a SECOND parity surface** (`src/wire.rs`), and it fails
+  silently: a reader that mis-sizes the hidden pool, drops a suit void or
+  mistakes which pile bottom is public still returns a legal card, just a worse
+  one — a room that says Hard while playing below it, with nothing red anywhere.
+  Hence `views.jsonl` (committed, both seats, both modes, every ply of four
+  games, from `tools/gen_view_fixtures.py`) and the `wire::fixture_replay` tests.
+  It reads `view_for` itself rather than a second projection, so the redaction
+  boundary the server already rests on is the one the bot searches.
+* **Rebuilding the artifact**: `wasm-pack build --target web --release
+  --no-typescript` in `rust-cores/oddtrick-core`, then copy `pkg/oddtrick.js` +
+  `pkg/oddtrick_bg.wasm` into `webapp/public/wasm/` and COMMIT them. CI does not
+  build Rust and the crate is in neither deploy path filter, so committing one
+  never deploys anything on its own. Same filename ⇒ browsers may serve the
+  cached old wasm (~10 min Pages TTL).
 
 ## Not built yet
 
-* **Hard tier.** The plan is `oddtrick-core` compiled to WASM and run
-  client-side (Duel pattern; server validates every move). Pool must be capped
-  at `min(hc-1, 4)` — the never-take-every-core rule.
+* **A Hard auction.** `auction.rs` / `skat.rs` already hold solvers over
+  `eval_hand`; what is missing is a measurement that the cost is worth paying at
+  a bid, and a `SkatCfg` tied to the engine's own price table rather than the
+  crate's default.
 * Match play across rounds (currently one round per room), and a `/review`.

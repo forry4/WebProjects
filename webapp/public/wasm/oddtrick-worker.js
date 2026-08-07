@@ -1,0 +1,71 @@
+// Oddtrick hard-tier search worker (WORLD-PARALLEL). Loaded as a MODULE worker;
+// the wasm-pack (--target web) glue + .wasm sit beside this file. One of N
+// identical workers — the main thread fans the SAME decision to each with an
+// independent seed, every worker samples its OWN worlds, and their per-move
+// value sums are added.
+//
+// WHY SUMMING WORKS. The search is PIMC: sample a deal consistent with what the
+// seat knows, solve it exactly, and total the value of each root move. The
+// arrays are indexed by `State::legal`, a pure function of the position, so
+// index i means the same card in every worker and in the pick. Sums over
+// DISJOINT world samples add, so the pooled totals are exactly what one worker
+// with the combined world count would have computed.
+//
+// The pick is NOT reimplemented here: `odd_best_card` runs the core's own rule
+// (highest total, ties to the earliest legal move), which is `PimcBot::pick`'s.
+// A JS copy that drifted would be a different bot with the same name.
+//
+// EACH WORKER SPENDS ITS OWN BUDGET, one world at a time, and stops on whichever
+// of `budget`/`maxWorlds` comes first. A world costs ~70ms at trick 1 and
+// effectively nothing by trick 7 (measured), so a fixed count would either stall
+// the opening or waste the endgame; the cap is what actually binds, because
+// sampling saturates around 8 worlds per seat.
+//
+// Protocol (main -> worker):
+//   { id, kind:"search", view, budget, maxWorlds, seed }
+//     -> { id, moves:[...], sum:[...], worlds:n }
+//   { id, kind:"pick", moves, sum } -> { id, card }
+// Lifecycle: { ready:true } once the wasm loads, or { ready:false, error } if it
+//   won't (the main thread drops this worker; with none ready it never announces
+//   client_ai_ready and the SERVER plays the bot — the pre-existing path).
+
+import init, { odd_pick_card, odd_best_card } from "./oddtrick.js";
+
+let readyResolve;
+const readyP = new Promise((res) => (readyResolve = res));
+
+init()
+  .then(() => { readyResolve(true); self.postMessage({ ready: true }); })
+  .catch((err) => { readyResolve(false); self.postMessage({ ready: false, error: String(err) }); });
+
+self.onmessage = async (e) => {
+  const msg = e.data || {};
+  if (!msg.kind) return;
+  const ok = await readyP;
+  if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
+  try {
+    if (msg.kind === "search") {
+      const view = String(msg.view);
+      const budget = Number(msg.budget) || 2000;
+      const cap = (msg.maxWorlds >>> 0) || 8;
+      const t0 = Date.now();
+      let sum = null, moves = null, worlds = 0, seed = Number(msg.seed) || 1;
+      do {
+        const r = JSON.parse(odd_pick_card(view, 1, seed++));
+        if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
+        if (!sum) { moves = r.moves; sum = r.sum.slice(); }
+        else for (let i = 0; i < sum.length; i++) sum[i] += r.sum[i];
+        // A forced move reports zero worlds and returns immediately — searching
+        // it further cannot change the answer.
+        if (r.worlds === 0) { worlds = 0; break; }
+        worlds += r.worlds;
+      } while (worlds < cap && Date.now() - t0 < budget);
+      self.postMessage({ id: msg.id, moves, sum, worlds });
+    } else if (msg.kind === "pick") {
+      const card = odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
+      self.postMessage({ id: msg.id, card });
+    }
+  } catch (err) {
+    self.postMessage({ id: msg.id, error: String(err) });
+  }
+};
