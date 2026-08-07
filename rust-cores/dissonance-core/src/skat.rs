@@ -32,16 +32,21 @@
 use crate::auction::{HandEval, MAX_LEVEL, NDEN, NULL_DENOM};
 use std::collections::HashMap;
 
-/// `value = base * level`, indexed by denomination (clubs..no-trump). The order
-/// deliberately INVERTS the classic mode's C < D < H < S ranking — diamonds
-/// cheap, clubs dear — matching real Skat and keeping the two modes' tables
-/// from being mistaken for each other.
+/// `value = base * level`, indexed by denomination (clubs..no-trump).
 ///
-/// The suits are measured symmetric in this game (settled-denomination evenness
-/// 0.943), which is exactly why assigning prices works: it manufactures an
-/// asymmetry the game does not otherwise have. Ability in a denomination is
-/// real and varies by hand; only its PRICE is convention.
-pub const SKAT_BASE: [i32; NDEN] = [5, 2, 3, 4, 6];
+/// PRICED BY COLOUR since 2026-08-07: red 2, black 3, no-trump 5. It replaced a
+/// four-tier table (D2 H3 S4 C5 NT6) mirroring real Skat's 9/10/11/12. The
+/// suits are measured symmetric in this game (settled-denomination evenness
+/// 0.943), which is why assigning prices works at all — but four tiers over
+/// four symmetric suits priced a hand equally playable in hearts and spades a
+/// whole rung apart for no reason a player could name, and the cheap suits
+/// swallowed the auction. Two tiers keep the convention where it earns its
+/// keep and make the within-colour choice a question about the cards.
+///
+/// Dropping base 6 costs no rung anyone bids: every multiple of 6 at or below
+/// 36 is already a multiple of 2 or 3, so the ladder is identical through 40
+/// and only 42/54/66/72 go. Ability stays real; only price is convention.
+pub const SKAT_BASE: [i32; NDEN] = [3, 2, 2, 3, 5];
 
 /// Null's flat value, sitting mid-ladder the way Skat's 23 does.
 pub const SKAT_NULL_VALUE: i32 = 20;
@@ -132,7 +137,8 @@ pub fn quantile(vals: &mut [i32], q: f64) -> f64 {
 ///
 /// DERIVED, never typed out. (The design note this mode came from enumerates it
 /// by hand as "2,3,4,…,10,12,…" and counts 43 rungs; both are wrong — 7 is a
-/// multiple of no base, so the real ladder is 36 rungs with a single hole at 7.)
+/// multiple of no base, so it is a hole. Under the shipped colour-priced table
+/// that leaves 28 rungs from 2 to 60, with 7 still the only gap below ten.)
 pub fn ladder(cfg: &SkatCfg) -> Vec<i32> {
     let mut v: Vec<i32> = Vec::new();
     for &base in &cfg.bases {

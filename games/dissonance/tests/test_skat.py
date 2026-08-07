@@ -31,7 +31,7 @@ def _settled(value: int = 12, opener: int = 0) -> dict:
     return g
 
 
-def _declared(value=12, denom=2, level=4, hand=False, sharp=False, open_=False,
+def _declared(value=12, denom=3, level=4, hand=False, sharp=False, open_=False,
               kontra=False, re=False) -> dict:
     """Drive a skat game all the way to the opening lead."""
     g = _settled(value)
@@ -64,7 +64,11 @@ def test_every_rung_is_a_base_times_a_level_or_null():
     for v in E.SKAT_VALUES:
         assert v in products or v == E.SKAT_NULL_VALUE, v
     assert E.SKAT_VALUES == sorted(set(E.SKAT_VALUES)), "no duplicate rungs"
-    assert E.SKAT_VALUES[0] == 2 and E.SKAT_VALUES[-1] == 6 * E.MAX_LEVEL
+    # DERIVED from the bases, not written as literals: the colour re-pricing
+    # moved the ceiling from 6x12 to 5x12, and a literal would have had to be
+    # hand-edited to notice.
+    assert E.SKAT_VALUES[0] == min(E.SKAT_BASE)
+    assert E.SKAT_VALUES[-1] == max(E.SKAT_BASE) * E.MAX_LEVEL
 
 
 def test_seven_is_the_ladders_only_hole_below_ten():
@@ -100,11 +104,21 @@ def test_every_legal_bid_is_declarable():
         assert any(E.SKAT_BASE[o["denom"]] * o["min_level"] >= v for o in opts)
 
 
-def test_the_price_table_inverts_the_classic_ranking():
-    """Deliberate, so the two modes' tables can't be confused: classic ranks
-    C < D < H < S < NT; here diamonds are cheap and clubs dear."""
-    assert E.SKAT_BASE[1] < E.SKAT_BASE[2] < E.SKAT_BASE[3] < E.SKAT_BASE[0]
-    assert E.SKAT_BASE[4] == max(E.SKAT_BASE)
+def test_the_price_table_is_two_tiers_by_COLOUR_plus_no_trump():
+    """Red 2, black 3, no-trump dearest -- and the two suits in a colour cost
+    exactly the same, which is the point.
+
+    It replaced a four-tier table (D2 H3 S4 C5 NT6). The suits are measured
+    symmetric, so pricing hearts a rung under spades made the cheap suits
+    swallow the auction for a reason no player could name. With the colours
+    level, choosing within one is a question about your cards again -- so the
+    EQUALITIES below are the assertion, not an incidental consequence of it.
+    """
+    clubs, diamonds, hearts, spades, notrump = E.SKAT_BASE
+    assert diamonds == hearts, "the two reds are priced identically"
+    assert clubs == spades, "the two blacks are priced identically"
+    assert diamonds < clubs < notrump, "red cheap, black dearer, no-trump dearest"
+    assert notrump == max(E.SKAT_BASE), "no-trump at MAX_LEVEL is the top rung"
 
 
 # --- the auction -----------------------------------------------------------
@@ -240,15 +254,15 @@ def test_the_declaration_must_reach_the_bid():
 def test_declaring_higher_than_you_must_is_legal_and_costs_you_the_level():
     g = _declare_phase_at(12)
     decl = g["auction"]["declarer"]
-    E.apply_declare(g, decl, 4, 6)          # no-trump x 6 = 36, far past the bid
-    assert g["contract"]["value"] == 36
+    E.apply_declare(g, decl, 4, 6)          # no-trump x 6 = 30, far past the bid
+    assert g["contract"]["value"] == E.SKAT_BASE[4] * 6
     assert E.skat_target(g) == 6, "the level you declared is the level you owe"
 
 
 def test_null_is_not_a_declaration_either():
     """It stopped being a game you buy, in BOTH modes at once. The ladder still
-    contains 20 -- as clubs at 4, diamonds at 10 and spades at 5 -- but nothing
-    on it names Null any more."""
+    contains 20 -- as diamonds at 10, hearts at 10 and no-trump at 4 -- but
+    nothing on it names Null any more."""
     g = _declare_phase_at(20)
     assert all(d["denom"] != E.NULL_DENOM for d in E.declare_options(g)["denoms"])
     assert "null_ok" not in E.declare_options(g)
@@ -261,15 +275,15 @@ def test_open_rides_on_sharp():
     g = _declare_phase_at(12)
     decl = g["auction"]["declarer"]
     with pytest.raises(ValueError):
-        E.apply_declare(g, decl, 2, 4, sharp=False, open_=True)
-    E.apply_declare(g, decl, 2, 4, sharp=True, open_=True)
+        E.apply_declare(g, decl, 3, 4, sharp=False, open_=True)
+    E.apply_declare(g, decl, 3, 4, sharp=True, open_=True)
     assert g["contract"]["open"] is True
 
 
 def test_only_the_declarer_declares():
     g = _declare_phase_at(12)
     with pytest.raises(ValueError):
-        E.apply_declare(g, 1 - g["auction"]["declarer"], 2, 4)
+        E.apply_declare(g, 1 - g["auction"]["declarer"], 3, 4)
 
 
 # --- announcements and Kontra ----------------------------------------------
@@ -308,7 +322,7 @@ def test_kontra_doubles_and_re_doubles_again():
 def test_kontra_belongs_to_the_defender_and_re_to_the_declarer():
     g = _declare_phase_at(12)
     decl = g["auction"]["declarer"]
-    E.apply_declare(g, decl, 2, 4)
+    E.apply_declare(g, decl, 3, 4)
     assert g["phase"] == "kontra"
     assert E.turn_seat(g) == 1 - decl
     with pytest.raises(ValueError):
@@ -336,7 +350,7 @@ def test_every_skat_phase_names_exactly_one_seat_to_act(phase_at, seat_is_declar
     if phase_at != "talon":
         E.apply_hand(g, decl)
     if phase_at in ("kontra", "re"):
-        E.apply_declare(g, decl, 2, 4)
+        E.apply_declare(g, decl, 3, 4)
     if phase_at == "re":
         E.apply_kontra(g, 1 - decl, True)
     assert g["phase"] == phase_at
@@ -365,7 +379,7 @@ def _score(g: dict, declarer_pts: int, etricks: int = 1) -> dict:
 
 
 def test_making_it_pays_value_times_multiplier():
-    g = _declared(value=12, denom=2, level=4)      # hearts x 4 = 12
+    g = _declared(value=12, denom=3, level=4)      # spades x 4 = 12
     res = _score(g, 5)
     assert res["mode"] == "skat"
     assert (res["value"], res["mult"], res["doubling"]) == (12, 1, 1)
@@ -375,7 +389,7 @@ def test_making_it_pays_value_times_multiplier():
 
 
 def test_missing_it_pays_the_defender_the_same_number_plus_the_shortfall():
-    g = _declared(value=12, denom=2, level=4)
+    g = _declared(value=12, denom=3, level=4)
     res = _score(g, 1)
     assert res["made"] is False and res["short"] == 3
     assert res["scores"][1 - res["declarer"]] == 12 + E.SHORT_PENALTY * 3
@@ -387,22 +401,22 @@ def test_sharp_raises_the_bar_and_a_bare_make_now_loses():
     measured at 0% of contracts and dropped to 2), so a test that hardcodes it
     fails on the next tuning pass for no reason."""
     bonus = E.SHARP_BONUS
-    g = _declared(value=12, denom=2, level=4, sharp=True)
+    g = _declared(value=12, denom=3, level=4, sharp=True)
     assert E.skat_target(g) == 4 + bonus
     res = _score(g, 4)      # would have made the plain contract exactly
     assert res["made"] is False, "Sharp promises level + the bonus, not level"
     assert res["short"] == bonus
     assert res["scores"][1 - res["declarer"]] == 12 * 2 + E.SHORT_PENALTY * bonus
 
-    made = _score(_declared(value=12, denom=2, level=4, sharp=True), 4 + bonus)
+    made = _score(_declared(value=12, denom=3, level=4, sharp=True), 4 + bonus)
     assert made["made"] is True and made["scores"][made["declarer"]] == 24
     # Exactly on the bar makes it; one under does not.
-    just_under = _score(_declared(value=12, denom=2, level=4, sharp=True), 3 + bonus)
+    just_under = _score(_declared(value=12, denom=3, level=4, sharp=True), 3 + bonus)
     assert just_under["made"] is False and just_under["short"] == 1
 
 
 def test_the_full_stack_multiplies_rather_than_adds_to_the_payout():
-    g = _declared(value=12, denom=2, level=4, hand=True, sharp=True, open_=True,
+    g = _declared(value=12, denom=3, level=4, hand=True, sharp=True, open_=True,
                   kontra=True, re=True)
     res = _score(g, 7)
     assert (res["mult"], res["doubling"]) == (4, 4)
@@ -412,9 +426,9 @@ def test_the_full_stack_multiplies_rather_than_adds_to_the_payout():
 
 def test_kontra_cuts_both_ways():
     """Doubling is not a defender-only weapon -- it doubles the make too."""
-    made = _score(_declared(value=12, denom=2, level=4, kontra=True), 5)
+    made = _score(_declared(value=12, denom=3, level=4, kontra=True), 5)
     assert made["scores"][made["declarer"]] == 24
-    lost = _score(_declared(value=12, denom=2, level=4, kontra=True), 1)
+    lost = _score(_declared(value=12, denom=3, level=4, kontra=True), 1)
     assert lost["scores"][1 - lost["declarer"]] == 24 + E.SHORT_PENALTY * 3
 
 
@@ -423,7 +437,7 @@ def test_null_is_a_flat_consolation_that_ignores_the_contract_entirely():
     the value, not Hand, not Kontra. Doubling a consolation would have a
     defender's Kontra rewarding the very outcome it was betting against."""
     for kontra in (False, True):
-        g = _declared(value=24, denom=4, level=4, hand=True, sharp=True,
+        g = _declared(value=20, denom=4, level=4, hand=True, sharp=True,
                       kontra=kontra, re=False)
         decl = g["auction"]["declarer"]
         res = _score(g, -3, etricks=0)   # a dreadful total is beside the point
@@ -445,7 +459,7 @@ def test_one_scoring_trick_is_the_difference_between_null_and_a_heavy_set():
 
 
 def test_walking_out_costs_the_declared_game_not_a_classic_square():
-    g = _declared(value=12, denom=2, level=4, hand=True, kontra=True)
+    g = _declared(value=12, denom=3, level=4, hand=True, kontra=True)
     assert E.forfeit_value(g) == 12 * 2 * 2
     # Before the declaration the standing bid is the closest honest number.
     mid = _settled(15)
@@ -463,7 +477,7 @@ def test_a_skat_view_never_leaks_the_talon_or_the_opponents_hand():
     """Asserted against the whole SERIALIZED view of a real in-progress game --
     a nested copy is exactly how CoC's redaction was correct at the top level
     and still leaking."""
-    g = _declared(value=12, denom=2, level=4)
+    g = _declared(value=12, denom=3, level=4)
     for _ in range(6):
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[0])
@@ -506,7 +520,7 @@ def _all_lists(node):
 
 
 def test_the_defender_never_sees_the_talon_a_hand_game_declined_to_look_at():
-    g = _declared(value=12, denom=2, level=4, hand=True)
+    g = _declared(value=12, denom=3, level=4, hand=True)
     for seat in (0, 1):
         assert E.view_for(g, seat)["shown"] is None, \
             "nobody has seen these cards, the declarer included"
@@ -516,7 +530,7 @@ def test_open_shows_the_declarers_hand_and_only_from_trick_one():
     g = _settled(12)
     decl = g["auction"]["declarer"]
     E.apply_hand(g, decl)
-    E.apply_declare(g, decl, 2, 4, sharp=True, open_=True)
+    E.apply_declare(g, decl, 3, 4, sharp=True, open_=True)
     # Announced, but the cards are not down until the Kontra decision resolves.
     assert E.view_for(g, 1 - decl)["opp_hand"] is None
     assert g["phase"] == "kontra"
@@ -530,7 +544,7 @@ def test_open_shows_the_declarers_hand_and_only_from_trick_one():
 
 
 def test_a_spectator_sees_the_public_game_and_no_more():
-    g = _declared(value=12, denom=2, level=4)
+    g = _declared(value=12, denom=3, level=4)
     v = E.player_view(g, "nobody")
     assert v["hand"] == [] and v["you"] is None
     assert v["shown"] is None and v["opp_hand"] is None
@@ -542,7 +556,7 @@ def test_a_spectator_sees_the_public_game_and_no_more():
 
 
 def test_a_skat_round_plays_from_the_deal_to_a_scored_result():
-    g = _declared(value=12, denom=2, level=4, sharp=True, kontra=True, re=True)
+    g = _declared(value=12, denom=3, level=4, sharp=True, kontra=True, re=True)
     guard = 0
     while g["phase"] == "play":
         guard += 1
@@ -578,7 +592,7 @@ def test_the_game_dict_stays_json_safe_in_every_skat_phase():
     E.apply_look(g, 0)
     E.apply_swap(g, 0, g["shown"][0], sorted(g["hands"][0])[0])
     seen.append(json.dumps(g))
-    E.apply_declare(g, 0, 2, 4, sharp=True)
+    E.apply_declare(g, 0, 3, 4, sharp=True)
     E.apply_kontra(g, 1, True)
     E.apply_re(g, 0, True)
     seen.append(json.dumps(g))
@@ -596,7 +610,7 @@ def test_apply_move_routes_every_skat_move_kind():
     E.apply_move(g, pid1, {"kind": "pass"})
     E.apply_move(g, pid0, {"kind": "look"})
     E.apply_move(g, pid0, {"kind": "swap", "take": None, "give": None})
-    E.apply_move(g, pid0, {"kind": "declare", "denom": 2, "level": 4,
+    E.apply_move(g, pid0, {"kind": "declare", "denom": 3, "level": 4,
                            "sharp": True, "open": True})
     E.apply_move(g, pid1, {"kind": "kontra", "on": True})
     E.apply_move(g, pid0, {"kind": "re", "on": True})
@@ -614,7 +628,7 @@ def test_a_skat_game_survives_the_state_json_codec():
     the server would then score wrong."""
     from games.dissonance import main as m
 
-    g = _declared(value=12, denom=2, level=4, sharp=True, kontra=True, re=True)
+    g = _declared(value=12, denom=3, level=4, sharp=True, kontra=True, re=True)
     for _ in range(4):
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[0])
@@ -663,7 +677,7 @@ def test_walking_out_leaves_a_result_row_every_reader_can_render():
     played-out one. In skat mode the panel branches on `mode` and reads six keys
     only `_finish_skat` would otherwise set -- so a hand-rolled row rendered as
     "bought it at undefined"."""
-    quit_mid = _declared(value=12, denom=2, level=4, hand=True, kontra=True)
+    quit_mid = _declared(value=12, denom=3, level=4, hand=True, kontra=True)
     res = E.abandon_result(quit_mid, seat=0)
     assert res["mode"] == "skat" and res["abandoned_by"] == 0
     for key in ("bid", "value", "mult", "doubling", "stake", "target",
@@ -721,7 +735,8 @@ def test_a_hand_game_reaches_the_lead_without_ever_entering_a_swap():
     g = _settled(24)
     decl = g["auction"]["declarer"]
     E.apply_move(g, g["seats"][decl], {"kind": "hand"})
-    E.apply_move(g, g["seats"][decl], {"kind": "declare", "denom": 4, "level": 4})
+    # no-trump at 5 a level: 5 is the lowest that clears a bid of 24.
+    E.apply_move(g, g["seats"][decl], {"kind": "declare", "denom": 4, "level": 5})
     E.apply_move(g, g["seats"][1 - decl], {"kind": "kontra", "on": False})
     assert g["phase"] == "play"
     assert g["trump"] == E.NOTRUMP and g["contract"]["mult"] == 2

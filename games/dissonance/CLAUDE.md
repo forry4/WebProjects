@@ -68,13 +68,32 @@ The design argument is `rust-cores/dissonance-core/SKAT_MODE.md`.
 Classic is described below; this section is only what skat mode adds.
 
 * **Bid a number, name the game later.** `value = base × level`, bases
-  **♦2 ♥3 ♠4 ♣5 NT6** (deliberately *inverting* classic's C<D<H<S rank — so the
-  two tables can't be confused). The ladder is
+  **♦2 ♥2 ♠3 ♣3 NT5** — priced by COLOUR. The ladder is
   `SKAT_VALUES`, **derived from the bases**, and served via `/catalog`
   (`skat_bases`, `skat_values`) so the client holds no copy.
-* **Collisions are the point.** 12 = ♦6 = ♥4 = ♠3 = NT2, so a bid names a price,
+* **Collisions are the point.** 12 = ♦6 = ♥6 = ♠4 = ♣4, so a bid names a price,
   never a shape. The frontend *shows* this (`.dis-clears`) rather than
   explaining it.
+* **The colour pricing replaced a four-tier table (D2 H3 S4 C5 NT6), 2026-08-07,
+  and it is a deliberate partial reversal.** The original argument still holds
+  where it is load-bearing: the suits are *measured* symmetric (settled-
+  denomination evenness 0.943), and the prices exist to manufacture an asymmetry
+  the game does not otherwise have. Four tiers was too much of it — a hand
+  equally playable in hearts and spades was priced a whole rung apart for a
+  reason no player could name, and the cheap suits swallowed the auction. Two
+  tiers keep the convention where it earns its keep and hand the within-colour
+  choice back to the cards.
+  - **The ladder loses nothing anyone bids.** Every multiple of 6 at or below 36
+    is already a multiple of 2 or 3, so dropping base 6 removes only 42, 54, 66
+    and 72: the rungs are IDENTICAL through 40, the ceiling falls 72 → 60, and
+    the count goes 36 → 28. 7 is still the only hole below ten. `test_skat.py`
+    asserts the ends off `min`/`max(SKAT_BASE)` rather than as literals, which
+    is exactly what let the ceiling move without a hand-edit.
+  - **Null's flat 20 got relatively dearer to duck under**: still 13 rungs below
+    it, but 13-of-28 rather than 13-of-36, against a ceiling that fell by a
+    sixth. "A cheap contract is a licence to duck" is already the intended
+    shape; this nudges it. Retuning is engine-side alone (the Hard tier reads
+    `payoff_terms`), so it can wait for a measurement rather than a guess.
 * **Phases:** `auction` (numeric) → `talon` → `declare` → `kontra` → [`re`] →
   `play`. `talon` splits into `look` / `hand` / `swap` because **declining to
   look is what Hand means** — the declarer who plays Hand never sees `shown`
@@ -94,13 +113,16 @@ Classic is described below; this section is only what skat mode adds.
   scheduler and every open socket hold that exact object.
 
 ### Skat mode: things that are not what the spec says
-* **SKAT_MODE.md's ladder enumeration is wrong** — it counts 43 rungs and lists a
-  7. `base × level` is the rule and 7 is a multiple of no base, so the real
-  ladder is **36 rungs with one hole at 7**. `test_skat.py` asserts against the
-  *generator*, and pins the hole so nobody "fixes" it back.
+* **The ladder is DERIVED, and SKAT_MODE.md's hand enumeration of it was wrong
+  twice** — it counted 43 rungs and listed a 7. `base × level` is the rule and 7
+  is a multiple of no base, so the real ladder is **28 rungs from 2 to 60 with
+  one hole at 7**. `test_skat.py` asserts against the *generator* and pins the
+  hole so nobody "fixes" it back; it also reads the ends off `min`/`max(
+  SKAT_BASE)` rather than as literals, which is what let the colour re-pricing
+  move the ceiling without anyone hand-editing a number.
 * **"Overbid loses automatically" cannot fire, and is deliberately not
-  implemented.** The level is the declarer's free 1..12 choice and NT×12 = 72 is
-  the top rung, so every legal bid is declarable (`test_every_legal_bid_is_
+  implemented.** The level is the declarer's free 1..12 choice and NT×12 is the
+  top rung, so every legal bid is declarable (`test_every_legal_bid_is_
   declarable`). Stretching is punished *structurally* instead — a big number
   forces you up the level ladder into a contract you can't make, and past 20 it
   make. Writing the rule anyway would be an untestable branch, which

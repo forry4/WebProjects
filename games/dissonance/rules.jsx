@@ -120,19 +120,19 @@ export default function DissonanceRules() {
 					after you've won.
 				</p>
 				<p>
-					A game is worth <b>base × level</b>, with each denomination carrying a
-					price of its own — <b>♦2, ♥3, ♠4, ♣5, no-trump 6</b> — and the level
-					meaning exactly what it does in classic mode: the trick points you promise
-					to score. Note the suits run the other way round here: diamonds cheap,
-					clubs dear.
+					A game is worth <b>base × level</b>, and the price is set by
+					<i> colour</i>: <b>the reds ♦♥ cost 2, the blacks ♠♣ cost 3, and
+					no-trump costs 5</b>. The level means exactly what it does in classic
+					mode — the trick points you promise to score.
 				</p>
 				<RulesTip>
 					<p>
-						<b>Collisions are the point.</b> 12 is ♦6, and ♥4, and ♠3, and NT2. Bid
+						<b>Collisions are the point.</b> 12 is ♦6, and ♥6, and ♠4, and ♣4. Bid
 						12 and your opponent learns the price of your hand, never its shape. A
 						hand playable in two denominations can bid higher <i>safely</i> than an
 						equally strong hand playable in one — flexibility becomes a resource
-						with a price.
+						with a price. The two suits of a colour cost the same, so choosing
+						between them is a question about your cards and nothing else.
 					</p>
 				</RulesTip>
 				<RulesDefs items={[
