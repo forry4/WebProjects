@@ -2291,6 +2291,12 @@ try {
 			return {
 				match: t(".dis-match"),
 				panel: t(".dis-p-match"),
+				// The side panel's scorecard: one line per round banked. It is
+				// fed by `match.rounds` off the wire, so a panel that renders
+				// nothing is exactly what a field that never shipped looks like.
+				card: [...document.querySelectorAll(".dis-mcard .dis-mrow")]
+					.filter((r) => !r.classList.contains("dis-mrow-hd"))
+					.map((r) => [...r.children].map((c) => c.textContent.trim())),
 				next: [...document.querySelectorAll(".dis-result button")]
 					.some((b) => /next round/i.test(b.textContent)),
 				lobby: [...document.querySelectorAll(".dis-result button")]
@@ -2299,6 +2305,16 @@ try {
 		});
 		check("the result panel shows the match standing, not just the round",
 			/Match to \d+/.test(after.match), JSON.stringify(after).slice(0, 200));
+		// One round played, so one line — and it carries the four things the
+		// running total on its own cannot say.
+		check("the match panel lists the round that was just scored",
+			after.card.length === 1 && after.card[0][0] === "1"
+			&& after.card[0][1].length > 0
+			// The declarer's trick points against their target. NEGATIVE is
+			// ordinary — seven of thirteen tricks cost a point.
+			&& /^-?\d+\/\d+$|^—$/.test(after.card[0][2])
+			&& /^[+−]\d+$/.test(after.card[0][3]),
+			JSON.stringify(after.card));
 		check("a match still running offers the next round; a decided one does not",
 			after.next !== /wins the match|Match drawn/.test(after.match) && after.lobby,
 			JSON.stringify(after).slice(0, 200));
@@ -2323,6 +2339,12 @@ try {
 			check("...and the match total carries across the deal",
 				!!dealt && /Round 2/.test(dealt.round) && dealt.round !== before,
 				`${before} -> ${dealt?.round}`);
+			// The scorecard is the MATCH's, not the round's, so round 1's line
+			// is still there while round 2 is being bid.
+			const kept = await page.evaluate(() =>
+				document.querySelectorAll(".dis-mcard .dis-mrow").length);
+			check("...and round 1 stays on the scorecard through the next deal",
+				kept === 2, `header + rows = ${kept}`);
 		}
 
 		check("no page errors playing a game out", errors.length === 0,

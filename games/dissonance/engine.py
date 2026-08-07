@@ -969,7 +969,7 @@ def _score_is_settled(g: dict) -> bool:
       made -- and a made contract paid a FLAT amount, which did not move with the
       final total. Settled. It is precisely this premise the bonus removes.
     * **Cannot make.** Being mathematically set does NOT settle the score: the
-      defender is paid `(N-1) + 4 x shortfall`, and every remaining trick still
+      defender is paid `N + 4 x shortfall`, and every remaining trick still
       moves the shortfall. Holding a busted declarer down is a real contest --
       arguably the most interesting part of a lost hand -- so it plays on.
 
@@ -1013,9 +1013,9 @@ def contract_score(level: int, declarer_pts: int) -> tuple[int, int]:
     """(declarer score, defender score) for a settled CLASSIC contract.
 
     Make it and the declarer scores N squared, plus 1 for every trick point past
-    N. Fall short and the DEFENDER scores (N-1) plus 4 for every point the
-    declarer finished below it. Only this scores -- the trick points are the
-    yardstick, and now also the margin.
+    N. Fall short and the DEFENDER scores N plus 4 for every point the declarer
+    finished below it. Only this scores -- the trick points are the yardstick,
+    and now also the margin.
 
     DELEGATES rather than restating the arithmetic. It used to hold its own copy
     of the make/set rule, which was fine while that rule was two lines and never
@@ -1071,8 +1071,13 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
                 "target": level + (SHARP_BONUS if sharp else 0),
                 "make": stake, "over": over, "set_base": stake,
                 "short": SHORT_PENALTY, "null": SKAT_NULL_VALUE}
+    # Classic's set base is N, not N-1 (2026-08-07): breaking a contract is
+    # worth its level plus the margin, rather than one less than its level. At
+    # level 1 the old base contributed nothing at all, so the cheapest contract
+    # -- and ~42% of openings sit at the floor -- paid the defender by the
+    # margin alone. Uniformly +1, so it never reorders two set results.
     return {"denom": denom, "level": level, "target": level,
-            "make": level * level, "over": over, "set_base": max(0, level - 1),
+            "make": level * level, "over": over, "set_base": level,
             "short": SHORT_PENALTY, "null": NULL_MAKE}
 
 
@@ -1193,18 +1198,58 @@ def _match_for_next_deal(g: dict, advance: bool) -> dict:
     return m
 
 
-def _bank_round(g: dict, scores: list) -> None:
-    """Add a finished round's scores to the match, and decide if that ends it.
+def _round_summary(g: dict, m: dict, res: dict) -> dict:
+    """One line of the match's scorecard, off the result row that was just built.
+
+    DERIVED from `res` rather than recomputed from `g`: made/null/target are
+    rules, and a second reading of them here would be a second copy of the
+    scoring -- the exact drift `payoff_terms` exists to prevent. This only
+    reshapes what `_finish` already decided.
+
+    Deliberately small, because it is stored per round for the life of the
+    match: the contract, the declarer's trick points against what they
+    promised, and who took the round.
+    """
+    row = {
+        "round": int(m.get("round", 1)),
+        "declarer": res.get("declarer", -1),
+        "level": res.get("level", 0),
+        "denom": res.get("denom", -1),
+        # Trick points for BOTH seats -- they sum to POOL over a completed
+        # round, but an abandoned one stops wherever it stopped.
+        "pts": list(g["pts"]),
+        # What the declarer had to score. Skat's Sharp announcement raises it
+        # above the level, so it is the result row's number and not the level.
+        "target": res.get("target", res.get("level", 0)),
+        "made": bool(res.get("made")),
+        "null": bool(res.get("null")),
+        "scores": [int(res["scores"][0]), int(res["scores"][1])],
+    }
+    if res.get("abandoned_by") is not None:
+        row["abandoned"] = True
+    return row
+
+
+def _bank_round(g: dict, res: dict) -> None:
+    """Add a finished round to the match: its scores, and its scorecard line.
 
     Called by both `_finish` paths and by the abandon path, because all three
     produce a scored round and a match that has to notice.
+
+    `rounds` is `setdefault`ed rather than created in `new_game` for the same
+    reason `match_of` exists: a match already in progress when this shipped has
+    no scorecard, and it must go on banking rounds rather than KeyError. Its
+    earlier rounds are simply not in it -- there is nowhere to recover them
+    from, and the running total was always the thing being played for.
     """
     m = match_of(g)
     if not m:
         return
+    scores = res["scores"]
     for i in (0, 1):
         m["scores"][i] += int(scores[i])
     m["over"] = max(m["scores"]) >= m["target"]
+    m.setdefault("rounds", []).append(_round_summary(g, m, res))
 
 
 def _match_result_keys(g: dict) -> dict:
@@ -1251,8 +1296,7 @@ def _finish_skat(g: dict) -> None:
     over = (dpts - target) if made else 0
     scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
-    _bank_round(g, scores)
-    g["result"] = _match_result_keys(g) | {
+    res = {
         # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
         "ended_early": g["trick"] < NTRICKS,
@@ -1283,6 +1327,10 @@ def _finish_skat(g: dict) -> None:
         "over_bonus": terms.get("over", 0),
         "scores": scores,
     }
+    # Banked from the result row, so the match's scorecard says exactly what the
+    # panel says -- then the match keys are merged back onto the row.
+    _bank_round(g, res)
+    g["result"] = _match_result_keys(g) | res
 
 
 def _finish(g: dict) -> None:
@@ -1305,8 +1353,7 @@ def _finish(g: dict) -> None:
     over = (dpts - a["level"]) if made else 0
     scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
-    _bank_round(g, scores)
-    g["result"] = _match_result_keys(g) | {
+    res = {
         # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug. Always
         # False while overtricks pay -- see `_score_is_settled`, which is
@@ -1316,6 +1363,10 @@ def _finish(g: dict) -> None:
         "declarer": decl,
         "level": a["level"],
         "denom": a["denom"],
+        # What the declarer had to score. Identical to the level in classic
+        # mode -- it is on the row so the scorecard and the panel can read one
+        # key in both modes rather than knowing which mode hides it where.
+        "target": terms["target"],
         "null": null,
         "null_value": NULL_MAKE,
         "declarer_pts": dpts,
@@ -1326,6 +1377,8 @@ def _finish(g: dict) -> None:
         "over_bonus": terms.get("over", 0),
         "scores": scores,
     }
+    _bank_round(g, res)
+    g["result"] = _match_result_keys(g) | res
 
 
 def forfeit_value(g: dict) -> int:
@@ -1391,7 +1444,7 @@ def abandon_result(g: dict, seat: int) -> dict:
     # Walking out ends the MATCH, not just the round. The forfeit is banked so
     # the standing is honest, and then the match is closed regardless of the
     # target -- there is nobody left to play the rest of it.
-    _bank_round(g, scores)
+    _bank_round(g, res)
     m = match_of(g)
     if m:
         m["over"] = True

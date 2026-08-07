@@ -302,11 +302,14 @@ def test_the_auction_survives_a_json_round_trip():
     # is the boundary the bonus must not move.
     (5, 9, (25 + 4, 0)),
     (5, 6, (25 + 1, 0)),
-    (5, 4, (0, 4 + 4 * 1)),
-    (5, 3, (0, 4 + 4 * 2)),
-    (5, 0, (0, 4 + 4 * 5)),
+    # Set pays the defender N + 4 a point short (2026-08-07: N, not N-1 -- at
+    # the floor the base used to contribute nothing, so the cheapest contract
+    # paid its breaker by the margin alone).
+    (5, 4, (0, 5 + 4 * 1)),
+    (5, 3, (0, 5 + 4 * 2)),
+    (5, 0, (0, 5 + 4 * 5)),
     (1, 1, (1, 0)),
-    (1, 0, (0, 0 + 4 * 1)),
+    (1, 0, (0, 1 + 4 * 1)),
     (8, 8, (64, 0)),
     # The declarer's ceiling is the six +2 tricks, so this is the largest
     # overtrick bonus the game can pay -- and at level 1 it is 12x the contract.
@@ -827,6 +830,81 @@ def test_the_alternation_survives_any_number_of_pass_outs():
     E.next_round(g, 0, 1)
     assert g["match"]["round"] == 2
     assert g["opener"] == 0, "round 2 opens on the other seat, pass-outs or not"
+
+
+def test_the_match_keeps_a_scorecard_of_every_round_it_banked():
+    # The running total says who is ahead and nothing about how they got there.
+    # One line per round -- the contract, the declarer's points against what
+    # they promised, and who took it -- is what the side panel reads.
+    g = E.new_game(["a", "b"], random.Random(115), opener=0)
+    seen = []
+    for i in range(3):
+        g = _play_out(g, random.Random(400 + i))
+        res = g["result"]
+        card = g["match"]["rounds"]
+        assert len(card) == i + 1, "a scored round must add exactly one line"
+        row = card[-1]
+        assert row["round"] == res["round"]
+        # DERIVED from the result row, never re-read off the board -- the
+        # scorecard and the result panel must not be able to disagree.
+        assert row["scores"] == res["scores"]
+        assert row["declarer"] == res["declarer"]
+        assert (row["level"], row["denom"]) == (res["level"], res["denom"])
+        assert row["made"] == res["made"] and row["null"] == res["null"]
+        assert row["pts"] == g["pts"], "the trick points as the round ended"
+        assert row["target"] == res["level"], "classic promises its level"
+        seen.append(dict(row))
+        E.match_of(g)["scores"] = [0, 0]     # hold the match open, as above
+        E.match_of(g)["over"] = False
+        E.next_round(g, 0, res["round"])
+    assert g["match"]["rounds"] == seen, "an earlier round's line must never be rewritten"
+    assert [r["round"] for r in seen] == [1, 2, 3]
+
+
+def test_the_scorecard_totals_are_the_running_total():
+    # The two are written by the same call, so this is really asking that the
+    # scorecard is COMPLETE -- a round banked without a line, or a line added
+    # without banking, both show up here.
+    g = E.new_game(["a", "b"], random.Random(116), opener=0)
+    while not E.is_over(g):
+        g = _play_out(g, random.Random(500 + g["match"]["round"]))
+        if not E.is_over(g):
+            E.next_round(g, 0, g["result"]["round"])
+    m = g["match"]
+    assert len(m["rounds"]) == m["round"], "one line per round played"
+    for i in (0, 1):
+        assert sum(r["scores"][i] for r in m["rounds"]) == m["scores"][i]
+
+
+def test_a_passed_out_skat_deal_puts_no_line_on_the_scorecard():
+    """It is not a round: nothing was played and nothing was scored."""
+    g = E.new_game(["a", "b"], random.Random(117), mode="skat", opener=0)
+    E.apply_move(g, "a", {"kind": "pass"})
+    E.apply_move(g, "b", {"kind": "pass"})
+    assert g["redeals"] == 1
+    assert g["match"].get("rounds", []) == []
+
+
+def test_a_forfeited_round_is_on_the_scorecard_and_says_so():
+    g = E.new_game(["a", "b"], random.Random(118), opener=0)
+    g["result"] = E.abandon_result(g, 0)
+    row = g["match"]["rounds"][-1]
+    assert row["abandoned"] is True
+    assert row["scores"] == g["result"]["scores"], "the forfeit is banked as the round"
+
+
+def test_a_match_already_in_progress_gains_a_scorecard_without_crashing():
+    # `rounds` is setdefault'ed for the same reason `match_of` exists: a save
+    # written before the scorecard has no list, and banking a round must add to
+    # it rather than KeyError. Its earlier rounds are simply not recoverable.
+    g = E.new_game(["a", "b"], random.Random(119), opener=0)
+    g["match"].pop("rounds", None)      # exactly what an older row deserialises to
+    g["match"]["scores"] = [30, 20]
+    g["match"]["round"] = 5
+    g = _play_out(g, random.Random(119))
+    assert [r["round"] for r in g["match"]["rounds"]] == [5], \
+        "the round just played is on it; the four before it are gone"
+    assert g["match"]["scores"] != [30, 20], "...and it still banked the score"
 
 
 def test_a_match_saved_before_the_opener_was_derived_keeps_its_phase():

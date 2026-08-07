@@ -228,6 +228,89 @@ function ContractChip({ game, nameOf, sharpBonus }) {
   );
 }
 
+/** A finished game's one-line summary for the lobby's History card.
+ *
+ *  The row's score is the MATCH standing, so this says what produced it: how
+ *  many deals, played to what. Only a one-round game gets its contract named —
+ *  in a ten-round match the last deal's contract is not the story, and putting
+ *  it here read as though it were.
+ */
+function histLine(g) {
+  if (g.abandoned) return `abandoned after ${g.rounds || 1} round${(g.rounds || 1) === 1 ? "" : "s"}`;
+  if (g.rounds > 1) return `${g.rounds} rounds${g.target ? ` to ${g.target}` : ""}`;
+  const c = g.contract;
+  if (!c || !c.level) return "";
+  return `${c.you_declared ? "declared" : "defended"} `
+    + `${c.level}${DENOM_LABEL[c.denom] || ""}`
+    + (g.mode === "skat" && c.value
+      ? ` for ${c.value}${c.mult > 1 ? `×${c.mult}` : ""}` : "")
+    + `${c.made ? " (made)" : " (set)"}`;
+}
+
+/** The match's scorecard: one line per round played, under the running total.
+ *
+ *  Every number here is the ENGINE's — `match.rounds` is written when a round
+ *  is banked, off the same result row the panel narrates, so nothing is
+ *  re-derived from the board. Renders nothing at all for a match with no
+ *  scorecard: one that was already in progress when this shipped has no rounds
+ *  recorded and there is nowhere to recover them from.
+ *
+ *  The score column is signed from YOUR seat — exactly one side scores a round,
+ *  so a `+` is what you took and a `−` is what it cost you, which is the read
+ *  the running total above is made of.
+ */
+function MatchCard({ rounds, mySeat, oppSeat, nameOf }) {
+  if (!rounds || rounds.length === 0) return null;
+  return (
+    <div className="dis-mcard">
+      <div className="dis-mrow dis-mrow-hd">
+        <span>#</span><span>Contract</span><span>Pts</span><span>Score</span>
+      </div>
+      {rounds.map((r, i) => {
+        const mine = r.scores?.[mySeat] || 0;
+        const theirs = r.scores?.[oppSeat] || 0;
+        const declared = r.declarer === mySeat;
+        return (
+          <div className="dis-mrow" key={r.round ?? i}>
+            <span className="dis-mrow-n">{r.round ?? i + 1}</span>
+            <span className={`dis-mrow-ct${declared ? " mine" : ""}`}
+              title={roundTitle(r, nameOf)}>
+              {r.abandoned ? "forfeit"
+                : r.declarer < 0 ? "—"
+                  : <>{nameOf(r.declarer)}{" "}
+                    <b className={RED_DENOM(r.denom) ? "red" : ""}>
+                      {r.level}{DENOM_LABEL[r.denom] || ""}
+                    </b>
+                    {r.null ? " Null" : ""}</>}
+            </span>
+            {/* The declarer's trick points against what they promised — the
+                yardstick and the bar, which is what makes a made/set line
+                readable at a glance. */}
+            <span className="dis-mrow-pts">
+              {r.declarer >= 0 && !r.abandoned
+                ? `${r.pts?.[r.declarer] ?? 0}/${r.target}` : "—"}
+            </span>
+            <span className={`dis-mrow-sc ${mine >= theirs ? "good" : "bad"}`}>
+              {mine >= theirs ? `+${mine}` : `−${theirs}`}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The hover text for a scorecard line — the whole sentence the row abbreviates. */
+function roundTitle(r, nameOf) {
+  if (r.abandoned) return `Round ${r.round}: forfeited`;
+  if (r.declarer < 0) return `Round ${r.round}`;
+  const who = nameOf(r.declarer);
+  const what = `${r.level}${DENOM_LABEL[r.denom] || ""}`;
+  const took = `took ${r.pts?.[r.declarer] ?? 0} of ${r.target}`;
+  return `Round ${r.round}: ${who} declared ${what}, ${took} — `
+    + (r.null ? "Null" : r.made ? "made" : "set");
+}
+
 /** What the declared skat game is worth right now, and why.
  *  `rows` renders it as side-panel score rows; otherwise as one inline line. */
 function SkatStake({ game, nameOf, rows }) {
@@ -826,29 +909,37 @@ export default function Dissonance({ myId, authUser, onExit }) {
         <LobbySectionHd title="History" />
         <div className="lby-list" ref={historyMore}>
           {history.length === 0 && <LobbyEmpty>No finished games yet.</LobbyEmpty>}
-          {historyShown.map((g) => (
-            <div key={g.id} className="lby-card lby-card-hist">
-              <div className="lby-card-info">
-                <div className="lby-card-title">
-                  <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>
-                    {g.you_won ? "Won" : "Lost"}
-                  </span>
-                  <span className="hist-scores"> vs {g.opp_name}{" "}
-                    <span className="hist-score-num">{g.your_score}–{g.opp_score}</span>
-                  </span>
-                  <ModeBadge mode={g.mode} />
-                </div>
-                <div className="lby-card-meta">
-                  {g.contract ? `${g.contract.you_declared ? "declared" : "defended"} `
-                    + `${g.contract.level}${DENOM_LABEL[g.contract.denom] || ""}`
-                    + (g.mode === "skat" && g.contract.value
-                      ? ` for ${g.contract.value}${g.contract.mult > 1 ? `×${g.contract.mult}` : ""}` : "")
-                    + `${g.contract.made ? " (made)" : " (set)"} · ` : ""}
-                  {timeAgo(g.updated_at)}
+          {historyShown.map((g) => {
+            const line = histLine(g);
+            return (
+              <div key={g.id} className="lby-card lby-card-hist">
+                <div className="lby-card-info">
+                  <div className="lby-card-title">
+                    {/* A match CAN end level — a forfeit banks whatever the
+                        round was worth and then closes the match regardless of
+                        the target — so "not won" is not the same as lost. `tie`
+                        is the shared kit's own class, which CoC and Dontminion
+                        already use; this game had no third state before. */}
+                    <span className={`hist-result ${g.your_score === g.opp_score
+                      ? "tie" : g.you_won ? "won" : "lost"}`}>
+                      {g.your_score === g.opp_score ? "Tie" : g.you_won ? "Won" : "Lost"}
+                    </span>
+                    <span className="hist-scores"> vs {g.opp_name}{" "}
+                      <span className="hist-score-num">{g.your_score}–{g.opp_score}</span>
+                    </span>
+                    <ModeBadge mode={g.mode} />
+                  </div>
+                  {/* The score above is the MATCH, so the meta line says what it
+                      took. A single round is the one case where the contract is
+                      the whole story — over ten deals it is just the last one,
+                      which read as the headline and was never true. */}
+                  <div className="lby-card-meta">
+                    {line}{line ? " · " : ""}{timeAgo(g.updated_at)}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -1397,7 +1488,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     : res.made
                       ? `${res.level} × ${res.level} = ${res.level * res.level}`
                         + `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : `${res.level - 1} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
+                      : `${res.level} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                 </div>
               </>}
               {res.null && (
@@ -1556,6 +1647,31 @@ export default function Dissonance({ myId, authUser, onExit }) {
 
         {/* side panel */}
         <div className="dis-side">
+          {/* THE TALON FIRST, for the seat that bought the right to see it.
+              Three cards you know are out of play is the one thing in this
+              column you play FROM rather than read after the fact, so it sits
+              at the top where the eye lands, above the standing. It stays up
+              for the rest of the round — losing sight of it the moment the swap
+              resolves threw away the holding you paid the auction for.
+
+              It tracks what is ACTUALLY OUT, so after a swap your discard sits
+              where the card you took used to be. That is the useful half while
+              you are still playing, and it is also the shape the client-side
+              searcher reads off the wire. The round-end reveal is where "what
+              you were SHOWN" gets answered, from `shown_at_deal`. */}
+          {game.shown && game.phase !== "over" && (
+            <div className="dis-panel dis-p-talon">
+              <h4>The talon · you saw these</h4>
+              <div className="dis-outrow">
+                {game.shown.map((c) => <Card key={c} c={c} small />)}
+              </div>
+              {game.swapped && (
+                <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
+                  Includes the card you discarded.
+                </div>
+              )}
+            </div>
+          )}
           <div className="dis-panel dis-p-contract">
             <h4>Contract</h4>
             {isSkat && <>
@@ -1632,30 +1748,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
               </div>
             </div>
           )}
-          {/* The talon, for the seat that bought the right to see it. It stays
-              on screen for the rest of the round: three cards you know are out
-              of play is a real holding to count from, and losing sight of them
-              the moment the swap resolves threw that away.
-
-              It tracks what is ACTUALLY OUT, so after a swap your discard sits
-              where the card you took used to be. That is the useful half while
-              you are still playing — it is a holding to count from — and it is
-              also the shape the client-side searcher reads off the wire. The
-              round-end reveal is where "what you were SHOWN" gets answered,
-              from `shown_at_deal`. */}
-          {game.shown && game.phase !== "over" && (
-            <div className="dis-panel dis-p-talon">
-              <h4>The talon · you saw these</h4>
-              <div className="dis-outrow">
-                {game.shown.map((c) => <Card key={c} c={c} small />)}
-              </div>
-              {game.swapped && (
-                <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
-                  Includes the card you discarded.
-                </div>
-              )}
-            </div>
-          )}
           <div className="dis-panel dis-p-points">
             <h4>Points</h4>
             <div className="dis-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>
@@ -1684,6 +1776,14 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <div className="muted" style={{ fontSize: "0.72rem" }}>
                 Round {game.match.round}
               </div>
+              {/* ...and how the total got there. A running total on its own
+                  says who is ahead and nothing about why: which rounds were
+                  bought cheaply, who has been declaring, and whether the gap is
+                  one big set or six small ones. Absent on a match that was
+                  already in progress when the scorecard shipped — there is
+                  nowhere to recover its earlier rounds from. */}
+              <MatchCard rounds={game.match.rounds} mySeat={mySeat}
+                oppSeat={oppSeat} nameOf={nameOf} />
             </div>
           )}
         </div>

@@ -260,9 +260,10 @@ mod tests {
     use super::*;
 
     /// A classic-mode option: a made contract pays flat, so `over` is 0.
+    /// Set pays N + 4 a point short (2026-08-07: N, not N-1).
     fn opt(target: i32, make: i32, null: i32) -> Option_ {
         Option_ { denom: 0, target, make, over: 0,
-                  set_base: (target - 1).max(0), short: 4, null }
+                  set_base: target, short: 4, null }
     }
 
     /// A skat-mode option: the same contract with the overtrick bonus on it.
@@ -297,8 +298,8 @@ mod tests {
 
     #[test]
     fn falling_short_is_paid_by_the_shortfall() {
-        // level 4, finishing on 1: -(3 + 4 x 3)
-        assert_eq!(opt(4, 16, 12).payoff(1, false), -15);
+        // level 4, finishing on 1: -(4 + 4 x 3)
+        assert_eq!(opt(4, 16, 12).payoff(1, false), -16);
     }
 
     #[test]
@@ -367,7 +368,7 @@ mod tests {
         let o = Option_ { denom: 3, ..opt(4, 16, 12) };
         let worlds = vec![World::default()];
         assert_eq!(price(&[o], &worlds, 0b00000), vec![0.0]);
-        assert_eq!(price(&[o], &worlds, 0b01000), vec![-19.0]);   // -(3 + 4x4)
+        assert_eq!(price(&[o], &worlds, 0b01000), vec![-20.0]);   // -(4 + 4x4)
     }
 
     #[test]

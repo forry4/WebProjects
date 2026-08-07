@@ -337,6 +337,44 @@
 .dis-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
 .dis-scorerow b { font-variant-numeric: tabular-nums; }
 
+/* The match scorecard, under the running total: one line per round played.
+   It SCROLLS IN PLACE rather than growing the panel — a match runs a median of
+   ten rounds and has been seen past sixteen, and a column that keeps getting
+   taller pushes the Last trick panel off the bottom of a laptop screen by the
+   back half of the match. The cap is deliberately a hair under six rows, so
+   there is always a part-row showing and the list reads as scrollable.
+
+   THE GRID IS ON THE CONTAINER AND EVERY ROW IS `display: contents` — with a
+   grid per row the `auto` columns are sized per row, so the Pts and Score
+   columns would step in and out by a character as the numbers changed and the
+   header would line up with nothing. One grid, one set of column widths. */
+.dis-mcard {
+  display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto auto;
+  gap: 0.12rem 0.4rem; align-items: baseline;
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 9.2rem; overflow-y: auto;
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+}
+.dis-mrow { display: contents; }
+.dis-mrow-pts, .dis-mrow-sc, .dis-mrow-hd span:nth-child(3),
+.dis-mrow-hd span:nth-child(4) { justify-self: end; }
+.dis-mrow-hd {
+  color: var(--text-dim); font-size: 0.6rem;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.dis-mrow-n { color: var(--text-dim); }
+/* The declarer's name is the one variable-width thing in a fixed column, so it
+   ellipsises rather than wrapping the row to two lines. */
+.dis-mrow-ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.dis-mrow-ct.mine { color: var(--text); }
+.dis-mrow-ct b { color: var(--text); }
+.dis-mrow-ct b.red { color: #ff8a9c; }
+.dis-mrow-pts { color: var(--text-dim); }
+.dis-mrow-sc { font-weight: 700; }
+.dis-mrow-sc.good { color: var(--accent); }
+.dis-mrow-sc.bad { color: #ff9a9a; }
+
 /* ── result ─────────────────────────────────────────────────────────────── */
 .dis-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
 .dis-result .dis-big { font-size: 1.6rem; font-weight: 800; }
