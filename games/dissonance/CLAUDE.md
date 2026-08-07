@@ -632,7 +632,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (353)
+## Tests (359)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
 `test_bot_fairness.py` (8) the bots see only their own seat, by INVARIANCE over
@@ -660,9 +660,13 @@ determinizer. `solver_matches_brute_force` also sweeps `DENOMS` now and asserts
 it reached Grand — the equivalence collapse is the one place a Grand bug would
 show up only as a slightly wrong VALUE, which nothing else would notice.
 
-**RUN IT. CI DOES NOT BUILD RUST, so a broken Rust test target is invisible
-here in a way a Python one never is** — nothing goes red, the suite simply
-stops existing. `tests/engine.rs` had not COMPILED since the deck-width
+**RUN IT — and since 2026-08-07 so does CI: `.github/workflows/
+rust-dissonance.yml` runs this exact gate on every push touching the crate or
+the committed fixtures** (it deploys nothing — the wasm artifact stays a
+by-hand `wasm-pack` step). The workflow exists because a broken Rust test
+target is invisible here in a way a Python one never is — nothing goes red,
+the suite simply stops existing — and this crate had already been bitten
+twice. `tests/engine.rs` had not COMPILED since the deck-width
 campaign (`2a8957b`) took masks from 32 to 64 bits: it kept a `let mut covered
 = 0u32`, which stopped type-checking against `Mask`, and the whole target — all
 13 tests — silently dropped out of every run for the entire v2 release. Behind
@@ -673,6 +677,14 @@ Both are now DERIVED from `NCARD` / `NDEALT` / `NOUT` rather than written as
 literals, so they hold under the `rank7` / `rank9` / `rank10` builds too — which
 is not a hypothetical, since a literal 28 is wrong under three of the four and
 `rank7` is exactly the 28-card game the pre-sweep numbers were measured on.
+
+The second bite was the GATE itself: `[profile.release] panic = "abort"`
+(there for the wasm artifact) made `cargo test --release` fail its FIRST run
+from every clean checkout — the cdylib's abort flavour and the test targets'
+forced unwind collide in one build graph — and pass on the re-run once cached
+unwind artifacts exist, which is exactly the friction that stops a by-hand
+gate being run at all. Removed 2026-08-07; the Cargo.toml note carries the
+measurement (the shipped wasm does not change).
 
 Browser side, `webapp/test/screens.mjs` drives the skat **create-modal segment**
 through to a dealt room and a first bid — a mounted screen says nothing about
@@ -893,4 +905,4 @@ says is legal. No thresholds.
   not what letting the opponent have it costs.
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
-* Match play across rounds (currently one round per room), and a `/review`.
+* A `/review`.

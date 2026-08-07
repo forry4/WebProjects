@@ -37,11 +37,23 @@ rank8 = []
 rank9 = []
 rank10 = []
 
+# No `panic = "abort"` here, deliberately. The lib is rlib + cdylib, so a
+# `cargo test --release` build graph holds the same lib twice -- the cdylib
+# honouring an abort strategy and the test targets, which cargo forces to
+# unwind -- and from a clean target/ the two flavours collide (cargo warns
+# about the shared libdissonance.so filename): the first run dies with
+# "requires panic strategy `abort`" and a re-run, finding cached unwind
+# artifacts, passes. A gate that fails once per fresh checkout is how this
+# crate's engine suite silently stopped compiling for a whole release. The
+# setting bought nothing back: wasm32-unknown-unknown aborts on panic
+# regardless. Measured 2026-08-07: the release cdylib is the same 141,046
+# bytes with and without it, code sections identical -- the only delta is the
+# crate-hash string inside wasm-bindgen's custom metadata sections, which
+# wasm-bindgen strips when it emits the shipped `_bg.wasm`.
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
-panic = "abort"
 
 [lib]
 name = "dissonance"

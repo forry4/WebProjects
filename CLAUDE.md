@@ -467,7 +467,9 @@ covers the logic; each game's wiring is one line).
   **gitignored**, so on a fresh clone the gate fails with a `FAILED` that looks like a parity break and
   is really just a missing file — read the panic, it names the generator. Run the tools with
   `PYTHONPATH=<repo root>`. Spender — `cargo test --lib` (`src/bin/*` need `--features bridge`);
-  Duel — `cargo test --lib` (37 lib tests).
+  Duel — `cargo test --lib` (37 lib tests); Dissonance — `cargo test --release --features bridge`
+  (fixtures committed — and the ONE crate whose gate CI also runs, via `rust-dissonance.yml`, after
+  its engine suite silently stopped compiling for a whole release).
 
 ---
 
@@ -561,7 +563,9 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 - **WASM is a committed artifact** — CI does not rebuild Rust. Build with `wasm-pack build --target web
   --release --no-typescript`, copy `pkg/*.{js,_bg.wasm}` into `webapp/public/wasm/`, commit. **Same
   filename ⇒ browsers may serve the cached old wasm** (~10 min Pages TTL / hard-refresh). The crates are
-  in **neither** CI path filter, so committing one never deploys anything on its own. CoC is the
+  in **neither deploy path filter**, so committing one never deploys anything on its own
+  (`rust-cores/dissonance-core/**` does trigger `rust-dissonance.yml` — a test job that deploys
+  nothing). CoC is the
   exception where a *model* swap needs no rebuild (the `.bin` is fetched); Spender and Duel embed nets.
 - **Render keep-alive** (free tier spins down ~15min idle, ~30-50s cold start): `keepalive.yml`
   (GitHub Actions) is the SOLE mechanism — several INDEPENDENT long-lived (~90min) pre-7am runs, each

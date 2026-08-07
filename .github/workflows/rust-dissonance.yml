@@ -1,0 +1,53 @@
+name: Rust CI (dissonance-core)
+
+# The Python suites go red when they break; a Rust test target that stops
+# compiling just VANISHES from every local run — `tests/engine.rs` sat
+# uncompiled for the whole v2 release (fixed in f1229b2) and nothing anywhere
+# went red. This job is the net: it runs the reference implementation's full
+# gate (`--features bridge` pulls in the wire-reader tests, which replay the
+# committed view/payoff fixtures) on every push that touches the crate or the
+# fixtures it replays.
+#
+# It does NOT rebuild or commit the wasm artifact — that stays a by-hand
+# `wasm-pack` step (see games/dissonance/CLAUDE.md), and this workflow is in
+# neither deploy path filter, so it gates nothing but itself.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'rust-cores/dissonance-core/**'
+      - 'games/dissonance/tests/fixtures/**'
+      - '.github/workflows/rust-dissonance.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'rust-cores/dissonance-core/**'
+      - 'games/dissonance/tests/fixtures/**'
+      - '.github/workflows/rust-dissonance.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust-cores/dissonance-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-cores/dissonance-core/target
+          key: rust-dissonance-${{ runner.os }}-${{ hashFiles('rust-cores/dissonance-core/Cargo.toml', 'rust-cores/dissonance-core/Cargo.lock') }}
+          restore-keys: rust-dissonance-${{ runner.os }}-
+      - name: Run tests
+        # --release because tests/engine.rs runs whole solver games (~15s
+        # optimized, minutes unoptimized). This must pass from a COLD cache:
+        # the release profile deliberately carries no `panic = "abort"` (see
+        # the note in Cargo.toml) because that made the first clean-checkout
+        # run fail every time.
+        run: cargo test --release --features bridge
