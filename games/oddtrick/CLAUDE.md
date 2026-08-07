@@ -341,6 +341,13 @@ heuristic. The reference measured the one-trick-deep policy **69.8% behind
     +4.05 and was wrong** — the harness seeded bots by identity rather than by
     seat, so swapping tiers swapped their RNG streams too. The mirror caught it;
     that is what the mirror is for.
+  - **The browser gate counts ARMED decisions, not an absolute number of
+    answers.** The server arms a decision only where the bot has a CHOICE —
+    under mandatory follow-suit most plays are forced and it applies those
+    itself — so how many arrive is a property of the DEAL. An absolute threshold
+    failed on deals with more forced moves while the tier worked perfectly, and
+    read exactly like the tier being broken. `screens.mjs` reads the count off
+    the WebSocket frames and asserts every armed decision came back.
   - Costs **1.79x** a points solve (`csearch` has no MTD(f) and must play to
     trick 13), so ~125ms per world at trick 1 against ~70ms.
 * **The strength knob is the WORLD COUNT and nothing else.** Sampling saturates

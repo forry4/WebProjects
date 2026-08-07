@@ -1763,11 +1763,30 @@ try {
 		const page = await ctx.newPage();
 		const errors = [];
 		const searches = [];
+		// THE FORK, read off the socket itself. `ai_search` frames arriving but no
+		// answers going back means the BROWSER failed; no frames at all means the
+		// server never armed, which is a completely different fix. Guessing between
+		// those two cost a whole session once.
+		const frames = { ai_search: 0, room_update: 0 };
+		page.on("websocket", (ws) => {
+			ws.on("framereceived", ({ payload }) => {
+				if (typeof payload !== "string") return;
+				if (payload.includes('"ai_search"')) frames.ai_search++;
+				if (payload.includes('"room_update"')) frames.room_update++;
+			});
+			ws.on("socketerror", (e) => errors.push(`ws: ${e}`));
+		});
 		page.on("pageerror", (e) => errors.push(String(e)));
+		// Every console line, not just ours: a module worker that throws while
+		// loading reports there and nowhere else.
+		page.on("console", (m) => {
+			const t = m.text();
+			if (t.includes("client-AI")) searches.push(t);
+			if (m.type() === "error" || /wasm|worker/i.test(t)) errors.push(`[${m.type()}] ${t.slice(0, 200)}`);
+		});
 		// Each answered decision logs its worker count, world count and latency —
 		// the only visible sign the client tier ran, and the detail a failure here
 		// needs (every other path is a silent return to the server bot).
-		page.on("console", (m) => { if (m.text().includes("client-AI")) searches.push(m.text()); });
 		const check = (name, cond, detail = "") => {
 			if (cond) console.log(`  OK   ${name}`);
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
@@ -1810,7 +1829,7 @@ try {
 		const answered = async () => (await page.evaluate(
 			() => window.__acts.filter((a) => a === "ai_move").length));
 		while (Date.now() < deadline) {
-			if (await answered() >= 6) break;
+			if (await answered() >= 4) break;
 			const st = await page.evaluate(() => {
 				const q = (s) => document.querySelector(s);
 				if (q(".odd-result")) return { over: true };
@@ -1838,16 +1857,25 @@ try {
 		// The bot has thirteen cards to play and a couple of them are forced (the
 		// server applies those itself without asking), so most — not all — of the
 		// game must come back from the browser. Zero means the wasm never loaded.
-		check("the browser answered the bot's decisions", (acts.ai_move || 0) >= 6,
-			`${JSON.stringify(acts)} searches=${JSON.stringify(searches.slice(0, 3))}`);
-		// Each answer logs its worker count, world count and latency. An empty
-		// list with a live `client_ai_ready` is the signature of the wasm loading
-		// and then the SEARCH failing, which is a different fix from the socket
-		// never being armed — so say which one happened.
-		check("...and the searches really ran in the browser", searches.length >= 6,
-			`${searches.length} logged: ${JSON.stringify(searches.slice(0, 2))}`);
-		check("no page errors driving the client-side search", errors.length === 0,
-			errors[0]?.slice(0, 200) || "");
+		// EVERY ARMED DECISION, not an absolute count. The server only arms a
+		// decision where the bot has a CHOICE — under mandatory follow-suit most
+		// plays are forced and it applies those itself — so how many arrive is a
+		// property of the DEAL. An absolute threshold failed on deals with more
+		// forced moves while the tier was working perfectly, and read exactly like
+		// the tier being broken. One in flight is tolerated: the loop stops on its
+		// own count, so the server can arm one more behind it.
+		const armed = frames.ai_search;
+		check("the browser answered every decision the server armed",
+			armed >= 3 && (acts.ai_move || 0) >= armed - 1,
+			`${JSON.stringify(acts)} frames=${JSON.stringify(frames)} `
+			+ `searches=${JSON.stringify(searches.slice(0, 2))} err=${JSON.stringify(errors.slice(0, 2))}`);
+		// Each answer logs its worker count, world count and latency. Zero of those
+		// with a live `client_ai_ready` is the wasm loading and the SEARCH failing,
+		// which is a different fix from the socket never being armed.
+		check("...and the searches really ran in the browser", searches.length >= armed - 1,
+			`${searches.length} logged of ${armed} armed: ${JSON.stringify(searches.slice(0, 2))}`);
+		check("no page errors driving the client-side search",
+			!errors.some((e) => !e.startsWith("[info]")), errors.slice(0, 3).join(" | ").slice(0, 300));
 		await ctx.close();
 	}
 
