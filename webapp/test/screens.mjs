@@ -1799,27 +1799,33 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
 
-		// WALL-CLOCK bounded, not iteration bounded. A decision the browser fails
-		// to answer costs the server's whole watchdog before it plays the move
-		// itself, so on a loaded box an iteration cap silently stops mid-game and
-		// reads as "the client never answered" — which is a different bug.
-		const deadline = Date.now() + 180_000;
+		// STOPS ON EVIDENCE, not on a finished game. What this block is for is
+		// whether the browser answers the bot's decisions at all; six answers say
+		// that as well as thirteen do, and playing the rest costs minutes of gate
+		// time on a box already running the beat block's game and four WASM
+		// workers. One round-trip per iteration for the same reason — at three or
+		// four the loop spent its budget on latency and timed out mid-auction,
+		// which reads identically to "the client never answered".
+		const deadline = Date.now() + 240_000;
+		const answered = async () => (await page.evaluate(
+			() => window.__acts.filter((a) => a === "ai_move").length));
 		while (Date.now() < deadline) {
-			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".odd-bidgrid button"),
-				over: !!document.querySelector(".odd-result"),
-			}));
+			if (await answered() >= 6) break;
+			const st = await page.evaluate(() => {
+				const q = (s) => document.querySelector(s);
+				if (q(".odd-result")) return { over: true };
+				if (q(".odd-bidgrid button")) return { bidding: true };
+				const pat = [...document.querySelectorAll("button")]
+					.find((b) => /stand pat/i.test(b.textContent));
+				if (pat) { pat.click(); return { acted: true }; }
+				const seats = document.querySelectorAll(".odd-seat");
+				const card = seats[seats.length - 1]?.querySelector(".odd-card.play");
+				if (card) { card.click(); return { acted: true }; }
+				return {};
+			});
 			if (st.over) break;
-			if (st.bidding) {
-				await oddBidCheaply(page);
-				await sleep(250);
-				continue;
-			}
-			const pat = page.getByRole("button", { name: /stand pat/i }).first();
-			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
-			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
-			await sleep(120);
+			if (st.bidding) { await oddBidCheaply(page); await sleep(250); continue; }
+			await sleep(st.acted ? 120 : 250);
 		}
 
 		const acts = await page.evaluate(() => {
@@ -1834,7 +1840,12 @@ try {
 		// game must come back from the browser. Zero means the wasm never loaded.
 		check("the browser answered the bot's decisions", (acts.ai_move || 0) >= 6,
 			`${JSON.stringify(acts)} searches=${JSON.stringify(searches.slice(0, 3))}`);
-		check("a Hard game plays to a result", !!(await page.locator(".odd-result").count()));
+		// Each answer logs its worker count, world count and latency. An empty
+		// list with a live `client_ai_ready` is the signature of the wasm loading
+		// and then the SEARCH failing, which is a different fix from the socket
+		// never being armed — so say which one happened.
+		check("...and the searches really ran in the browser", searches.length >= 6,
+			`${searches.length} logged: ${JSON.stringify(searches.slice(0, 2))}`);
 		check("no page errors driving the client-side search", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
 		await ctx.close();
@@ -1920,25 +1931,31 @@ try {
 			if (p.n >= 3 && p.buried > 0 && p.dimmed > 0) piles = p;
 		};
 
-		// Wall-clock bounded, like the block above and for the same reason.
-		const beatDeadline = Date.now() + 180_000;
+		// ONE ROUND-TRIP PER ITERATION for the common case. This block runs right
+		// after the Hard one, which leaves four WASM workers' worth of heat on the
+		// box, and at three or four round-trips a turn the loop was spending its
+		// budget on latency rather than on the game — it timed out during the
+		// auction in CI while passing four times in a row locally. Reading the
+		// state and playing a card in the same evaluate collapses that; the cards
+		// are plain divs with an onClick, so there is no actionability to lose.
+		const beatDeadline = Date.now() + 240_000;
 		while (Date.now() < beatDeadline) {
 			await samplePiles();
-			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".odd-bidgrid button"),
-				over: !!document.querySelector(".odd-result"),
-			}));
+			const st = await page.evaluate(() => {
+				const q = (s) => document.querySelector(s);
+				if (q(".odd-result")) return { over: true };
+				if (q(".odd-bidgrid button")) return { bidding: true };
+				const pat = [...document.querySelectorAll("button")]
+					.find((b) => /stand pat/i.test(b.textContent));
+				if (pat) { pat.click(); return { acted: true }; }
+				const seats = document.querySelectorAll(".odd-seat");
+				const card = seats[seats.length - 1]?.querySelector(".odd-card.play");
+				if (card) { card.click(); return { acted: true }; }
+				return {};
+			});
 			if (st.over) break;
-			if (st.bidding) {
-				await oddBidCheaply(page);
-				await sleep(250);
-				continue;
-			}
-			const pat = page.getByRole("button", { name: /stand pat/i }).first();
-			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
-			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
-			await sleep(90);
+			if (st.bidding) { await oddBidCheaply(page); await sleep(250); continue; }
+			await sleep(st.acted ? 90 : 200);
 		}
 
 		check("a pile's top card is opaque, dimmed or not",
@@ -1953,8 +1970,20 @@ try {
 			cards: e[1], ms: Math.round(trace[i + 1][0] - e[0]) }))
 			.filter((d) => d.cards.split(" ").length === 2);
 		const shortest = dwells.reduce((a, b) => (b.ms < a.ms ? b : a), { ms: Infinity });
+		// A failure here used to say only "0 finished tricks", which is the symptom
+		// of three different causes (a stuck auction, a timed-out loop, a trick
+		// area that stopped rendering) and told them apart not at all. Say where
+		// it actually got to, so the next red run is one read rather than one
+		// six-minute experiment.
+		const stuck = await page.evaluate(() => ({
+			mid: document.querySelector(".odd-auction, .odd-trick, .odd-result")?.className,
+			turnbar: document.querySelector(".odd-turnbar")?.textContent,
+			buttons: [...document.querySelectorAll(".odd-auction button")]
+				.map((b) => `${b.textContent.trim().slice(0, 12)}${b.disabled ? "(off)" : ""}`).slice(0, 10),
+			playable: document.querySelectorAll(".odd-card.play").length,
+		}));
 		check("a whole game was played out", dwells.length >= 8,
-			`${dwells.length} finished tricks reached the table`);
+			`${dwells.length} finished tricks, ${trace.length} frames — ${JSON.stringify(stuck)}`);
 		check("every finished trick is held, even at full tilt",
 			dwells.length >= 8 && shortest.ms >= 550,
 			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`);

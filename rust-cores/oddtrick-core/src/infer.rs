@@ -54,6 +54,8 @@ fn rewind(v: &View, now: &State) -> State {
         leader: v.first_leader,
         led: -1,
         pts: [0, 0],
+        // The rewind replays from the DEAL, so it re-derives this on the way.
+        escored: 0,
     }
 }
 

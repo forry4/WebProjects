@@ -35,7 +35,7 @@ use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::POOL;
 use crate::view::View;
-use crate::wire::view_from_json;
+use crate::wire::{contract_from_json, view_from_json};
 
 /// Transposition table size, per worker. 2^18 entries is ~4MB for the plain
 /// table plus ~2MB for the contract one — times a pool of at most four workers.
@@ -53,11 +53,21 @@ fn err(msg: &str) -> String {
     format!("{{\"error\":\"{}\"}}", msg)
 }
 
-fn parse(view_json: &str) -> Option<View> {
-    view_from_json(&serde_json::from_str::<serde_json::Value>(view_json).ok()?)
+/// The armed request: the seat's view, and the scoring rule it is playing for.
+/// The payoff half is optional so a caller that has not got it still gets a
+/// search -- just one optimising the yardstick instead of the score.
+fn parse(view_json: &str) -> Option<(View, Option<crate::dd::Contract>)> {
+    let v: serde_json::Value = serde_json::from_str(view_json).ok()?;
+    let view = view_from_json(v.get("view").unwrap_or(&v))?;
+    let contract = v.get("payoff").and_then(contract_from_json);
+    Some((view, contract))
 }
 
 /// Solve `k` sampled worlds and return the per-move value sums.
+///
+/// `view_json` is the armed request: `{"view": ..., "payoff": ...}`. A bare
+/// view is accepted too and searched on trick POINTS, which is what this did
+/// before the payoff terms existed.
 ///
 /// `{"moves":[card...],"sum":[f64...],"worlds":k}` — `moves` is `State::legal`
 /// in its own order and `sum[i]` is the total, over the sampled worlds, of the
@@ -69,8 +79,8 @@ fn parse(view_json: &str) -> Option<View> {
 /// most wasteful thing this could do (mandatory follow-suit makes it common).
 #[wasm_bindgen]
 pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
-    let v = match parse(view_json) {
-        Some(v) => v,
+    let (v, contract) = match parse(view_json) {
+        Some(x) => x,
         None => return err("not a searchable position"),
     };
     let mut moves = [0u8; 16];
@@ -97,21 +107,38 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
         return list(&[0.0; 16], 0);
     }
 
-    // `me == 0` maximises the raw solver value (declarer-minus-defender is
-    // signed for seat 0), so seat 1 negates it. This is `PimcBot::pick`'s own
-    // sign rule and the reason a pooled SUM is directly comparable.
-    let sign = if v.me == 0 { 1i16 } else { -1i16 };
+    // THE SIGN. A contract solve is signed for the DECLARER (declarer score
+    // minus defender score) and a points solve for SEAT 0, so each has its own
+    // rule for turning the solver's number into "better for me" -- and getting
+    // it backwards is a bot that plays to lose, which no assertion about legal
+    // moves would ever catch.
     let mut rng = Rng::new(seed.to_bits() ^ 0x9E37_79B9_7F4A_7C15);
     let mut buf: Vec<u8> = Vec::with_capacity(16);
-    let mut vals = [0i16; 16];
     let mut sums = [0f64; 16];
     DD.with(|dd| {
         let mut dd = dd.borrow_mut();
-        for _ in 0..k.max(1) {
-            let w = v.determinize(&mut rng, &mut buf);
-            dd.solve_root(&w, &moves[..n], &mut vals);
-            for i in 0..n {
-                sums[i] += (sign * vals[i]) as f64;
+        match contract {
+            Some(c) => {
+                let sign = if v.me == c.declarer { 1i32 } else { -1i32 };
+                let mut vals = [0i32; 16];
+                for _ in 0..k.max(1) {
+                    let w = v.determinize(&mut rng, &mut buf);
+                    dd.solve_root_contract(&w, &moves[..n], &c, &mut vals);
+                    for i in 0..n {
+                        sums[i] += (sign * vals[i]) as f64;
+                    }
+                }
+            }
+            None => {
+                let sign = if v.me == 0 { 1i16 } else { -1i16 };
+                let mut vals = [0i16; 16];
+                for _ in 0..k.max(1) {
+                    let w = v.determinize(&mut rng, &mut buf);
+                    dd.solve_root(&w, &moves[..n], &mut vals);
+                    for i in 0..n {
+                        sums[i] += (sign * vals[i]) as f64;
+                    }
+                }
             }
         }
     });

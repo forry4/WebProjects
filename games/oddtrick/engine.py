@@ -767,6 +767,52 @@ def contract_score(level: int, declarer_pts: int) -> tuple[int, int]:
     return 0, (level - 1) + SHORT_PENALTY * (level - declarer_pts)
 
 
+def payoff_terms(g: dict) -> dict:
+    """The scoring rule as NUMBERS, in whichever currency this room pays in.
+
+    ONE SOURCE. `_finish` scores from these, and the Hard tier's armed decision
+    ships them to the browser so the solver optimises the payoff the server will
+    actually apply. The alternative -- a second copy of the scoring in Rust --
+    is the drift the card-play parity gate exists to prevent, in a place where
+    it would show up only as the bot playing slightly wrong.
+
+    `declarer_score - defender_score` for a final total `p`, given whether the
+    declarer ever won a +2 trick:
+
+        no +2 trick  ->  +null
+        p >= target  ->  +make
+        otherwise    ->  -(set_base + short x (target - p))
+    """
+    a = g["auction"]
+    if mode_of(g) == "skat":
+        ct = g["contract"]
+        stake = ct["value"] * ct["mult"] * skat_doubling(ct)
+        return {"declarer": a["declarer"], "target": skat_target(g),
+                "make": stake, "set_base": stake,
+                "short": SHORT_PENALTY, "null": SKAT_NULL_VALUE}
+    return {"declarer": a["declarer"], "target": a["level"],
+            "make": a["level"] * a["level"], "set_base": max(0, a["level"] - 1),
+            "short": SHORT_PENALTY, "null": NULL_MAKE}
+
+
+def payoff(terms: dict, declarer_pts: int, declarer_scored: bool) -> int:
+    """Apply `payoff_terms`. Null is checked FIRST and wins -- it can never
+    collide with a make, since only +2 tricks add points."""
+    if not declarer_scored:
+        return terms["null"]
+    if declarer_pts >= terms["target"]:
+        return terms["make"]
+    return -(terms["set_base"] + terms["short"] * (terms["target"] - declarer_pts))
+
+
+def _split(value: int, declarer: int) -> list[int]:
+    """A signed payoff back into the two-sided score row. Exactly one side ever
+    scores, which is what makes the difference a faithful single number."""
+    scores = [0, 0]
+    scores[declarer if value >= 0 else 1 - declarer] = abs(value)
+    return scores
+
+
 def _finish_skat(g: dict) -> None:
     """Declared value x multiplier, to whichever side was right.
 
@@ -779,19 +825,15 @@ def _finish_skat(g: dict) -> None:
     decl = a["declarer"]
     dpts = g["pts"][decl]
     stake = ct["value"] * ct["mult"] * skat_doubling(ct)
-    target = skat_target(g)
+    terms = payoff_terms(g)
+    target = terms["target"]
+    # The consolation. A declarer who took no +2 trick cannot have reached any
+    # target (only +2 tricks add points), so it always REPLACES a set -- it is
+    # never a bonus on top of a made contract.
     null = g["etricks"][decl] == 0
     made = (not null) and dpts >= target
     short = 0 if (null or made) else target - dpts
-    scores = [0, 0]
-    if null:
-        # The consolation. A declarer who took no +2 trick cannot have reached
-        # any target (only +2 tricks add points), so this always REPLACES a
-        # set -- it is never a bonus on top of a made contract.
-        scores[decl] = SKAT_NULL_VALUE
-    else:
-        scores[decl if made else 1 - decl] = (
-            stake if made else stake + SHORT_PENALTY * short)
+    scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
     g["result"] = {
         # A settled round can stop short of thirteen tricks; the UI says so
@@ -836,14 +878,8 @@ def _finish(g: dict) -> None:
     # always replaces being set, which is exactly the escape hatch it is for.
     null = g["etricks"][decl] == 0
     made = (not null) and dpts >= a["level"]
-    scores = [0, 0]
-    if null:
-        scores[decl] = NULL_MAKE
-        short = 0
-    else:
-        ds, fs = contract_score(a["level"], dpts)
-        scores[decl], scores[1 - decl] = ds, fs
-        short = max(0, a["level"] - dpts)
+    short = 0 if (null or made) else a["level"] - dpts
+    scores = _split(payoff(payoff_terms(g), dpts, not null), decl)
     g["phase"] = "over"
     g["result"] = {
         # A settled round can stop short of thirteen tricks; the UI says so

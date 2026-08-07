@@ -506,6 +506,13 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # seat, so there is no second projection to keep in step and the bot
             # provably searches only what its seat may know.
             "view": engine.view_for(g, seat),
+            # The SCORING RULE, as numbers, straight from the function `_finish`
+            # scores with. The search optimises the payoff this room will pay
+            # rather than the trick points that merely measure it -- and shipping
+            # the terms instead of reimplementing them in Rust is what keeps the
+            # two from drifting. Public: it is derivable from the contract, which
+            # both seats can already see.
+            "payoff": engine.payoff_terms(g),
         }
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()

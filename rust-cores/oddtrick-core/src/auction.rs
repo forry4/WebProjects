@@ -714,6 +714,9 @@ pub fn forced_floor(dd: &mut Dd, s: &State, declarer: usize) -> i32 {
         over: 1,
         set_base: 1_000_000,
         short: 0,
+        // No consolation: this asks how low the declarer can HOLD THEMSELVES,
+        // and a Null payoff sitting under it would answer a different question.
+        null: None,
     };
     -dd.solve_contract(s, &c) + LOW
 }

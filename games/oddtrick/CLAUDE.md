@@ -180,14 +180,23 @@ MAX_LEVEL works because one player's ceiling is sweeping the six +2 tricks;
 * **Optional follow-suit is rejected.** With negative odd tricks it makes every
   odd trick fall deterministically to whoever leads it — 7 of 13 tricks lose
   all decision content.
-* **Neither tier CHASES the Null consolation, and both should.** A declarer
-  whose contract has gone wrong ought to switch to ducking every +2 trick — but
-  "has gone wrong" is a lookahead judgement, and the server bot is one trick
-  deep (reading it off the current total instead would throw away contracts it
-  was still winning). The Hard tier misses it for a different reason: its solver
-  maximises trick POINTS, and Null is a discontinuous jump a double-dummy value
-  function cannot see. Both want the contract-aware solve `dd::solve_contract`
-  already provides for the auction.
+* **The SERVER bot does not chase the Null consolation; the Hard tier does.**
+  A declarer whose contract has gone wrong ought to switch to ducking every +2
+  trick — but "has gone wrong" is a lookahead judgement, and Easy/Normal are one
+  trick deep (reading it off the current total instead would throw away
+  contracts they were still winning). Hard got it by searching the payoff
+  instead of the points; that is the fix, and it is not portable to a policy
+  with no search.
+* **NULL AT A FLAT 12 (skat 20) DOMINATES A LOW CONTRACT, and this is measured,
+  not speculative.** Classic levels 1–3 pay 1/4/9, all below 12; in skat, 13 of
+  the 36 ladder rungs pay under 20 at ×1. So a declarer who bought cheaply has
+  no reason to play for their contract at all — and the floor cluster puts ~42%
+  of openings at level 1. The contract-aware Hard tier exploits it on sight
+  (6–7 Nulls per 40 rounds against the points searcher's 0). **Flat is a
+  DECISION, taken 2026-08-07 with this measurement in hand** — a cheap contract
+  is now a licence to duck, and that is the intended shape of the escape hatch.
+  Revisiting it costs no bot work: the search reads `payoff_terms`, so scaling
+  Null or capping it below what it replaces is an engine-side change alone.
 * **The bot scheduler's staleness guard is `_position_key`, and EVERY
   state-advancing action must appear in it.** Two schedulers can be in flight at
   once (`_handle_move` starts one, so does every reconnect), and the guard used
@@ -309,6 +318,31 @@ heuristic. The reference measured the one-trick-deep policy **69.8% behind
   ~74ms natively and the wasm measures **~70ms per world at trick 1**, collapsing
   to ~0 by trick 7. Render's free tier is ~0.1 CPU with five games on one uvicorn
   process. The player's own cores are the only place this fits.
+* **It searches the CONTRACT PAYOFF, not the trick points (2026-08-07).** Points
+  are the game's yardstick, not its score: a points solver cannot see that a
+  declarer past their target gains nothing more, that every point of a
+  defender's shortfall is worth four, or — since Null became a consolation —
+  that a declarer who has taken no +2 trick is one ducked trick from scoring
+  instead of being set. That last one is a CLIFF in the payoff at a single bit
+  of state, which is why `State` carries `escored` (not derivable from `pts`: a
+  total of −1 is one +2 trick and three −1s just as easily as one −1 alone).
+  Ducking for Null and defending against it both fall straight out of the
+  minimax; neither is a special case.
+  - **The terms are SHIPPED, not reimplemented.** `_ai_search` carries
+    `engine.payoff_terms` — the same function `_finish` scores with — so the
+    only thing written twice is the arithmetic turning terms into a number, and
+    `wire::payoff_parity` holds that to a fixture of the engine's own answers.
+    A consequence worth knowing: **change the Null value or the curves and the
+    bot follows with no code change at all.**
+  - **Measured** (`bin/cmatch`, paired, mirror reads exactly 0.000): **+0.55**
+    payoff/round at level 4 and **+1.25** at level 1, positive in BOTH roles,
+    and it finds Nulls the points search never does (6–7 vs 0 in 40 rounds).
+    n=80, so treat the magnitudes as indicative. **The first run of this read
+    +4.05 and was wrong** — the harness seeded bots by identity rather than by
+    seat, so swapping tiers swapped their RNG streams too. The mirror caught it;
+    that is what the mirror is for.
+  - Costs **1.79x** a points solve (`csearch` has no MTD(f) and must play to
+    trick 13), so ~125ms per world at trick 1 against ~70ms.
 * **The strength knob is the WORLD COUNT and nothing else.** Sampling saturates
   at k≈8 (CAMPAIGN.md), so the server caps the pooled total at 8 and the worker's
   millisecond budget only exists so a slow phone still answers.

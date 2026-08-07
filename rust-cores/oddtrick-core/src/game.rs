@@ -81,6 +81,7 @@ impl Game {
             leader,
             led: -1,
             pts: [0; 2],
+            escored: 0,
         };
         let mut k = 0;
         for p in 0..2 {

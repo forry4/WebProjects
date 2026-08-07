@@ -72,6 +72,15 @@ pub struct State {
     /// Card led this trick, or -1 if nobody has played yet.
     pub led: i8,
     pub pts: [i8; 2],
+    /// Bit p set once player p has won a +2 trick.
+    ///
+    /// A COUNT would be redundant -- nothing asks how many -- but the bit is
+    /// not derivable from `pts`, which is the whole reason it is here: a total
+    /// of -1 is one +2 trick and three -1s just as easily as it is one -1 and
+    /// nothing else. Since 2026-08-07 a declarer who never wins a +2 trick
+    /// scores the Null consolation instead of being set, so the payoff has a
+    /// cliff at exactly this bit and a solver optimising points cannot see it.
+    pub escored: u8,
 }
 
 /// Which parity of trick NUMBER scores +2. Default: even-numbered tricks.
@@ -221,6 +230,9 @@ impl State {
         };
         let v = trick_value(self.trick);
         self.pts[winner as usize] += v;
+        if v > 0 {
+            self.escored |= 1 << winner;
+        }
         self.trick += 1;
         self.leader = winner;
         self.led = -1;

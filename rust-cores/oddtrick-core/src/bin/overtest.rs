@@ -80,6 +80,7 @@ fn main() {
                                     over: 1,
                                     set_base: BIG,
                                     short: 0,
+                                    null: None,
                                 };
                                 dd.clear();
                                 let v = dd.solve_contract(&base, &c);
