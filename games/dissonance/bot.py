@@ -50,7 +50,9 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
         if want_win:
             return 3.0 - r if w else 1.0 - r
         return 0.6 - r if w else 3.0 + r
-    trumpish = 1.0 if g["trump"] < E.NOTRUMP and E.suit(c) == g["trump"] else 0.0
+    # Grand counts here too: its trump class is a real one, it is just made
+    # of the four tens rather than a suit.
+    trumpish = 1.0 if E.esuit(c, g["trump"]) == E.trump_class(g["trump"]) else 0.0
     if want_win:
         return 1.0 + r + trumpish
     # Lead low: under mandatory follow-suit this is how a -1 trick gets forced
@@ -77,7 +79,14 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
     """Cheap estimate of the points this seat could take in `denom`."""
     cards = E.playable(g, seat) + [p[0] for p in g["piles"][seat] if len(p) == 2]
     total = sum(_RANK_VALUE[E.rank(c)] for c in cards)
-    if denom < E.NOTRUMP:
+    if denom == E.GRAND:
+        # There are only four trumps in a Grand game, so LENGTH is not the
+        # question -- holding any of them at all is. Each is worth roughly a
+        # stolen trick, and the rest of the hand is valued as if at no-trump.
+        total += sum(1.4 for c in cards if E.rank(c) == E.TEN_RANK)
+        longest = max(sum(1 for c in cards if E.suit(c) == s) for s in range(4))
+        total -= max(0, longest - 5) * 0.8
+    elif denom < E.NOTRUMP:
         n = sum(1 for c in cards if E.suit(c) == denom)
         total += max(0, n - 3) * 1.2  # length is worth something, shortage is not
     else:
@@ -143,7 +152,7 @@ _KONTRA_STRENGTH = 10.0
 def skat_ceiling(g: dict, seat: int) -> int:
     """The largest number this hand can afford to be held to."""
     best = 0
-    for d in range(E.NOTRUMP + 1):
+    for d in E.SKAT_DENOMS:
         want = _level_for(hand_strength(g, seat, d))
         best = max(best, E.SKAT_BASE[d] * want)
     return best
@@ -201,7 +210,9 @@ def swap_denom(g: dict, seat: int) -> int:
     denom = g["auction"]["denom"]
     if denom >= 0:
         return denom
-    return max(range(E.NOTRUMP + 1), key=lambda d: hand_strength(g, seat, d))
+    # Only skat mode reaches here, and Grand is one of its games -- leaving it
+    # out would value the talon as if the tens were ordinary cards.
+    return max(E.SKAT_DENOMS, key=lambda d: hand_strength(g, seat, d))
 
 
 def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
@@ -217,8 +228,8 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
 
     def worth(c: int) -> float:
         v = _RANK_VALUE[E.rank(c)]
-        if denom < E.NOTRUMP and E.suit(c) == denom:
-            v += 0.8  # trump length is worth having
+        if E.esuit(c, denom) == E.trump_class(denom):
+            v += 0.8  # a trump is worth having -- a Grand ten most of all
         return v
 
     best = {"take": None, "give": None}

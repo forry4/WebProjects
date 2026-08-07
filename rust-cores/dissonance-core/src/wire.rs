@@ -138,8 +138,12 @@ pub fn view_from_json(v: &Value) -> Option<View> {
             match led_now {
                 None => led_now = Some(card),
                 Some(l) => {
-                    if suit(card) != suit(l) {
-                        kn.hand_void[seat][suit(l) as usize] = true;
+                    // The CONTRACT decides what following means, so this reads
+                    // `s.trump` rather than the raw suit: under Grand a ten
+                    // discharges a trump lead and nothing else.
+                    let ls = esuit(l, s.trump);
+                    if esuit(card, s.trump) != ls {
+                        kn.hand_void[seat][ls as usize] = true;
                     }
                     led_now = None;
                 }
@@ -253,9 +257,14 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
 // combined `k` would do — `HandEval` is a list of independent worlds and every
 // reader indexes it as one.
 
-/// `{"pts":[[[..5],[..5]]...],"floor":[...],"null":[[bool,bool]...]}`
+/// `{"pts":[[[..NDENOM_SLOTS],[..NDENOM_SLOTS]]...],"floor":[...],"null":[[bool,bool]...]}`
+///
+/// A row is one world's per-TRUMP result for both seats, so it is
+/// `NDENOM_SLOTS` wide rather than the classic auction's five: Grand is a
+/// trump the solver can be asked about even though the classic ladder
+/// cannot name it.
 pub fn hand_eval_to_json(ev: &HandEval) -> String {
-    let rows = |v: &Vec<[[i8; 5]; 2]>| {
+    let rows = |v: &Vec<[[i8; NDENOM_SLOTS]; 2]>| {
         let mut out = String::from("[");
         for (w, row) in v.iter().enumerate() {
             if w > 0 {
@@ -310,13 +319,13 @@ pub fn hand_eval_from_json(parts: &[Value]) -> HandEval {
     let mut nulls = Vec::new();
     let mut any_no_floor = false;
     let mut any_no_null = false;
-    let grab = |v: Option<&Value>, out: &mut Vec<[[i8; 5]; 2]>| -> bool {
+    let grab = |v: Option<&Value>, out: &mut Vec<[[i8; NDENOM_SLOTS]; 2]>| -> bool {
         let a = match v.and_then(|x| x.as_array()) {
             Some(a) if !a.is_empty() => a,
             _ => return false,
         };
         for world in a {
-            let mut row = [[0i8; 5]; 2];
+            let mut row = [[0i8; NDENOM_SLOTS]; 2];
             if let Some(sides) = world.as_array() {
                 for (d, side) in sides.iter().enumerate().take(2) {
                     if let Some(cells) = side.as_array() {
@@ -612,7 +621,10 @@ mod fixture_replay {
         for (i, f) in fixtures().iter().enumerate() {
             let v = view_from_json(f).unwrap();
             let opp = 1 - v.me;
-            for s in 0..4usize {
+            // NFOLLOW, not 4: under Grand the tens are a class of their own,
+            // and a loop that stopped at the four suits would never check the
+            // one void the fifth suit makes possible.
+            for s in 0..NFOLLOW {
                 if !v.kn.hand_void[opp][s] {
                     continue;
                 }
@@ -620,9 +632,9 @@ mod fixture_replay {
                 for _ in 0..4 {
                     let d = v.determinize(&mut rng, &mut buf);
                     assert_eq!(
-                        d.hand[opp] & SUIT_MASK[s],
+                        d.hand[opp] & follow_mask(s as u8, v.s.trump),
                         0,
-                        "fixture {i}: dealt suit {s} into a hand known to be void"
+                        "fixture {i}: dealt class {s} into a hand known to be void"
                     );
                 }
             }

@@ -49,13 +49,36 @@ def _settle(g: dict, rng: random.Random) -> None:
             E.apply_move(g, pid, mv)
 
 
+def _forced_grand(rng: random.Random) -> dict:
+    """A skat game DRIVEN into Grand rather than left to the bot's judgement.
+
+    Grand is the one contract under which following suit means something other
+    than matching the suit, so it is the one the wire reader can get wrong on
+    its own. The bot picks a denomination on hand strength and may go whole
+    runs without choosing Grand, which would leave the reader's Grand path
+    covered by nothing while the file still looked comprehensive.
+    """
+    g = E.new_game(["a", "b"], rng, opener=0, mode="skat")
+    E.apply_skat_bid(g, 0, E.skat_value_of(E.GRAND, 3))   # 4 x 3 = 12
+    E.apply_pass(g, 1)
+    E.apply_look(g, 0)
+    E.apply_swap(g, 0, **B.choose_swap(g, 0, E.GRAND))
+    E.apply_declare(g, 0, E.GRAND, 3)
+    E.apply_kontra(g, 1, False)
+    assert g["phase"] == "play" and g["trump"] == E.GRAND
+    return g
+
+
 def main() -> None:
     out = []
-    for i in range(GAMES):
+    for i in range(GAMES + 1):
         rng = random.Random(1000 + i)
         mode = "skat" if i % 2 else "classic"
-        g = E.new_game(["a", "b"], rng, opener=i % 2, mode=mode)
-        _settle(g, rng)
+        if i == GAMES:
+            g = _forced_grand(rng)
+        else:
+            g = E.new_game(["a", "b"], rng, opener=i % 2, mode=mode)
+            _settle(g, rng)
         while g["phase"] == "play":
             seat = E.to_play(g)
             # BOTH seats every ply, not just the mover: the defender's view is

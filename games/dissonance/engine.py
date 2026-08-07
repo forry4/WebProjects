@@ -56,7 +56,28 @@ NOTRUMP = 4
 RANK_NAMES = ["7", "8", "9", "10", "J", "Q", "K", "A"]
 SUIT_NAMES = ["clubs", "diamonds", "hearts", "spades"]
 SUIT_CHARS = ["c", "d", "h", "s"]
-DENOM_NAMES = SUIT_NAMES + ["no-trump", "Null"]
+
+#: GRAND: the four tens are trump and belong to NO suit -- Skat's jack rule,
+#: transplanted onto the ten. Only reachable in skat mode (it is priced, and
+#: classic's auction ranks denominations rather than pricing them).
+#:
+#: 6, NOT 5. 5 is NULL_DENOM, the marker left on saved games from before Null
+#: stopped being a bid, and reusing the number would silently re-read one of
+#: those as a Grand contract -- a different trump and different follow-suit.
+#: Nothing else about the value 6 matters; it is never arithmetic.
+GRAND = 6
+
+#: The rank that becomes trump under Grand. DERIVED, because the deck's rank
+#: list is what says which index is the ten.
+TEN_RANK = RANK_NAMES.index("10")
+
+#: Follow-suit classes: the four real suits, plus one for Grand's trump. A
+#: card's class is its suit everywhere EXCEPT a ten in a Grand game, so under
+#: any other contract this collapses back to `suit`.
+TRUMP_CLASS = 4
+NFOLLOW = 5
+
+DENOM_NAMES = SUIT_NAMES + ["no-trump", "Null", "grand"]
 
 NTRICKS = 13
 POOL = 5  # both players' point totals always sum to this
@@ -156,14 +177,26 @@ MATCH_TARGET = {"classic": 100, "skat": 100}
 #: multiple of 2 or 3 -- so the rungs are IDENTICAL through 40 and the ceiling
 #: falls 72 -> 60. The playable range does not move at all.
 #:
-#: WHAT IT BUYS is not MORE collisions -- 12 cleared four ways under both
-#: tables -- but AMBIGUOUS ones, which is the mode's actual premise. The old
-#: four (D6 H4 S3 NT2) sat at four DISTINCT levels, so a bid plus any tell
-#: about the level pinned the denomination exactly. The new four pair up
-#: (D6/H6 and C4/S4), so the same information still leaves a two-way choice --
-#: and the pairs are the two suits of a colour, which is precisely the
-#: distinction the price table has stopped making.
-SKAT_BASE = [3, 2, 2, 3, 5]  # clubs, diamonds, hearts, spades, no-trump
+#: WHAT IT BUYS is AMBIGUOUS collisions, which is the mode's actual premise.
+#: 12 used to clear four ways (D6 H4 S3 NT2) at four DISTINCT levels, so a bid
+#: plus any tell about the level pinned the denomination exactly. It now clears
+#: FIVE ways and they pair up -- D6/H6, C4/S4, and Grand alone at 3 -- so the
+#: same information still leaves a choice, and the pairs are the two suits of a
+#: colour, precisely the distinction the price table has stopped making.
+#:
+#: GRAND sits at 4, between the blacks and no-trump, and that is where it
+#: belongs rather than at the top: with only four trumps (of which ~0.75 sit
+#: out of play on an average deal) a Grand game is no-trump with a handful of
+#: wild cards, not a suit game with a long trump.
+#:
+#: INDEXED BY DENOMINATION, including the two that cannot be bought: NULL_DENOM
+#: at 5 carries a base of 0, which is the marker for "not on the ladder". Iterate
+#: `SKAT_DENOMS`, never `range(len(SKAT_BASE))`.
+SKAT_BASE = [3, 2, 2, 3, 5, 0, 4]
+#             C  D  H  S  NT  -  G
+
+#: The denominations a skat game can actually be played in, in ladder order.
+SKAT_DENOMS = (0, 1, 2, 3, NOTRUMP, GRAND)
 
 #: What the Null consolation pays in skat mode. Flat, like classic's, and
 #: deliberately NOT scaled by the announcements or by Kontra: Hand, Sharp and
@@ -192,10 +225,10 @@ SHARP_BONUS = 2
 #: enumerates the rungs by hand and gets it wrong twice (it counts 43 and lists
 #: a 7). The GENERATOR (base x level) is the rule -- 7 is a multiple of no base,
 #: so it is a hole, and it remains the ONLY one in the otherwise dense 2..10
-#: stretch under the colour-priced table too. That table gives 28 rungs topping
+#: stretch under the colour-priced table too. That table gives 32 rungs topping
 #: out at 60. Derived here rather than typed out so the two can never disagree.
 SKAT_VALUES = sorted(
-    {SKAT_BASE[d] * lvl for d in range(NOTRUMP + 1)
+    {SKAT_BASE[d] * lvl for d in SKAT_DENOMS
      for lvl in range(MIN_LEVEL, MAX_LEVEL + 1)}
 )
 
@@ -216,7 +249,7 @@ def skat_declarable(value: int) -> list[dict]:
     ladder into a contract you cannot make.
     """
     out = []
-    for d in range(NOTRUMP + 1):
+    for d in SKAT_DENOMS:
         lo = skat_min_level(d, value)
         if lo <= MAX_LEVEL:
             out.append({"denom": d, "base": SKAT_BASE[d], "min_level": lo})
@@ -258,14 +291,41 @@ def trick_value(trick: int) -> int:
     return 2 if trick % 2 == 1 else -1
 
 
+def esuit(c: int, trump: int) -> int:
+    """The suit a card belongs to FOR FOLLOWING, under this contract.
+
+    Identical to `suit` under every contract but Grand, where the four tens
+    leave their suits entirely and become a fifth one. That is the whole of
+    the rules change: holding only the ten of diamonds when diamonds are led
+    makes you VOID in diamonds, and leading a ten obliges the opponent to
+    follow with a ten if they hold one.
+    """
+    if trump == GRAND and rank(c) == TEN_RANK:
+        return TRUMP_CLASS
+    return c // NRANK
+
+
+def trump_class(trump: int) -> int:
+    """Which follow-suit class, if any, ruffs. -1 when nothing does."""
+    if trump == GRAND:
+        return TRUMP_CLASS
+    return trump if trump < NOTRUMP else -1
+
+
 def beats(led: int, follow: int, trump: int) -> bool:
-    ls, fs = suit(led), suit(follow)
+    ls, fs = esuit(led, trump), esuit(follow, trump)
     if fs == ls:
+        # Two Grand trumps cannot be ranked against each other -- they are all
+        # tens -- so the SECOND one played takes the trick. Leading a ten is
+        # therefore a way to LOSE a trick on purpose, which in a game where
+        # seven of the thirteen are worth -1 is a tool rather than a penalty.
+        if ls == TRUMP_CLASS:
+            return True
         return rank(follow) > rank(led)
-    if trump < NOTRUMP:
-        # Off-suit only wins by ruffing, and only if the lead was not trump.
-        return fs == trump and ls != trump
-    return False
+    t = trump_class(trump)
+    # Off-suit only wins by ruffing, and only if the lead was not itself trump.
+    # At no-trump `t` is -1, which no class equals, so nothing ruffs.
+    return fs == t and ls != t
 
 
 # --- dealing ---------------------------------------------------------------
@@ -718,7 +778,7 @@ def apply_declare(g: dict, seat: int, denom: int, level: int,
     sharp, open_ = bool(sharp), bool(open_)
     bid = a["value"]
 
-    if not (0 <= denom <= NOTRUMP):
+    if denom not in SKAT_DENOMS:
         raise ValueError("no such denomination")
     if not (MIN_LEVEL <= level <= MAX_LEVEL):
         raise ValueError("level out of range")
@@ -802,8 +862,9 @@ def legal_moves(g: dict, seat: int) -> list[int]:
         return []
     cands = playable(g, seat)
     if g["led"] is not None:
-        ls = suit(g["led"])
-        follow = [c for c in cands if suit(c) == ls]
+        trump = g["trump"]
+        ls = esuit(g["led"], trump)
+        follow = [c for c in cands if esuit(c, trump) == ls]
         # Follow-suit is MANDATORY and a pile's exposed top counts as a card
         # you hold, so the piles can constrain you.
         if follow:
@@ -1132,7 +1193,7 @@ def _finish_skat(g: dict) -> None:
         # the review can show base x level = value -- the one step of the skat
         # arithmetic that used to be invisible, which left a made contract
         # printing a bare number where classic prints "3 x 3 = 9".
-        "base": SKAT_BASE[a["denom"]] if 0 <= a["denom"] <= NOTRUMP else 0,
+        "base": SKAT_BASE[a["denom"]] if a["denom"] in SKAT_DENOMS else 0,
         "null": null,
         "null_value": SKAT_NULL_VALUE,
         "value": ct["value"],

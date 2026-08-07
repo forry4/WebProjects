@@ -27,7 +27,7 @@ pub fn policy_score(s: &State, c: u8) -> f32 {
             (false, true) => 0.6 - r,
         }
     } else {
-        let trumpish = if s.trump < NOTRUMP && suit(c) == s.trump {
+        let trumpish = if esuit(c, s.trump) == trump_class(s.trump) {
             1.0
         } else {
             0.0

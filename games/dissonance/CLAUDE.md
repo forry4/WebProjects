@@ -68,11 +68,16 @@ The design argument is `rust-cores/dissonance-core/SKAT_MODE.md`.
 Classic is described below; this section is only what skat mode adds.
 
 * **Bid a number, name the game later.** `value = base × level`, bases
-  **♦2 ♥2 ♠3 ♣3 NT5** — priced by COLOUR. The ladder is
+  **♦2 ♥2 ♠3 ♣3 Grand4 NT5** — priced by COLOUR. The ladder is
   `SKAT_VALUES`, **derived from the bases**, and served via `/catalog`
   (`skat_bases`, `skat_values`) so the client holds no copy.
-* **Collisions are the point.** 12 = ♦6 = ♥6 = ♠4 = ♣4, so a bid names a price,
-  never a shape. The frontend *shows* this (`.dis-clears`) rather than
+  **`SKAT_BASE` is indexed by DENOMINATION and is SPARSE**: index 5 is
+  `NULL_DENOM` and carries a base of 0, the marker for "not on the ladder".
+  Iterate `SKAT_DENOMS`, never `range(len(SKAT_BASE))` — and the client filters
+  `base > 0` for the same reason (`levelsFor`), because a 0 divides to Infinity
+  and only failed to render by accident.
+* **Collisions are the point.** 12 = ♦6 = ♥6 = ♠4 = ♣4 = Grand3, so a bid names
+  a price, never a shape. The frontend *shows* this (`.dis-clears`) rather than
   explaining it.
 * **The colour pricing replaced a four-tier table (D2 H3 S4 C5 NT6), 2026-08-07,
   and it is a deliberate partial reversal.** The original argument still holds
@@ -86,14 +91,54 @@ Classic is described below; this section is only what skat mode adds.
   - **The ladder loses nothing anyone bids.** Every multiple of 6 at or below 36
     is already a multiple of 2 or 3, so dropping base 6 removes only 42, 54, 66
     and 72: the rungs are IDENTICAL through 40, the ceiling falls 72 → 60, and
-    the count goes 36 → 28. 7 is still the only hole below ten. `test_skat.py`
+    the count goes 36 → 28 (32 once Grand's base 4 is added). 7 is still the
+    only hole below ten. `test_skat.py`
     asserts the ends off `min`/`max(SKAT_BASE)` rather than as literals, which
     is exactly what let the ceiling move without a hand-edit.
   - **Null's flat 20 got relatively dearer to duck under**: still 13 rungs below
-    it, but 13-of-28 rather than 13-of-36, against a ceiling that fell by a
+    it, but 13-of-32 rather than 13-of-36, against a ceiling that fell by a
     sixth. "A cheap contract is a licence to duck" is already the intended
     shape; this nudges it. Retuning is engine-side alone (the Hard tier reads
     `payoff_terms`), so it can wait for a measurement rather than a guess.
+* **GRAND (2026-08-07) — the four 10s are trump and belong to NO suit**, Skat's
+  jack rule on the ten. Skat mode only: classic *ranks* denominations rather
+  than pricing them, and Grand has no natural rank slot in `C<D<H<S<NT` because
+  it is defined by what it costs. Base 4, between the blacks and no-trump —
+  with four trumps (~0.75 of them out of play on an average deal) it is
+  no-trump with a handful of wild cards, not a suit game with a long trump.
+  - **The SECOND ten played wins.** They are all tens, so there is nothing to
+    rank them by, and any imposed order (Skat's ♣>♠>♥>♦ or otherwise) is one
+    more rule a player cannot read off the cards. So leading a ten is a way to
+    LOSE a trick on purpose — which, with seven of thirteen tricks at −1, is a
+    tool and not a penalty. It also makes all four tens fully interchangeable,
+    which the solver's equivalence collapse depends on.
+  - **`GRAND = 6`, NOT 5.** 5 is `NULL_DENOM`, the marker on games saved before
+    Null stopped being a bid; reusing it would silently re-read one of those as
+    a Grand contract — different trump, different follow-suit. The value is
+    never arithmetic, so the gap costs nothing but the sparse `SKAT_BASE`.
+  - **`esuit(card, trump)` IS THE WHOLE FEATURE, and it is expressed once.**
+    Suit membership stops being `card // NRANK` while Grand is trump, which is
+    the deepest shared invariant in both implementations. Everything derives
+    from that one function: `beats`, `legal_moves`, `Knowledge::hand_void`
+    (**five classes, not four** — a trump void is a real fact, and a `[bool; 4]`
+    would have dropped it silently while the determinizer kept dealing tens into
+    a hand that had proved it held none), the determinizer's partition,
+    `dd.rs`'s equivalence collapse (`follow_mask`, because under Grand a suit
+    LOSES its ten so its 9 and J become adjacent — reading the raw suit mask
+    would refuse a collapse that is legal, and would collapse two tens against a
+    suit that is not theirs), `policy.rs`, and `wire.rs`'s void inference.
+  - **It is the identity under every other contract, and both suites assert that
+    over the WHOLE card space** rather than sampling it (`test_every_other_
+    contract_plays_exactly_as_it_did_before_grand_existed`,
+    `no_other_contract_moved_when_grand_arrived`). `esuit` sits on the solver's
+    hottest path; a regression there is a different game, not a worse bot.
+  - **The fixtures cover it or it is not covered.** `gen_fixtures` samples trump
+    over `DENOMS` (so ~1 play fixture in 6 is Grand and the Python port replays
+    it), `solver_matches_brute_force` sweeps `DENOMS` and asserts it reached
+    Grand, and `gen_view_fixtures.py` appends a FORCED Grand game — the bot
+    picks a denomination on hand strength and can go whole runs without choosing
+    Grand, which would leave the wire reader's Grand path covered by nothing
+    while the file still looked comprehensive.
 * **Phases:** `auction` (numeric) → `talon` → `declare` → `kontra` → [`re`] →
   `play`. `talon` splits into `look` / `hand` / `swap` because **declining to
   look is what Hand means** — the declarer who plays Hand never sees `shown`
@@ -115,7 +160,7 @@ Classic is described below; this section is only what skat mode adds.
 ### Skat mode: things that are not what the spec says
 * **The ladder is DERIVED, and SKAT_MODE.md's hand enumeration of it was wrong
   twice** — it counted 43 rungs and listed a 7. `base × level` is the rule and 7
-  is a multiple of no base, so the real ladder is **28 rungs from 2 to 60 with
+  is a multiple of no base, so the real ladder is **32 rungs from 2 to 60 with
   one hole at 7**. `test_skat.py` asserts against the *generator* and pins the
   hole so nobody "fixes" it back; it also reads the ends off `min`/`max(
   SKAT_BASE)` rather than as literals, which is what let the colour re-pricing
@@ -464,23 +509,29 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (327)
+## Tests (338)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
 `test_integration.py` create → auction → 13 tricks → scored result → the NEXT
 round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers
 the case most likely to strand: only the human can deal the next round, and the
-bot has to pick its own turn back up once they do) · `test_skat.py` (50) the skat phase machine: the
-derived ladder, the redeal, talon/Hand secrecy, declaration validity,
-the announcement table, Kontra/Re, the Open reveal, and a `state_json`
-round-trip · `test_client_ai.py` (12) the Hard tier's protocol: the armed
+bot has to pick its own turn back up once they do) · `test_skat.py` (73) the skat
+phase machine: the derived ladder, the redeal, talon/Hand secrecy, declaration
+validity, the announcement table, Kontra/Re, the Open reveal, a `state_json`
+round-trip, and **Grand** (the tens as a fifth suit, second-ten-wins, the
+NULL_DENOM collision, a whole round through the real phase machine, and the
+whole-card-space assertion that no other contract moved) · `test_client_ai.py` (12) the Hard tier's protocol: the armed
 request, the re-validation, the stale drop, the watchdog, and the picker/server
 tier agreement.
 
 Rust side, `cargo test --features bridge` runs `wire::fixture_replay` (the
-wire-reader gate above) plus `tests/engine.rs`, the 13-test mirror of
-`test_engine.py`.
+wire-reader gate above) plus `tests/engine.rs`, the 16-test mirror of
+`test_engine.py`. Three of those are Grand's: the fifth-suit rules, the
+whole-card-space no-regression sweep, and a trump void surviving the
+determinizer. `solver_matches_brute_force` also sweeps `DENOMS` now and asserts
+it reached Grand — the equivalence collapse is the one place a Grand bug would
+show up only as a slightly wrong VALUE, which nothing else would notice.
 
 **RUN IT. CI DOES NOT BUILD RUST, so a broken Rust test target is invisible
 here in a way a Python one never is** — nothing goes red, the suite simply

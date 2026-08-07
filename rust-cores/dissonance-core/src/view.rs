@@ -19,16 +19,25 @@ use crate::state::*;
 
 #[derive(Clone, Copy, Default, Debug)]
 pub struct Knowledge {
-    /// `hand_void[p][s]` — player p is known to hold no `s` IN HAND.
-    pub hand_void: [[bool; 4]; 2],
+    /// `hand_void[p][cls]` — player p is known to hold no card of follow-suit
+    /// class `cls` IN HAND.
+    ///
+    /// FIVE classes, not four: under Grand the tens are a suit of their own, so
+    /// "showed out of trump" and "showed out of diamonds" are different facts
+    /// about a hand that both have to be recordable. Sizing this to 4 would
+    /// have silently dropped every trump void in a Grand game — the
+    /// determinizer would keep dealing tens into a hand that had proved it held
+    /// none, and the search would spend its worlds on impossible deals with
+    /// nothing red anywhere.
+    pub hand_void: [[bool; NFOLLOW]; 2],
 }
 
 impl Knowledge {
     /// Call after every card is played, before the state advances.
     pub fn observe(&mut self, s: &State, mover: usize, played_card: u8) {
         if s.led >= 0 {
-            let ls = suit(s.led as u8);
-            if suit(played_card) != ls {
+            let ls = esuit(s.led as u8, s.trump);
+            if esuit(played_card, s.trump) != ls {
                 self.hand_void[mover][ls as usize] = true;
             }
         }
@@ -141,7 +150,7 @@ impl View {
         while m != 0 {
             let c = m.trailing_zeros() as u8;
             m &= m - 1;
-            if !voids[suit(c) as usize] {
+            if !voids[esuit(c, self.s.trump) as usize] {
                 buf.insert(n_allowed, c);
                 n_allowed += 1;
             } else {

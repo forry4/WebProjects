@@ -11,7 +11,7 @@
 //!
 //!   gen_fixtures [games] > games/dissonance/tests/fixtures/play.jsonl
 
-use dissonance::cards::NOTRUMP;
+use dissonance::cards::DENOMS;
 use dissonance::game::Game;
 use dissonance::rng::Rng;
 use dissonance::state::POOL;
@@ -24,7 +24,11 @@ fn main() {
 
     for i in 0..n as u64 {
         let mut rng = Rng::new(i + 1);
-        let trump = (rng.next_u64() % 5) as u8;
+        // Over DENOMS, so GRAND is in the fixtures: it is the only trump
+        // under which following suit means something different, and a
+        // generator that sampled 0..=NOTRUMP would leave the Python port's
+        // whole Grand path ungated.
+        let trump = DENOMS[(rng.next_u64() % DENOMS.len() as u64) as usize];
         let leader = (rng.next_u64() % 2) as u8;
         let mut g = Game::deal(&mut Rng::new(i + 1), trump, leader);
 
@@ -80,7 +84,10 @@ fn main() {
             hands,
             piles,
             out.join(","),
-            if trump >= NOTRUMP { 4 } else { trump },
+            // The ACTUAL trump, not clamped to 4: GRAND is 6, and a
+            // fixture that flattened it to no-trump would have the Python
+            // port replay a different game and agree for the wrong reason.
+            trump,
             leader,
             moves.join(","),
             g.s.pts[0],

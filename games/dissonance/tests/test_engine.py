@@ -672,15 +672,25 @@ def test_the_opener_alternates_between_rounds():
     # Not for the LEAD -- the declarer leads to trick 1, whoever opened -- but
     # for the bidding: the opener names a contract into no information at all,
     # and in classic mode is not allowed to pass.
+    #
+    # The match is held OPEN rather than left to chance. `next_round` deals with
+    # `rng=None`, i.e. from OS entropy, so every round after the first is
+    # genuinely random -- and this needs the match to survive three of them,
+    # which one big round can end on its own. It failed roughly one run in
+    # eight, and a flake in a suite with no skips reads as a real regression in
+    # whatever was pushed that day. Zeroing the running total between rounds
+    # makes the ROUND COUNT deterministic without touching the thing under
+    # test, which is the opener and nothing else.
     g = E.new_game(["a", "b"], random.Random(104), opener=0)
     openers = [g["opener"]]
     for i in range(3):
         g = _play_out(g, random.Random(300 + i))
-        if E.is_over(g):
-            break
+        E.match_of(g)["scores"] = [0, 0]
+        E.match_of(g)["over"] = False
+        assert not E.is_over(g), "the match was held open, so it cannot be over"
         E.next_round(g, 1, g["result"]["round"])
         openers.append(g["opener"])
-    assert len(openers) >= 3, "the match must have run more than one round"
+    assert len(openers) == 4, "three rounds were dealt, so four openers"
     for a, b in zip(openers, openers[1:]):
         assert a != b, f"the opener did not alternate: {openers}"
 

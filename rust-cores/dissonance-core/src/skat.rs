@@ -29,7 +29,8 @@
 //! double-dummy resolves exactly, and Sharp raises the point target, which is
 //! arithmetic over the same matrix.
 
-use crate::auction::{HandEval, MAX_LEVEL, NDEN, NULL_DENOM};
+use crate::auction::{HandEval, MAX_LEVEL, NULL_DENOM};
+use crate::cards::{DENOMS, NDENOM_SLOTS};
 use std::collections::HashMap;
 
 /// `value = base * level`, indexed by denomination (clubs..no-trump).
@@ -46,7 +47,17 @@ use std::collections::HashMap;
 /// Dropping base 6 costs no rung anyone bids: every multiple of 6 at or below
 /// 36 is already a multiple of 2 or 3, so the ladder is identical through 40
 /// and only 42/54/66/72 go. Ability stays real; only price is convention.
-pub const SKAT_BASE: [i32; NDEN] = [3, 2, 2, 3, 5];
+///
+/// GRAND sits at 4, between the blacks and no-trump, and that is where it
+/// belongs rather than at the top: with only four trumps (of which ~0.75 sit
+/// out of play on an average deal) a Grand game is no-trump with a handful of
+/// wild cards, not a suit game with a long trump.
+///
+/// INDEXED BY DENOMINATION, including the one that cannot be bought: NULL_DENOM
+/// at 5 carries a base of 0, the marker for "not on the ladder". Iterate
+/// `DENOMS`, never the array's length.
+pub const SKAT_BASE: [i32; NDENOM_SLOTS] = [3, 2, 2, 3, 5, 0, 4];
+//                                          C  D  H  S  NT -  G
 
 /// Null's flat value, sitting mid-ladder the way Skat's 23 does.
 pub const SKAT_NULL_VALUE: i32 = 20;
@@ -58,7 +69,7 @@ pub const SHARP_BONUS: i32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SkatCfg {
-    pub bases: [i32; NDEN],
+    pub bases: [i32; NDENOM_SLOTS],
     pub null_value: i32,
     pub sharp_bonus: i32,
     /// Points the defender gains per point the declarer finished short — the
@@ -138,10 +149,11 @@ pub fn quantile(vals: &mut [i32], q: f64) -> f64 {
 /// DERIVED, never typed out. (The design note this mode came from enumerates it
 /// by hand as "2,3,4,…,10,12,…" and counts 43 rungs; both are wrong — 7 is a
 /// multiple of no base, so it is a hole. Under the shipped colour-priced table
-/// that leaves 28 rungs from 2 to 60, with 7 still the only gap below ten.)
+/// that leaves 32 rungs from 2 to 60, with 7 still the only gap below ten.)
 pub fn ladder(cfg: &SkatCfg) -> Vec<i32> {
     let mut v: Vec<i32> = Vec::new();
-    for &base in &cfg.bases {
+    for d in DENOMS {
+        let base = cfg.bases[d as usize];
         for l in 1..=MAX_LEVEL as i32 {
             v.push(base * l);
         }
@@ -227,13 +239,13 @@ impl Decl {
 /// Null value it locks Null away.
 pub fn declarable(cfg: &SkatCfg, bid: i32, hand: bool) -> Vec<Decl> {
     let mut v = Vec::new();
-    for d in 0..NDEN {
-        let base = cfg.bases[d];
+    for d in DENOMS {
+        let base = cfg.bases[d as usize];
         let lo = ((bid + base - 1) / base).max(1);
         for l in lo..=MAX_LEVEL as i32 {
-            v.push(Decl { denom: d as u8, level: l as u8, hand, sharp: false });
+            v.push(Decl { denom: d, level: l as u8, hand, sharp: false });
             if cfg.allow_sharp {
-                v.push(Decl { denom: d as u8, level: l as u8, hand, sharp: true });
+                v.push(Decl { denom: d, level: l as u8, hand, sharp: true });
             }
         }
     }

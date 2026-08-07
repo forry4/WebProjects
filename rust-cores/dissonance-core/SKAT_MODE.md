@@ -24,6 +24,7 @@ Everything below follows from that one move.
 | hearts | 2 |
 | spades | 3 |
 | clubs | 3 |
+| **grand** | **4** |
 | no-trump | 5 |
 
 **Priced by COLOUR since 2026-08-07.** This section originally specified four
@@ -50,14 +51,50 @@ and 72. The ladder is identical through 40, the ceiling falls 72 → 60, and the
 rung count goes 36 → 28. The playable range does not move at all.
 
 **Collisions are the point, and colour pricing makes them ambiguous rather than
-merely numerous.** 12 = ♦6 = ♥6 = ♠4 = ♣4. That is four declarations, the same
-count the old table gave — but the old four (♦6 ♥4 ♠3 NT2) sat at four
-*distinct* levels, so a bid plus any tell about the level pinned the
-denomination exactly. These pair up, and the pairs are the two suits of a
-colour: the same information still leaves a two-way choice. A bid of 12 does not
+merely numerous.** 12 = ♦6 = ♥6 = ♠4 = ♣4 = Grand 3. The old table's four
+(♦6 ♥4 ♠3 NT2) sat at four *distinct* levels, so a bid plus any tell about the
+level pinned the denomination exactly. These pair up, and the pairs are the two
+suits of a colour: the same information still leaves a choice. A bid of 12 does not
 say which game is coming. A hand playable in two denominations can bid higher
 *safely* than an equally strong hand playable in one — flexibility becomes a
 resource with a price, a decision the shipped auction cannot express.
+
+## Grand — a sixth game, skat mode only (2026-08-07)
+
+The four **10s are trump**, and they leave their suits entirely — Skat's jack
+rule transplanted onto the ten. The 10♦ is not a diamond: it will not answer a
+diamond lead, a hand whose only diamond is the 10 is *void* in diamonds, and
+leading a 10 obliges the opponent to follow with a 10 if they hold one.
+
+**The second 10 played wins.** They are all tens, so there is nothing to rank
+them by, and an order (Skat's ♣>♠>♥>♦, or any other) would be one more rule a
+player cannot infer from the cards. Play order decides instead — which makes
+leading a ten a way to *lose* a trick on purpose. Seven of the thirteen tricks
+are worth −1, so that is a tool rather than a penalty, and it is the same shape
+as the rest of the game: winning is not simply good.
+
+**Priced at 4, between the blacks and no-trump.** Only four cards are trump and
+~0.75 of them sit out of play on an average deal, so a Grand game is no-trump
+with a handful of wild cards, not a suit game with a long trump. The ruffing
+game is thin and the price says so.
+
+**Skat mode only, deliberately.** Classic's auction *ranks* denominations
+(C < D < H < S < NT) rather than pricing them, and Grand has no natural rank
+slot in that order — it is defined by what it costs. Adding it there would also
+mean a sixth position in the per-player denomination budget for no design gain.
+`SKAT_DENOMS` is the list of games the ladder can buy; classic still iterates
+`0..=NOTRUMP`.
+
+**Implementation note, because it is the whole cost of the feature.** Suit
+membership stops being `card // NRANK` while Grand is trump, which is the
+deepest shared invariant in both implementations. It is expressed once, as
+`esuit(card, trump)`, and everything else derives: `beats`, `legal_moves`,
+`Knowledge::hand_void` (five classes, not four — a trump void is a real fact
+about a hand), the determinizer's partition, the solver's equivalence collapse
+(all four tens are mutually interchangeable; a suit loses its ten), and the
+wire reader's void inference. `esuit` is the identity `suit` under every other
+contract, and both suites assert that over the whole card space rather than
+sampling it.
 
 ## The auction
 
@@ -68,10 +105,10 @@ the standing one. Whoever holds the last bid declares.
 Legal values are the products {base × level}, and the ladder is DERIVED from
 the bases rather than typed out — this paragraph originally enumerated it by
 hand, claimed "every integer 2–10", and counted 43 rungs, and all of that was
-wrong. The real ladder under the colour-priced table is **28 rungs from 2 to
+wrong. The real ladder under the colour-priced table is **32 rungs from 2 to
 60**:
 
-    2 3 4 5 6 8 9 10 12 14 15 16 18 20 21 22 24 25 27 30 33 35 36 40 45 50 55 60
+    2 3 4 5 6 8 9 10 12 14 15 16 18 20 21 22 24 25 27 28 30 32 33 35 36 40 44 45 48 50 55 60
 
 Density is good through the playable range — 7 is the only gap below ten,
 because it is a multiple of no base — and thins exactly where hands get rare,

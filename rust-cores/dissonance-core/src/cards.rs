@@ -32,8 +32,34 @@ pub const NSUIT: u8 = 4;
 pub const NCARD: u8 = NRANK * NSUIT;
 /// Sentinel denomination meaning "no trump".
 pub const NOTRUMP: u8 = 4;
+/// Sentinel denomination meaning GRAND: the four tens are trump and belong to
+/// NO suit — Skat's jack rule, transplanted onto the ten.
+///
+/// 6, NOT 5. 5 is `auction::NULL_DENOM`, the marker left on games saved before
+/// Null stopped being a bid; reusing it would silently re-read one of those as
+/// a Grand contract, which is a different trump AND a different follow-suit
+/// rule. Nothing else about the number matters — it is never arithmetic.
+pub const GRAND: u8 = 6;
 /// A card slot whose identity is hidden from the observer.
 pub const UNKNOWN: u8 = 255;
+
+/// The rank that becomes trump under Grand. DERIVED: `RANK_CH` always ends
+/// `T J Q K A`, so the ten sits five from the top on every deck width, and a
+/// literal 3 would be wrong under three of the four `rank*` builds.
+pub const TEN: u8 = NRANK - 5;
+
+/// Follow-suit classes: the four real suits plus one for Grand's trump. A
+/// card's class is its suit under every contract but Grand, so everything
+/// below collapses to plain `suit` the moment `trump != GRAND`.
+pub const TRUMP_CLASS: u8 = 4;
+pub const NFOLLOW: usize = 5;
+
+/// The playable denominations, in ladder order — the values `State::trump` can
+/// legitimately take. Note `NULL_DENOM` is absent: it is a scoring outcome,
+/// never a trump.
+pub const DENOMS: [u8; 6] = [0, 1, 2, 3, NOTRUMP, GRAND];
+/// Width of an array indexed by a wire denomination.
+pub const NDENOM_SLOTS: usize = GRAND as usize + 1;
 
 /// Cards dealt to each player: 7 in hand + three 2-card piles. Fixed, so that
 /// widening the deck changes ONLY the out-of-play count and never the shape of
@@ -55,9 +81,63 @@ const fn suit_masks() -> [Mask; 4] {
 }
 pub const SUIT_MASK: [Mask; 4] = suit_masks();
 
+const fn ten_mask() -> Mask {
+    let mut m: Mask = 0;
+    let mut s = 0u8;
+    while s < NSUIT {
+        m |= (1 as Mask) << (s * NRANK + TEN);
+        s += 1;
+    }
+    m
+}
+/// The four tens — Grand's entire trump suit.
+pub const TEN_MASK: Mask = ten_mask();
+
 #[inline(always)]
 pub fn suit(c: u8) -> u8 {
     c / NRANK
+}
+
+/// The suit a card belongs to FOR FOLLOWING, under this contract.
+///
+/// Identical to `suit` under every contract but Grand, where the four tens
+/// leave their suits entirely and become a fifth one. That is the whole of the
+/// rules change: holding only the ten of diamonds when diamonds are led makes
+/// you VOID in diamonds, and leading a ten obliges the opponent to follow with
+/// a ten if they hold one.
+#[inline(always)]
+pub fn esuit(c: u8, trump: u8) -> u8 {
+    if trump == GRAND && rank(c) == TEN {
+        TRUMP_CLASS
+    } else {
+        c / NRANK
+    }
+}
+
+/// Which follow-suit class ruffs, or 255 when none does (no-trump).
+#[inline(always)]
+pub fn trump_class(trump: u8) -> u8 {
+    if trump == GRAND {
+        TRUMP_CLASS
+    } else if trump < NOTRUMP {
+        trump
+    } else {
+        255
+    }
+}
+
+/// Every card in a follow-suit class. Under Grand a suit is its eight cards
+/// MINUS its ten, and the trump class is the four tens.
+#[inline(always)]
+pub fn follow_mask(cls: u8, trump: u8) -> Mask {
+    if trump != GRAND {
+        return SUIT_MASK[cls as usize];
+    }
+    if cls == TRUMP_CLASS {
+        TEN_MASK
+    } else {
+        SUIT_MASK[cls as usize] & !TEN_MASK
+    }
 }
 
 #[inline(always)]

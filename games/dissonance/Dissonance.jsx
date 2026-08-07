@@ -27,8 +27,14 @@ const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
 const RANKS = ["7", "8", "9", "10", "J", "Q", "K", "A"];
 // Denominations are RANKED left to right: a same-level overtake must name one
 // further right. Null is the top rung and exists only at level 6.
-const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT", "Null"];
-const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump", "Null — win no +2 trick"];
+// Indexed by DENOMINATION, so index 5 is the legacy Null marker and Grand
+// sits at 6 rather than beside no-trump. A dense array is what the wire
+// hands us; the gap is the point, not an oversight.
+const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT", "Null", "Grand"];
+const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump",
+  "Null — win no +2 trick", "Grand (the four 10s are trump)"];
+// The two reds, for the one bit of colour the labels carry.
+const RED_DENOM = (d) => d === 1 || d === 2;
 const NOTRUMP = 4;
 // Null is a CONSOLATION, not a contract: take no +2 trick as declarer and you
 // score this instead of being set, whatever you actually declared. There is no
@@ -186,7 +192,7 @@ function ContractChip({ game, nameOf, sharpBonus }) {
   const a = game.auction || {};
   if (!a.level) return null;
   const ct = game.contract || {};
-  const red = a.denom === 1 || a.denom === 2;
+  const red = RED_DENOM(a.denom);
   const doubling = ct.re ? 4 : ct.kontra ? 2 : 1;
   const parts = multParts(ct);
   return (
@@ -254,8 +260,13 @@ function SkatStake({ game, nameOf, rows }) {
 function levelsFor(value, bases, maxLevel) {
   if (!value || !bases?.length || !maxLevel) return [];
   return bases
-    .map((base, denom) => ({ denom, level: Math.max(1, Math.ceil(value / base)) }))
-    .filter((x) => x.level <= maxLevel);
+    // A base of 0 marks a denomination that is NOT on the ladder (Null). Left
+    // in, it divides to Infinity and only survives because the level cap
+    // happens to drop it -- filter it explicitly rather than rely on that.
+    .map((base, denom) => (base > 0
+      ? { denom, level: Math.max(1, Math.ceil(value / base)) }
+      : null))
+    .filter((x) => x && x.level <= maxLevel);
 }
 
 /** What a number commits its winner to, per denomination. Rendered for the
@@ -268,7 +279,7 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
     <div className="dis-clears">
       <span className="muted">{prefix}</span>
       {levelsFor(value, bases, maxLevel).map((x) => (
-        <span key={x.denom} className={`dis-clear${x.denom === 1 || x.denom === 2 ? " red" : ""}`}>
+        <span key={x.denom} className={`dis-clear${RED_DENOM(x.denom) ? " red" : ""}`}>
           {x.level}{DENOM_LABEL[x.denom]}
         </span>
       ))}
@@ -291,7 +302,7 @@ function ContractLine({ game }) {
       : <span className="muted">no bid yet</span>;
   }
   if (!a.level) return <span className="muted">no contract yet</span>;
-  const red = a.denom === 1 || a.denom === 2;
+  const red = RED_DENOM(a.denom);
   return (
     <span className="dis-contract">
       <b>{a.level}</b>
@@ -857,7 +868,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <span className="cm-hint">
                 {newMode === "skat"
                   ? "Bid a number; name the game only after you win it. Then Hand, Sharp, Open — and their Kontra."
-                  : "Bid a level and a denomination, ranked ♣ < ♦ < ♥ < ♠ < NT < Null."}
+                  : "Bid a level and a denomination, ranked ♣ < ♦ < ♥ < ♠ < NT."}
               </span>
             </CmRow>
             <div className="cm-footer">
@@ -1199,7 +1210,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     <div className="dis-denoms">
                       {d.denoms.map((x) => (
                         <button key={x.denom}
-                          className={`${declDenom === x.denom ? "on " : ""}${x.denom === 1 || x.denom === 2 ? "red" : ""}`}
+                          className={`${declDenom === x.denom ? "on " : ""}${RED_DENOM(x.denom) ? "red" : ""}`}
                           title={`${DENOM_NAME[x.denom]} — base ${x.base}, so at least level ${x.min_level}`}
                           // Switching denomination resets the announcements: the
                           // level moves with it, and a stale Open without its

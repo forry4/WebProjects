@@ -59,16 +59,18 @@ def test_every_rung_is_a_base_times_a_level_or_null():
     against the generator.
     """
     products = {E.SKAT_BASE[d] * lvl
-                for d in range(E.NOTRUMP + 1)
+                for d in E.SKAT_DENOMS
                 for lvl in range(E.MIN_LEVEL, E.MAX_LEVEL + 1)}
     for v in E.SKAT_VALUES:
         assert v in products or v == E.SKAT_NULL_VALUE, v
     assert E.SKAT_VALUES == sorted(set(E.SKAT_VALUES)), "no duplicate rungs"
     # DERIVED from the bases, not written as literals: the colour re-pricing
     # moved the ceiling from 6x12 to 5x12, and a literal would have had to be
-    # hand-edited to notice.
-    assert E.SKAT_VALUES[0] == min(E.SKAT_BASE)
-    assert E.SKAT_VALUES[-1] == max(E.SKAT_BASE) * E.MAX_LEVEL
+    # hand-edited to notice. Over SKAT_DENOMS, never over the raw table -- that
+    # carries a 0 in Null's slot for "not on the ladder".
+    buyable = [E.SKAT_BASE[d] for d in E.SKAT_DENOMS]
+    assert E.SKAT_VALUES[0] == min(buyable)
+    assert E.SKAT_VALUES[-1] == max(buyable) * E.MAX_LEVEL
 
 
 def test_seven_is_the_ladders_only_hole_below_ten():
@@ -114,11 +116,185 @@ def test_the_price_table_is_two_tiers_by_COLOUR_plus_no_trump():
     level, choosing within one is a question about your cards again -- so the
     EQUALITIES below are the assertion, not an incidental consequence of it.
     """
-    clubs, diamonds, hearts, spades, notrump = E.SKAT_BASE
+    clubs, diamonds, hearts, spades, notrump = (
+        E.SKAT_BASE[d] for d in (0, 1, 2, 3, E.NOTRUMP))
     assert diamonds == hearts, "the two reds are priced identically"
     assert clubs == spades, "the two blacks are priced identically"
-    assert diamonds < clubs < notrump, "red cheap, black dearer, no-trump dearest"
+    assert diamonds < clubs < E.SKAT_BASE[E.GRAND] < notrump, (
+        "red cheap, black dearer, Grand above them, no-trump dearest")
     assert notrump == max(E.SKAT_BASE), "no-trump at MAX_LEVEL is the top rung"
+    assert E.SKAT_BASE[E.NULL_DENOM] == 0, (
+        "Null is not on the ladder, and a base of 0 is how the table says so")
+
+
+# --- Grand: the four tens are trump, and belong to no suit -----------------
+#
+# Only the skat auction can buy it, but the CARD PLAY is shared with classic
+# mode, so these drive `beats` / `legal_moves` directly rather than through an
+# auction. The one thing every case below turns on: `esuit` is `suit` under
+# every contract but Grand.
+
+
+def _card(s: int, r: int) -> int:
+    return s * E.NRANK + r
+
+
+_TENS = [_card(s, E.TEN_RANK) for s in range(4)]
+
+
+def test_the_ten_is_derived_from_the_deck_not_written_as_an_index():
+    """A literal 3 is wrong on any deck but this one, and the rank list is what
+    actually says which index is the ten."""
+    assert E.RANK_NAMES[E.TEN_RANK] == "10"
+    assert all(E.card_name(c).startswith("10") for c in _TENS)
+
+
+def test_grand_is_priced_between_the_black_suits_and_no_trump():
+    """Four trumps, of which ~0.75 sit out of play on an average deal, is
+    no-trump with a handful of wild cards -- not a suit game with a long
+    trump. The price says so."""
+    assert E.SKAT_BASE[E.GRAND] == 4
+    assert E.SKAT_BASE[3] < E.SKAT_BASE[E.GRAND] < E.SKAT_BASE[E.NOTRUMP]
+    assert E.GRAND in E.SKAT_DENOMS
+    assert 12 in E.SKAT_VALUES and E.skat_min_level(E.GRAND, 12) == 3
+
+
+def test_grand_does_not_collide_with_the_legacy_null_marker():
+    """5 is NULL_DENOM, left on saves from before Null stopped being a bid.
+    Reusing it for Grand would silently re-read one of those as a Grand
+    contract -- a different trump AND a different follow-suit rule."""
+    assert E.GRAND != E.NULL_DENOM
+    assert E.NULL_DENOM not in E.SKAT_DENOMS
+    g = _declare_phase_at(12)
+    with pytest.raises(ValueError):
+        E.apply_declare(g, g["auction"]["declarer"], E.NULL_DENOM, 3)
+
+
+def test_the_second_ten_played_wins_whichever_two_they_are():
+    """Grand's trumps are unrankable -- they are all tens -- so the order they
+    are PLAYED in is the only thing that can decide, and the follower takes it.
+
+    Which makes leading a ten a way to LOSE a trick on purpose. Seven of the
+    thirteen tricks are worth -1, so that is a tool, not a penalty.
+    """
+    for led in _TENS:
+        for follow in _TENS:
+            if led == follow:
+                continue
+            assert E.beats(led, follow, E.GRAND), (
+                f"{E.card_name(follow)} answering {E.card_name(led)}")
+
+
+def test_a_ten_ruffs_but_a_ten_lead_is_never_ruffed():
+    ace_of_spades, king_of_spades = _card(3, 7), _card(3, 6)
+    assert E.beats(ace_of_spades, _TENS[0], E.GRAND), "a ten ruffs from any suit"
+    assert not E.beats(_TENS[0], ace_of_spades, E.GRAND), "nothing over-ruffs a ten"
+    assert E.beats(ace_of_spades, king_of_spades, E.GRAND) is False
+    assert E.beats(king_of_spades, ace_of_spades, E.GRAND) is True
+
+
+def test_a_ten_is_not_a_card_of_its_own_suit_under_grand():
+    """The rule with all the consequences. The ten of diamonds does not answer
+    a diamond lead, does not beat a lower diamond as a diamond, and its absence
+    from the suit is what makes a hand VOID."""
+    ten_d, nine_d, seven_d = _TENS[1], _card(1, 2), _card(1, 0)
+    assert E.beats(nine_d, ten_d, E.GRAND), "it takes the trick as a TRUMP"
+    assert not E.beats(ten_d, nine_d, E.GRAND), "a diamond cannot beat a trump"
+    assert E.esuit(ten_d, E.GRAND) == E.TRUMP_CLASS
+    assert E.esuit(seven_d, E.GRAND) == E.suit(seven_d) == 1
+
+
+def _grand_at(hand: list[int], led: int) -> dict:
+    """A play position with `hand` at seat 1 and `led` on the table."""
+    g = E.new_game(["alice", "bob"], None, opener=0, mode="skat")
+    g["phase"], g["trump"] = "play", E.GRAND
+    g["hands"][1], g["piles"][1] = sorted(hand), [[], [], []]
+    g["led"], g["leader"] = led, 0
+    return g
+
+
+def test_follow_suit_reads_the_grand_trump_as_a_fifth_suit():
+    ten_d, seven_d, queen_h = _TENS[1], _card(1, 0), _card(2, 5)
+    ace_d = _card(1, 7)
+
+    # Holding the ten of diamonds does NOT discharge a diamond lead.
+    g = _grand_at([ten_d, seven_d, queen_h], ace_d)
+    assert E.legal_moves(g, 1) == [seven_d]
+
+    # Drop the seven and the same hand is void: the ten may ruff, or not.
+    g = _grand_at([ten_d, queen_h], ace_d)
+    assert E.legal_moves(g, 1) == sorted([ten_d, queen_h]), "may ruff, never forced"
+
+    # A ten LED is a trump lead, and a trump must be followed.
+    g = _grand_at([ten_d, queen_h], _TENS[0])
+    assert E.legal_moves(g, 1) == [ten_d]
+
+    # ...and with no ten at all, anything goes.
+    g = _grand_at([seven_d, queen_h], _TENS[0])
+    assert E.legal_moves(g, 1) == sorted([seven_d, queen_h])
+
+
+def test_every_other_contract_plays_exactly_as_it_did_before_grand_existed():
+    """The regression that matters most: `esuit` collapses to `suit` under all
+    five old denominations, so this asserts the OLD rule over the whole 32x32
+    card space rather than sampling it."""
+    for trump in list(range(E.NOTRUMP)) + [E.NOTRUMP]:
+        for led in range(E.NCARD):
+            for follow in range(E.NCARD):
+                ls, fs = E.suit(led), E.suit(follow)
+                if fs == ls:
+                    want = E.rank(follow) > E.rank(led)
+                elif trump < E.NOTRUMP:
+                    want = fs == trump and ls != trump
+                else:
+                    want = False
+                assert E.beats(led, follow, trump) is want, (led, follow, trump)
+
+
+def test_a_grand_round_plays_from_the_declaration_to_a_scored_result():
+    """End to end through the real phase machine, not a hand-built dict: the
+    auction has to OFFER Grand, `_start_play` has to put GRAND in `trump`, and
+    thirteen tricks have to score to the pool under the fifth-suit rule."""
+    from games.dissonance import bot
+
+    g = _skat(opener=0)
+    E.apply_skat_bid(g, 0, 12)
+    E.apply_pass(g, 1)
+    E.apply_hand(g, 0)
+    assert any(d["denom"] == E.GRAND for d in E.declare_options(g)["denoms"])
+    E.apply_declare(g, 0, E.GRAND, 3)          # 4 x 3 = 12
+    E.apply_kontra(g, 1, False)
+    assert g["phase"] == "play" and g["trump"] == E.GRAND
+
+    guard = 0
+    while g["phase"] == "play":
+        seat = E.to_play(g)
+        E.apply_play(g, seat, bot.choose_card(g, seat))
+        guard += 1
+        assert guard <= E.NTRICKS * 2
+    assert g["phase"] == "over"
+    if not g["result"]["ended_early"]:
+        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.POOL
+    assert g["result"]["denom"] == E.GRAND
+    assert g["result"]["base"] == E.SKAT_BASE[E.GRAND]
+
+
+def test_a_grand_game_survives_the_state_json_codec():
+    """`trump` is 6 here, outside the 0..4 every other contract uses, and it
+    rides the compaction boundary like any other int."""
+    from games.dissonance import persist
+
+    g = _skat(opener=0)
+    E.apply_skat_bid(g, 0, 12)
+    E.apply_pass(g, 1)
+    E.apply_hand(g, 0)
+    E.apply_declare(g, 0, E.GRAND, 3)
+    E.apply_kontra(g, 1, False)
+    E.apply_play(g, 0, E.legal_moves(g, 0)[0])
+
+    back = persist.expand_state(json.loads(json.dumps(persist.compact_state(g))))
+    assert back["trump"] == E.GRAND
+    assert E.legal_moves(back, E.to_play(back)) == E.legal_moves(g, E.to_play(g))
 
 
 # --- the auction -----------------------------------------------------------
@@ -722,7 +898,7 @@ def test_the_bots_talon_swap_is_valued_in_a_real_denomination():
     assert g["auction"]["denom"] == -1, "the premise: nothing is declared yet"
 
     d = bot.swap_denom(g, decl)
-    assert 0 <= d <= E.NOTRUMP, d
+    assert d in E.SKAT_DENOMS, d
     kind, move = bot.act(g, decl, None)
     assert kind == "move" and move["kind"] == "swap"
     # The action the bot actually takes is the one that denomination implies.

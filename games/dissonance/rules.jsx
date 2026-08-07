@@ -121,18 +121,37 @@ export default function DissonanceRules() {
 				</p>
 				<p>
 					A game is worth <b>base × level</b>, and the price is set by
-					<i> colour</i>: <b>the reds ♦♥ cost 2, the blacks ♠♣ cost 3, and
-					no-trump costs 5</b>. The level means exactly what it does in classic
-					mode — the trick points you promise to score.
+					<i> colour</i>: <b>the reds ♦♥ cost 2, the blacks ♠♣ cost 3, Grand
+					costs 4 and no-trump costs 5</b>. The level means exactly what it does
+					in classic mode — the trick points you promise to score.
+				</p>
+				<p>
+					<b>Grand</b> is a sixth game, and skat mode is the only place you can
+					buy it. The four <b>10s are trump</b> and they leave their suits
+					entirely: the 10♦ is <i>not</i> a diamond, so it will not answer a
+					diamond lead, and a hand whose only diamond is the 10 is <b>void</b> in
+					diamonds. Lead a 10 and your opponent must play a 10 if they hold one.
 				</p>
 				<RulesTip>
 					<p>
-						<b>Collisions are the point.</b> 12 is ♦6, and ♥6, and ♠4, and ♣4. Bid
-						12 and your opponent learns the price of your hand, never its shape. A
-						hand playable in two denominations can bid higher <i>safely</i> than an
-						equally strong hand playable in one — flexibility becomes a resource
-						with a price. The two suits of a colour cost the same, so choosing
-						between them is a question about your cards and nothing else.
+						<b>The second 10 played wins.</b> They are all tens, so there is
+						nothing to rank them by — which makes leading one a way to
+						<i> lose</i> a trick on purpose. Seven of the thirteen tricks are
+						worth −1, so that is a tool, not a penalty. With only four trumps in
+						the deck (and some of them usually out of play), Grand plays much
+						closer to no-trump than to a suit game — which is why it is priced
+						just below it.
+					</p>
+				</RulesTip>
+				<RulesTip>
+					<p>
+						<b>Collisions are the point.</b> 12 is ♦6, and ♥6, and ♠4, and ♣4,
+						and Grand 3. Bid 12 and your opponent learns the price of your hand,
+						never its shape. A hand playable in two denominations can bid higher
+						<i> safely</i> than an equally strong hand playable in one —
+						flexibility becomes a resource with a price. The two suits of a
+						colour cost the same, so choosing between them is a question about
+						your cards and nothing else.
 					</p>
 				</RulesTip>
 				<RulesDefs items={[

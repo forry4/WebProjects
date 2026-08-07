@@ -1624,6 +1624,19 @@ try {
 				.then(() => true).catch(() => false);
 			check("a selected number shows every game that clears it", clears);
 
+			// GRAND has to be among them. It is served like every other
+			// denomination (a base in /catalog, a row in `declare`), so a
+			// frontend that quietly dropped it — a label array one short, a
+			// filter that stopped at no-trump — would render a perfectly normal
+			// hint with a game missing from it and nothing red anywhere.
+			const clearLabels = await page.evaluate(() =>
+				[...document.querySelectorAll(".dis-clears .dis-clear")].map((s) => s.textContent.trim()));
+			check("the clears hint offers Grand alongside the suits",
+				clearLabels.some((s) => s.includes("Grand")), JSON.stringify(clearLabels));
+			check("no clears entry renders an unnamed denomination",
+				clearLabels.length > 0 && clearLabels.every((s) => /\d+(♣|♦|♥|♠|NT|Grand)$/.test(s)),
+				JSON.stringify(clearLabels));
+
 			await page.getByRole("button", { name: /^Bid \d+$/ }).first()
 				.click({ timeout: 10_000 }).catch(() => {});
 			// The bot answers, and the round moves on — to its own bid, or to
@@ -1649,9 +1662,19 @@ try {
 			await sleep(450);
 			return true;
 		};
+		let grandPicked = false;
 		for (let i = 0; i < 60; i++) {
 			if (await page.locator(".dis-lasttrick").count() > 0) break;
 			if (await step(/^Play Hand/)) continue;           // talon
+			// Pick GRAND at the declaration when it is offered, so this gate
+			// plays a real Grand round rather than only rendering its label:
+			// the tens are trump and belong to no suit, which is the one
+			// contract where follow-suit differs, and it is worth having a
+			// browser drive it end to end against the live engine.
+			if (!grandPicked && await step(/^Grand×\d+$/)) {
+				grandPicked = true;
+				continue;
+			}
 			if (await step(/^Declare$/)) continue;            // declaration
 			if (await step(/^Let it stand$/)) continue;       // defender declines Kontra
 			if (await step(/^Accept$/)) continue;             // declarer declines Re

@@ -4,6 +4,7 @@ use dissonance::dd::Dd;
 use dissonance::game::{play_round, Bot, Game};
 use dissonance::rng::Rng;
 use dissonance::state::*;
+use dissonance::view::{Knowledge, View};
 
 fn all_state_cards(s: &State) -> Vec<u8> {
     let mut v = Vec::new();
@@ -92,8 +93,11 @@ fn a_round_plays_every_card_and_scores_to_the_pool() {
 #[test]
 fn follow_suit_is_mandatory_and_pile_tops_count() {
     let mut rng = Rng::new(4242);
-    for _ in 0..300 {
-        let mut g = Game::deal(&mut rng, 2, 0);
+    for i in 0..300 {
+        // Every trump, GRAND included -- it is the only one under which
+        // following means something other than matching the suit, so a fixed
+        // trump of 2 would have left the whole rule ungated here.
+        let mut g = Game::deal(&mut rng, DENOMS[i % DENOMS.len()], 0);
         let mut r = Rng::new(7);
         while !g.over() {
             let p = g.s.to_play() as usize;
@@ -101,11 +105,18 @@ fn follow_suit_is_mandatory_and_pile_tops_count() {
             let n = g.s.legal(&mut m);
             assert!(n > 0 && n <= 10, "at most 7 hand + 3 pile tops");
             if g.s.led >= 0 {
-                let ls = suit(g.s.led as u8);
-                let have = g.s.playable(p) & SUIT_MASK[ls as usize];
+                // esuit, not suit: under GRAND a ten discharges a TRUMP lead
+                // and nothing else, so the raw suit would call a legal move
+                // illegal on one deal in six.
+                let ls = esuit(g.s.led as u8, g.s.trump);
+                let have = g.s.playable(p) & follow_mask(ls, g.s.trump);
                 if have != 0 {
                     for &c in &m[..n] {
-                        assert_eq!(suit(c), ls, "must follow when able, piles included");
+                        assert_eq!(
+                            esuit(c, g.s.trump),
+                            ls,
+                            "must follow when able, piles included"
+                        );
                     }
                     assert_eq!(m[..n].len() as u32, have.count_ones());
                 }
@@ -127,6 +138,110 @@ fn trick_winner_rules() {
     assert!(!beats(card(0, 6), card(1, 6), 2));
     // A trump lead is not beaten by a side suit.
     assert!(!beats(card(2, 0), card(0, 6), 2));
+}
+
+/// GRAND: the four tens are trump and belong to no suit, and the SECOND ten
+/// played wins. Mirrors `test_skat.py`'s Grand block card for card — the two
+/// implementations of this rule are exactly what drifts.
+#[test]
+fn grand_makes_the_tens_a_fifth_suit_and_the_second_one_played_wins() {
+    let ten = |s: u8| card(s, TEN);
+    assert_eq!(RANK_CH[TEN as usize], "T", "TEN is derived, not a literal");
+
+    // Unrankable against each other, so the follower takes it -- both ways
+    // round, for every pair.
+    for a in 0..4u8 {
+        for b in 0..4u8 {
+            if a != b {
+                assert!(beats(ten(a), ten(b), GRAND), "the second ten wins");
+            }
+        }
+    }
+    // A ten ruffs from anywhere; nothing over-ruffs a ten lead.
+    assert!(beats(card(3, 7), ten(0), GRAND));
+    assert!(!beats(ten(0), card(3, 7), GRAND));
+    // A ten is NOT a card of its own suit: it ruffs a diamond lead rather than
+    // following it, and a diamond cannot beat it.
+    assert!(beats(card(1, 7), ten(1), GRAND));
+    assert!(!beats(ten(1), card(1, 7), GRAND));
+    // Side suits behave exactly as at no-trump.
+    assert!(beats(card(1, 2), card(1, 5), GRAND));
+    assert!(!beats(card(1, 5), card(0, 7), GRAND));
+
+    // Classes, and the masks built from them.
+    assert_eq!(esuit(ten(1), GRAND), TRUMP_CLASS);
+    assert_eq!(esuit(card(1, 0), GRAND), 1);
+    assert_eq!(esuit(ten(1), NOTRUMP), 1, "only GRAND moves a ten");
+    assert_eq!(follow_mask(TRUMP_CLASS, GRAND), TEN_MASK);
+    assert_eq!(follow_mask(1, GRAND).count_ones(), NRANK as u32 - 1);
+    assert_eq!(follow_mask(1, NOTRUMP), SUIT_MASK[1]);
+}
+
+/// Every other contract plays EXACTLY as it did before Grand existed. Asserted
+/// over the whole card space rather than sampled: `esuit` sits on the hottest
+/// path in the solver, and a regression here is a different game, not a worse
+/// bot.
+#[test]
+fn no_other_contract_moved_when_grand_arrived() {
+    for &trump in &[0u8, 1, 2, 3, NOTRUMP] {
+        for led in 0..NCARD {
+            for follow in 0..NCARD {
+                let (ls, fs) = (suit(led), suit(follow));
+                let want = if fs == ls {
+                    rank(follow) > rank(led)
+                } else if trump < NOTRUMP {
+                    fs == trump && ls != trump
+                } else {
+                    false
+                };
+                assert_eq!(beats(led, follow, trump), want, "{led} {follow} {trump}");
+            }
+        }
+    }
+}
+
+/// A trump void in a Grand game is a real, recordable fact — and it was the
+/// thing a `[bool; 4]` `hand_void` would have silently dropped, leaving the
+/// determinizer dealing tens into a hand that had proved it held none.
+#[test]
+fn a_grand_trump_void_is_inferred_and_respected_by_the_determinizer() {
+    let mut rng = Rng::new(0xB0A7);
+    let mut g = Game::deal(&mut rng, GRAND, 0);
+    let mut kn = Knowledge::default();
+
+    // Drive to a position where someone showed out of trump, or ran out of deal.
+    let mut r = Rng::new(11);
+    let mut seen = false;
+    while !g.over() {
+        let p = g.s.to_play() as usize;
+        let mut m = [0u8; 16];
+        let n = g.s.legal(&mut m);
+        let c = m[r.below(n)];
+        kn.observe(&g.s, p, c);
+        g.apply(c);
+        if kn.hand_void[0][TRUMP_CLASS as usize] || kn.hand_void[1][TRUMP_CLASS as usize] {
+            seen = true;
+            break;
+        }
+    }
+    assert!(
+        seen,
+        "no trump void arose -- with four tens against thirteen tricks one \
+         always does, so this is the harness failing, not the rule"
+    );
+
+    let void_seat = if kn.hand_void[0][TRUMP_CLASS as usize] { 0 } else { 1 };
+    let mut v = View::of(&g, 1 - void_seat);
+    v.kn = kn;
+    let mut buf = Vec::new();
+    for _ in 0..16 {
+        let d = v.determinize(&mut rng, &mut buf);
+        assert_eq!(
+            d.hand[void_seat] & TEN_MASK,
+            0,
+            "dealt a ten into a hand that showed out of trump"
+        );
+    }
 }
 
 /// Reference minimax with no table, no pruning, no move ordering.
@@ -158,8 +273,19 @@ fn solver_matches_brute_force() {
     // reference search is affordable, then compare exactly.
     let mut dd = Dd::new(18);
     let mut checked = 0;
-    for seed in 0..40u64 {
-        let mut g = Game::deal(&mut Rng::new(seed), (seed % 5) as u8, (seed % 2) as u8);
+    let mut grand_seeds = 0;
+    for seed in 0..48u64 {
+        // Over DENOMS, so GRAND is covered. It is not decoration here: the
+        // equivalence collapse prunes on the follow-suit CLASS, and Grand is
+        // the only trump where that is not the suit -- all four tens become
+        // mutually interchangeable while a suit loses its ten. A collapse that
+        // got either direction wrong would prune a move that was not really
+        // equivalent, and the only symptom is a slightly wrong value.
+        let trump = DENOMS[(seed % DENOMS.len() as u64) as usize];
+        if trump == GRAND {
+            grand_seeds += 1;
+        }
+        let mut g = Game::deal(&mut Rng::new(seed), trump, (seed % 2) as u8);
         let mut r = Rng::new(seed ^ 0xABCD);
         while g.s.trick < 8 {
             let mut m = [0u8; 16];
@@ -170,7 +296,8 @@ fn solver_matches_brute_force() {
         assert_eq!(dd.solve(&g.s), naive(&g.s), "seed {seed}");
         checked += 1;
     }
-    assert_eq!(checked, 40);
+    assert_eq!(checked, 48);
+    assert!(grand_seeds > 0, "the trump sweep never reached Grand");
 }
 
 #[test]

@@ -17,11 +17,15 @@
 //! rather than played by hand-written heuristics, and we can read the
 //! resulting strategy off instead of guessing it.
 
-use crate::cards::NOTRUMP;
+use crate::cards::{DENOMS, NDENOM_SLOTS, NOTRUMP};
 use std::collections::HashMap;
 
 /// Highest biddable level: every positive trick taken and no negative one.
 pub const MAX_LEVEL: u8 = if crate::state::POSITIVE_IS_ODD { 14 } else { 12 };
+/// Denominations the CLASSIC auction ranks and can name. Grand is not one
+/// of them -- it is priced, not ranked, so only the skat ladder buys it.
+/// The eval matrices below are indexed by TRUMP instead, and there are six
+/// of those; see `NDENOM_SLOTS`.
 pub const NDEN: usize = 5;
 
 /// NULL: "I will take no trick at all." Skat's escape hatch for a hand with no
@@ -225,10 +229,15 @@ pub fn contract_score(cfg: &ScoreCfg, n: u8, declarer_pts: i32) -> (i32, i32) {
 pub struct HandEval {
     /// Most the declarer can guarantee against a defence trying to hold them
     /// down. Decides whether a contract can be MADE.
-    pub pts: Vec<[[i8; NDEN]; 2]>,
+    ///
+    /// INDEXED BY TRUMP, not by classic denomination -- the two stopped being
+    /// the same thing when Grand arrived. `NULL_DENOM`'s slot is present and
+    /// always zero (Null is a separate search, in `null` below); iterate
+    /// `DENOMS` rather than the array's length.
+    pub pts: Vec<[[i8; NDENOM_SLOTS]; 2]>,
     /// Least the declarer can hold themselves to against a defence trying to
     /// BURST them. Decides how far they overshoot. Empty when `over` is 0.
-    pub floor: Vec<[[i8; NDEN]; 2]>,
+    pub floor: Vec<[[i8; NDENOM_SLOTS]; 2]>,
     /// Whether each player could make NULL in this world. Empty when Null is
     /// off — it is a separate search, not a column of `pts`.
     pub null: Vec<[bool; 2]>,
@@ -633,12 +642,12 @@ pub fn eval_hand(
 ) -> HandEval {
     let mut buf = Vec::new();
     let mut pts = Vec::with_capacity(k);
-    let mut floor: Vec<[[i8; NDEN]; 2]> = Vec::with_capacity(k);
+    let mut floor: Vec<[[i8; NDENOM_SLOTS]; 2]> = Vec::with_capacity(k);
     let mut null: Vec<[bool; 2]> = Vec::with_capacity(k);
     for _ in 0..k {
         let w = v.determinize(rng, &mut buf);
-        let mut row = [[0i8; NDEN]; 2];
-        let mut frow = [[0i8; NDEN]; 2];
+        let mut row = [[0i8; NDENOM_SLOTS]; 2];
+        let mut frow = [[0i8; NDENOM_SLOTS]; 2];
         if need_null {
             // Null is played at no trump, as in Skat: with a trump suit the
             // declarer gets a second way to be forced to win a trick.
@@ -673,7 +682,7 @@ pub fn eval_hand(
             null.push(nrow);
         }
         for declarer in 0..2usize {
-            for d in 0..NDEN {
+            for d in DENOMS.map(|d| d as usize) {
                 let s = State {
                     trump: d as u8,
                     trick: 0,

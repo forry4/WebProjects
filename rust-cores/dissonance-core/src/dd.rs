@@ -684,11 +684,19 @@ impl Dd {
         }
         let hand = s.hand[mover];
 
-        // Equivalence collapse: two cards of the same suit with no in-play card
-        // between them are interchangeable — but only if BOTH sit in hand.
-        // Two pile tops are never equivalent, because they cover different
-        // cards, and a hand card is never equivalent to a pile top for the
-        // same reason. Keep the lower of each run.
+        // Equivalence collapse: two cards of the same follow-suit CLASS with no
+        // in-play card between them are interchangeable — but only if BOTH sit
+        // in hand. Two pile tops are never equivalent, because they cover
+        // different cards, and a hand card is never equivalent to a pile top
+        // for the same reason. Keep the lower of each run.
+        //
+        // The class, not the suit, and under Grand that changes the answer in
+        // both directions. A ten is no longer between its own 9 and J, so those
+        // two ARE adjacent — reading the raw suit mask would find the ten
+        // sitting between them and refuse a collapse that is legal. And all
+        // four tens are mutually interchangeable (they cannot even be ranked
+        // against each other), which the trump class expresses and the four
+        // separate suit masks cannot.
         let mut kept = [0u8; 16];
         let mut score = [0i32; 16];
         let mut k = 0;
@@ -696,7 +704,9 @@ impl Dd {
         for i in 0..n {
             let c = moves[i];
             if self.use_equiv && hand & (1 << c) != 0 {
-                let below = SUIT_MASK[suit(c) as usize] & inplay & (((1 as Mask) << c) - 1);
+                let below = follow_mask(esuit(c, s.trump), s.trump)
+                    & inplay
+                    & (((1 as Mask) << c) - 1);
                 if below != 0 {
                     let lower = Mask::BITS - 1 - below.leading_zeros();
                     if hand & (1 << lower) != 0 {
@@ -716,7 +726,7 @@ impl Dd {
                     (false, true) => 100 - r,   // forced to win: pay the least
                 }
             } else {
-                let trumpish = s.trump < NOTRUMP && suit(c) == s.trump;
+                let trumpish = esuit(c, s.trump) == trump_class(s.trump);
                 if want_win {
                     r + if trumpish { 7 } else { 0 }
                 } else {

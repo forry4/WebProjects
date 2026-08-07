@@ -29,8 +29,7 @@
 //! and "can I duck in THIS trump" is a per-denomination question, where the old
 //! Null was always played at no trump.
 
-use crate::auction::NDEN;
-use crate::cards::NOTRUMP;
+use crate::cards::{DENOMS, NDENOM_SLOTS};
 use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::{State, POOL};
@@ -79,9 +78,11 @@ impl Option_ {
 #[derive(Clone, Copy, Default)]
 pub struct World {
     /// Most the declarer can guarantee, with both sides playing for points.
-    pub pts: [i32; NDEN],
+    /// Indexed by WIRE denomination, so Grand's slot is 6 and Null's 5 is a
+    /// hole nothing ever writes.
+    pub pts: [i32; NDENOM_SLOTS],
     /// Could the declarer take NO +2 trick, in that denomination as trump?
-    pub duck: [bool; NDEN],
+    pub duck: [bool; NDENOM_SLOTS],
 }
 
 /// The sampled deals AND what has been solved on them so far.
@@ -109,7 +110,7 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
     // seeds the next: the same hand is worth a similar amount in hearts and in
     // spades, and the first full solve pays for the other four.
     let mut guess = 0i16;
-    for d in 0..=NOTRUMP {
+    for d in DENOMS {
         if wanted & (1 << d) == 0 {
             continue;
         }
@@ -142,7 +143,9 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
 pub fn wanted_denoms(opts: &[Option_]) -> u8 {
     let mut m = 0u8;
     for o in opts {
-        if o.denom <= NOTRUMP {
+        // Membership, not a range check: 5 is Null, which is never a trump,
+        // and Grand's 6 sits above no-trump's 4 rather than beside it.
+        if DENOMS.contains(&o.denom) {
             m |= 1 << o.denom;
         }
     }
@@ -200,7 +203,7 @@ pub fn price(opts: &[Option_], worlds: &[World], have: u8) -> Vec<f64> {
     for w in worlds {
         for (i, o) in opts.iter().enumerate() {
             let d = o.denom as usize;
-            if d >= NDEN || have & (1 << d) == 0 {
+            if d >= NDENOM_SLOTS || have & (1 << d) == 0 {
                 continue;
             }
             sums[i] += o.payoff(w.pts[d], w.duck[d]) as f64;

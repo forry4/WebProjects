@@ -120,16 +120,22 @@ pub const NTRICKS: u8 = 13;
 /// Does `follow` beat `led`, given the trump denomination?
 #[inline(always)]
 pub fn beats(led: u8, follow: u8, trump: u8) -> bool {
-    let ls = suit(led);
-    let fs = suit(follow);
+    let ls = esuit(led, trump);
+    let fs = esuit(follow, trump);
     if fs == ls {
+        // Two Grand trumps cannot be ranked against each other — they are all
+        // tens — so the SECOND one played takes the trick. Leading a ten is
+        // therefore a way to LOSE a trick on purpose, which in a game where
+        // seven of the thirteen are worth -1 is a tool rather than a penalty.
+        if ls == TRUMP_CLASS {
+            return true;
+        }
         return rank(follow) > rank(led);
     }
-    if trump < NOTRUMP {
-        // Different suits: only a ruff can win, and only if the lead wasn't trump.
-        return fs == trump && ls != trump;
-    }
-    false
+    // Different classes: only a ruff can win, and only if the lead wasn't
+    // trump. At no-trump `t` is 255, which no class equals, so nothing ruffs.
+    let t = trump_class(trump);
+    fs == t && ls != t
 }
 
 impl State {
@@ -181,7 +187,7 @@ impl State {
         let p = self.to_play() as usize;
         let mut m = self.playable(p);
         if self.led >= 0 {
-            let f = m & SUIT_MASK[suit(self.led as u8) as usize];
+            let f = m & follow_mask(esuit(self.led as u8, self.trump), self.trump);
             if f != 0 {
                 m = f;
             }

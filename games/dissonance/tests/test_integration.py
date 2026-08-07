@@ -391,8 +391,12 @@ def test_the_catalog_matches_the_engine():
     assert cat["modes"] == list(E.MODES)
     assert cat["skat_bases"] == list(E.SKAT_BASE)
     assert cat["skat_values"] == list(E.SKAT_VALUES)
+    # A base of 0 marks a denomination that is NOT on the ladder (Null), so
+    # a client has to filter it out to reproduce the rungs -- which is what
+    # `levelsFor` does, and why this asserts the filtered form.
+    assert 0 in cat["skat_bases"], "the unbuyable slot ships as 0, not as a gap"
     assert set(cat["skat_values"]) == (
-        {b * lvl for b in cat["skat_bases"]
+        {b * lvl for b in cat["skat_bases"] if b > 0
          for lvl in range(cat["min_level"], cat["max_level"] + 1)}
         | {cat["skat_null_value"]})
 
