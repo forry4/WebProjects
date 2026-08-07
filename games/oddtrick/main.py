@@ -926,10 +926,10 @@ async def catalog():
         "short_penalty": engine.SHORT_PENALTY,
         # v2: ranked denominations, the Null contract, and the declarer swap.
         "ranked_denoms": True,
-        "null_denom": engine.NULL_DENOM,
-        "null_level": engine.NULL_LEVEL,
+        # Null is a CONSOLATION now, not a rung: no denomination, no level, no
+        # set price. What a client still needs is what it pays; the skat side of
+        # that already ships below with the rest of the price table.
         "null_make": engine.NULL_MAKE,
-        "null_set": engine.NULL_SET,
         "n_out": engine.N_OUT,
         "n_shown": engine.N_SHOWN,
         "difficulties": list(DIFFICULTIES),

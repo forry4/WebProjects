@@ -85,11 +85,39 @@ def test_trick_values_and_constant_sum():
 
 @pytest.mark.parametrize("seed", range(30))
 def test_every_card_is_played_and_points_sum_to_the_pool(seed):
+    """The conservation invariant, stated for a round that RAN TO THIRTEEN.
+
+    `pts` sums to POOL only over a completed round, and a round now stops the
+    moment the score can no longer change -- so this asserts the invariant on
+    the complete branch and asserts the STOP was legitimate on the other.
+    Neither branch is skipped: a round that ended early with a score that could
+    still have moved is exactly the bug worth catching.
+    """
     g = _play_out(E.new_game(["a", "b"], random.Random(seed)), random.Random(seed))
-    assert g["trick"] == E.NTRICKS
-    assert len(g["played"]) == 26
     assert not set(g["played"]) & set(g["out"]), "the out-of-play pair never enters"
-    assert sum(g["pts"]) == E.POOL
+    if g["trick"] == E.NTRICKS:
+        assert len(g["played"]) == 26
+        assert sum(g["pts"]) == E.POOL
+        assert not g["result"]["ended_early"]
+        return
+    r = g["result"]
+    assert r["ended_early"] and r["made"], "only a contract that cannot fail stops early"
+    # The floor it stopped on: no more +2 tricks, every remaining -1 taken.
+    neg_left = sum(1 for t in range(g["trick"], E.NTRICKS) if E.trick_value(t) < 0)
+    assert g["pts"][r["declarer"]] - neg_left >= r["level"]
+
+
+def test_a_round_both_completes_and_settles_early_across_random_play():
+    """Non-vacuity for the branch above: if every random game ran to thirteen,
+    the early-end half of that test would be asserting nothing."""
+    complete = early = 0
+    for seed in range(60):
+        g = _play_out(E.new_game(["a", "b"], random.Random(seed)), random.Random(seed))
+        if g["trick"] == E.NTRICKS:
+            complete += 1
+        else:
+            early += 1
+    assert complete and early, f"{complete} complete, {early} early"
 
 
 def test_taking_every_trick_scores_worse_than_taking_the_even_ones():
@@ -174,23 +202,18 @@ def test_an_overtake_raises_by_at_most_two_or_outranks_at_the_same_level():
     assert E.can_bid(g, 1, 5, 0)[0] and E.can_bid(g, 1, 6, 1)[0]
 
 
-def test_null_is_a_single_rung_above_no_trump():
+def test_null_cannot_be_bid_at_all():
+    """It stopped being a purchase (2026-08-07). Every measurement of it as a
+    rung said the same thing -- overtaken away when cheap, unmakeable when dear
+    -- so it is a consolation that rides under every contract instead."""
     g = E.new_game(["a", "b"], random.Random(4))
-    E.apply_bid(g, 0, 5, 1)  # open 5 diamonds
-    bids = E.auction_options(g)["bids"]
-    assert [E.NULL_LEVEL, E.NULL_DENOM] in bids, "null is reachable from a 5-bid"
-    assert not any(d == E.NULL_DENOM and l != E.NULL_LEVEL for l, d in bids),         "null exists at exactly one rung"
-    E.apply_bid(g, 1, E.NULL_LEVEL, E.NULL_DENOM)
-    bids = E.auction_options(g)["bids"]
-    assert [6, 4] not in bids, "NT at 6 does not outrank Null at 6"
-    assert [7, 0] in bids and [8, 4] in bids, "levels 7-8 overtake Null"
-    assert not any(d == E.NULL_DENOM for _, d in bids), "null cannot be re-bid"
-
-
-def test_null_is_out_of_reach_from_a_low_bid():
-    g = E.new_game(["a", "b"], random.Random(4))
-    E.apply_bid(g, 0, 2, 0)
-    assert not E.can_bid(g, 1, E.NULL_LEVEL, E.NULL_DENOM)[0],         "a raise of 4 exceeds the cap even for Null"
+    for lvl in range(E.MIN_LEVEL, E.MAX_LEVEL + 1):
+        assert [lvl, E.NULL_DENOM] not in E.auction_options(g)["bids"]
+    assert not E.can_bid(g, 0, 6, E.NULL_DENOM)[0]
+    with pytest.raises(ValueError):
+        E.apply_bid(g, 0, 6, E.NULL_DENOM)
+    E.apply_bid(g, 0, 5, 1)
+    assert not any(d == E.NULL_DENOM for _, d in E.auction_options(g)["bids"]),         "and it is not reachable as an overtake either"
 
 
 def test_a_player_may_not_repeat_their_own_denomination_but_may_take_the_opponents():
@@ -202,8 +225,6 @@ def test_a_player_may_not_repeat_their_own_denomination_but_may_take_the_opponen
     # named it since. The budget is per-player, not shared.
     assert not E.can_bid(g, 0, 4, 0)[0], "seat 0 already named clubs"
     assert E.can_bid(g, 0, 4, 1)[0], "diamonds is untouched by seat 0"
-    # Null (denom 5) is absent not because it was named but because its rung
-    # (6) is beyond a 2-raise reach from the standing 3.
     assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [1, 2, 3, 4]
 
 
@@ -255,9 +276,9 @@ def test_result_is_internally_consistent(seed):
     r = g["result"]
     decl = r["declarer"]
     assert r["declarer_pts"] == g["pts"][decl]
-    if r["denom"] == E.NULL_DENOM:
-        assert r["made"] == (r["declarer_etricks"] == 0)
-        ds, fs = ((E.NULL_MAKE, 0) if r["made"] else (0, E.NULL_SET))
+    if r["null"]:
+        assert r["declarer_etricks"] == 0 and not r["made"]
+        ds, fs = E.NULL_MAKE, 0
     else:
         assert r["made"] == (r["declarer_pts"] >= r["level"])
         ds, fs = E.contract_score(r["level"], r["declarer_pts"])
@@ -379,38 +400,60 @@ def test_the_bot_beats_random_play():
     assert wins / games > 0.7, f"greedy only won {wins}/{games} against random"
 
 
-# --- the Null contract, played to both outcomes -----------------------------
+# --- Null, the consolation ---------------------------------------------------
 
 
-def test_a_null_contract_scores_on_even_tricks_alone():
-    """Drive real Null games to completion and demand both outcomes appear.
+def _duck_everything(seed, level=4, denom=2):
+    """A declarer who plays to take NO +2 trick, against a defender who plays
+    to hand them one. It is a real playthrough rather than a staged result --
+    the point of Null is that it is decided by the cards."""
+    rng = random.Random(seed)
+    g = E.new_game(["a", "b"], random.Random(seed), opener=0)
+    E.apply_bid(g, 0, level, denom)
+    E.apply_pass(g, 1)
+    E.apply_swap(g, 0, None, None)
+    while g["phase"] == "play":
+        seat = E.to_play(g)
+        moves = E.legal_moves(g, seat)
+        if seat == 0:
+            # Declarer: shed the highest card on a +2 trick, keep the lead low.
+            want = E.trick_value(g["trick"]) < 0
+            moves = sorted(moves, key=lambda c: (E.rank(c), c), reverse=want)
+        E.apply_play(g, seat, moves[0] if seat == 0 else rng.choice(moves))
+    return g
 
-    For a SAMPLED choice, assert every branch: a test that only ever sees the
-    made (or only the set) branch proves half a rule.
-    """
-    made_seen = set_seen = False
+
+def test_taking_no_scoring_trick_scores_null_instead_of_being_set():
+    """Both branches, from real play: a declarer who ducks everything scores
+    the consolation, one who is merely set does not."""
+    null_seen = set_seen = False
     for seed in range(60):
-        rng = random.Random(seed)
-        g = E.new_game(["a", "b"], random.Random(seed), opener=0)
-        E.apply_bid(g, 0, 5, 0)
-        E.apply_bid(g, 1, E.NULL_LEVEL, E.NULL_DENOM)
-        E.apply_pass(g, 0)
-        assert g["phase"] == "swap" and E.turn_seat(g) == 1
-        E.apply_swap(g, 1, None, None)
-        assert g["trump"] == E.NOTRUMP, "null is played at no trump"
-        while g["phase"] == "play":
-            seat = E.to_play(g)
-            E.apply_play(g, seat, rng.choice(E.legal_moves(g, seat)))
+        g = _duck_everything(seed)
         r = g["result"]
-        assert r["denom"] == E.NULL_DENOM
-        assert r["made"] == (g["etricks"][1] == 0)
-        if r["made"]:
-            made_seen = True
-            assert r["scores"] == [0, E.NULL_MAKE]
-        else:
+        assert r["null"] == (r["declarer_etricks"] == 0)
+        if r["null"]:
+            null_seen = True
+            assert not r["made"], "Null replaces being set; it is never a bonus"
+            assert r["scores"] == [E.NULL_MAKE, 0]
+            assert g["pts"][0] <= 0, "no +2 trick means no positive total"
+        elif not r["made"]:
             set_seen = True
-            assert r["scores"] == [E.NULL_SET, 0]
-    assert made_seen and set_seen, "60 random playthroughs must reach both outcomes"
+            assert r["scores"][0] == 0 and r["scores"][1] > 0
+    assert null_seen and set_seen, "60 playthroughs must reach both outcomes"
+
+
+def test_null_is_live_under_every_contract_not_just_one_denomination():
+    """The whole change: it is no longer a game you buy, so the denomination and
+    the level the declarer happened to name cannot gate it."""
+    seen = set()
+    for denom in range(E.NOTRUMP + 1):
+        for seed in range(40):
+            g = _duck_everything(seed, level=3, denom=denom)
+            if g["result"]["null"]:
+                seen.add(denom)
+                assert g["result"]["scores"][0] == E.NULL_MAKE
+                break
+    assert seen == set(range(E.NOTRUMP + 1)), f"only reached Null in {sorted(seen)}"
 
 
 def test_the_swap_moves_exactly_one_card_each_way():

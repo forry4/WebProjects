@@ -42,7 +42,7 @@ Classic is described below; this section is only what skat mode adds.
 
 * **Bid a number, name the game later.** `value = base × level`, bases
   **♦2 ♥3 ♠4 ♣5 NT6** (deliberately *inverting* classic's C<D<H<S rank — so the
-  two tables can't be confused), Null a flat **20**. The ladder is
+  two tables can't be confused). The ladder is
   `SKAT_VALUES`, **derived from the bases**, and served via `/catalog`
   (`skat_bases`, `skat_values`) so the client holds no copy.
 * **Collisions are the point.** 12 = ♦6 = ♥4 = ♠3 = NT2, so a bid names a price,
@@ -53,8 +53,8 @@ Classic is described below; this section is only what skat mode adds.
   look is what Hand means** — the declarer who plays Hand never sees `shown`
   either, in the engine *and* in `view_for`, or Hand would be a free multiplier.
 * **Announcements add, they don't multiply**: `mult = 1 + hand + sharp + open`.
-  Sharp promises `level + SHARP_BONUS` (3); Open rides on Sharp (except Null,
-  which has no margin to sharpen). Kontra ×2 / Re ×4 on top. A multiplier rather
+  Sharp promises `level + SHARP_BONUS` (2); Open rides on Sharp. Kontra ×2 /
+  Re ×4 on top. A multiplier rather
   than a flat bonus because classic's campaign measured a flat +1 *raising* the
   floor cluster — it is proportionally biggest on the smallest contracts.
 * **Open is the only path by which one seat legitimately sees the other's hand.**
@@ -76,14 +76,14 @@ Classic is described below; this section is only what skat mode adds.
   the top rung, so every legal bid is declarable (`test_every_legal_bid_is_
   declarable`). Stretching is punished *structurally* instead — a big number
   forces you up the level ladder into a contract you can't make, and past 20 it
-  locks Null away. Writing the rule anyway would be an untestable branch, which
+  make. Writing the rule anyway would be an untestable branch, which
   the repo's zero-skips policy is the same argument against.
 * **The bot's skat thresholds are guesses, not measurements.** `skat_ceiling` is
   the real arithmetic (max over denominations of `base × the level that
   denomination is worth`), but `_KONTRA_TARGET` / `_KONTRA_STRENGTH` are placed
   by hand, and the bot never announces Hand/Sharp/Open and never Res.
-  SKAT_MODE.md's five open questions — announcement rates, overbid frequency,
-  Null at 20, the Kontra threshold, and whether the mode beats classic on the
+  SKAT_MODE.md's open questions — announcement rates, overbid frequency, the
+  Kontra threshold, and whether the mode beats classic on the
   settled-contract distribution — are a **`skatlab` self-play sweep that has not
   been run**. None of them are answered by shipping this.
 
@@ -95,24 +95,25 @@ when uncovered. The **middle** pile's bottom is dealt face-up to both; the
 outer two are hidden from everyone **including the owner**. **Six** cards sit
 out, revealed at the end.
 
-**Auction.** Denominations are **ranked C < D < H < S < NT < Null**. Opener
+**Auction.** Denominations are **ranked C < D < H < S < NT**. Opener
 names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
 denomination**, or **raise by +1/+2** in any denomination that player has not
-named. Per-player no-repeat. The opener may not pass. **Null** is a single
-rung: it bids as a 6, above NT, and commits the declarer to winning **no +2
-trick** — flat **12** made, flat **10** to the defender broken.
+named. Per-player no-repeat. The opener may not pass.
 
 **The talon.** The auction winner is shown **3 of the 6** out-cards (fixed at
 the deal) and may swap ONE into hand, discarding a hand card face-down — never
 a pile card. The defender learns *that* a swap happened, never which cards.
 
-**Play.** Declarer leads trick 1. Null plays at no trump. Follow-suit is
+**Play.** Declarer leads trick 1. Follow-suit is
 mandatory **and a pile top counts as a card you hold**. May ruff when void,
 never forced to. Winner leads next.
 
 **Scoring** (contract only; trick points are the yardstick): make → **N²**;
-set → defender scores **(N−1) + 4 × shortfall**. Null: flat 12 / flat 10.
+set → defender scores **(N−1) + 4 × shortfall**. **NULL OVERRIDES A SET**: a
+declarer who won **no +2 trick all round** scores a flat **12** (skat: **20**)
+instead, whatever they declared. **A round stops the moment the score can no
+longer change** — see below.
 
 ### Why these numbers, in one line each
 
@@ -123,33 +124,70 @@ set → defender scores **(N−1) + 4 × shortfall**. Null: flat 12 / flat 10.
   distribution instead of translating its spike (level-4 hole 6.7% → 14.2%,
   replicated on both decks). Openers name where it is CHEAP, not where they
   are strong (best-denom openings 45% → 31%), which is the hidden-info point.
-* **Null at rung 6, 12/10** — rung is measured: at 3 it was overtaken away in
-  100% of auctions; at 8 nobody makes it; raising the price SUPPRESSES it
-  (33%-make gamble, only worth taking while losing is cheap). In play it is a
-  **sacrifice valve** — all 18 observed contracts arrived by overtake, none by
-  opening.
+* **Null is not a bid (2026-08-07)** — and every measurement of it as one said
+  the same thing. At rung 3 it was overtaken away in 100% of auctions; at 8
+  nobody makes it; raising the price SUPPRESSES it (a 33%-make gamble is only
+  worth taking while losing is cheap); all 18 observed contracts arrived by
+  OVERTAKE, none by opening. As a purchase it was either free or dead. It is a
+  **consolation** now, live under every contract at once — which is what the
+  "sacrifice valve" reading always wanted, at no auction cost.
 * **the swap** — makes winning the auction worth something beyond the
   contract, adds real overbid risk, and the discard is a bluffable signal.
 * **maxraise 2** — a cap of exactly 2 relocates the punishment-landing pile
   from level 2 to level 3, which is where the distribution had a hole. A cap of
   3 empties level 3 again; the spike *translates*, it never spreads.
 * **declarer leads** — the opening lead was measured at **+0.93 pts**, the
-  strongest single lever on contract height — and the reason Null exists at
-  all (its make rate defending is ~0%).
+  strongest single lever on contract height — and the reason Null is a
+  DECLARER'S consolation (its make rate defending is ~0%).
 * **N² make / linear set** — the make/set RATIO is what lifts bidding. Matched
   curves cancel: N² on both left the floor cluster identically at 42.7%.
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## A round stops when the SCORE stops moving (2026-08-07)
+
+`_score_is_settled` is checked after every completed trick, and the bar is the
+SCORE, not the outcome — which is why only one direction of "decided" ends a
+round early:
+
+* **Cannot fail** → stop. If the declarer clears the target even after losing
+  every remaining +2 trick and being handed every remaining −1, the contract is
+  made, and a made contract pays a flat N² (or the skat stake) that does not move
+  with the final total.
+* **Cannot make** → play on. Being mathematically set does NOT settle the score:
+  the defender is paid `(N−1) + 4 × shortfall`, and every remaining trick still
+  moves the shortfall. Holding a busted declarer down is a real contest, and the
+  Null consolation makes it a live one from the other side too.
+* **Null** gets no early exit of its own. It used to (as a bid it was decided the
+  moment the declarer took a scoring trick), but as a consolation it is settled
+  early only when no +2 trick remains — which by the parity of the trick values
+  can only ever save the thirteenth.
+
+**`pts` sums to POOL only over a COMPLETED round.** Every conservation assertion
+has to say "a round that ran to thirteen tricks"; four tests and one fixture
+generator learned that the hard way.
+
+**The Rust parity harness names a `MAX_LEVEL` contract on purpose.** The
+reference always plays all thirteen tricks, so `_game_from` has to describe a
+contract that can never settle early — at its old level of 1 the early end fired
+most of the way through most deals and every fixture's final points diverged.
+MAX_LEVEL works because one player's ceiling is sweeping the six +2 tricks;
+`test_rust_parity` asserts that relationship rather than assuming it.
+
 ## Do not relitigate
 
 * **Optional follow-suit is rejected.** With negative odd tricks it makes every
   odd trick fall deterministically to whoever leads it — 7 of 13 tricks lose
   all decision content.
-* **The bot never bids Null.** It is a 33%-make gamble under EXACT play; a
-  one-trick-deep policy has no business finding the other 67%. Revisit only
-  with the WASM Hard tier.
+* **Neither tier CHASES the Null consolation, and both should.** A declarer
+  whose contract has gone wrong ought to switch to ducking every +2 trick — but
+  "has gone wrong" is a lookahead judgement, and the server bot is one trick
+  deep (reading it off the current total instead would throw away contracts it
+  was still winning). The Hard tier misses it for a different reason: its solver
+  maximises trick POINTS, and Null is a discontinuous jump a double-dummy value
+  function cannot see. Both want the contract-aware solve `dd::solve_contract`
+  already provides for the auction.
 * **The bot scheduler's staleness guard is `_position_key`, and EVERY
   state-advancing action must appear in it.** Two schedulers can be in flight at
   once (`_handle_move` starts one, so does every reconnect), and the guard used
@@ -187,9 +225,9 @@ Last trick panel, because the server clears `led` the instant the second card
 lands. Three things about it are load-bearing, all three MEASURED in a browser
 against a live backend (`screens.mjs`, "Oddtrick's completed-trick beat"):
 
-* **The hold covers `over`, not just `play`.** The thirteenth trick and the +2
-  that breaks a Null both end the game in the SAME message that completes the
-  trick, so a hold gated on `phase === "play"` skipped the one trick a player
+* **The hold covers `over`, not just `play`.** The thirteenth trick, and any
+  trick that settles the score, ends the game in the SAME message that completes
+  the trick, so a hold gated on `phase === "play"` skipped the one trick a player
   most wants to see: measured 700ms on every other trick and **0ms on the last**,
   swapped straight for the result panel. `wasPlaying` keeps that to a game that
   ended under you — opening a finished room from the lobby must not replay its

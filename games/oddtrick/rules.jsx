@@ -90,17 +90,26 @@ export default function OddtrickRules() {
 				</p>
 			</RulesSection>
 
-			<RulesSection title="Null — the contract for a hopeless hand">
+			<RulesSection title="Null — the way out of a hand gone wrong">
 				<p>
-					Instead of a number, you may bid <b>Null</b>: a promise to win <b>no +2 trick</b>
-					for the whole round. It slots into the ladder as a 6 (above no-trump 6, below 7)
-					and is played without trump. Make it and you score a flat <b>12</b>; if even one
-					scoring trick lands on you, your opponent scores <b>10</b> instead.
+					You never bid Null. It sits under <i>every</i> contract at once: if you are the
+					declarer and you finish the round having won <b>no +2 trick at all</b>, you score
+					a flat <b>12</b> (<b>20</b> in Skat mode) instead of being set — whatever you
+					declared, and however far short of it you finished.
 				</p>
 				<p>
-					Winning a −1 trick is legal — but it puts you <b>on lead into the +2 trick that
-					follows</b>, the one seat you can't duck from. The odd tricks are not free.
+					So a contract you can no longer make is not simply lost. Stop fighting for the
+					scoring tricks, duck every one of them, and the hand pays you instead of your
+					opponent. Your opponent's job changes with it: they now have to <b>force a
+					single +2 trick on you</b>, and one is enough.
 				</p>
+				<RulesTip>
+					<p>
+						Winning a −1 trick is legal and costs you nothing directly — but it puts you
+						<b> on lead into the +2 trick that follows</b>, the one seat you can't duck
+						from. The odd tricks are not free.
+					</p>
+				</RulesTip>
 			</RulesSection>
 
 			<RulesSection title="Skat mode — bid a number, name the game later">
@@ -114,8 +123,8 @@ export default function OddtrickRules() {
 					A game is worth <b>base × level</b>, with each denomination carrying a
 					price of its own — <b>♦2, ♥3, ♠4, ♣5, no-trump 6</b> — and the level
 					meaning exactly what it does in classic mode: the trick points you promise
-					to score. <b>Null is a flat 20.</b> Note the suits run the other way round
-					here: diamonds cheap, clubs dear.
+					to score. Note the suits run the other way round here: diamonds cheap,
+					clubs dear.
 				</p>
 				<RulesTip>
 					<p>
@@ -174,6 +183,15 @@ export default function OddtrickRules() {
 					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
 					making it scores 9; bidding 3 and finishing on 1 gives your opponent 10.
 				</p>
+				<RulesTip>
+					<p>
+						<b>A round can stop before trick 13.</b> Once the declarer is home even if
+						they lose every +2 trick left and take every −1, the contract cannot fail —
+						and a made contract pays a flat amount, so nothing left to play could move
+						the score. A round the declarer <i>cannot make</i> plays on, because every
+						remaining trick still changes how far short they finish.
+					</p>
+				</RulesTip>
 			</RulesSection>
 
 			<RulesSection title="The thing to notice">

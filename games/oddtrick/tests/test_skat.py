@@ -78,8 +78,6 @@ def test_a_number_does_not_say_which_game_is_coming():
     reach = [d for d in E.skat_declarable(12)
              if E.SKAT_BASE[d["denom"]] * d["min_level"] == 12]
     assert len(reach) >= 3
-    # ...and Null is a fourth reading of a number below its flat value.
-    assert E.declare_options(_declare_phase_at(12))["null_ok"] is True
 
 
 def _declare_phase_at(value: int) -> dict:
@@ -94,8 +92,7 @@ def test_every_legal_bid_is_declarable():
 
     The level is the declarer's free choice from 1..12 and no-trump at 12 is the
     ladder's top rung, so no bid can strand its winner. Stretching is punished
-    structurally instead — a big number forces a level you cannot make, and past
-    20 it locks Null away.
+    structurally instead — a big number forces a level you cannot make.
     """
     for v in E.SKAT_VALUES:
         opts = E.skat_declarable(v)
@@ -248,29 +245,25 @@ def test_declaring_higher_than_you_must_is_legal_and_costs_you_the_level():
     assert E.skat_target(g) == 6, "the level you declared is the level you owe"
 
 
-def test_a_bid_past_twenty_locks_null_away():
-    """The one place where stretching the auction really removes a game."""
-    assert E.declare_options(_declare_phase_at(20))["null_ok"] is True
-    g = _declare_phase_at(21)
-    assert E.declare_options(g)["null_ok"] is False
+def test_null_is_not_a_declaration_either():
+    """It stopped being a game you buy, in BOTH modes at once. The ladder still
+    contains 20 -- as clubs at 4, diamonds at 10 and spades at 5 -- but nothing
+    on it names Null any more."""
+    g = _declare_phase_at(20)
+    assert all(d["denom"] != E.NULL_DENOM for d in E.declare_options(g)["denoms"])
+    assert "null_ok" not in E.declare_options(g)
     with pytest.raises(ValueError):
         E.apply_declare(g, g["auction"]["declarer"], E.NULL_DENOM, 0)
+    assert 20 in E.SKAT_VALUES, "20 is still an ordinary rung, reached three ways"
 
 
-def test_null_cannot_be_sharpened_and_open_rides_on_sharp():
+def test_open_rides_on_sharp():
     g = _declare_phase_at(12)
     decl = g["auction"]["declarer"]
     with pytest.raises(ValueError):
-        E.apply_declare(g, decl, E.NULL_DENOM, 0, sharp=True)
-    with pytest.raises(ValueError):
         E.apply_declare(g, decl, 2, 4, sharp=False, open_=True)
-    # Null Open needs no Sharp -- there is no margin to sharpen.
-    E.apply_declare(g, decl, E.NULL_DENOM, 0, sharp=False, open_=True)
-    assert g["contract"]["value"] == E.SKAT_NULL_VALUE
-    # Null keeps its classic-mode rung so `auction.level`/`denom` mean the same
-    # thing downstream in both modes.
-    assert g["auction"]["level"] == E.NULL_LEVEL
-    assert g["auction"]["denom"] == E.NULL_DENOM
+    E.apply_declare(g, decl, 2, 4, sharp=True, open_=True)
+    assert g["contract"]["open"] is True
 
 
 def test_only_the_declarer_declares():
@@ -354,11 +347,19 @@ def test_every_skat_phase_names_exactly_one_seat_to_act(phase_at, seat_is_declar
 # --- scoring ---------------------------------------------------------------
 
 
-def _score(g: dict, declarer_pts: int) -> dict:
-    """Run the scorer over a declared game held at a chosen point total."""
+def _score(g: dict, declarer_pts: int, etricks: int = 1) -> dict:
+    """Run the scorer over a declared game held at a chosen point total.
+
+    `etricks` defaults to 1 because Null is checked FIRST and wins: a declarer
+    left on zero scoring tricks takes the consolation whatever their point total
+    says, so a staged result that forgot it would score every contract as Null.
+    Pass 0 deliberately to exercise that branch.
+    """
     decl = g["auction"]["declarer"]
     g["pts"][decl] = declarer_pts
     g["pts"][1 - decl] = E.POOL - declarer_pts
+    g["etricks"][decl] = etricks
+    g["etricks"][1 - decl] = 6 - etricks
     E._finish(g)
     return g["result"]
 
@@ -417,21 +418,30 @@ def test_kontra_cuts_both_ways():
     assert lost["scores"][1 - lost["declarer"]] == 24 + E.SHORT_PENALTY * 3
 
 
-def test_null_is_flat_and_scores_off_the_scoring_tricks_not_the_points():
-    g = _declared(value=12, denom=E.NULL_DENOM, level=0, hand=True)
-    decl = g["auction"]["declarer"]
-    assert g["contract"]["value"] == E.SKAT_NULL_VALUE
-    g["etricks"][decl] = 0
-    res = _score(g, -1)     # a dreadful point total is irrelevant to Null
-    assert res["made"] is True
-    assert res["short"] == 0, "Null is flat; there is no shortfall to scale"
-    assert res["scores"][decl] == E.SKAT_NULL_VALUE * 2
+def test_null_is_a_flat_consolation_that_ignores_the_contract_entirely():
+    """It replaces being set, and NOTHING about the contract scales it -- not
+    the value, not Hand, not Kontra. Doubling a consolation would have a
+    defender's Kontra rewarding the very outcome it was betting against."""
+    for kontra in (False, True):
+        g = _declared(value=24, denom=4, level=4, hand=True, sharp=True,
+                      kontra=kontra, re=False)
+        decl = g["auction"]["declarer"]
+        res = _score(g, -3, etricks=0)   # a dreadful total is beside the point
+        assert res["null"] is True and res["made"] is False
+        assert res["short"] == 0, "Null is flat; there is no shortfall to scale"
+        assert res["scores"][decl] == E.SKAT_NULL_VALUE
+        assert res["scores"][1 - decl] == 0
+        assert res["mult"] > 1 and (res["doubling"] > 1) == kontra, \
+            "the multipliers are still on the row; they simply do not apply"
 
-    broken = _declared(value=12, denom=E.NULL_DENOM, level=0, hand=True)
-    broken["etricks"][broken["auction"]["declarer"]] = 1
-    bres = _score(broken, 4)
-    assert bres["made"] is False
-    assert bres["scores"][1 - bres["declarer"]] == E.SKAT_NULL_VALUE * 2
+
+def test_one_scoring_trick_is_the_difference_between_null_and_a_heavy_set():
+    """The cliff the consolation puts in the middle of a losing hand."""
+    ducked = _score(_declared(value=24, denom=4, level=6), -3, etricks=0)
+    slipped = _score(_declared(value=24, denom=4, level=6), -1, etricks=1)
+    decl = ducked["declarer"]
+    assert ducked["scores"][decl] == E.SKAT_NULL_VALUE
+    assert slipped["scores"][decl] == 0 and slipped["scores"][1 - decl] > 0
 
 
 def test_walking_out_costs_the_declared_game_not_a_classic_square():
@@ -714,72 +724,114 @@ def test_a_hand_game_reaches_the_lead_without_ever_entering_a_swap():
 # --- Null ends the moment it is broken -------------------------------------
 
 
-def _drive_null(mode: str, seed: int):
-    """Play a Null contract out with a fixed policy until the engine stops."""
+def _drive(mode: str, seed: int, level: int = 4, denom: int = 2, pick=-1):
+    """Play a declared game out with a fixed policy until the engine stops."""
     import random as _r
     g = E.new_game(["alice", "bob"], _r.Random(seed), 0, mode=mode)
     if mode == "skat":
-        E.apply_skat_bid(g, 0, 12)
+        E.apply_skat_bid(g, 0, E.SKAT_BASE[denom] * level)
         E.apply_pass(g, 1)
         E.apply_hand(g, 0)
-        E.apply_declare(g, 0, E.NULL_DENOM, 0)
+        E.apply_declare(g, 0, denom, level)
         E.apply_kontra(g, 1, False)
     else:
-        E.apply_bid(g, 0, E.NULL_LEVEL, E.NULL_DENOM)
+        E.apply_bid(g, 0, level, denom)
         E.apply_pass(g, 1)
         E.apply_swap(g, 0, None, None)
     while g["phase"] == "play":
         s = E.to_play(g)
-        E.apply_play(g, s, E.legal_moves(g, s)[-1])
+        E.apply_play(g, s, E.legal_moves(g, s)[pick])
     return g
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
-def test_a_broken_null_stops_the_moment_the_declarer_takes_a_scoring_trick(mode):
-    """Null pays a FLAT amount either way, so once the declarer has won one +2
-    trick no remaining card can move the score by a point — playing them out is
-    dead time at a table where the result is already settled."""
-    broken = None
+def test_a_contract_that_cannot_fail_stops_there(mode):
+    """The one direction that ends a round early, and the reason it is the only
+    one: a MADE contract pays a flat amount, so once the declarer clears the
+    target even after losing every remaining +2 and taking every remaining -1,
+    no card left can move a single point of the score."""
+    early = None
     for seed in range(400):
-        g = _drive_null(mode, seed)
-        if not g["result"]["made"]:
-            broken = g
+        g = _drive(mode, seed, level=1)
+        if g["result"]["ended_early"]:
+            early = g
             break
-    assert broken is not None, f"no seed in 400 broke a {mode} Null"
-    res = broken["result"]
+    assert early is not None, f"no seed in 400 settled a {mode} contract early"
+    res = early["result"]
     decl = res["declarer"]
-    assert broken["phase"] == "over"
-    assert broken["trick"] < E.NTRICKS, "a broken Null should not run to thirteen"
-    assert res["ended_early"] is True
-    assert broken["etricks"][decl] == 1, "it stops at the FIRST scoring trick, not later"
-    # ...and the score is exactly what playing it out would have paid.
-    assert res["scores"][decl] == 0
-    assert res["scores"][1 - decl] > 0
+    assert early["phase"] == "over"
+    assert early["trick"] < E.NTRICKS
+    assert res["made"] is True and res["null"] is False
+    # The floor it stopped on, recomputed here rather than trusted.
+    neg_left = sum(1 for t in range(early["trick"], E.NTRICKS) if E.trick_value(t) < 0)
+    target = res["target"] if mode == "skat" else res["level"]
+    assert early["pts"][decl] - neg_left >= target
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
-def test_a_made_null_still_runs_all_thirteen_tricks(mode):
-    """The early exit must be keyed on the contract being BROKEN, not on Null.
-    A Null the declarer is winning has to be played to the end — the thirteenth
-    trick can still be the one that breaks it."""
-    made = None
+def test_a_round_stops_at_the_FIRST_trick_that_settles_it_and_not_before(mode):
+    """Both halves of the timing, replayed trick by trick. Stopping late is dead
+    time; stopping early would score a hand that could still move."""
+    import random as _r
+    checked = 0
+    for seed in range(60):
+        g = E.new_game(["alice", "bob"], _r.Random(seed), 0, mode=mode)
+        if mode == "skat":
+            E.apply_skat_bid(g, 0, E.SKAT_BASE[2] * 1)
+            E.apply_pass(g, 1)
+            E.apply_hand(g, 0)
+            E.apply_declare(g, 0, 2, 1)
+            E.apply_kontra(g, 1, False)
+        else:
+            E.apply_bid(g, 0, 1, 2)
+            E.apply_pass(g, 1)
+            E.apply_swap(g, 0, None, None)
+        while g["phase"] == "play":
+            before = g["trick"]
+            assert not E._score_is_settled(g), (
+                f"seed {seed}: still playing at trick {before} with the score "
+                "already settled")
+            s = E.to_play(g)
+            E.apply_play(g, s, E.legal_moves(g, s)[-1])
+        if g["trick"] < E.NTRICKS:
+            assert E._score_is_settled(g), "stopped on a score that could still move"
+            checked += 1
+    assert checked, "no seed settled early, so the stop condition went unchecked"
+
+
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_a_contract_that_cannot_be_MADE_still_plays_on(mode):
+    """The asymmetry, and it is deliberate. Being mathematically set does not
+    settle the SCORE: the defender is paid (N-1) + 4 x shortfall and every
+    remaining trick still moves the shortfall, so holding a busted declarer
+    down is a real contest rather than dead time."""
+    hopeless = None
     for seed in range(400):
-        g = _drive_null(mode, seed)
-        if g["result"]["made"]:
-            made = g
+        g = _drive(mode, seed, level=E.MAX_LEVEL, denom=4, pick=0)
+        if not g["result"]["made"] and not g["result"]["null"]:
+            hopeless = g
             break
-    assert made is not None, f"no seed in 400 made a {mode} Null"
-    assert made["trick"] == E.NTRICKS
-    assert made["result"]["ended_early"] is False
-    assert sum(made["pts"]) == E.POOL, "a completed round still sums to the pool"
+    assert hopeless is not None, f"no seed in 400 busted a {mode} contract"
+    assert hopeless["trick"] == E.NTRICKS, "a set contract runs to thirteen"
+    assert hopeless["result"]["ended_early"] is False
+    assert sum(hopeless["pts"]) == E.POOL
 
 
-def test_only_null_ends_early():
-    """A point contract is never decided before the last trick — the shortfall
-    term means every remaining trick can still change the score."""
-    g = _declared(value=12, denom=2, level=4)
-    while g["phase"] == "play":
-        s = E.to_play(g)
-        E.apply_play(g, s, E.legal_moves(g, s)[0])
-    assert g["trick"] == E.NTRICKS
-    assert g["result"]["ended_early"] is False
+@pytest.mark.parametrize("mode", ["classic", "skat"])
+def test_null_gets_no_early_exit_of_its_own(mode):
+    """It used to end the round the moment the declarer took a scoring trick --
+    correct while Null was a flat CONTRACT, meaningless now that the contract
+    underneath it is still being scored on points."""
+    ducked = None
+    for seed in range(400):
+        g = _drive(mode, seed, level=6, denom=2, pick=0)
+        if g["result"]["null"]:
+            ducked = g
+            break
+    assert ducked is not None, f"no seed in 400 reached Null in {mode}"
+    assert ducked["trick"] == E.NTRICKS
+    assert ducked["result"]["ended_early"] is False
+    assert sum(ducked["pts"]) == E.POOL
+    decl = ducked["result"]["declarer"]
+    assert ducked["result"]["scores"][decl] == (
+        E.SKAT_NULL_VALUE if mode == "skat" else E.NULL_MAKE)

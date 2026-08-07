@@ -50,8 +50,24 @@ def _game_from(fx):
     g["pts"] = [0, 0]
     # The reference plays cards only; give it a settled contract so the engine
     # will accept plays and score at the end.
-    g["auction"] = {"level": 1, "denom": fx["trump"], "declarer": fx["leader"],
-                    "used": [0, 0], "to_act": fx["leader"], "log": []}
+    #
+    # THE LEVEL IS MAX_LEVEL ON PURPOSE, and it is load-bearing. `engine` stops a
+    # round the moment the score can no longer change -- a contract that cannot
+    # fail pays a flat amount, so the rest is dead time -- and at a level of 1
+    # that fires most of the way through most deals, which cut the replay short
+    # and made every fixture's final points diverge. The reference always plays
+    # all thirteen, so the harness has to name a contract that can never settle
+    # early. MAX_LEVEL is exactly that: one player's ceiling is sweeping the six
+    # +2 tricks, so `_score_is_settled` would need more points than the game
+    # contains. Asserted rather than assumed, because it is a coincidence of two
+    # constants and would rot in silence.
+    ceiling = sum(v for v in (E.trick_value(t) for t in range(E.NTRICKS)) if v > 0)
+    assert E.MAX_LEVEL >= ceiling, (
+        "MAX_LEVEL no longer exceeds what a declarer can score, so this harness "
+        "can settle a round early and truncate the replay")
+    g["auction"] = {"level": E.MAX_LEVEL, "denom": fx["trump"],
+                    "declarer": fx["leader"], "used": [0, 0],
+                    "to_act": fx["leader"], "log": []}
     return g
 
 

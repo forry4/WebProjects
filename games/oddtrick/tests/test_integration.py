@@ -92,9 +92,13 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
             move = {"kind": "play", "card": E.legal_moves(g, seat)[0]}
         run(m._handle_move(ws, "R", pid, {"move": move}))
 
-    assert g["trick"] == E.NTRICKS
     assert g["result"] is not None
-    assert sum(g["pts"]) == E.POOL
+    if g["trick"] == E.NTRICKS:
+        assert sum(g["pts"]) == E.POOL
+    else:
+        # A round stops the moment the score can no longer change, so a room
+        # can legitimately reach a result before the thirteenth trick.
+        assert g["result"]["ended_early"] and g["result"]["made"]
     assert room["status"] == "over", "the room status must follow the game"
     # And no handler ever reported an error along the way.
     assert "error" not in wa.types() and "error" not in wb.types()
@@ -131,7 +135,12 @@ def test_a_vs_bot_room_is_creatable_and_the_bot_takes_its_turn():
         run(m._handle_move(ws, "B", pid, {"move": move}))
 
     assert room["game"]["result"] is not None
-    assert sum(room["game"]["pts"]) == E.POOL
+    # This room is dealt from an UNSEEDED rng, so the pool invariant has to be
+    # stated the way the engine means it: over a round that ran to thirteen.
+    if room["game"]["trick"] == E.NTRICKS:
+        assert sum(room["game"]["pts"]) == E.POOL
+    else:
+        assert room["game"]["result"]["ended_early"]
 
 
 def test_an_illegal_move_is_refused_without_corrupting_the_game():
@@ -208,11 +217,16 @@ def test_a_skat_room_plays_from_create_to_a_scored_result():
         pid, move = _drive(g, _skat_auction_move)
         run(m._handle_move(wa if pid == "alice" else wb, "K", pid, {"move": move}))
 
-    assert g["trick"] == E.NTRICKS
-    assert sum(g["pts"]) == E.POOL
+    # A round stops the moment the score can no longer change, so the pool
+    # invariant holds only over a COMPLETED round.
+    if g["trick"] == E.NTRICKS:
+        assert sum(g["pts"]) == E.POOL
+    else:
+        assert g["result"]["ended_early"]
     res = g["result"]
     assert res["mode"] == "skat" and res["value"] > 0
-    assert res["scores"][res["declarer"] if res["made"] else 1 - res["declarer"]] > 0
+    winner = res["declarer"] if (res["made"] or res["null"]) else 1 - res["declarer"]
+    assert res["scores"][winner] > 0
     assert room["status"] == "over"
     assert "error" not in wa.types() and "error" not in wb.types()
 
@@ -240,7 +254,12 @@ def test_a_vs_bot_skat_room_is_creatable_and_the_bot_takes_every_phase(monkeypat
         run(m._handle_move(ws, "KB", pid, {"move": move}))
 
     assert room["game"]["result"] is not None
-    assert sum(room["game"]["pts"]) == E.POOL
+    # Unseeded deal, so the pool invariant is stated the way the engine means
+    # it: over a round that ran to thirteen tricks.
+    if room["game"]["trick"] == E.NTRICKS:
+        assert sum(room["game"]["pts"]) == E.POOL
+    else:
+        assert room["game"]["result"]["ended_early"]
     assert "error" not in ws.types(), "the bot never produced an illegal move"
 
 

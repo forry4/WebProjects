@@ -77,17 +77,25 @@ SHORT_PENALTY = 4
 #: instead of translating its spike (level-4 hole 6.7% -> 14.2%), replicated
 #: on both deck widths.
 #:
-#: NULL: "I will win no +2 trick." A trick-COUNT condition, because the
-#: constant-sum pool makes an inverse POINT contract identical to a normal
-#: one. It bids as a single fixed rung -- level 6, above no-trump -- and pays
-#: a flat amount either way. Rung 6 is measured, not chosen: at rung 3 it was
-#: overtaken away in 100% of auctions (0 contracts in 240 rounds), at rung 8
-#: nobody could make it, and raising the price SUPPRESSES it (a 33% gamble is
-#: only worth taking when losing is cheap).
+#: NULL: "I won no +2 trick." A trick-COUNT condition, because the constant-sum
+#: pool makes an inverse POINT contract identical to a normal one.
+#:
+#: IT IS NO LONGER A BID (2026-08-07). It used to be a single rung above
+#: no-trump that you had to buy in the auction, and every measurement said the
+#: same thing about that shape: at rung 3 it was overtaken away in 100% of
+#: auctions, at rung 8 nobody could make it, raising the price SUPPRESSED it,
+#: and all 18 contracts ever observed arrived by OVERTAKE rather than by anyone
+#: opening it. A 33% gamble is only worth taking while losing is cheap, so as a
+#: purchase it was either free or dead.
+#:
+#: So it is a CONSOLATION now, live under every contract at once: take no +2
+#: trick as declarer and you score `NULL_MAKE` instead of being set. That makes
+#: it what it always wanted to be -- the escape hatch from a contract going
+#: wrong, available exactly when you are already losing, with no auction cost
+#: and nothing to announce. `NULL_DENOM` survives only as the marker on
+#: pre-change saved games; nothing can bid it.
 NULL_DENOM = 5
-NULL_LEVEL = 6
 NULL_MAKE = 12
-NULL_SET = 10
 
 #: Out-of-play cards the declarer is shown after the auction; they may swap
 #: exactly one into hand (hand cards only -- the piles are the board, not the
@@ -120,9 +128,10 @@ DEFAULT_MODE = "classic"
 #: manufactures an asymmetry the measured-symmetric suits do not otherwise have.
 SKAT_BASE = [5, 2, 3, 4, 6]  # clubs, diamonds, hearts, spades, no-trump
 
-#: Null is a flat value sitting mid-ladder the way Skat's 23 does. 20 is
-#: already spades-at-5 / diamonds-at-10 / clubs-at-4, which is the point:
-#: collisions mean a bid names a price, not a game.
+#: What the Null consolation pays in skat mode. Flat, like classic's, and
+#: deliberately NOT scaled by the announcements or by Kontra: Hand, Sharp and
+#: Open are promises about the CONTRACT, and doubling a consolation would make
+#: a defender's Kontra reward the very outcome it was betting against.
 SKAT_NULL_VALUE = 20
 
 #: Sharp promises the declared level plus this much.
@@ -140,7 +149,7 @@ SKAT_NULL_VALUE = 20
 #: bar narrows that gap; it does not close it.
 SHARP_BONUS = 2
 
-#: The legal bid ladder: every product base x level, plus Null's flat value.
+#: The legal bid ladder: every product base x level.
 #:
 #: NOTE for anyone checking this against SKAT_MODE.md: that document's prose
 #: enumerates "2,3,4,...,10,12,..." and counts 43 rungs. Both are wrong, and
@@ -151,7 +160,6 @@ SHARP_BONUS = 2
 SKAT_VALUES = sorted(
     {SKAT_BASE[d] * lvl for d in range(NOTRUMP + 1)
      for lvl in range(MIN_LEVEL, MAX_LEVEL + 1)}
-    | {SKAT_NULL_VALUE}
 )
 
 
@@ -168,7 +176,7 @@ def skat_declarable(value: int) -> list[dict]:
     12 is the ladder's top rung, EVERY legal bid is declarable -- Skat's
     "overbid loses at once" rule has nothing to fire on here. The punishment
     for stretching is structural instead: a big number forces you up the level
-    ladder into a contract you cannot make, and past 20 it locks Null away.
+    ladder into a contract you cannot make.
     """
     out = []
     for d in range(NOTRUMP + 1):
@@ -179,7 +187,7 @@ def skat_declarable(value: int) -> list[dict]:
 
 
 def skat_value_of(denom: int, level: int) -> int:
-    return SKAT_NULL_VALUE if denom == NULL_DENOM else SKAT_BASE[denom] * level
+    return SKAT_BASE[denom] * level
 
 
 def skat_multiplier(hand: bool, sharp: bool, open_: bool) -> int:
@@ -349,27 +357,17 @@ def auction_options(g: dict) -> dict:
             "may_pass": True,
         }
     me = a["to_act"]
-    free = [d for d in range(NULL_DENOM + 1) if not (a["used"][me] >> d) & 1]
+    free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
     if a["level"] == 0:
         # The opener must bid; passing out is not offered.
         for d in free:
-            if d == NULL_DENOM:
-                bids.append([NULL_LEVEL, d])
-            else:
-                bids.extend([lvl, d] for lvl in range(MIN_LEVEL, MAX_LEVEL + 1))
+            bids.extend([lvl, d] for lvl in range(MIN_LEVEL, MAX_LEVEL + 1))
         return {"bids": bids, "may_pass": False}
     # Ranked denominations: an overtake stands at the SAME level in a
-    # higher-ranked denomination, or raises by up to MAX_RAISE in any unused
-    # one. Null lives at its single rung and follows the same ordering.
+    # higher-ranked denomination, or raises by up to MAX_RAISE in any unused one.
     lo, hi = a["level"], min(MAX_LEVEL, a["level"] + MAX_RAISE)
     for d in free:
-        if d == NULL_DENOM:
-            if lo <= NULL_LEVEL <= hi and not (
-                NULL_LEVEL == a["level"] and a["denom"] >= NULL_DENOM
-            ):
-                bids.append([NULL_LEVEL, d])
-            continue
         for lvl in range(lo, hi + 1):
             if lvl == a["level"] and d <= a["denom"]:
                 continue  # same level: only a higher-ranked denomination outranks
@@ -563,16 +561,12 @@ def apply_hand(g: dict, seat: int) -> None:
 def declare_options(g: dict) -> dict:
     """The declarations that satisfy the winning bid, for the client to render."""
     if g["phase"] != "declare":
-        return {"bid": 0, "denoms": [], "null_ok": False}
+        return {"bid": 0, "denoms": []}
     ct = g["contract"]
     bid = g["auction"]["value"]
     return {
         "bid": bid,
         "denoms": skat_declarable(bid),
-        # A bid above Null's flat value locks Null away -- the one place where
-        # stretching the auction genuinely removes a game from your hand.
-        "null_ok": bid <= SKAT_NULL_VALUE,
-        "null_value": SKAT_NULL_VALUE,
         "max_level": MAX_LEVEL,
         "sharp_bonus": SHARP_BONUS,
         "hand": ct["hand"],
@@ -591,25 +585,16 @@ def apply_declare(g: dict, seat: int, denom: int, level: int,
     sharp, open_ = bool(sharp), bool(open_)
     bid = a["value"]
 
-    if denom == NULL_DENOM:
-        if bid > SKAT_NULL_VALUE:
-            raise ValueError(f"Null is worth {SKAT_NULL_VALUE}; your bid is {bid}")
-        if sharp:
-            # There is no margin to sharpen: Null is won outright or not at all.
-            raise ValueError("Null cannot be played Sharp")
-        level = NULL_LEVEL   # its rung, so `a["level"]` means the same thing in both modes
-        value = SKAT_NULL_VALUE
-    else:
-        if not (0 <= denom <= NOTRUMP):
-            raise ValueError("no such denomination")
-        if not (MIN_LEVEL <= level <= MAX_LEVEL):
-            raise ValueError("level out of range")
-        value = skat_value_of(denom, level)
-        if value < bid:
-            raise ValueError(
-                f"{SKAT_BASE[denom]} x {level} = {value} does not reach your bid of {bid}")
-        if open_ and not sharp:
-            raise ValueError("Open is played on top of Sharp")
+    if not (0 <= denom <= NOTRUMP):
+        raise ValueError("no such denomination")
+    if not (MIN_LEVEL <= level <= MAX_LEVEL):
+        raise ValueError("level out of range")
+    value = skat_value_of(denom, level)
+    if value < bid:
+        raise ValueError(
+            f"{SKAT_BASE[denom]} x {level} = {value} does not reach your bid of {bid}")
+    if open_ and not sharp:
+        raise ValueError("Open is played on top of Sharp")
 
     a["level"] = level
     a["denom"] = denom
@@ -657,8 +642,8 @@ def skat_target(g: dict) -> int:
 def _start_play(g: dict) -> None:
     a = g["auction"]
     g["phase"] = "play"
-    # A Null contract is played at no trump: a trump suit would only add a
-    # second way for the declarer to be forced to win a trick.
+    # `NULL_DENOM` is unreachable from the auction now; the branch survives so a
+    # game SAVED before Null stopped being a bid still starts at no trump.
     g["trump"] = NOTRUMP if a["denom"] == NULL_DENOM else a["denom"]
     g["trick"] = 0
     g["led"] = None
@@ -728,25 +713,43 @@ def apply_play(g: dict, seat: int, c: int) -> None:
     g["trick"] += 1
     g["leader"] = winner
     g["led"] = None
-    if g["trick"] >= NTRICKS or _null_is_already_broken(g, winner, v):
+    if g["trick"] >= NTRICKS or _score_is_settled(g):
         _finish(g)
 
 
-def _null_is_already_broken(g: dict, winner: int, value: int) -> bool:
-    """A Null contract is decided the moment the declarer takes a scoring trick.
+def _score_is_settled(g: dict) -> bool:
+    """Can the remaining tricks still change the SCORE? If not, stop here.
 
-    Null pays a FLAT amount either way, so once the declarer has won one +2
-    trick nothing in the remaining cards can move the score by a single point --
-    playing them out is dead time at a table where the result is settled.
+    The bar is the score, not the outcome, and the difference is the whole
+    reason only one direction of "decided" ends a round early:
+
+    * **Cannot fail.** If the declarer clears the target even after losing every
+      remaining +2 trick and being handed every remaining -1, the contract is
+      made -- and a made contract pays a flat N squared (or the skat stake),
+      which does not move with the final total. Settled.
+    * **Cannot make.** Being mathematically set does NOT settle the score: the
+      defender is paid `(N-1) + 4 x shortfall`, and every remaining trick still
+      moves the shortfall. Holding a busted declarer down is a real contest --
+      arguably the most interesting part of a lost hand -- so it plays on.
+    Null gets NO early end of its own. It used to -- as a bid it was decided the
+    moment the declarer took a scoring trick -- but as a consolation it is
+    settled early only when no +2 trick remains, which by the parity of the
+    trick values can only ever save the thirteenth. Not worth a branch, and a
+    branch that fires on the last trick is one the Rust parity fixtures (which
+    replay all thirteen) would have to be taught about.
 
     Ending here is score-identical to playing on. What it is NOT is
-    pool-identical: `pts` sums to POOL only over a COMPLETED round, so a broken
-    Null stops short of +5 and anything asserting that invariant has to say
-    "a round that ran to thirteen tricks".
+    pool-identical: `pts` sums to POOL only over a COMPLETED round, so anything
+    asserting that invariant has to say "a round that ran to thirteen tricks".
     """
-    return (value > 0
-            and g["auction"]["denom"] == NULL_DENOM
-            and winner == g["auction"]["declarer"])
+    decl = g["auction"]["declarer"]
+    if decl is None or decl < 0:
+        return False
+    neg_left = sum(1 for t in range(g["trick"], NTRICKS) if trick_value(t) < 0)
+    target = skat_target(g) if mode_of(g) == "skat" else g["auction"]["level"]
+    # The declarer's floor from here: they win no more +2 tricks and are forced
+    # to take every remaining -1.
+    return g["pts"][decl] - neg_left >= target
 
 
 # --- scoring ---------------------------------------------------------------
@@ -776,21 +779,22 @@ def _finish_skat(g: dict) -> None:
     decl = a["declarer"]
     dpts = g["pts"][decl]
     stake = ct["value"] * ct["mult"] * skat_doubling(ct)
-    if a["denom"] == NULL_DENOM:
-        made = g["etricks"][decl] == 0
-        short = 0
-        target = 0
-        pay = stake
-    else:
-        target = skat_target(g)
-        made = dpts >= target
-        short = max(0, target - dpts)
-        pay = stake if made else stake + SHORT_PENALTY * short
+    target = skat_target(g)
+    null = g["etricks"][decl] == 0
+    made = (not null) and dpts >= target
+    short = 0 if (null or made) else target - dpts
     scores = [0, 0]
-    scores[decl if made else 1 - decl] = pay
+    if null:
+        # The consolation. A declarer who took no +2 trick cannot have reached
+        # any target (only +2 tricks add points), so this always REPLACES a
+        # set -- it is never a bonus on top of a made contract.
+        scores[decl] = SKAT_NULL_VALUE
+    else:
+        scores[decl if made else 1 - decl] = (
+            stake if made else stake + SHORT_PENALTY * short)
     g["phase"] = "over"
     g["result"] = {
-        # A broken Null stops short of thirteen tricks; the UI says so
+        # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
         "ended_early": g["trick"] < NTRICKS,
         "mode": "skat",
@@ -798,6 +802,13 @@ def _finish_skat(g: dict) -> None:
         "bid": a["value"],
         "level": a["level"],
         "denom": a["denom"],
+        # The base price of the declared denomination. It rides the result so
+        # the review can show base x level = value -- the one step of the skat
+        # arithmetic that used to be invisible, which left a made contract
+        # printing a bare number where classic prints "3 x 3 = 9".
+        "base": SKAT_BASE[a["denom"]] if 0 <= a["denom"] <= NOTRUMP else 0,
+        "null": null,
+        "null_value": SKAT_NULL_VALUE,
         "value": ct["value"],
         "mult": ct["mult"],
         "doubling": skat_doubling(ct),
@@ -820,28 +831,30 @@ def _finish(g: dict) -> None:
     a = g["auction"]
     decl = a["declarer"]
     dpts = g["pts"][decl]
-    if a["denom"] == NULL_DENOM:
-        # Null: made iff the declarer won no +2 trick. Flat pay both ways --
-        # it is not a level-N contract and the curves do not apply to it.
-        made = g["etricks"][decl] == 0
-        ds, fs = (NULL_MAKE, 0) if made else (0, NULL_SET)
+    # NULL IS CHECKED FIRST AND WINS. Taking no +2 trick is only reachable with
+    # a non-positive total, so it can never coincide with a made contract -- it
+    # always replaces being set, which is exactly the escape hatch it is for.
+    null = g["etricks"][decl] == 0
+    made = (not null) and dpts >= a["level"]
+    scores = [0, 0]
+    if null:
+        scores[decl] = NULL_MAKE
         short = 0
     else:
-        made = dpts >= a["level"]
         ds, fs = contract_score(a["level"], dpts)
+        scores[decl], scores[1 - decl] = ds, fs
         short = max(0, a["level"] - dpts)
-    scores = [0, 0]
-    scores[decl] = ds
-    scores[1 - decl] = fs
     g["phase"] = "over"
     g["result"] = {
-        # A broken Null stops short of thirteen tricks; the UI says so
+        # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
         "ended_early": g["trick"] < NTRICKS,
         "mode": "classic",
         "declarer": decl,
         "level": a["level"],
         "denom": a["denom"],
+        "null": null,
+        "null_value": NULL_MAKE,
         "declarer_pts": dpts,
         "declarer_etricks": g["etricks"][decl],
         "made": made,

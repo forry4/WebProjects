@@ -92,8 +92,21 @@
 .odd-card.red { color: #c0233a; }
 .odd-card.black { color: #17171a; }
 .odd-card.play { cursor: pointer; }
-.odd-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
-.odd-card.dim { opacity: 0.38; filter: grayscale(0.55); }
+/* HOVER ONLY WHERE THERE IS A POINTER. On a touch screen the browser leaves
+   :hover latched on the last thing you tapped until you tap somewhere else, so
+   after playing a card the card that reflowed into that slot came up raised —
+   which reads as the game having auto-selected it for you at the start of your
+   turn. */
+@media (hover: hover) and (pointer: fine) {
+  .odd-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
+}
+/* DIMMING MUST NOT BE TRANSPARENCY. A pile's top card sits ON TOP of its buried
+   one (offset down and left so only the buried card's corner shows), and an
+   unplayable top — every pile of the opponent's, and your own between turns —
+   used to be `opacity: .38`, so the card underneath showed straight through it
+   and the two read as one smeared card. Brightness on an opaque background is
+   the same visual cue and stays opaque. */
+.odd-card.dim { filter: grayscale(0.6) brightness(0.7); }
 .odd-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
 .odd-card.back {
   background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
@@ -183,8 +196,6 @@
 .odd-yourturn { color: var(--accent); font-weight: 700; }
 
 /* v2: the Null bid stands apart from the number ladder */
-.odd-nullbid { border-color: #8a6fd8; color: #b9a5f2; }
-.odd-nullbid:hover { background: rgba(138, 111, 216, 0.12); }
 
 /* ── skat mode ──────────────────────────────────────────────────────────────
    A second auction over the same table, so everything here reuses the bid-grid
@@ -226,7 +237,6 @@
   background: rgba(255, 255, 255, 0.08);
 }
 .odd-clear.red { color: #ff8a9c; }
-.odd-clear.null { color: #b9a5f2; }
 
 .odd-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
 
@@ -293,7 +303,6 @@
 }
 .odd-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
 .odd-chip-den.red { color: #ff8a9c; }
-.odd-chip-den.null { color: #b9a5f2; }
 .odd-chip-mult {
   font-weight: 700; color: var(--accent);
   padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);

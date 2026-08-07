@@ -20,19 +20,22 @@ from . import engine as E
 
 
 def _want_win(g: dict, seat: int) -> bool:
-    """Whether the mover wants THIS trick, contract-aware.
+    """Whether the mover wants THIS trick.
 
-    Normal contracts: everyone wants the +2 tricks and nobody wants the -1s.
-    Null flips both seats: the declarer must never win a +2 trick (and winning
-    a -1 means LEADING the +2 that follows -- the worst seat to duck from), so
-    they duck everything; the defender wants the declarer to eat the +2s, so
-    they duck those too and win the -1s to keep the lead.
+    Everyone wants the +2 tricks and nobody wants the -1s.
+
+    IT DOES NOT CHASE THE NULL CONSOLATION, and that is a known gap rather than
+    an oversight. Since 2026-08-07 a declarer who takes no +2 trick all round
+    scores Null instead of being set, so a declarer whose contract has already
+    gone wrong should switch to ducking EVERYTHING -- but "already gone wrong"
+    is a lookahead judgement, and this tier is one trick deep. Reading it off
+    the current total instead (duck once you are behind) would make the bot
+    throw away contracts it was still winning. The Hard tier does not chase it
+    either: its solver maximises trick POINTS, and Null is a discontinuous jump
+    the double-dummy value function cannot see. Both want the contract-aware
+    solve (`dd::solve_contract`) that already exists for the auction.
     """
-    ev = E.trick_value(g["trick"]) > 0
-    if g["auction"]["denom"] == E.NULL_DENOM:
-        decl = g["auction"]["declarer"]
-        return not ev if seat != decl else False
-    return ev
+    return E.trick_value(g["trick"]) > 0
 
 
 def policy_score(g: dict, c: int, seat: int | None = None) -> float:
@@ -93,14 +96,10 @@ def _level_for(strength: float) -> int:
 
 
 def choose_bid(g: dict, seat: int, rng=None) -> dict:
-    """Return {"pass": True} or {"level": n, "denom": d}.
-
-    The bot never bids Null: it is a 33%-make gamble under EXACT play, and a
-    one-trick-deep policy has no business finding the other 67%.
-    """
+    """Return {"pass": True} or {"level": n, "denom": d}."""
     rng = rng or random.Random()
     opt = E.auction_options(g)
-    bids = [b for b in opt["bids"] if b[1] != E.NULL_DENOM]
+    bids = list(opt["bids"])
     if not bids:
         return {"pass": True} if opt["may_pass"] else {"pass": True}
 
@@ -164,11 +163,8 @@ def choose_skat_bid(g: dict, seat: int) -> dict:
 def choose_declare(g: dict, seat: int) -> dict:
     """Name the game that satisfies the bid with the least stretch.
 
-    Never Null, for the same reason the bot never bids it in classic mode: it
-    is a 33%-make gamble under EXACT play and a one-trick-deep policy has no
-    business finding the other 67%. Never announces either — Hand, Sharp and
-    Open all multiply a contract this bot is not confident enough to have
-    bought in the first place.
+    Never announces: Hand, Sharp and Open all multiply a contract this bot is
+    not confident enough to have bought in the first place.
     """
     bid = g["auction"]["value"]
     best, best_key = None, None
@@ -186,8 +182,6 @@ def choose_declare(g: dict, seat: int) -> dict:
 
 def choose_kontra(g: dict, seat: int) -> bool:
     a = g["auction"]
-    if a["denom"] == E.NULL_DENOM:
-        return False
     target = a["level"] + (E.SHARP_BONUS if g["contract"]["sharp"] else 0)
     return (target >= _KONTRA_TARGET
             and hand_strength(g, seat, a["denom"]) >= _KONTRA_STRENGTH)
@@ -215,18 +209,14 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
 
     Value each candidate hand by rank-worth in `denom` (defaulting to whichever
     denomination this position implies); keep the swap only if it improves on
-    standing pat. Under Null the polarity flips -- LOW cards are the good ones,
-    so swap out the biggest.
+    standing pat.
     """
     if denom is None:
         denom = swap_denom(g, seat)
     hand = list(g["hands"][seat])
-    is_null = denom == E.NULL_DENOM
 
     def worth(c: int) -> float:
         v = _RANK_VALUE[E.rank(c)]
-        if is_null:
-            return -E.rank(c)  # every high card is a liability
         if denom < E.NOTRUMP and E.suit(c) == denom:
             v += 0.8  # trump length is worth having
         return v

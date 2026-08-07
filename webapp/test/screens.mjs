@@ -1912,6 +1912,31 @@ try {
 			await sleep(90);
 		}
 
+		// A PILE'S TOP CARD MUST BE OPAQUE. It sits over the buried one, offset so
+		// only the buried card's top-right corner shows -- and an unplayable top
+		// (every pile of the opponent's, and your own between turns) was dimmed
+		// with `opacity`, so the card underneath showed straight through it and
+		// the two read as one smeared card. Pure CSS, so nothing in Python can
+		// see it; the opponent's row is the one that is always dimmed.
+		const piles = await page.evaluate(() => {
+			const rows = [...document.querySelectorAll(".odd-piles")];
+			const tops = rows.flatMap((r) => [...r.querySelectorAll(".odd-pilewrap")]
+				.map((w) => [...w.children].find((c) => c.classList.contains("odd-card")))
+				.filter(Boolean));
+			return {
+				n: tops.length,
+				dimmed: tops.filter((t) => t.classList.contains("dim")).length,
+				seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
+				// ...and the buried card is still peeking out, or the offset broke.
+				buried: document.querySelectorAll(".odd-buried").length,
+			};
+		});
+		check("a pile's top card is opaque, dimmed or not",
+			piles.n >= 3 && piles.seeThrough === 0 && piles.buried > 0,
+			JSON.stringify(piles));
+		check("...and the check is not vacuous: some top really is dimmed",
+			piles.dimmed > 0, JSON.stringify(piles));
+
 		const trace = await page.evaluate(() => window.__hold);
 		// Dwell of state i = when state i+1 replaced it. The last entry has no
 		// successor, so it is dropped rather than guessed at.
