@@ -1660,6 +1660,29 @@ try {
 			check("...and its number contrasts with what it sits on",
 				readable.ratio >= 3, JSON.stringify(readable));
 
+			// ...AND IT MUST SURVIVE :hover, ON EVERY FAMILY OF SELECTABLE
+			// BUTTON. The check above tested only `.dis-valgrid` and passed
+			// while the SUIT row was visibly broken on a phone: the hover fill
+			// out-specified `.on` (`:not(:disabled)` contributes its argument,
+			// so (0,3,1) beat (0,2,1)) and repainted the selected button grey,
+			// leaving `.on`'s near-black glyph on it. `:hover` LATCHES to the
+			// last thing tapped on iOS, so that was permanent, not transient —
+			// reported from a phone with the number green and the suit not.
+			// valgrid was the one family that happened to be safe, purely
+			// because its hover rule ties on specificity and loses on source
+			// order, which is exactly why testing one family proved nothing.
+			// Hover is the only way to see it: idle, all four are correct.
+			for (const fam of [".dis-valgrid button.on", ".dis-bidgrid button.on",
+				".dis-denoms button.on", ".dis-ann.on"]) {
+				const el = await page.$(fam);
+				if (!el) continue;              // not every family is on screen in every phase
+				const before = await el.evaluate((e) => getComputedStyle(e).backgroundColor);
+				await el.hover();
+				const after = await el.evaluate((e) => getComputedStyle(e).backgroundColor);
+				check(`a selected ${fam} keeps its colour under :hover`,
+					after === before, `${fam}: ${before} -> ${after}`);
+			}
+
 			// GRAND has to be among them. It is served like every other
 			// denomination (a base in /catalog, a row in `declare`), so a
 			// frontend that quietly dropped it — a label array one short, a
@@ -2011,12 +2034,22 @@ try {
 		// is precisely the size of the bug.
 		await page.evaluate(() => {
 			window.__hold = [];
-			let last = null;
+			// The RESULT PANEL is sampled on the same frames, because the end of
+			// the game is where these two interact. `heldTrick` is set from an
+			// effect, and React paints BEFORE effects run — so on the message
+			// that ends the game the panel can paint for one frame before the
+			// hold takes it back down, giving result -> last trick -> result.
+			// One frame is invisible to any polling loop and easy to miss by
+			// eye, which is exactly why it is recorded rather than watched.
+			window.__resultFlips = [];
+			let last = null, lastRes = null;
 			const tick = () => {
 				const t = document.querySelector(".dis-trick");
 				const s = !t ? "-" : [...t.querySelectorAll(".dis-tp .dis-card")]
 					.map((e) => e.textContent.trim()).join(" ") || "(none)";
 				if (s !== last) { window.__hold.push([performance.now(), s]); last = s; }
+				const res = !!document.querySelector(".dis-result");
+				if (res !== lastRes) { window.__resultFlips.push([performance.now(), res]); lastRes = res; }
 				requestAnimationFrame(tick);
 			};
 			requestAnimationFrame(tick);
@@ -2142,6 +2175,16 @@ try {
 		check("the trick that ends the game is held too, not replaced by the result",
 			dwells.length >= 8 && dwells[dwells.length - 1].ms >= 550,
 			JSON.stringify(dwells[dwells.length - 1] || null));
+		// ...AND THE RESULT PANEL MUST NOT FLASH BEFORE THAT HOLD. The check
+		// above measures the hold once it starts, so it passes just as happily
+		// when the panel painted a frame earlier and was yanked back down. That
+		// is a visible blink of the final score before the last trick — the
+		// user-reported "flash of something as the game ends". The panel should
+		// appear exactly ONCE, so more than one on-flip is the bug.
+		const flips = await page.evaluate(() => window.__resultFlips || []);
+		const appearances = flips.filter(([, shown]) => shown).length;
+		check("the result panel does not flash before the final trick's hold",
+			appearances <= 1, `result panel appeared ${appearances}x: ${JSON.stringify(flips)}`);
 		// ── the round that just ended is one round of a MATCH ────────────────
 		// A game is played to 100, so the result panel carries the running
 		// standing and deals again rather than sending anyone to the lobby. One

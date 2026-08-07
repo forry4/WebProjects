@@ -196,7 +196,19 @@
   background: rgba(255, 255, 255, 0.07); color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
 }
-.dis-bidgrid button:hover:not(:disabled), .dis-denoms button:hover:not(:disabled) {
+/* `:not(.on)` IS LOAD-BEARING — without it the hover fill EATS THE SELECTED
+   GREEN, and on a phone it does so permanently. `:hover` latches to the last
+   thing you tapped (the same iOS behaviour the card rules below are guarded
+   for), so the suit you just picked keeps the grey fill for the rest of the
+   auction. It out-specifies `.on` — `:not(:disabled)` contributes its argument,
+   making this (0,3,1) against `.on`'s (0,2,1) — so the green never even lands,
+   while `.on`'s near-black `color` still applies: a dark glyph on a grey
+   button, which is the exact unreadable state --accent was defined to fix.
+   Reported from a phone; measured at rgba(255,255,255,.15) where the green
+   should be. `.dis-valgrid` below only escaped because ITS hover rule ties on
+   specificity and loses on source order — that is luck, not design, so it
+   carries the same guard. */
+.dis-bidgrid button:hover:not(:disabled):not(.on), .dis-denoms button:hover:not(:disabled):not(.on) {
   background: rgba(255, 255, 255, 0.15);
 }
 .dis-bidgrid button.on, .dis-denoms button.on { background: var(--accent); color: #08131f; border-color: transparent; }
@@ -264,7 +276,10 @@
   background: rgba(255, 255, 255, 0.07); color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
 }
-.dis-valgrid button:hover { background: rgba(255, 255, 255, 0.15); }
+/* `:not(.on)` for the reason spelled out at .dis-bidgrid: this pair TIES on
+   specificity and only keeps its green because `.on` happens to come second.
+   Reordering these two lines would silently break it, so say it in the selector. */
+.dis-valgrid button:hover:not(.on) { background: rgba(255, 255, 255, 0.15); }
 .dis-valgrid button.on { background: var(--accent); color: #08131f; border-color: transparent; }
 
 /* The collision list: one number, several games. This IS the mode's argument,
@@ -296,7 +311,8 @@
   background: rgba(255, 255, 255, 0.06); color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.14);
 }
-.dis-ann:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+/* Same guard: Sharp/Open are toggles, and this rule out-specified `.on` too. */
+.dis-ann:hover:not(:disabled):not(.on) { background: rgba(255, 255, 255, 0.14); }
 .dis-ann.on { background: var(--accent); color: #08131f; border-color: transparent; }
 .dis-ann:disabled { opacity: 0.32; cursor: not-allowed; }
 .dis-annbtn { border-color: #6fa8d8; color: #a5d0f2; }
