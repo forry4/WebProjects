@@ -198,13 +198,13 @@ export default function DissonanceRules() {
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
 						declarer scores <b>N × N</b>, plus <b>1 for every trick point past N</b>.
 						The defender scores nothing.</li>
-					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>(N − 1) + 4 for every
+					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 4 for every
 						point the declarer finished below N</b>.</li>
 				</ul>
 				<p>
 					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
 					making it scores 9; bidding 3 and finishing on 7 scores 13; bidding 3 and
-					finishing on 1 gives your opponent 10.
+					finishing on 1 gives your opponent 11.
 				</p>
 				<RulesTip>
 					<p>
@@ -252,7 +252,8 @@ export default function DissonanceRules() {
 			</RulesSection>
 
 			<p className="rl-note">
-				One round per game, head-to-head against a friend (share the room code) or the bot.
+				Rounds are played to a running total of 100, head-to-head against a friend
+				(share the room code) or the bot.
 				Suits are shown by glyph as well as color, so red/black is never the only signal.
 			</p>
 		</>

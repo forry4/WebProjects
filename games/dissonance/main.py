@@ -374,12 +374,29 @@ def list_user_history(user_id: str) -> list[dict]:
             continue
         is_p1 = r["player1_id"] == user_id
         opp_name = (r["player2_name"] if is_p1 else r["player1_name"]) or "Opponent"
-        scores = res.get("scores") or [0, 0]
+        # THE MATCH STANDING, not the last round's score. A game is rounds
+        # played to a target, so the round that happened to end it says nothing
+        # about who won -- a 100-84 match whose final deal was a 9-point make
+        # was listed in History as "Won 9-0", and one ended by the OPPONENT
+        # crossing the line first was listed as a loss on a round the reader
+        # had no way to tell apart from the whole game. `scores` is the
+        # fallback for a row written before matches existed, which really is
+        # one round and really is the whole game.
+        scores = res.get("match_scores") or res.get("scores") or [0, 0]
+        rounds = int(res.get("round") or 1)
         out.append({
             "id": r["id"], "opp_name": opp_name,
             "your_score": scores[seat], "opp_score": scores[1 - seat],
             "you_won": scores[seat] > scores[1 - seat],
             "mode": engine.mode_of(g),
+            # How many deals it took, and what it was played to -- the two
+            # numbers that make the score above legible.
+            "rounds": rounds,
+            "target": res.get("match_target"),
+            "abandoned": res.get("abandoned_by") is not None,
+            # The LAST round's contract. Worth showing for a one-round game,
+            # which is what the whole result is; the frontend drops it for a
+            # match, where it is one deal in ten and reads as the headline.
             "contract": {"level": res.get("level"), "denom": res.get("denom"),
                          "made": res.get("made"),
                          "value": res.get("value"), "mult": res.get("mult"),

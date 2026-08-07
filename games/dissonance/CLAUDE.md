@@ -208,7 +208,7 @@ never forced to. Winner leads next.
 
 **Scoring** (contract only; trick points are the yardstick *and* the margin):
 make → **N² + 1 per trick point past N**; set → defender scores
-**(N−1) + 4 × shortfall**. **NULL OVERRIDES A SET**: a declarer who won **no +2
+**N + 4 × shortfall**. **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **12** (skat: **20**) instead, whatever they
 declared. **Every round runs all thirteen tricks** — see the overtrick section.
 
@@ -238,6 +238,20 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   DECLARER'S consolation (its make rate defending is ~0%).
 * **N² make / linear set** — the make/set RATIO is what lifts bidding. Matched
   curves cancel: N² on both left the floor cluster identically at 42.7%.
+* **set base N, not N−1 (2026-08-07)** — a product decision, not a measurement,
+  and it is one number in one place (`_terms_for`'s classic `set_base`). At the
+  floor the old base contributed *nothing*: breaking a level-1 contract paid the
+  defender by the margin alone, and ~42% of openings sit at level 1. It adds
+  exactly 1 to every set in the mode, so it can never reorder two set results —
+  what it moves is set-vs-make and set-vs-Null, both by one. **Everything
+  downstream follows for free**: `payoff_terms` ships to the Hard tier, so the
+  bot re-priced itself with no bot code at all, and the only files that had to
+  change with it are the ones holding a SECOND copy — `payoff.jsonl`
+  (regenerate: `PYTHONPATH=. python -m games.dissonance.tools.gen_payoff_fixtures`),
+  the Rust harnesses that hand-build classic terms (`bid.rs`'s test `opt`,
+  `cmatch.rs`, `abench.rs`), and the two places that print the arithmetic to a
+  human (the result panel's maths line, `rules.jsx`). Skat is untouched: its set
+  base is the STAKE, so there was no N−1 in it to add to.
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
@@ -302,6 +316,40 @@ the bidding judgement, which is the part worth playing.
 * **The final standing is written onto the RESULT ROW** (`match_scores`,
   `match_target`, `match_over`, `round`), not left only in `g["match"]`. The
   lobby history reads a stored result and never the live game.
+* **…and the lobby History row must READ it (fixed 2026-08-07).** It shipped
+  reporting `result["scores"]` — the score of the DEAL that happened to end the
+  match — so a match taken 100–84 listed as "Won 9–0" and one lost by the
+  opponent crossing the line listed a loss on a round the reader could not tell
+  apart from the whole game. The keys were on the row from the day matches
+  shipped; nothing read them. Now: `match_scores` (falling back to `scores`, so
+  a genuinely one-round save is still right), plus `rounds`/`target` so the meta
+  line says "12 rounds to 100" instead of narrating the last deal's contract —
+  which is one deal in ten and read as the headline. The contract line is kept
+  for the one-round case, where it *is* the whole game. `tests/test_history.py`
+  drives real played-out matches through a temp sqlite file, because a
+  hand-built result row only pins the shape the test itself wrote.
+  A match can also end LEVEL (a forfeit closes it regardless of the target), so
+  the row has a third state — the shared kit's `tie` class, which CoC and
+  Dontminion already use.
+* **The match keeps a SCORECARD, `match["rounds"]`** — one line per round
+  banked: the contract, the declarer's trick points against what they promised,
+  and the round's scores. The side panel's "Match to 100" box renders it under
+  the running total (`MatchCard`), because a total says who is ahead and nothing
+  about how: which rounds were bought cheaply, who has been declaring, whether
+  the gap is one big set or six small ones.
+  - **Every line is DERIVED from the result row, in `_bank_round`.** The three
+    finishers (`_finish`, `_finish_skat`, `abandon_result`) now build their
+    result dict FIRST and hand it over, so the scorecard cannot disagree with
+    the panel that narrates the same round — re-reading made/null/target off the
+    board would have been a second copy of the scoring, which is what
+    `payoff_terms` exists to prevent.
+  - **`rounds` is `setdefault`ed, never created in `new_game`** — same reason
+    `match_of` exists. A match already in progress when this shipped has no
+    scorecard and must go on banking rounds rather than KeyError; its earlier
+    rounds are simply gone, and there is nowhere to recover them from.
+  - A pass-out redeal adds no line, because it is not a round.
+  - It rides in `view_for`'s `match` (wholly public, like the totals) and
+    through `persist.py` untouched. ~8 small keys x a median of ten rounds.
 * **A save with no `match` key is a single round and still ends at its own
   end.** `match_of()` is the only reader of `g["match"]` for exactly that
   reason — a game already in progress when this shipped must not crash and must
@@ -360,7 +408,7 @@ deal both ways, so the difference is the rule and not the cards.
 
 What the shelved rule said, kept because it was measured rather than assumed:
 cannot-fail stopped, cannot-**make** played on (the defender is paid
-`(N−1) + 4 × shortfall`, so every remaining trick still moves the shortfall);
+`N + 4 × shortfall`, so every remaining trick still moves the shortfall);
 Null got no early exit of its own; and it never stopped with ONE trick left,
 because that beat is where the shortfall and the Null consolation are both still
 live.
@@ -463,6 +511,14 @@ at all. The frontend gates that line on `sawTalon` (`!isSkat || game.looked`).
   filter), sampled MID-round: the check it replaced ran after the game was over,
   when every pile is exhausted, so it read all-zeroes on every run and could
   never pass.
+* **The side panel's order is TALON → match → contract → last trick → points**
+  (2026-08-07). The talon is the only panel there you play *from* rather than
+  read after the fact — three cards you know are out of play is a holding to
+  count from — so it sits at the top of the column, above the standing. It was
+  fourth, under Last trick, which put the thing you paid the auction to see
+  below two panels that only report. The phone rules drop Contract and Points
+  (both duplicated elsewhere) and stack the rest, so the order carries there
+  too.
 * **Optional follow-suit is rejected.** With negative odd tricks it makes every
   odd trick fall deterministically to whoever leads it — 7 of 13 tricks lose
   all decision content.
@@ -577,9 +633,14 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (345)
+## Tests (355)
 
-`test_engine.py` rules · `test_rust_parity.py` the drift gate ·
+`test_engine.py` rules (including the match SCORECARD: one line per banked
+round, derived from the result row, none for a pass-out, and a match that
+predates it gaining one without crashing) · `test_history.py` (5) the lobby
+History row — the MATCH standing rather than the last deal's, the rounds/target
+line, both seats reading the same match from their own side, a forfeit, and a
+pre-match save still read as one round · `test_rust_parity.py` the drift gate ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
 `test_integration.py` create → auction → 13 tricks → scored result → the NEXT
 round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers
@@ -623,7 +684,11 @@ whether a new room flag can actually be created (the Renaissance lesson) — pla
 a **whole Hard game** and counts `client_ai_ready` / `ai_move` on the socket
 (every failure in the Worker→wasm→fetch chain degrades to the server bot, so a
 game that plays out perfectly is exactly what the fallback looks like), and
-measures the **completed-trick beat** described above.
+measures the **completed-trick beat** described above. It also reads the match
+**scorecard** off the rendered panel — cells, not a substring — and asserts
+round 1's line survives the next deal: the panel is fed by `match.rounds` off
+the wire, so a field that never shipped and a panel that renders nothing look
+identical from the outside.
 
 ## The Hard tier — an exact solver, in the player's browser (2026-08-07)
 
