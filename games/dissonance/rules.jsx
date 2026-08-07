@@ -163,9 +163,11 @@ export default function DissonanceRules() {
 				]} />
 				<p>
 					<b>Scoring.</b> Make everything you announced and you score{" "}
-					<b>value × multiplier</b>. Miss any part of it — the level, or the Sharp
-					margin on top — and your opponent scores that same number, plus 4 for
-					every point you finished short.
+					<b>value × multiplier</b>, plus <b>1 for every trick point past your
+					target</b>. Miss any part of it — the level, or the Sharp margin on top —
+					and your opponent scores that same number, plus 4 for every point you
+					finished short. The overtrick bonus is flat: 1 a point whatever the
+					contract cost, so Kontra never multiplies it.
 				</p>
 				<p>
 					So the escalation doesn't stop when the auction does. Winning cheap at 6
@@ -194,14 +196,26 @@ export default function DissonanceRules() {
 				</p>
 				<ul>
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
-						declarer scores <b>N × N</b>. The defender scores nothing.</li>
+						declarer scores <b>N × N</b>, plus <b>1 for every trick point past N</b>.
+						The defender scores nothing.</li>
 					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>(N − 1) + 4 for every
 						point the declarer finished below N</b>.</li>
 				</ul>
 				<p>
 					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
-					making it scores 9; bidding 3 and finishing on 1 gives your opponent 10.
+					making it scores 9; bidding 3 and finishing on 7 scores 13; bidding 3 and
+					finishing on 1 gives your opponent 10.
 				</p>
+				<RulesTip>
+					<p>
+						<b>Overtricks mean no trick is ever dead.</b> Getting home used to end the
+						hand for you — the contract paid the same whether you finished on your
+						number or five past it. Now every point after it is worth another, so the
+						back half of a won hand is still worth playing, and the defender still has
+						something to take off you. It also means <b>every round runs all thirteen
+						tricks</b>.
+					</p>
+				</RulesTip>
 				<p>
 					<b>A game is a match, not a deal.</b> Rounds are scored onto a running total
 					and the first player to <b>100</b> wins, in either mode. That's usually about
@@ -211,15 +225,6 @@ export default function DissonanceRules() {
 					contract before you know anything about their hand, and in classic mode you
 					aren't allowed to pass.
 				</p>
-				<RulesTip>
-					<p>
-						<b>A round can stop before trick 13.</b> Once the declarer is home even if
-						they lose every +2 trick left and take every −1, the contract cannot fail —
-						and a made contract pays a flat amount, so nothing left to play could move
-						the score. A round the declarer <i>cannot make</i> plays on, because every
-						remaining trick still changes how far short they finish.
-					</p>
-				</RulesTip>
 			</RulesSection>
 
 			<RulesSection title="The thing to notice">

@@ -87,6 +87,19 @@ function multParts(ct) {
   return parts;
 }
 
+/** The overtrick bonus as the tail of a made contract's arithmetic line.
+ *
+ *  Empty when nothing was scored past the target, so a contract brought home
+ *  exactly reads the way it always did ("3 × 3 = 9 to Alice") rather than
+ *  growing a "+ 0". Both modes share it: the chain in front differs, the tail
+ *  does not. The numbers are the RESULT ROW's — `over` and the final score are
+ *  the engine's own, never recomputed here.
+ */
+function overTail(res) {
+  if (!res?.over) return "";
+  return ` + ${res.over} = ${res.scores[res.declarer]}`;
+}
+
 const suitOf = (c) => Math.floor(c / 8);
 const rankOf = (c) => c % 8;
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
@@ -240,8 +253,8 @@ function SkatStake({ game, nameOf, rows }) {
       <div className="dis-scorerow"><span>At stake</span><b>{stake}</b></div>
       {why && <div className="muted" style={{ fontSize: "0.72rem" }}>{why}</div>}
       <div className="muted" style={{ fontSize: "0.72rem" }}>
-        Made, it goes to {nameOf(game.auction.declarer)}; missed, to{" "}
-        {nameOf(1 - game.auction.declarer)} plus 4 a point short.
+        Made, it goes to {nameOf(game.auction.declarer)} plus 1 a point over;
+        missed, to {nameOf(1 - game.auction.declarer)} plus 4 a point short.
       </div>
     </>
   );
@@ -935,6 +948,11 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // contract was already safe, and the tricks nobody played would still have
   // moved the trick points. Printing the running total as if it were the final
   // one reads as a miscount, so say what is actually true — at least this many.
+  //
+  // `ended_early` is always false while overtricks pay (every trick moves the
+  // score, so no round stops short) — kept because the engine's early end is
+  // SHELVED rather than removed, and a stored result from before the bonus can
+  // still carry it. See `_score_is_settled`.
   const scored = (n) => (res?.ended_early ? `at least ${n}` : `${n}`);
   // THE BEAT BLOCKS PLAY, and that is what makes it a beat rather than a race.
   // The hold is 700ms and a trick takes ~600ms at full tilt, so a player who
@@ -1347,7 +1365,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     {res.doubling > 1 ? ` × ${res.doubling}` : ""}
                     {res.mult > 1 || res.doubling > 1 ? ` = ${res.stake}` : ""}
                     {res.made
-                      ? ` to ${nameOf(res.declarer)}`
+                      ? `${overTail(res)} to ${nameOf(res.declarer)}`
                       : ` + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                   </>}
                 </div>
@@ -1360,7 +1378,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   {res.null
                     ? `flat ${res.null_value} to ${nameOf(res.declarer)}`
                     : res.made
-                      ? `${res.level} × ${res.level} = ${res.scores[res.declarer]} to ${nameOf(res.declarer)}`
+                      ? `${res.level} × ${res.level} = ${res.level * res.level}`
+                        + `${overTail(res)} to ${nameOf(res.declarer)}`
                       : `${res.level - 1} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                 </div>
               </>}

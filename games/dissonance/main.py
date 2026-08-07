@@ -1041,6 +1041,8 @@ async def catalog():
         "skat_values": list(engine.SKAT_VALUES),
         "skat_null_value": engine.SKAT_NULL_VALUE,
         "sharp_bonus": engine.SHARP_BONUS,
+        # Per mode, because the shape is per mode even while both read 1.
+        "over_bonus": dict(engine.OVER_BONUS),
     }
 
 

@@ -143,6 +143,9 @@ Classic is described below; this section is only what skat mode adds.
   `play`. `talon` splits into `look` / `hand` / `swap` because **declining to
   look is what Hand means** — the declarer who plays Hand never sees `shown`
   either, in the engine *and* in `view_for`, or Hand would be a free multiplier.
+* **Overtricks pay 1 each, flat.** `stake + 1 × (pts − target)` on a make — the
+  same `OVER_BONUS` classic uses, and deliberately NOT run through `mult` or the
+  doubling. See the overtrick section above.
 * **Announcements add, they don't multiply**: `mult = 1 + hand + sharp + open`.
   Sharp promises `level + SHARP_BONUS` (2); Open rides on Sharp. Kontra ×2 /
   Re ×4 on top. A multiplier rather
@@ -203,11 +206,11 @@ a pile card. The defender learns *that* a swap happened, never which cards.
 mandatory **and a pile top counts as a card you hold**. May ruff when void,
 never forced to. Winner leads next.
 
-**Scoring** (contract only; trick points are the yardstick): make → **N²**;
-set → defender scores **(N−1) + 4 × shortfall**. **NULL OVERRIDES A SET**: a
-declarer who won **no +2 trick all round** scores a flat **12** (skat: **20**)
-instead, whatever they declared. **A round stops the moment the score can no
-longer change** — see below.
+**Scoring** (contract only; trick points are the yardstick *and* the margin):
+make → **N² + 1 per trick point past N**; set → defender scores
+**(N−1) + 4 × shortfall**. **NULL OVERRIDES A SET**: a declarer who won **no +2
+trick all round** scores a flat **12** (skat: **20**) instead, whatever they
+declared. **Every round runs all thirteen tricks** — see the overtrick section.
 
 ### Why these numbers, in one line each
 
@@ -247,6 +250,11 @@ the normal-tier bot: classic **median 10 rounds** (6–16), skat **median 11**
 (6–18). **Re-measure if the bases or the payoff arithmetic move** — the target
 is a product decision, but the round count it buys is not a guess, and skat was
 a median of 8 to the same 100 before its bases were re-priced by colour.
+
+**THOSE MEDIANS ARE NOW STALE and have not been re-run.** The overtrick bonus
+raises every made contract, so 100 buys FEWER rounds than the numbers above —
+by how much is unmeasured. It is a `skatlab` run, not a guess, and it is the
+same run the Null-cliff question below wants.
 
 Still a per-mode DICT though both read 100, because the modes score on different
 scales and nothing requires them to agree: a classic round pays level² (up to
@@ -305,50 +313,78 @@ the bidding judgement, which is the part worth playing.
   scheduler finds nothing to do and the result panel stays up until a human
   presses Next round. `test_the_bot_never_deals_the_next_round_by_itself`.
 
-## A round stops when the SCORE stops moving (2026-08-07)
+## Every trick point past your contract is worth 1 (2026-08-07)
 
-`_score_is_settled` is checked after every completed trick, and the bar is the
-SCORE, not the outcome — which is why only one direction of "decided" ends a
-round early:
+`OVER_BONUS = {"classic": 1, "skat": 1}` — a per-mode dict like `MATCH_TARGET`,
+and like that one it currently reads the same in both while the modes score on
+different scales. A made contract pays **N² + 1 × (pts − N)** in classic and
+**stake + 1 × (pts − target)** in skat. Set is untouched; Null is untouched.
 
-* **Cannot fail** → stop. If the declarer clears the target even after losing
-  every remaining +2 trick and being handed every remaining −1, the contract is
-  made, and a made contract pays a flat N² (or the skat stake) that does not move
-  with the final total.
-* **Cannot make** → play on. Being mathematically set does NOT settle the score:
-  the defender is paid `(N−1) + 4 × shortfall`, and every remaining trick still
-  moves the shortfall. Holding a busted declarer down is a real contest, and the
-  Null consolation makes it a live one from the other side too.
-* **Null** gets no early exit of its own. It used to (as a bid it was decided the
-  moment the declarer took a scoring trick), but as a consolation it is settled
-  early only when no +2 trick remains — which by the parity of the trick values
-  can only ever save the thirteenth, and the floor below now forbids that anyway.
-* **Never with ONE trick left** (2026-08-07). Stopping a trick from home saves
-  nothing and costs the hand its last beat — the trick where the shortfall and
-  the Null consolation are both still live, i.e. the one most worth watching.
-  `_score_is_settled` returns False below two remaining, so the earliest stop
-  leaves at least two. Pinned at the predicate by
-  `test_the_last_trick_is_always_played_out` rather than by a seed sweep: the
-  position is common enough to matter and rare enough that random play passing
-  is no evidence it was checked.
+* **It ships through `payoff_terms` as an `over` term**, so `_finish` and the
+  Hard tier's solver get it from one place — **change it and the bot follows with
+  no bot code at all.** `dd::Contract.over` was already there as a *penalty* from
+  the auction lab's burst experiments; it is now SIGNED (a bonus, negative for a
+  penalty) so the sign convention matches the server's, and `forced_floor` passes
+  −1. On the wire it is OPTIONAL, defaulting to flat, because a browser can hold
+  a cached wasm older than the server.
+* **FLAT, not scaled by skat's announcements or Kontra** — the `SKAT_NULL_VALUE`
+  argument. Hand/Sharp/Open are promises about the CONTRACT, and running a
+  per-point bonus through a ×4 would make one overtrick worth more than the rungs
+  the ladder is built from.
+* **It narrows the Null cliff, which was measured and deliberate.** "A cheap
+  contract is a licence to duck" was priced against FLAT payouts: a made classic
+  level-1 now runs 1 → up to 12 against Null's 12, and a skat stake of 6 runs
+  6 → 15 against 20. Narrowed, not removed — and it is the number most worth
+  re-running in `skatlab`, since the measurement behind it no longer describes
+  the game.
+* **`contract_score` now DELEGATES to `payoff`.** It held its own copy of the
+  classic make/set rule, was reachable from the tests only, and would have gone
+  on paying flat — a test agreeing with itself.
 
-**A round that stopped early reports "scored AT LEAST N".** The score is exact —
-that is the whole precondition for stopping — but the trick TOTAL is not, because
-the unplayed tricks would still have moved it. Printing the running total as if
-it were final reads as a miscount, so the result panel says "at least" whenever
-`result.ended_early` (which only ever coincides with a MADE contract, since a set
-one plays on).
+### The early end is SHELVED, not deleted
 
-**`pts` sums to POOL only over a COMPLETED round.** Every conservation assertion
-has to say "a round that ran to thirteen tricks"; four tests and one fixture
-generator learned that the hard way.
+`_score_is_settled` stopped a round the moment the score could no longer change.
+Its "cannot fail → stop" branch rested *entirely* on a made contract paying a
+flat amount; with overtricks every remaining trick moves the score, so **every
+round now runs all thirteen tricks.**
 
-**The Rust parity harness names a `MAX_LEVEL` contract on purpose.** The
-reference always plays all thirteen tricks, so `_game_from` has to describe a
-contract that can never settle early — at its old level of 1 the early end fired
-most of the way through most deals and every fixture's final points diverged.
-MAX_LEVEL works because one player's ceiling is sweeping the six +2 tricks;
-`test_rust_parity` asserts that relationship rather than assuming it.
+The predicate is kept whole and **gated on the TERMS, not on the mode** — put a
+0 back in `OVER_BONUS` for a mode and the early end returns for that mode alone,
+with no other edit. `test_no_round_ends_before_the_thirteenth_trick` drives both
+halves (bonus on: never settles; bonus off via `monkeypatch.setitem`: the old
+rule exactly, last-trick guard included), so the branch stays live and tested
+rather than rotting into something that no longer compiles against the state
+around it. `test_a_round_that_would_have_stopped_early_now_plays_on_for_the_bonus`
+finds the seeds that used to stop and asserts they now run to thirteen — the same
+deal both ways, so the difference is the rule and not the cards.
+
+What the shelved rule said, kept because it was measured rather than assumed:
+cannot-fail stopped, cannot-**make** played on (the defender is paid
+`(N−1) + 4 × shortfall`, so every remaining trick still moves the shortfall);
+Null got no early exit of its own; and it never stopped with ONE trick left,
+because that beat is where the shortfall and the Null consolation are both still
+live.
+
+**`result.ended_early` is now always false, and the key stays.** The result panel
+still reads it (`scored()` prints "at least N", because a stopped round's trick
+TOTAL was not final even though its score was) — a stored result from before the
+bonus can still carry it, and the shelf could put it back.
+
+**`pts` sums to POOL only over a COMPLETED round** — still the correct way to
+state it, and now unconditionally true. The four tests and one fixture generator
+that learned it the hard way assert it flat rather than behind an `if`: a round
+that ended early would be a real regression and must not read as the other half
+of a legitimate pair.
+
+**The Rust parity harness names a `MAX_LEVEL` contract on purpose, and it stays
+that way.** The reference always plays all thirteen tricks, so `_game_from` has
+to describe a contract that can never settle early — at its old level of 1 the
+early end fired most of the way through most deals and every fixture's final
+points diverged. MAX_LEVEL works because one player's ceiling is sweeping the six
++2 tricks; `test_rust_parity` asserts that relationship rather than assuming it.
+The overtrick bonus makes this redundant *today* (nothing settles early any more)
+— keep it, because it is the shelf's insurance: flipping `OVER_BONUS` back to 0
+would otherwise silently truncate every fixture replay again.
 
 ## `shown` is the OUT-OF-PLAY SET, not a record of what was shown
 
@@ -415,7 +451,7 @@ at all. The frontend gates that line on `sawTalon` (`!isSkat || game.looked`).
   with no search.
 * **NULL AT A FLAT 12 (skat 20) DOMINATES A LOW CONTRACT, and this is measured,
   not speculative.** Classic levels 1–3 pay 1/4/9, all below 12; in skat, 13 of
-  the 36 ladder rungs pay under 20 at ×1. So a declarer who bought cheaply has
+  the 28 ladder rungs pay under 20 at ×1. So a declarer who bought cheaply has
   no reason to play for their contract at all — and the floor cluster puts ~42%
   of openings at level 1. The contract-aware Hard tier exploits it on sight
   (6–7 Nulls per 40 rounds against the points searcher's 0). **Flat is a
@@ -423,6 +459,14 @@ at all. The frontend gates that line on `sawTalon` (`!isSkat || game.looked`).
   is now a licence to duck, and that is the intended shape of the escape hatch.
   Revisiting it costs no bot work: the search reads `payoff_terms`, so scaling
   Null or capping it below what it replaces is an engine-side change alone.
+  - **THE OVERTRICK BONUS (same day) NARROWED THIS, and the measurement above
+    was taken on FLAT payouts.** A made contract is now worth its stake plus
+    every point past the target, and the declarer's ceiling is 12: classic
+    level 1 runs 1 → up to 12 against Null's 12, and a skat stake of 6 runs
+    6 → 15 against 20. The cliff is smaller and the Null rate should have
+    fallen with it. **Nobody has re-run it.** The rate is a `skatlab` sweep and
+    the same one the match-length medians want; until it exists, treat "6–7
+    Nulls per 40 rounds" as describing a game that no longer ships.
 * **The bot scheduler's staleness guard is `_position_key`, and EVERY
   state-advancing action must appear in it.** Two schedulers can be in flight at
   once (`_handle_move` starts one, so does every reconnect), and the guard used
@@ -509,19 +553,21 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (338)
+## Tests (345)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
 `test_integration.py` create → auction → 13 tricks → scored result → the NEXT
 round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers
 the case most likely to strand: only the human can deal the next round, and the
-bot has to pick its own turn back up once they do) · `test_skat.py` (73) the skat
+bot has to pick its own turn back up once they do) · `test_skat.py` (74) the skat
 phase machine: the derived ladder, the redeal, talon/Hand secrecy, declaration
 validity, the announcement table, Kontra/Re, the Open reveal, a `state_json`
 round-trip, and **Grand** (the tens as a fifth suit, second-ten-wins, the
 NULL_DENOM collision, a whole round through the real phase machine, and the
-whole-card-space assertion that no other contract moved) · `test_client_ai.py` (12) the Hard tier's protocol: the armed
+whole-card-space assertion that no other contract moved), and the **overtrick
+bonus** (the make boundary, the flat-through-the-multipliers rule, and that no
+trick is ever skipped) · `test_client_ai.py` (12) the Hard tier's protocol: the armed
 request, the re-validation, the stale drop, the watchdog, and the picker/server
 tier agreement.
 
@@ -568,9 +614,11 @@ heuristic. The reference measured the one-trick-deep policy **69.8% behind
   to ~0 by trick 7. Render's free tier is ~0.1 CPU with five games on one uvicorn
   process. The player's own cores are the only place this fits.
 * **It searches the CONTRACT PAYOFF, not the trick points (2026-08-07).** Points
-  are the game's yardstick, not its score: a points solver cannot see that a
-  declarer past their target gains nothing more, that every point of a
-  defender's shortfall is worth four, or — since Null became a consolation —
+  are the game's yardstick, not its score: a points solver cannot see what a
+  declarer past their target actually gains (1 a point since the overtrick
+  bonus, and nothing at all before it — the payoff says which, the solver does
+  not assume), that every point of a defender's shortfall is worth four, or —
+  since Null became a consolation —
   that a declarer who has taken no +2 trick is one ducked trick from scoring
   instead of being set. That last one is a CLIFF in the payoff at a single bit
   of state, which is why `State` carries `escored` (not derivable from `pts`: a

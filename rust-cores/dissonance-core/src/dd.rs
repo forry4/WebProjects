@@ -66,16 +66,22 @@ const fn build_bounds(max: bool) -> [i16; 14] {
 
 /// A contract to be played out exactly, rather than for maximum points.
 ///
-/// With a penalty for exceeding the contract the payoff stops being linear in
-/// the point differential, so the constant-sum trick that `search` relies on
-/// no longer applies: the value now depends on the declarer's FINAL total, and
-/// accumulated points have to enter the transposition key.
+/// Once anything about the payoff depends on the MARGIN -- an overtrick bonus,
+/// a shortfall penalty, a burst penalty -- the value stops being linear in the
+/// point differential and the constant-sum trick that `search` relies on no
+/// longer applies: it depends on the declarer's FINAL total, and accumulated
+/// points have to enter the transposition key.
 #[derive(Clone, Copy, Debug)]
 pub struct Contract {
     pub level: i32,
     pub declarer: usize,
     pub make_base: i32,
-    /// Penalty per point ABOVE the contract.
+    /// What each point ABOVE the target adds to a made contract. SIGNED: the
+    /// shipped skat rule is a bonus of +1, the auction lab's burst experiments
+    /// are a penalty (negative), and classic mode is 0 because a made contract
+    /// there pays flat. It comes off the wire from `engine.payoff_terms`, so
+    /// the sign convention has to match the server's -- which is why this is a
+    /// bonus rather than the penalty it was written as.
     pub over: i32,
     pub set_base: i32,
     /// Defender's reward per point the declarer finished short.
@@ -106,7 +112,7 @@ impl Contract {
             }
         }
         if declarer_pts >= self.level {
-            self.make_base - self.over * (declarer_pts - self.level)
+            self.make_base + self.over * (declarer_pts - self.level)
         } else {
             -(self.set_base + self.short * (self.level - declarer_pts))
         }
@@ -207,11 +213,11 @@ impl Dd {
     /// payoff (declarer minus defender) after playing `moves[i]`.
     ///
     /// The contract twin of `solve_root`, and the reason the served bot has one
-    /// at all: a points solver optimises the YARDSTICK. It cannot see that a
-    /// declarer three points past their target gains nothing more, that every
-    /// point of a defender's shortfall is worth four, or that a declarer who
-    /// has taken no +2 trick is one ducked trick away from scoring instead of
-    /// being set.
+    /// at all: a points solver optimises the YARDSTICK. It cannot see what a
+    /// declarer three points past their target actually gains (nothing in
+    /// classic, three in skat), that every point of a defender's shortfall is
+    /// worth four, or that a declarer who has taken no +2 trick is one ducked
+    /// trick away from scoring instead of being set.
     pub fn solve_root_contract(&mut self, s: &State, moves: &[u8], c: &Contract,
                                out: &mut [i32; 16]) {
         for (i, &m) in moves.iter().enumerate() {
@@ -222,10 +228,11 @@ impl Dd {
     }
 
     /// Exact value of playing out a CONTRACT, as declarer score minus defender
-    /// score. Unlike `solve`, the declarer here is not maximising points -- an
-    /// over-penalty makes their payoff single-peaked at the contract level, so
-    /// they may have to deliberately shed tricks, and the defence's weapon
-    /// becomes forcing unwanted winners on them.
+    /// score. Unlike `solve`, the declarer here is not maximising points: a
+    /// NEGATIVE `over` makes their payoff single-peaked at the target, so they
+    /// may have to deliberately shed tricks and the defence's weapon becomes
+    /// forcing unwanted winners on them. Plain alpha-beta over `payoff` at the
+    /// leaves, so no branch here assumes which way the term points.
     pub fn solve_contract(&mut self, s: &State, c: &Contract) -> i32 {
         self.csearch(s, c, -1_000_000, 1_000_000)
     }

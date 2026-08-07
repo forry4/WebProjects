@@ -115,9 +115,18 @@ async function waitForServer() {
 	return false;
 }
 
+// Bundled chromium in CI (after `playwright install chromium`); fall back to the
+// system Edge channel locally so no extra download is needed.
+//
+// `PLAYWRIGHT_CHROMIUM_PATH` is the same escape hatch `screens.mjs` already has,
+// and for the same reason: a box with a preinstalled Chromium that Playwright's
+// pin does not name (a container image where the pin moved 1194 -> 1228) can run
+// neither of the first two branches, and the gate stops being runnable at all.
+// The two gates are always run together, so having it on only one of them meant
+// the pair failed anyway.
 async function launchBrowser() {
-	// Bundled chromium in CI (after `playwright install chromium`); fall back to the
-	// system Edge channel locally so no extra download is needed.
+	const exe = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+	if (exe) return await chromium.launch({ executablePath: exe });
 	try { return await chromium.launch(); }
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }

@@ -561,12 +561,37 @@ def _score(g: dict, declarer_pts: int, etricks: int = 1) -> dict:
 
 def test_making_it_pays_value_times_multiplier():
     g = _declared(value=12, denom=3, level=4)      # spades x 4 = 12
-    res = _score(g, 5)
+    res = _score(g, 4)                             # exactly on target: no bonus
     assert res["mode"] == "skat"
     assert (res["value"], res["mult"], res["doubling"]) == (12, 1, 1)
     assert res["made"] is True
+    assert res["over"] == 0
     assert res["scores"][res["declarer"]] == 12
     assert res["scores"][1 - res["declarer"]] == 0
+
+
+def test_every_point_past_the_target_adds_one():
+    """The overtrick bonus. Flat, and NOT run through the multipliers -- one
+    trick point is worth one whatever the contract cost, on the same argument
+    that keeps the Null consolation unscaled."""
+    plain = _score(_declared(value=12, denom=3, level=4), 7)
+    assert plain["made"] is True and plain["over"] == 3
+    assert plain["over_bonus"] == E.OVER_BONUS["skat"] == 1
+    assert plain["scores"][plain["declarer"]] == 12 + 3
+
+    # x16 on the stake, x1 on the bonus.
+    stacked = _declared(value=12, denom=3, level=4, hand=True, sharp=True,
+                        open_=True, kontra=True, re=True)
+    res = _score(stacked, 9)
+    assert res["target"] == 4 + E.SHARP_BONUS
+    assert res["over"] == 9 - res["target"]
+    assert res["scores"][res["declarer"]] == 12 * 4 * 4 + res["over"]
+
+    # Being SET is untouched by it: there is no margin above a target you
+    # missed, and the shortfall rule already prices the distance below.
+    lost = _score(_declared(value=12, denom=3, level=4), 1)
+    assert lost["over"] == 0 and lost["made"] is False
+    assert lost["scores"][1 - lost["declarer"]] == 12 + E.SHORT_PENALTY * 3
 
 
 def test_missing_it_pays_the_defender_the_same_number_plus_the_shortfall():
@@ -590,7 +615,8 @@ def test_sharp_raises_the_bar_and_a_bare_make_now_loses():
     assert res["scores"][1 - res["declarer"]] == 12 * 2 + E.SHORT_PENALTY * bonus
 
     made = _score(_declared(value=12, denom=3, level=4, sharp=True), 4 + bonus)
-    assert made["made"] is True and made["scores"][made["declarer"]] == 24
+    assert made["made"] is True and made["over"] == 0
+    assert made["scores"][made["declarer"]] == 24
     # Exactly on the bar makes it; one under does not.
     just_under = _score(_declared(value=12, denom=3, level=4, sharp=True), 3 + bonus)
     assert just_under["made"] is False and just_under["short"] == 1
@@ -599,15 +625,18 @@ def test_sharp_raises_the_bar_and_a_bare_make_now_loses():
 def test_the_full_stack_multiplies_rather_than_adds_to_the_payout():
     g = _declared(value=12, denom=3, level=4, hand=True, sharp=True, open_=True,
                   kontra=True, re=True)
-    res = _score(g, 7)
+    # Sharp moves the target to 4 + 2, so scoring 6 makes it with nothing over
+    # and the payout is the stack alone.
+    res = _score(g, 4 + E.SHARP_BONUS)
     assert (res["mult"], res["doubling"]) == (4, 4)
     assert res["stake"] == 12 * 4 * 4
+    assert res["over"] == 0
     assert res["scores"][res["declarer"]] == 192
 
 
 def test_kontra_cuts_both_ways():
     """Doubling is not a defender-only weapon -- it doubles the make too."""
-    made = _score(_declared(value=12, denom=3, level=4, kontra=True), 5)
+    made = _score(_declared(value=12, denom=3, level=4, kontra=True), 4)
     assert made["scores"][made["declarer"]] == 24
     lost = _score(_declared(value=12, denom=3, level=4, kontra=True), 1)
     assert lost["scores"][1 - lost["declarer"]] == 24 + E.SHORT_PENALTY * 3
@@ -948,35 +977,51 @@ def _drive(mode: str, seed: int, level: int = 4, denom: int = 2, pick=-1):
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
-def test_a_contract_that_cannot_fail_stops_there(mode):
-    """The one direction that ends a round early, and the reason it is the only
-    one: a MADE contract pays a flat amount, so once the declarer clears the
-    target even after losing every remaining +2 and taking every remaining -1,
-    no card left can move a single point of the score."""
-    early = None
+def test_a_contract_that_cannot_fail_plays_on_for_the_overtricks(mode):
+    """The early end is SHELVED in both modes, and this is the position it used
+    to fire on: a level-1 contract long since safe, with tricks still to play.
+
+    It used to stop there because a made contract paid a flat amount and the
+    rest of the round could not move the score. Every point past the target is
+    now worth 1, so those tricks are the declarer's to win and the round runs
+    to thirteen. Driven over 400 deals so the safe-early position is certainly
+    reached rather than hoped for.
+    """
+    safe = 0
     for seed in range(400):
         g = _drive(mode, seed, level=1)
-        if g["result"]["ended_early"]:
-            early = g
-            break
-    assert early is not None, f"no seed in 400 settled a {mode} contract early"
-    res = early["result"]
-    decl = res["declarer"]
-    assert early["phase"] == "over"
-    assert early["trick"] < E.NTRICKS
-    assert res["made"] is True and res["null"] is False
-    # The floor it stopped on, recomputed here rather than trusted.
-    neg_left = sum(1 for t in range(early["trick"], E.NTRICKS) if E.trick_value(t) < 0)
-    target = res["target"] if mode == "skat" else res["level"]
-    assert early["pts"][decl] - neg_left >= target
+        res = g["result"]
+        assert g["trick"] == E.NTRICKS, f"seed {seed} ended at trick {g['trick']}"
+        assert res["ended_early"] is False
+        assert sum(g["pts"]) == E.POOL, "a completed round conserves the pool"
+        if res["made"]:
+            stake, target = _contract_of(res, mode)
+            assert res["over"] == res["declarer_pts"] - target
+            assert res["scores"][res["declarer"]] == stake + res["over"]
+            if res["over"]:
+                safe += 1
+    assert safe, f"no {mode} deal in 400 finished above a level-1 target"
+
+
+def _contract_of(res: dict, mode: str) -> tuple[int, int]:
+    """(what the contract itself paid, the target it promised) from a result row.
+
+    Classic rows carry neither key by that name -- the level IS the target and
+    N^2 is the payout -- which is the one place the two modes' rows differ in
+    shape rather than only in value.
+    """
+    if mode == "skat":
+        return res["stake"], res["target"]
+    return res["level"] ** 2, res["level"]
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
-def test_a_round_stops_at_the_FIRST_trick_that_settles_it_and_not_before(mode):
-    """Both halves of the timing, replayed trick by trick. Stopping late is dead
-    time; stopping early would score a hand that could still move."""
+def test_no_trick_is_ever_skipped_while_overtricks_pay(mode):
+    """Replayed trick by trick: the predicate must be False at EVERY ply, not
+    merely at the ones a finished game happens to expose. Stopping anywhere
+    would silently drop tricks the declarer could still have scored on."""
     import random as _r
-    checked = 0
+    plies = 0
     for seed in range(60):
         g = E.new_game(["alice", "bob"], _r.Random(seed), 0, mode=mode)
         if mode == "skat":
@@ -990,16 +1035,14 @@ def test_a_round_stops_at_the_FIRST_trick_that_settles_it_and_not_before(mode):
             E.apply_pass(g, 1)
             E.apply_swap(g, 0, None, None)
         while g["phase"] == "play":
-            before = g["trick"]
             assert not E._score_is_settled(g), (
-                f"seed {seed}: still playing at trick {before} with the score "
-                "already settled")
+                f"seed {seed}: the round settled at trick {g['trick']} while "
+                "every remaining trick still moves the score")
+            plies += 1
             s = E.to_play(g)
             E.apply_play(g, s, E.legal_moves(g, s)[-1])
-        if g["trick"] < E.NTRICKS:
-            assert E._score_is_settled(g), "stopped on a score that could still move"
-            checked += 1
-    assert checked, "no seed settled early, so the stop condition went unchecked"
+        assert g["trick"] == E.NTRICKS
+    assert plies >= 60 * E.NTRICKS, f"only {plies} plies — the sweep went short"
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])

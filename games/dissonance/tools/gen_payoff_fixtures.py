@@ -38,7 +38,19 @@ def _contracts():
             E.apply_pass(g, 1)
             E.apply_swap(g, 0, None, None)
             yield g
-    for value, denom, level in ((12, 2, 4), (20, 0, 4), (36, 4, 6), (2, 1, 1)):
+    # DERIVE the level from the bid rather than writing the pair out. Hand-typed
+    # levels rot the moment the bases move: three of the four here stopped
+    # reaching their bid when the denominations were re-priced by colour, and
+    # because CI does not run cargo the stale fixture sat committed and unnoticed.
+    # `+ raise_` covers declaring ABOVE the minimum, which is where the overtrick
+    # bonus and the shortfall are measured from different targets.
+    # Every denomination ON THE LADDER appears, Grand included -- its base is
+    # what the stake is built from, so a denomination missing here is a whole
+    # column of the price table the solver is never held to.
+    for value, denom, raise_ in ((12, 2, 0), (20, 0, 0), (36, 4, 0), (2, 1, 0),
+                                 (12, 3, 2), (6, 1, 3),
+                                 (12, E.GRAND, 0), (20, E.GRAND, 2)):
+        level = min(E.MAX_LEVEL, E.skat_min_level(denom, value) + raise_)
         for hand in (False, True):
             for sharp in (False, True):
                 for kontra in (False, True):

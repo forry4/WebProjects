@@ -210,9 +210,12 @@ pub fn contract_from_json(v: &Value) -> Option<Contract> {
         level: n("target")?,
         declarer: declarer as usize,
         make_base: n("make")?,
-        // No over-penalty in the shipped game: a made contract pays flat, so
-        // points past the target are worth exactly nothing.
-        over: 0,
+        // What each point past the target adds to a made contract: +1 in both
+        // shipped modes. OPTIONAL rather than required, and defaulting to the
+        // old flat rule, because a browser can hold a cached wasm older than
+        // the server -- an armed decision written before the term existed must
+        // still be searchable, and searching it at the old rule is exactly right.
+        over: n("over").unwrap_or(0),
         set_base: n("set_base")?,
         short: n("short")?,
         null: n("null"),
@@ -238,7 +241,12 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
         match (n("denom"), n("target"), n("make"), n("set_base"), n("short"), n("null")) {
             (Some(d), Some(t), Some(m), Some(sb), Some(sh), Some(nu)) if (0..=4).contains(&d) => {
                 out.push(crate::bid::Option_ {
-                    denom: d as u8, target: t, make: m, set_base: sb, short: sh, null: nu,
+                    denom: d as u8, target: t, make: m,
+                    // Optional and flat by default, same as the card search's:
+                    // a cached wasm older than the server still prices every
+                    // option, just under the rule it was built for.
+                    over: n("over").unwrap_or(0),
+                    set_base: sb, short: sh, null: nu,
                 });
             }
             _ => return Vec::new(),   // a malformed list is not a partial one
@@ -442,6 +450,13 @@ mod payoff_parity {
             }
         }
         assert!(classic > 0 && skat > 0, "both modes must be covered");
+        // The overtrick bonus is optional on the wire and defaults to flat, so
+        // a fixture set that never carried one would pass this whole table
+        // while the term was being dropped in `contract_from_json`.
+        let with_over = all.iter()
+            .filter(|f| contract_from_json(&f["terms"]).unwrap().over != 0)
+            .count();
+        assert!(with_over > 0, "no fixture prices an overtrick — regenerate");
         // Non-vacuity: the Null branch is the whole reason this search exists,
         // and a fixture that never exercised it would prove only the old rule.
         assert!(nulls > 100 && checked > 1000, "{nulls} null rows of {checked}");

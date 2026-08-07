@@ -45,6 +45,11 @@ pub struct Option_ {
     /// Trick points the declarer would be promising (Sharp included).
     pub target: i32,
     pub make: i32,
+    /// What each point past the target adds to a made contract: 0 in classic,
+    /// +1 in skat. It prices an option UPWARDS by the margin the guaranteed
+    /// total already clears the target by — which is exactly the hand that
+    /// should be declaring above its bid rather than at the minimum.
+    pub over: i32,
     pub set_base: i32,
     pub short: i32,
     /// The Null consolation, if it applies to this option.
@@ -62,7 +67,7 @@ impl Option_ {
     #[inline]
     pub fn payoff(&self, guaranteed_pts: i32, can_duck: bool) -> i32 {
         let contract = if guaranteed_pts >= self.target {
-            self.make
+            self.make + self.over * (guaranteed_pts - self.target)
         } else {
             -(self.set_base + self.short * (self.target - guaranteed_pts))
         };
@@ -254,8 +259,34 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
 mod tests {
     use super::*;
 
+    /// A classic-mode option: a made contract pays flat, so `over` is 0.
     fn opt(target: i32, make: i32, null: i32) -> Option_ {
-        Option_ { denom: 0, target, make, set_base: (target - 1).max(0), short: 4, null }
+        Option_ { denom: 0, target, make, over: 0,
+                  set_base: (target - 1).max(0), short: 4, null }
+    }
+
+    /// A skat-mode option: the same contract with the overtrick bonus on it.
+    fn skat_opt(target: i32, make: i32, null: i32) -> Option_ {
+        Option_ { over: 1, set_base: make, ..opt(target, make, null) }
+    }
+
+    #[test]
+    fn overtricks_price_a_skat_option_above_its_stake() {
+        // Three points past a target of 4, at +1 each.
+        assert_eq!(skat_opt(4, 16, 20).payoff(7, false), 19);
+        assert_eq!(skat_opt(4, 16, 20).payoff(4, false), 16, "on target is the stake");
+        // The bonus applies to the MAKE only -- being set is still the
+        // shortfall rule, and it is the skat stake that is at risk.
+        assert_eq!(skat_opt(4, 16, 20).payoff(1, false), -(16 + 4 * 3));
+        // What it does to the "a cheap contract is a licence to duck" cliff: it
+        // NARROWS the gap without closing it at the bottom. A stake of 6 played
+        // out to the declarer's ceiling of 12 points is worth 6 + 9 = 15 — up
+        // from a flat 6, and still under the consolation's 20, so this hand
+        // ducks either way.
+        assert_eq!(skat_opt(3, 6, 20).payoff(12, false), 15);
+        assert_eq!(skat_opt(3, 6, 20).payoff(12, true), 20, "the duck still wins");
+        // Dearer, and the contract is worth playing out on its own.
+        assert_eq!(skat_opt(4, 20, 20).payoff(12, true), 28);
     }
 
     #[test]
@@ -342,7 +373,8 @@ mod tests {
     #[test]
     fn an_option_naming_no_denomination_is_skipped_not_panicked_on() {
         // The wire is server-supplied but not trusted to be in range.
-        let bad = Option_ { denom: 99, target: 1, make: 1, set_base: 0, short: 4, null: 12 };
+        let bad = Option_ { denom: 99, target: 1, make: 1, over: 0,
+                            set_base: 0, short: 4, null: 12 };
         let mut dd = Dd::new(10);
         let mut rng = Rng::new(1);
         let g = crate::game::Game::deal(&mut Rng::new(7), 0, 0);

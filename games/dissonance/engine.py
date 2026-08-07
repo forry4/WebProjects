@@ -92,6 +92,38 @@ MAX_RAISE = 2
 #: Set-score multiplier per point the declarer finished short.
 SHORT_PENALTY = 4
 
+#: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
+#:
+#: A per-mode dict like `MATCH_TARGET`, and like that one it currently reads the
+#: same in both -- the two modes score on different scales and nothing requires
+#: them to agree, so the shape stays even while the numbers match.
+#:
+#: WHY. Before this, a made contract paid a flat amount: N^2 in classic, the
+#: stake in skat. So the moment the target was home the rest of the round was
+#: worth nothing to the declarer, and in skat -- where the level is a free
+#: choice made after the auction, and declaring the minimum that clears your bid
+#: is normal -- that could be most of the hand. Every trick now moves the score.
+#:
+#: FLAT, and deliberately NOT scaled by skat's announcements or by Kontra, on the
+#: same argument as `SKAT_NULL_VALUE`: Hand, Sharp and Open are promises about
+#: the CONTRACT, and running a per-point bonus through a x4 would make one
+#: overtrick worth more than the rungs the ladder is built out of.
+#:
+#: TWO CONSEQUENCES, both of which fall out rather than being designed:
+#:  * NO ROUND STOPS EARLY ANY MORE. `_score_is_settled` asks whether the
+#:    remaining tricks can still move the SCORE; with an overtrick bonus the
+#:    answer is always yes. The predicate is SHELVED, not deleted -- it reads
+#:    this table rather than the mode, so setting a bonus back to 0 restores the
+#:    early end for that mode on its own, and a test drives it at 0 to keep the
+#:    branch live. See the note on `_score_is_settled`.
+#:  * IT NARROWS THE NULL CLIFF, which was measured and is documented as
+#:    deliberate ("a cheap contract is a licence to duck"). A declarer's ceiling
+#:    is 12 points, so a made level-1 classic contract goes from 1 to as much as
+#:    12 against Null's flat 12, and a skat stake of 6 from 6 to 15 against 20.
+#:    The cliff is narrowed, not removed, and the measurement behind it was taken
+#:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
+OVER_BONUS = {"classic": 1, "skat": 1}
+
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
 #: Measured: the first change that SPREAD the settled-contract distribution
@@ -914,17 +946,33 @@ def apply_play(g: dict, seat: int, c: int) -> None:
 def _score_is_settled(g: dict) -> bool:
     """Can the remaining tricks still change the SCORE? If not, stop here.
 
-    The bar is the score, not the outcome, and the difference is the whole
-    reason only one direction of "decided" ends a round early:
+    SHELVED AS OF THE OVERTRICK BONUS (2026-08-07), and deliberately not deleted.
+    Both modes now pay 1 for every trick point past the target, so every trick
+    moves the score and this returns False in the shipped configuration -- every
+    round runs to thirteen. What is below is the rule as it stood, kept whole,
+    because "every trick matters" is a product decision that could be revisited
+    and the argument for the early end was measured rather than assumed.
+
+    IT IS GATED ON THE TERMS, NOT ON THE MODE, which is what makes the shelf
+    real: put a 0 back in `OVER_BONUS` for a mode and the early end returns for
+    that mode alone, with no other edit. `test_no_round_ends_before_the_
+    thirteenth_trick` drives both halves -- bonus on, nothing settles; bonus off,
+    the old rule exactly, last-trick guard included -- so the branch below stays
+    live and tested rather than rotting into something that no longer compiles
+    against the state around it.
+
+    The bar was the score, not the outcome, and the difference is the whole
+    reason only one direction of "decided" ever ended a round early:
 
     * **Cannot fail.** If the declarer clears the target even after losing every
       remaining +2 trick and being handed every remaining -1, the contract is
-      made -- and a made contract pays a flat N squared (or the skat stake),
-      which does not move with the final total. Settled.
+      made -- and a made contract paid a FLAT amount, which did not move with the
+      final total. Settled. It is precisely this premise the bonus removes.
     * **Cannot make.** Being mathematically set does NOT settle the score: the
       defender is paid `(N-1) + 4 x shortfall`, and every remaining trick still
       moves the shortfall. Holding a busted declarer down is a real contest --
       arguably the most interesting part of a lost hand -- so it plays on.
+
     Null gets NO early end of its own. It used to -- as a bid it was decided the
     moment the declarer took a scoring trick -- but as a consolation it is
     settled early only when no +2 trick remains, which by the parity of the
@@ -938,6 +986,12 @@ def _score_is_settled(g: dict) -> bool:
     """
     decl = g["auction"]["declarer"]
     if decl is None or decl < 0:
+        return False
+    # THE SHELF. A made contract that keeps paying per overtrick is never
+    # settled: every remaining trick still moves the declarer's total, and that
+    # total is now part of the score rather than only the yardstick. Below the
+    # declarer guard because `payoff_terms` reads a SETTLED contract.
+    if payoff_terms(g).get("over"):
         return False
     # NEVER STOP WITH A SINGLE TRICK LEFT. Cutting the round one trick from home
     # saves nothing and costs the players the hand's last beat -- and that beat
@@ -956,15 +1010,21 @@ def _score_is_settled(g: dict) -> bool:
 
 
 def contract_score(level: int, declarer_pts: int) -> tuple[int, int]:
-    """(declarer score, defender score) for a settled contract.
+    """(declarer score, defender score) for a settled CLASSIC contract.
 
-    Make it and the declarer scores N squared. Fall short and the DEFENDER
-    scores (N-1) plus 4 for every point the declarer finished below target.
-    Only this scores -- the trick points are purely the yardstick.
+    Make it and the declarer scores N squared, plus 1 for every trick point past
+    N. Fall short and the DEFENDER scores (N-1) plus 4 for every point the
+    declarer finished below it. Only this scores -- the trick points are the
+    yardstick, and now also the margin.
+
+    DELEGATES rather than restating the arithmetic. It used to hold its own copy
+    of the make/set rule, which was fine while that rule was two lines and never
+    changed; the overtrick bonus is exactly the kind of change that lands in one
+    copy and not the other, and this one is reachable from the tests only, so the
+    drift would have shown up as a test agreeing with itself.
     """
-    if declarer_pts >= level:
-        return level * level, 0
-    return 0, (level - 1) + SHORT_PENALTY * (level - declarer_pts)
+    value = payoff(_terms_for("classic", 0, level), declarer_pts, True)
+    return (value, 0) if value >= 0 else (0, -value)
 
 
 def payoff_terms(g: dict) -> dict:
@@ -980,8 +1040,10 @@ def payoff_terms(g: dict) -> dict:
     declarer ever won a +2 trick:
 
         no +2 trick  ->  +null
-        p >= target  ->  +make
+        p >= target  ->  +make + over x (p - target)
         otherwise    ->  -(set_base + short x (target - p))
+
+    `over` is the overtrick bonus for this room's mode -- see `OVER_BONUS`.
     """
     a = g["auction"]
     if mode_of(g) == "skat":
@@ -1002,14 +1064,15 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     their numbers from one place -- a second copy is how the bot ends up ranking
     options against a scoring rule the room does not use.
     """
+    over = OVER_BONUS.get(mode, OVER_BONUS[DEFAULT_MODE])
     if mode == "skat":
         stake = SKAT_BASE[denom] * level * mult * doubling
         return {"denom": denom, "level": level,
                 "target": level + (SHARP_BONUS if sharp else 0),
-                "make": stake, "set_base": stake,
+                "make": stake, "over": over, "set_base": stake,
                 "short": SHORT_PENALTY, "null": SKAT_NULL_VALUE}
     return {"denom": denom, "level": level, "target": level,
-            "make": level * level, "set_base": max(0, level - 1),
+            "make": level * level, "over": over, "set_base": max(0, level - 1),
             "short": SHORT_PENALTY, "null": NULL_MAKE}
 
 
@@ -1067,11 +1130,16 @@ def auction_payoff_options(g: dict) -> list[dict]:
 
 def payoff(terms: dict, declarer_pts: int, declarer_scored: bool) -> int:
     """Apply `payoff_terms`. Null is checked FIRST and wins -- it can never
-    collide with a make, since only +2 tricks add points."""
+    collide with a make, since only +2 tricks add points.
+
+    `over` defaults to 0 so terms written before it existed -- a fixture, an
+    armed decision replayed off an old save -- still price a make at the flat
+    stake rather than raising a KeyError.
+    """
     if not declarer_scored:
         return terms["null"]
     if declarer_pts >= terms["target"]:
-        return terms["make"]
+        return terms["make"] + terms.get("over", 0) * (declarer_pts - terms["target"])
     return -(terms["set_base"] + terms["short"] * (terms["target"] - declarer_pts))
 
 
@@ -1177,6 +1245,10 @@ def _finish_skat(g: dict) -> None:
     null = g["etricks"][decl] == 0
     made = (not null) and dpts >= target
     short = 0 if (null or made) else target - dpts
+    # Points past the target, and what they were worth. On the row rather than
+    # recomputed in the panel, because the panel prints the arithmetic and the
+    # arithmetic has exactly one owner.
+    over = (dpts - target) if made else 0
     scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
     _bank_round(g, scores)
@@ -1207,6 +1279,8 @@ def _finish_skat(g: dict) -> None:
         "declarer_etricks": g["etricks"][decl],
         "made": made,
         "short": short,
+        "over": over,
+        "over_bonus": terms.get("over", 0),
         "scores": scores,
     }
 
@@ -1224,12 +1298,19 @@ def _finish(g: dict) -> None:
     null = g["etricks"][decl] == 0
     made = (not null) and dpts >= a["level"]
     short = 0 if (null or made) else a["level"] - dpts
-    scores = _split(payoff(payoff_terms(g), dpts, not null), decl)
+    terms = payoff_terms(g)
+    # Points past the target, and what each was worth. On the row rather than
+    # recomputed in the panel, because the panel prints the arithmetic and the
+    # arithmetic has exactly one owner.
+    over = (dpts - a["level"]) if made else 0
+    scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
     _bank_round(g, scores)
     g["result"] = _match_result_keys(g) | {
         # A settled round can stop short of thirteen tricks; the UI says so
-        # rather than leaving a half-played board looking like a bug.
+        # rather than leaving a half-played board looking like a bug. Always
+        # False while overtricks pay -- see `_score_is_settled`, which is
+        # shelved rather than removed, so the key and its reader stay.
         "ended_early": g["trick"] < NTRICKS,
         "mode": "classic",
         "declarer": decl,
@@ -1241,6 +1322,8 @@ def _finish(g: dict) -> None:
         "declarer_etricks": g["etricks"][decl],
         "made": made,
         "short": short,
+        "over": over,
+        "over_bonus": terms.get("over", 0),
         "scores": scores,
     }
 
@@ -1284,6 +1367,10 @@ def abandon_result(g: dict, seat: int) -> dict:
         "declarer_etricks": g["etricks"][decl] if decl >= 0 else 0,
         "made": False,
         "short": 0,
+        # Nobody played a contract out, so nothing was scored over one. Both
+        # modes carry the pair now, so it sits here rather than in the skat block.
+        "over": 0,
+        "over_bonus": 0,
         "scores": scores,
     }
     if mode_of(g) == "skat":

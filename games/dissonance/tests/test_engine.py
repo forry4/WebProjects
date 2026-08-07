@@ -85,66 +85,79 @@ def test_trick_values_and_constant_sum():
 
 @pytest.mark.parametrize("seed", range(30))
 def test_every_card_is_played_and_points_sum_to_the_pool(seed):
-    """The conservation invariant, stated for a round that RAN TO THIRTEEN.
+    """The conservation invariant -- and, since the overtrick bonus, an
+    unconditional one.
 
-    `pts` sums to POOL only over a completed round, and a round now stops the
-    moment the score can no longer change -- so this asserts the invariant on
-    the complete branch and asserts the STOP was legitimate on the other.
-    Neither branch is skipped: a round that ended early with a score that could
-    still have moved is exactly the bug worth catching.
+    `pts` sums to POOL only over a round that ran to thirteen tricks. That used
+    to be a branch, because a contract that could not fail stopped early; now
+    every trick moves the score, so every round runs to the end and the
+    invariant is simply true. Asserted flat rather than behind an `if`: a round
+    that ended early would be a real regression and must not read as the other
+    half of a legitimate pair.
     """
     g = _play_out(E.new_game(["a", "b"], random.Random(seed)), random.Random(seed))
     assert not set(g["played"]) & set(g["out"]), "the out-of-play pair never enters"
-    if g["trick"] == E.NTRICKS:
-        assert len(g["played"]) == 26
-        assert sum(g["pts"]) == E.POOL
-        assert not g["result"]["ended_early"]
-        return
-    r = g["result"]
-    assert r["ended_early"] and r["made"], "only a contract that cannot fail stops early"
-    assert g["trick"] <= E.NTRICKS - 2, \
-        "a round must never be cut short with a single trick left to play"
-    # The floor it stopped on: no more +2 tricks, every remaining -1 taken.
-    neg_left = sum(1 for t in range(g["trick"], E.NTRICKS) if E.trick_value(t) < 0)
-    assert g["pts"][r["declarer"]] - neg_left >= r["level"]
+    assert g["trick"] == E.NTRICKS, "every trick moves the score, so all 13 are played"
+    assert len(g["played"]) == 26
+    assert sum(g["pts"]) == E.POOL
+    assert not g["result"]["ended_early"]
 
 
-def test_the_last_trick_is_always_played_out():
-    """Stopping one trick from home saves nothing and costs the hand its last
-    beat -- the trick where the shortfall and the Null consolation are still
-    live, and so the one most worth seeing.
+def test_no_round_ends_before_the_thirteenth_trick(monkeypatch):
+    """Both halves of the shelf, in one place.
 
-    Driven at the predicate rather than through random play, because the
-    position this guards (settled with exactly one trick left) is common enough
-    to matter and rare enough that a seed sweep is not proof it was checked.
+    WITH the bonus on (the shipped configuration) nothing settles early, at any
+    point total, however far past the target -- that is the product decision.
+    With it OFF the old rule is still exactly the old rule, including its
+    last-trick guard, which is what makes `_score_is_settled` shelved rather
+    than dead: restoring the early end is one 0 in `OVER_BONUS` and no other
+    edit. Driven at the predicate rather than through random play, because the
+    position it guards (settled with one trick left) is common enough to matter
+    and rare enough that a seed sweep is not proof it was checked.
     """
     g = E.new_game(["a", "b"], random.Random(3), opener=0)
     E.apply_bid(g, 0, 1, 0)
     E.apply_pass(g, 1)
     decl = g["auction"]["declarer"]
-
-    # Way past a level-1 target, so only the trick count can hold the round open.
+    # Way past a level-1 target, so only the rules under test can end the round.
     g["pts"][decl] = 99
-    for remaining in (2, 1, 0):
+
+    for remaining in (5, 2, 1, 0):
+        g["trick"] = E.NTRICKS - remaining
+        assert not E._score_is_settled(g), \
+            f"a round ended with {remaining} trick(s) left while overtricks pay"
+
+    monkeypatch.setitem(E.OVER_BONUS, "classic", 0)
+    for remaining in (5, 2, 1, 0):
         g["trick"] = E.NTRICKS - remaining
         settled = E._score_is_settled(g)
         if remaining <= 1:
             assert not settled, f"stopped with {remaining} trick(s) left"
         else:
-            assert settled, "a contract that cannot fail should still settle early"
+            assert settled, "with the bonus off, a contract that cannot fail settles"
 
 
-def test_a_round_both_completes_and_settles_early_across_random_play():
-    """Non-vacuity for the branch above: if every random game ran to thirteen,
-    the early-end half of that test would be asserting nothing."""
-    complete = early = 0
-    for seed in range(60):
-        g = _play_out(E.new_game(["a", "b"], random.Random(seed)), random.Random(seed))
-        if g["trick"] == E.NTRICKS:
-            complete += 1
-        else:
-            early += 1
-    assert complete and early, f"{complete} complete, {early} early"
+def test_a_round_that_would_have_stopped_early_now_plays_on_for_the_bonus(monkeypatch):
+    """Non-vacuity for the test above, and the change stated as behaviour.
+
+    Seeds that used to end short must (a) still be reachable with the bonus off,
+    or the shelf is guarding nothing, and (b) run to thirteen with it on. The
+    same seed both ways, so the difference is the rule and not the deal.
+    """
+    def played(seed):
+        return _play_out(E.new_game(["a", "b"], random.Random(seed)),
+                         random.Random(seed))
+
+    monkeypatch.setitem(E.OVER_BONUS, "classic", 0)
+    stopped = [s for s in range(60) if played(s)["trick"] < E.NTRICKS]
+    assert stopped, "no seed settles early even with the bonus off -- shelf unguarded"
+
+    monkeypatch.undo()
+    for seed in stopped:
+        g = played(seed)
+        assert g["trick"] == E.NTRICKS, f"seed {seed} still stopped early"
+        # ...and the extra tricks are worth something, which is the whole point.
+        assert g["result"]["over"] >= 0 and g["result"]["over_bonus"] == 1
 
 
 def test_taking_every_trick_scores_worse_than_taking_the_even_ones():
@@ -285,16 +298,33 @@ def test_the_auction_survives_a_json_round_trip():
 
 @pytest.mark.parametrize("level,dpts,expect", [
     (5, 5, (25, 0)),
-    (5, 9, (25, 0)),
+    # Past the target, at 1 a point. Exactly on it is still the bare N^2, which
+    # is the boundary the bonus must not move.
+    (5, 9, (25 + 4, 0)),
+    (5, 6, (25 + 1, 0)),
     (5, 4, (0, 4 + 4 * 1)),
     (5, 3, (0, 4 + 4 * 2)),
     (5, 0, (0, 4 + 4 * 5)),
     (1, 1, (1, 0)),
     (1, 0, (0, 0 + 4 * 1)),
     (8, 8, (64, 0)),
+    # The declarer's ceiling is the six +2 tricks, so this is the largest
+    # overtrick bonus the game can pay -- and at level 1 it is 12x the contract.
+    (1, 12, (1 + 11, 0)),
 ])
 def test_contract_score_table(level, dpts, expect):
     assert E.contract_score(level, dpts) == expect
+
+
+def test_contract_score_is_the_payoff_arithmetic_and_not_a_second_copy():
+    """It used to hold its own make/set rule. The overtrick bonus is exactly the
+    kind of change that lands in one copy and not the other, and this helper is
+    reachable from the tests only -- so the drift would have been a test
+    agreeing with itself."""
+    terms = E._terms_for("classic", 0, 4)
+    for dpts in range(-7, 13):
+        ds, fs = E.contract_score(4, dpts)
+        assert ds - fs == E.payoff(terms, dpts, True)
 
 
 @pytest.mark.parametrize("seed", range(20))

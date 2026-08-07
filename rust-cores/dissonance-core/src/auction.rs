@@ -720,7 +720,10 @@ pub fn forced_floor(dd: &mut Dd, s: &State, declarer: usize) -> i32 {
         level: LOW,
         declarer,
         make_base: 0,
-        over: 1,
+        // -1: `over` is a BONUS per point above `level`, so a declarer holding
+        // themselves down wants it negative. It reads `-(pts - LOW)`, which
+        // `solve_contract`'s caller negates and un-offsets back into the total.
+        over: -1,
         set_base: 1_000_000,
         short: 0,
         // No consolation: this asks how low the declarer can HOLD THEMSELVES,
