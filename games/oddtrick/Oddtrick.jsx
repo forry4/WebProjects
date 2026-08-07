@@ -853,8 +853,11 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 const row = d.denoms.find((x) => x.denom === declDenom);
                 const value = isNull ? d.null_value : (row ? row.base * (declLevel || 0) : 0);
                 const mult = 1 + (d.hand ? 1 : 0) + (declSharp ? 1 : 0) + (declOpen ? 1 : 0);
-                const ok = isNull ? d.null_ok
-                  : !!row && declLevel >= row.min_level && declLevel <= d.max_level;
+                // The same conditions apply_declare enforces, so the button is
+                // never live on a declaration the server will refuse.
+                const ok = (isNull ? d.null_ok && !declSharp
+                  : !!row && declLevel >= row.min_level && declLevel <= d.max_level
+                    && (!declOpen || declSharp));
                 return (
                   <>
                     <div className="odd-denoms">
@@ -862,14 +865,26 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                         <button key={x.denom}
                           className={`${declDenom === x.denom ? "on " : ""}${x.denom === 1 || x.denom === 2 ? "red" : ""}`}
                           title={`${DENOM_NAME[x.denom]} — base ${x.base}, so at least level ${x.min_level}`}
-                          onClick={() => { setDeclDenom(x.denom); setDeclLevel(x.min_level); }}>
+                          // Announcements are legal in different combinations per
+                          // denomination (Null takes no Sharp; every other game
+                          // needs Sharp under Open), so switching denomination
+                          // resets them rather than carrying a combination the
+                          // server would refuse — and would leave unclearable,
+                          // since the Open toggle disables itself without Sharp.
+                          onClick={() => {
+                            setDeclDenom(x.denom); setDeclLevel(x.min_level);
+                            setDeclSharp(false); setDeclOpen(false);
+                          }}>
                           {DENOM_LABEL[x.denom]}<small>×{x.base}</small>
                         </button>
                       ))}
                       {d.null_ok && (
                         <button className={`odd-nullbid${isNull ? " on" : ""}`}
                           title={`Win no +2 trick. Flat ${d.null_value}.`}
-                          onClick={() => { setDeclDenom(NULL_DENOM); setDeclSharp(false); }}>
+                          onClick={() => {
+                            setDeclDenom(NULL_DENOM);
+                            setDeclSharp(false); setDeclOpen(false);
+                          }}>
                           Null
                         </button>
                       )}
@@ -964,11 +979,26 @@ export default function Oddtrick({ myId, authUser, onExit }) {
           ) : game.phase === "over" ? (
             <div className="odd-result">
               <div className={`odd-big ${res.made ? "made" : "set"}`}>
-                {res.denom === NULL_DENOM
-                  ? (res.made ? "Null made" : "Null broken")
-                  : (res.made ? "Contract made" : "Contract set")}
+                {res.abandoned_by !== null && res.abandoned_by !== undefined
+                  ? "Game abandoned"
+                  : res.denom === NULL_DENOM
+                    ? (res.made ? "Null made" : "Null broken")
+                    : (res.made ? "Contract made" : "Contract set")}
               </div>
-              {res.mode === "skat" ? <>
+              {/* A forfeit has no contract to narrate — in skat mode the auction
+                  may not even have produced a declarer, so every arithmetic line
+                  below is skipped rather than printed against missing keys. */}
+              {res.abandoned_by !== null && res.abandoned_by !== undefined ? (
+                <div className="muted">
+                  {nameOf(res.abandoned_by)} left the game, so{" "}
+                  {nameOf(1 - res.abandoned_by)} takes{" "}
+                  {res.scores[1 - res.abandoned_by]}
+                  {res.level ? <>
+                    {" "}for the standing {res.denom === NULL_DENOM ? "Null"
+                      : `${res.level}${DENOM_LABEL[res.denom]}`} contract.
+                  </> : "."}
+                </div>
+              ) : res.mode === "skat" ? <>
                 <div className="muted">
                   {`${nameOf(res.declarer)} bought it at ${res.bid}, declared `}
                   {res.denom === NULL_DENOM ? "Null" : `${res.level}${DENOM_LABEL[res.denom]}`}

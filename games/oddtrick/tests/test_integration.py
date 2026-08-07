@@ -244,6 +244,26 @@ def test_a_vs_bot_skat_room_is_creatable_and_the_bot_takes_every_phase(monkeypat
     assert "error" not in ws.types(), "the bot never produced an illegal move"
 
 
+def test_abandoning_a_skat_room_scores_it_in_skat_currency():
+    """Reachable in skat mode with NOTHING agreed — both players may pass, so
+    the room can be walked out of with no declarer at all."""
+    wa, wb = _FakeWS(), _FakeWS()
+    run(m._handle_create(wa, "A1", "alice", {"name": "Alice", "mode": "skat"}))
+    run(m._handle_join(wb, "A1", "bob", {"name": "Bob"}))
+    run(m._handle_start(wa, "A1", "alice"))
+    g = m.ROOMS["A1"]["game"]
+    assert g["auction"]["declarer"] == -1
+
+    run(m._handle_abandon(wa, "A1", "alice"))
+    res = m.ROOMS["A1"]["game"]["result"]
+    assert res["mode"] == "skat" and res["abandoned_by"] == E.seat_of(g, "alice")
+    # Whoever stayed is paid, and named by a seat index that really exists.
+    assert res["scores"][1 - res["abandoned_by"]] > 0
+    assert res["scores"][res["abandoned_by"]] == 0
+    assert m.ROOMS["A1"]["status"] == "over"
+    assert "error" not in wa.types() and "error" not in wb.types()
+
+
 def test_a_room_created_without_a_mode_is_still_the_classic_auction():
     ws = _FakeWS()
     run(m._handle_create(ws, "C", "alice", {"name": "Alice", "vs_ai": True}))

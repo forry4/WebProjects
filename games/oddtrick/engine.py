@@ -830,6 +830,50 @@ def forfeit_value(g: dict) -> int:
     return max(1, g["auction"]["level"] ** 2)
 
 
+def abandon_result(g: dict, seat: int) -> dict:
+    """The result row for `seat` walking out of a live game.
+
+    It has to satisfy the SAME readers as a played-out result -- the lobby's
+    history row and the result panel -- or the round ends narrating a contract
+    nobody ever agreed to. Skat mode makes that a live risk rather than a
+    theoretical one: both players may pass, so a room can be abandoned with
+    `declarer` still -1 and no declaration at all, and the skat result panel
+    reads six keys that only `_finish_skat` would otherwise set.
+    """
+    a = g["auction"]
+    decl = a["declarer"]
+    scores = [0, 0]
+    scores[1 - seat] = forfeit_value(g)
+    res = {
+        "mode": mode_of(g),
+        "abandoned_by": seat,
+        "declarer": decl,
+        "level": a["level"],
+        "denom": a["denom"],
+        "declarer_pts": g["pts"][decl] if decl >= 0 else 0,
+        "declarer_etricks": g["etricks"][decl] if decl >= 0 else 0,
+        "made": False,
+        "short": 0,
+        "scores": scores,
+    }
+    if mode_of(g) == "skat":
+        ct = g.get("contract") or {}
+        res.update({
+            "bid": a.get("value", 0),
+            "value": ct.get("value", 0),
+            "mult": ct.get("mult", 1),
+            "doubling": skat_doubling(ct),
+            "stake": scores[1 - seat],
+            "target": skat_target(g) if a["level"] else 0,
+            "hand": ct.get("hand", False),
+            "sharp": ct.get("sharp", False),
+            "open": ct.get("open", False),
+            "kontra": ct.get("kontra", False),
+            "re": ct.get("re", False),
+        })
+    return res
+
+
 def winner_seat(g: dict):
     """Seat with the higher score, or None on a tie."""
     if g["phase"] != "over":

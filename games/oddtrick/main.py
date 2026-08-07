@@ -723,18 +723,12 @@ async def _handle_abandon(ws, room_id, pid):
             seat = engine.seat_of(g, pid)
             if seat is not None:
                 # Forfeit: the opponent takes the contract's value, in whichever
-                # currency this room's mode scores in.
+                # currency this room's mode scores in. The row is built in the
+                # engine so it carries every key the result panel reads --
+                # hand-rolling it here is how a skat forfeit came out as
+                # "bought it at undefined".
                 g["phase"] = "over"
-                scores = [0, 0]
-                scores[1 - seat] = engine.forfeit_value(g)
-                g["result"] = {"mode": engine.mode_of(g),
-                               "declarer": g["auction"]["declarer"],
-                               "level": g["auction"]["level"],
-                               "denom": g["auction"]["denom"],
-                               "declarer_pts": g["pts"][g["auction"]["declarer"]]
-                               if g["auction"]["declarer"] >= 0 else 0,
-                               "made": False, "short": 0,
-                               "abandoned_by": seat, "scores": scores}
+                g["result"] = engine.abandon_result(g, seat)
         room["status"] = "over"
         save_game(room_id)
     await broadcast_state(room_id)

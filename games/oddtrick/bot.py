@@ -193,15 +193,33 @@ def choose_kontra(g: dict, seat: int) -> bool:
             and hand_strength(g, seat, a["denom"]) >= _KONTRA_STRENGTH)
 
 
-def choose_swap(g: dict, seat: int) -> dict:
-    """Pick the exchange that most strengthens the declared contract.
+def swap_denom(g: dict, seat: int) -> int:
+    """Which denomination the talon exchange should be valued in.
 
-    Value each candidate hand by rank-worth in the contract denomination;
-    keep the swap only if it improves on standing pat. Under Null the polarity
-    flips -- LOW cards are the good ones, so swap out the biggest.
+    Classic mode swaps AFTER the auction, so the declared denomination is the
+    right answer and is already sitting in `auction["denom"]`. Skat mode
+    inverts the order -- the talon resolves BEFORE the game is named, so that
+    key is still -1 and reading it silently disables both contract-aware terms
+    in `worth()` below. Use the denomination this hand is actually worth most
+    in; `choose_declare` picks from the post-swap hand on the same measure, so
+    the two agree.
     """
-    a = g["auction"]
-    denom = a["denom"]
+    denom = g["auction"]["denom"]
+    if denom >= 0:
+        return denom
+    return max(range(E.NOTRUMP + 1), key=lambda d: hand_strength(g, seat, d))
+
+
+def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
+    """Pick the exchange that most strengthens the intended contract.
+
+    Value each candidate hand by rank-worth in `denom` (defaulting to whichever
+    denomination this position implies); keep the swap only if it improves on
+    standing pat. Under Null the polarity flips -- LOW cards are the good ones,
+    so swap out the biggest.
+    """
+    if denom is None:
+        denom = swap_denom(g, seat)
     hand = list(g["hands"][seat])
     is_null = denom == E.NULL_DENOM
 

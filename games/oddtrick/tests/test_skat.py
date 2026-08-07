@@ -604,6 +604,65 @@ def test_a_skat_game_survives_the_state_json_codec():
     assert back["result"] == g["result"]
 
 
+def test_walking_out_leaves_a_result_row_every_reader_can_render():
+    """A forfeit row is read by the same result panel and history card as a
+    played-out one. In skat mode the panel branches on `mode` and reads six keys
+    only `_finish_skat` would otherwise set -- so a hand-rolled row rendered as
+    "bought it at undefined"."""
+    quit_mid = _declared(value=12, denom=2, level=4, hand=True, kontra=True)
+    res = E.abandon_result(quit_mid, seat=0)
+    assert res["mode"] == "skat" and res["abandoned_by"] == 0
+    for key in ("bid", "value", "mult", "doubling", "stake", "target",
+                "hand", "sharp", "open", "kontra", "re",
+                "declarer", "level", "denom", "declarer_pts", "made",
+                "short", "scores"):
+        assert key in res, key
+    assert res["scores"][1] == E.forfeit_value(quit_mid) == 12 * 2 * 2
+    assert res["scores"][0] == 0
+
+
+def test_a_skat_room_can_be_abandoned_before_anyone_has_bid():
+    """Only skat mode can reach this: classic's opener is forced to bid, but
+    here both players may pass, so `declarer` is still -1 -- and a result row
+    indexed off -1 would name the wrong seat as the winner."""
+    g = _skat()
+    res = E.abandon_result(g, seat=1)
+    assert res["declarer"] == -1 and res["level"] == 0
+    assert res["abandoned_by"] == 1
+    # The seat that stayed is named by `abandoned_by`, never by `declarer`,
+    # so it is always a real index.
+    assert res["scores"][0] > 0 and res["scores"][1] == 0
+    assert res["declarer_pts"] == 0 and res["declarer_etricks"] == 0
+    assert res["value"] == 0 and res["target"] == 0
+    assert json.dumps(res)
+
+
+def test_the_bots_talon_swap_is_valued_in_a_real_denomination():
+    """Skat resolves the talon BEFORE the game is named, so `auction["denom"]`
+    is still -1 there. Reading it silently disables both contract-aware terms in
+    the bot's `worth()` -- the swap degenerates to "take the highest card"."""
+    from games.oddtrick import bot
+
+    g = _settled(12)
+    decl = g["auction"]["declarer"]
+    E.apply_look(g, decl)
+    assert g["auction"]["denom"] == -1, "the premise: nothing is declared yet"
+
+    d = bot.swap_denom(g, decl)
+    assert 0 <= d <= E.NOTRUMP, d
+    kind, move = bot.act(g, decl, None)
+    assert kind == "move" and move["kind"] == "swap"
+    # The action the bot actually takes is the one that denomination implies.
+    assert move["take"] == bot.choose_swap(g, decl, d)["take"]
+
+    # ...and classic mode, which swaps AFTER the auction, still uses the
+    # denomination it actually declared.
+    classic = E.new_game(["a", "b"], None, opener=0)
+    E.apply_bid(classic, 0, 3, 1)
+    E.apply_pass(classic, 1)
+    assert bot.swap_denom(classic, 0) == 1
+
+
 def test_a_hand_game_reaches_the_lead_without_ever_entering_a_swap():
     g = _settled(24)
     decl = g["auction"]["declarer"]
