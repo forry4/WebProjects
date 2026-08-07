@@ -1501,7 +1501,7 @@ try {
 	// and specificity beats source order, so Active stayed in column 2 of a
 	// one-column grid — rendered shrunk to content against the right edge. The
 	// existing tier checks all measured the GRID, which was correctly 1fr; only
-	// the column's own box shows it. Checked on the two games that pin columns.
+	// the column's own box shows it. Checked on every game that pins columns.
 	{
 		const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -1514,11 +1514,13 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		// All FOUR games that pin columns. CoC earns its place: it is the one
-		// whose own sheet is concatenated BEFORE the shared one, so it resolves
-		// these ties in the opposite order from everyone else.
+		// EVERY game that pins columns — kept in step with the Python contract
+		// test, which derives the same roster from the tree. CoC earns its place
+		// specifically: it is the one whose own sheet is concatenated BEFORE the
+		// shared one, so it resolves these ties in the opposite order.
 		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
-			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"]]) {
+			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"],
+			["/oddtrick", ".odd"]]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});

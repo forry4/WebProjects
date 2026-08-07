@@ -143,6 +143,39 @@ function Pile({ pile, onPlay, playable }) {
   );
 }
 
+/** The contract, in the MIDDLE column so it survives a phone.
+ *  The side panel already carries the full breakdown, but `.odd-side` is
+ *  display:none under 760px — so on a phone the one thing the whole round is
+ *  about was invisible from the moment the auction ended. */
+function ContractChip({ game, nameOf, sharpBonus }) {
+  const a = game.auction || {};
+  if (!a.level) return null;
+  const ct = game.contract || {};
+  const isNull = a.denom === NULL_DENOM;
+  const red = a.denom === 1 || a.denom === 2;
+  const doubling = ct.re ? 4 : ct.kontra ? 2 : 1;
+  const parts = multParts(ct);
+  return (
+    <div className="odd-chip">
+      <span className={`odd-chip-den${red ? " red" : ""}${isNull ? " null" : ""}`}>
+        {isNull ? "Null" : <>{a.level}{DENOM_LABEL[a.denom]}</>}
+      </span>
+      <span className="odd-chip-who">
+        {nameOf(a.declarer)}{" "}
+        {isNull ? "must win no +2 trick"
+          : `must score ${a.level + (ct.sharp ? sharpBonus : 0)}`}
+      </span>
+      {(parts.length > 0 || doubling > 1) && (
+        <span className="odd-chip-mult">
+          {parts.join(" + ")}{parts.length && doubling > 1 ? " · " : ""}
+          {doubling > 1 ? (ct.re ? "Kontra + Re" : "Kontra") : ""}
+          {ct.value ? ` · ${ct.value * (ct.mult || 1) * doubling}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** The parity strip: every trick, what it pays, and who took it. */
 function TrickStrip({ game }) {
   const hist = game.history || [];
@@ -271,6 +304,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const [toast, setToast] = useState("");
   const [showRules, setShowRules] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [confirmAbandon, setConfirmAbandon] = useState(false);
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
@@ -466,68 +500,76 @@ export default function Oddtrick({ myId, authUser, onExit }) {
       return <div className="odd"><style>{styles}</style><LobbyLoading label="Connecting…" /></div>;
     }
     const openCol = (
-      <div className="lby-col">
+      <div className="lby-col-open">
         <LobbySectionHd title="Open games" note={openGames.length ? `${openGames.length} waiting` : null} />
         <div className="lby-list">
           {openGames.length === 0 && <LobbyEmpty>No open games. Create one!</LobbyEmpty>}
           {openGames.map((g) => (
             <div key={g.id} className="lby-card">
-              <div className="lby-cardmain">
-                <div className="lby-cardtitle">
+              <div className="lby-card-info">
+                <div className="lby-card-title">
                   {g.host_name || "Player"}<ModeBadge mode={g.mode} />
                 </div>
-                <div className="lby-cardsub">{g.id} · {timeAgo(g.created_at)}</div>
+                <div className="lby-card-meta">{g.id} · {timeAgo(g.created_at)}</div>
               </div>
-              {g.host_id === myId
-                ? <button className="btn btn-ghost" onClick={() => cancelGame(g.id)}>Cancel</button>
-                : <button className="btn" onClick={() => joinGame(g.id)}>Join</button>}
+              <div className="lby-card-actions">
+                {g.host_id === myId
+                  ? <button className="btn btn-ghost" onClick={() => cancelGame(g.id)}>Cancel</button>
+                  : <button className="btn" onClick={() => joinGame(g.id)}>Join</button>}
+              </div>
             </div>
           ))}
         </div>
       </div>
     );
     const activeCol = (
-      <div className="lby-col">
+      <div className="lby-col-active">
         <LobbySectionHd title="Your games" />
         <div className="lby-list">
           {myGames.length === 0 && <LobbyEmpty>Nothing in progress.</LobbyEmpty>}
           {myGames.map((g) => (
             <div key={g.id} className="lby-card">
-              <div className="lby-cardmain">
-                <div className="lby-cardtitle">
+              <div className="lby-card-info">
+                <div className="lby-card-title">
                   {(g.you_are_p1 ? g.player2_name : g.player1_name) || "Waiting…"}
                   <ModeBadge mode={g.mode} />
                   {g.your_turn && <TurnBadge mine>Your turn</TurnBadge>}
                 </div>
-                <div className="lby-cardsub">{g.id} · {timeAgo(g.updated_at)}</div>
+                <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
               </div>
-              <button className="btn" onClick={() => resumeGame(g.id)}>Resume</button>
+              <div className="lby-card-actions">
+                <button className="btn" onClick={() => resumeGame(g.id)}>Resume</button>
+              </div>
             </div>
           ))}
         </div>
       </div>
     );
     const histCol = (
-      <div className="lby-col lby-history">
+      <div className="lby-col-history">
         <LobbySectionHd title="History" />
         <div className="lby-list" ref={historyMore}>
           {history.length === 0 && <LobbyEmpty>No finished games yet.</LobbyEmpty>}
           {historyShown.map((g) => (
-            <div key={g.id} className="lby-card">
-              <div className="lby-cardmain">
-                <div className="lby-cardtitle">
-                  {g.you_won ? "Won" : "Lost"} vs {g.opp_name}
+            <div key={g.id} className="lby-card lby-card-hist">
+              <div className="lby-card-info">
+                <div className="lby-card-title">
+                  <span className={`hist-result ${g.you_won ? "won" : "lost"}`}>
+                    {g.you_won ? "Won" : "Lost"}
+                  </span>
+                  <span className="hist-scores"> vs {g.opp_name}{" "}
+                    <span className="hist-score-num">{g.your_score}–{g.opp_score}</span>
+                  </span>
                   <ModeBadge mode={g.mode} />
                 </div>
-                <div className="lby-cardsub">
-                  {g.your_score}–{g.opp_score}
-                  {g.contract ? ` · ${g.contract.you_declared ? "declared" : "defended"} `
+                <div className="lby-card-meta">
+                  {g.contract ? `${g.contract.you_declared ? "declared" : "defended"} `
                     + (g.contract.denom === NULL_DENOM ? "Null"
                       : `${g.contract.level}${DENOM_LABEL[g.contract.denom] || ""}`)
                     + (g.mode === "skat" && g.contract.value
                       ? ` for ${g.contract.value}${g.contract.mult > 1 ? `×${g.contract.mult}` : ""}` : "")
-                    + `${g.contract.made ? " (made)" : " (set)"}` : ""}
-                  {" · "}{timeAgo(g.updated_at)}
+                    + `${g.contract.made ? " (made)" : " (set)"} · ` : ""}
+                  {timeAgo(g.updated_at)}
                 </div>
               </div>
             </div>
@@ -546,11 +588,17 @@ export default function Oddtrick({ myId, authUser, onExit }) {
           onRules={() => setShowRules(true)}
           refreshing={loadingGames}
         />
-        <LobbyTabs
-          tabs={[{ id: "open", label: "Open" }, { id: "active", label: "Yours" }, { id: "history", label: "History" }]}
-          value={lobbyTab} onChange={setLobbyTab}
-        />
-        <div className="lby-cols" data-tab={lobbyTab}>
+        {/* `key`, not `id` — LobbyTabs reads `t.key`, and the grid's `tab-<key>`
+            class is what the CSS hides the other columns off. With `id` the bar
+            rendered but every click set the tab to undefined, and `data-tab`
+            matched no rule, so the phone lobby showed all three sections at once
+            and the bar did nothing at all. */}
+        <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
+          { key: "open", label: "Open", count: openGames.length || null },
+          { key: "active", label: "Active", count: myGames.length || null },
+          { key: "history", label: "History", count: history.length || null },
+        ]} />
+        <div className={`lby-cols tab-${lobbyTab}`}>
           {openCol}{activeCol}{histCol}
         </div>
         {showCreate && (
@@ -605,7 +653,9 @@ export default function Oddtrick({ myId, authUser, onExit }) {
     return (
       <div className="odd">
         <style>{styles}</style>
-        <LobbyHeader onBack={leaveToLobby} title="Oddtrick" onRules={() => setShowRules(true)} user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
+        <LobbyHeader title="Oddtrick" menu={<OddMenu onLeave={leaveToLobby}
+          onRules={() => setShowRules(true)} />}
+          user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
         <div className="panel" style={{ maxWidth: 480, margin: "2rem auto", textAlign: "center" }}>
           <h3>Room {roomId}</h3>
           <p className="muted">Share this code, or the link in your address bar.</p>
@@ -648,7 +698,10 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   return (
     <div className="odd">
       <style>{styles}</style>
-      <LobbyHeader onBack={leaveToLobby} title="Oddtrick" onRules={() => setShowRules(true)} user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
+      <LobbyHeader title="Oddtrick" menu={<OddMenu onLeave={leaveToLobby}
+        onRules={() => setShowRules(true)}
+        onAbandon={game.phase !== "over" ? () => setConfirmAbandon(true) : null} />}
+        user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
       {reconnecting && <div className="banner">Reconnecting…</div>}
 
       <div className="odd-main">
@@ -704,7 +757,6 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                         </span>
                       ))}
                       {bidValue === skatNull && <span className="odd-clear null">Null</span>}
-                      <span className="muted">— and they can't tell which.</span>
                     </div>
                   )}
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -1120,6 +1172,8 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                   </span>
                 </div>
               </div>
+              <ContractChip game={game} nameOf={nameOf}
+                sharpBonus={catalog?.sharp_bonus ?? 2} />
               <TrickStrip game={game} />
               <div className="odd-turnbar">
                 {myTurn ? <span className="odd-yourturn">Your turn</span>
@@ -1283,8 +1337,37 @@ export default function Oddtrick({ myId, authUser, onExit }) {
       </div>
 
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
+      {confirmAbandon && (
+        <CreateModal title="Abandon game?" onClose={() => setConfirmAbandon(false)}>
+          <span className="cm-hint">
+            You forfeit the round and your opponent is paid what the contract is
+            currently worth. This cannot be undone.
+          </span>
+          <div className="cm-footer">
+            <button type="button" className="btn btn-ghost"
+              onClick={() => setConfirmAbandon(false)}>Keep playing</button>
+            <button type="button" className="cm-create"
+              onClick={() => { send({ action: "abandon" }); setConfirmAbandon(false); }}>
+              Abandon
+            </button>
+          </div>
+        </CreateModal>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
+  );
+}
+
+/** The in-game ☰. Every game uses this shape rather than a row of buttons in
+ *  the header — Oddtrick was the last one still showing Back + Rules. */
+function OddMenu({ onLeave, onRules, onAbandon }) {
+  return (
+    <GameMenu items={[
+      { label: "Return to menu", icon: "\u2190", onClick: onLeave },
+      { label: "View rules", icon: "\ud83d\udcd6", onClick: onRules },
+      // Only for a live game you are still in.
+      onAbandon && { label: "Abandon game", icon: "\u2691", danger: true, onClick: onAbandon },
+    ]} />
   );
 }
 

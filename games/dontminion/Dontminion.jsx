@@ -2104,10 +2104,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
           the gap left over by the menu. */}
       <div className="dm-top">
         <div className="dm-top-side">
+          {/* Same wording, same order, same icons as every other game: Return /
+              rules / abandon. This was the odd one out — "Back to lobby" with
+              no icons and Rules below Abandon. */}
           <GameMenu items={[
-            { label: "Back to lobby", onClick: leaveToLobby },
-            !over && { label: "Abandon game", onClick: () => setConfirmAbandon(true), danger: true },
-            { label: "Rules", onClick: () => setShowRules(true) },
+            { label: "Return to menu", icon: "←", onClick: leaveToLobby },
+            { label: "View rules", icon: "📖", onClick: () => setShowRules(true) },
+            !over && { label: "Abandon game", icon: "⚑", danger: true,
+              onClick: () => setConfirmAbandon(true) },
           ].filter(Boolean)} label="Menu" />
         </div>
         <h1 className="dm-title">Dontminion</h1>

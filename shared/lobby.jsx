@@ -30,12 +30,18 @@ export const lobbyCss = _lobbyCssText;
 
 // Full-width flush top bar. Renders its own back + rules buttons (uniform across games);
 // `user` is the right-side slot (name / guest badge). rulesLabel lets Duel say "How to Play".
-export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, rulesLabel = "📖 Rules", user }) {
+// `menu` is the IN-GAME shape and takes precedence over the buttons: every game
+// shows a single ☰ dropdown once you are at a board, never a row of Back/Rules
+// buttons. Pass `menu={<GameMenu items={…} />}` there and `onBack`/`onRules` in
+// the lobby, where a plain Back is right.
+export function LobbyHeader({ onBack, backLabel = "← Back", title, onRules, rulesLabel = "📖 Rules", user, menu }) {
 	return (
 		<div className="lby-header">
 			<div className="lby-head-left">
-				{onBack && <button className="lby-back" onClick={onBack}>{backLabel}</button>}
-				{onRules && <button className="lby-headbtn" onClick={onRules}>{rulesLabel}</button>}
+				{menu || <>
+					{onBack && <button className="lby-back" onClick={onBack}>{backLabel}</button>}
+					{onRules && <button className="lby-headbtn" onClick={onRules}>{rulesLabel}</button>}
+				</>}
 			</div>
 			<div className="lby-title">{title}</div>
 			<div className="lby-head-right">{user}</div>

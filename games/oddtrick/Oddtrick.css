@@ -2,7 +2,10 @@
    Mobile @media blocks come BEFORE the base rules in this file, so every
    mobile override is .odd-prefixed to out-specify the later base rule. */
 
-.odd { min-height: 100vh; color: var(--text); }
+/* Every other game hands the shared lobby its own accent; without one the kit
+   falls back to Spender's gold, so Oddtrick's lobby was wearing another game's
+   colour while its board wore this green. */
+.odd { min-height: 100vh; color: var(--text); --lby-accent: #6fe0a0; }
 
 /* ── mobile overrides (must precede the base rules; see above) ───────────── */
 @media (max-width: 760px) {
@@ -250,4 +253,22 @@
 .odd-reveal {
   display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
   margin-top: 0.3rem;
+}
+
+/* The contract, in the middle column. The side panel carries the full
+   breakdown but is display:none on a phone, which left the one fact the whole
+   round turns on invisible from the end of the auction onwards. */
+.odd-chip {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted);
+  padding: 0.3rem 0.6rem; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+.odd-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
+.odd-chip-den.red { color: #ff8a9c; }
+.odd-chip-den.null { color: #b9a5f2; }
+.odd-chip-mult {
+  font-weight: 700; color: var(--accent);
+  padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);
 }
