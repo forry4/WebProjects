@@ -85,12 +85,10 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
             assert room["status"] == "playing", \
                 "a scored round is not the end of the match -- the room stays live"
             assert g["result"] is not None
-            if g["trick"] == E.NTRICKS:
-                assert sum(g["pts"]) == E.POOL
-            else:
-                # A round stops the moment the score can no longer change, so a
-                # room can legitimately reach a result before the 13th trick.
-                assert g["result"]["ended_early"] and g["result"]["made"]
+            # Flat, not behind an `if`: since the overtrick bonus every round
+            # runs all thirteen tricks, so an early end here is a regression
+            # and must not read as the other half of a legitimate pair.
+            assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.POOL
             # Either seat may deal the next one; Bob does, to prove it is not
             # the host's privilege.
             run(m._handle_move(wb, "R", "bob",
@@ -281,7 +279,13 @@ def _skat_auction_move(g):
 def test_a_skat_room_plays_from_create_to_a_scored_result():
     """The mode is a room FLAG, not a second game: same table, same route, same
     handlers. If any of that were wrong the room would stall in a phase no
-    handler advances."""
+    handler advances.
+
+    Rounds are driven until the MATCH is decided. With Hand, Sharp, Kontra and
+    Re all on, most deals settle it in one round -- but whether one round's
+    payout reaches the target is the DEAL's business, and the deal is unseeded:
+    asserting a one-round match here failed CI (2026-08-07) on a deal that paid
+    short while the identical suite passed in the other gate."""
     wa, wb = _FakeWS(), _FakeWS()
     assert run(m._handle_create(wa, "K", "alice",
                                 {"name": "Alice", "mode": "skat"})) is True
@@ -292,23 +296,34 @@ def test_a_skat_room_plays_from_create_to_a_scored_result():
     g = room["game"]
     assert room["mode"] == "skat" and g["mode"] == "skat"
 
-    guard = 0
-    while g["phase"] != "over":
-        guard += 1
-        assert guard < 300, f"the room stalled in {g['phase']}"
-        pid, move = _drive(g, _skat_auction_move)
-        run(m._handle_move(wa if pid == "alice" else wb, "K", pid, {"move": move}))
+    rounds = 0
+    while not E.is_over(g):
+        rounds += 1
+        assert rounds < 40, "the match never reached its target"
+        guard = 0
+        while g["phase"] != "over":
+            guard += 1
+            assert guard < 300, f"the room stalled in {g['phase']}"
+            pid, move = _drive(g, _skat_auction_move)
+            run(m._handle_move(wa if pid == "alice" else wb, "K", pid,
+                               {"move": move}))
 
-    # A round stops the moment the score can no longer change, so the pool
-    # invariant holds only over a COMPLETED round.
-    if g["trick"] == E.NTRICKS:
-        assert sum(g["pts"]) == E.POOL
-    else:
-        assert g["result"]["ended_early"]
-    res = g["result"]
-    assert res["mode"] == "skat" and res["value"] > 0
-    winner = res["declarer"] if (res["made"] or res["null"]) else 1 - res["declarer"]
-    assert res["scores"][winner] > 0
+        # Flat, not behind an `if`: since the overtrick bonus every round runs
+        # all thirteen tricks, so an early end is a regression and must not
+        # read as the other half of a legitimate pair.
+        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.POOL
+        res = g["result"]
+        assert res["mode"] == "skat" and res["value"] > 0
+        winner = (res["declarer"] if (res["made"] or res["null"])
+                  else 1 - res["declarer"])
+        assert res["scores"][winner] > 0
+        if not E.is_over(g):
+            assert room["status"] == "playing", \
+                "a scored round is not the end of the match -- the room stays live"
+            run(m._handle_move(wb, "K", "bob",
+                               {"move": {"kind": "next_round",
+                                         "round": res["round"]}}))
+
     assert room["status"] == "over"
     assert "error" not in wa.types() and "error" not in wb.types()
 
