@@ -146,3 +146,42 @@ def test_the_in_game_menu_offers_the_same_three_actions():
         assert re.search(r"Return to (menu|lobby)", body), \
             f"{jsx.name}'s menu has no way back to the lobby"
         assert "rules" in body.lower(), f"{jsx.name}'s menu does not offer the rules"
+
+
+def test_a_row_action_uses_the_shared_button():
+    """One Resume button, one look. The five lobbies had drifted to FOUR styles
+    for the same action — `btn`, `btn btn-gold`, `btn btn-outline` and
+    `btn btn-outline btn-sm` — because each game wrote its own class string.
+    `LobbyAction` is that string, once."""
+    bad = {}
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        # A row action is a button inside .lby-card-actions; a raw <button
+        # className="btn…"> there is one that skipped the kit.
+        for m in re.finditer(r'lby-card-actions"?>([\s\S]{0,400}?)</div>', text):
+            raw = re.findall(r'<button[^>]*className="(btn[^"]*)"', m.group(1))
+            if raw:
+                bad.setdefault(jsx.name, set()).update(raw)
+    assert not bad, (
+        "these lobby row actions bypass LobbyAction, so their styling is "
+        f"per-game rather than shared: {bad}")
+
+
+def test_an_active_list_built_from_games_mine_filters_out_waiting_rooms():
+    """A room you are in but which has not STARTED is waiting, not active — it
+    is already in Open, with a Cancel if you host it. Only Duel filtered; the
+    others listed waiting rooms as in-progress and offered a Resume that just
+    dropped you back into the waiting room.
+
+    Games whose Active column browses `/games/active` (Spender, CoC) are
+    already in-progress-only server-side and are correctly exempt.
+    """
+    for jsx in _lobby_games():
+        text = jsx.read_text(encoding="utf-8")
+        if "/games/mine" not in text:
+            continue
+        near = text[max(0, text.find("lby-col-active") - 400):
+                    text.find("lby-col-active") + 1200]
+        assert "notWaiting" in near or "notWaiting" in text, (
+            f"{jsx.name} builds its Active column from /games/mine without "
+            "notWaiting(), so rooms still waiting for a player show as active")

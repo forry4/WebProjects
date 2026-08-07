@@ -3,6 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
+  notWaiting, LobbyAction,
   LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs,
   RulesModal, rulesModalCss,
 } from "../../shared/lobby.jsx";
@@ -1983,7 +1984,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   {g.host_id === myId
                     ? <>
                         <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Return</button>
-                        <button className="btn btn-outline" onClick={() => cancelGame(g.id)}>Cancel</button>
+                        <LobbyAction kind="secondary" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
                       </>
                     : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
                 </div>
@@ -1994,7 +1995,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-section lby-col-active">
             <LobbySectionHd title="My Games" note={authUser?.session_token ? "in progress" : "sign in to track games"} />
             <div className="lby-list">
-            {myGames.map((g) => (
+            {notWaiting(myGames).map((g) => (
               <div key={g.id} className="lby-card">
                 <div className="lby-card-info">
                   <div className="lby-card-title">vs {(g.opponents || []).join(", ") || "…"}</div>
@@ -2004,7 +2005,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   </div>
                 </div>
                 <div className="lby-card-actions">
-                  <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Resume</button>
+                  <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
                 </div>
               </div>
             ))}
@@ -2033,10 +2034,9 @@ export default function Dontminion({ myId, authUser, onExit }) {
                     <div className="lby-card-meta">{timeAgo(g.updated_at)}</div>
                   </div>
                   <div className="lby-card-actions">
-                    <button className="btn btn-outline" disabled={!!reviewLoadingId}
-                      onClick={() => enterReview(g.id)}>
+                    <LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>
                       {reviewLoadingId === g.id ? "Loading…" : "Review"}
-                    </button>
+                    </LobbyAction>
                   </div>
                 </div>
               );

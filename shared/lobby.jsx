@@ -59,6 +59,31 @@ export function LobbySectionHd({ title, note }) {
 	);
 }
 
+// A room you have joined but which has NOT started is waiting, not active. It
+// already appears in Open — with a Cancel if you host it — so listing it again
+// as in-progress offers a Resume that just drops you back in the waiting room.
+// Only Duel filtered; Spender, CoC, Dontminion and Oddtrick all showed waiting
+// rooms as active, which is the kind of thing that stays wrong in four places
+// at once precisely because each lobby built its own list.
+export function notWaiting(games) {
+	return (games || []).filter((g) => g.status !== "open");
+}
+
+// The one action button a lobby row gets. Extracted because the five lobbies had
+// drifted to four different styles for the SAME Resume button (btn / btn-gold /
+// btn-outline / btn-outline btn-sm), and a class name copied per game is a
+// difference nobody chose.
+export function LobbyAction({ kind = "primary", onClick, children, title }) {
+	const cls = kind === "primary" ? "btn btn-gold"
+		: kind === "danger" ? "btn btn-ghost"
+			: "btn btn-outline";
+	return (
+		<button type="button" className={cls} onClick={onClick} title={title}>
+			{children}
+		</button>
+	);
+}
+
 export function LobbyEmpty({ children }) {
 	return <div className="lby-empty">{children}</div>;
 }

@@ -56,7 +56,7 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
 	RulesModal, rulesModalCss,
-	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge } from "../../shared/lobby.jsx";
+	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction } from "../../shared/lobby.jsx";
 import SpenderRules from "./rules.jsx";
 import { GemToken, CardView, GEM_COLORS, GEM_LABELS, GEM_HEX,
 	splendorPanelCss, splendorCardCss, splendorCardExtraCss, splendorPillCss,
@@ -2981,7 +2981,7 @@ export default function SpenderApp() {
 											<div className="lby-card-meta">{timeAgo(g.finished_at)}{g.win_points === 21 ? " · Long (21)" : ""}</div>
 										</div>
 										<div className="lby-card-actions">
-											<button className="btn btn-outline btn-sm" onClick={() => enterReview(g.id)}>Review</button>
+											<LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>Review</LobbyAction>
 										</div>
 									</div>
 									);
@@ -3030,7 +3030,7 @@ export default function SpenderApp() {
 															{g.turn === myId
 																? <TurnBadge mine>Your Turn</TurnBadge>
 																: <TurnBadge>Their Turn</TurnBadge>}
-															<button className="btn btn-outline btn-sm" onClick={() => handleContinue(g.id)}>Resume</button>
+															<LobbyAction onClick={() => handleContinue(g.id)}>Resume</LobbyAction>
 														</>
 													) : (
 														<TurnBadge>{turnName ? `${displayName(turnName)}'s turn` : "In progress"}</TurnBadge>

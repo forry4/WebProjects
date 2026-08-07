@@ -5,7 +5,7 @@ import {
   LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList,
+  useProgressiveList, notWaiting, LobbyAction,
 } from "../../shared/lobby.jsx";
 import OddtrickRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
@@ -297,6 +297,8 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   const [myGames, setMyGames] = useState(() => readLobbyCache("oddtrick", myId, "mine", []));
   const [history, setHistory] = useState(() => readLobbyCache("oddtrick", myId, "history", []));
   const [historyShown, historyMore] = useProgressiveList(history);
+  // A room still waiting for an opponent belongs in Open, not in progress.
+  const activeMine = notWaiting(myGames);
   const [lobbyTab, setLobbyTab] = useState("open");
   const [loadingGames, setLoadingGames] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -514,8 +516,8 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               </div>
               <div className="lby-card-actions">
                 {g.host_id === myId
-                  ? <button className="btn btn-ghost" onClick={() => cancelGame(g.id)}>Cancel</button>
-                  : <button className="btn" onClick={() => joinGame(g.id)}>Join</button>}
+                  ? <LobbyAction kind="danger" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
+                  : <LobbyAction onClick={() => joinGame(g.id)}>Join</LobbyAction>}
               </div>
             </div>
           ))}
@@ -526,8 +528,8 @@ export default function Oddtrick({ myId, authUser, onExit }) {
       <div className="lby-col-active">
         <LobbySectionHd title="Your games" />
         <div className="lby-list">
-          {myGames.length === 0 && <LobbyEmpty>Nothing in progress.</LobbyEmpty>}
-          {myGames.map((g) => (
+          {activeMine.length === 0 && <LobbyEmpty>Nothing in progress.</LobbyEmpty>}
+          {activeMine.map((g) => (
             <div key={g.id} className="lby-card">
               <div className="lby-card-info">
                 <div className="lby-card-title">
@@ -538,7 +540,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 <div className="lby-card-meta">{g.id} · {timeAgo(g.updated_at)}</div>
               </div>
               <div className="lby-card-actions">
-                <button className="btn" onClick={() => resumeGame(g.id)}>Resume</button>
+                <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
               </div>
             </div>
           ))}
@@ -595,7 +597,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
             and the bar did nothing at all. */}
         <LobbyTabs value={lobbyTab} onChange={setLobbyTab} tabs={[
           { key: "open", label: "Open", count: openGames.length || null },
-          { key: "active", label: "Active", count: myGames.length || null },
+          { key: "active", label: "Active", count: activeMine.length || null },
           { key: "history", label: "History", count: history.length || null },
         ]} />
         <div className={`lby-cols tab-${lobbyTab}`}>

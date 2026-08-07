@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, LobbyTabs } from "../../shared/lobby.jsx";
+  useProgressiveList, LobbyTabs, notWaiting, LobbyAction } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -1458,7 +1458,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     );
   }
   if (screen === "lobby") {
-    const activeMine = myGames.filter((g) => g.status === "playing");
+    const activeMine = notWaiting(myGames);
     const savedRid = (() => { try { return localStorage.getItem("duel_roomId"); } catch { return null; } })();
     const savedTok = (() => { try { return savedRid ? localStorage.getItem(`duel_token_${savedRid}_${myId}`) : null; } catch { return null; } })();
     const savedListed = savedRid && (openGames.some((g) => g.id === savedRid) || myGames.some((g) => g.id === savedRid));
@@ -1526,7 +1526,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                   {g.host_id === myId
                     ? (<>
                         <button className="btn btn-outline" onClick={() => resumeGame(g.id)}>Return</button>
-                        <button className="btn btn-outline" onClick={() => cancelGame(g.id)}>Cancel</button>
+                        <LobbyAction kind="secondary" onClick={() => cancelGame(g.id)}>Cancel</LobbyAction>
                       </>)
                     : <button className="btn btn-gold" onClick={() => joinGame(g.id)}>Join</button>}
                 </div>
@@ -1542,7 +1542,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                   <div className="lby-card-title">Game {savedRid}</div>
                   <div className="lby-card-meta">saved on this device</div>
                 </div>
-                <div className="lby-card-actions"><button className="btn btn-gold" onClick={() => resumeGame(savedRid)}>Resume</button></div>
+                <div className="lby-card-actions"><LobbyAction onClick={() => resumeGame(savedRid)}>Resume</LobbyAction></div>
               </div>
             )}
             {activeMine.length === 0 && !(savedRid && savedTok && !savedListed) && <div className="lby-empty">No games in progress.</div>}
@@ -1555,7 +1555,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                 </div>
                 <div className="lby-card-actions">
                   {g.your_turn ? <TurnBadge mine>Your turn</TurnBadge> : <TurnBadge>Their turn</TurnBadge>}
-                  <button className="btn btn-gold" onClick={() => resumeGame(g.id)}>Resume</button>
+                  <LobbyAction onClick={() => resumeGame(g.id)}>Resume</LobbyAction>
                 </div>
               </div>
             ))}
@@ -1574,7 +1574,7 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
                   </div>
                   <div className="lby-card-meta">{WIN_DESC[g.win_condition] ? WIN_DESC[g.win_condition] + " · " : ""}{timeAgo(g.updated_at)}</div>
                 </div>
-                <div className="lby-card-actions"><button className="btn btn-outline" onClick={() => enterReview(g.id)}>Review</button></div>
+                <div className="lby-card-actions"><LobbyAction kind="secondary" onClick={() => enterReview(g.id)}>Review</LobbyAction></div>
               </div>
             ))}
             {historyMore}
