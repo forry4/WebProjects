@@ -71,7 +71,9 @@
      corner — every card's index but the last was covered. A hand is at most 7
      cards, and 7 x 42px plus gaps fits a 390px phone with room to spare, so the
      overlap was buying nothing anyway. */
-  .dis .dis-hand { gap: 0.18rem; flex-wrap: wrap; }
+  /* ...and the mobile card is 42px, so its reserved row is smaller. See the
+     base `.dis-hand` rule for why this exists at all. */
+  .dis .dis-hand { gap: 0.18rem; flex-wrap: wrap; min-height: calc(42px * 1.4 + 2px); }
   .dis .dis-piles { gap: 0.35rem; }
   .dis .dis-pilewrap { --pk: 11px; }
   .dis .dis-bidgrid { grid-template-columns: repeat(4, 1fr); }
@@ -170,7 +172,22 @@
    for exactly this. */
 .dis .muted { color: var(--text-dim); }
 
-.dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem; }
+/* THE HAND KEEPS ITS ROW WHEN IT IS EMPTY, and that is what stops the board
+   moving under your thumb. `.dis-table` on a phone is `min-height: 100dvh` with
+   `justify-content: space-between`, so the gaps are whatever is left over — the
+   instant any row changes height, every gap recomputes and the whole board
+   re-distributes. Playing your last card collapsed this row from a full card
+   height to ZERO, and that one collapse is the entire effect: reported from a
+   phone as the view shifting around, measured across two screenshots of the
+   same trick as 28.7 / 44.3 / 60 CSS px of movement, progressively more toward
+   the bottom, which is exactly how space-between pays out a freed 60px.
+   `.dis-trick` already reserves 96px and measures 96px empty, one card and two,
+   so it was never part of this — measured before changing anything.
+   The height is one card row: `--cw * 1.4` plus the 1px border top and bottom.
+   It is written per breakpoint rather than derived from `--cw`, because that
+   token lives on `.dis-card` and is not in scope here. */
+.dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem;
+  min-height: calc(56px * 1.4 + 2px); }
 
 /* ── piles ──────────────────────────────────────────────────────────────── */
 .dis-piles { display: flex; gap: 0.6rem; justify-content: center; }
