@@ -12,6 +12,7 @@
   .odd .odd-hand .odd-card:not(:first-child) { margin-left: -14px; }
   .odd .odd-piles { gap: 0.35rem; }
   .odd .odd-bidgrid { grid-template-columns: repeat(4, 1fr); }
+  .odd .odd-valgrid { grid-template-columns: repeat(5, 1fr); max-height: 34vh; }
   .odd .odd-side { display: none; }
   .odd .odd-main { grid-template-columns: 1fr; }
   .odd .odd-trickstrip { overflow-x: auto; }
@@ -155,3 +156,71 @@
 /* v2: the Null bid stands apart from the number ladder */
 .odd-nullbid { border-color: #8a6fd8; color: #b9a5f2; }
 .odd-nullbid:hover { background: rgba(138, 111, 216, 0.12); }
+
+/* ── skat mode ──────────────────────────────────────────────────────────────
+   A second auction over the same table, so everything here reuses the bid-grid
+   vocabulary above rather than inventing a parallel one. */
+
+/* Which auction a room runs. Classic is the default and carries no badge. */
+.odd-modebadge {
+  margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; vertical-align: middle;
+  background: rgba(138, 111, 216, 0.18); color: #b9a5f2;
+  border: 1px solid rgba(138, 111, 216, 0.45);
+}
+
+/* The value ladder is longer than the 1..12 level row, so it scrolls in place
+   rather than pushing the table off the screen. */
+.odd-valgrid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem;
+  width: 100%; max-width: 420px; max-height: 26vh; overflow-y: auto;
+  padding-right: 2px;
+}
+.odd-valgrid button {
+  padding: 0.45rem 0.2rem; border-radius: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.07); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+}
+.odd-valgrid button:hover { background: rgba(255, 255, 255, 0.15); }
+.odd-valgrid button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+
+/* The collision list: one number, several games. This IS the mode's argument,
+   so it is shown rather than explained. */
+.odd-clears {
+  display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center;
+  justify-content: center; font-size: 0.78rem; max-width: 420px;
+}
+.odd-clear {
+  padding: 0.05rem 0.4rem; border-radius: 6px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+}
+.odd-clear.red { color: #ff8a9c; }
+.odd-clear.null { color: #b9a5f2; }
+
+.odd-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
+
+/* Declaration: the denomination buttons carry their base as a subscript, so
+   the price table is legible without a lookup. */
+.odd-denoms button small {
+  display: block; font-size: 0.6rem; font-weight: 600; opacity: 0.7;
+  margin-top: 1px;
+}
+
+/* Announcements — toggles, not a ladder: each adds one to the multiplier. */
+.odd-anns { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.odd-ann {
+  padding: 0.35rem 0.7rem; border-radius: 999px; font-weight: 700;
+  font-size: 0.82rem; cursor: pointer;
+  background: rgba(255, 255, 255, 0.06); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.odd-ann:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.odd-ann.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.odd-ann:disabled { opacity: 0.32; cursor: not-allowed; }
+.odd-annbtn { border-color: #6fa8d8; color: #a5d0f2; }
+
+/* Kontra is the defender's one moment of leverage; it reads as a threat. */
+.odd-kontrabtn { background: #b8434f; color: #fff; }
+.odd-kontrabtn:hover { background: #c9505c; }

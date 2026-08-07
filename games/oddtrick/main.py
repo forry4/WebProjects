@@ -56,6 +56,13 @@ def _valid_difficulty(value) -> str:
     return value if value in DIFFICULTIES else DEFAULT_DIFFICULTY
 
 
+def _valid_mode(value) -> str:
+    """Skat mode is a ROOM FLAG, not a second game: one table, one route, one
+    lobby. The mode lives on the room (an open room has no game dict yet) and
+    is copied into the game dict at the deal."""
+    return value if value in engine.MODES else engine.DEFAULT_MODE
+
+
 oddtrick_app = FastAPI(title="Oddtrick API")
 oddtrick_app.add_middleware(
     CORSMiddleware,
@@ -168,6 +175,7 @@ def save_game(room_id: str) -> None:
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "mode": room.get("mode", engine.DEFAULT_MODE),
     }
     now = int(time.time())
     _DB_WRITE_EXEC.submit(
@@ -217,6 +225,9 @@ def load_game_to_memory(room_id: str) -> bool:
         # Persisted so a vs-bot game reconnected after a redeploy keeps the
         # tier it was created with instead of silently reverting to default.
         "ai_difficulty": _valid_difficulty(state.get("ai_difficulty")),
+        # Rows written before skat mode existed have no `mode`; they resume as
+        # classic, which is what their game dict already is.
+        "mode": _valid_mode(state.get("mode")),
         "sockets": {},
     }
     return True
@@ -226,13 +237,32 @@ def list_open_games() -> list[dict]:
     maybe_cleanup_games(TABLE, background=True)
     conn = _db()
     cur = conn.cursor()
-    cur.execute(f"""SELECT id, player1_id, player1_name, created_at FROM {TABLE}
+    cur.execute(f"""SELECT id, player1_id, player1_name, state_json, created_at
+                    FROM {TABLE}
                     WHERE status='open' ORDER BY created_at DESC LIMIT 20""")
     rows = cur.fetchall()
     conn.close()
     return [{"id": r["id"], "host_id": r["player1_id"],
-             "host_name": r["player1_name"], "created_at": r["created_at"]}
+             "host_name": r["player1_name"], "created_at": r["created_at"],
+             # An open room has no game dict yet, so the mode has to come off
+             # the room state -- the lobby badge says which auction you'd join.
+             "mode": _row_mode(r["state_json"])}
             for r in rows]
+
+
+def _row_mode(blob) -> str:
+    """The room's auction mode, off a stored blob. Never raises: an unreadable
+    row is a lobby badge, not a reason to 500 the list."""
+    try:
+        state = _decode_state(blob)
+        if not isinstance(state, dict):
+            return engine.DEFAULT_MODE
+        g = state.get("game")
+        if isinstance(g, dict) and g.get("mode"):
+            return _valid_mode(g.get("mode"))
+        return _valid_mode(state.get("mode"))
+    except Exception:
+        return engine.DEFAULT_MODE
 
 
 def list_user_games(user_id: str) -> list[dict]:
@@ -256,6 +286,7 @@ def list_user_games(user_id: str) -> list[dict]:
             "id": r["id"], "status": r["status"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
             "you_are_p1": r["player1_id"] == user_id, "your_turn": your_turn,
+            "mode": _valid_mode(g.get("mode")) if g else _row_mode(r["state_json"]),
             "created_at": r["created_at"], "updated_at": r["updated_at"],
         })
     return out
@@ -291,8 +322,10 @@ def list_user_history(user_id: str) -> list[dict]:
             "id": r["id"], "opp_name": opp_name,
             "your_score": scores[seat], "opp_score": scores[1 - seat],
             "you_won": scores[seat] > scores[1 - seat],
+            "mode": engine.mode_of(g),
             "contract": {"level": res.get("level"), "denom": res.get("denom"),
                          "made": res.get("made"),
+                         "value": res.get("value"), "mult": res.get("mult"),
                          "you_declared": res.get("declarer") == seat},
             "updated_at": r["updated_at"],
         })
@@ -319,6 +352,7 @@ def mk_room_state(room_id: str, viewer_pid: str | None = None) -> dict[str, Any]
         "vs_ai": room.get("vs_ai", False),
         "ai_player": room.get("ai_player"),
         "ai_difficulty": room.get("ai_difficulty", DEFAULT_DIFFICULTY),
+        "mode": room.get("mode", engine.DEFAULT_MODE),
         # Scoped to the recipient: a room-wide token map would hand every
         # socket the other seat's reconnect credential.
         "reconnect_tokens": (
@@ -360,20 +394,51 @@ _BOT_EXEC = concurrent.futures.ThreadPoolExecutor(
     max_workers=2, thread_name_prefix="oddtrick-bot")
 
 
+def _position_key(g: dict) -> tuple:
+    """Everything a bot move was computed against.
+
+    Two schedulers can be in flight at once (``_handle_move`` starts one, and
+    so does every reconnect), so a move is only applied if the position has not
+    moved underneath it. EVERY state-advancing action must show up here or the
+    duplicate applies its stale move on top:
+
+    * ``redeals`` — a skat hand thrown in resets phase/trick/history/log to
+      their opening values, so without it a redeal reads as "nothing moved";
+    * ``looked``/``swapped`` — the talon steps change none of the other
+      components, which is exactly how a doubled scheduler managed to send
+      ``look`` twice and have the second rejected as illegal.
+    """
+    return (g["phase"], g["trick"], len(g["history"]), len(g["auction"]["log"]),
+            g.get("redeals", 0), bool(g.get("looked")), g.get("swapped"))
+
+
 def _bot_move_sync(g: dict, seat: int, difficulty: str, seed: int):
     rng = random.Random(seed)
+    # Easy blunders on purpose rather than searching worse — but only in the
+    # two phases where a careless choice is still a LEGAL one. It used to
+    # blunder in every non-play phase and reach for `opt["levels"]`, a key the
+    # v2 auction stopped returning, so an Easy bot's first bid raised KeyError
+    # and the scheduler gave up on the room.
     if difficulty == "easy" and rng.random() < 0.35:
-        # Easy blunders on purpose rather than searching worse.
         if g["phase"] == "play":
             return {"kind": "play", "card": rng.choice(engine.legal_moves(g, seat))}
-        opt = engine.auction_options(g)
-        if opt["may_pass"] and rng.random() < 0.5:
+        if g["phase"] == "auction":
+            opt = engine.auction_options(g)
+            if opt["may_pass"] and rng.random() < 0.5:
+                return {"kind": "pass"}
+            if engine.mode_of(g) == "skat":
+                vals = opt["values"]
+                return ({"kind": "bid", "value": rng.choice(vals[:4])} if vals
+                        else {"kind": "pass"})
+            # Never Null by accident: it is a contract, not a slip.
+            bids = [b for b in opt["bids"] if b[1] != engine.NULL_DENOM]
+            if bids:
+                lvl, den = rng.choice(bids)
+                return {"kind": "bid", "level": lvl, "denom": den}
             return {"kind": "pass"}
-        if opt["levels"] and opt["denoms"]:
-            return {"kind": "bid", "level": opt["levels"][0],
-                    "denom": rng.choice(opt["denoms"])}
-        return {"kind": "pass"}
     kind, mv = bot.act(g, seat, rng)
+    if kind == "move":
+        return mv
     if kind == "play":
         return {"kind": "play", "card": mv}
     if kind == "swap":
@@ -396,8 +461,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
             seat = engine.seat_of(g, ai)
             difficulty = _valid_difficulty(room.get("ai_difficulty"))
             snapshot = json.loads(json.dumps(g))
-            trick_before = (g["phase"], g["trick"], len(g["history"]),
-                            len(g["auction"]["log"]))
+            position_before = _position_key(g)
 
         t0 = time.monotonic()
         try:
@@ -417,8 +481,7 @@ async def _schedule_bot_turn(room_id: str) -> None:
                 return
             g = room["game"]
             # Re-validate: the position must not have moved while we computed.
-            if (g["phase"], g["trick"], len(g["history"]),
-                    len(g["auction"]["log"])) != trick_before:
+            if _position_key(g) != position_before:
                 continue
             try:
                 engine.apply_move(g, ai, move)
@@ -438,7 +501,8 @@ def _start_new_game(room: dict, room_id: str) -> None:
     seats = [p for p in room["players"].keys()]
     rng = _new_rng()
     rng.shuffle(seats)   # who opens the auction is a real edge; randomise it
-    room["game"] = engine.new_game(seats, rng, opener=0)
+    room["game"] = engine.new_game(seats, rng, opener=0,
+                                   mode=_valid_mode(room.get("mode")))
     room["status"] = "playing"
 
 
@@ -500,6 +564,7 @@ async def _handle_create(ws, room_id, pid, msg):
     name = (msg.get("name") or "Player").strip()[:24] or "Player"
     vs_ai = bool(msg.get("vs_ai"))
     difficulty = _valid_difficulty(msg.get("ai_difficulty"))
+    mode = _valid_mode(msg.get("mode"))
     async with ROOM_LOCK:
         if room_id in ROOMS or _ensure_room_loaded(room_id):
             await _send(ws, {"type": "error", "message": "room already exists"})
@@ -514,6 +579,7 @@ async def _handle_create(ws, room_id, pid, msg):
             "vs_ai": vs_ai,
             "ai_player": None,
             "ai_difficulty": difficulty,
+            "mode": mode,
         }
         ROOMS[room_id] = room
         if vs_ai:
@@ -656,11 +722,13 @@ async def _handle_abandon(ws, room_id, pid):
         if g and not engine.is_over(g):
             seat = engine.seat_of(g, pid)
             if seat is not None:
-                # Forfeit: the opponent takes the contract's value.
+                # Forfeit: the opponent takes the contract's value, in whichever
+                # currency this room's mode scores in.
                 g["phase"] = "over"
                 scores = [0, 0]
-                scores[1 - seat] = max(1, g["auction"]["level"] ** 2)
-                g["result"] = {"declarer": g["auction"]["declarer"],
+                scores[1 - seat] = engine.forfeit_value(g)
+                g["result"] = {"mode": engine.mode_of(g),
+                               "declarer": g["auction"]["declarer"],
                                "level": g["auction"]["level"],
                                "denom": g["auction"]["denom"],
                                "declarer_pts": g["pts"][g["auction"]["declarer"]]
@@ -702,6 +770,15 @@ async def catalog():
         "n_out": engine.N_OUT,
         "n_shown": engine.N_SHOWN,
         "difficulties": list(DIFFICULTIES),
+        # Skat mode. The value ladder is DERIVED from the bases in engine.py and
+        # served from here so the client never hardcodes it -- the two tables
+        # cannot disagree about what a bid costs.
+        "modes": list(engine.MODES),
+        "default_mode": engine.DEFAULT_MODE,
+        "skat_bases": list(engine.SKAT_BASE),
+        "skat_values": list(engine.SKAT_VALUES),
+        "skat_null_value": engine.SKAT_NULL_VALUE,
+        "sharp_bonus": engine.SHARP_BONUS,
     }
 
 

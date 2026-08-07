@@ -121,6 +121,78 @@ def choose_bid(g: dict, seat: int, rng=None) -> dict:
     return {"pass": True}
 
 
+# --- skat mode: the number ladder, the declaration, Kontra ------------------
+#
+# All three reuse `hand_strength` / `_level_for` — the arithmetic the mode
+# needs is exactly the arithmetic already here, pointed at a different question.
+# A hand's BID CEILING is max over denominations of (base x the level that
+# denomination is worth), because bidding a number V forces you to declare at
+# ceil(V / base) in whichever denomination you pick.
+#
+# The thresholds below (`_KONTRA_TARGET`, `_KONTRA_STRENGTH`) are GUESSES, not
+# measurements. SKAT_MODE.md's open question 4 — "Kontra should double
+# 10–20% of contracts, correctly more often than not" — is a `skatlab`
+# self-play sweep that has not been run; until it is, this tier is deliberately
+# reluctant rather than tuned.
+
+#: A defender only doubles a promise this greedy...
+_KONTRA_TARGET = 8
+#: ...and only when its own holding in the declared denomination backs the read.
+_KONTRA_STRENGTH = 10.0
+
+
+def skat_ceiling(g: dict, seat: int) -> int:
+    """The largest number this hand can afford to be held to."""
+    best = 0
+    for d in range(E.NOTRUMP + 1):
+        want = _level_for(hand_strength(g, seat, d))
+        best = max(best, E.SKAT_BASE[d] * want)
+    return best
+
+
+def choose_skat_bid(g: dict, seat: int) -> dict:
+    """Return {"pass": True} or {"value": v}: march up the ladder while the
+    standing number is still below the ceiling."""
+    # The ladder is ascending, so the first rung above the standing bid is the
+    # cheapest way to stay in — there is never a reason to jump past it.
+    above = E.auction_options(g)["values"]
+    if above and above[0] <= skat_ceiling(g, seat):
+        return {"value": above[0]}
+    return {"pass": True}
+
+
+def choose_declare(g: dict, seat: int) -> dict:
+    """Name the game that satisfies the bid with the least stretch.
+
+    Never Null, for the same reason the bot never bids it in classic mode: it
+    is a 33%-make gamble under EXACT play and a one-trick-deep policy has no
+    business finding the other 67%. Never announces either — Hand, Sharp and
+    Open all multiply a contract this bot is not confident enough to have
+    bought in the first place.
+    """
+    bid = g["auction"]["value"]
+    best, best_key = None, None
+    for opt in E.skat_declarable(bid):
+        d = opt["denom"]
+        strength = hand_strength(g, seat, d)
+        # How far past what the hand is worth this bid drags the level.
+        stretch = opt["min_level"] - _level_for(strength)
+        key = (max(0, stretch), -strength)
+        if best_key is None or key < best_key:
+            best, best_key = opt, key
+    return {"denom": best["denom"], "level": best["min_level"],
+            "sharp": False, "open": False}
+
+
+def choose_kontra(g: dict, seat: int) -> bool:
+    a = g["auction"]
+    if a["denom"] == E.NULL_DENOM:
+        return False
+    target = a["level"] + (E.SHARP_BONUS if g["contract"]["sharp"] else 0)
+    return (target >= _KONTRA_TARGET
+            and hand_strength(g, seat, a["denom"]) >= _KONTRA_STRENGTH)
+
+
 def choose_swap(g: dict, seat: int) -> dict:
     """Pick the exchange that most strengthens the declared contract.
 
@@ -153,11 +225,36 @@ def choose_swap(g: dict, seat: int) -> dict:
 
 
 def act(g: dict, seat: int, rng=None):
-    """One bot action for whichever phase the game is in."""
-    if g["phase"] == "auction":
+    """One bot action for whichever phase the game is in.
+
+    Returns ``(kind, payload)``. ``"move"`` means the payload is already a
+    complete move dict — the skat phases have no shared shape worth flattening.
+    """
+    phase = g["phase"]
+    skat = E.mode_of(g) == "skat"
+    if phase == "auction":
+        if skat:
+            b = choose_skat_bid(g, seat)
+            return ("move", {"kind": "pass"} if b.get("pass")
+                    else {"kind": "bid", "value": b["value"]})
         return ("bid", choose_bid(g, seat, rng))
-    if g["phase"] == "swap":
+    if phase == "swap":
         return ("swap", choose_swap(g, seat))
-    if g["phase"] == "play":
+    if phase == "talon":
+        # Always look. Hand is worth x2, but a tier that cannot evaluate the
+        # gamble should not take it — and looking is also how the bot finds out
+        # whether the talon fixes a denomination for it.
+        if not g.get("looked"):
+            return ("move", {"kind": "look"})
+        sw = choose_swap(g, seat)
+        return ("move", {"kind": "swap", "take": sw["take"], "give": sw["give"]})
+    if phase == "declare":
+        return ("move", {"kind": "declare", **choose_declare(g, seat)})
+    if phase == "kontra":
+        return ("move", {"kind": "kontra", "on": choose_kontra(g, seat)})
+    if phase == "re":
+        # Doubling back is a read on the defender's read; not this tier.
+        return ("move", {"kind": "re", "on": False})
+    if phase == "play":
         return ("play", choose_card(g, seat))
     return (None, None)

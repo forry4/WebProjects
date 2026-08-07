@@ -15,7 +15,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
-| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration |
+| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, and the two auction modes (classic / skat) |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -86,7 +86,9 @@ games/
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
 oddtrick/            # Oddtrick — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/oddtrick-core (the solver-validated reference);
-                       #   tests/test_rust_parity.py is the drift gate
+                       #   tests/test_rust_parity.py is the drift gate. TWO auction
+                       #   modes over the identical card play, picked per room
+                       #   (`mode: classic|skat`) — see its CLAUDE.md
   books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the

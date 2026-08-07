@@ -13,6 +13,14 @@ play (the hidden-information sweep's efficient point), ranked denominations
 contract (win no +2 trick; fixed rung 6, pays 12 / set 10), and the declarer's
 swap (shown 3 of the out-cards after the auction, may take one into hand).
 
+Skat mode (2026-08-07) is a SECOND auction over that same card play, chosen per
+room: you bid a bare NUMBER, and only after winning do you declare the game
+(denomination + level) that satisfies it, optionally escalating against
+yourself with Hand / Sharp / Open before the defender's Kontra. The deal, the
+piles, the talon, follow-suit, the parity and the redaction machinery are
+shared verbatim -- ``apply_move`` dispatches on ``g["mode"]`` and both paths
+converge on ``_start_play``. See ``rust-cores/oddtrick-core/SKAT_MODE.md``.
+
 Ported from ``rust-cores/oddtrick-core`` (``state.rs`` + ``auction.rs``),
 which is the solver-validated reference. ``tests/test_rust_parity.py`` replays
 fixtures generated there and asserts identical states, so this file must not
@@ -88,6 +96,94 @@ N_OUT = 6
 N_SHOWN = 3
 
 
+# --- skat mode -------------------------------------------------------------
+#
+# A second way to arrive at a contract over the SAME card play. See
+# rust-cores/oddtrick-core/SKAT_MODE.md for the design argument; the one idea
+# is that the shipped auction makes level N both the price and the task, so
+# naming your bid tells the opponent what you intend to play. Skat mode splits
+# them: you bid a NUMBER, and only after winning do you declare the game that
+# satisfies it. Many games clear the same number, so the number cannot be read
+# backwards into a denomination.
+#
+# Nothing below touches the deck, the piles, the talon, follow-suit or the
+# parity. Only the phase machine between the deal and trick 1 changes.
+
+MODES = ("classic", "skat")
+DEFAULT_MODE = "classic"
+
+#: value = base x level. Indexed by denomination (clubs..no-trump); the order
+#: deliberately INVERTS the classic mode's C < D < H < S ranking -- diamonds
+#: cheap, clubs dear -- matching real Skat and keeping the two modes' tables
+#: from being mistaken for each other. Your ABILITY in a denomination is real
+#: and varies by hand; only its PRICE is convention, and assigning one is what
+#: manufactures an asymmetry the measured-symmetric suits do not otherwise have.
+SKAT_BASE = [5, 2, 3, 4, 6]  # clubs, diamonds, hearts, spades, no-trump
+
+#: Null is a flat value sitting mid-ladder the way Skat's 23 does. 20 is
+#: already spades-at-5 / diamonds-at-10 / clubs-at-4, which is the point:
+#: collisions mean a bid names a price, not a game.
+SKAT_NULL_VALUE = 20
+
+#: Sharp promises the declared level plus this much.
+SHARP_BONUS = 3
+
+#: The legal bid ladder: every product base x level, plus Null's flat value.
+#:
+#: NOTE for anyone checking this against SKAT_MODE.md: that document's prose
+#: enumerates "2,3,4,...,10,12,..." and counts 43 rungs. Both are wrong, and
+#: the GENERATOR (base x level) is the rule -- 7 is not a multiple of any base,
+#: so the real ladder is 36 rungs and has a single hole at 7 in the otherwise
+#: dense 2..10 stretch. Derived here rather than typed out so the two can never
+#: disagree.
+SKAT_VALUES = sorted(
+    {SKAT_BASE[d] * lvl for d in range(NOTRUMP + 1)
+     for lvl in range(MIN_LEVEL, MAX_LEVEL + 1)}
+    | {SKAT_NULL_VALUE}
+)
+
+
+def skat_min_level(denom: int, value: int) -> int:
+    """Lowest level in `denom` whose value clears `value` (ceiling division)."""
+    base = SKAT_BASE[denom]
+    return max(MIN_LEVEL, -(-value // base))
+
+
+def skat_declarable(value: int) -> list[dict]:
+    """Every declaration that satisfies a winning bid of `value`.
+
+    Because the level is the declarer's free choice from 1..12 and no-trump at
+    12 is the ladder's top rung, EVERY legal bid is declarable -- Skat's
+    "overbid loses at once" rule has nothing to fire on here. The punishment
+    for stretching is structural instead: a big number forces you up the level
+    ladder into a contract you cannot make, and past 20 it locks Null away.
+    """
+    out = []
+    for d in range(NOTRUMP + 1):
+        lo = skat_min_level(d, value)
+        if lo <= MAX_LEVEL:
+            out.append({"denom": d, "base": SKAT_BASE[d], "min_level": lo})
+    return out
+
+
+def skat_value_of(denom: int, level: int) -> int:
+    return SKAT_NULL_VALUE if denom == NULL_DENOM else SKAT_BASE[denom] * level
+
+
+def skat_multiplier(hand: bool, sharp: bool, open_: bool) -> int:
+    """Announcements stack Skat-style by ADDITION, never multiplication.
+
+    Base game x1; Hand, Sharp and Open each add one. Hand+Sharp = x3,
+    Hand+Sharp+Open = x4, Sharp alone = x2.
+
+    Why a multiplier rather than a flat bonus: the classic-mode campaign
+    measured flat bonuses distorting the bottom of the ladder (a flat +1 RAISED
+    the floor cluster, being proportionally biggest on the smallest contracts).
+    A multiplier prices confidence identically at every level.
+    """
+    return 1 + int(bool(hand)) + int(bool(sharp)) + int(bool(open_))
+
+
 def suit(c: int) -> int:
     return c // NRANK
 
@@ -118,9 +214,15 @@ def beats(led: int, follow: int, trump: int) -> bool:
 # --- dealing ---------------------------------------------------------------
 
 
-def new_game(seats, rng=None, opener: int = 0) -> dict:
-    """Deal a round. `seats` is [pid0, pid1]; `opener` names the first bidder."""
+def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE) -> dict:
+    """Deal a round. `seats` is [pid0, pid1]; `opener` names the first bidder.
+
+    `mode` selects which auction runs on top of the identical deal: "classic"
+    (level + denomination, the shipped v2 auction) or "skat" (a numeric ladder
+    followed by a declaration). Everything from `_start_play` onwards is shared.
+    """
     rng = rng or random.Random()
+    mode = mode if mode in MODES else DEFAULT_MODE
     deck = list(range(NCARD))
     rng.shuffle(deck)
 
@@ -134,8 +236,9 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
         k += 6
     out = deck[26:26 + N_OUT]
 
-    return {
+    g = {
         "v": VERSION,
+        "mode": mode,
         "seats": list(seats),
         "phase": "auction",
         "hands": hands,
@@ -150,6 +253,12 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
         "opener": opener,
         # The auction is real game state, not a transient message field, so it
         # survives saves and reconnects and stays server-enforced.
+        #
+        # `level`/`denom` mean different things per mode and that is deliberate:
+        # in classic they are the BID, in skat they are the DECLARATION and stay
+        # unset (0 / -1) for the whole auction. Everything downstream --
+        # `_start_play`'s trump, the result row, the lobby's contract line --
+        # then reads the same two keys in both modes.
         "auction": {
             "level": 0,
             "denom": -1,
@@ -157,6 +266,10 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
             "used": [0, 0],
             "to_act": opener,
             "log": [],
+            # skat only: the standing numeric bid, and how many times the
+            # auction has been passed out at zero.
+            "value": 0,
+            "passes": 0,
         },
         "trump": NOTRUMP,
         "trick": 0,
@@ -169,6 +282,32 @@ def new_game(seats, rng=None, opener: int = 0) -> dict:
         "played": [],
         "result": None,
     }
+    if mode == "skat":
+        # Whether the declarer LOOKED at the talon at all. Distinct from
+        # `swapped`: looking and standing pat is still not a Hand game.
+        g["looked"] = False
+        g["redeals"] = 0
+        g["contract"] = _new_contract()
+    return g
+
+
+def _new_contract() -> dict:
+    """The skat declaration. Entirely public once made -- no redaction needed."""
+    return {
+        "value": 0,      # declared game value: base x level, or 20 for Null
+        "hand": False,   # played without looking at the talon
+        "sharp": False,  # promises level + SHARP_BONUS
+        "open": False,   # declarer's hand face up from trick 1
+        "kontra": False,
+        "re": False,
+        "mult": 1,       # from the announcements only
+    }
+
+
+def mode_of(g: dict) -> str:
+    """A save written before skat mode existed has no `mode` key."""
+    m = (g or {}).get("mode", DEFAULT_MODE)
+    return m if m in MODES else DEFAULT_MODE
 
 
 # --- auction ---------------------------------------------------------------
@@ -184,7 +323,19 @@ def auction_options(g: dict) -> dict:
     """
     a = g["auction"]
     if g["phase"] != "auction":
-        return {"bids": [], "may_pass": False}
+        return {"bids": [], "values": [], "standing": 0, "may_pass": False}
+    if mode_of(g) == "skat":
+        # Ascending numeric, alternating; either player may pass. Passing when
+        # nothing stands is a genuine "you take it" that hands the opponent the
+        # talon and the lead at THEIR price -- which is why an open pass is safe
+        # here and was not in classic mode, where the opener is forced to name a
+        # contract and passing would be strictly better than a bad one.
+        return {
+            "bids": [],
+            "values": [v for v in SKAT_VALUES if v > a["value"]],
+            "standing": a["value"],
+            "may_pass": True,
+        }
     me = a["to_act"]
     free = [d for d in range(NULL_DENOM + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
@@ -217,6 +368,8 @@ def auction_options(g: dict) -> dict:
 def can_bid(g: dict, seat: int, level: int, denom: int) -> tuple[bool, str]:
     if g["phase"] != "auction":
         return False, "not bidding"
+    if mode_of(g) == "skat":
+        return False, "this game bids a number, not a contract"
     a = g["auction"]
     if seat != a["to_act"]:
         return False, "not your turn"
@@ -238,17 +391,63 @@ def apply_bid(g: dict, seat: int, level: int, denom: int) -> None:
     a["log"].append({"seat": seat, "level": level, "denom": denom})
 
 
+def apply_skat_bid(g: dict, seat: int, value: int) -> None:
+    """Name a number strictly above the standing bid. Skat mode only."""
+    if g["phase"] != "auction" or mode_of(g) != "skat":
+        raise ValueError("not bidding a number")
+    a = g["auction"]
+    if seat != a["to_act"]:
+        raise ValueError("not your turn")
+    value = int(value)
+    if value not in SKAT_VALUES:
+        raise ValueError("not a value on the ladder")
+    if value <= a["value"]:
+        raise ValueError("that does not outbid the standing number")
+    a["value"] = value
+    a["declarer"] = seat
+    a["to_act"] = 1 - seat
+    a["log"].append({"seat": seat, "value": value})
+
+
 def apply_pass(g: dict, seat: int) -> None:
     if g["phase"] != "auction":
         raise ValueError("not bidding")
     a = g["auction"]
     if seat != a["to_act"]:
         raise ValueError("not your turn")
+    if mode_of(g) == "skat":
+        a["log"].append({"seat": seat, "pass": True})
+        if a["value"] == 0:
+            # Nothing stands: this is a genuine "you take it", and both players
+            # declining throws the hand in.
+            a["passes"] += 1
+            if a["passes"] >= 2:
+                _redeal(g)
+            else:
+                a["to_act"] = 1 - seat
+            return
+        # A bid stands, so the last bidder has bought the declaration.
+        g["phase"] = "talon"
+        return
     if a["level"] == 0:
         raise ValueError("the opener must bid")
     a["log"].append({"seat": seat, "pass": True})
     # The declarer now sees `shown` and decides on the swap before play.
     g["phase"] = "swap"
+
+
+def _redeal(g: dict) -> None:
+    """Throw the hand in and deal again, in place.
+
+    Mutating `g` rather than returning a fresh dict is load-bearing: the room
+    server, the bot scheduler and every open socket all hold this exact object.
+    The opener alternates so a player cannot pass out of a bad seat for free.
+    """
+    n = g.get("redeals", 0) + 1
+    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"], mode="skat")
+    fresh["redeals"] = n
+    g.clear()
+    g.update(fresh)
 
 
 def swap_options(g: dict) -> dict:
@@ -266,8 +465,11 @@ def apply_swap(g: dict, seat: int, take, give) -> None:
     face-down, so the defender learns only that a swap happened -- the round-end
     reveal is what eventually shows which cards moved.
     """
-    if g["phase"] != "swap":
+    skat = mode_of(g) == "skat"
+    if g["phase"] != ("talon" if skat else "swap"):
         raise ValueError("not the swap phase")
+    if skat and not g.get("looked"):
+        raise ValueError("look at the talon first")
     decl = g["auction"]["declarer"]
     if seat != decl:
         raise ValueError("only the declarer swaps")
@@ -285,7 +487,159 @@ def apply_swap(g: dict, seat: int, take, give) -> None:
         g["out"][g["out"].index(take)] = give
         g["shown"][g["shown"].index(take)] = give
         g["swapped"] = True
+    if skat:
+        # In skat mode the talon resolves BEFORE the game is named -- the whole
+        # point of taking it is to see whether it fixes a denomination for you.
+        g["phase"] = "declare"
+    else:
+        _start_play(g)
+
+
+# --- skat: talon, declaration, announcements, Kontra ------------------------
+#
+# This is where the mode's interest lives. The auction ends with a number; the
+# declarer then escalates AGAINST THEMSELVES (Hand / Sharp / Open) with the
+# opponent already out of the loop, and the defender gets the last word
+# (Kontra) at the moment they finally learn what game they are defending. A
+# two-player auction otherwise has neither of those pressures.
+
+
+def _skat_declarer(g: dict) -> int:
+    return g["auction"]["declarer"]
+
+
+def talon_options(g: dict) -> dict:
+    """What the declarer may do in the talon phase.
+
+    `shown` is empty until they choose to LOOK -- declining to look is what
+    Hand means, so the cards cannot be handed over before the choice is made.
+    """
+    if g["phase"] != "talon":
+        return {"looked": False, "shown": [], "hand": []}
+    decl = _skat_declarer(g)
+    return {
+        "looked": bool(g.get("looked")),
+        "shown": list(g["shown"]) if g.get("looked") else [],
+        "hand": sorted(g["hands"][decl]),
+    }
+
+
+def apply_look(g: dict, seat: int) -> None:
+    """Turn the three talon cards face up -- and give up the Hand multiplier."""
+    if g["phase"] != "talon":
+        raise ValueError("not the talon phase")
+    if seat != _skat_declarer(g):
+        raise ValueError("only the declarer sees the talon")
+    if g.get("looked"):
+        raise ValueError("already looking")
+    g["looked"] = True
+
+
+def apply_hand(g: dict, seat: int) -> None:
+    """Decline to look at all: Hand, worth +1 to the multiplier."""
+    if g["phase"] != "talon":
+        raise ValueError("not the talon phase")
+    if seat != _skat_declarer(g):
+        raise ValueError("only the declarer plays Hand")
+    if g.get("looked"):
+        raise ValueError("you have already seen the talon")
+    g["contract"]["hand"] = True
+    g["swapped"] = False
+    g["phase"] = "declare"
+
+
+def declare_options(g: dict) -> dict:
+    """The declarations that satisfy the winning bid, for the client to render."""
+    if g["phase"] != "declare":
+        return {"bid": 0, "denoms": [], "null_ok": False}
+    ct = g["contract"]
+    bid = g["auction"]["value"]
+    return {
+        "bid": bid,
+        "denoms": skat_declarable(bid),
+        # A bid above Null's flat value locks Null away -- the one place where
+        # stretching the auction genuinely removes a game from your hand.
+        "null_ok": bid <= SKAT_NULL_VALUE,
+        "null_value": SKAT_NULL_VALUE,
+        "max_level": MAX_LEVEL,
+        "sharp_bonus": SHARP_BONUS,
+        "hand": ct["hand"],
+    }
+
+
+def apply_declare(g: dict, seat: int, denom: int, level: int,
+                  sharp: bool = False, open_: bool = False) -> None:
+    """Name the game, then optionally raise the stakes against yourself."""
+    if g["phase"] != "declare":
+        raise ValueError("not the declaration phase")
+    if seat != _skat_declarer(g):
+        raise ValueError("only the declarer declares")
+    a, ct = g["auction"], g["contract"]
+    denom, level = int(denom), int(level)
+    sharp, open_ = bool(sharp), bool(open_)
+    bid = a["value"]
+
+    if denom == NULL_DENOM:
+        if bid > SKAT_NULL_VALUE:
+            raise ValueError(f"Null is worth {SKAT_NULL_VALUE}; your bid is {bid}")
+        if sharp:
+            # There is no margin to sharpen: Null is won outright or not at all.
+            raise ValueError("Null cannot be played Sharp")
+        level = NULL_LEVEL   # its rung, so `a["level"]` means the same thing in both modes
+        value = SKAT_NULL_VALUE
+    else:
+        if not (0 <= denom <= NOTRUMP):
+            raise ValueError("no such denomination")
+        if not (MIN_LEVEL <= level <= MAX_LEVEL):
+            raise ValueError("level out of range")
+        value = skat_value_of(denom, level)
+        if value < bid:
+            raise ValueError(
+                f"{SKAT_BASE[denom]} x {level} = {value} does not reach your bid of {bid}")
+        if open_ and not sharp:
+            raise ValueError("Open is played on top of Sharp")
+
+    a["level"] = level
+    a["denom"] = denom
+    ct["value"] = value
+    ct["sharp"] = sharp
+    ct["open"] = open_
+    ct["mult"] = skat_multiplier(ct["hand"], sharp, open_)
+    g["phase"] = "kontra"
+
+
+def apply_kontra(g: dict, seat: int, on: bool) -> None:
+    """The defender's reply, priced at maximum information asymmetry."""
+    if g["phase"] != "kontra":
+        raise ValueError("not the Kontra phase")
+    if seat == _skat_declarer(g):
+        raise ValueError("only the defender may Kontra")
+    if not on:
+        _start_play(g)
+        return
+    g["contract"]["kontra"] = True
+    g["phase"] = "re"
+
+
+def apply_re(g: dict, seat: int, on: bool) -> None:
+    if g["phase"] != "re":
+        raise ValueError("not the Re phase")
+    if seat != _skat_declarer(g):
+        raise ValueError("only the declarer may Re")
+    g["contract"]["re"] = bool(on)
     _start_play(g)
+
+
+def skat_doubling(ct: dict) -> int:
+    """Kontra doubles everything whichever way it falls; Re doubles it again."""
+    if ct.get("re"):
+        return 4
+    return 2 if ct.get("kontra") else 1
+
+
+def skat_target(g: dict) -> int:
+    """Trick points the declarer promised, Sharp included."""
+    return g["auction"]["level"] + (SHARP_BONUS if g["contract"]["sharp"] else 0)
 
 
 def _start_play(g: dict) -> None:
@@ -381,7 +735,56 @@ def contract_score(level: int, declarer_pts: int) -> tuple[int, int]:
     return 0, (level - 1) + SHORT_PENALTY * (level - declarer_pts)
 
 
+def _finish_skat(g: dict) -> None:
+    """Declared value x multiplier, to whichever side was right.
+
+    Make everything you announced and the declarer takes it; miss ANY part of
+    it -- the level, or the Sharp margin on top -- and the defender takes the
+    same number, plus the classic mode's shortfall term so deep failures still
+    hurt more than near misses.
+    """
+    a, ct = g["auction"], g["contract"]
+    decl = a["declarer"]
+    dpts = g["pts"][decl]
+    stake = ct["value"] * ct["mult"] * skat_doubling(ct)
+    if a["denom"] == NULL_DENOM:
+        made = g["etricks"][decl] == 0
+        short = 0
+        target = 0
+        pay = stake
+    else:
+        target = skat_target(g)
+        made = dpts >= target
+        short = max(0, target - dpts)
+        pay = stake if made else stake + SHORT_PENALTY * short
+    scores = [0, 0]
+    scores[decl if made else 1 - decl] = pay
+    g["phase"] = "over"
+    g["result"] = {
+        "mode": "skat",
+        "declarer": decl,
+        "bid": a["value"],
+        "level": a["level"],
+        "denom": a["denom"],
+        "value": ct["value"],
+        "mult": ct["mult"],
+        "doubling": skat_doubling(ct),
+        "stake": stake,
+        "hand": ct["hand"], "sharp": ct["sharp"], "open": ct["open"],
+        "kontra": ct["kontra"], "re": ct["re"],
+        "target": target,
+        "declarer_pts": dpts,
+        "declarer_etricks": g["etricks"][decl],
+        "made": made,
+        "short": short,
+        "scores": scores,
+    }
+
+
 def _finish(g: dict) -> None:
+    if mode_of(g) == "skat":
+        _finish_skat(g)
+        return
     a = g["auction"]
     decl = a["declarer"]
     dpts = g["pts"][decl]
@@ -400,6 +803,7 @@ def _finish(g: dict) -> None:
     scores[1 - decl] = fs
     g["phase"] = "over"
     g["result"] = {
+        "mode": "classic",
         "declarer": decl,
         "level": a["level"],
         "denom": a["denom"],
@@ -409,6 +813,21 @@ def _finish(g: dict) -> None:
         "short": short,
         "scores": scores,
     }
+
+
+def forfeit_value(g: dict) -> int:
+    """What walking out of a live game hands the opponent.
+
+    Whatever the contract was worth at that moment, in that mode's own
+    currency, floored at 1 so abandoning before anything is agreed still costs.
+    """
+    if mode_of(g) == "skat":
+        ct = g.get("contract") or {}
+        # Before the declaration there is no game value; the standing bid is
+        # the closest honest number.
+        stake = (ct.get("value") or g["auction"].get("value") or 0)
+        return max(1, stake * (ct.get("mult") or 1) * skat_doubling(ct))
+    return max(1, g["auction"]["level"] ** 2)
 
 
 def winner_seat(g: dict):
@@ -451,11 +870,22 @@ def view_for(g: dict, seat: int) -> dict:
     """The game as one seat may see it. Never leaks a card they cannot know."""
     opp = 1 - seat
     over = g["phase"] == "over"
+    skat = mode_of(g) == "skat"
     decl = g["auction"]["declarer"]
+    ct = g.get("contract") or {}
     # The shown out-cards belong to the DECLARER's knowledge from the moment
     # the auction settles; the defender sees them only at the round-end reveal.
-    sees_shown = over or (decl == seat and g["phase"] in ("swap", "play"))
+    # In skat mode the declarer earns them by CHOOSING to look -- a Hand game
+    # never sees them either, or Hand would be free information.
+    sees_shown = over or (decl == seat and (
+        bool(g.get("looked")) if skat
+        else g["phase"] in ("swap", "play")))
+    # Open: the declarer's hand is face up from trick 1. This is the only path
+    # by which one seat legitimately sees the other's cards, and it is bought
+    # with a multiplier.
+    open_now = bool(ct.get("open")) and g["phase"] in ("play", "over")
     v = {
+        "mode": mode_of(g),
         "phase": g["phase"],
         "seats": g["seats"],
         "you": seat,
@@ -469,7 +899,16 @@ def view_for(g: dict, seat: int) -> dict:
             "to_act": g["auction"]["to_act"],
             "used": list(g["auction"]["used"]),
             "log": list(g["auction"]["log"]),
+            # The bid ladder needs no redaction at all: a number is a price,
+            # and it cannot be read backwards into a denomination.
+            "value": g["auction"].get("value", 0),
         },
+        # Public from the moment it is made -- and only made after the auction.
+        "contract": dict(ct) if skat else None,
+        "looked": bool(g.get("looked")) if skat else None,
+        "redeals": g.get("redeals", 0) if skat else 0,
+        # Face-up only under an Open announcement; None every other time.
+        "opp_hand": sorted(g["hands"][opp]) if (open_now and opp == decl) else None,
         "trump": g["trump"],
         "trick": g["trick"],
         "trick_value": trick_value(g["trick"]) if g["phase"] == "play" else 0,
@@ -488,6 +927,9 @@ def view_for(g: dict, seat: int) -> dict:
         "legal": legal_moves(g, seat) if g["phase"] == "play" else [],
         "options": auction_options(g) if g["phase"] == "auction" else None,
         "swap": swap_options(g) if g["phase"] == "swap" and seat == decl else None,
+        # Skat's post-auction prompts, each to exactly one seat.
+        "talon": talon_options(g) if g["phase"] == "talon" and seat == decl else None,
+        "declare": declare_options(g) if g["phase"] == "declare" and seat == decl else None,
     }
     return v
 
@@ -505,8 +947,10 @@ def turn_seat(g) -> int | None:
         return None
     if g["phase"] == "auction":
         return g["auction"]["to_act"]
-    if g["phase"] == "swap":
+    if g["phase"] in ("swap", "talon", "declare", "re"):
         return g["auction"]["declarer"]
+    if g["phase"] == "kontra":
+        return 1 - g["auction"]["declarer"]
     return to_play(g)
 
 
@@ -535,8 +979,16 @@ def player_view(g, pid):
         v["legal"] = []
         v["options"] = None
         v["swap"] = None
+        v["talon"] = None
+        v["declare"] = None
         if g["phase"] != "over":
             v["shown"] = None
+        # An Open hand is face up at the table, so a spectator keeps it -- but
+        # it is the DECLARER's, which may be the seat this view was built from.
+        ct = g.get("contract") or {}
+        v["opp_hand"] = (sorted(g["hands"][g["auction"]["declarer"]])
+                         if ct.get("open") and g["phase"] in ("play", "over")
+                         else None)
         return v
     return view_for(g, s)
 
@@ -548,11 +1000,25 @@ def apply_move(g, pid, move: dict) -> None:
         raise ValueError("not a player in this game")
     kind = (move or {}).get("kind")
     if kind == "bid":
-        apply_bid(g, seat, int(move["level"]), int(move["denom"]))
+        if mode_of(g) == "skat":
+            apply_skat_bid(g, seat, int(move["value"]))
+        else:
+            apply_bid(g, seat, int(move["level"]), int(move["denom"]))
     elif kind == "pass":
         apply_pass(g, seat)
     elif kind == "swap":
         apply_swap(g, seat, move.get("take"), move.get("give"))
+    elif kind == "look":
+        apply_look(g, seat)
+    elif kind == "hand":
+        apply_hand(g, seat)
+    elif kind == "declare":
+        apply_declare(g, seat, int(move["denom"]), int(move.get("level") or 0),
+                      move.get("sharp"), move.get("open"))
+    elif kind == "kontra":
+        apply_kontra(g, seat, bool(move.get("on")))
+    elif kind == "re":
+        apply_re(g, seat, bool(move.get("on")))
     elif kind == "play":
         apply_play(g, seat, int(move["card"]))
     else:

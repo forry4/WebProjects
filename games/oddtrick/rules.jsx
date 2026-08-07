@@ -50,6 +50,22 @@ export default function OddtrickRules() {
 				</ul>
 			</RulesSection>
 
+			<RulesSection title="Two auctions — pick one when you create the game">
+				<p>
+					The deal, the piles, the talon and the card play below are the same either
+					way. Only <b>how you arrive at a contract</b> changes:
+				</p>
+				<RulesDefs items={[
+					{ t: "Classic", d: "Bid a level and a denomination together. Simple, and your bid tells your opponent what you intend to play." },
+					{ t: "Skat", d: "Bid a bare NUMBER. Only after winning do you name the game — and many games clear the same number, so the auction happens behind the denomination." },
+				]} />
+				<p className="rl-note">
+					Classic is described first; the Skat auction has its own section further
+					down. A room's auction is fixed when it's created and shown as a badge in
+					the lobby.
+				</p>
+			</RulesSection>
+
 			<RulesSection title="The auction">
 				<p>
 					Before playing, you bid for the contract. A bid is a <b>number (1–12)</b> and a
@@ -84,6 +100,51 @@ export default function OddtrickRules() {
 				<p>
 					Winning a −1 trick is legal — but it puts you <b>on lead into the +2 trick that
 					follows</b>, the one seat you can't duck from. The odd tricks are not free.
+				</p>
+			</RulesSection>
+
+			<RulesSection title="Skat mode — bid a number, name the game later">
+				<p>
+					In the classic auction the level is <i>both</i> the price and the task, so
+					naming your bid announces your plan. Skat mode splits them. You bid a
+					number; the number is only a <b>price</b>, and you decide what to play
+					after you've won.
+				</p>
+				<p>
+					A game is worth <b>base × level</b>, with each denomination carrying a
+					price of its own — <b>♦2, ♥3, ♠4, ♣5, no-trump 6</b> — and the level
+					meaning exactly what it does in classic mode: the trick points you promise
+					to score. <b>Null is a flat 20.</b> Note the suits run the other way round
+					here: diamonds cheap, clubs dear.
+				</p>
+				<RulesTip>
+					<p>
+						<b>Collisions are the point.</b> 12 is ♦6, and ♥4, and ♠3, and NT2. Bid
+						12 and your opponent learns the price of your hand, never its shape. A
+						hand playable in two denominations can bid higher <i>safely</i> than an
+						equally strong hand playable in one — flexibility becomes a resource
+						with a price.
+					</p>
+				</RulesTip>
+				<RulesDefs items={[
+					{ t: "The auction", d: "Ascending numbers, taking turns. Either player may pass — including the opener, because here passing hands the opponent the talon and the lead at THEIR price, rather than being an escape from a forced bad contract. Both passing throws the hand in and redeals." },
+					{ t: "Talon or Hand", d: "Win it and you choose: look at the three talon cards and maybe swap one in, or decline to look at all and play HAND for ×2. Looking and then standing pat is not Hand — you saw them." },
+					{ t: "Declare", d: "Name a denomination and a level whose value reaches your bid. Declaring the minimum is normal; declaring higher is voluntary and pays more." },
+					{ t: "Sharp / Open", d: "Before trick 1 you may promise your level PLUS 3 (Sharp, +1 to the multiplier) and then play with your hand face up (Open, +1 again). They stack by addition: Hand + Sharp + Open is ×4." },
+					{ t: "Kontra", d: "The defender, who has just learned what game they're facing, may double everything. The declarer may Re it back to ×4 of the announced total." },
+				]} />
+				<p>
+					<b>Scoring.</b> Make everything you announced and you score{" "}
+					<b>value × multiplier</b>. Miss any part of it — the level, or the Sharp
+					margin on top — and your opponent scores that same number, plus 4 for
+					every point you finished short.
+				</p>
+				<p>
+					So the escalation doesn't stop when the auction does. Winning cheap at 6
+					and quietly declaring ♦3 is legal and pays 6; the same hand announcing
+					Hand + Sharp pays 18 out of the identical auction. Your real bid is the one
+					you make against yourself, after your opponent is out of the loop — and
+					then they get the last word.
 				</p>
 			</RulesSection>
 

@@ -1496,6 +1496,76 @@ try {
 		await ctx.close();
 	}
 
+	// ── Oddtrick's skat auction ───────────────────────────────────────────────
+	// Skat mode is a room FLAG chosen in the create modal, which is exactly the
+	// failure class this gate exists for: Dontminion's Renaissance set rendered
+	// fine and could not be CREATED, because a list in main.py was stale. A
+	// mounted /oddtrick screen says nothing about whether picking "Skat" deals a
+	// skat game, so this drives the segment, the deal, and the first bid — the
+	// value ladder is a middle panel that does not exist in classic mode at all.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "skat-harness", name: "Skat", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		await page.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		await page.locator(".cm-seg .cm-seg-btn", { hasText: /^Skat$/ }).first()
+			.click({ timeout: 10_000 }).catch(() => {});
+		const picked = await page.evaluate(() =>
+			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		check("the skat auction is selectable in the create modal",
+			picked.includes("Skat"), JSON.stringify(picked));
+
+		await page.getByRole("button", { name: /^Bot · Normal$/ }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		// A skat room deals immediately vs the bot, straight into the number
+		// ladder — a grid that classic mode never renders.
+		const ladder = await page.waitForSelector(".odd-valgrid button", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("a skat room deals into the number ladder", ladder);
+
+		if (ladder) {
+			const rungs = await page.evaluate(() =>
+				[...document.querySelectorAll(".odd-valgrid button")].map((b) => +b.textContent));
+			check("the ladder is ascending and server-supplied, not a 1..12 level row",
+				rungs.length > 12 && rungs.every((v, i) => i === 0 || v > rungs[i - 1]),
+				JSON.stringify(rungs.slice(0, 8)));
+
+			await page.locator(".odd-valgrid button").first().click().catch(() => {});
+			// Selecting a number shows what it could BUY — the mode's whole
+			// argument, and the one thing /catalog is fetched for.
+			const clears = await page.waitForSelector(".odd-clears .odd-clear", { timeout: 10_000 })
+				.then(() => true).catch(() => false);
+			check("a selected number shows every game that clears it", clears);
+
+			await page.getByRole("button", { name: /^Bid \d+$/ }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+			// The bot answers, and the round moves on — to its own bid, or to
+			// the talon prompt if it passed. Either way the auction is NOT stuck.
+			await sleep(2500);
+			const moved = await page.evaluate(() => ({
+				log: document.querySelectorAll(".odd-bidlog div").length,
+				phase: !!document.querySelector(".odd-auction, .odd-result"),
+			}));
+			check("the bot answers a number bid", moved.log >= 2 && moved.phase,
+				JSON.stringify(moved));
+		}
+		check("no page errors in the skat auction", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

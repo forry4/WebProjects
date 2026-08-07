@@ -157,6 +157,105 @@ def test_an_illegal_move_is_refused_without_corrupting_the_game():
     assert json.dumps(g, sort_keys=True) == before, "a refused move must not mutate state"
 
 
+def _drive(g, pick_auction):
+    """One move for whichever phase a room is in, in either mode."""
+    pid = E.turn_pid(g)
+    seat = E.seat_of(g, pid)
+    phase = g["phase"]
+    if phase == "auction":
+        return pid, pick_auction(g)
+    if phase == "swap":
+        return pid, {"kind": "swap", "take": None}
+    if phase == "talon":
+        return pid, {"kind": "hand"}
+    if phase == "declare":
+        d = E.declare_options(g)["denoms"][0]
+        return pid, {"kind": "declare", "denom": d["denom"],
+                     "level": d["min_level"], "sharp": True}
+    if phase == "kontra":
+        return pid, {"kind": "kontra", "on": True}
+    if phase == "re":
+        return pid, {"kind": "re", "on": True}
+    return pid, {"kind": "play", "card": E.legal_moves(g, seat)[0]}
+
+
+def _skat_auction_move(g):
+    vals = E.auction_options(g)["values"]
+    # Bid low enough that the auction settles instead of climbing to the top of
+    # the ladder, but never pass out of a hand nobody has bid on.
+    return ({"kind": "bid", "value": vals[0]} if vals and vals[0] <= 12
+            else {"kind": "pass"})
+
+
+def test_a_skat_room_plays_from_create_to_a_scored_result():
+    """The mode is a room FLAG, not a second game: same table, same route, same
+    handlers. If any of that were wrong the room would stall in a phase no
+    handler advances."""
+    wa, wb = _FakeWS(), _FakeWS()
+    assert run(m._handle_create(wa, "K", "alice",
+                                {"name": "Alice", "mode": "skat"})) is True
+    assert run(m._handle_join(wb, "K", "bob", {"name": "Bob"})) is True
+    run(m._handle_start(wa, "K", "alice"))
+
+    room = m.ROOMS["K"]
+    g = room["game"]
+    assert room["mode"] == "skat" and g["mode"] == "skat"
+
+    guard = 0
+    while g["phase"] != "over":
+        guard += 1
+        assert guard < 300, f"the room stalled in {g['phase']}"
+        pid, move = _drive(g, _skat_auction_move)
+        run(m._handle_move(wa if pid == "alice" else wb, "K", pid, {"move": move}))
+
+    assert g["trick"] == E.NTRICKS
+    assert sum(g["pts"]) == E.POOL
+    res = g["result"]
+    assert res["mode"] == "skat" and res["value"] > 0
+    assert res["scores"][res["declarer"] if res["made"] else 1 - res["declarer"]] > 0
+    assert room["status"] == "over"
+    assert "error" not in wa.types() and "error" not in wb.types()
+
+
+def test_a_vs_bot_skat_room_is_creatable_and_the_bot_takes_every_phase(monkeypatch):
+    """The bot has to answer four NEW prompts (talon, declaration, Kontra, Re),
+    and a bot that stalls on any of them leaves the human with no way forward."""
+    monkeypatch.setattr(m, "BOT_FLOOR_SECONDS", 0.0)
+    ws = _FakeWS()
+    assert run(m._handle_create(ws, "KB", "alice",
+                                {"name": "Alice", "vs_ai": True,
+                                 "ai_difficulty": "normal", "mode": "skat"})) is True
+    room = m.ROOMS["KB"]
+    assert room["game"]["mode"] == "skat"
+
+    guard = 0
+    while room["game"]["phase"] != "over":
+        guard += 1
+        assert guard < 400, f"stalled in {room['game']['phase']}"
+        g = room["game"]
+        if E.turn_pid(g) == m.AI_PID:
+            run(m._schedule_bot_turn("KB"))
+            continue
+        pid, move = _drive(g, _skat_auction_move)
+        run(m._handle_move(ws, "KB", pid, {"move": move}))
+
+    assert room["game"]["result"] is not None
+    assert sum(room["game"]["pts"]) == E.POOL
+    assert "error" not in ws.types(), "the bot never produced an illegal move"
+
+
+def test_a_room_created_without_a_mode_is_still_the_classic_auction():
+    ws = _FakeWS()
+    run(m._handle_create(ws, "C", "alice", {"name": "Alice", "vs_ai": True}))
+    room = m.ROOMS["C"]
+    assert room["mode"] == "classic"
+    assert room["game"]["mode"] == "classic"
+    assert "contract" not in room["game"]
+    # ...and a nonsense mode falls back rather than dealing something undefined.
+    run(m._handle_create(_FakeWS(), "C2", "alice", {"name": "A", "mode": "chess"}))
+    assert m.ROOMS["C2"]["mode"] == "classic"
+
+
 def test_the_catalog_matches_the_engine():
     """The client renders trick values from /catalog; if the two ever disagree
     the board would lie about what a trick is worth."""
@@ -166,3 +265,12 @@ def test_the_catalog_matches_the_engine():
     assert sum(cat["trick_values"]) == cat["pool"]
     assert cat["max_raise"] == E.MAX_RAISE
     assert cat["short_penalty"] == E.SHORT_PENALTY
+    # Skat mode's price table is served, never copied into the client — the
+    # bases and the ladder they generate must agree.
+    assert cat["modes"] == list(E.MODES)
+    assert cat["skat_bases"] == list(E.SKAT_BASE)
+    assert cat["skat_values"] == list(E.SKAT_VALUES)
+    assert set(cat["skat_values"]) == (
+        {b * lvl for b in cat["skat_bases"]
+         for lvl in range(cat["min_level"], cat["max_level"] + 1)}
+        | {cat["skat_null_value"]})
