@@ -2,12 +2,15 @@
 
 The card-play policy is a direct port of ``policy.rs`` from the Rust core: one
 trick deep, take the +2 tricks as cheaply as possible and shed the -1 tricks as
-expensively as possible. It is the floor the searching bot has to clear, and
-the reference measured it at 69.8% behind ``pimc:8`` -- so this is a genuine
-beginner opponent, not a placeholder.
+expensively as possible. It is the floor the searching bot has to clear: a
+CRN-paired arena on the v2 rules puts ``pimc:8`` **+1.10 +/- 0.10 trick points
+per round** ahead of it, on a pool of 5.
 
-The Hard tier is the Rust core itself compiled to WASM and run client-side;
-nothing here is on that path.
+THIS FILE IS ALSO WHAT HARD FALLS BACK TO. The Hard tier is the Rust core
+compiled to WASM and run client-side, and when the browser does not answer a
+decision ``_bot_move_sync`` lands here -- so a Hard room with no working WASM is
+playing Normal. That is the whole reason the client tier exists; there is no
+server-side search at any tier.
 """
 
 from __future__ import annotations

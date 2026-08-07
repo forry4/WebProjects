@@ -685,9 +685,44 @@ measures the **completed-trick beat** described above.
 ## The Hard tier — an exact solver, in the player's browser (2026-08-07)
 
 `easy` / `normal` / **`hard`**. Hard's CARD PLAY is `dissonance-core`'s `PimcBot`
-compiled to WASM and run client-side; its auction is still the server's
-heuristic. The reference measured the one-trick-deep policy **69.8% behind
-`pimc:8`**, so this is the ladder's real rung.
+compiled to WASM and run client-side.
+
+**WHAT THE BROWSER ACTUALLY BUYS — measured 2026-08-07 on the v2 rules, since
+the old "69.8% behind `pimc:8`" figure predates the 32-card deck, Grand and the
+payoff-aware search.** CRN-paired `bin/arena`, 120 paired deals, mirror reading
+exactly 0.0000; edge in trick points per round to the stronger side, on a pool
+where both players' totals always sum to 5:
+
+| | vs `greedy` | doubling buys |
+|---|---|---|
+| `pimc:1` | **+0.04 ± 0.11** | — |
+| `pimc:2` | +0.46 ± 0.11 | +0.42 |
+| `pimc:4` | +0.90 ± 0.12 | +0.44 |
+| `pimc:8` *(shipped cap)* | **+1.10 ± 0.10** | +0.20 |
+| `pimc:16` | +1.20 ± 0.10 | +0.10 |
+
+and search against search: `pimc:8` over `pimc:2` is +0.58 ± 0.10, `pimc:32`
+over `pimc:8` only **+0.21 ± 0.08** for four times the compute.
+
+Three things follow, and they are the answer to "is client-side worth it":
+
+* **`greedy` IS what the server plays.** When the browser does not answer,
+  `_bot_move_sync` falls through to `bot.act` — the same one-trick-deep policy
+  Normal uses (`GreedyBot` is `policy_best`, which `bot.choose_card` ports).
+  There is no server-side search at any tier, so **Hard without a browser is
+  Normal**, and the whole +1.10 is what the client buys.
+* **One world of exact solving is worth NOTHING** (+0.04 ± 0.11 — inside the
+  error bar of the heuristic). The strength is in AVERAGING OVER UNCERTAINTY,
+  not in the double-dummy solve, so a server that could afford one world per
+  decision would gain nothing at all for the trouble.
+* **Past the shipped cap a faster machine buys very little.** 8 → 32 worlds is
+  four times the compute for +0.21, so a fast desktop is not meaningfully
+  stronger than a slow laptop here — the CAP binds, not the CPU (except at ≤4
+  cores, where the worker pool itself shrinks).
+
+**This is CARD PLAY only.** The auction's compute→strength curve is still
+unmeasured; its cap is a separate `CLIENT_AI_AUCTION_WORLDS` (3) and nothing
+says whether that sits at the knee the way 8 does here.
 
 * **Why client-side, and why it could never be otherwise.** The search is an
   EXACT double-dummy solve per sampled deal: `bin/bench` times one full solve at
