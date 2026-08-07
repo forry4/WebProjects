@@ -176,24 +176,6 @@ function ContractChip({ game, nameOf, sharpBonus }) {
   );
 }
 
-/** The parity strip: every trick, what it pays, and who took it. */
-function TrickStrip({ game }) {
-  const hist = game.history || [];
-  // Two plays make a trick; walk the history to find each trick's winner.
-  const winners = [];
-  for (let t = 0; t * 2 + 1 < hist.length; t++) winners.push(null);
-  return (
-    <div className="odd-trickstrip">
-      {Array.from({ length: 13 }, (_, t) => {
-        const v = trickValue(t);
-        const done = t < game.trick;
-        const cls = `odd-tick ${v > 0 ? "good" : "bad"}${t === game.trick && game.phase === "play" ? " now" : ""}`;
-        return <div key={t} className={cls} style={{ opacity: done ? 0.45 : 1 }}>{v > 0 ? "+2" : "−1"}</div>;
-      })}
-    </div>
-  );
-}
-
 /** What the declared skat game is worth right now, and why.
  *  `rows` renders it as side-panel score rows; otherwise as one inline line. */
 function SkatStake({ game, nameOf, rows }) {
@@ -1176,7 +1158,6 @@ export default function Oddtrick({ myId, authUser, onExit }) {
               </div>
               <ContractChip game={game} nameOf={nameOf}
                 sharpBonus={catalog?.sharp_bonus ?? 2} />
-              <TrickStrip game={game} />
               <div className="odd-turnbar">
                 {myTurn ? <span className="odd-yourturn">Your turn</span>
                   : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
@@ -1324,15 +1305,6 @@ export default function Oddtrick({ myId, authUser, onExit }) {
             <div className="odd-scorerow"><span>{nameOf(oppSeat)}</span><b>{game.pts[oppSeat]}</b></div>
             <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
               Always adds up to +5.
-            </div>
-          </div>
-          <div className="odd-panel odd-p-log">
-            <h4>Tricks played</h4>
-            <div className="odd-log">
-              {(game.history || []).length === 0 && <div>Nothing yet.</div>}
-              {(game.history || []).slice().reverse().slice(0, 26).map((h, i) => (
-                <div key={i}><span>{nameOf(h[0])}</span><span>{cardName(h[1])}</span></div>
-              ))}
             </div>
           </div>
         </div>

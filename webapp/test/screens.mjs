@@ -1687,7 +1687,7 @@ try {
 				side: vis(".odd-side"),
 				lastTrick: vis(".odd-p-last"),
 				contractChip: vis(".odd-chip"),
-				log: vis(".odd-p-log"),
+				lastTrickCards: document.querySelectorAll(".odd-lasttrick .odd-card").length,
 				// Deliberately hidden — duplicated by the chip and the seat rows.
 				contractPanel: vis(".odd-p-contract"),
 				pointsPanel: vis(".odd-p-points"),
@@ -1695,8 +1695,9 @@ try {
 					> document.documentElement.clientWidth + 1,
 			};
 		});
-		check("the last trick and the log survive a phone",
-			onPhone.side === true && onPhone.lastTrick === true && onPhone.log === true,
+		check("the last trick survives a phone",
+			onPhone.side === true && onPhone.lastTrick === true
+				&& onPhone.lastTrickCards === 2,
 			JSON.stringify(onPhone));
 		check("the contract is on screen on a phone", onPhone.contractChip === true,
 			JSON.stringify(onPhone));

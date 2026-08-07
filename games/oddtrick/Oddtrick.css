@@ -39,9 +39,7 @@
      block PRECEDES the base rules, so a single-class override would lose. */
   .odd .odd-side { display: flex; }
   .odd .odd-p-contract, .odd .odd-p-points { display: none; }
-  .odd .odd-log { max-height: 140px; }
   .odd .odd-main { grid-template-columns: 1fr; }
-  .odd .odd-trickstrip { overflow-x: auto; }
 }
 
 /* ── cards ──────────────────────────────────────────────────────────────── */
@@ -114,27 +112,18 @@
   min-height: 96px; display: flex; align-items: center; justify-content: center;
   gap: 1.2rem; position: relative;
 }
+/* The trick's value is the whole game, so the pill on the trick line is loud.
+   It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
+   used to sit under the board was removed as noise. */
+.odd-val { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.9rem; }
+.odd-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
+.odd-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
+
 .odd-trickinfo {
   position: absolute; left: 50%; transform: translateX(-50%);
   bottom: -4px; font-size: 0.72rem; color: var(--muted);
 }
 
-/* The parity is the whole game, so the value of the trick in play is loud. */
-.odd-val { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.9rem; }
-.odd-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
-.odd-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
-
-.odd-trickstrip { display: flex; gap: 3px; margin-top: 0.3rem; }
-.odd-tick {
-  width: 15px; height: 15px; border-radius: 4px; font-size: 0.58rem;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(255, 255, 255, 0.07); color: var(--muted); font-weight: 700;
-}
-.odd-tick.good { background: rgba(70, 190, 120, 0.22); color: #6fe0a0; }
-.odd-tick.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
-.odd-tick.now { outline: 2px solid var(--accent); }
-.odd-tick.won0 { box-shadow: inset 0 -3px 0 #6ea8ff; }
-.odd-tick.won1 { box-shadow: inset 0 -3px 0 #ffb56e; }
 
 /* ── auction ────────────────────────────────────────────────────────────── */
 .odd-auction { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; padding: 1rem; }
@@ -166,8 +155,6 @@
 .odd-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .odd-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
 .odd-scorerow b { font-variant-numeric: tabular-nums; }
-.odd-log { max-height: 210px; overflow-y: auto; font-size: 0.78rem; display: flex; flex-direction: column; gap: 0.12rem; }
-.odd-log div { display: flex; gap: 0.4rem; color: var(--muted); }
 
 /* ── result ─────────────────────────────────────────────────────────────── */
 .odd-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
