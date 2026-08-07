@@ -1514,7 +1514,11 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const [route, marker] of [["/duel", ".duel"], ["/dontminion", ".dm"]]) {
+		// All FOUR games that pin columns. CoC earns its place: it is the one
+		// whose own sheet is concatenated BEFORE the shared one, so it resolves
+		// these ties in the opposite order from everyone else.
+		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
+			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"]]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});
