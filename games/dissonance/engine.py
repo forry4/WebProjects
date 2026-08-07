@@ -120,6 +120,17 @@ N_SHOWN = 3
 MODES = ("classic", "skat")
 DEFAULT_MODE = "classic"
 
+#: A game is a MATCH of rounds, played until one side reaches this. Per mode,
+#: because the two modes score on different scales: a classic round pays
+#: level^2 (1..36, with the flat 12 for Null), a skat round base x level x the
+#: announcements (9..60 and up). Both land at roughly three to six rounds.
+#:
+#: WHY A MATCH AT ALL. One round is one deal, and a deal can simply be bad --
+#: a hand with no contract in it loses to a hand with one, and the auction is
+#: the only lever either player has. Over several rounds the deals average out
+#: and what is left is the bidding judgement, which is the part worth playing.
+MATCH_TARGET = {"classic": 50, "skat": 100}
+
 #: value = base x level. Indexed by denomination (clubs..no-trump); the order
 #: deliberately INVERTS the classic mode's C < D < H < S ranking -- diamonds
 #: cheap, clubs dear -- matching real Skat and keeping the two modes' tables
@@ -234,12 +245,17 @@ def beats(led: int, follow: int, trump: int) -> bool:
 # --- dealing ---------------------------------------------------------------
 
 
-def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE) -> dict:
+def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
+             match: dict | None = None) -> dict:
     """Deal a round. `seats` is [pid0, pid1]; `opener` names the first bidder.
 
     `mode` selects which auction runs on top of the identical deal: "classic"
     (level + denomination, the shipped v2 auction) or "skat" (a numeric ladder
     followed by a declaration). Everything from `_start_play` onwards is shared.
+
+    `match` carries a running match in. Omit it for the first round of a new
+    one; `next_round` passes the standing one back so the deal changes and the
+    totals do not.
     """
     rng = rng or random.Random()
     mode = mode if mode in MODES else DEFAULT_MODE
@@ -314,6 +330,16 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE) -> dict
         "history": [],
         "played": [],
         "result": None,
+        # THE MATCH, which outlives this deal. `scores` is cumulative across
+        # every scored round; `round` counts them; `over` is what ends the room.
+        # A skat pass-out redeals without touching any of it -- an unplayed
+        # deal is not a round.
+        "match": dict(match) if match else {
+            "target": MATCH_TARGET.get(mode, MATCH_TARGET[DEFAULT_MODE]),
+            "scores": [0, 0],
+            "round": 1,
+            "over": False,
+        },
     }
     if mode == "skat":
         # Whether the declarer LOOKED at the talon at all. Distinct from
@@ -465,10 +491,50 @@ def _redeal(g: dict) -> None:
     Mutating `g` rather than returning a fresh dict is load-bearing: the room
     server, the bot scheduler and every open socket all hold this exact object.
     The opener alternates so a player cannot pass out of a bad seat for free.
+
+    The MATCH rides through untouched, `round` included: a deal both players
+    passed out is not a round anybody played.
     """
     n = g.get("redeals", 0) + 1
-    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"], mode="skat")
+    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"], mode="skat",
+                     match=match_of(g))
     fresh["redeals"] = n
+    g.clear()
+    g.update(fresh)
+
+
+def next_round(g: dict, seat: int, round_no=None) -> None:
+    """Deal the next round of a match that is not decided yet, in place.
+
+    EITHER seat may call it, which is why it carries `round_no`: the round the
+    caller was LOOKING at when they asked. Two players clicking at the same
+    moment is the normal case, not an error either of them should be shown, and
+    without the token the second click arrives after the deal and either reads
+    as "the round is still being played" or -- far worse -- deals a third round
+    over the top of the second. A stale click from a round already finished
+    no-ops for the same reason.
+
+    In place for the same reason as `_redeal`: the room server and every open
+    socket hold this exact dict.
+    """
+    if seat not in (0, 1):
+        raise ValueError("not a player in this game")
+    m = match_of(g)
+    if not m:
+        raise ValueError("this game is a single round")
+    if round_no is not None and int(round_no) != m["round"]:
+        return                      # already dealt, or a click from long ago
+    if g["phase"] != "over":
+        raise ValueError("the round is still being played")
+    if m["over"]:
+        raise ValueError("the match is over")
+    nxt = dict(m)
+    nxt["round"] = m["round"] + 1
+    # The opener alternates round by round. Leading trick 1 is worth ~0.93
+    # points, so a match that always opened the same seat would hand one player
+    # that edge every round of it.
+    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"],
+                     mode=mode_of(g), match=nxt)
     g.clear()
     g.update(fresh)
 
@@ -921,6 +987,50 @@ def _split(value: int, declarer: int) -> list[int]:
     return scores
 
 
+def match_of(g: dict) -> dict | None:
+    """The running match, or None for a save written before matches existed.
+
+    Every reader goes through this rather than `g["match"]`: a round already in
+    progress when this shipped has no match dict, and it must finish the way it
+    started -- as the whole game -- not crash and not silently acquire a target
+    it was never being played to.
+    """
+    m = g.get("match")
+    return m if isinstance(m, dict) else None
+
+
+def _bank_round(g: dict, scores: list) -> None:
+    """Add a finished round's scores to the match, and decide if that ends it.
+
+    Called by both `_finish` paths and by the abandon path, because all three
+    produce a scored round and a match that has to notice.
+    """
+    m = match_of(g)
+    if not m:
+        return
+    for i in (0, 1):
+        m["scores"][i] += int(scores[i])
+    m["over"] = max(m["scores"]) >= m["target"]
+
+
+def _match_result_keys(g: dict) -> dict:
+    """What every result row says about the match it sits in.
+
+    On the row rather than only in `g["match"]` because the lobby history reads
+    a STORED result and never the live game, so the final standing has to be
+    written into the row that outlives the room.
+    """
+    m = match_of(g)
+    if not m:
+        return {}
+    return {
+        "match_scores": list(m["scores"]),
+        "match_target": m["target"],
+        "match_over": bool(m["over"]),
+        "round": m["round"],
+    }
+
+
 def _finish_skat(g: dict) -> None:
     """Declared value x multiplier, to whichever side was right.
 
@@ -943,7 +1053,8 @@ def _finish_skat(g: dict) -> None:
     short = 0 if (null or made) else target - dpts
     scores = _split(payoff(terms, dpts, not null), decl)
     g["phase"] = "over"
-    g["result"] = {
+    _bank_round(g, scores)
+    g["result"] = _match_result_keys(g) | {
         # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
         "ended_early": g["trick"] < NTRICKS,
@@ -989,7 +1100,8 @@ def _finish(g: dict) -> None:
     short = 0 if (null or made) else a["level"] - dpts
     scores = _split(payoff(payoff_terms(g), dpts, not null), decl)
     g["phase"] = "over"
-    g["result"] = {
+    _bank_round(g, scores)
+    g["result"] = _match_result_keys(g) | {
         # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
         "ended_early": g["trick"] < NTRICKS,
@@ -1063,6 +1175,14 @@ def abandon_result(g: dict, seat: int) -> dict:
             "kontra": ct.get("kontra", False),
             "re": ct.get("re", False),
         })
+    # Walking out ends the MATCH, not just the round. The forfeit is banked so
+    # the standing is honest, and then the match is closed regardless of the
+    # target -- there is nobody left to play the rest of it.
+    _bank_round(g, scores)
+    m = match_of(g)
+    if m:
+        m["over"] = True
+    res.update(_match_result_keys(g))
     return res
 
 
@@ -1143,6 +1263,10 @@ def view_for(g: dict, seat: int) -> dict:
         "contract": dict(ct) if skat else None,
         "looked": bool(g.get("looked")) if skat else None,
         "redeals": g.get("redeals", 0) if skat else 0,
+        # The match this deal sits in. Wholly public -- both players' running
+        # totals are on the table in any card game played to a target. None on
+        # a save from before matches existed, which the UI reads as one round.
+        "match": dict(match_of(g)) if match_of(g) else None,
         # Face-up only under an Open announcement; None every other time.
         "opp_hand": sorted(g["hands"][opp]) if (open_now and opp == decl) else None,
         "trump": g["trump"],
@@ -1182,8 +1306,37 @@ def view_for(g: dict, seat: int) -> dict:
 # --- turn / seat helpers (used by main.py) ---------------------------------
 
 
-def is_over(g) -> bool:
+def round_over(g) -> bool:
+    """This DEAL is scored. There may well be another one coming."""
     return bool(g) and g.get("phase") == "over"
+
+
+def is_over(g) -> bool:
+    """The MATCH is decided -- which is what ends the room.
+
+    `phase == "over"` is a round ending, and between rounds the room is still
+    live: it keeps its socket, its history row stays out of the finished list,
+    and either seat may deal the next one. A save from before matches existed
+    has no match dict and ends where it always did, at the end of its round.
+    """
+    if not (g and g.get("phase") == "over"):
+        return False
+    m = match_of(g)
+    return bool(m["over"]) if m else True
+
+
+def may_act(g, pid) -> bool:
+    """Is this player allowed to send a move right now?
+
+    Between rounds the answer is EITHER seat, which the single-seat turn model
+    cannot express -- so the question lives here rather than main.py comparing
+    against `turn_pid` and rejecting a `next_round` that is perfectly legal.
+    """
+    if seat_of(g, pid) is None:
+        return False
+    if round_over(g):
+        return not is_over(g)
+    return turn_pid(g) == pid
 
 
 def turn_seat(g) -> int | None:
@@ -1266,5 +1419,7 @@ def apply_move(g, pid, move: dict) -> None:
         apply_re(g, seat, bool(move.get("on")))
     elif kind == "play":
         apply_play(g, seat, int(move["card"]))
+    elif kind == "next_round":
+        next_round(g, seat, move.get("round"))
     else:
         raise ValueError("unknown move")

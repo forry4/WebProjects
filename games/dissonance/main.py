@@ -334,7 +334,11 @@ def list_user_games(user_id: str) -> list[dict]:
             g = (_decode_state(r["state_json"]).get("game") or {})
         except Exception:
             g = {}
-        your_turn = bool(g) and engine.turn_pid(g) == user_id
+        # `may_act`, not `turn_pid`: a match sitting between rounds has nobody on
+        # turn and is waiting on EITHER player to deal the next one. Keyed on the
+        # turn alone it would sit in Active with no prompt on either side, which
+        # is exactly how a match gets forgotten.
+        your_turn = bool(g) and engine.may_act(g, user_id)
         out.append({
             "id": r["id"], "status": r["status"],
             "player1_name": r["player1_name"], "player2_name": r["player2_name"],
@@ -836,7 +840,11 @@ async def _handle_move(ws, room_id, pid, msg):
         if engine.is_over(g):
             await _send(ws, {"type": "error", "message": "game is over"})
             return
-        if engine.turn_pid(g) != pid:
+        # NOT `turn_pid(g) != pid`. A match sits between rounds with the round
+        # scored and no seat on turn, and either player may deal the next one --
+        # a question the single-seat turn model cannot answer, so the engine
+        # owns it.
+        if not engine.may_act(g, pid):
             await _send(ws, {"type": "error", "message": "not your turn"})
             return
         try:
@@ -844,6 +852,12 @@ async def _handle_move(ws, room_id, pid, msg):
         except (ValueError, KeyError, TypeError) as exc:
             await _send(ws, {"type": "error", "message": str(exc) or "illegal move"})
             return
+        if (msg.get("move") or {}).get("kind") == "next_round":
+            # A new deal makes any armed search a question about a game that no
+            # longer exists. Re-broadcasting it would hand the browser a view of
+            # the previous round's cards; the answer would be re-validated and
+            # thrown out, but the arming is what must not survive the deal.
+            room["_ai_search"] = None
         _sync_status_from_game(room)
         save_game(room_id)
         bot_turn = _bot_should_act(room)

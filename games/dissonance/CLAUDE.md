@@ -172,6 +172,56 @@ longer change** — see below.
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## A game is a MATCH of rounds (2026-08-07)
+
+`MATCH_TARGET` — **classic 50, skat 100**. A round is one deal; a game is rounds
+played onto a running total until one side reaches the target. Measured against
+the normal-tier bot: classic **median 5 rounds** (3–9), skat **median 8** (4–12).
+Per mode because the modes price on different scales — a classic round pays
+level² (1–36, flat 12 for Null), a skat one base × level × the announcements.
+
+**WHY:** one deal can simply be bad, and the auction is the only lever either
+player has against it. Over a match the deals average out and what is left is
+the bidding judgement, which is the part worth playing.
+
+* **`phase == "over"` still means the ROUND is over — `is_over()` now means the
+  MATCH is.** That split is the whole feature and it is load-bearing in
+  `main.py`: `_sync_status_from_game` and `_bot_should_act` both read `is_over`,
+  so between rounds the room stays `playing`, keeps its sockets, and stays out
+  of the finished-games list. `round_over()` is the other half.
+* **`may_act(g, pid)`, not `turn_pid(g) == pid`.** Between rounds the round is
+  scored and NO seat is on turn, yet either player may deal the next one — a
+  question the single-seat turn model cannot express. It lives in the engine
+  rather than as a special case in the move handler.
+* **`next_round` carries the round it was pressed on.** Both players clicking at
+  the same moment is the normal case, not an error either should see; without
+  the token the second click either reads as "the round is still being played"
+  or — far worse — deals a third round over the top of the second. A mismatched
+  token is a silent no-op, the same idempotency discipline as the client-AI
+  decision counter.
+* **The opener alternates every round.** Leading trick 1 is worth ~0.93 points,
+  so a match that always opened the same seat would hand one player that edge in
+  every round of it.
+* **A skat pass-out redeals WITHOUT counting as a round.** `_redeal` carries the
+  match through untouched, `round` included — a deal nobody played is not a
+  round.
+* **Walking out ends the MATCH.** `abandon_result` banks the forfeit and then
+  closes the match regardless of the target: there is nobody left to play the
+  rest of it.
+* **The final standing is written onto the RESULT ROW** (`match_scores`,
+  `match_target`, `match_over`, `round`), not left only in `g["match"]`. The
+  lobby history reads a stored result and never the live game.
+* **A save with no `match` key is a single round and still ends at its own
+  end.** `match_of()` is the only reader of `g["match"]` for exactly that
+  reason — a game already in progress when this shipped must not crash and must
+  not silently acquire a target it was never being played to.
+* **`next_round` clears `room["_ai_search"]`.** A new deal makes any armed
+  search a question about a game that no longer exists; the answer would be
+  re-validated and thrown out, but the ARMING must not survive the deal.
+* **The bot never deals for you.** `turn_pid` is None between rounds, so the
+  scheduler finds nothing to do and the result panel stays up until a human
+  presses Next round. `test_the_bot_never_deals_the_next_round_by_itself`.
+
 ## A round stops when the SCORE stops moving (2026-08-07)
 
 `_score_is_settled` is checked after every completed trick, and the bar is the
@@ -376,12 +426,14 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (259)
+## Tests (327)
 
 `test_engine.py` rules · `test_rust_parity.py` the drift gate ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
-`test_integration.py` create → auction → 13 tricks → scored result, vs human
-and vs bot, in **both modes** · `test_skat.py` (50) the skat phase machine: the
+`test_integration.py` create → auction → 13 tricks → scored result → the NEXT
+round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers
+the case most likely to strand: only the human can deal the next round, and the
+bot has to pick its own turn back up once they do) · `test_skat.py` (50) the skat phase machine: the
 derived ladder, the redeal, talon/Hand secrecy, declaration validity,
 the announcement table, Kontra/Re, the Open reveal, and a `state_json`
 round-trip · `test_client_ai.py` (12) the Hard tier's protocol: the armed

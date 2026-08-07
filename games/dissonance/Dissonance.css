@@ -196,6 +196,17 @@
 .dis-result .set { color: #ff9a9a; }
 .dis-maths { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* The match standing under the round's own result: separated by a rule, since
+   the two score rows are the same shape and read as one list otherwise. */
+.dis-match {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
+  padding-top: 0.5rem; margin-top: 0.2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12); align-self: stretch;
+}
+.dis-match .dis-scorerow { justify-content: center; }
+.dis-match .dis-big { font-size: 1.25rem; margin-top: 0.2rem; }
+.dis-resbtns { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+
 .dis-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
 .dis-yourturn { color: var(--accent); font-weight: 700; }
 

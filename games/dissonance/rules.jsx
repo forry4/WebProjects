@@ -17,8 +17,8 @@ export default function DissonanceRules() {
 
 			<RulesFacts items={[
 				{ k: "Players", v: "2 (friend or bot)" },
-				{ k: "Length", v: "10–15 minutes for a round" },
-				{ k: "You win by", v: "Scoring more than your opponent on the contract" },
+				{ k: "Length", v: "A few minutes a round; a match is 3–9 of them" },
+				{ k: "You win by", v: "Being first to 50 points (100 in skat mode)" },
 			]} />
 
 			<RulesSection title="If you've never played a trick-taking game">
@@ -182,6 +182,13 @@ export default function DissonanceRules() {
 				<p>
 					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
 					making it scores 9; bidding 3 and finishing on 1 gives your opponent 10.
+				</p>
+				<p>
+					<b>A game is a match, not a deal.</b> Rounds are scored onto a running total
+					and the first player to <b>50</b> wins — <b>100</b> in skat mode, where the
+					contracts are priced higher. That's usually three to nine rounds. One deal can
+					simply be bad; over a match the deals even out and what's left is your bidding.
+					Whoever opened the bidding swaps each round, so nobody keeps the lead advantage.
 				</p>
 				<RulesTip>
 					<p>

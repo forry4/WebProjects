@@ -1363,6 +1363,32 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
                 <span>{nameOf(oppSeat)} <b>{res.scores[oppSeat]}</b></span>
               </div>
+              {/* ...and what that did to the match. The round's number on its
+                  own is only half the story once there is a target: being set
+                  for 3 reads very differently at 12-all and at 47-all. */}
+              {res.match_scores && (
+                <div className="dis-match">
+                  <div className="muted">
+                    {res.match_over
+                      ? `Match to ${res.match_target}`
+                      : `Match to ${res.match_target} · after round ${res.round}`}
+                  </div>
+                  <div className="dis-scorerow" style={{ gap: "1.5rem", fontSize: "1.2rem" }}>
+                    <span>{nameOf(mySeat)} <b>{res.match_scores[mySeat]}</b></span>
+                    <span>{nameOf(oppSeat)} <b>{res.match_scores[oppSeat]}</b></span>
+                  </div>
+                  {res.match_over && (
+                    <div className={`dis-big ${res.match_scores[mySeat] > res.match_scores[oppSeat]
+                      ? "made" : "set"}`}>
+                      {res.match_scores[mySeat] === res.match_scores[oppSeat]
+                        ? "Match drawn"
+                        : res.match_scores[mySeat] > res.match_scores[oppSeat]
+                          ? "You win the match"
+                          : `${nameOf(oppSeat)} wins the match`}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* THE TALON — the six nobody was dealt, revealed. Every card you
                   could not account for all round was either in their hand or in
                   here, so this is the answer sheet — as cards, because a run of
@@ -1405,7 +1431,21 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   ))}
                 </div>
               )}
-              <button className="btn" onClick={leaveToLobby}>Back to lobby</button>
+              {/* A match that is not decided yet deals again rather than
+                  sending anyone back to the lobby. EITHER seat may press it --
+                  waiting on one nominated player is how a match stalls when
+                  they close the tab -- and the round it was pressed on rides
+                  along so two simultaneous clicks cannot deal twice. */}
+              {res.match_scores && !res.match_over ? (
+                <div className="dis-resbtns">
+                  <button className="btn" onClick={() => doMove({
+                    kind: "next_round", round: res.round,
+                  })}>Next round</button>
+                  <button className="btn btn-ghost" onClick={leaveToLobby}>Back to lobby</button>
+                </div>
+              ) : (
+                <button className="btn" onClick={leaveToLobby}>Back to lobby</button>
+              )}
             </div>
           ) : (
             <>
@@ -1469,6 +1509,24 @@ export default function Dissonance({ myId, authUser, onExit }) {
 
         {/* side panel */}
         <div className="dis-side">
+          {/* THE MATCH, above the contract, because it is the thing being
+              played for: a round is only worth what it moves this by. Absent
+              on a game saved before matches existed, which is one round and
+              has no running total to show. */}
+          {game.match && (
+            <div className="dis-panel dis-p-match">
+              <h4>Match to {game.match.target}</h4>
+              <div className="dis-scorerow">
+                <span>{nameOf(mySeat)}</span><b>{game.match.scores[mySeat]}</b>
+              </div>
+              <div className="dis-scorerow">
+                <span>{nameOf(oppSeat)}</span><b>{game.match.scores[oppSeat]}</b>
+              </div>
+              <div className="muted" style={{ fontSize: "0.72rem" }}>
+                Round {game.match.round}
+              </div>
+            </div>
+          )}
           <div className="dis-panel dis-p-contract">
             <h4>Contract</h4>
             {isSkat && <>

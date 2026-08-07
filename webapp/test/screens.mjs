@@ -2073,6 +2073,50 @@ try {
 		check("the trick that ends the game is held too, not replaced by the result",
 			dwells.length >= 8 && dwells[dwells.length - 1].ms >= 550,
 			JSON.stringify(dwells[dwells.length - 1] || null));
+		// ── the round that just ended is one round of a MATCH ────────────────
+		// A game is played to 50 (100 in skat), so the result panel carries the
+		// running standing and deals again rather than sending anyone to the
+		// lobby. One round CAN settle it outright — a level-12 contract pays
+		// 144 — so this must not assume there is a next round to play.
+		const after = await page.evaluate(() => {
+			const t = (s) => document.querySelector(s)?.textContent || "";
+			return {
+				match: t(".dis-match"),
+				panel: t(".dis-p-match"),
+				next: [...document.querySelectorAll(".dis-result button")]
+					.some((b) => /next round/i.test(b.textContent)),
+				lobby: [...document.querySelectorAll(".dis-result button")]
+					.some((b) => /back to lobby/i.test(b.textContent)),
+			};
+		});
+		check("the result panel shows the match standing, not just the round",
+			/Match to \d+/.test(after.match), JSON.stringify(after).slice(0, 200));
+		check("a match still running offers the next round; a decided one does not",
+			after.next !== /wins the match|Match drawn/.test(after.match) && after.lobby,
+			JSON.stringify(after).slice(0, 200));
+		if (after.next) {
+			const before = await page.evaluate(() =>
+				document.querySelector(".dis-p-match")?.textContent || "");
+			await page.evaluate(() => [...document.querySelectorAll(".dis-result button")]
+				.find((b) => /next round/i.test(b.textContent))?.click());
+			let dealt = null;
+			const dealBy = Date.now() + 15_000;
+			while (!dealt && Date.now() < dealBy) {
+				dealt = await page.evaluate(() => {
+					const q = (s) => document.querySelector(s);
+					if (q(".dis-result")) return null;      // still on the old round
+					return q(".dis-auction")
+						? { round: q(".dis-p-match")?.textContent || "" } : null;
+				});
+				if (!dealt) await sleep(250);
+			}
+			check("Next round deals again instead of ending the game", !!dealt,
+				JSON.stringify(dealt));
+			check("...and the match total carries across the deal",
+				!!dealt && /Round 2/.test(dealt.round) && dealt.round !== before,
+				`${before} -> ${dealt?.round}`);
+		}
+
 		check("no page errors playing a game out", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();

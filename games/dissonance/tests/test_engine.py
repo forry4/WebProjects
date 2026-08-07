@@ -621,3 +621,135 @@ def test_the_swap_rejects_pile_cards_and_unshown_cards():
     with pytest.raises(ValueError):
         E.apply_swap(g, 1, g["shown"][0], sorted(g["hands"][1])[0])  # defender
     assert g["phase"] == "swap", "every refused swap leaves the phase alone"
+
+
+# ── match play ────────────────────────────────────────────────────────────────
+# A game is a MATCH of rounds played to a target, not a single deal. One deal
+# can simply be bad; over several the deals average out and what is left is the
+# bidding judgement.
+
+
+def test_a_round_ending_is_not_the_game_ending():
+    g = E.new_game(["a", "b"], random.Random(101), opener=0)
+    g = _play_out(g, random.Random(101))
+    assert E.round_over(g), "the deal is scored"
+    assert not E.is_over(g), "...but the match is not decided by one round"
+    assert g["match"]["scores"] == g["result"]["scores"]
+    assert g["match"]["round"] == 1
+
+
+def test_the_match_accumulates_round_by_round_and_ends_at_the_target():
+    g = E.new_game(["a", "b"], random.Random(102), opener=0)
+    running = [0, 0]
+    rounds = 0
+    while not E.is_over(g):
+        g = _play_out(g, random.Random(200 + rounds))
+        rounds += 1
+        for i in (0, 1):
+            running[i] += g["result"]["scores"][i]
+        assert g["match"]["scores"] == running, "the match total is the sum of its rounds"
+        assert g["match"]["round"] == rounds
+        if E.is_over(g):
+            break
+        assert max(running) < g["match"]["target"], \
+            "a match that reached the target must not still be running"
+        E.next_round(g, 0, g["result"]["round"])
+    assert rounds > 1, "one deal cannot reach the target"
+    assert max(running) >= g["match"]["target"]
+    assert g["result"]["match_over"] is True
+
+
+@pytest.mark.parametrize("mode,target", [("classic", 50), ("skat", 100)])
+def test_each_mode_is_played_to_its_own_target(mode, target):
+    g = E.new_game(["a", "b"], random.Random(103), mode=mode)
+    assert g["match"]["target"] == target == E.MATCH_TARGET[mode]
+
+
+def test_the_opener_alternates_between_rounds():
+    # Leading trick 1 is worth ~0.93 points, so a match that always opened the
+    # same seat would hand one player that edge in every round of it.
+    g = E.new_game(["a", "b"], random.Random(104), opener=0)
+    openers = [g["opener"]]
+    for i in range(3):
+        g = _play_out(g, random.Random(300 + i))
+        if E.is_over(g):
+            break
+        E.next_round(g, 1, g["result"]["round"])
+        openers.append(g["opener"])
+    assert len(openers) >= 3, "the match must have run more than one round"
+    for a, b in zip(openers, openers[1:]):
+        assert a != b, f"the opener did not alternate: {openers}"
+
+
+def test_a_duplicate_next_round_click_does_not_deal_a_third_round():
+    # Both players clicking at the same moment is the normal case, not an error
+    # either of them should be shown -- and emphatically not a second deal on
+    # top of the first, which would throw away a round already in progress.
+    g = E.new_game(["a", "b"], random.Random(105), opener=0)
+    g = _play_out(g, random.Random(105))
+    seen = g["result"]["round"]
+    E.next_round(g, 0, seen)
+    hands = [sorted(h) for h in g["hands"]]
+    E.next_round(g, 1, seen)          # the other seat, one moment later
+    assert [sorted(h) for h in g["hands"]] == hands, "the second click redealt"
+    assert g["match"]["round"] == seen + 1
+
+
+def test_next_round_is_refused_mid_round_and_after_the_match():
+    g = E.new_game(["a", "b"], random.Random(106), opener=0)
+    with pytest.raises(ValueError):
+        E.next_round(g, 0)            # still bidding
+    g = _play_out(g, random.Random(106))
+    g["match"]["scores"] = [g["match"]["target"], 0]
+    g["match"]["over"] = True
+    with pytest.raises(ValueError):
+        E.next_round(g, 0)
+
+
+def test_walking_out_ends_the_match_not_just_the_round():
+    g = E.new_game(["a", "b"], random.Random(107), opener=0)
+    res = E.abandon_result(g, 0)
+    assert res["scores"][1] > 0, "the seat left standing takes the forfeit"
+    assert res["match_over"] is True
+    assert res["match_scores"] == res["scores"]
+    g["phase"] = "over"
+    g["result"] = res
+    assert E.is_over(g), "there is nobody left to play the rest of the match"
+
+
+def test_a_skat_pass_out_redeals_without_counting_as_a_round():
+    g = E.new_game(["a", "b"], random.Random(108), mode="skat", opener=0)
+    E.apply_move(g, "a", {"kind": "pass"})
+    E.apply_move(g, "b", {"kind": "pass"})
+    assert g["redeals"] == 1, "a passed-out deal is thrown in"
+    assert g["match"]["round"] == 1, "...and is not a round anybody played"
+    assert g["match"]["scores"] == [0, 0]
+
+
+def test_both_seats_may_deal_the_next_round():
+    for seat in (0, 1):
+        g = E.new_game(["a", "b"], random.Random(109), opener=0)
+        g = _play_out(g, random.Random(109))
+        E.next_round(g, seat, g["result"]["round"])
+        assert g["phase"] == "auction", f"seat {seat} could not deal the next round"
+
+
+def test_may_act_opens_up_between_rounds_and_shuts_at_the_match_end():
+    g = E.new_game(["a", "b"], random.Random(110), opener=0)
+    on_turn = g["seats"][E.turn_seat(g)]
+    assert E.may_act(g, on_turn) and not E.may_act(g, g["seats"][1 - E.turn_seat(g)])
+    g = _play_out(g, random.Random(110))
+    assert E.may_act(g, "a") and E.may_act(g, "b"), \
+        "between rounds either seat may deal the next one"
+    g["match"]["over"] = True
+    assert not E.may_act(g, "a") and not E.may_act(g, "b")
+
+
+def test_a_save_written_before_matches_existed_still_ends_at_its_round():
+    g = E.new_game(["a", "b"], random.Random(111), opener=0)
+    del g["match"]                    # exactly what an older row deserialises to
+    g = _play_out(g, random.Random(111))
+    assert E.match_of(g) is None
+    assert E.is_over(g), "a matchless game ends where it always did"
+    assert E.view_for(g, 0)["match"] is None
+    assert "match_scores" not in g["result"]

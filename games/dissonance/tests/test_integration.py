@@ -72,10 +72,31 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
     assert g is not None, "starting must deal a game"
     assert g["phase"] == "auction"
 
+    # A game is a MATCH, so this plays rounds until one side reaches the target
+    # -- and asserts the room stays LIVE in between, which is the whole
+    # difference between a round ending and a game ending.
     guard = 0
-    while g["phase"] != "over":
+    rounds = 0
+    while not E.is_over(g):
         guard += 1
-        assert guard < 200, "the room failed to reach a result"
+        assert guard < 4000, "the room failed to reach a result"
+        if E.round_over(g):
+            rounds += 1
+            assert room["status"] == "playing", \
+                "a scored round is not the end of the match -- the room stays live"
+            assert g["result"] is not None
+            if g["trick"] == E.NTRICKS:
+                assert sum(g["pts"]) == E.POOL
+            else:
+                # A round stops the moment the score can no longer change, so a
+                # room can legitimately reach a result before the 13th trick.
+                assert g["result"]["ended_early"] and g["result"]["made"]
+            # Either seat may deal the next one; Bob does, to prove it is not
+            # the host's privilege.
+            run(m._handle_move(wb, "R", "bob",
+                               {"move": {"kind": "next_round",
+                                         "round": g["result"]["round"]}}))
+            continue
         pid = E.turn_pid(g)
         ws = wa if pid == "alice" else wb
         if g["phase"] == "auction":
@@ -92,14 +113,12 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
             move = {"kind": "play", "card": E.legal_moves(g, seat)[0]}
         run(m._handle_move(ws, "R", pid, {"move": move}))
 
-    assert g["result"] is not None
-    if g["trick"] == E.NTRICKS:
-        assert sum(g["pts"]) == E.POOL
-    else:
-        # A round stops the moment the score can no longer change, so a room
-        # can legitimately reach a result before the thirteenth trick.
-        assert g["result"]["ended_early"] and g["result"]["made"]
-    assert room["status"] == "over", "the room status must follow the game"
+    assert rounds >= 2, "a match to the target takes more than one deal"
+    match = g["match"]
+    assert max(match["scores"]) >= match["target"]
+    assert g["result"]["match_scores"] == match["scores"], \
+        "the stored result carries the final standing -- history never sees the live game"
+    assert room["status"] == "over", "the room status must follow the MATCH"
     # And no handler ever reported an error along the way.
     assert "error" not in wa.types() and "error" not in wb.types()
 
@@ -141,6 +160,69 @@ def test_a_vs_bot_room_is_creatable_and_the_bot_takes_its_turn():
         assert sum(room["game"]["pts"]) == E.POOL
     else:
         assert room["game"]["result"]["ended_early"]
+
+
+def test_a_vs_bot_match_carries_on_into_the_next_round():
+    """The case most likely to strand: only the human can deal the next round,
+    and the bot has to pick its own turn back up once they do."""
+    ws = _FakeWS()
+    run(m._handle_create(ws, "N", "alice",
+                         {"name": "Alice", "vs_ai": True, "ai_difficulty": "normal"}))
+    room = m.ROOMS["N"]
+
+    def drive_to_round_end():
+        guard = 0
+        while not E.round_over(room["game"]):
+            guard += 1
+            assert guard < 300, f"stuck in {room['game']['phase']}"
+            g = room["game"]
+            pid = E.turn_pid(g)
+            if pid == m.AI_PID:
+                run(m._schedule_bot_turn("N"))
+                continue
+            if g["phase"] == "auction":
+                opt = E.auction_options(g)
+                move = ({"kind": "pass"} if opt["may_pass"]
+                        else {"kind": "bid", "level": opt["bids"][0][0],
+                              "denom": opt["bids"][0][1]})
+            elif g["phase"] == "swap":
+                move = {"kind": "swap", "take": None}
+            else:
+                move = {"kind": "play", "card": E.legal_moves(g, E.seat_of(g, pid))[0]}
+            run(m._handle_move(ws, "N", pid, {"move": move}))
+
+    drive_to_round_end()
+    first = room["game"]["result"]
+    assert room["status"] == "playing", "the room must not close after one round"
+
+    run(m._handle_move(ws, "N", "alice",
+                       {"move": {"kind": "next_round", "round": first["round"]}}))
+    g = room["game"]
+    assert g["phase"] == "auction" and g["result"] is None, "a fresh deal"
+    assert g["match"]["round"] == first["round"] + 1
+    assert g["match"]["scores"] == first["match_scores"], "the standing carries over"
+    assert room.get("_ai_search") is None, \
+        "an armed search must not outlive the deal it was asking about"
+
+    # ...and the bot is playable again, which is the half that actually strands.
+    drive_to_round_end()
+    assert room["game"]["result"] is not None
+    assert room["game"]["match"]["round"] == first["round"] + 1
+
+
+def test_the_bot_never_deals_the_next_round_by_itself():
+    """`turn_pid` is None between rounds, so the scheduler must find nothing to
+    do -- a bot that dealt on its own would blow past the result panel."""
+    ws = _FakeWS()
+    run(m._handle_create(ws, "S", "alice",
+                         {"name": "Alice", "vs_ai": True, "ai_difficulty": "normal"}))
+    room = m.ROOMS["S"]
+    g = room["game"]
+    g["phase"] = "over"
+    g["result"] = {"scores": [0, 0], "round": 1, "match_over": False}
+    assert m._bot_should_act(room) is False
+    run(m._schedule_bot_turn("S"))
+    assert room["game"]["phase"] == "over", "the bot dealt the next round on its own"
 
 
 def test_an_illegal_move_is_refused_without_corrupting_the_game():
@@ -313,3 +395,24 @@ def test_the_catalog_matches_the_engine():
         {b * lvl for b in cat["skat_bases"]
          for lvl in range(cat["min_level"], cat["max_level"] + 1)}
         | {cat["skat_null_value"]})
+
+
+def test_a_match_between_rounds_prompts_BOTH_players_in_the_lobby():
+    """Nobody is on turn between rounds, so a lobby keyed on the turn alone
+    would list the match as Active with no prompt on either side -- which is
+    exactly how one gets forgotten."""
+    wa, wb = _FakeWS(), _FakeWS()
+    run(m._handle_create(wa, "L", "alice", {"name": "Alice"}))
+    run(m._handle_join(wb, "L", "bob", {"name": "Bob"}))
+    run(m._handle_start(wa, "L", "alice"))
+    g = m.ROOMS["L"]["game"]
+
+    on_turn = E.turn_pid(g)
+    other = "bob" if on_turn == "alice" else "alice"
+    assert m.engine.may_act(g, on_turn) and not m.engine.may_act(g, other)
+
+    g["phase"] = "over"
+    g["result"] = {"scores": [0, 0], "round": 1, "match_over": False}
+    assert m.engine.may_act(g, "alice") and m.engine.may_act(g, "bob")
+    g["match"]["over"] = True
+    assert not m.engine.may_act(g, "alice") and not m.engine.may_act(g, "bob")
