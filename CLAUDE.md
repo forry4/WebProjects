@@ -15,7 +15,7 @@ Per-area detail lives in a `CLAUDE.md` next to the code, loaded when you read fi
 | [`games/wherewolf/CLAUDE.md`](games/wherewolf/CLAUDE.md) | WW roles, redaction matrix, night conductor |
 | [`games/spender_duel/CLAUDE.md`](games/spender_duel/CLAUDE.md) | Duel engine, hidden info, and the current coherent/minimax search |
 | [`games/dontminion/CLAUDE.md`](games/dontminion/CLAUDE.md) | Dontminion (Dominion) frame-stack engine, the frozen effects API, multi-bot server, decision-prompt frontend |
-| [`games/oddtrick/CLAUDE.md`](games/oddtrick/CLAUDE.md) | Oddtrick — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the two auction modes (classic / skat), and the browser-served Hard tier |
+| [`games/dissonance/CLAUDE.md`](games/dissonance/CLAUDE.md) | Dissonance — parity trick-taking rules, the Rust reference + parity gate, auction/scoring calibration, the two auction modes (classic / skat), and the browser-served Hard tier |
 | [`shared/CLAUDE.md`](shared/CLAUDE.md) | Shared frontend kits + URL routing |
 | [`books/CLAUDE.md`](books/CLAUDE.md) | The Books feature |
 | [`docs/ai-research-log.md`](docs/ai-research-log.md) | **AI campaign history, dated sessions, rejected-experiment postmortems.** When something here says "see the research log," that's the blow-by-blow + "do not relitigate" detail. |
@@ -84,8 +84,8 @@ games/
                        #   main.py (dontminion_app @ /dontminion) + Dontminion.jsx; expansion
                        #   picker, 2-4p, multi-bot rooms. tools/replay_prod_saves.py is the
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
-oddtrick/            # Oddtrick — 2p parity trick-taking. engine.py is a PORT of
-                       #   rust-cores/oddtrick-core (the solver-validated reference);
+  dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
+                       #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. TWO auction
                        #   modes over the identical card play, picked per room
                        #   (`mode: classic|skat`) — see its CLAUDE.md
@@ -100,7 +100,7 @@ rust-cores/            # Per-game Rust→WASM search crates (client-side serving
   spender-core/        #   Spender variant S/N search core
   coc-core/            #   CoC Expert (netval) search core
   duel-core/           #   Duel attention-net search core
-  oddtrick-core/       #   Oddtrick rules reference + PIMC/double-dummy Hard tier
+  dissonance-core/       #   Dissonance rules reference + PIMC/double-dummy Hard tier
 docs/                  # GitHub Pages build output + ai-research-log.md
 ```
 
@@ -323,7 +323,7 @@ covers the logic; each game's wiring is one line).
 - **A client-WASM worker pool must NEVER take every core.** The search is CPU-bound; a pool that pegs
   all of them starves the browser's main/compositor/raster threads and the animations stutter while the
   AI thinks. Each game sizes its own pool by hand, so the rule has to be re-applied every time: Spender
-  `min(hc-1, 4)`, Duel `min(hc-1, 4)`, CoC `hc<=4 ? hc-1 : min(hc-2, 8)`, Oddtrick
+  `min(hc-1, 4)`, Duel `min(hc-1, 4)`, CoC `hc<=4 ? hc-1 : min(hc-2, 8)`, Dissonance
   `max(1, min(hc-1, 4))`. Spender had it; **Duel and CoC shipped without it for months.** Only bites at
   ≤4 cores (the caps dominate above that) — and the `max(1, …)` matters: a literal `min(hc-1, 4)` on a
   single-core phone asks for a pool of ZERO workers, which is the server bot wearing the Hard label.
@@ -348,7 +348,7 @@ covers the logic; each game's wiring is one line).
   an illegal move and a closed tab are all the same path. The armed request lives in ROOM STATE so every
   re-broadcast and reconnect re-ships it, and the opt-in is cleared when the socket drops
   (`release_socket(disarm_client_ai=True)`) so a room never waits on a tab that is gone. Duel, CoC and
-  Oddtrick all run this shape; **the move is re-validated against the engine on arrival**, which is the
+  Dissonance all run this shape; **the move is re-validated against the engine on arrival**, which is the
   whole reason a client-side AI is safe.
 - **THE CREATE MODAL'S DIFFICULTY DEFAULT IS THE TIER THAT PLAYER LAST PLAYED, in every game with a
   bot** — `useLastDifficulty` in `shared/lobby.jsx`, keyed per game and per identity, written where

@@ -2,7 +2,7 @@
    ruleset behaves the same everywhere: the panel is capped to the viewport and
    the BODY is the only scroller (a game's rules can be as long as it needs).
    Before this, five games each had their own .X-rules-body copy and two of them
-   (Dontminion, Oddtrick) reused the narrow create-modal panel, which is 372px
+   (Dontminion, Dissonance) reused the narrow create-modal panel, which is 372px
    wide and grows the page instead of scrolling.
 
    Token-driven with hard fallbacks — CoC mounts bare (no baseCss). */

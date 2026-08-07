@@ -62,7 +62,7 @@ export function LobbySectionHd({ title, note }) {
 // A room you have joined but which has NOT started is waiting, not active. It
 // already appears in Open — with a Cancel if you host it — so listing it again
 // as in-progress offers a Resume that just drops you back in the waiting room.
-// Only Duel filtered; Spender, CoC, Dontminion and Oddtrick all showed waiting
+// Only Duel filtered; Spender, CoC, Dontminion and Dissonance all showed waiting
 // rooms as active, which is the kind of thing that stays wrong in four places
 // at once precisely because each lobby built its own list.
 export function notWaiting(games) {

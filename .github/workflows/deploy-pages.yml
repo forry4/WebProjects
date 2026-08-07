@@ -24,7 +24,7 @@ on:
       - 'games/wherewolf/**'
       - 'games/spender_duel/**'
       - 'games/dontminion/**'
-      - 'games/oddtrick/**'
+      - 'games/dissonance/**'
       - 'books/**'
       - 'shared/**'
       - '.github/workflows/deploy-pages.yml'

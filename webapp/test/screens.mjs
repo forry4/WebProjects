@@ -37,7 +37,7 @@ const SCREENS = [
 	{ path: "/coc", chunk: "CastlesOfCrimson", marker: ".coc" },
 	{ path: "/werewolf", chunk: "WhereWolf", marker: ".ww" },
 	{ path: "/dontminion", chunk: "Dontminion", marker: ".dm" },
-	{ path: "/oddtrick", chunk: "Oddtrick", marker: ".odd" },
+	{ path: "/dissonance", chunk: "Dissonance", marker: ".dis" },
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 ];
 
@@ -469,7 +469,7 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/oddtrick"]) {
+		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance"]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(".lby-rules", { timeout: 25_000 }).catch(() => {});
 			const hasBtn = await page.locator(".lby-rules").count().catch(() => 0);
@@ -1520,7 +1520,7 @@ try {
 		// shared one, so it resolves these ties in the opposite order.
 		for (const [route, marker] of [["/spender", ".sp-lobby, .lby-cols"],
 			["/duel", ".duel"], ["/coc", ".coc"], ["/dontminion", ".dm"],
-			["/oddtrick", ".odd"]]) {
+			["/dissonance", ".dis"]]) {
 			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
 			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
 			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});
@@ -1558,11 +1558,11 @@ try {
 		await ctx.close();
 	}
 
-	// ── Oddtrick's skat auction ───────────────────────────────────────────────
+	// ── Dissonance's skat auction ───────────────────────────────────────────────
 	// Skat mode is a room FLAG chosen in the create modal, which is exactly the
 	// failure class this gate exists for: Dontminion's Renaissance set rendered
 	// fine and could not be CREATED, because a list in main.py was stale. A
-	// mounted /oddtrick screen says nothing about whether picking "Skat" deals a
+	// mounted /dissonance screen says nothing about whether picking "Skat" deals a
 	// skat game, so this drives the segment, the deal, and the first bid — the
 	// value ladder is a middle panel that does not exist in classic mode at all.
 	{
@@ -1577,8 +1577,8 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
-		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
 		await page.getByRole("button", { name: /new game|create/i }).first()
 			.click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
@@ -1599,21 +1599,21 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		// A skat room deals immediately vs the bot, straight into the number
 		// ladder — a grid that classic mode never renders.
-		const ladder = await page.waitForSelector(".odd-valgrid button", { timeout: 25_000 })
+		const ladder = await page.waitForSelector(".dis-valgrid button", { timeout: 25_000 })
 			.then(() => true).catch(() => false);
 		check("a skat room deals into the number ladder", ladder);
 
 		if (ladder) {
 			const rungs = await page.evaluate(() =>
-				[...document.querySelectorAll(".odd-valgrid button")].map((b) => +b.textContent));
+				[...document.querySelectorAll(".dis-valgrid button")].map((b) => +b.textContent));
 			check("the ladder is ascending and server-supplied, not a 1..12 level row",
 				rungs.length > 12 && rungs.every((v, i) => i === 0 || v > rungs[i - 1]),
 				JSON.stringify(rungs.slice(0, 8)));
 
-			await page.locator(".odd-valgrid button").first().click().catch(() => {});
+			await page.locator(".dis-valgrid button").first().click().catch(() => {});
 			// Selecting a number shows what it could BUY — the mode's whole
 			// argument, and the one thing /catalog is fetched for.
-			const clears = await page.waitForSelector(".odd-clears .odd-clear", { timeout: 10_000 })
+			const clears = await page.waitForSelector(".dis-clears .dis-clear", { timeout: 10_000 })
 				.then(() => true).catch(() => false);
 			check("a selected number shows every game that clears it", clears);
 
@@ -1623,8 +1623,8 @@ try {
 			// the talon prompt if it passed. Either way the auction is NOT stuck.
 			await sleep(2500);
 			const moved = await page.evaluate(() => ({
-				log: document.querySelectorAll(".odd-bidlog div").length,
-				phase: !!document.querySelector(".odd-auction, .odd-result"),
+				log: document.querySelectorAll(".dis-bidlog div").length,
+				phase: !!document.querySelector(".dis-auction, .dis-result"),
 			}));
 			check("the bot answers a number bid", moved.log >= 2 && moved.phase,
 				JSON.stringify(moved));
@@ -1643,13 +1643,13 @@ try {
 			return true;
 		};
 		for (let i = 0; i < 60; i++) {
-			if (await page.locator(".odd-lasttrick").count() > 0) break;
+			if (await page.locator(".dis-lasttrick").count() > 0) break;
 			if (await step(/^Play Hand/)) continue;           // talon
 			if (await step(/^Declare$/)) continue;            // declaration
 			if (await step(/^Let it stand$/)) continue;       // defender declines Kontra
 			if (await step(/^Accept$/)) continue;             // declarer declines Re
 			if (await step(/^Pass$/)) continue;               // settle the auction
-			const card = page.locator(".odd-seat .odd-card.play").last();
+			const card = page.locator(".dis-seat .dis-card.play").last();
 			if (await card.count() > 0) {
 				await card.click({ timeout: 5_000 }).catch(() => {});
 				await sleep(450);
@@ -1658,11 +1658,11 @@ try {
 			await sleep(500);
 		}
 		const lt = await page.evaluate(() => {
-			const el = document.querySelector(".odd-lasttrick");
+			const el = document.querySelector(".dis-lasttrick");
 			if (!el) return null;
 			return {
-				cards: el.querySelectorAll(".odd-card").length,
-				marksWinner: !!el.querySelector(".odd-lt-play.won"),
+				cards: el.querySelectorAll(".dis-card").length,
+				marksWinner: !!el.querySelector(".dis-lt-play.won"),
 			};
 		});
 		check("the previous trick stays visible beside the board",
@@ -1684,13 +1684,13 @@ try {
 				return getComputedStyle(el).display !== "none" && r.width > 0 && r.height > 0;
 			};
 			return {
-				side: vis(".odd-side"),
+				side: vis(".dis-side"),
 				lastTrick: vis(".odd-p-last"),
-				contractChip: vis(".odd-chip"),
-				lastTrickCards: document.querySelectorAll(".odd-lasttrick .odd-card").length,
+				contractChip: vis(".dis-chip"),
+				lastTrickCards: document.querySelectorAll(".dis-lasttrick .dis-card").length,
 				// Deliberately hidden — duplicated by the chip and the seat rows.
-				contractPanel: vis(".odd-p-contract"),
-				pointsPanel: vis(".odd-p-points"),
+				contractPanel: vis(".dis-p-contract"),
+				pointsPanel: vis(".dis-p-points"),
 				pageScrollsSideways: document.documentElement.scrollWidth
 					> document.documentElement.clientWidth + 1,
 			};
@@ -1709,7 +1709,7 @@ try {
 		// The board must FILL the phone, not size itself to its content and leave
 		// a third of the screen dead below it.
 		const fill = await page.evaluate(() => {
-			const t = document.querySelector(".odd-table");
+			const t = document.querySelector(".dis-table");
 			if (!t) return null;
 			return { table: Math.round(t.getBoundingClientRect().height),
 				view: window.innerHeight };
@@ -1719,7 +1719,7 @@ try {
 		await ctx.close();
 	}
 
-	// Oddtrick's cheapest legal bid, used by both blocks below. It is a helper and
+	// Dissonance's cheapest legal bid, used by both blocks below. It is a helper and
 	// not four inline clicks because of a RACE that bites intermittently: the
 	// denomination buttons are disabled per LEVEL, so clicking a level and then
 	// immediately reading `:not([disabled])` can pick from the PREVIOUS render.
@@ -1728,9 +1728,9 @@ try {
 	// surfaced as "no tricks were ever played" rather than as a stuck auction.
 	// Settle between clicks, and confirm the button really is live.
 	const oddBidCheaply = async (page) => {
-		await page.locator(".odd-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
+		await page.locator(".dis-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
 		await sleep(150);
-		const denoms = page.locator(".odd-denoms button:not([disabled])");
+		const denoms = page.locator(".dis-denoms button:not([disabled])");
 		const n = await denoms.count();
 		for (let d = 0; d < n; d++) {
 			await denoms.nth(d).click({ timeout: 5_000 }).catch(() => {});
@@ -1747,7 +1747,7 @@ try {
 			.click({ timeout: 5_000 }).catch(() => {});
 	};
 
-	// ── Oddtrick's Hard tier, searched in the browser ─────────────────────────
+	// ── Dissonance's Hard tier, searched in the browser ─────────────────────────
 	// Hard is the only bot on this site whose CARD PLAY runs client-side, and the
 	// whole path is invisible to Python: a module Worker loads wasm-pack glue, the
 	// glue fetches a .wasm from /wasm/, the page announces `client_ai_ready`, and
@@ -1773,8 +1773,8 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
-		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
 		// Count the protocol rather than infer it from the board: a game that
 		// plays out perfectly is exactly what the fallback looks like.
 		await page.evaluate(() => {
@@ -1797,7 +1797,7 @@ try {
 			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
 		check("Hard is offered in the create modal", picked.includes("Hard"), JSON.stringify(picked));
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
-		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
+		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
 		// WALL-CLOCK bounded, not iteration bounded. A decision the browser fails
 		// to answer costs the server's whole watchdog before it plays the move
@@ -1806,8 +1806,8 @@ try {
 		const deadline = Date.now() + 180_000;
 		while (Date.now() < deadline) {
 			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".odd-bidgrid button"),
-				over: !!document.querySelector(".odd-result"),
+				bidding: !!document.querySelector(".dis-bidgrid button"),
+				over: !!document.querySelector(".dis-result"),
 			}));
 			if (st.over) break;
 			if (st.bidding) {
@@ -1817,7 +1817,7 @@ try {
 			}
 			const pat = page.getByRole("button", { name: /stand pat/i }).first();
 			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
+			const card = page.locator(".dis-seat").last().locator(".dis-card.play").first();
 			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
 			await sleep(120);
 		}
@@ -1834,13 +1834,13 @@ try {
 		// game must come back from the browser. Zero means the wasm never loaded.
 		check("the browser answered the bot's decisions", (acts.ai_move || 0) >= 6,
 			`${JSON.stringify(acts)} searches=${JSON.stringify(searches.slice(0, 3))}`);
-		check("a Hard game plays to a result", !!(await page.locator(".odd-result").count()));
+		check("a Hard game plays to a result", !!(await page.locator(".dis-result").count()));
 		check("no page errors driving the client-side search", errors.length === 0,
 			errors[0]?.slice(0, 200) || "");
 		await ctx.close();
 	}
 
-	// ── Oddtrick's completed-trick beat ───────────────────────────────────────
+	// ── Dissonance's completed-trick beat ───────────────────────────────────────
 	// A finished trick stays face up for TRICK_HOLD_MS before it moves to the
 	// side panel. It is a pure timing behaviour, so nothing in Python can see it
 	// and a mounted screen says nothing about it — and it shipped broken in two
@@ -1864,8 +1864,8 @@ try {
 			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
 		};
 
-		await page.goto(`http://localhost:${PORT}/oddtrick`, { waitUntil: "networkidle" });
-		await page.waitForSelector(".odd", { timeout: 25_000 }).catch(() => {});
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
 		// Sample the middle of the board every frame and record each change. A
 		// polling loop from Node cannot see a state that lasts one frame, which
 		// is precisely the size of the bug.
@@ -1873,8 +1873,8 @@ try {
 			window.__hold = [];
 			let last = null;
 			const tick = () => {
-				const t = document.querySelector(".odd-trick");
-				const s = !t ? "-" : [...t.querySelectorAll(".odd-tp .odd-card")]
+				const t = document.querySelector(".dis-trick");
+				const s = !t ? "-" : [...t.querySelectorAll(".dis-tp .dis-card")]
 					.map((e) => e.textContent.trim()).join(" ") || "(none)";
 				if (s !== last) { window.__hold.push([performance.now(), s]); last = s; }
 				requestAnimationFrame(tick);
@@ -1890,14 +1890,14 @@ try {
 				.click({ timeout: 10_000 }).catch(() => {});
 		}
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
-		await page.waitForSelector(".odd-bidgrid, .odd-trick", { timeout: 25_000 }).catch(() => {});
+		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
 		// Wall-clock bounded, like the block above and for the same reason.
 		const beatDeadline = Date.now() + 180_000;
 		while (Date.now() < beatDeadline) {
 			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".odd-bidgrid button"),
-				over: !!document.querySelector(".odd-result"),
+				bidding: !!document.querySelector(".dis-bidgrid button"),
+				over: !!document.querySelector(".dis-result"),
 			}));
 			if (st.over) break;
 			if (st.bidding) {
@@ -1907,7 +1907,7 @@ try {
 			}
 			const pat = page.getByRole("button", { name: /stand pat/i }).first();
 			if (await pat.count()) { await pat.click({ timeout: 5_000 }).catch(() => {}); await sleep(250); continue; }
-			const card = page.locator(".odd-seat").last().locator(".odd-card.play").first();
+			const card = page.locator(".dis-seat").last().locator(".dis-card.play").first();
 			if (await card.count()) await card.click({ timeout: 5_000 }).catch(() => {});
 			await sleep(90);
 		}
@@ -1919,16 +1919,16 @@ try {
 		// the two read as one smeared card. Pure CSS, so nothing in Python can
 		// see it; the opponent's row is the one that is always dimmed.
 		const piles = await page.evaluate(() => {
-			const rows = [...document.querySelectorAll(".odd-piles")];
-			const tops = rows.flatMap((r) => [...r.querySelectorAll(".odd-pilewrap")]
-				.map((w) => [...w.children].find((c) => c.classList.contains("odd-card")))
+			const rows = [...document.querySelectorAll(".dis-piles")];
+			const tops = rows.flatMap((r) => [...r.querySelectorAll(".dis-pilewrap")]
+				.map((w) => [...w.children].find((c) => c.classList.contains("dis-card")))
 				.filter(Boolean));
 			return {
 				n: tops.length,
 				dimmed: tops.filter((t) => t.classList.contains("dim")).length,
 				seeThrough: tops.filter((t) => +getComputedStyle(t).opacity < 1).length,
 				// ...and the buried card is still peeking out, or the offset broke.
-				buried: document.querySelectorAll(".odd-buried").length,
+				buried: document.querySelectorAll(".dis-buried").length,
 			};
 		});
 		check("a pile's top card is opaque, dimmed or not",

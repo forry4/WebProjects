@@ -2,7 +2,7 @@
 
 `shared/lobby.jsx` + its stylesheet own the whole lobby: the column grid, the
 card rows, the empty states, the phone tab bar. A game opts in by using the
-kit's class names — and nothing checked that it actually did, so Oddtrick
+kit's class names — and nothing checked that it actually did, so Dissonance
 shipped a lobby using `lby-cardmain`, `lby-cardsub`, `lby-cardtitle`, `lby-col`
 and `lby-history`, none of which exist in the shared sheet. Every one of those
 rows rendered completely unstyled, and it looked like a theming problem rather
@@ -76,7 +76,7 @@ def test_the_phone_tab_bar_is_wired_to_the_grid():
 
     `LobbyTabs` reads `t.key`; a game passing `id` renders a bar whose every
     click sets the tab to `undefined`. The grid hides columns off a `tab-<key>`
-    CLASS; a game setting `data-tab` matches no rule, so nothing hides. Oddtrick
+    CLASS; a game setting `data-tab` matches no rule, so nothing hides. Dissonance
     did both, and the result was a tab bar that looked right, changed nothing,
     and left all three sections stacked on a phone.
     """
@@ -118,7 +118,7 @@ def test_each_lobby_sets_its_own_accent():
 def test_every_game_uses_the_shared_in_game_menu():
     """At a board, the header is ONE hamburger, never a row of buttons.
 
-    Oddtrick was the last game still showing Back + Rules in its in-game header
+    Dissonance was the last game still showing Back + Rules in its in-game header
     while the other five used `GameMenu` — and it already imported `GameMenu`
     without ever rendering it, which is the shape this catches. `LobbyHeader`
     takes a `menu` node for exactly this; `onBack`/`onRules` stay for the lobby,
@@ -133,7 +133,7 @@ def test_every_game_uses_the_shared_in_game_menu():
 def test_the_in_game_menu_offers_the_same_three_actions():
     """Return / rules / abandon, in that order, on every game that can be
     abandoned. A game that quietly drops one leaves players with no way out of a
-    live room except closing the tab — Oddtrick's server had supported abandon
+    live room except closing the tab — Dissonance's server had supported abandon
     since it shipped, with nothing in the UI ever calling it."""
     for jsx in _lobby_games():
         text = jsx.read_text(encoding="utf-8")

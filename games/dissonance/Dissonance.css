@@ -1,0 +1,316 @@
+/* Dissonance — layout on top of shared/theme.js tokens.
+   Mobile @media blocks come BEFORE the base rules in this file, so every
+   mobile override is .dis-prefixed to out-specify the later base rule. */
+
+/* Every other game hands the shared lobby its own accent; without one the kit
+   falls back to Spender's gold, so Dissonance's lobby was wearing another game's
+   colour while its board wore this green. */
+.dis { min-height: 100vh; color: var(--text); --lby-accent: #6fe0a0; }
+
+/* ── mobile overrides (must precede the base rules; see above) ───────────── */
+@media (max-width: 760px) {
+  /* Fill the phone. The table sized itself to its CONTENT, so a 13-trick game
+     with short hands left a third of the screen dead black below the board.
+     Growing it to the viewport and spacing the rows apart puts the opponent at
+     the top, the trick in the middle and your hand at the thumb — which is
+     where a card table wants them anyway.
+     The subtraction is the header, not a magic number: .lby-header is 13px of
+     padding either side of a ~34px control, plus the notch inset it adds to its
+     own padding-top. `dvh` so the iOS URL bar collapsing does not leave a gap;
+     the `vh` line above it is the fallback for anything that lacks dvh. */
+  .dis .dis-table {
+    gap: 0.5rem; padding: 0.5rem;
+    min-height: calc(100vh - 72px);
+    min-height: calc(100dvh - 72px - env(safe-area-inset-top, 0px));
+    justify-content: space-between;
+  }
+  .dis .dis-card { --cw: 42px; font-size: 0.78rem; }
+  .dis .dis-hand { gap: 0.18rem; }
+  /* NO overlap. The fan used to tuck each card 14px under the next, which is
+     fine when the index is centred and fatal now that it lives in the TOP-RIGHT
+     corner — every card's index but the last was covered. A hand is at most 7
+     cards, and 7 x 42px plus gaps fits a 390px phone with room to spare, so the
+     overlap was buying nothing anyway. */
+  .dis .dis-hand { gap: 0.18rem; flex-wrap: wrap; }
+  .dis .dis-piles { gap: 0.35rem; }
+  .dis .dis-pilewrap { --pk: 11px; }
+  .dis .dis-bidgrid { grid-template-columns: repeat(4, 1fr); }
+  .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
+  /* While BIDDING the board is exactly the viewport and the ladder takes
+     whatever is left, scrolling inside itself. A viewport-relative cap cannot
+     do this: the rest of the panel (the standing bid, the collision list, the
+     buttons, the log) is content-sized and varies, so any fixed vh either
+     overflows the page on a short phone or wastes space on a tall one.
+     Measured before this: the page ran 68px past the viewport and the grid
+     showed 35 of 36 rungs, i.e. it was not scrolling at all. */
+  .dis .dis-table.ph-auction { height: calc(100dvh - 72px); }
+  .dis .dis-table.ph-auction .dis-auction {
+    min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
+    justify-content: flex-start;
+  }
+  .dis .dis-table.ph-auction .dis-valgrid {
+    flex: 1 1 auto; min-height: 3.2rem; max-height: none;
+  }
+  /* The side panel STACKS below the board on a phone rather than vanishing.
+     Hiding it wholesale also hid the last trick, the talon you paid the auction
+     to see, and the move log — three things a phone player has no other way to
+     reach. Only the two that are genuinely duplicated elsewhere are dropped:
+     Contract (the chip in the middle column carries it) and Points (already on
+     both seat rows). Every rule here is `.dis `-prefixed because this @media
+     block PRECEDES the base rules, so a single-class override would lose. */
+  .dis .dis-side { display: flex; }
+  .dis .dis-p-contract, .dis .dis-p-points { display: none; }
+  .dis .dis-main { grid-template-columns: 1fr; }
+}
+
+/* ── cards ──────────────────────────────────────────────────────────────── */
+/* No image assets: a playing card is a rank and a suit glyph, so it renders
+   in CSS at any size and stays crisp. Suits differ by GLYPH as well as
+   colour, so red/black is never the only signal. */
+.dis-card {
+  --cw: 56px;
+  width: var(--cw);
+  height: calc(var(--cw) * 1.4);
+  border-radius: calc(var(--cw) * 0.11);
+  background: #fdfdfa;
+  color: #17171a;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  font-weight: 700; line-height: 1.05;
+  user-select: none; position: relative;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.dis-ix {
+  position: absolute; top: 4%; right: 7%;
+  display: flex; flex-direction: column; align-items: center;
+  line-height: 1;
+}
+.dis-card .dis-r { font-size: 0.95em; }
+.dis-card .dis-s { font-size: 1.15em; }
+.dis-card.red { color: #c0233a; }
+.dis-card.black { color: #17171a; }
+.dis-card.play { cursor: pointer; }
+/* HOVER ONLY WHERE THERE IS A POINTER. On a touch screen the browser leaves
+   :hover latched on the last thing you tapped until you tap somewhere else, so
+   after playing a card the card that reflowed into that slot came up raised —
+   which reads as the game having auto-selected it for you at the start of your
+   turn. */
+@media (hover: hover) and (pointer: fine) {
+  .dis-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
+}
+/* DIMMING MUST NOT BE TRANSPARENCY. A pile's top card sits ON TOP of its buried
+   one (offset down and left so only the buried card's corner shows), and an
+   unplayable top — every pile of the opponent's, and your own between turns —
+   used to be `opacity: .38`, so the card underneath showed straight through it
+   and the two read as one smeared card. Brightness on an opaque background is
+   the same visual cue and stays opaque. */
+.dis-card.dim { filter: grayscale(0.6) brightness(0.7); }
+.dis-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dis-card.back {
+  background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
+  border-color: rgba(255, 255, 255, 0.18); color: transparent;
+}
+.dis-card.ghost { background: rgba(255, 255, 255, 0.05); border-style: dashed; color: var(--muted); }
+
+.dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem; }
+
+/* ── piles ──────────────────────────────────────────────────────────────── */
+.dis-piles { display: flex; gap: 0.6rem; justify-content: center; }
+.dis-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
+/* The wrap reserves the peek offset as padding so the buried card cannot
+   overlap its neighbour or get clipped by the row. */
+.dis-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: 15px; }
+.dis-buried { position: absolute; top: 0; right: 0; z-index: 0; }
+.dis-pilewrap .dis-card { position: relative; z-index: 1; }
+
+/* ── table ──────────────────────────────────────────────────────────────── */
+.dis-main { display: grid; grid-template-columns: 1fr 260px; gap: 0.75rem; align-items: start; }
+.dis-table {
+  display: flex; flex-direction: column; gap: 0.9rem;
+  padding: 0.9rem; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(30, 62, 46, 0.55), rgba(18, 38, 28, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.dis-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
+.dis-seatname { font-size: 0.85rem; color: var(--muted); display: flex; gap: 0.5rem; align-items: center; }
+.dis-seatname b { color: var(--text); }
+
+.dis-trick {
+  min-height: 96px; display: flex; align-items: center; justify-content: center;
+  gap: 1.2rem; position: relative;
+}
+/* The trick's value is the whole game, so the pill on the trick line is loud.
+   It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
+   used to sit under the board was removed as noise. */
+.dis-val { font-weight: 800; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.9rem; }
+.dis-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
+.dis-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
+
+.dis-trickinfo {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: -4px; font-size: 0.72rem; color: var(--muted);
+}
+
+
+/* ── auction ────────────────────────────────────────────────────────────── */
+.dis-auction { display: flex; flex-direction: column; gap: 0.8rem; align-items: center; padding: 1rem; }
+.dis-contract {
+  font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.dis-bidgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem; width: 100%; max-width: 420px; }
+.dis-bidgrid button, .dis-denoms button {
+  padding: 0.5rem 0.2rem; border-radius: 9px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.07); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+}
+.dis-bidgrid button:hover:not(:disabled), .dis-denoms button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+}
+.dis-bidgrid button.on, .dis-denoms button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
+.dis-denoms { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
+.dis-denoms button { min-width: 56px; font-size: 1.1rem; }
+.dis-denoms button.red { color: #ff8a9c; }
+.dis-denoms button.on.red { color: #08131f; }
+.dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
+.dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+
+/* ── side panel ─────────────────────────────────────────────────────────── */
+.dis-side { display: flex; flex-direction: column; gap: 0.7rem; }
+.dis-panel { padding: 0.7rem; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
+.dis-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.dis-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
+.dis-scorerow b { font-variant-numeric: tabular-nums; }
+
+/* ── result ─────────────────────────────────────────────────────────────── */
+.dis-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
+.dis-result .dis-big { font-size: 1.6rem; font-weight: 800; }
+.dis-result .made { color: #6fe0a0; }
+.dis-result .set { color: #ff9a9a; }
+.dis-maths { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.dis-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
+.dis-yourturn { color: var(--accent); font-weight: 700; }
+
+/* v2: the Null bid stands apart from the number ladder */
+
+/* ── skat mode ──────────────────────────────────────────────────────────────
+   A second auction over the same table, so everything here reuses the bid-grid
+   vocabulary above rather than inventing a parallel one. */
+
+/* Which auction a room runs. Classic is the default and carries no badge. */
+.dis-modebadge {
+  margin-left: 0.4rem; padding: 0.05rem 0.4rem; border-radius: 999px;
+  font-size: 0.62rem; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase; vertical-align: middle;
+  background: rgba(138, 111, 216, 0.18); color: #b9a5f2;
+  border: 1px solid rgba(138, 111, 216, 0.45);
+}
+
+/* The value ladder is longer than the 1..12 level row, so it scrolls in place
+   rather than pushing the table off the screen. */
+.dis-valgrid {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem;
+  width: 100%; max-width: 420px; max-height: 26vh; overflow-y: auto;
+  padding-right: 2px;
+}
+.dis-valgrid button {
+  padding: 0.45rem 0.2rem; border-radius: 9px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255, 255, 255, 0.07); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+}
+.dis-valgrid button:hover { background: rgba(255, 255, 255, 0.15); }
+.dis-valgrid button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+
+/* The collision list: one number, several games. This IS the mode's argument,
+   so it is shown rather than explained. */
+.dis-clears {
+  display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center;
+  justify-content: center; font-size: 0.78rem; max-width: 420px;
+}
+.dis-clear {
+  padding: 0.05rem 0.4rem; border-radius: 6px; font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+}
+.dis-clear.red { color: #ff8a9c; }
+
+.dis-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
+
+/* Declaration: the denomination buttons carry their base as a subscript, so
+   the price table is legible without a lookup. */
+.dis-denoms button small {
+  display: block; font-size: 0.6rem; font-weight: 600; opacity: 0.7;
+  margin-top: 1px;
+}
+
+/* Announcements — toggles, not a ladder: each adds one to the multiplier. */
+.dis-anns { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.dis-ann {
+  padding: 0.35rem 0.7rem; border-radius: 999px; font-weight: 700;
+  font-size: 0.82rem; cursor: pointer;
+  background: rgba(255, 255, 255, 0.06); color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+.dis-ann:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.dis-ann.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.dis-ann:disabled { opacity: 0.32; cursor: not-allowed; }
+.dis-annbtn { border-color: #6fa8d8; color: #a5d0f2; }
+
+/* Kontra is the defender's one moment of leverage; it reads as a threat. */
+.dis-kontrabtn { background: #b8434f; color: #fff; }
+.dis-kontrabtn:hover { background: #c9505c; }
+
+/* ── cards you are allowed to keep looking at ───────────────────────────────
+   All three of these render real cards rather than text codes: a rank+glyph
+   run like "10h 7s Kd" is something you decode, and a row of cards is
+   something you read. They are the same `.dis-card` object as the hand, just
+   `small`. */
+.dis-card.sm { --cw: 34px; font-size: 0.62rem; }
+
+/* The trick just gone, beside the board. */
+.dis-lasttrick { display: flex; align-items: center; gap: 0.4rem; }
+.dis-lt-play { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.dis-lt-play .muted { font-size: 0.62rem; }
+/* The winner is marked on the card itself — which of the two took it is the
+   whole point of showing them side by side. */
+.dis-lt-play.won .dis-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dis-lt-note {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  font-size: 0.65rem; margin-left: auto; text-align: right;
+}
+.dis-lt-note .dis-val { font-size: 0.7rem; align-self: flex-end; }
+
+/* The talon, and the end-of-round reveal, share a row. */
+.dis-outrow { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.dis-reveal {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  margin-top: 0.3rem;
+}
+
+/* The contract, in the middle column. The side panel carries the full
+   breakdown but is display:none on a phone, which left the one fact the whole
+   round turns on invisible from the end of the auction onwards. */
+.dis-chip {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted);
+  padding: 0.3rem 0.6rem; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+.dis-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
+.dis-chip-den.red { color: #ff8a9c; }
+.dis-chip-mult {
+  font-weight: 700; color: var(--accent);
+  padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* A completed trick stays face up for a beat before moving to the Last trick
+   panel, so you actually see the two cards together — the server clears the
+   led card the instant the second one lands. The winner is outlined, which is
+   the whole reason the pause is worth having. */
+.dis-tp { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.dis-tp.won .dis-card { outline: 2px solid var(--accent); outline-offset: 2px; }

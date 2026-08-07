@@ -25,7 +25,7 @@ on:
       - 'games/wherewolf/**/*.py'
       - 'games/spender_duel/**/*.py'
       - 'games/dontminion/**/*.py'
-      - 'games/oddtrick/**/*.py'
+      - 'games/dissonance/**/*.py'
       # Every trigger above is *.py-scoped except `books/**` and `ai/models/**`, so
       # books/CLAUDE.md alone would restart prod for a docs edit (a real cold start for
       # no code change). Trailing negative rather than `paths-ignore`: GitHub rejects
