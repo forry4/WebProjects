@@ -2042,8 +2042,34 @@ try {
 			// One frame is invisible to any polling loop and easy to miss by
 			// eye, which is exactly why it is recorded rather than watched.
 			window.__resultFlips = [];
+			// WHICH PANEL is on screen, every frame. A user reported a one-frame
+			// blink of *something* just before the result — they explicitly were
+			// NOT sure what, so this must not be built around a guess. It records
+			// the known markers AND a short text digest of the centre panel, so
+			// an intruder nobody predicted still identifies itself in the failure
+			// message rather than only registering as "not what we expected".
+			window.__panels = [];
+			let lastPanel = null;
+			const panelNow = () => {
+				const has = (s) => !!document.querySelector(s);
+				const marks = [
+					has(".dis-valgrid") || has(".dis-bidgrid") ? "AUCTION" : "",
+					has(".dis-denoms") ? "denoms" : "",
+					has(".dis-clears") ? "clears" : "",
+					has(".dis-reveal") ? "reveal" : "",
+					has(".dis-result") ? "RESULT" : "",
+					has(".dis-trick") ? "board" : "",
+				].filter(Boolean).join("+");
+				// The digest is what makes this open-ended: whatever paints, its
+				// words come back with it.
+				const mid = document.querySelector(".dis-mid, .dis-centre, .dis-table");
+				const txt = (mid?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60);
+				return `${marks || "(no marker)"} :: ${txt}`;
+			};
 			let last = null, lastRes = null;
 			const tick = () => {
+				const pnl = panelNow();
+				if (pnl !== lastPanel) { window.__panels.push([Math.round(performance.now()), pnl]); lastPanel = pnl; }
 				const t = document.querySelector(".dis-trick");
 				const s = !t ? "-" : [...t.querySelectorAll(".dis-tp .dis-card")]
 					.map((e) => e.textContent.trim()).join(" ") || "(none)";
@@ -2185,6 +2211,21 @@ try {
 		const appearances = flips.filter(([, shown]) => shown).length;
 		check("the result panel does not flash before the final trick's hold",
 			appearances <= 1, `result panel appeared ${appearances}x: ${JSON.stringify(flips)}`);
+		// WHAT PRECEDES THE RESULT MUST BE THE BOARD — whatever the intruder is.
+		// Reported: "right before the contract made screen, a blink of something
+		// for maybe one frame", with the reporter explicitly unsure what it was.
+		// So this asserts the transition rather than the suspect: the last thing
+		// on screen before the result should be the held final trick, and any
+		// other state getting a frame in between fails and PRINTS ITSELF. The
+		// flip-counter above cannot see this at all — the result still appears
+		// exactly once either way. Not reproduced in classic vs bot over two
+		// runs, so this is the net rather than a regression guard.
+		const panels = await page.evaluate(() => window.__panels || []);
+		const iRes = panels.findIndex(([, p]) => p.includes("RESULT"));
+		const before = iRes > 0 ? panels[iRes - 1][1] : null;
+		check("nothing gets a frame between the last trick and the result",
+			iRes <= 0 || before.includes("board"),
+			`the frame before RESULT showed: ${before} | tail=${JSON.stringify(panels.slice(-6))}`);
 		// ── the round that just ended is one round of a MATCH ────────────────
 		// A game is played to 100, so the result panel carries the running
 		// standing and deals again rather than sending anyone to the lobby. One
