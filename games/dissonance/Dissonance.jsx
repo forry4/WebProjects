@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyLoading,
@@ -632,10 +632,27 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // trick, so a hold that stops at `play` skips the one trick a player most
   // wants to see and swaps straight to the result panel. Measured: every other
   // trick held 655–700ms and the last one held 0.
+  //
+  // **useLayoutEffect, NOT useEffect — the hold has to be armed BEFORE the
+  // browser paints.** The last card of a round arrives in a message that has
+  // already ended the game, so that render has `phase === "over"` while
+  // `heldTrick` is still null from the previous trick — and the result branch
+  // is keyed on exactly that pair. A passive effect runs AFTER paint, so the
+  // "contract made" panel got a frame of its own before the hold put the final
+  // trick back: result -> the trick you just played -> result. Reported from a
+  // phone as "a flash right as I press the last card, before the card shows up
+  // in the middle", which is precisely that ordering.
+  //
+  // It hid from four played-out games at desk speed because the paint/effect
+  // gap is ~0 on fast hardware. Reproduced by throttling the CPU 6x, where it
+  // measures ONE FRAME (8ms) against the 711ms hold that follows it.
+  // useLayoutEffect fires synchronously after the DOM mutation and before the
+  // paint, so the intermediate state can never reach the screen. Nothing else
+  // changes: same deps, same timer, same 700ms.
   const [heldTrick, setHeldTrick] = useState(null);
   const holdTimer = useRef(null);
   const wasPlaying = useRef(false);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const playing = game?.phase === "play";
     // Only a game that ENDED under us gets the over-hold. Opening a finished
     // room from the lobby would otherwise replay its last trick at you before
