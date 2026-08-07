@@ -4,8 +4,22 @@
 
 /* Every other game hands the shared lobby its own accent; without one the kit
    falls back to Spender's gold, so Dissonance's lobby was wearing another game's
-   colour while its board wore this green. */
-.dis { min-height: 100vh; color: var(--text); --lby-accent: #6fe0a0; }
+   colour while its board wore this green.
+
+   `--accent` IS DEFINED HERE BECAUSE NOTHING ELSE DEFINES IT. It is not a theme
+   token — `shared/theme.base-css.css` ships --gold/--text/--surface and no
+   accent at all, and the only `--accent:` anywhere else is scoped to Spender's
+   home cards. This sheet referenced `var(--accent)` in eight places from the day
+   it shipped, and every one of them was dead.
+
+   That failed SILENTLY, which is why it lasted: `var()` with no fallback makes
+   the whole declaration invalid at computed-value time, so `background:
+   var(--accent)` dropped to transparent and left the paired `color: #08131f`
+   as near-black text on a dark button — a selected bid you cannot read, in
+   BOTH auction modes. The outline rules lost their outline entirely. Anything
+   added here that reaches for a token must either be defined on this rule or
+   carry a `var(--x, fallback)`; `shared/tests/test_css_tokens.py` enforces it. */
+.dis { min-height: 100vh; color: var(--text); --accent: #6fe0a0; --lby-accent: var(--accent); }
 
 /* ── mobile overrides (must precede the base rules; see above) ───────────── */
 @media (max-width: 760px) {
@@ -116,7 +130,19 @@
   background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
   border-color: rgba(255, 255, 255, 0.18); color: transparent;
 }
-.dis-card.ghost { background: rgba(255, 255, 255, 0.05); border-style: dashed; color: var(--muted); }
+.dis-card.ghost { background: rgba(255, 255, 255, 0.05); border-style: dashed; color: var(--text-dim); }
+
+/* `.muted` IS THIS GAME'S OWN CLASS AND NOTHING DEFINED IT. The JSX reaches for
+   it 48 times for every piece of de-emphasised text on the board, but the only
+   rule that ever mentioned it was a font-size tweak scoped to the last-trick
+   panel — so all 48 rendered at full text brightness and nothing was actually
+   muted. `baseCss` has no `.muted`; the shared kit's equivalent is `.lby-muted`,
+   which is a lobby class and not in scope at a board.
+
+   Scoped under `.dis` so it cannot leak into another game's markup, and pointed
+   at `--text-dim`, which is what `.lby-muted` and every other game already use
+   for exactly this. */
+.dis .muted { color: var(--text-dim); }
 
 .dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem; }
 
@@ -138,7 +164,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .dis-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
-.dis-seatname { font-size: 0.85rem; color: var(--muted); display: flex; gap: 0.5rem; align-items: center; }
+.dis-seatname { font-size: 0.85rem; color: var(--text-dim); display: flex; gap: 0.5rem; align-items: center; }
 .dis-seatname b { color: var(--text); }
 
 .dis-trick {
@@ -154,7 +180,7 @@
 
 .dis-trickinfo {
   position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: -4px; font-size: 0.72rem; color: var(--muted);
+  bottom: -4px; font-size: 0.72rem; color: var(--text-dim);
 }
 
 
@@ -185,7 +211,7 @@
 /* ── side panel ─────────────────────────────────────────────────────────── */
 .dis-side { display: flex; flex-direction: column; gap: 0.7rem; }
 .dis-panel { padding: 0.7rem; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
-.dis-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.dis-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
 .dis-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
 .dis-scorerow b { font-variant-numeric: tabular-nums; }
 
@@ -194,7 +220,7 @@
 .dis-result .dis-big { font-size: 1.6rem; font-weight: 800; }
 .dis-result .made { color: #6fe0a0; }
 .dis-result .set { color: #ff9a9a; }
-.dis-maths { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* The match standing under the round's own result: separated by a rule, since
    the two score rows are the same shape and read as one list otherwise. */
@@ -311,7 +337,7 @@
    round turns on invisible from the end of the auction onwards. */
 .dis-chip {
   display: flex; align-items: center; justify-content: center;
-  gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted);
+  gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-dim);
   padding: 0.3rem 0.6rem; border-radius: 999px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.09);

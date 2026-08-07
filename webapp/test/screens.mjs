@@ -1624,6 +1624,42 @@ try {
 				.then(() => true).catch(() => false);
 			check("a selected number shows every game that clears it", clears);
 
+			// A SELECTED BID MUST BE READABLE. This shipped broken in both
+			// auction modes and nothing could see it: `.on` pairs `background:
+			// var(--accent)` with a near-black `color`, and --accent was defined
+			// nowhere a board could reach — so an undefined var() made only the
+			// BACKGROUND declaration invalid, leaving dark text on the unchanged
+			// dark button. Markup, geometry and class names were all perfect; the
+			// number was simply invisible. Contrast is the only thing that sees
+			// it, so measure that rather than the class.
+			const readable = await page.evaluate(() => {
+				const on = document.querySelector(".dis-valgrid button.on");
+				if (!on) return { err: "no selected rung" };
+				const cs = getComputedStyle(on);
+				const parse = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+				// Alpha 0 means the declaration was dropped, so the button is
+				// still painting whatever is behind it — report it as such
+				// rather than measuring a transparent colour as if it were one.
+				const a = Number((cs.backgroundColor.match(/[\d.]+/g) || [])[3] ?? 1);
+				const lum = (rgb) => {
+					const [r, g, b] = rgb.map((v) => {
+						const s = v / 255;
+						return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+					});
+					return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+				};
+				const L1 = lum(parse(cs.backgroundColor));
+				const L2 = lum(parse(cs.color));
+				const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+				return { bg: cs.backgroundColor, fg: cs.color, alpha: a,
+					ratio: Math.round(ratio * 100) / 100 };
+			});
+			check("a selected bid is painted, not left transparent",
+				readable.alpha > 0, JSON.stringify(readable));
+			// 3:1 is the large/bold-text floor. The broken build measured ~1.3.
+			check("...and its number contrasts with what it sits on",
+				readable.ratio >= 3, JSON.stringify(readable));
+
 			// GRAND has to be among them. It is served like every other
 			// denomination (a base in /catalog, a row in `declare`), so a
 			// frontend that quietly dropped it — a label array one short, a
