@@ -920,7 +920,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
           <div style={{ margin: "1rem 0" }}>
             {Object.values(players).map((nm, i) => <div key={i}>{nm}</div>)}
           </div>
-          {isHost && n >= 2 && <button className="btn" onClick={() => send({ action: "start" })}>Start</button>}
+          {isHost && n >= 2 && <button className="btn dis-gobtn" onClick={() => send({ action: "start" })}>Start</button>}
           {n < 2 && <div className="muted">Waiting for an opponent…</div>}
         </div>
         {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
@@ -1038,7 +1038,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       prefix={`yours would need`} />
                   )}
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <button className="btn" disabled={bidValue === null} onClick={doValueBid}>
+                    <button className="btn dis-gobtn" disabled={bidValue === null} onClick={doValueBid}>
                       Bid {bidValue ?? ""}
                     </button>
                     <button className="btn btn-ghost" onClick={doPass}>Pass</button>
@@ -1095,7 +1095,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     })}
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <button className="btn" disabled={!bidReady} onClick={doBid}>
+                    <button className="btn dis-gobtn" disabled={!bidReady} onClick={doBid}>
                       Bid {bidLevel ?? ""}{bidDenom !== null ? DENOM_LABEL[bidDenom] : ""}
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
@@ -1136,7 +1136,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     </div>
                   )}
                   <div style={{ display: "flex", gap: "0.5rem" }}>
-                    <button className="btn" disabled={swapTake === null || swapGive === null}
+                    <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                       onClick={() => doSwap(swapTake, swapGive)}>
                       Swap {swapTake !== null ? cardName(swapTake) : ""}{swapGive !== null ? ` for ${cardName(swapGive)}` : ""}
                     </button>
@@ -1166,7 +1166,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       +1 to your multiplier.
                     </div>
                     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                      <button className="btn" onClick={() => doMove({ kind: "look" })}>
+                      <button className="btn dis-gobtn" onClick={() => doMove({ kind: "look" })}>
                         Look at the talon
                       </button>
                       <button className="btn btn-ghost dis-annbtn"
@@ -1193,7 +1193,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       </div>
                     )}
                     <div style={{ display: "flex", gap: "0.5rem" }}>
-                      <button className="btn" disabled={swapTake === null || swapGive === null}
+                      <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                         onClick={() => doSwap(swapTake, swapGive)}>
                         Swap{swapTake !== null ? ` ${cardName(swapTake)}` : ""}
                         {swapGive !== null ? ` for ${cardName(swapGive)}` : ""}
@@ -1277,7 +1277,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       {" = "}<b>{value * mult}</b>
                       {` · you must score ${declLevel + (declSharp ? d.sharp_bonus : 0)}`}
                     </div>
-                    <button className="btn" disabled={!ok}
+                    <button className="btn dis-gobtn" disabled={!ok}
                       onClick={() => doDeclare(declDenom, declLevel, declSharp, declOpen)}>
                       Declare
                     </button>
@@ -1468,13 +1468,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   along so two simultaneous clicks cannot deal twice. */}
               {res.match_scores && !res.match_over ? (
                 <div className="dis-resbtns">
-                  <button className="btn" onClick={() => doMove({
+                  <button className="btn dis-gobtn" onClick={() => doMove({
                     kind: "next_round", round: res.round,
                   })}>Next round</button>
                   <button className="btn btn-ghost" onClick={leaveToLobby}>Back to lobby</button>
                 </div>
               ) : (
-                <button className="btn" onClick={leaveToLobby}>Back to lobby</button>
+                <button className="btn dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
               )}
             </div>
           ) : (

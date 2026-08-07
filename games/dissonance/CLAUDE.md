@@ -428,6 +428,30 @@ at all. The frontend gates that line on `sawTalon` (`!isSkat || game.looked`).
 
 ## Do not relitigate
 
+* **EVERY BUTTON ON THIS BOARD IS THE GREEN, and `.btn` alone is not a button**
+  (2026-08-07). `.btn` in the shared kit is GEOMETRY ONLY — padding, radius,
+  font, `border:none`, and deliberately no background or colour, because the
+  paint comes from a variant. This file carried **nine** bare `className="btn"`
+  buttons and was the only file in the repo that did, so Bid / Start / Swap /
+  Look / Next round / Back to lobby rendered as the browser's DEFAULT button
+  face — measured `rgba(239,239,239,.3)` on `rgba(16,16,16,.3)`, a white chip
+  with grey text on a dark green board. They are `.dis-gobtn` now (solid
+  accent), and `.dis-annbtn` — a `#6fa8d8` blue borrowed from nothing, on a
+  board with no other blue — is an accent OUTLINE, one step down from the solid.
+  - **Gold was the wrong fix even though it is the kit's primary.** The lobby,
+    the board, the selected bid and the turn badge are all `--accent`; gold is
+    Spender's colour arriving through the same fallback that already dressed
+    this game's lobby in the wrong accent once.
+  - **`--accent-hi` and `--ink` are tokens now**, not hex literals repeated in
+    eight places, so the go button, the bid toggles and the announcement outline
+    agree by construction.
+  - **Kontra stays red** (`#b8434f`, white text) and that is deliberate: it is
+    the defender's one moment of leverage and reads as a threat, the same role
+    the kit gives `btn-danger`. It is not an oversight to "fix".
+  - Guarded by `shared/tests/test_btn_has_a_variant.py`, repo-wide, because this
+    failed SILENTLY — nothing throws, the button works, and `smoke`, `screens`
+    and the whole Python suite all ask whether a thing renders, never what
+    colour it came out. Verified against the old file: it names all nine.
 * **No card is ever dimmed** (2026-08-07). Every face-up card renders
   identically, playable or not; legality lives in the `play` affordance and is
   enforced server-side. Two earlier versions of this failed differently and both

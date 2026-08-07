@@ -19,7 +19,33 @@
    BOTH auction modes. The outline rules lost their outline entirely. Anything
    added here that reaches for a token must either be defined on this rule or
    carry a `var(--x, fallback)`; `shared/tests/test_css_tokens.py` enforces it. */
-.dis { min-height: 100vh; color: var(--text); --accent: #6fe0a0; --lby-accent: var(--accent); }
+.dis {
+  min-height: 100vh; color: var(--text);
+  --accent: #6fe0a0;
+  /* Lifted accent for hover, and the near-black that goes ON the accent. Both
+     were written as literals in eight places between them; naming them is what
+     lets the go button, the bid toggles and the announcement outline agree by
+     construction rather than by everyone remembering the same two hex codes. */
+  --accent-hi: #8bebb5;
+  --ink: #08131f;
+  --lby-accent: var(--accent);
+}
+
+/* THE PRIMARY ACTION, and the reason it needs a class at all.
+   `.btn` in the shared kit is GEOMETRY ONLY — padding, radius, font, and
+   `border:none`. It sets no background and no colour, because every game is
+   expected to name a variant (`btn-gold`, `btn-outline`, `btn-ghost`). This
+   file had NINE bare `className="btn"` buttons and was the only file in the
+   repo that did, so Bid / Start / Swap / Look / Next round / Back to lobby all
+   fell through to the browser's default button face: `rgba(239,239,239,.3)`
+   on `rgba(16,16,16,.3)` — a white chip with grey text, on a dark green board.
+   Measured in a browser, not guessed.
+   Gold was the wrong fix even though it is the kit's primary: the lobby, the
+   board, the selected bid and the turn badge are all this green, and gold is
+   Spender's colour arriving through the same fallback that already dressed
+   this game's lobby in the wrong accent once. */
+.dis-gobtn { background: var(--accent); color: var(--ink); }
+.dis-gobtn:hover:not(:disabled) { background: var(--accent-hi); }
 
 /* ── mobile overrides (must precede the base rules; see above) ───────────── */
 @media (max-width: 760px) {
@@ -211,12 +237,12 @@
 .dis-bidgrid button:hover:not(:disabled):not(.on), .dis-denoms button:hover:not(:disabled):not(.on) {
   background: rgba(255, 255, 255, 0.15);
 }
-.dis-bidgrid button.on, .dis-denoms button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.dis-bidgrid button.on, .dis-denoms button.on { background: var(--accent); color: var(--ink); border-color: transparent; }
 .dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
 .dis-denoms { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
 .dis-denoms button { min-width: 56px; font-size: 1.1rem; }
 .dis-denoms button.red { color: #ff8a9c; }
-.dis-denoms button.on.red { color: #08131f; }
+.dis-denoms button.on.red { color: var(--ink); }
 .dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
 .dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
 
@@ -280,7 +306,7 @@
    specificity and only keeps its green because `.on` happens to come second.
    Reordering these two lines would silently break it, so say it in the selector. */
 .dis-valgrid button:hover:not(.on) { background: rgba(255, 255, 255, 0.15); }
-.dis-valgrid button.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.dis-valgrid button.on { background: var(--accent); color: var(--ink); border-color: transparent; }
 
 /* The collision list: one number, several games. This IS the mode's argument,
    so it is shown rather than explained. */
@@ -313,9 +339,14 @@
 }
 /* Same guard: Sharp/Open are toggles, and this rule out-specified `.on` too. */
 .dis-ann:hover:not(:disabled):not(.on) { background: rgba(255, 255, 255, 0.14); }
-.dis-ann.on { background: var(--accent); color: #08131f; border-color: transparent; }
+.dis-ann.on { background: var(--accent); color: var(--ink); border-color: transparent; }
 .dis-ann:disabled { opacity: 0.32; cursor: not-allowed; }
-.dis-annbtn { border-color: #6fa8d8; color: #a5d0f2; }
+/* The declare panel's "and Sharp" / "and Open" button. It was #6fa8d8/#a5d0f2 —
+   a blue borrowed from nothing, on a board with no other blue in it. It is an
+   OUTLINE of the accent now, so it reads as the same family as the toggles
+   above it while staying visibly one step down from the solid go button. */
+.dis-annbtn { border-color: var(--accent); color: var(--accent); }
+.dis-annbtn:hover:not(:disabled) { background: var(--accent); color: var(--ink); }
 
 /* Kontra is the defender's one moment of leverage; it reads as a threat. */
 .dis-kontrabtn { background: #b8434f; color: #fff; }
