@@ -264,6 +264,8 @@ fn main() {
         allow_sharp: !args.iter().any(|a| a == "--no-sharp"),
         allow_hand: !args.iter().any(|a| a == "--no-hand"),
         bid_expects_hand: args.iter().any(|a| a == "--expect-hand"),
+        sharp_bonus: flag(&args, "--sharp-bonus").and_then(|s| s.parse().ok())
+            .unwrap_or(SHARP_BONUS),
         q: flag(&args, "--q").and_then(|s| s.parse().ok()).unwrap_or(0.5),
         kontra_q: flag(&args, "--kontra-q").and_then(|s| s.parse().ok()).unwrap_or(0.5),
         ..SkatCfg::default()

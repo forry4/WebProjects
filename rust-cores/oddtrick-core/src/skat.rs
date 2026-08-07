@@ -46,8 +46,10 @@ pub const SKAT_BASE: [i32; NDEN] = [5, 2, 3, 4, 6];
 /// Null's flat value, sitting mid-ladder the way Skat's 23 does.
 pub const SKAT_NULL_VALUE: i32 = 20;
 
-/// Sharp promises the declared level plus this much.
-pub const SHARP_BONUS: i32 = 3;
+/// Sharp promises the declared level plus this much. 2, not 3 — at 3 it
+/// measured at 0% of contracts in every run, because the margin is taken off a
+/// scale whose ceiling is 12 and whose two totals sum to +5.
+pub const SHARP_BONUS: i32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SkatCfg {

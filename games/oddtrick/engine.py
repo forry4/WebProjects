@@ -126,7 +126,19 @@ SKAT_BASE = [5, 2, 3, 4, 6]  # clubs, diamonds, hearts, spades, no-trump
 SKAT_NULL_VALUE = 20
 
 #: Sharp promises the declared level plus this much.
-SHARP_BONUS = 3
+#:
+#: 2, not 3. The margin is measured against a scale where both players' totals
+#: sum to +5 and one player's ceiling is 12, so every point of it is a large
+#: ask: at 3, declaring level 4 Sharp promised 7 of a possible 12, i.e. holding
+#: the opponent to -2. Sharp measured at 0% of contracts in every skatlab run
+#: at that setting.
+#:
+#: The deeper reason it was mispriced is the additive multiplier. Hand and
+#: Sharp each add exactly +1, but Hand costs one declined card swap and Sharp
+#: costs points off a 12-point scale -- identical reward for wildly unequal
+#: risk, which is most of why Hand ran at ~94% and Sharp at 0%. Lowering the
+#: bar narrows that gap; it does not close it.
+SHARP_BONUS = 2
 
 #: The legal bid ladder: every product base x level, plus Null's flat value.
 #:

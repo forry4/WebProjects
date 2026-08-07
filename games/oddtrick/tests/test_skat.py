@@ -381,16 +381,23 @@ def test_missing_it_pays_the_defender_the_same_number_plus_the_shortfall():
     assert res["scores"][res["declarer"]] == 0
 
 
-def test_sharp_raises_the_bar_by_three_and_a_bare_make_now_loses():
+def test_sharp_raises_the_bar_and_a_bare_make_now_loses():
+    """The margin is SHARP_BONUS, read symbolically — it is a tuned knob (3 was
+    measured at 0% of contracts and dropped to 2), so a test that hardcodes it
+    fails on the next tuning pass for no reason."""
+    bonus = E.SHARP_BONUS
     g = _declared(value=12, denom=2, level=4, sharp=True)
-    assert E.skat_target(g) == 4 + E.SHARP_BONUS
+    assert E.skat_target(g) == 4 + bonus
     res = _score(g, 4)      # would have made the plain contract exactly
-    assert res["made"] is False, "Sharp promises level + 3, not level"
-    assert res["short"] == 3
-    assert res["scores"][1 - res["declarer"]] == 12 * 2 + E.SHORT_PENALTY * 3
+    assert res["made"] is False, "Sharp promises level + the bonus, not level"
+    assert res["short"] == bonus
+    assert res["scores"][1 - res["declarer"]] == 12 * 2 + E.SHORT_PENALTY * bonus
 
-    made = _score(_declared(value=12, denom=2, level=4, sharp=True), 7)
+    made = _score(_declared(value=12, denom=2, level=4, sharp=True), 4 + bonus)
     assert made["made"] is True and made["scores"][made["declarer"]] == 24
+    # Exactly on the bar makes it; one under does not.
+    just_under = _score(_declared(value=12, denom=2, level=4, sharp=True), 3 + bonus)
+    assert just_under["made"] is False and just_under["short"] == 1
 
 
 def test_the_full_stack_multiplies_rather_than_adds_to_the_payout():

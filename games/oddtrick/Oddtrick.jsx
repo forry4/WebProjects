@@ -1175,7 +1175,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
                 <div className="odd-scorerow">
                   <span>{game.auction.denom === NULL_DENOM ? "Must win" : "Must score"}</span>
                   <b>{game.auction.denom === NULL_DENOM ? "no +2 trick"
-                    : game.auction.level + (ct.sharp ? (catalog?.sharp_bonus ?? 3) : 0)}</b>
+                    : game.auction.level + (ct.sharp ? (catalog?.sharp_bonus ?? 2) : 0)}</b>
                 </div>
                 <SkatStake game={game} nameOf={nameOf} rows />
               </>}

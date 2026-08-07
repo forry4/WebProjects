@@ -130,7 +130,7 @@ export default function OddtrickRules() {
 					{ t: "The auction", d: "Ascending numbers, taking turns. Either player may pass — including the opener, because here passing hands the opponent the talon and the lead at THEIR price, rather than being an escape from a forced bad contract. Both passing throws the hand in and redeals." },
 					{ t: "Talon or Hand", d: "Win it and you choose: look at the three talon cards and maybe swap one in, or decline to look at all and play HAND for ×2. Looking and then standing pat is not Hand — you saw them." },
 					{ t: "Declare", d: "Name a denomination and a level whose value reaches your bid. Declaring the minimum is normal; declaring higher is voluntary and pays more." },
-					{ t: "Sharp / Open", d: "Before trick 1 you may promise your level PLUS 3 (Sharp, +1 to the multiplier) and then play with your hand face up (Open, +1 again). They stack by addition: Hand + Sharp + Open is ×4." },
+					{ t: "Sharp / Open", d: "Before trick 1 you may promise your level PLUS 2 (Sharp, +1 to the multiplier) and then play with your hand face up (Open, +1 again). They stack by addition: Hand + Sharp + Open is ×4." },
 					{ t: "Kontra", d: "The defender, who has just learned what game they're facing, may double everything. The declarer may Re it back to ×4 of the announced total." },
 				]} />
 				<p>
