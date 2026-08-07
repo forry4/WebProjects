@@ -1496,6 +1496,62 @@ try {
 		await ctx.close();
 	}
 
+	// ── Every lobby column spans the phone ────────────────────────────────────
+	// The base rules pin each column with two classes; the phone reset used one,
+	// and specificity beats source order, so Active stayed in column 2 of a
+	// one-column grid — rendered shrunk to content against the right edge. The
+	// existing tier checks all measured the GRID, which was correctly 1fr; only
+	// the column's own box shows it. Checked on the two games that pin columns.
+	{
+		const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "phone-harness", name: "Phone", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		for (const [route, marker] of [["/duel", ".duel"], ["/dontminion", ".dm"]]) {
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			await page.waitForSelector(marker, { timeout: 25_000 }).catch(() => {});
+			await page.waitForSelector(".lby-tabs", { timeout: 15_000 }).catch(() => {});
+			for (const tab of ["Open", "Active", "History"]) {
+				await page.locator(".lby-tab", { hasText: new RegExp(`^${tab}`) }).first()
+					.click({ timeout: 8_000 }).catch(() => {});
+				await sleep(180);
+				const m = await page.evaluate(() => {
+					const cols = document.querySelector(".lby-cols");
+					if (!cols) return null;
+					const vis = [...cols.children].find((c) => getComputedStyle(c).display !== "none");
+					if (!vis) return null;
+					const cb = cols.getBoundingClientRect(), vb = vis.getBoundingClientRect();
+					return {
+						gridW: Math.round(cb.width), colW: Math.round(vb.width),
+						leftGap: Math.round(vb.left - cb.left),
+						rightGap: Math.round(cb.right - vb.right),
+						col: getComputedStyle(vis).gridColumnStart,
+					};
+				});
+				// Three things, each catching a different half of the defect:
+				// track 1 (an implicit track is the bug itself), most of the
+				// width (not shrunk to content), and CENTRED — a column pushed
+				// against one edge is what the phone actually showed. Gaps are
+				// compared rather than required to be zero, because a game may
+				// legitimately pad its own column (Dontminion uses 18px).
+				check(`${route} ${tab} spans the phone`,
+					!!m && m.col === "1" && m.colW >= m.gridW * 0.85
+						&& Math.abs(m.leftGap - m.rightGap) <= 2,
+					JSON.stringify(m));
+			}
+		}
+		check("no page errors in the phone lobby", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Oddtrick's skat auction ───────────────────────────────────────────────
 	// Skat mode is a room FLAG chosen in the create modal, which is exactly the
 	// failure class this gate exists for: Dontminion's Renaissance set rendered

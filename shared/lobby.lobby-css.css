@@ -119,7 +119,16 @@
 @media(max-width:760px){
 	.lby-tabs{display:flex}
 	.lby-cols{grid-template-columns:1fr;gap:0}
-	.lby-cols>*{grid-column:1;grid-row:auto}
+	/* `.lby-cols.lby-cols` is doubled ON PURPOSE. The base rules pin each column
+	   with TWO classes (`.lby-cols>.lby-col-active{grid-column:2}`), and
+	   specificity beats source order — so a single-class `.lby-cols>*` reset
+	   LOSES here even though it sits later and inside a media query. The column
+	   then stayed pinned to column 2 of a one-column grid, the browser created an
+	   implicit auto-width track for it, and Active/History rendered shrunk to
+	   content and hugging the right edge of a phone instead of spanning it.
+	   Doubling the class matches the base specificity while still selecting any
+	   child, so a column class added later cannot reintroduce the bug. */
+	.lby-cols.lby-cols>*{grid-column:1;grid-row:auto}
 	.lby-cols.tab-open>:not(.lby-col-open),
 	.lby-cols.tab-active>:not(.lby-col-active),
 	.lby-cols.tab-history>:not(.lby-col-history){display:none}
