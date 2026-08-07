@@ -144,6 +144,52 @@ export function writeLobbyCache(ns, scope, key, val) {
 	try { localStorage.setItem(`lbyc.${ns}.${scope}.${key}`, JSON.stringify(val)); } catch {}
 }
 
+// ─── Last-played AI difficulty (every game that has an AI opponent) ──────────
+// The create modal's difficulty row starts on whatever this player last STARTED
+// a game against — per game, per identity — instead of one hardcoded tier for
+// everyone forever. Same storage discipline as the lobby cache above:
+// localStorage, namespaced by game (ns) + user/guest id (scope), every access
+// best-effort (a failure is a no-op fallback, never a throw).
+//
+// It is written when a vs-AI game is actually CREATED, not when the picker
+// moves — "last PLAYED". Opening the modal, browsing the tiers and backing out,
+// or creating a vs-Friend game, all leave the remembered tier alone.
+//
+// The stored id is validated against the tiers the game currently OFFERS, so a
+// retired one (Spender's variant codes, Dontminion's plain Big Money) falls
+// back to the game's own default instead of restoring a selection the server
+// would silently coerce to a different bot than the label claims.
+const lastDiffKey = (ns, scope) => `lastdiff.${ns}.${scope}`;
+
+export function readLastDifficulty(ns, scope, offered, fallback) {
+	try {
+		const v = localStorage.getItem(lastDiffKey(ns, scope));
+		return v !== null && offered.includes(v) ? v : fallback;
+	} catch { return fallback; }
+}
+export function writeLastDifficulty(ns, scope, value) {
+	try { localStorage.setItem(lastDiffKey(ns, scope), String(value)); } catch {}
+}
+
+// `[value, setValue, remember]` — a drop-in for the `useState` the create modal
+// used to hold. `remember(v)` is what makes a tier stick, so call it where the
+// vs-AI game is created, not from the picker's onChange.
+export function useLastDifficulty(ns, scope, offered, fallback) {
+	const [value, setValue] = useState(() => readLastDifficulty(ns, scope, offered, fallback));
+	// Identity can change under a mounted lobby (log in / log out) and the
+	// remembered tier is per-identity, so re-read when scope moves. Guarded by a
+	// ref rather than by a dep list: `offered` is an array literal at every call
+	// site, so a dep on it would re-run every render and clobber the pick the
+	// player just made in the open modal.
+	const scopeRef = useRef(scope);
+	useEffect(() => {
+		if (scopeRef.current === scope) return;
+		scopeRef.current = scope;
+		setValue(readLastDifficulty(ns, scope, offered, fallback));
+	});
+	return [value, setValue, (v) => writeLastDifficulty(ns, scope, v)];
+}
+
 // ─── Progressive History reveal (all four games' History lists) ──────────────
 // Show the newest HISTORY_PAGE games, reveal another page when the reader
 // scrolls the end of the list into view, and stop at HISTORY_MAX.

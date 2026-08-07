@@ -40,6 +40,18 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   together, since `core/` may not import a feature. It pages off a SENTINEL + IntersectionObserver
   rather than a scroll handler, because the four lobbies scroll different elements — see the root
   `CLAUDE.md`.
+  **And `useLastDifficulty` — the create modal's AI-difficulty row defaults to the tier the player
+  LAST PLAYED**, per game and per identity (localStorage `lastdiff.<ns>.<myId>`, same discipline as
+  the cache above). It returns `[value, setValue, remember]` and a game opts in by holding its
+  difficulty state in it and calling `remember` **where the vs-AI game is created** — not from the
+  picker's `onChange`, or browsing the tiers and backing out would rewrite the default. The stored
+  id is validated against the tiers the picker currently OFFERS, because a retired one (Spender's
+  variant codes, Dontminion's plain Big Money) would otherwise restore as a selection the server
+  silently coerces to a different bot than the label names. **A game that skips this compiles and
+  renders a perfectly normal picker; it just forgets** — so
+  `shared/tests/test_ai_difficulty_memory.py` derives the roster from the tree (any game screen
+  whose create message carries `ai_difficulty`/`ai_variant`) and fails the next game that lands
+  without it. `screens.mjs` covers the behaviour end-to-end on Duel.
 - **`splendor.jsx`** — Spender + Duel SHARE gems, jewel cards, and the move log
   (`GemToken`/`CardView`/`TokenPill`/`BonusPill`/`LogEntry` + CSS), lifted verbatim from Spender.jsx.
   **If a second game needs a Spender visual, EXTRACT it here — don't re-approximate it** (Duel drifted

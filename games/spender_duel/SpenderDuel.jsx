@@ -3,7 +3,7 @@ import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, LobbyTabs, notWaiting, LobbyAction } from "../../shared/lobby.jsx";
+  useProgressiveList, LobbyTabs, notWaiting, LobbyAction, useLastDifficulty } from "../../shared/lobby.jsx";
 // The gems, jewel cards and move log are SHARED with Spender (same game family, so
 // they must look the same). Duel adds only what Splendor Duel needs on top: pearls,
 // crowns, wild bonuses and ability glyphs — all optional props on the same CardView.
@@ -77,6 +77,7 @@ const BOT_TIERS = [
   { id: "expert", name: "Expert", desc: "Hard, retrained to punish impatience" },
 ];
 const TIER_NAME = { easy: "Easy", normal: "Normal", hard: "Hard", expert: "Expert" };
+const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function roomCode() { return Array.from({ length: 6 }, () => "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[Math.floor(Math.random() * 26)]).join(""); }
@@ -363,7 +364,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
   const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
-  const [createDiff, setCreateDiff] = useState("hard");           // AI difficulty (easy|normal|hard)
+  // AI difficulty (easy|normal|hard|expert) — starts on the tier this player
+  // last actually played, Hard until they have one.
+  const [createDiff, setCreateDiff, rememberDiff] =
+    useLastDifficulty("duel", myId, BOT_TIER_IDS, "hard");
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // review mode: an HTTP-loaded finished game (no WebSocket). replaySnapshots is the
   // per-move board list from /review; replayTurn is which one is on screen.
@@ -876,7 +880,10 @@ export default function SpenderDuel({ myId, authUser, onExit }) {
     setRoomData(null);
     setShowCreateModal(false);
     const msg = { action: "create", name: playerName, vs_ai: vsAi };
-    if (vsAi) msg.ai_difficulty = difficulty || "hard";
+    if (vsAi) {
+      msg.ai_difficulty = difficulty || "hard";
+      rememberDiff(msg.ai_difficulty);   // this game's tier is the next modal's default
+    }
     setConnecting(true);
     connect(`${DUEL_WS}/${rid}/${myId}`, msg);
   };

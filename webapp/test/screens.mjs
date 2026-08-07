@@ -1959,6 +1959,64 @@ try {
 		await ctx.close();
 	}
 
+	// ── The create modal opens on the tier you last PLAYED ───────────────────
+	// One game covers the behaviour (`useLastDifficulty` is shared, and each
+	// game's wiring is one line that `shared/tests/test_ai_difficulty_memory.py`
+	// checks statically). Duel, because its default is Hard and its Easy tier
+	// starts a game instantly, so the assertion is over two DIFFERENT tiers
+	// rather than over the default agreeing with itself.
+	{
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "lastdiff-harness", name: "Diff", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) console.log(`  OK   ${name}`);
+			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+		};
+		const openModal = async () => {
+			await page.goto(`http://localhost:${PORT}/duel`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".duel", { timeout: 25_000 }).catch(() => {});
+			await page.getByRole("button", { name: /new game|create/i }).first()
+				.click({ timeout: 15_000 }).catch(() => {});
+			await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+			return page.evaluate(() =>
+				[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		};
+
+		// A first-time player gets the game's own default.
+		const first = await openModal();
+		check("a player with no history gets the game's default tier",
+			first.includes("Hard") && !first.includes("Easy"), JSON.stringify(first));
+
+		// Play one game against a DIFFERENT tier…
+		for (const label of [/^VS AI$/, /^Easy$/]) {
+			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		await page.waitForSelector(".duel-board", { timeout: 25_000 }).catch(() => {});
+
+		// …and the next modal, on a FRESH page load, opens on it.
+		const again = await openModal();
+		check("the create modal reopens on the tier that was actually played",
+			again.includes("Easy") && !again.includes("Hard"), JSON.stringify(again));
+
+		// Browsing the picker is not playing: a tier merely clicked must not stick.
+		await page.locator(".cm-seg .cm-seg-btn", { hasText: /^Expert$/ }).first()
+			.click({ timeout: 10_000 }).catch(() => {});
+		const afterBrowsing = await openModal();
+		check("a tier only clicked, never played, does not become the default",
+			afterBrowsing.includes("Easy") && !afterBrowsing.includes("Expert"),
+			JSON.stringify(afterBrowsing));
+
+		check("no page errors remembering the difficulty", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);
 		process.exitCode = 1;

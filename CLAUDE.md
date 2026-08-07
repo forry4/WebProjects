@@ -350,6 +350,12 @@ covers the logic; each game's wiring is one line).
   (`release_socket(disarm_client_ai=True)`) so a room never waits on a tab that is gone. Duel, CoC and
   Oddtrick all run this shape; **the move is re-validated against the engine on arrival**, which is the
   whole reason a client-side AI is safe.
+- **THE CREATE MODAL'S DIFFICULTY DEFAULT IS THE TIER THAT PLAYER LAST PLAYED, in every game with a
+  bot** — `useLastDifficulty` in `shared/lobby.jsx`, keyed per game and per identity, written where
+  the vs-AI game is CREATED (not from the picker's `onChange`) and validated against the tiers the
+  picker currently offers. A new game with an AI opts in with one line;
+  `shared/tests/test_ai_difficulty_memory.py` derives its roster from the tree and fails the one
+  that doesn't, because forgetting compiles and renders a perfectly normal-looking picker.
 - **Benchmark offline only** (per-game `ai_selfplay` / arena / gate bins) — never in a serving path.
   Judge with CRN paired arenas + a mirror sanity that must read exactly 0.5000; the ship criterion is
   EQUAL-TIME, not equal-sims.

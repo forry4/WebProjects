@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, us
 import { lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, LobbyTabs } from "../../shared/lobby.jsx";
+  useProgressiveList, LobbyTabs, useLastDifficulty } from "../../shared/lobby.jsx";
 import CocRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, replacePath, subscribe } from "../../shared/router.js";
 
@@ -793,6 +793,16 @@ function BoardThumb({ spaces, name, selected, onClick }) {
   );
 }
 
+// The tiers the create modal OFFERS. `main.AI_DIFFICULTIES` also carries
+// "normal", which the picker has never shown — so this list, not that tuple, is
+// what a remembered last-played tier is validated against.
+const AI_TIER_OPTIONS = [
+  { value: "easy", label: "Easy", title: "A capable search opponent — a solid game without neural-net strength" },
+  { value: "hard", label: "Hard", title: "The first-generation neural net, searched in your browser — a real challenge" },
+  { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
+];
+const AI_TIER_IDS = AI_TIER_OPTIONS.map((t) => t.value);
+
 export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [board, setBoard] = useState(() => {           // {spaces, colors, castle, ...} — hydrated from cache
     try { const c = localStorage.getItem(COC_BOARDS_CACHE); if (c) return boardsWithById(JSON.parse(c)); } catch {}
@@ -825,7 +835,10 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
   const [reconnecting, setReconnecting] = useState(false);   // socket dropped mid-game, retrying
   const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
   const [createOpp, setCreateOpp] = useState("ai");               // "friend" | "ai"
-  const [createDiff, setCreateDiff] = useState("expert");         // AI difficulty (easy|hard|expert)
+  // AI difficulty (easy|hard|expert) — the tier this player last actually
+  // played, Expert until they have one.
+  const [createDiff, setCreateDiff, rememberDiff] =
+    useLastDifficulty("coc", myId, AI_TIER_IDS, "expert");
   const [createSeats, setCreateSeats] = useState(2);              // VS-Friend seat cap (2-4)
   const [createSameBoard, setCreateSameBoard] = useState(false);  // VS-Friend: force everyone onto the host's board
   const [joinBoardFor, setJoinBoardFor] = useState(null);         // room id pending a board pick before join
@@ -1633,6 +1646,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
 
   // ── actions ──
   const startCreate = (vsAi, difficulty = "hard") => {
+    if (vsAi) rememberDiff(difficulty);   // this game's tier is the next modal's default
     const rid = roomCode();
     setRoomId(rid);
     setConnecting(true);
@@ -1927,11 +1941,7 @@ export default function CastlesOfCrimson({ myId, authUser, onExit }) {
               </CmRow>
               {createOpp === "ai" ? (
                 <CmRow label="AI Difficulty">
-                  <CmSeg value={createDiff} onChange={setCreateDiff} options={[
-                    { value: "easy", label: "Easy", title: "A capable search opponent — a solid game without neural-net strength" },
-                    { value: "hard", label: "Hard", title: "The first-generation neural net, searched in your browser — a real challenge" },
-                    { value: "expert", label: "Expert", title: "The strongest neural net, searched in your browser" },
-                  ]} />
+                  <CmSeg value={createDiff} onChange={setCreateDiff} options={AI_TIER_OPTIONS} />
                 </CmRow>
               ) : (
                 <CmRow label="Players">

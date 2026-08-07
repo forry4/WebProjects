@@ -54,6 +54,7 @@ const GameChunkLoading = () => (
 );
 import { baseCss } from "../../shared/theme.js";
 import { lobbyCss, LobbyHeader, LobbyLoading, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
+	useLastDifficulty,
 	createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
 	RulesModal, rulesModalCss,
 	useProgressiveList, LobbySectionHd, LobbyTabs, TurnBadge, LobbyAction } from "../../shared/lobby.jsx";
@@ -103,6 +104,10 @@ const MODE_FOR_SCREEN = { home: "home", spender: "spender", coc: "coc", werewolf
 // Frontend-only display names for the AI variants (wire codes stay H2/H3/S).
 const AI_PERSONAS = { H2: "Henry", H3: "Herald", S: "Steve", N: "Nina" };
 const AI_TIERS = { H2: "easy", H3: "medium", S: "hard", N: "expert" };
+// The variants the create modal OFFERS, weakest first — the pill row is built
+// from this, and it is what a remembered last-played variant is validated
+// against (a retired code must not restore as a live selection).
+const AI_VARIANTS = ["H2", "H3", "S", "N"];
 const aiPersona = (v) => AI_PERSONAS[v] || `AI ${v}`;         // variant code -> persona name (retired codes -> "AI <code>")
 const aiTierLabel = (v) => (AI_TIERS[v] || "").replace(/^./, (c) => c.toUpperCase());  // "expert" -> "Expert"
 const displayName = (name) => {                                // backend "AI (H2)" -> "Henry (AI)"; humans unchanged
@@ -846,7 +851,10 @@ export default function SpenderApp() {
 	const [browserLoading, setBrowserLoading] = useState(false);
 	const [showCreateModal, setShowCreateModal] = useState(false);  // the New Game options modal
 	const [createOpp, setCreateOpp] = useState("ai");        // "friend" | "ai"
-	const [createVariant, setCreateVariant] = useState("N"); // AI difficulty (wire code)
+	// AI difficulty (wire code) — defaults to the last variant this player
+	// actually started a game against, falling back to Nina for a first game.
+	const [createVariant, setCreateVariant, rememberVariant] =
+		useLastDifficulty("spender", myId, AI_VARIANTS, "N");
 	const [createSeats, setCreateSeats] = useState(2);       // friend-lobby seat cap (2-4)
 	const [showRules, setShowRules] = useState(false);  // lobby "How to Play" modal
 	const [winPoints, setWinPoints] = useState(15);   // 15 = Classic, 21 = Long mode
@@ -1682,6 +1690,7 @@ export default function SpenderApp() {
 
 	// ── Room / game actions ────────────────────────────────────────────────
 	const handleCreate = (vsAI = false, aiVariant = "A", wp = 15, maxPlayers = 4) => {
+		if (vsAI) rememberVariant(aiVariant);   // this game's variant is the next modal's default
 		const newRoomId = roomCode();
 		setRoomId(newRoomId);
 		try { localStorage.setItem("spender_roomId", newRoomId); } catch {}
@@ -2876,7 +2885,7 @@ export default function SpenderApp() {
 							{createOpp === "ai" ? (
 								<CmRow label="AI Difficulty">
 									<div className="cm-pills">
-										{["H2", "H3", "S", "N"].map(v => (
+										{AI_VARIANTS.map(v => (
 											<button key={v} type="button" className={`cm-pill${createVariant === v ? " sel" : ""}`}
 												onClick={() => setCreateVariant(v)}>
 												<span className="cm-pill-name">{aiPersona(v)}</span>

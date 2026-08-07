@@ -4,7 +4,7 @@ import {
   lobbyCss, LobbyHeader, LobbySectionHd, TurnBadge, LobbyLoading, GameMenu, gameMenuCss,
   readLobbyCache, writeLobbyCache, createModalCss, CreateModal, CmRow, CmSeg,
   notWaiting, LobbyAction,
-  LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs,
+  LobbyCreateRow, lobbyCreateRowCss, useProgressiveList, LobbyTabs, useLastDifficulty,
   RulesModal, rulesModalCss,
 } from "../../shared/lobby.jsx";
 // Only the shared CARD FRAME (sizing vars + .card chrome). Dontminion's card face
@@ -41,6 +41,11 @@ const BOTS = [
   { id: "easy", name: "Random", title: "Random legal moves — barely plays" },
   { id: "bmplus", name: "Money+", title: "Big Money+ — reads the board for a terminal, knows how the game ends" },
 ];
+// A remembered last-played tier is validated against THIS list, not against
+// `main.AI_DIFFICULTIES` — plain Big Money left the picker before it left the
+// server, and a retired id must fall back to the default rather than restore as
+// a selection whose label no longer names the bot the server would seat.
+const BOT_IDS = BOTS.map((b) => b.id);
 // Display NAMES only. The SERVER decides which expansions exist (/catalog
 // "expansions", from main.KNOWN_EXPANSIONS) and the picker is built from that,
 // so a set the server ships without a label here still appears (under a
@@ -789,10 +794,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createOpp, setCreateOpp] = useState("ai");
   const [createBots, setCreateBots] = useState(1);
-  // Big Money+ by default: the strongest tier that still answers instantly,
-  // and the one that plays a recognisable game of Dominion (it reads the
-  // board for a terminal and knows how the game ends).
-  const [createBotKind, setCreateBotKind] = useState("bmplus");
+  // The bot style this player last actually played. Big Money+ until they have
+  // one: the strongest tier that still answers instantly, and the one that
+  // plays a recognisable game of Dominion (it reads the board for a terminal
+  // and knows how the game ends).
+  const [createBotKind, setCreateBotKind, rememberBotKind] =
+    useLastDifficulty("dontminion", myId, BOT_IDS, "bmplus");
   // Kingdom requirements — none by default, so a plain Create still deals the
   // fully random 10 the game has always dealt.
   const [createReqs, setCreateReqs] = useState([]);
@@ -1239,6 +1246,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
     if (createOpp === "ai") {
       msg.num_bots = createBots;
       msg.ai_difficulty = createBotKind;
+      rememberBotKind(createBotKind);   // this game's bot style is the next modal's default
     } else {
       msg.max_players = createPlayers;
     }

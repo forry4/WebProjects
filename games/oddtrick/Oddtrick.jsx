@@ -5,7 +5,7 @@ import {
   LobbyTabs, GameMenu, gameMenuCss, readLobbyCache, writeLobbyCache,
   createModalCss, CreateModal, CmRow, CmSeg, LobbyCreateRow, lobbyCreateRowCss,
   RulesModal, rulesModalCss,
-  useProgressiveList, notWaiting, LobbyAction,
+  useProgressiveList, notWaiting, LobbyAction, useLastDifficulty,
 } from "../../shared/lobby.jsx";
 import OddtrickRules from "./rules.jsx";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
@@ -48,6 +48,7 @@ const BOT_TIERS = [
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
   { id: "hard", name: "Hard", desc: "Solves the hand exactly, in your browser" },
 ];
+const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
 
 // The Hard tier's card play is searched HERE, on the player's CPU. It is an
 // exact double-dummy solve per sampled deal — ~70ms for one deal at trick 1 —
@@ -347,7 +348,10 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   // Create-modal selections. Deferred until "Create Game" rather than firing on
   // the option click — the shape every other game's modal uses.
   const [createOpp, setCreateOpp] = useState("ai");
-  const [createDiff, setCreateDiff] = useState("normal");
+  // Difficulty defaults to the tier this player last actually played, Normal
+  // until they have one.
+  const [createDiff, setCreateDiff, rememberDiff] =
+    useLastDifficulty("oddtrick", myId, BOT_TIER_IDS, "normal");
   // Skat mode's half-built moves: the number, then the declaration.
   const [bidValue, setBidValue] = useState(null);
   const [declDenom, setDeclDenom] = useState(null);
@@ -587,6 +591,7 @@ export default function Oddtrick({ myId, authUser, onExit }) {
   }, [game?.phase, game?.declare?.bid]);
 
   const createGame = (vsAi, difficulty) => {
+    if (vsAi) rememberDiff(difficulty);   // this game's tier is the next modal's default
     const rid = roomCode();
     setConnecting(true); setShowCreate(false);
     connect(`${OT_WS}/${rid}/${myId}`, {
