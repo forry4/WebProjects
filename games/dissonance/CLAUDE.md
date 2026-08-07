@@ -523,9 +523,11 @@ says is legal. No thresholds.
   wrong is what the first wired version did. A card decision solves the deal
   once (74ms native); an auction decision solves it in every denomination
   (417ms). Inheriting the card tier's 8-world cap put **7.5–9.2s** on a bid,
-  past the point where the watchdog took decisions back (6 of 8 answered). Three
-  things fixed it, and it now runs **~1.0s for the first decision and ~0 for the
-  rest, 14 of 14 answered**:
+  past the point where the watchdog took decisions back (6 of 8 answered). It
+  now runs **~1.0s for the first decision of a hand and ~0 for every one after
+  it, 14 of 14 answered** — but note that the "~0 for the rest" only became true
+  with the `covered` mask below; before it, the cache hit inside a round and
+  missed across them, so a whole auction paid its opening price on every turn:
   - **A separate `CLIENT_AI_AUCTION_WORLDS` (3).** The estimate is a whole-hand
     question and much less noisy than a mid-play one; the design lab's own
     sweeps ran at k=4.
@@ -534,13 +536,41 @@ says is legal. No thresholds.
     more up a skat ladder — and only the option list changes, which is
     arithmetic. The talon swap changes the hand and so invalidates it by
     construction. This is the big one.
+  - **…and the denominations asked about are a QUERY against that entry, never
+    part of its identity.** The option list does not merely change, it SHRINKS:
+    a classic seat cannot re-bid a denomination it has named, so the set its
+    options span runs 5, 4, 3, 2 down its own four turns, and skat's runs
+    5, 4, 3, 2, 1 as the rungs price denominations out. With that set in the
+    key every one of those steps MISSED and re-solved denominations already in
+    hand — the cache only ever hit inside a round. `Solved` now carries the
+    sampled deals plus a `covered` mask: a subset is a hit, a superset solves
+    only the difference **on the same deals** (a fresh sample would make the
+    choice between denominations noise). Measured over a whole classic auction,
+    **18,435k nodes → 7,220k, −61%**, and every turn after the first is free.
   - **MTD(f) seeds each denomination from the last** (−6%, exact). The same hand
     is worth a similar amount in hearts and spades, so the first solve pays for
     the other four. `solve_root` had done this between sibling moves since the
     campaign.
+  - **Seeding ACROSS WORLDS is worth nothing — do not relitigate.** The obvious
+    next step (carry each denomination's value into the same denomination of the
+    next world, since a different lie of the unseen cards should move the value
+    less than a different trump does) measures 8,634k → 8,685k nodes: no change.
+    It first read −14% on a bench that solved the SAME deal three times, where
+    the carried seed was already exactly right; the fix is that the worlds must
+    be really determinized. `bin/abench`.
   - **A BIGGER TT IS SLOWER — do not relitigate.** 2^19 and 2^20 each cut nodes
     (2.55M → 2.43M → 2.38M) and each ran SLOWER in wall clock (423 → 472 → 491
     ms/world): cache locality dominates at this size. 2^18 stays.
+  - **THE FAN-OUT IS ALREADY OPTIMAL — splitting it finer cannot help.** The
+    pool gives each worker its own world, so four workers buy four worlds for
+    one world's wall clock with no idle time. Splitting by denomination instead
+    (each worker owning some trumps across shared worlds) was measured and is
+    WORSE at equal quality: total work is unchanged and worlds are near-equal
+    cost, so the balance being optimised was never the problem. What is left is
+    total work — which is what the cache above attacks.
+  - **MEASURE THIS IN NODES, NOT MILLISECONDS.** `Dd::nodes` is exact and
+    proportional to time; wall clock on a dev box swings ~2.5x on byte-identical
+    work, which is more than any of the effects above.
 * **The approximation, stated:** `solve` gives what a declarer can guarantee
   with both sides playing for POINTS, which is not either side playing for the
   contract. Pricing every candidate exactly needs a `solve_contract` per

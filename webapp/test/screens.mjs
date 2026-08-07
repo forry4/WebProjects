@@ -53,7 +53,14 @@ async function waitForHttp(url, timeoutMs, label) {
 	throw new Error(`${label} did not come up at ${url} within ${timeoutMs}ms`);
 }
 
+// CI installs the browser Playwright asks for and the first branch takes it.
+// The escape hatch is for a box that has a Chromium Playwright's pin does not
+// name — a preinstalled one in a container image, say, where the pin moved from
+// build 1194 to 1228 and the gate stops being runnable at all. Silently falling
+// back to msedge was the old answer and only worked on one machine.
 async function launchBrowser() {
+	const exe = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+	if (exe) return await chromium.launch({ executablePath: exe });
 	try { return await chromium.launch(); }
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }

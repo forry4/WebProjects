@@ -84,13 +84,27 @@ pub struct World {
     pub duck: [bool; NDEN],
 }
 
-/// Solve one determinized deal in every denomination the options mention.
+/// The sampled deals AND what has been solved on them so far.
+///
+/// The two halves are stored together because the cache extends: a later round
+/// asking about a denomination this one did not cover must solve it on the SAME
+/// deals, or the new denomination would be priced against a different sample
+/// than its rivals and the comparison between them would be noise.
+#[derive(Clone, Default)]
+pub struct Solved {
+    /// The determinizations, kept so a missing denomination can be filled in.
+    pub deals: Vec<State>,
+    /// Bit d set once every deal has been solved in denomination d.
+    pub covered: u8,
+    pub worlds: Vec<World>,
+}
+
+/// Solve one determinized deal in every denomination in `todo`.
 ///
 /// Only the denominations actually asked about: a declaration that has already
 /// fixed its trump asks about one, and paying for the other four would be four
 /// full 13-trick solves thrown away.
-fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8) -> World {
-    let mut w = World::default();
+fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut World) {
     // MTD(f) converges by a ladder of null-window probes, so each denomination
     // seeds the next: the same hand is worth a similar amount in hearts and in
     // spades, and the first full solve pays for the other four.
@@ -117,7 +131,6 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8) -> World 
         w.pts[d as usize] = if declarer == 0 { p0 } else { POOL as i32 - p0 };
         w.duck[d as usize] = dd.null_no_even_makeable(&s, declarer);
     }
-    w
 }
 
 /// Sum each option's declarer-signed payoff over `k` sampled deals.
@@ -146,24 +159,48 @@ pub fn wanted_denoms(opts: &[Option_]) -> u8 {
 /// seat HOLDS, so it survives every one of those rounds; only the option list
 /// changes, and pricing is arithmetic. Recomputing it per round was the single
 /// biggest cost in the first wired version.
-pub fn solve_worlds(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
-                    wanted: u8, declarer: usize) -> Vec<World> {
-    let mut buf: Vec<u8> = Vec::with_capacity(16);
-    (0..k.max(1))
-        .map(|_| {
-            let deal = v.determinize(rng, &mut buf);
-            solve_world(dd, &deal, declarer, wanted)
-        })
-        .collect()
+///
+/// WHICH IS WHY THIS EXTENDS RATHER THAN REPLACES. The option list does not just
+/// change, it SHRINKS: a classic seat cannot re-bid a denomination it has
+/// already named, so the denominations asked about run 5, 5, 4, 4, 3, 3, 2 down
+/// the auction. Keying the cache on the set asked for made every one of those
+/// steps a miss that re-solved denominations already in hand — the whole auction
+/// paid the opening's price on every round. The set asked for is now a QUERY
+/// against what has been solved, not part of its identity: a subset is a hit,
+/// and a superset solves only the difference, on the same deals.
+pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
+                  wanted: u8, declarer: usize, cache: &mut Solved) {
+    let k = k.max(1);
+    if cache.deals.len() != k {
+        // A different world count is a different sample: start over rather than
+        // mixing two of them.
+        let mut buf: Vec<u8> = Vec::with_capacity(16);
+        cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
+        cache.worlds = vec![World::default(); k];
+        cache.covered = 0;
+    }
+    let todo = wanted & !cache.covered;
+    if todo == 0 {
+        return;
+    }
+    for (deal, w) in cache.deals.iter().zip(cache.worlds.iter_mut()) {
+        solve_world(dd, deal, declarer, todo, w);
+    }
+    cache.covered |= todo;
 }
 
 /// THE CHEAP HALF: price each option against already-solved deals.
-pub fn price(opts: &[Option_], worlds: &[World]) -> Vec<f64> {
+///
+/// `have` is what the worlds actually hold. An option in a denomination nobody
+/// solved must be left at zero rather than read out of a default `World`, where
+/// it would price as a flat 0 points in every deal — a plausible-looking number
+/// that would outrank genuinely bad contracts.
+pub fn price(opts: &[Option_], worlds: &[World], have: u8) -> Vec<f64> {
     let mut sums = vec![0f64; opts.len()];
     for w in worlds {
         for (i, o) in opts.iter().enumerate() {
             let d = o.denom as usize;
-            if d >= NDEN {
+            if d >= NDEN || have & (1 << d) == 0 {
                 continue;
             }
             sums[i] += o.payoff(w.pts[d], w.duck[d]) as f64;
@@ -175,7 +212,11 @@ pub fn price(opts: &[Option_], worlds: &[World]) -> Vec<f64> {
 /// What the seat HOLDS, as one number. Two auction decisions with the same key
 /// are asking about the same cards and can share a solve; the talon swap
 /// changes the hand and so changes this.
-pub fn hand_key(v: &View, wanted: u8, declarer: usize, k: usize) -> u64 {
+///
+/// The denominations asked about are deliberately NOT in here — see
+/// `solve_into`. `declarer` is, because it decides who leads, and `k` is,
+/// because it decides how many deals the entry holds.
+pub fn hand_key(v: &View, declarer: usize, k: usize) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut mix = |x: u64| {
         h ^= x;
@@ -184,7 +225,7 @@ pub fn hand_key(v: &View, wanted: u8, declarer: usize, k: usize) -> u64 {
     mix(v.s.hand[v.me]);
     mix(v.pool);
     mix(v.opp_hand_n as u64);
-    mix(wanted as u64 | ((declarer as u64) << 8) | ((k as u64) << 16));
+    mix((declarer as u64) << 8 | ((k as u64) << 16));
     mix(v.s.trump as u64 | ((v.first_leader as u64) << 8));
     for q in 0..2 {
         for i in 0..3 {
@@ -200,8 +241,10 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     if opts.is_empty() {
         return Vec::new();
     }
-    let worlds = solve_worlds(v, dd, rng, k, wanted_denoms(opts), declarer);
-    price(opts, &worlds)
+    let wanted = wanted_denoms(opts);
+    let mut cache = Solved::default();
+    solve_into(v, dd, rng, k, wanted, declarer, &mut cache);
+    price(opts, &cache.worlds, cache.covered)
 }
 
 #[cfg(test)]
@@ -236,6 +279,61 @@ mod tests {
         // contract is worth LESS than ducking, so the search prefers to duck.
         assert_eq!(opt(3, 9, 12).payoff(3, true), 12);
         assert_eq!(opt(3, 9, 12).payoff(3, false), 9, "...only when it can");
+    }
+
+    /// The bug this file was optimised for: a classic auction asks about fewer
+    /// denominations every round, and re-solving the ones already in hand cost
+    /// the opening's full price on every one of them.
+    #[test]
+    fn narrowing_the_denominations_asked_about_costs_nothing() {
+        let mut dd = Dd::new(14);
+        let mut rng = Rng::new(3);
+        let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
+        let v = View::of(&g, 0);
+        let mut cache = Solved::default();
+        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, &mut cache);
+        assert_eq!(cache.covered, 0b11111);
+        let after_open = dd.nodes;
+        let pts = cache.worlds[0].pts;
+
+        // The auction narrows, exactly as `auction_payoff_options` does.
+        for wanted in [0b11111u8, 0b11110, 0b11100, 0b11000] {
+            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, &mut cache);
+        }
+        assert_eq!(dd.nodes, after_open, "a subset must not search a single node");
+        assert_eq!(cache.worlds[0].pts, pts, "...nor disturb what was solved");
+    }
+
+    #[test]
+    fn asking_about_a_new_denomination_solves_only_that_one() {
+        let mut dd = Dd::new(14);
+        let mut rng = Rng::new(3);
+        let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
+        let v = View::of(&g, 0);
+        let mut cache = Solved::default();
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, &mut cache);
+        let first = cache.worlds[0].pts[0];
+        let deals = cache.deals.clone();
+
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, &mut cache);
+        assert_eq!(cache.covered, 0b00011);
+        // The new denomination is solved on the SAME deals, so the two are
+        // comparable — a fresh sample would make the choice between them noise.
+        assert_eq!(cache.deals.len(), deals.len());
+        for (a, b) in cache.deals.iter().zip(deals.iter()) {
+            assert_eq!(a.hand, b.hand);
+        }
+        assert_eq!(cache.worlds[0].pts[0], first, "the old answer is untouched");
+    }
+
+    #[test]
+    fn an_unsolved_denomination_prices_at_zero_not_at_a_default_world() {
+        // `World::default()` reads as 0 points, which is a real-looking value.
+        // An option nobody solved must contribute nothing instead.
+        let o = Option_ { denom: 3, ..opt(4, 16, 12) };
+        let worlds = vec![World::default()];
+        assert_eq!(price(&[o], &worlds, 0b00000), vec![0.0]);
+        assert_eq!(price(&[o], &worlds, 0b01000), vec![-19.0]);   // -(3 + 4x4)
     }
 
     #[test]

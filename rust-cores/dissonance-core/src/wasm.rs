@@ -55,7 +55,13 @@ thread_local! {
     /// solved deals is arithmetic. Without this every round paid the full solve
     /// again, which is where a bid's 7.5-9.2s went. The key is what the seat
     /// HOLDS, so the talon swap invalidates it by construction.
-    static LAST_BID: RefCell<Option<(u64, Vec<crate::bid::World>)>> = RefCell::new(None);
+    ///
+    /// The entry also remembers WHICH denominations it has solved, and grows.
+    /// The set the options span shrinks down a classic auction (5, 5, 4, 4, 3,
+    /// 3, 2 — a seat cannot re-bid a denomination it has named), so an entry
+    /// identified by that set missed on every round and re-solved denominations
+    /// it already held. Every round after the first is now arithmetic.
+    static LAST_BID: RefCell<Option<(u64, crate::bid::Solved)>> = RefCell::new(None);
 }
 
 fn err(msg: &str) -> String {
@@ -190,25 +196,29 @@ pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
     let sign = if view.me == declarer { 1.0 } else { -1.0 };
     let mut rng = Rng::new(seed.to_bits() ^ 0x2545_F491_4F6C_DD1D);
     let wanted = crate::bid::wanted_denoms(&opts);
-    let key = crate::bid::hand_key(&view, wanted, declarer, k.max(1));
+    let key = crate::bid::hand_key(&view, declarer, k.max(1));
     let mut cached = false;
     let sums = LAST_BID.with(|slot| {
         let mut slot = slot.borrow_mut();
-        if let Some((k0, worlds)) = slot.as_ref() {
-            if *k0 == key && !opts.is_empty() {
-                cached = true;
-                return crate::bid::price(&opts, worlds);
-            }
-        }
         if opts.is_empty() {
             return Vec::new();
         }
-        let worlds = DD.with(|dd| {
-            let mut dd = dd.borrow_mut();
-            crate::bid::solve_worlds(&view, &mut dd, &mut rng, k.max(1), wanted, declarer)
-        });
-        let out = crate::bid::price(&opts, &worlds);
-        *slot = Some((key, worlds));
+        // A different hand starts a new entry; the same hand extends the one it
+        // has, and asking about nothing new does no work at all.
+        let mut entry = match slot.take() {
+            Some((k0, s)) if k0 == key => s,
+            _ => crate::bid::Solved::default(),
+        };
+        cached = wanted & !entry.covered == 0;
+        if !cached {
+            DD.with(|dd| {
+                let mut dd = dd.borrow_mut();
+                crate::bid::solve_into(&view, &mut dd, &mut rng, k.max(1), wanted,
+                                       declarer, &mut entry);
+            });
+        }
+        let out = crate::bid::price(&opts, &entry.worlds, entry.covered);
+        *slot = Some((key, entry));
         out
     });
     let body = sums
