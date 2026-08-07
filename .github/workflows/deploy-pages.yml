@@ -34,6 +34,14 @@ on:
       # negative pattern rather than `paths-ignore`: GitHub rejects both filters on one
       # event, and later patterns override earlier ones.
       - '!**/*.md'
+      # Python test packages don't reach the bundle either, and they live inside the
+      # same globs — so a test-only commit republished a byte-identical site. Not
+      # merely wasted minutes: the build stamps a fresh `__BUILD_ID__` + version.json,
+      # and shared/update-nudge.js reads that on tab-focus, so every open tab was
+      # prompted to Refresh for a change no browser can observe.
+      # This does NOT match `webapp/test/` (singular) on purpose — smoke.mjs and
+      # screens.mjs ARE the frontend gates, and editing a gate must re-run it.
+      - '!**/tests/**'
   workflow_dispatch:   # manual "Run workflow" button
 
 # Grant the deploy job the OIDC + Pages permissions the official action needs.

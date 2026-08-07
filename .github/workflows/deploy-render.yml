@@ -31,6 +31,15 @@ on:
       # no code change). Trailing negative rather than `paths-ignore`: GitHub rejects
       # both filters on one event, and later patterns override earlier ones.
       - '!**/*.md'
+      # ...and a TEST file is the same problem, which the .md rule hid: every glob
+      # above is `<pkg>/**/*.py`, and that matches `<pkg>/tests/*.py`. So a
+      # test-only commit rebuilt the image and restarted prod — measured at ~3
+      # minutes of backend downtime on 2026-08-07, for a push containing no
+      # shipping code at all. Nothing under a tests/ directory is imported by the
+      # server (all 13 are nested, so this one pattern reaches every one), and the
+      # suite still runs on every push regardless: python-app.yml carries NO paths
+      # filter, so excluding tests here costs no coverage, only the restart.
+      - '!**/tests/**'
   workflow_dispatch:
 
 jobs:
