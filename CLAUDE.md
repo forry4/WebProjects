@@ -398,14 +398,49 @@ covers the logic; each game's wiring is one line).
 - **Rules/engine unit tests are the most valuable to protect** — each game has them (per-package
   `CLAUDE.md` lists what each covers), plus `core/tests/` (db/auth/ratelimit/retention, in-memory
   sqlite) and Books `tests/` (17, in-memory DB).
-- **ZERO conditional skips, repo-wide — keep it there** (`pytest.skip` / `skipif` / `xfail`). A test
-  that can't reach the state it means to exercise must FAIL, not opt out: a skip is a green tick over
-  a test that proved nothing, and the failure it hides looks like a pass in CI. All three that existed
-  were real holes — a guessed frame option id that skipped when the guess missed (it swallowed a live
-  engine regression during a fix), a hardcoded `range(13)` parametrize whose skip only guarded the
-  roster SHRINKING (the next expansion's kingdoms would have gone unsoaked in silence — derive the
+- **ZERO STATE-REACHABILITY skips, repo-wide — keep it there** (`pytest.skip` / `skipif` / `xfail`). A
+  test that can't reach the state it means to exercise must FAIL, not opt out: a skip is a green tick
+  over a test that proved nothing, and the failure it hides looks like a pass in CI. All three that
+  existed were real holes — a guessed frame option id that skipped when the guess missed (it swallowed
+  a live engine regression during a fix), a hardcoded `range(13)` parametrize whose skip only guarded
+  the roster SHRINKING (the next expansion's kingdoms would have gone unsoaked in silence — derive the
   count from the data instead), and a "no seed produced the position" bail. For a SAMPLED choice,
   assert every branch rather than only the interesting one.
+  **This rule said "ZERO conditional skips" and was simply FALSE — there were two, and the wording is
+  what let them sit.** Worth stating because the rule's whole value is that a reader can trust it: once
+  it is inaccurate, someone grepping `skipif` finds hits and cannot tell sanctioned from drift, so the
+  rule stops being enforceable by reading. Both were `importorskip`, and they were different problems:
+  - `test_train.py`'s `importorskip("numpy")` was **vacuous** — numpy is a hard requirement imported
+    unconditionally by five serving modules, so a numpy-less checkout dies at collection and the guard
+    could never fire. **Deleted.** A guard that cannot fire is worse than none: it documents an
+    optionality that doesn't exist.
+  - `test_az_actions.py`'s `importorskip("torch")` is **kept, deliberately, and is the one carve-out**:
+    an OPTIONAL-DEPENDENCY guard over code that does not ship. It covers `SpenderNet` in
+    `ai/offline/net.py` — the AZ/variant-Z *training* stack, imported only by `train_az`/`arena`/
+    `az_vs_h2`/`bootstrap_train`. Variant Z is retired, and the path that still serves it to old saves
+    is numpy (`infer_np` + `az_model.npz`), never torch; `ai/offline/` is never imported by the server
+    and is deliberately outside the deploy path filter. **Verified 2026-08-07 by installing torch and
+    running it: it PASSES** (the file goes 13+1skip → 14, the suite → 3273/0), so it is not hiding a
+    regression. Making it run in CI costs a torch install — 4.6GB from PyPI (CUDA build), a few hundred
+    MB for the CPU wheel — against a suite that now runs in ~50-80s, to cover code that cannot reach
+    prod. **And it must NEVER go in `games/spender/requirements.txt`**, which is the SERVER's
+    requirements: the Dockerfile installs that file into the prod image.
+  The distinction to carry: a skip over code that SHIPS is a hole; a skip over an optional dep for
+  non-shipping research code is a cost decision. If you add a second carve-out, add it here — an
+  unlisted `skipif` is drift by definition.
+  **The rule is now MECHANICALLY ENFORCED — `core/tests/test_no_conditional_skips.py`**, because a
+  rule whose only enforcement is prose is enforced only by whoever re-reads it, and this one had
+  already drifted to prove it. It walks every module `pytest.ini` collects (122 today) and fails on
+  any `skip`/`importorskip`/`xfail` call or `skip`/`skipif`/`xfail` mark outside its `SANCTIONED`
+  map, so **a new carve-out must be added in TWO places — that map and this rule.** Two things about
+  it are load-bearing and are the local versions of lessons already paid for elsewhere: it parses the
+  **AST, not text** (the regex version of the `lost_track` guard scanned a 6-line window and comments
+  pushed two real sites out of it — and here two modules DISCUSS `pytest.skip()` in prose, which a
+  text search would flag), and its roster is **derived from `testpaths`** rather than hand-written,
+  since a hardcoded list only guards the tree SHRINKING and a new test package would join unguarded —
+  the `range(13)` bug's exact shape. A second test asserts the sanctioned skip is still *found*, so a
+  broken walk or a stale row fails instead of quietly passing. Verified non-vacuous against all four
+  skip forms plus a comment-only mention.
 - **CI runs `core/tests/` first; Render deploy is gated on tests.** Frontend deploy is gated by
   `npm run smoke` AND `npm run screens`.
 - **`npm run smoke` NEVER RENDERS A GAME — don't mistake it for render coverage.** The shell pings the
