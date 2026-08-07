@@ -1806,7 +1806,18 @@ try {
 		const deadline = Date.now() + 180_000;
 		while (Date.now() < deadline) {
 			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".dis-bidgrid button"),
+				// OUR TURN IN THE AUCTION -- which is NOT the same as "the level
+				// row has buttons". Once a player has named all five denominations
+				// they can neither raise (per-player no-repeat) nor overtake at
+				// the same level, so the level row is empty and their only legal
+				// move is Pass. Keying on the level row alone left this loop
+				// spinning against a live auction until its deadline, which is
+				// deal-dependent and so failed intermittently. The Pass button is
+				// the reliable tell: the auction panel renders buttons only on our
+				// turn, and the swap phase offers "Stand pat", never "Pass".
+				bidding: !!document.querySelector(".dis-bidgrid button")
+					|| [...document.querySelectorAll(".dis-auction button")]
+						.some((b) => b.textContent.trim() === "Pass"),
 				over: !!document.querySelector(".dis-result"),
 			}));
 			if (st.over) break;
@@ -1904,7 +1915,18 @@ try {
 		let piles = null;
 		while (Date.now() < beatDeadline) {
 			const st = await page.evaluate(() => ({
-				bidding: !!document.querySelector(".dis-bidgrid button"),
+				// OUR TURN IN THE AUCTION -- which is NOT the same as "the level
+				// row has buttons". Once a player has named all five denominations
+				// they can neither raise (per-player no-repeat) nor overtake at
+				// the same level, so the level row is empty and their only legal
+				// move is Pass. Keying on the level row alone left this loop
+				// spinning against a live auction until its deadline, which is
+				// deal-dependent and so failed intermittently. The Pass button is
+				// the reliable tell: the auction panel renders buttons only on our
+				// turn, and the swap phase offers "Stand pat", never "Pass".
+				bidding: !!document.querySelector(".dis-bidgrid button")
+					|| [...document.querySelectorAll(".dis-auction button")]
+						.some((b) => b.textContent.trim() === "Pass"),
 				over: !!document.querySelector(".dis-result"),
 			}));
 			if (st.over) break;

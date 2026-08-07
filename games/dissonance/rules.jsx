@@ -83,7 +83,7 @@ export default function DissonanceRules() {
 
 			<RulesSection title="The talon">
 				<p>
-					After the auction, the declarer is shown <b>three</b> of the six set-aside cards
+					After the auction, the declarer is shown <b>three</b> of the six talon cards
 					and may take <b>one</b> into hand, discarding a hand card face-down in its place
 					(pile cards can't be swapped). The defender is told <i>that</i> a swap happened —
 					never which cards. Winning the auction buys information as well as the contract.

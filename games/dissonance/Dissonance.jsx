@@ -1050,7 +1050,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {game.swap ? (
                 <>
                   <div className="muted" style={{ fontSize: "0.85rem" }}>
-                    You won the auction. Three of the six set-aside cards — take
+                    You won the auction. Three of the six talon cards — take
                     one into hand and discard, or stand pat.
                   </div>
                   <div className="dis-hand" style={{ justifyContent: "center" }}>
@@ -1077,7 +1077,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               ) : (
                 <div className="muted">
                   {nameOf(game.auction.declarer)} is looking at three of the
-                  set-aside cards…
+                  talon cards…
                 </div>
               )}
             </div>
@@ -1090,7 +1090,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <>
                     <div className="muted dis-hint">
                       You bought the declaration at <b>{game.auction.value}</b>. Look at
-                      three of the six set-aside cards and you may take one into
+                      three of the six talon cards and you may take one into
                       hand — or decline to look at all and play <b>Hand</b>, worth
                       +1 to your multiplier.
                     </div>
@@ -1321,13 +1321,19 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
                 <span>{nameOf(oppSeat)} <b>{res.scores[oppSeat]}</b></span>
               </div>
-              {/* The six nobody was dealt, revealed. Every card you could not
-                  account for all round was either in their hand or in here, so
-                  this is the answer sheet — as cards, because a run of text
-                  codes is not something you can read a hand off. */}
+              {/* THE TALON — the six nobody was dealt, revealed. Every card you
+                  could not account for all round was either in their hand or in
+                  here, so this is the answer sheet — as cards, because a run of
+                  text codes is not something you can read a hand off.
+
+                  "The talon" is the whole six-card stock, and the line beneath
+                  says which three of it the declarer was actually shown. Note
+                  the swap means this is the talon as it ENDED: the card the
+                  declarer took is in their hand, and their discard is here in
+                  its place. */}
               {game.out && (
                 <div className="dis-reveal">
-                  <div className="muted">Out of play all round</div>
+                  <div className="muted">The talon</div>
                   <div className="dis-outrow">
                     {game.out.map((c) => <Card key={c} c={c} small />)}
                   </div>
@@ -1509,7 +1515,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               down. */}
           {game.shown && game.phase !== "over" && (
             <div className="dis-panel dis-p-talon">
-              <h4>Set aside · you saw these</h4>
+              <h4>The talon · you saw these</h4>
               <div className="dis-outrow">
                 {game.shown.map((c) => <Card key={c} c={c} small />)}
               </div>
