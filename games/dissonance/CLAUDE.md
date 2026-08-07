@@ -217,27 +217,45 @@ most of the way through most deals and every fixture's final points diverged.
 MAX_LEVEL works because one player's ceiling is sweeping the six +2 tricks;
 `test_rust_parity` asserts that relationship rather than assuming it.
 
-## The talon reveal describes WHAT HAPPENED, not the final position
+## `shown` is the OUT-OF-PLAY SET, not a record of what was shown
 
-`shown` is the record of the three cards the declarer was shown, fixed at the
-deal. **`apply_swap` must never rewrite it.** It used to — the taken card was
-replaced in place by the discard, keeping `shown` in step with `out` — and the
-round-end reveal then named the discarded card as one the declarer "was shown",
-when that card had come out of their own hand and may never have been near the
-talon. `out` DOES change (the discard really is out of play now, and the reveal
-has to show the six cards that actually sat out); `swap_take` / `swap_give`
-record which cards moved, and are **redacted until the round is over** — the
-defender learns THAT a swap happened and nothing more, which is the entire point
-of the discard going face-down.
+Two questions, two fields, and collapsing them breaks the Hard tier silently.
 
-The same mistake had a second form: the reveal said "was shown" even for a skat
-**Hand** game, where declining to look IS the announcement and the declarer never
-saw the talon at all. The frontend gates that line on `sawTalon`
-(`!isSkat || game.looked`).
+* **`shown`** — the out-of-play cards this seat can place. A swap REWRITES it,
+  so it keeps matching `out`: the taken card leaves, the discard takes its slot.
+  This is what goes on the wire, what the in-round talon panel shows (a holding
+  to count from), and what the client-side searcher reads.
+* **`shown_at_deal`** — the three cards the declarer was actually shown, fixed
+  at the deal and never rewritten. Only the round-end reveal reads it.
+* **`swap_take` / `swap_give`** — which cards moved, **redacted until the round
+  is over**: the defender learns THAT a swap happened and nothing more, which is
+  the entire point of the discard going face-down.
 
-Both are one error — describing the talon from the final position instead of from
-what happened. `test_engine.py` pins the record, the redaction and the decline;
-one pre-existing test asserted the old behaviour outright and was corrected.
+**THE WIRE'S `shown` IS NOT OURS TO REDEFINE.**
+`rust-cores/dissonance-core/src/wire.rs` treats every card in `view["shown"]` as
+out of play and does exact card-count arithmetic on it — the unseen pool must
+partition into the opponent's hand, the covered pile bottoms and the unplaced
+out-cards, or `view_from_json` returns None. That contract is frozen by the
+COMMITTED wasm, which cannot be rebuilt without `wasm-pack`, so changing what
+the field means requires a rebuild in the same commit or it is simply a break.
+
+Making `shown` the historical record put the taken card — by then in the
+declarer's HAND — into the searcher's out-of-play set. The arithmetic stopped
+balancing on every decision after a swap, all four workers returned "not a
+searchable position", and the main thread's `good` filter dropped them without a
+word. **The room played on at full speed, still labelled Hard, on the server
+bot.** No exception, no console error, nothing red — and because it only bites
+after a swap, it passed locally and went red in CI.
+
+`test_every_card_the_wire_calls_shown_is_really_out_of_play` is the guard: it
+walks a whole played round, both seats, and asserts `view["shown"] ⊆ out`. It
+fails on 25 of 25 seeds against the broken version, because the bot swaps in
+nearly every game — which is also why whether the HARNESS or the BOT won the
+auction decided whether the browser gate passed.
+
+The reveal's other half: it said "was shown" even for a skat **Hand** game,
+where declining to look IS the announcement and the declarer never saw the talon
+at all. The frontend gates that line on `sawTalon` (`!isSkat || game.looked`).
 
 ## Do not relitigate
 

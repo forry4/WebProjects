@@ -267,9 +267,14 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE) -> dict
         # The subset of `out` shown to whoever wins the auction. Fixed at the
         # deal so it does not depend on who wins; secret until then.
         #
-        # It is a RECORD OF WHAT WAS SHOWN, not a live view of the out pile, and
-        # `apply_swap` must never rewrite it -- see the note there.
+        # THIS TRACKS WHAT IS CURRENTLY OUT OF PLAY, and a swap rewrites it --
+        # see the note in `apply_swap`, which explains why the wire depends on
+        # that and cannot be given the historical record instead.
         "shown": out[:N_SHOWN],
+        # ...and this is the historical record: the three cards the declarer was
+        # actually shown, never rewritten. Only the round-end reveal reads it,
+        # and it exists because `shown` cannot answer that question after a swap.
+        "shown_at_deal": list(out[:N_SHOWN]),
         # None until the swap phase resolves; then True/False. WHICH cards
         # moved stays hidden -- the defender learns only that a swap happened.
         "swapped": None,
@@ -502,14 +507,26 @@ def apply_swap(g: dict, seat: int, take, give) -> None:
         g["hands"][decl].remove(give)
         g["hands"][decl].append(take)
         g["hands"][decl].sort()
-        # `out` DOES change -- the discard really is out of play now, and the
-        # round-end reveal has to show the six cards that actually sat out.
         g["out"][g["out"].index(take)] = give
-        # `shown` deliberately does NOT. It records the three cards the declarer
-        # was shown, and the discard was never one of them -- it came out of
-        # their hand. Rewriting it here (which this used to do) made the
-        # round-end reveal name a card the declarer had never been shown, and
-        # that card may never have been anywhere near the talon.
+        # `shown` MUST follow `out`. It is not a record of what was shown -- it
+        # is "the out-of-play cards this seat can place", and the client-side
+        # searcher does exact card-count arithmetic on it: `wire.rs` treats every
+        # card here as out of play and returns "not a searchable position" if the
+        # pool does not then partition into the opponent's hand, the covered pile
+        # bottoms and the unplaced out-cards.
+        #
+        # Making this the historical record instead put the TAKEN card (which is
+        # now in the declarer's hand) in the searcher's out-of-play set. The
+        # arithmetic stopped balancing on every decision after a swap, so all
+        # four workers errored, the main thread's filter dropped them silently,
+        # and the room played out on the SERVER bot while still saying Hard --
+        # no error anywhere, just a weaker opponent. It is deal-dependent, so it
+        # passed locally and went red in CI.
+        #
+        # The wire shape is frozen by the COMMITTED wasm, which cannot be
+        # rebuilt without wasm-pack, so this field's meaning is not ours to
+        # change unilaterally. The reveal reads `shown_at_deal` instead.
+        g["shown"][g["shown"].index(take)] = give
         g["swap_take"], g["swap_give"] = take, give
         g["swapped"] = True
     if skat:
@@ -1069,7 +1086,12 @@ def view_for(g: dict, seat: int) -> dict:
         "result": g["result"],
         # The out-of-play cards stay secret until the round is done.
         "out": list(g["out"]) if over else None,
+        # `shown` is the out-of-play set the client searcher reads (see
+        # `apply_swap`); `shown_at_deal` is what the declarer was actually shown,
+        # which only the round-end reveal wants. Same redaction for both.
         "shown": list(g["shown"]) if sees_shown else None,
+        "shown_at_deal": (list(g.get("shown_at_deal") or g["shown"])
+                          if sees_shown else None),
         # Whether a swap happened is public; which cards moved is not -- until
         # the round is over, when everything opens up. `.get` because a save
         # written before these keys existed can still be mid-round on load.

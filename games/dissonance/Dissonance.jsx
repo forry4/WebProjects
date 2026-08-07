@@ -1350,9 +1350,9 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       looked at the talon at all. Both are the same mistake:
                       describing the talon from the final position instead of
                       from what happened. */}
-                  {game.shown && (sawTalon ? (
+                  {game.shown_at_deal && (sawTalon ? (
                     <div className="muted" style={{ fontSize: "0.72rem" }}>
-                      {nameOf(res.declarer)} was shown {game.shown.map(cardName).join(" ")}
+                      {nameOf(res.declarer)} was shown {game.shown_at_deal.map(cardName).join(" ")}
                       {game.swap_take != null && game.swap_give != null
                         ? `, and swapped ${cardName(game.swap_take)} with ${cardName(game.swap_give)}`
                         : game.swapped
@@ -1513,11 +1513,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
               of play is a real holding to count from, and losing sight of them
               the moment the swap resolves threw that away.
 
-              It shows WHAT YOU WERE SHOWN, which after a swap is no longer what
-              is out — the card you took is in your hand and your discard is out
-              in its place. That is the more useful of the two: you can see your
-              own hand, and this is the only record of the third card you turned
-              down. */}
+              It tracks what is ACTUALLY OUT, so after a swap your discard sits
+              where the card you took used to be. That is the useful half while
+              you are still playing — it is a holding to count from — and it is
+              also the shape the client-side searcher reads off the wire. The
+              round-end reveal is where "what you were SHOWN" gets answered,
+              from `shown_at_deal`. */}
           {game.shown && game.phase !== "over" && (
             <div className="dis-panel dis-p-talon">
               <h4>The talon · you saw these</h4>
@@ -1526,7 +1527,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               </div>
               {game.swapped && (
                 <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
-                  One of these is now in your hand.
+                  Includes the card you discarded.
                 </div>
               )}
             </div>

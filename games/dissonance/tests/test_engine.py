@@ -494,33 +494,81 @@ def test_the_swap_moves_exactly_one_card_each_way():
     assert take in g["hands"][0] and give not in g["hands"][0]
     assert give in g["out"] and take not in g["out"]
     assert len(g["out"]) == len(before_out) == E.N_OUT
-    assert give not in g["shown"], \
-        "the discard came out of HAND — it was never a card the declarer was shown"
+    assert give in g["shown"], \
+        "shown tracks what is OUT, so the discard takes the taken card's place"
     assert g["swapped"] is True and g["phase"] == "play"
     assert len(g["hands"][0]) == 7, "hand size is unchanged"
 
 
-def test_a_swap_does_not_rewrite_the_record_of_what_was_shown():
-    """`shown` is history, `out` is the current position — they diverge here.
+def test_a_swap_keeps_shown_on_the_out_pile_and_records_history_separately():
+    """Two fields with two jobs, because one cannot do both.
 
-    They used to be kept in step, which meant the round-end reveal ("was shown
-    X Y Z") named the card the declarer had just discarded out of their own
-    hand. A card that was never in the talon could be reported as one they were
-    shown, which is worse than useless: it is a false read on the one piece of
-    hidden information the defender gets to see at the end.
+    `shown` is the OUT-OF-PLAY set this seat can place, and a swap rewrites it
+    so it keeps matching `out`. `shown_at_deal` is what the declarer was
+    actually shown and never moves; only the round-end reveal reads it.
+
+    Collapsing them into one field is what the reveal bug tempted us into, and
+    the wire will not have it -- see the invariant test below.
     """
     g = E.new_game(["a", "b"], random.Random(21), opener=0)
     E.apply_bid(g, 0, 4, 3)
     E.apply_pass(g, 1)
-    shown_at_deal = list(g["shown"])
+    dealt = list(g["shown"])
     take, give = g["shown"][2], sorted(g["hands"][0])[-1]
 
     E.apply_swap(g, 0, take, give)
 
-    assert g["shown"] == shown_at_deal, "the record of what was shown moved"
+    assert give in g["shown"] and take not in g["shown"], \
+        "shown must follow out, or the client searcher's arithmetic breaks"
+    assert g["shown_at_deal"] == dealt, "the historical record moved"
+    assert take in g["shown_at_deal"], "the card taken was one they were shown"
+    assert give not in g["shown_at_deal"], \
+        "the discard came out of HAND -- it was never shown to them"
     assert g["swap_take"] == take and g["swap_give"] == give
-    # ...while `out` tracks the real position, discard included.
     assert give in g["out"] and take not in g["out"]
+
+
+@pytest.mark.parametrize("seed", range(25))
+def test_every_card_the_wire_calls_shown_is_really_out_of_play(seed):
+    """THE INVARIANT THE CLIENT-SIDE SEARCHER RESTS ON, and it is not obvious
+    from either side alone.
+
+    `rust-cores/dissonance-core/src/wire.rs` treats `view["shown"]` as "the
+    out-of-play cards this seat can place" and does exact card-count arithmetic
+    with it: the unseen pool must partition into the opponent's hand, the
+    covered pile bottoms and the unplaced out-cards, or it returns None and the
+    decision falls back to the server bot.
+
+    Breaking this is SILENT. Every worker errors, the main thread's filter drops
+    them, and the room plays on at full speed with a weaker opponent while still
+    calling itself Hard -- no exception, no console error, nothing red. It
+    happened: making `shown` the historical record put the taken card (by then
+    in the declarer's hand) into the searcher's out-of-play set, and because it
+    only bites after a swap it passed locally and went red in CI.
+
+    Asserted over a whole played round, for both seats, so a swap is included.
+    """
+    rng = random.Random(seed)
+    g = E.new_game(["a", "b"], random.Random(seed))
+    while g["phase"] != "over":
+        for seat in (0, 1):
+            v = E.view_for(g, seat)
+            if v["shown"]:
+                assert set(v["shown"]) <= set(g["out"]), (
+                    f"seat {seat} is told {sorted(set(v['shown']) - set(g['out']))} "
+                    "is out of play when it is not")
+        seat = E.turn_seat(g)
+        if g["phase"] == "auction":
+            _, mv = bot.act(g, seat, rng)
+            if mv.get("pass"):
+                E.apply_pass(g, seat)
+            else:
+                E.apply_bid(g, seat, mv["level"], mv["denom"])
+        elif g["phase"] == "swap":
+            _, mv = bot.act(g, seat, rng)
+            E.apply_swap(g, seat, mv.get("take"), mv.get("give"))
+        else:
+            E.apply_play(g, seat, bot.choose_card(g, seat))
 
 
 def test_standing_pat_records_no_moved_cards():
