@@ -120,13 +120,31 @@ N_SHOWN = 3
 MODES = ("classic", "skat")
 DEFAULT_MODE = "classic"
 
-#: value = base x level. Indexed by denomination (clubs..no-trump); the order
-#: deliberately INVERTS the classic mode's C < D < H < S ranking -- diamonds
-#: cheap, clubs dear -- matching real Skat and keeping the two modes' tables
-#: from being mistaken for each other. Your ABILITY in a denomination is real
-#: and varies by hand; only its PRICE is convention, and assigning one is what
-#: manufactures an asymmetry the measured-symmetric suits do not otherwise have.
-SKAT_BASE = [5, 2, 3, 4, 6]  # clubs, diamonds, hearts, spades, no-trump
+#: value = base x level. Indexed by denomination (clubs..no-trump).
+#:
+#: PRICED BY COLOUR since 2026-08-07: red 2, black 3, no-trump 5. It replaced a
+#: four-tier table (D2 H3 S4 C5 NT6) that mirrored real Skat's 9/10/11/12, and
+#: the reason for the change is that four tiers over four MEASURED-SYMMETRIC
+#: suits was too much manufactured asymmetry -- a hand equally playable in
+#: hearts and spades was priced a whole rung apart for no reason a player could
+#: name, so the cheap suits swallowed the auction. Two tiers keep the part that
+#: works (your ABILITY in a denomination is real and varies by hand; only its
+#: PRICE is convention) and drop the part that only added noise: choosing
+#: between the two reds is now purely a question about your cards.
+#:
+#: WHAT IT COSTS: the ladder loses nothing anyone bids. Dropping base 6 removes
+#: only 42, 54, 66 and 72 -- every multiple of 6 at or below 36 is already a
+#: multiple of 2 or 3 -- so the rungs are IDENTICAL through 40 and the ceiling
+#: falls 72 -> 60. The playable range does not move at all.
+#:
+#: WHAT IT BUYS is not MORE collisions -- 12 cleared four ways under both
+#: tables -- but AMBIGUOUS ones, which is the mode's actual premise. The old
+#: four (D6 H4 S3 NT2) sat at four DISTINCT levels, so a bid plus any tell
+#: about the level pinned the denomination exactly. The new four pair up
+#: (D6/H6 and C4/S4), so the same information still leaves a two-way choice --
+#: and the pairs are the two suits of a colour, which is precisely the
+#: distinction the price table has stopped making.
+SKAT_BASE = [3, 2, 2, 3, 5]  # clubs, diamonds, hearts, spades, no-trump
 
 #: What the Null consolation pays in skat mode. Flat, like classic's, and
 #: deliberately NOT scaled by the announcements or by Kontra: Hand, Sharp and
@@ -152,11 +170,11 @@ SHARP_BONUS = 2
 #: The legal bid ladder: every product base x level.
 #:
 #: NOTE for anyone checking this against SKAT_MODE.md: that document's prose
-#: enumerates "2,3,4,...,10,12,..." and counts 43 rungs. Both are wrong, and
-#: the GENERATOR (base x level) is the rule -- 7 is not a multiple of any base,
-#: so the real ladder is 36 rungs and has a single hole at 7 in the otherwise
-#: dense 2..10 stretch. Derived here rather than typed out so the two can never
-#: disagree.
+#: enumerates the rungs by hand and gets it wrong twice (it counts 43 and lists
+#: a 7). The GENERATOR (base x level) is the rule -- 7 is a multiple of no base,
+#: so it is a hole, and it remains the ONLY one in the otherwise dense 2..10
+#: stretch under the colour-priced table too. That table gives 28 rungs topping
+#: out at 60. Derived here rather than typed out so the two can never disagree.
 SKAT_VALUES = sorted(
     {SKAT_BASE[d] * lvl for d in range(NOTRUMP + 1)
      for lvl in range(MIN_LEVEL, MAX_LEVEL + 1)}

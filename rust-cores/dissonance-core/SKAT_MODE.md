@@ -21,24 +21,40 @@ Everything below follows from that one move.
 | denomination | base |
 |---|---|
 | diamonds | 2 |
-| hearts | 3 |
-| spades | 4 |
-| clubs | 5 |
-| no-trump | 6 |
+| hearts | 2 |
+| spades | 3 |
+| clubs | 3 |
+| no-trump | 5 |
+
+**Priced by COLOUR since 2026-08-07.** This section originally specified four
+tiers (D2 H3 S4 C5 NT6), mirroring real Skat's 9/10/11/12 and deliberately
+inverting the shipped mode's C < D < H < S. That shipped and was too much
+manufactured asymmetry: a hand equally playable in hearts and spades was priced
+a whole rung apart for a reason no player could name, and the cheap suits
+swallowed the auction.
 
 **Null is a fixed 20**, sitting mid-ladder the way Skat's 23 does (between
-spades-at-4 = 16 and diamonds-at-11 = 22 it has plenty of neighbours).
+spades-at-6 = 18 and diamonds-at-11 = 22 it has plenty of neighbours).
 
 The base values are pure convention — the suits are measured symmetric
 (settled-denomination evenness 0.943; the clubs spike in early data was a
 solver tie-break artifact). That is exactly why assigning them works: it
 manufactures an asymmetry the game does not otherwise have. Your *ability* in
-a denomination is real and varies by hand; only its *price* is convention.
-Note the order deliberately inverts the shipped mode's C < D < H < S ranking —
-diamonds cheap, clubs dear — matching real Skat and keeping the two modes'
-tables from being confused for each other.
+a denomination is real and varies by hand; only its *price* is convention. Two
+tiers keep that argument where it is load-bearing and hand the within-colour
+choice back to the cards.
 
-**Collisions are the point.** 12 = ♦6 = ♥4 = ♠3 = NT2. A bid of 12 does not
+**The re-pricing costs no rung anyone bids.** Every multiple of 6 at or below 36
+is already a multiple of 2 or 3, so dropping base 6 removes exactly 42, 54, 66
+and 72. The ladder is identical through 40, the ceiling falls 72 → 60, and the
+rung count goes 36 → 28. The playable range does not move at all.
+
+**Collisions are the point, and colour pricing makes them ambiguous rather than
+merely numerous.** 12 = ♦6 = ♥6 = ♠4 = ♣4. That is four declarations, the same
+count the old table gave — but the old four (♦6 ♥4 ♠3 NT2) sat at four
+*distinct* levels, so a bid plus any tell about the level pinned the
+denomination exactly. These pair up, and the pairs are the two suits of a
+colour: the same information still leaves a two-way choice. A bid of 12 does not
 say which game is coming. A hand playable in two denominations can bid higher
 *safely* than an equally strong hand playable in one — flexibility becomes a
 resource with a price, a decision the shipped auction cannot express.
@@ -49,10 +65,17 @@ Ascending numeric, alternating, opener speaks first and **may pass** (both
 pass = hand thrown in, redeal). Each bid names any legal value higher than
 the standing one. Whoever holds the last bid declares.
 
-Legal values are the products {base × level} ∪ {20}: 2,3,4,…,10,12,14,15,16,
-18,20,21,22,24,… — 43 distinct values from 2 to 72. Density is good through
-the playable range (every integer 2–10) and thins exactly where hands get
-rare, which is the right shape for an auction ladder.
+Legal values are the products {base × level}, and the ladder is DERIVED from
+the bases rather than typed out — this paragraph originally enumerated it by
+hand, claimed "every integer 2–10", and counted 43 rungs, and all of that was
+wrong. The real ladder under the colour-priced table is **28 rungs from 2 to
+60**:
+
+    2 3 4 5 6 8 9 10 12 14 15 16 18 20 21 22 24 25 27 30 33 35 36 40 45 50 55 60
+
+Density is good through the playable range — 7 is the only gap below ten,
+because it is a multiple of no base — and thins exactly where hands get rare,
+which is the right shape for an auction ladder.
 
 Why opener-may-pass is safe HERE and was not in the shipped mode: the shipped
 floor cluster exists because the opener is *forced* to name a contract. In
