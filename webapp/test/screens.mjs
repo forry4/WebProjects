@@ -54,7 +54,7 @@ async function waitForHttp(url, timeoutMs, label) {
 }
 
 async function launchBrowser() {
-	try { return await chromium.launch(); }
+	try { return await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); }
 	catch { return await chromium.launch({ channel: "msedge" }); }
 }
 
@@ -1728,7 +1728,20 @@ try {
 	// surfaced as "no tricks were ever played" rather than as a stuck auction.
 	// Settle between clicks, and confirm the button really is live.
 	const oddBidCheaply = async (page) => {
-		await page.locator(".odd-bidgrid button").first().click({ timeout: 5_000 }).catch(() => {});
+		// NO LEVELS LEFT IS A REAL STATE, not a broken selector. Denominations are
+		// per-player no-repeat, so once this seat has named all five it can only
+		// pass — `bidLevels` empties and the whole level grid stops rendering.
+		// Reaching for it anyway burned a 5s actionability timeout an iteration,
+		// and the CALLER's "are we bidding" test keyed on the same vanished
+		// element, so the harness sat out its whole deadline in the auction and
+		// reported it as "no tricks were ever played".
+		const levels = page.locator(".odd-bidgrid button");
+		if (await levels.count() === 0) {
+			await page.getByRole("button", { name: /^Pass$/ }).first()
+				.click({ timeout: 5_000 }).catch(() => {});
+			return;
+		}
+		await levels.first().click({ timeout: 5_000 }).catch(() => {});
 		await sleep(150);
 		const denoms = page.locator(".odd-denoms button:not([disabled])");
 		const n = await denoms.count();
@@ -1833,10 +1846,22 @@ try {
 			const st = await page.evaluate(() => {
 				const q = (s) => document.querySelector(s);
 				if (q(".odd-result")) return { over: true };
-				if (q(".odd-bidgrid button")) return { bidding: true };
+				// Stand pat FIRST: the swap panel shares `.odd-auction`.
 				const pat = [...document.querySelectorAll("button")]
 					.find((b) => /stand pat/i.test(b.textContent));
 				if (pat) { pat.click(); return { acted: true }; }
+				// Bidding needs BOTH signals, because each one alone has a state where
+				// it is absent. The level grid disappears once this seat has named
+				// all five denominations (per-player no-repeat) and only Pass is
+				// left; and at the OPENING bid there is no Pass at all — the opener
+				// must bid — while Bid stays disabled until a level and a
+				// denomination are picked. Keying on either one alone parks the
+				// harness in the auction until its deadline, which then reports as
+				// "no tricks were ever played".
+				const bidding = q(".odd-auction") && (q(".odd-bidgrid button")
+					|| [...document.querySelectorAll(".odd-auction button")]
+						.some((b) => !b.disabled && /^(Pass|Bid )/.test(b.textContent.trim())));
+				if (bidding) return { bidding: true };
 				const seats = document.querySelectorAll(".odd-seat");
 				const card = seats[seats.length - 1]?.querySelector(".odd-card.play");
 				if (card) { card.click(); return { acted: true }; }
@@ -1972,10 +1997,22 @@ try {
 			const st = await page.evaluate(() => {
 				const q = (s) => document.querySelector(s);
 				if (q(".odd-result")) return { over: true };
-				if (q(".odd-bidgrid button")) return { bidding: true };
+				// Stand pat FIRST: the swap panel shares `.odd-auction`.
 				const pat = [...document.querySelectorAll("button")]
 					.find((b) => /stand pat/i.test(b.textContent));
 				if (pat) { pat.click(); return { acted: true }; }
+				// Bidding needs BOTH signals, because each one alone has a state where
+				// it is absent. The level grid disappears once this seat has named
+				// all five denominations (per-player no-repeat) and only Pass is
+				// left; and at the OPENING bid there is no Pass at all — the opener
+				// must bid — while Bid stays disabled until a level and a
+				// denomination are picked. Keying on either one alone parks the
+				// harness in the auction until its deadline, which then reports as
+				// "no tricks were ever played".
+				const bidding = q(".odd-auction") && (q(".odd-bidgrid button")
+					|| [...document.querySelectorAll(".odd-auction button")]
+						.some((b) => !b.disabled && /^(Pass|Bid )/.test(b.textContent.trim())));
+				if (bidding) return { bidding: true };
 				const seats = document.querySelectorAll(".odd-seat");
 				const card = seats[seats.length - 1]?.querySelector(".odd-card.play");
 				if (card) { card.click(); return { acted: true }; }
