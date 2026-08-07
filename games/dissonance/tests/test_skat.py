@@ -133,7 +133,12 @@ def test_the_opener_may_pass_and_both_passing_throws_the_hand_in():
     E.apply_pass(g, 1)
     assert g["phase"] == "auction", "a thrown-in hand redeals rather than ending"
     assert g["redeals"] == 1
-    assert g["opener"] == 1, "the opener alternates so passing out is not free"
+    # The SAME seat opens the replacement deal. This used to flip, on the
+    # reasoning that passing out of a bad seat should not be free -- but the
+    # replacement is fresh cards, so there was no bad seat left to escape, and
+    # the flip's real effect was to knock the match's round-by-round
+    # alternation out of phase (a thrown-in hand is not a round).
+    assert g["opener"] == 0, "a redeal moved the opener without a round passing"
     assert g["auction"]["passes"] == 0 and g["auction"]["log"] == []
     assert [list(h) for h in g["hands"]] != hands_before or g["out"], "a fresh deal"
 

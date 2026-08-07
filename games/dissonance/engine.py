@@ -122,8 +122,15 @@ DEFAULT_MODE = "classic"
 
 #: A game is a MATCH of rounds, played until one side reaches this. Per mode,
 #: because the two modes score on different scales: a classic round pays
-#: level^2 (1..36, with the flat 12 for Null), a skat round base x level x the
-#: announcements (9..60 and up). Both land at roughly three to six rounds.
+#: level^2 (1..144, with the flat 12 for Null), a skat one base x level x the
+#: announcements (2..60, flat 20 for Null).
+#:
+#: MEASURED against the normal-tier bot, on the colour-priced bases: classic to
+#: 50 is a median of 5 rounds (range 2-9), skat to 100 a median of 11 (7-18).
+#: Skat's is the longer match because the colour re-pricing dropped its scale --
+#: it was a median of 8 under the old four-tier table. Re-measure here if the
+#: bases or the payoff arithmetic move again; the target is a product decision
+#: but the round count is not a guess.
 #:
 #: WHY A MATCH AT ALL. One round is one deal, and a deal can simply be bad --
 #: a hand with no contract in it loses to a hand with one, and the auction is
@@ -357,6 +364,10 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
             "scores": [0, 0],
             "round": 1,
             "over": False,
+            # Who opened round 1. Every later round's opener is DERIVED from
+            # this and the round number rather than flipped from the last deal
+            # -- see `opener_for_round`.
+            "first_opener": opener,
         },
     }
     if mode == "skat":
@@ -508,14 +519,19 @@ def _redeal(g: dict) -> None:
 
     Mutating `g` rather than returning a fresh dict is load-bearing: the room
     server, the bot scheduler and every open socket all hold this exact object.
-    The opener alternates so a player cannot pass out of a bad seat for free.
 
     The MATCH rides through untouched, `round` included: a deal both players
-    passed out is not a round anybody played.
+    passed out is not a round anybody played -- so the SAME seat opens the
+    replacement deal. This used to flip the opener, on the reasoning that a
+    player should not be able to pass out of a bad seat for free; but the
+    replacement deal is fresh cards, so there was no bad seat left to escape,
+    and the flip's real effect was to knock the round-by-round alternation out
+    of phase.
     """
     n = g.get("redeals", 0) + 1
-    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"], mode="skat",
-                     match=match_of(g))
+    m = _match_for_next_deal(g, advance=False)
+    fresh = new_game(list(g["seats"]), None, opener=opener_for_round(m),
+                     mode="skat", match=m)
     fresh["redeals"] = n
     g.clear()
     g.update(fresh)
@@ -546,12 +562,12 @@ def next_round(g: dict, seat: int, round_no=None) -> None:
         raise ValueError("the round is still being played")
     if m["over"]:
         raise ValueError("the match is over")
-    nxt = dict(m)
-    nxt["round"] = m["round"] + 1
-    # The opener alternates round by round. Leading trick 1 is worth ~0.93
-    # points, so a match that always opened the same seat would hand one player
-    # that edge every round of it.
-    fresh = new_game(list(g["seats"]), None, opener=1 - g["opener"],
+    # The opener alternates, round by round. Not for the LEAD -- the declarer
+    # leads to trick 1, whoever opened -- but for the bidding: the opener names
+    # a contract into no information at all, and in classic mode is not even
+    # allowed to pass.
+    nxt = _match_for_next_deal(g, advance=True)
+    fresh = new_game(list(g["seats"]), None, opener=opener_for_round(nxt),
                      mode=mode_of(g), match=nxt)
     g.clear()
     g.update(fresh)
@@ -1015,6 +1031,36 @@ def match_of(g: dict) -> dict | None:
     """
     m = g.get("match")
     return m if isinstance(m, dict) else None
+
+
+def opener_for_round(m: dict) -> int:
+    """Who opens the bidding in round `m["round"]`. It simply alternates.
+
+    DERIVED from the round number, never flipped from whatever the last deal
+    happened to use -- because not every deal is a round. A skat hand both
+    players pass out is thrown in and dealt again, and a redeal that flipped
+    the opener would knock the alternation out of phase, so which seat opened
+    round 4 would depend on how many hands got passed out along the way.
+    Derived, it is the same answer no matter what the deal did.
+    """
+    return (int(m.get("first_opener", 0)) + int(m.get("round", 1)) - 1) % 2
+
+
+def _match_for_next_deal(g: dict, advance: bool) -> dict:
+    """The match dict the next deal should carry, and the seat that opens it.
+
+    `advance` is what separates the two ways a new deal happens: `next_round`
+    counts, a pass-out redeal does not.
+    """
+    m = dict(match_of(g) or {})
+    if "first_opener" not in m:
+        # A match saved before the opener was derived. Recover the phase from
+        # where it actually is, rather than resetting it to seat 0 and skipping
+        # or repeating a turn mid-match.
+        m["first_opener"] = (int(g.get("opener", 0)) - int(m.get("round", 1)) + 1) % 2
+    if advance:
+        m["round"] = int(m.get("round", 1)) + 1
+    return m
 
 
 def _bank_round(g: dict, scores: list) -> None:

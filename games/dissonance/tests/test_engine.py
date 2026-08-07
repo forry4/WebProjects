@@ -666,8 +666,9 @@ def test_each_mode_is_played_to_its_own_target(mode, target):
 
 
 def test_the_opener_alternates_between_rounds():
-    # Leading trick 1 is worth ~0.93 points, so a match that always opened the
-    # same seat would hand one player that edge in every round of it.
+    # Not for the LEAD -- the declarer leads to trick 1, whoever opened -- but
+    # for the bidding: the opener names a contract into no information at all,
+    # and in classic mode is not allowed to pass.
     g = E.new_game(["a", "b"], random.Random(104), opener=0)
     openers = [g["opener"]]
     for i in range(3):
@@ -753,3 +754,46 @@ def test_a_save_written_before_matches_existed_still_ends_at_its_round():
     assert E.is_over(g), "a matchless game ends where it always did"
     assert E.view_for(g, 0)["match"] is None
     assert "match_scores" not in g["result"]
+
+
+def test_the_opener_is_derived_from_the_round_not_flipped_from_the_last_deal():
+    # Not every deal is a round. A skat hand both players pass out is thrown in
+    # and dealt again, and a redeal that flipped the opener would knock the
+    # alternation out of phase -- which seat opened round 4 would then depend on
+    # how many hands happened to get passed out along the way.
+    g = E.new_game(["a", "b"], random.Random(112), mode="skat", opener=0)
+    assert g["opener"] == 0
+    for expected_redeals in (1, 2, 3):
+        E.apply_move(g, "a", {"kind": "pass"})
+        E.apply_move(g, "b", {"kind": "pass"})
+        assert g["redeals"] == expected_redeals
+        assert g["match"]["round"] == 1, "a passed-out deal is not a round"
+        assert g["opener"] == 0, \
+            f"a redeal moved the opener to {g['opener']} without a round passing"
+    assert E.opener_for_round(g["match"]) == 0
+
+
+def test_the_alternation_survives_any_number_of_pass_outs():
+    g = E.new_game(["a", "b"], random.Random(113), mode="skat", opener=1)
+    # Round 1 opens on seat 1, so round 2 must open on seat 0 no matter how many
+    # deals were thrown in first.
+    E.apply_move(g, "b", {"kind": "pass"})
+    E.apply_move(g, "a", {"kind": "pass"})
+    g["phase"] = "over"
+    g["result"] = {"round": 1, "scores": [0, 0]}
+    E.next_round(g, 0, 1)
+    assert g["match"]["round"] == 2
+    assert g["opener"] == 0, "round 2 opens on the other seat, pass-outs or not"
+
+
+def test_a_match_saved_before_the_opener_was_derived_keeps_its_phase():
+    # Recovered from where the alternation actually IS, rather than reset to
+    # seat 0 -- which would repeat or skip a turn in the middle of a match.
+    g = E.new_game(["a", "b"], random.Random(114), opener=0)
+    g["match"]["round"] = 3
+    g["opener"] = 0                    # round 3 of an alternation that began at 0
+    del g["match"]["first_opener"]
+    g["phase"] = "over"
+    g["result"] = {"round": 3, "scores": [0, 0]}
+    E.next_round(g, 0, 3)
+    assert g["opener"] == 1, "round 4 must follow round 3, not restart the pattern"

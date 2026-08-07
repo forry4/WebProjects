@@ -198,9 +198,14 @@ longer change** — see below.
 
 `MATCH_TARGET` — **classic 50, skat 100**. A round is one deal; a game is rounds
 played onto a running total until one side reaches the target. Measured against
-the normal-tier bot: classic **median 5 rounds** (3–9), skat **median 8** (4–12).
+the normal-tier bot: classic **median 5 rounds** (2–9), skat **median 11**
+(7–18). Skat's is the longer match, and it got longer when the bases were
+re-priced by colour on 2026-08-07 — it was a median of 8 under the old
+four-tier table. **Re-measure if the bases or the payoff arithmetic move**: the
+target is a product decision, but the round count it produces is not a guess.
 Per mode because the modes price on different scales — a classic round pays
-level² (1–36, flat 12 for Null), a skat one base × level × the announcements.
+level² (up to 144, flat 12 for Null), a skat one base × level × the
+announcements (up to 60, flat 20).
 
 **WHY:** one deal can simply be bad, and the auction is the only lever either
 player has against it. Over a match the deals average out and what is left is
@@ -221,9 +226,19 @@ the bidding judgement, which is the part worth playing.
   or — far worse — deals a third round over the top of the second. A mismatched
   token is a silent no-op, the same idempotency discipline as the client-AI
   decision counter.
-* **The opener alternates every round.** Leading trick 1 is worth ~0.93 points,
-  so a match that always opened the same seat would hand one player that edge in
-  every round of it.
+* **The opener alternates every round, and is DERIVED from the round number**
+  (`opener_for_round`), never flipped from whatever the last deal used. Not
+  every deal is a round: a skat hand both players pass out is thrown in and
+  dealt again, and a redeal that flipped the opener knocked the alternation out
+  of phase, so which seat opened round 4 depended on how many hands got passed
+  out along the way. `_redeal` therefore keeps the SAME opener — it used to
+  flip, on the reasoning that passing out of a bad seat should not be free, but
+  the replacement deal is fresh cards so there was no bad seat left to escape.
+  A match saved before `first_opener` existed recovers its phase from where the
+  alternation actually is rather than restarting at seat 0.
+* **What the opener alternation is FOR is the BIDDING, not the lead** — the
+  DECLARER leads to trick 1 (`_start_play`), whoever opened. The opener names a
+  contract into no information at all, and in classic mode may not pass.
 * **A skat pass-out redeals WITHOUT counting as a round.** `_redeal` carries the
   match through untouched, `round` included — a deal nobody played is not a
   round.
