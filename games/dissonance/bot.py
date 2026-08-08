@@ -270,16 +270,89 @@ def swap_denom(g: dict, seat: int) -> int:
     return max(E.SKAT_DENOMS, key=lambda d: hand_strength(g, seat, d))
 
 
-def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
-    """Pick the exchange that most strengthens the intended contract.
+#: The CLASSIC swap policy's weights -- FITTED, not styled (2026-08-08).
+#:
+#: The policy this replaced took the highest card shown and threw the lowest
+#: card held (its 3x7 "search" was separable, so that is all it could ever do),
+#: and it measured **-0.477 +- 0.226 score/round against standing pat** over
+#: 3000 paired deals, firing in 64% of rounds. Backwards by construction in a
+#: game where 7 of 13 tricks are penalties and low cards are the tool for
+#: forcing them onto the opponent -- the card play's own "lead low" branch
+#: depends on exactly the cards it discarded.
+#:
+#: These weights are a ridge fit on 300 ORACLE-labelled decisions
+#: (`tools/swaplab.py`: every candidate exchange resolved by an exact
+#: double-dummy solve of the real deal), features restricted to what the seat
+#: may legally see. The oracle's own take-histogram is U-SHAPED -- it takes 7s
+#: almost as often as Aces -- and the fit found the same shape on its own:
+#: rank weights below run +0.92 for a 7, negative through the middle, +2.05
+#: for an Ace. Held-out (a second 300 decisions): regret vs the oracle 1.92
+#: against the old policy's 2.50. Under greedy playout, paired over 3000
+#: deals: **+1.500 +- 0.208 vs standing pat, +1.976 +- 0.194 vs the old
+#: policy** -- a gain under BOTH resolutions, which matters because the swap's
+#: value depends on who plays the cards afterwards (the old policy was +1.6 vs
+#: pat under exact play and -0.48 under greedy).
+#:
+#: Indexed by rank (7 8 9 10 J Q K A). `_SWAP_GIVE_W`'s Ace entry is a bare
+#: 0.0 because an Ace was never the best discard anywhere in the 6600
+#: labelled candidates -- the weight is unlearnable there; the entry only
+#: keeps the row indexable.
+_SWAP_TAKE_W = (0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
+_SWAP_GIVE_W = (0.32, 0.10, 1.51, 0.88, 0.95, -0.10, -1.04, 0.0)
+_SWAP_TAKE_TRUMP = 1.57
+_SWAP_GIVE_TRUMP = -1.24
+#: Discarding a suit's LAST card (a void beats a singleton, but both help --
+#: shape is real value the old rank-only policy could not see).
+_SWAP_VOID = 1.47
+_SWAP_SINGLETON = 0.67
+#: Lengthening the take-card's suit, per card of it already held / 7.
+#:
+#: There is deliberately NO level-scaled bar on top of these. The ridge fit
+#: produced one (-1.89 x level/6, the oracle swaps less at high stakes), but a
+#: per-decision constant cancels out of the argmax between swaps and, applied
+#: as an explicit stand-pat threshold, it measured NO better on held-out
+#: decisions (regret 2.03 vs 1.92 without). The policy the arenas actually
+#: measured is this one: threshold zero, argmax over the score below.
+_SWAP_LENGTH = 1.24
 
-    Value each candidate hand by rank-worth in `denom` (defaulting to whichever
-    denomination this position implies); keep the swap only if it improves on
-    standing pat.
+
+def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
+    """Pick the talon exchange, or stand pat.
+
+    CLASSIC (the contract is settled): the fitted policy above.
+
+    SKAT (the talon resolves BEFORE the game is named): still the old
+    rank-worth rule, DELIBERATELY. The fit was trained and gated on classic
+    decisions, where the denomination and level are known; skat's swap has
+    neither, and shipping the classic weights there would be a guess wearing a
+    measurement's clothes. Fixing skat's swap is its own `swaplab` run.
     """
     if denom is None:
         denom = swap_denom(g, seat)
     hand = list(g["hands"][seat])
+
+    if g["auction"]["denom"] >= 0:
+        tc = E.trump_class(denom)
+        best = {"take": None, "give": None}
+        best_score = 0.0
+        for t in g["shown"]:
+            for h in hand:
+                s = _SWAP_TAKE_W[E.rank(t)] + _SWAP_GIVE_W[E.rank(h)]
+                if E.esuit(t, denom) == tc:
+                    s += _SWAP_TAKE_TRUMP
+                if E.esuit(h, denom) == tc:
+                    s += _SWAP_GIVE_TRUMP
+                give_suit = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(h, denom))
+                take_suit = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(t, denom))
+                if give_suit == 1:
+                    s += _SWAP_VOID
+                elif give_suit == 2:
+                    s += _SWAP_SINGLETON
+                s += _SWAP_LENGTH * take_suit / 7.0
+                if s > best_score:
+                    best_score = s
+                    best = {"take": t, "give": h}
+        return best
 
     def worth(c: int) -> float:
         v = _RANK_VALUE[E.rank(c)]

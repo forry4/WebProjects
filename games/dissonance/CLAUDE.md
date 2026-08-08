@@ -1176,7 +1176,14 @@ capping play, arrived at deliberately.
 
 **MEASURED AT 2250 PAIRED DEALS: THE TREE BUYS NOTHING.** `tools/auction_arena.py`
 (the harness lives with the code and drives `bin/bidserve`, i.e. the same
-`wire::answer_auction` the browser calls). CRN-paired: every deal played twice
+`wire::answer_auction` the browser calls). **Since 2026-08-08 the arena resolves
+by exact double-dummy of the real deal (`resolve=dd`, the default)** — per-deal
+σ 15.8 → 11.5, no greedy-play bias, mirror still exactly +0.0000. Two additions
+measured USELESS for expert-vs-hard and kept for cheaper comparisons: the
+conditional-on-differing mean (the tiers bid differently on **93%** of deals,
+so there is nothing to condition away) and the opener-quality control variate
+(β ≈ +0.05, no σ reduction). ±0.15 still needs ~5900 paired deals; the loop got
+~2× faster, not 5×. CRN-paired: every deal played twice
 with the tiers swapped, greedy card play and the server's talon on BOTH sides so
 the auction is the only difference; the mirror `hard`-vs-`hard` reads exactly
 **+0.0000**.
@@ -1242,20 +1249,74 @@ from the deal AS DEALT. The LEAD is modelled explicitly (the declarer leads,
 worth ~0.93), but the SWAP is not — the declarer's hand carries no talon card,
 so winning the auction is priced without the thing winning it buys. That biases
 both tiers toward conceding, and Expert compounds it at every node.
-- **It currently costs almost nothing, and that is a statement about the SWAP
-  POLICY rather than about the talon.** Measured over 3000 paired deals (same
-  deal, same auction, greedy play, only the swap differing): the server bot's
-  swap is worth **−0.083 ± 0.029 trick points and −0.477 ± 0.226 score**, and
-  it moves the declarer's points in 64% of rounds. It is doing a great deal and
-  gaining less than nothing. So the search's blind spot matches reality today —
-  and **fixing the swap would open one**, since the talon and swap deliberately
-  stay server-side (they are decisions about INFORMATION, with no contract to
-  price them against).
+- **This blind spot is now OPEN (2026-08-08).** It used to cost nothing because
+  the swap itself was worthless (the old policy measured −0.477 ± 0.226 score
+  against standing pat); the fitted replacement is **+1.500 ± 0.208** against
+  pat, so winning a classic auction now buys ~+1.5 the search cannot see.
+  Valuing the swap inside `solve_world` (apply the chooser to each determinized
+  world's talon before solving, both sides) is the queued fix — measure it, on
+  the arena, before believing it.
+
+## The classic swap policy is FITTED, and the old one was backwards (2026-08-08)
+
+`bot.choose_swap`'s classic branch. The old rule looked like a 3×7 search but
+`gain = worth(t) − worth(h)` is separable, so it was exactly "take the highest
+card shown, throw the lowest card held" — and `_RANK_VALUE` is strictly
+increasing, so it could not represent any other preference. Backwards by
+construction in a game where 7 of 13 tricks are penalties and low cards are how
+you force them onto the opponent (the play policy's own "lead low" branch
+depends on the cards it discarded). Measured: **−0.477 ± 0.226 score/round
+against standing pat**, firing in 64% of rounds.
+
+**The method, reusable for any talon question** (`tools/swaplab.py`):
+1. **An oracle labels real decisions.** Drive real rounds to the swap, resolve
+   every candidate exchange (3 shown × 7 held, plus pat) by an exact
+   double-dummy solve of the real deal — `bidserve`'s `resolve` request. The
+   oracle cheats (full information) on purpose: it is a diagnostic bound, not a
+   ship gate.
+2. **The dataset evaluates any policy for free** — every candidate's exact
+   value is recorded, so a proposed policy's regret is a lookup, not a run.
+3. **Fit interpretable, information-legal features** (rank one-hots, trumpness,
+   resulting suit shape) by ridge on `value − pat`; hold out a second sweep.
+4. **Ship-gate on the paired arena over the real information set**, under BOTH
+   resolutions — the swap's value depends on who plays the cards afterwards
+   (the old policy was +1.6 vs pat under exact play and −0.48 under greedy).
+
+**What the oracle knows that the old rule did not:** its take-histogram is
+**U-shaped** — it takes 7s (36) almost as often as Aces (52) and dips through
+the middle ranks; it discards Kings when shape wants it (20 of 300); it stands
+pat in 35% of decisions (old policy: 4%); and its edge concentrates at high
+levels (L5 −4.9, L6 −22 policy loss), where a wrong swap flips make→set at
+quadratic stakes.
+
+**Shipped numbers** (constants and derivation documented at `_SWAP_TAKE_W` in
+`bot.py`): held-out regret vs the oracle **1.92** against the old policy's
+2.50; greedy-playout paired arena over 3000 deals **+1.500 ± 0.208 vs pat,
++1.976 ± 0.194 vs the old policy** — the shipped function itself, not a copy.
+A fitted level-scaled stand-pat bar was tried and dropped: it cancels out of
+the argmax and measured no better held-out (2.03 vs 1.92). The remaining ~1.9
+regret against the oracle is deal-specific combinatorics (make/set boundary,
+the Null threat) that no information-legal linear feature set sees — closing
+it means solving, which the server cannot afford and the user declined to
+client-serve.
+
+**Skat's talon deliberately keeps the old rule** — no denomination, no level,
+no measurement. Its own swaplab run is queued.
 
 **THREE APPROXIMATIONS, stated because they are the difference between this and
 an exact answer.**
 1. **The leaf is `bid.rs`'s** — what a declarer can guarantee with both sides
-   playing for POINTS. Same proxy Hard uses, same reason.
+   playing for POINTS. Same proxy Hard uses, same reason. **Its exact error is
+   now measured (2026-08-08, after the contract-table fix): the ONLY gap is the
+   adaptive Null threat.** Over 900 (deal, contract) pairs: `payoff(solve,
+   duck)` equals `solve_contract` in 93.3%; every nonzero gap is POSITIVE
+   (exact ≥ served, +6.5 conditional, worst +27), sits in the same ~7% of
+   (deal, denom, declarer) combos at every level, and the guaranteed-duck
+   subset gaps exactly 0. The mechanism: a declarer who cannot GUARANTEE
+   ducking can still leverage the threat of it — the defender cannot always
+   prevent the Null and hold the points down at once — and
+   `max(contract, null·duck)` only credits the guarantee. One-sided toward
+   UNDER-valuing declaring, i.e. the same direction as Expert's other leaks.
 2. **The opponent is modelled against OUR sample**, so their branch is chosen
    knowing our hand exactly. Inherent to searching from one seat's information
    set. It is however LESS strategy-fusion than per-world minimax would be: the
@@ -1286,12 +1347,12 @@ green. That is the exact shape of the Grand outage.
   was built for. Pricing a candidate exactly needs a `solve_contract` per
   (denomination, level) per world; the tree makes the option list smaller than
   Hard's ~50, so this is closer to affordable than it was.
-* **The server bot's talon swap is worth −0.48 score, i.e. it is a LOSS.**
-  Measured 2026-08-08 over 3000 paired deals (see the Expert section). It fires
-  in 64% of rounds and gains nothing, and it is the swap EVERY tier plays,
-  because the talon deliberately stays server-side. Fixing it helps Easy through
-  Expert at once — and would then open the auction search's talon blind spot,
-  which today costs nothing precisely because the swap is worthless.
+* **Skat's talon swap still runs the OLD take-high/give-low rule.** Classic's
+  was replaced 2026-08-08 by a fitted policy (see the swap section below); the
+  fit was trained and gated on classic decisions, where the contract is
+  settled, and skat's talon resolves before the game is named. It needs its
+  own `swaplab` run, not the classic weights on faith —
+  `test_the_skat_talon_still_runs_the_old_policy` is the marker.
 * **Modelling the opponent's UNCERTAINTY in the auction tree.** The single
   clearest reason Expert's lookahead does not pay is that its modelled opponent
   is handed our exact hand. Anything that makes their branch choose without it
