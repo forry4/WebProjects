@@ -278,55 +278,106 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
 
 // ── the OFFLINE oracle: a whole deal, for resolving a settled contract ───────
 
-/// A complete deal — every hand and every pile, nothing redacted.
+/// A COMPLETE deal — every hand, every pile bottom, the out-cards, nothing
+/// redacted. Two callers, one encoding:
 ///
-/// NOT A SERVING PATH. `view_from_json` is the redaction boundary and stays the
-/// only thing the browser is ever handed; this reads GROUND TRUTH and exists so
-/// an offline harness can resolve a settled contract by an exact double-dummy
-/// solve of the real cards instead of by playing them with a heuristic. That is
-/// `bin/bidlab`'s own method, and it is what takes card-play noise out of an
-/// auction measurement entirely: a difference between two bidding strategies
-/// becomes a difference in BIDDING, full stop.
+/// * **`odd_review`** (the scorecard's DD column) hands it a banked round's
+///   snapshot off the wire and spends an exact solve on the answer;
+/// * **`bidserve`** (the auction arena's resolver) hands it `play.jsonl`-shaped
+///   deals — the field names are that file's on purpose, so there is one
+///   encoding of a deal in the repo rather than one per harness.
 ///
-/// The field names are `play.jsonl`'s, deliberately — `bin/gen_fixtures` already
-/// writes exactly this shape, so there is one encoding of a deal in the repo
-/// rather than one per harness.
+/// NOT A SERVING PATH for hidden information: `view_from_json` remains the
+/// redaction boundary, and this reads ground truth that is already public
+/// (a finished round, an offline fixture). It is also deliberately NOT
+/// `view_from_json` with every card filled in — a View is an information set
+/// whose pool the searcher SAMPLES, so even a fully-named payload gets
+/// reshuffled, and its partition check rejects a filled-in outer bottom first
+/// anyway (`hidden_slots` counts piles by `n == 2`, not by what is known).
+///
+/// FAILS CLOSED on anything that is not a fresh, complete deal: hands sized
+/// off `NDEALT` (a literal 7 is wrong under three of the four deck-width
+/// features), everything disjoint, and the whole expected card set accounted
+/// for. `out` is OPTIONAL — the arena's resolver ships only hands + piles,
+/// which is a complete POSITION (`State` never stores the out-cards; they are
+/// the six nobody holds) — but whichever shape arrives is checked in full.
+/// The caller is about to spend an exact solve, and a deal missing a card
+/// resolves to a confident wrong number, not to an error.
 pub fn deal_from_json(v: &Value) -> Option<State> {
-    let hands = v.get("hands")?.as_array()?;
-    let piles = v.get("piles")?.as_array()?;
     let mut s = State {
         hand: [0; 2],
         pile: [[Pile::default(); 3]; 2],
         trump: u8_at(v, "trump")?,
+        // A review always runs the card play from the top: trick 1, nobody to
+        // lead yet, no points and no +2 trick scored by either side.
         trick: 0,
         leader: u8_at(v, "leader")?,
         led: -1,
         pts: [0, 0],
         escored: 0,
     };
-    for p in 0..2usize {
-        s.hand[p] = mask_of(hands.get(p)?);
-        let row = piles.get(p)?.as_array()?;
-        for i in 0..3usize {
-            let pl = row.get(i)?.as_array()?;
-            // [bottom, top], the layout `Pile::c` uses and `gen_fixtures` emits.
-            s.pile[p][i] = Pile {
-                c: [pl.first()?.as_u64()? as u8, pl.get(1)?.as_u64()? as u8],
-                n: 2,
-            };
-        }
-    }
-    // Fail closed on anything that is not a fresh, complete deal: the caller is
-    // about to spend an exact solve on it, and a deal missing a card resolves
-    // to a confident wrong number rather than to an error.
-    // DERIVED, not a literal 7: a seat is dealt `NDEALT` cards of which six sit
-    // in its three two-card piles, and a hardcoded hand size is wrong under
-    // three of the four deck-width features.
-    let in_hand = NDEALT as u32 - 6;
-    if s.hand[0].count_ones() != in_hand || s.hand[1].count_ones() != in_hand {
+    if s.leader > 1 {
         return None;
     }
-    if s.hand[0] & s.hand[1] != 0 {
+
+    let hands = v.get("hands")?.as_array()?;
+    let piles = v.get("piles")?.as_array()?;
+    // Every card must be accounted for exactly once. Counting bits as we go and
+    // comparing the total at the end catches a duplicate as surely as a
+    // missing card: a repeated card raises the count in `seen` by nothing.
+    let mut seen: Mask = 0;
+    let mut n = 0u32;
+    let take = |c: u8, seen: &mut Mask, n: &mut u32| -> Option<()> {
+        if c >= NCARD {
+            return None;
+        }
+        *seen |= 1 << c;
+        *n += 1;
+        Some(())
+    };
+
+    let in_hand = NDEALT as u32 - 6;
+    for q in 0..2usize {
+        s.hand[q] = mask_of(hands.get(q)?);
+        if s.hand[q].count_ones() != in_hand {
+            return None;
+        }
+        for c in hands.get(q)?.as_array()? {
+            take(c.as_u64()? as u8, &mut seen, &mut n)?;
+        }
+        let row = piles.get(q)?.as_array()?;
+        for i in 0..3usize {
+            // `[bottom, top]` — the order `State::Pile.c` uses and
+            // `gen_fixtures` emits, so a pile is read exactly as the engine
+            // stores it and there is no place to get the orientation backwards.
+            let p = row.get(i)?.as_array()?;
+            if p.len() != 2 {
+                return None;
+            }
+            let bottom = p[0].as_u64()? as u8;
+            let top = p[1].as_u64()? as u8;
+            take(bottom, &mut seen, &mut n)?;
+            take(top, &mut seen, &mut n)?;
+            s.pile[q][i] = Pile { c: [bottom, top], n: 2 };
+        }
+    }
+    // `out` is OPTIONAL, and both shapes are fully checked. The banked-round
+    // snapshot and `play.jsonl` carry it, and then the whole deck must
+    // partition; the auction arena's resolver ships only hands + piles, which
+    // is enough — `State` does not store the out-cards at all, they are simply
+    // the six nobody holds, so their identity adds integrity and no position.
+    let expect = match v.get("out") {
+        Some(o) => {
+            for c in o.as_array()? {
+                take(c.as_u64()? as u8, &mut seen, &mut n)?;
+            }
+            NCARD as u32
+        }
+        None => NCARD as u32 - NOUT as u32,
+    };
+
+    // Disjoint (no card claimed twice) AND complete (everything expected).
+    if n != expect || seen.count_ones() != expect {
         return None;
     }
     Some(s)
@@ -1242,5 +1293,162 @@ mod swap_policy_parity {
         // Both BRANCHES, or the assertion above is half a test: random talons
         // essentially never produce a pat, so the generator engineers them.
         assert!(swaps > 300 && pats >= 10, "{swaps} swaps / {pats} pats");
+    }
+}
+
+#[cfg(test)]
+mod review {
+    //! The round review — `deal_from_json` + the exact solve behind `odd_review`.
+    //!
+    //! The review is shown to a player as a FACT about the round they just
+    //! played ("double dummy would have scored this"), not as a bot's opinion,
+    //! and these tests are what earns that framing: the reader has to fail
+    //! closed on anything that is not a real deal, and the answer has to be the
+    //! same number every time it is asked.
+    use super::*;
+    use crate::dd::Dd;
+
+    /// A complete, legal deal as the server would ship it: 7 in hand and three
+    /// 2-card piles per seat, 6 out of play, 32 accounted for exactly once.
+    fn deal_json(trump: u8, leader: u8) -> Value {
+        let mut c = 0u8;
+        let mut next = |n: usize| -> Vec<u8> {
+            let v: Vec<u8> = (c..c + n as u8).collect();
+            c += n as u8;
+            v
+        };
+        let h0 = next(7);
+        let p0: Vec<Vec<u8>> = (0..3).map(|_| next(2)).collect();
+        let h1 = next(7);
+        let p1: Vec<Vec<u8>> = (0..3).map(|_| next(2)).collect();
+        let out = next(6);
+        serde_json::json!({
+            "hands": [h0, h1],
+            "piles": [p0, p1],
+            "out": out,
+            "trump": trump,
+            "leader": leader,
+        })
+    }
+
+    fn contract_json(declarer: usize) -> Value {
+        serde_json::json!({
+            "declarer": declarer, "target": 4, "make": 16,
+            "set_base": 4, "short": 4, "over": 1, "null": 12,
+        })
+    }
+
+    #[test]
+    fn a_complete_deal_reads_back_as_the_start_of_trick_one() {
+        let d = deal_from_json(&deal_json(2, 1)).expect("a complete deal must read");
+        assert_eq!(d.trump, 2);
+        assert_eq!(d.leader, 1);
+        // A review always runs the play from the top, whatever happened live.
+        assert_eq!(d.trick, 0);
+        assert_eq!(d.led, -1);
+        assert_eq!(d.pts, [0, 0]);
+        assert_eq!(d.escored, 0, "nobody has won a +2 trick before trick 1");
+        for q in 0..2 {
+            assert_eq!(d.hand[q].count_ones(), 7);
+            for i in 0..3 {
+                assert_eq!(d.pile[q][i].n, 2, "every pile starts covered");
+            }
+        }
+        // 7 in hand + 6 in piles, per seat.
+        let held: u32 = (0..2)
+            .map(|q| d.hand[q].count_ones() + (0..3).map(|i| d.pile[q][i].n as u32).sum::<u32>())
+            .sum();
+        assert_eq!(held, 2 * NDEALT as u32);
+    }
+
+    #[test]
+    fn a_pile_is_read_bottom_then_top() {
+        // Orientation is the one thing here that a wrong answer would not
+        // announce: a flipped pile is a legal position, just the wrong one.
+        let d = deal_from_json(&deal_json(4, 0)).unwrap();
+        let p = d.pile[0][0];
+        assert_eq!(p.c, [7, 8], "stored as [bottom, top]");
+        assert_eq!(p.top(), Some(8), "the TOP is what is playable now");
+        assert_eq!(p.covered(), Some(7));
+    }
+
+    #[test]
+    fn an_incomplete_or_double_counted_deal_is_refused() {
+        // FAIL CLOSED. Every one of these is a payload that would still
+        // describe a searchable-looking position, so the reader has to reject
+        // them on the arithmetic rather than on whether it can build a State.
+        let strip = |f: &dyn Fn(&mut Value)| {
+            let mut v = deal_json(1, 0);
+            f(&mut v);
+            deal_from_json(&v)
+        };
+        assert!(strip(&|v| { v["out"] = serde_json::json!([]); }).is_none(),
+                "a deal missing its out-cards is not a complete deal");
+        assert!(strip(&|v| { v["hands"][0] = serde_json::json!([0, 1, 2, 3, 4, 5]); }).is_none(),
+                "a six-card hand leaves a card unaccounted for");
+        assert!(strip(&|v| { v["hands"][1][0] = serde_json::json!(0); }).is_none(),
+                "the same card in both hands must not read as a legal deal");
+        assert!(strip(&|v| { v["piles"][0][0] = serde_json::json!([7]); }).is_none(),
+                "a pile is two cards");
+        assert!(strip(&|v| { v["leader"] = serde_json::json!(2); }).is_none(),
+                "there are two seats");
+        assert!(strip(&|v| { v["hands"][0][0] = serde_json::json!(99); }).is_none(),
+                "a card index off the end of the deck");
+        assert!(strip(&|v| { v.as_object_mut().unwrap().remove("trump"); }).is_none());
+    }
+
+    #[test]
+    fn a_deal_without_out_cards_reads_the_same_position() {
+        // The arena's resolver ships only hands + piles; the six out-cards add
+        // integrity, never position (`State` does not store them). Both shapes
+        // must read, and to the identical State -- and dropping a card from a
+        // HAND must still be refused in the out-less shape.
+        let mut v = deal_json(2, 1);
+        let full = deal_from_json(&v).expect("with out");
+        v.as_object_mut().unwrap().remove("out");
+        let bare = deal_from_json(&v).expect("without out");
+        assert_eq!(full, bare, "the out-cards changed the position");
+        v["hands"][0] = serde_json::json!([0, 1, 2, 3, 4, 5]);
+        assert!(deal_from_json(&v).is_none(), "a short hand slipped past the out-less check");
+    }
+
+    #[test]
+    fn the_review_is_exact_and_gives_the_same_answer_every_time() {
+        // The whole argument for showing this number to a player: there is no
+        // sampling in it, so it is a property of the DEAL and not of a seed.
+        // A PIMC answer would vary run to run and could not be labelled the way
+        // this one is.
+        let deal = deal_from_json(&deal_json(0, 0)).unwrap();
+        let c = contract_from_json(&contract_json(0)).unwrap();
+        let mut dd = Dd::new(16);
+        let first = dd.solve_contract(&deal, &c);
+        for _ in 0..3 {
+            dd.clear();
+            assert_eq!(dd.solve_contract(&deal, &c), first,
+                       "an exact solve of a fixed deal must not move");
+        }
+        // ...and a WARM table must not change it either, which is the state the
+        // export actually runs in (the tier has been searching all round).
+        let other = deal_from_json(&deal_json(3, 1)).unwrap();
+        dd.solve_contract(&other, &c);
+        assert_eq!(dd.solve_contract(&deal, &c), first,
+                   "a table warmed on another deal changed the answer");
+    }
+
+    #[test]
+    fn swapping_the_declarer_reflects_the_value() {
+        // The value is signed for the DECLARER. The same cards priced from the
+        // other side is a different POSITION (the declarer leads to trick 1),
+        // so this asserts the sign convention holds rather than that the two
+        // are negatives of each other.
+        let deal = deal_from_json(&deal_json(4, 0)).unwrap();
+        let mut dd = Dd::new(16);
+        let a = dd.solve_contract(&deal, &contract_from_json(&contract_json(0)).unwrap());
+        dd.clear();
+        let b = dd.solve_contract(&deal, &contract_from_json(&contract_json(1)).unwrap());
+        // Both are finite scores in the payoff units the server ships, and a
+        // made level-4 contract is worth its 16 while a set one pays the
+        // defender -- so they cannot both be the same number by accident.
+        assert!(a.abs() < 1000 && b.abs() < 1000, "payoff out of range: {a}, {b}");
     }
 }

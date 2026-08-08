@@ -35,7 +35,7 @@ use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::POOL;
 use crate::view::View;
-use crate::wire::{answer_auction, contract_from_json, view_from_json};
+use crate::wire::{answer_auction, contract_from_json, deal_from_json, view_from_json};
 
 /// Transposition table size, per worker. 2^18 entries is ~4MB for the plain
 /// table plus ~2MB for the contract one — times a pool of at most four workers.
@@ -195,6 +195,56 @@ pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
     let body = sums.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
     format!("{{\"sums\":[{}],\"worlds\":{},\"cached\":{}}}",
             body, if sums.is_empty() { 0 } else { k.max(1) }, cached)
+}
+
+/// THE ROUND REVIEW: what the card play was worth to a perfect declarer.
+///
+/// `{"deal": {...}, "payoff": {...}}` -> `{"value": i32}`, the exact
+/// double-dummy payoff of the round from the START of trick 1, signed for the
+/// DECLARER — the same convention `solve_root_contract` uses, and the same one
+/// `payoff` itself is written in.
+///
+/// WHY THIS IS NOT `odd_pick_card` WITH A FULLY-SPECIFIED VIEW. That is the
+/// obvious implementation and it cannot work: a view carries a POOL of cards
+/// the seat cannot place and the searcher samples worlds from it, so even a
+/// payload naming every card gets reshuffled — and the wire's partition check
+/// rejects the payload first anyway (see `deal_from_json`). A review has no
+/// uncertainty left in it by construction: the round is over and every card has
+/// been revealed, so this solves the ONE true deal exactly rather than
+/// averaging over sampled ones. It is the cheapest search this crate does for
+/// the same reason — one solve, no determinization, no pooling.
+///
+/// So there is nothing to aggregate and no seed: two callers handed the same
+/// deal get the same number, which is what makes it safe to show a player as a
+/// fact about their round rather than as a bot's opinion.
+#[wasm_bindgen]
+pub fn odd_review(request_json: &str) -> String {
+    let v: serde_json::Value = match serde_json::from_str(request_json) {
+        Ok(v) => v,
+        Err(_) => return err("bad request"),
+    };
+    let deal = match v.get("deal").and_then(deal_from_json) {
+        Some(d) => d,
+        None => return err("not a complete deal"),
+    };
+    let contract = match v.get("payoff").and_then(contract_from_json) {
+        Some(c) => c,
+        None => return err("no contract to price"),
+    };
+    if contract.declarer > 1 {
+        return err("no such declarer");
+    }
+    let value = DD.with(|dd| {
+        let mut dd = dd.borrow_mut();
+        // The review is a one-off against a table warmed by whatever the tier
+        // was last asked. Those entries are keyed on positions from a DIFFERENT
+        // deal, so they are not wrong -- a TT hit is keyed on the position --
+        // but they are dead weight competing for slots with this solve. Clear
+        // once, up front, rather than fight them for the whole search.
+        dd.clear();
+        dd.solve_contract(&deal, &contract)
+    });
+    format!("{{\"value\":{}}}", value)
 }
 
 /// The card the pooled sums choose: highest total, ties to the earliest legal
