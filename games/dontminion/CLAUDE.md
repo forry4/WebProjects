@@ -1447,6 +1447,39 @@ no-ops and the release is swallowed — holding a card can never also play it. T
 buys when the pile is affordable. `screens.mjs` pins all three behaviours (right-click opens
 without buying, hold opens without buying, a short tap still buys and opens nothing).
 
+**…and the gesture is NOT card-only — the detail modal answers for everything on the table.** A
+Dominion board is not only cards, and every other thing on it used to be unreadable: an Event's
+text is CLIPPED by its own face, a Landmark is never bought so nothing ever opened it, the mats
+carried a `title` tooltip that touch cannot see, and an **Artifact nobody has taken yet appears
+NOWHERE on the board at all** — Lantern and Horn existed in the rules and in no pixel. So
+`useCardInfoGesture` is now worn by the landscapes (`DmLandscape`), the mat chips (`DmMatChip`),
+and every badge, token and resource counter (`DmChip`), and the modal's state is a DESCRIPTOR —
+`{kind:"card"|"landscape"|"thing", …}` — rendered by one `renderInfoModal` with three left-hand
+columns (a card face / a wide landscape face / an emblem) and identical chrome. Three things are
+load-bearing:
+- **`DmLandscape` and `DmChip` are COMPONENTS, not render helpers.** They call a hook, and
+  `renderLandscape` is invoked from a `.map` — a hook there is a rules-of-hooks violation. Any
+  future not-a-card thing goes through one of them for the same reason.
+- **A `DmChip` may contain BUTTONS** (the Coffers/Villagers/Debt counters carry their spend
+  controls), so its plain click is gated on `!e.target.closest("button")` and the hold's
+  `onClickCapture` swallow is what stops a press-and-hold ALSO spending.
+- **The rules text for a mat / token / counter lives in `THINGS`, in the frontend**, because the
+  server has no table for it (`cards.py` has CARDS, LANDSCAPES and ARTIFACTS — a mat is none of
+  those). An Artifact's own text still comes from `/catalog`; the `THINGS.artifact` entry adds
+  only the part no card explains, i.e. what an Artifact IS. Same for `LANDSCAPE_BLURB`: what a
+  KIND of landscape is, as opposed to what one particular Event does.
+
+**The Kingdom browser shows what the board can't: the landscapes and the Artifacts.** Events,
+Projects and Landmarks are dealt WITH the kingdom, so they belong in the thing that calls itself
+"this game's Kingdom" — grouped by kind (`landscapeGroups`, ordered by `KIND_ORDER`, headed by
+`kindPlural`, so a set that adds Ways or Traits gets its section free), each section led by its
+`LANDSCAPE_BLURB`, and each face `readOnly` — a click there READS the Event, it must never spend a
+Buy from behind an open modal. Artifacts follow, held or not. `screens.mjs`'s `dmInfoModal` block
+pins all of it, and derives the expected Artifact roster from the DEALT kingdom (the
+`cards.ARTIFACTS` `by` column, inverted) rather than hardcoding one — it re-deals up to 8 times to
+reach a board with both a landscape and an Artifact bearer, and FAILS rather than skipping if it
+never does (Renaissance-only makes that ~1e-8).
+
 **The card face has ONE inset token, `--cf-pad`** (on `.dm-card`, used by the name, rules text
 and foot). The face also zeroes the shared `.card` frame's own padding — the two stacked, so the
 real buffer was 12px per side, a fifth of a 56px card's width. Three things follow and all three

@@ -1552,6 +1552,158 @@ try {
 		await ctx.close();
 	}
 
+	// ── Dontminion: the detail modal is not card-only ─────────────────────────
+	// A Dominion table is not only cards, and everything else on it used to be
+	// unreadable: an Event's text is CLIPPED by its own face, a Landmark is never
+	// bought so nothing ever opens it, and an Artifact nobody has taken yet
+	// appears NOWHERE on the board at all. This block drives the three paths that
+	// fixed that:
+	//   1. the info gesture (right-click) on a LANDSCAPE — not a card face;
+	//   2. the same gesture on a resource COUNTER, which carries spend buttons,
+	//      so the gesture has to win without swallowing the button;
+	//   3. the Kingdom browser's landscape + Artifact sections.
+	//
+	// Both the landscape deal and the Artifact roster are RANDOM (p11 deals 0-2
+	// landscapes; Artifacts exist only if a Border Guard / Flag Bearer /
+	// Treasurer / Swashbuckler was dealt), so the rig re-deals until it has a
+	// board that exercises both rather than asserting whatever turned up — a
+	// pass on an empty board would be a green tick over nothing. Renaissance
+	// alone deals a landscape ~99.9% of the time and a bearer ~89%, so 8 attempts
+	// miss with probability ~1e-8; missing FAILS, it does not skip.
+	async function dmInfoModal(log) {
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "dminfo-harness", name: "Info", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+		// cards.ARTIFACTS' `by` column, the other way round: which Artifacts a
+		// game must keep available, given the kingdom it dealt.
+		const ARTIFACT_BY = {
+			"Flag Bearer": ["Flag"], "Border Guard": ["Horn", "Lantern"],
+			Treasurer: ["Key"], Swashbuckler: ["Treasure Chest"],
+		};
+		const readBoard = () => page.evaluate(() => ({
+			kingdom: [...document.querySelectorAll(".dm-supply .dm-kingdom .dm-card .dm-fitspan")]
+				.map((s) => s.textContent.trim()),
+			landscapes: [...document.querySelectorAll(".dm-lscape-row .dm-ls-name")]
+				.map((s) => s.textContent.trim()),
+		}));
+
+		let board = null;
+		for (let attempt = 0; attempt < 8 && !board; attempt++) {
+			await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
+			await page.waitForSelector(".dm", { timeout: 25_000 }).catch(() => {});
+			await page.getByRole("button", { name: /new game|create/i }).first()
+				.click({ timeout: 15_000 }).catch(() => {});
+			await page.waitForSelector(".dm-checks", { timeout: 15_000 }).catch(() => {});
+			// Renaissance ONLY: the densest landscape pool we ship, and the only
+			// set with Artifacts — mixing Base back in halves both odds.
+			for (const label of ["Renaissance", "Base Set"]) {
+				await page.locator(".dm-checks .dm-check", { hasText: label }).first()
+					.click({ timeout: 10_000 }).catch(() => {});
+			}
+			await page.locator(".cm-create").click({ timeout: 15_000 }).catch(() => {});
+			const dealt = await page.waitForSelector(".dm-supply .dm-card", { timeout: 30_000 })
+				.then(() => true).catch(() => false);
+			if (!dealt) continue;
+			const b = await readBoard();
+			const wanted = b.kingdom.filter((n) => ARTIFACT_BY[n]);
+			if (b.landscapes.length && wanted.length) board = { ...b, wanted };
+		}
+		check("a Renaissance deal with both a landscape and an Artifact was reached",
+			!!board, "8 deals produced none — see the block comment");
+		if (!board) { await ctx.close(); return; }
+
+		const expectArtifacts = [...new Set(board.wanted.flatMap((n) => ARTIFACT_BY[n]))].sort();
+
+		// 1 — right-click a landscape. The plain click is BUY (or the info modal
+		//     when it isn't buyable); the hold/right-click must read it either way.
+		await page.locator(".dm-lscape-row .dm-lscape").first().click({ button: "right", timeout: 10_000 });
+		const ls = await page.evaluate(() => {
+			const m = document.querySelector(".dm-cardinfo");
+			return m && {
+				title: m.querySelector("h2")?.textContent.trim() || "",
+				meta: m.querySelector(".dm-cardinfo-meta")?.textContent.trim() || "",
+				text: m.querySelector(".dm-cardinfo-text")?.textContent.trim() || "",
+				face: !!m.querySelector(".dm-cardinfo-lscape .dm-lscape"),
+			};
+		});
+		check("right-clicking an Event/Project opens its detail modal",
+			!!ls && ls.title === board.landscapes[0] && ls.face, JSON.stringify(ls));
+		// The KIND blurb ("a Project is bought once, with a Buy…") is the half no
+		// card prints, so it has to lead the text, above the card's own words.
+		check("...leading with what that kind of landscape IS",
+			!!ls && /\b(Event|Project|Landmark|Way|Trait|Prophecy)\b/.test(ls.text)
+				&& ls.text.length > 120 && !!ls.meta, JSON.stringify(ls?.text?.slice(0, 120)));
+		await page.locator(".dm-cardinfo .btn").click({ timeout: 10_000 });
+
+		// 2 — a resource counter. It OWNS its click (the spend buttons live inside
+		//     it), so this is the case the gesture has to win without eating them.
+		await page.waitForSelector(".dm-resbar .dm-chip-info", { timeout: 25_000 });
+		await page.locator(".dm-resbar .dm-chip-info").first().click({ button: "right", timeout: 10_000 });
+		const counter = await page.evaluate(() => {
+			const m = document.querySelector(".dm-cardinfo");
+			return m && {
+				title: m.querySelector("h2")?.textContent.trim() || "",
+				text: m.querySelector(".dm-cardinfo-text")?.textContent.trim() || "",
+				emblem: !!m.querySelector(".dm-cardinfo-emblem"),
+			};
+		});
+		check("right-clicking a resource counter explains it too",
+			!!counter && counter.title.length > 0 && counter.text.length > 60 && counter.emblem,
+			JSON.stringify(counter));
+		await page.locator(".dm-cardinfo .btn").click({ timeout: 10_000 });
+
+		// 3 — the Kingdom browser. Landscapes are dealt WITH the kingdom, and an
+		//     untaken Artifact has no other home on the whole screen.
+		await page.locator(".dm-kingdom-btn").click({ timeout: 10_000 });
+		await page.waitForSelector(".dm-kingdom-modal", { timeout: 10_000 });
+		const kg = await page.evaluate(() => {
+			const m = document.querySelector(".dm-kingdom-modal");
+			return {
+				heads: [...m.querySelectorAll("h3")].map((h) => h.textContent.trim()),
+				landscapes: [...m.querySelectorAll(".dm-kgrid-wide .dm-lscape:not(.dm-ls-artifact) .dm-ls-name")]
+					.map((s) => s.textContent.trim()).sort(),
+				artifacts: [...m.querySelectorAll(".dm-ls-artifact .dm-ls-name")]
+					.map((s) => s.textContent.replace("🏳", "").trim()).sort(),
+				notes: m.querySelectorAll(".dm-kg-note").length,
+			};
+		});
+		check("the Kingdom lists the Events/Projects it was dealt",
+			JSON.stringify(kg.landscapes) === JSON.stringify([...board.landscapes].sort())
+				&& kg.heads.some((h) => /Events|Projects|Landmarks|Ways/.test(h)) && kg.notes > 0,
+			JSON.stringify(kg));
+		// The exact roster, derived from the DEALT kingdom rather than hardcoded:
+		// this is the check that would have caught the old board, where Lantern
+		// and Horn existed in the rules and nowhere in the UI.
+		check("...and every Artifact this game keeps, held or not",
+			JSON.stringify(kg.artifacts) === JSON.stringify(expectArtifacts)
+				&& kg.heads.includes("Artifacts"),
+			`${JSON.stringify(kg.artifacts)} vs ${JSON.stringify(expectArtifacts)} from ${JSON.stringify(board.wanted)}`);
+		await page.locator(".dm-ls-artifact").first().click({ timeout: 10_000 });
+		const art = await page.evaluate(() => {
+			const m = document.querySelector(".dm-cardinfo");
+			return m && {
+				title: m.querySelector("h2")?.textContent.trim() || "",
+				meta: m.querySelector(".dm-cardinfo-meta")?.textContent.trim() || "",
+				text: m.querySelector(".dm-cardinfo-text")?.textContent.trim() || "",
+			};
+		});
+		check("an Artifact row opens its rules and says who holds it",
+			!!art && expectArtifacts.includes(art.title)
+				&& /not taken yet|has it|held by/.test(art.meta) && art.text.length > 80,
+			JSON.stringify(art));
+
+		check("no page errors reading the board's non-card things", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	// ── Offline vs-AI (Spender local play) ────────────────────────────────────
 	// The first browser coverage of BOTH the offline driver and the client-WASM AI
 	// path: /offline must boot with no backend ping, create a local game through the
@@ -2728,7 +2880,7 @@ try {
 		dissonanceSkat, dissonanceHard, dissonanceBeat];
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
-		dmEmpires, dmRenaissance, phoneLobbyColumns, lastDifficulty];
+		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
 	// writing it — it then ran because it was simply the next statement. Now it has

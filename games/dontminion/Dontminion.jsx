@@ -77,11 +77,104 @@ const TOKEN_GLYPH = {
 const seatTokens = (seat) => {
   const t = seat?.tokens || {};
   const out = [];
-  if (t["-card"]) out.push({ key: "-card", glyph: "−1🃏", title: "-1 Card token: your next draw is one card short" });
-  if (t["-coin"]) out.push({ key: "-coin", glyph: "−$1", title: "-$1 token: the next $ you get is reduced by 1" });
-  if (t.journey_down) out.push({ key: "journey", glyph: "🧭", title: "Journey token: face DOWN" });
-  if (t.estate) out.push({ key: "estate", glyph: `🏠 ${t.estate}`, title: `Inheritance: their Estates play ${t.estate}` });
+  if (t["-card"]) out.push({ key: "-card", thing: "stok:-card", glyph: "−1🃏", title: "-1 Card token: your next draw is one card short" });
+  if (t["-coin"]) out.push({ key: "-coin", thing: "stok:-coin", glyph: "−$1", title: "-$1 token: the next $ you get is reduced by 1" });
+  if (t.journey_down) out.push({ key: "journey", thing: "stok:journey", glyph: "🧭", title: "Journey token: face DOWN" });
+  if (t.estate) out.push({ key: "estate", thing: "stok:estate", glyph: `🏠 ${t.estate}`, title: `Inheritance: their Estates play ${t.estate}`, extra: { sub: `naming ${t.estate}` } });
   return out;
+};
+
+// ─── THINGS THAT ARE NOT CARDS ─────────────────────────────────────────────
+// A Dominion table is not only cards. Mats, tokens, Artifacts and the spendable
+// counters all carry real rules, and — unlike a card, a pile or a landscape —
+// NONE of them prints those rules on anything the player can open. A `title`
+// tooltip is not an answer either: touch has no hover, which is the same hole
+// that once hid the Native Village mat's contents on a phone.
+//
+// So every one of them gets an entry here and answers the SAME gesture a card
+// face does (press-and-hold / right-click → the detail modal, via
+// useCardInfoGesture). The rule the whole board now keeps: whatever the reader
+// points at, "what does this do?" has one answer in one place.
+const THINGS = {
+  // — mats —
+  "mat:tavern": { icon: "🍺", title: "Tavern mat", sub: "Adventures — face up",
+    text: "Some cards set themselves aside on your Tavern mat instead of going to your discard pile. They sit there face up — public, out of your deck, and not in play — until you Call them.\n\nYou never press a Call button: every card says exactly when it may be called, so the game asks you at that moment, as an ordinary decision." },
+  "mat:island": { icon: "🏝", title: "Island mat", sub: "Seaside — face up",
+    text: "Island puts itself and another card from your hand onto your Island mat, out of your deck for the rest of the game.\n\nCards on the mat are public and they still count for scoring at the end — which is the point of putting Victory cards there." },
+  "mat:village": { icon: "🏕", title: "Native Village mat", sub: "Seaside — face down",
+    text: "Native Village either sets the top card of your deck aside on your mat, or puts every card on the mat into your hand.\n\nThe mat is face down: you may look at your own whenever you like, but an opponent only sees how many cards are on theirs. Cards there still count for scoring." },
+  "mat:aside": { icon: "⏳", title: "Set aside", sub: "cards waiting to come back",
+    text: "Cards a Duration effect has set aside. They are out of your deck and not in play, and they return on their own — at the moment the card that set them aside says, with no action needed from you." },
+  // — the spendable / counted resources in the turn bar —
+  actions: { icon: "⚔", title: "Actions", sub: "this turn only",
+    text: "How many Action cards you may still play this turn. You start your turn with 1; a Village-type card gives you more.\n\nUnspent Actions do not carry over — they are gone at the end of your turn." },
+  buys: { icon: "🛒", title: "Buys", sub: "this turn only",
+    text: "How many cards (and Events/Projects) you may still buy this turn. You start with 1.\n\nUnspent Buys do not carry over." },
+  coins: { icon: "$", title: "Money", sub: "this turn only",
+    text: "The coins available to spend right now — from Treasures you have played, from +$ on Action cards, and from anything you have spent Coffers or Debt payments on.\n\nUnspent money does NOT carry over: it disappears at the end of your turn. Coffers are the way to keep it." },
+  potions: { icon: "🧪", title: "Potions", sub: "Alchemy",
+    text: "Alchemy's second currency. Playing a Potion gives +1 Potion, and cards like Familiar cost a Potion as well as coins — a $3 + Potion card cannot be bought with $3 alone.\n\nLike money, unspent Potions vanish at the end of your turn." },
+  coffers: { icon: "🪙", title: "Coffers", sub: "Cornucopia & Guilds",
+    text: "Saved money, kept on a mat between turns. Spend a Coffers at any time during your turn to get +$1.\n\nThey never expire, so money put into Coffers is money you did not have to spend this turn." },
+  villagers: { icon: "🧑", title: "Villagers", sub: "Renaissance",
+    text: "Coffers' twin, one column over: saved Actions. Spend a Villager during your Action phase to get +1 Action.\n\nThey never expire — but unlike Coffers they are Action-phase only." },
+  debt: { icon: "🪙", title: "Debt", sub: "Empires",
+    text: "Debt is not a price you pay — it is a debt you TAKE. While you have any Debt at all you cannot buy anything: no card, no Event, no Project.\n\nPay it off at $1 per token, any time during your turn. Paying costs you no Buy, and you may pay off as much or as little as you can afford." },
+  vp_tokens: { icon: "⭐", title: "VP tokens", sub: "counted at the end",
+    text: "Victory point tokens sit in front of you, public, and are added to the VP on your cards when the game is scored.\n\nOnce you have them they are safe — trashing or discarding a card never takes them away." },
+  // — Artifacts (the per-artifact rules text comes from the catalog) —
+  artifact: { icon: "🏳", title: "Artifact", sub: "Renaissance",
+    text: "An Artifact is not a card. Exactly one copy of each exists, it is never bought, gained or shuffled into anyone's deck, and it is never in play.\n\nIt sits in front of whoever took it last — so taking one TAKES it from the player who had it." },
+  // — Adventures tokens sitting ON a Supply pile —
+  "tok:+card": { icon: "+C", title: "+1 Card token", sub: "Pathfinding — on a Supply pile",
+    text: "While this token is on a Supply pile, its owner gets +1 Card when they play a card from that pile — before the card does anything else." },
+  "tok:+action": { icon: "+A", title: "+1 Action token", sub: "Lost Arts — on a Supply pile",
+    text: "While this token is on a Supply pile, its owner gets +1 Action when they play a card from that pile — before the card does anything else." },
+  "tok:+buy": { icon: "+B", title: "+1 Buy token", sub: "Seaway — on a Supply pile",
+    text: "While this token is on a Supply pile, its owner gets +1 Buy when they play a card from that pile — before the card does anything else." },
+  "tok:+coin": { icon: "+$", title: "+$1 token", sub: "Training — on a Supply pile",
+    text: "While this token is on a Supply pile, its owner gets +$1 when they play a card from that pile — before the card does anything else." },
+  "tok:-cost": { icon: "−$2", title: "−$2 cost token", sub: "Ferry — on a Supply pile",
+    text: "Cards from this pile cost $2 less on their owner's turns (never below $0). It changes the price for its OWNER only." },
+  "tok:trashing": { icon: "🗑", title: "Trashing token", sub: "Plan — on a Supply pile",
+    text: "When its owner buys a card from this pile, they may trash a card from their hand." },
+  "tok:estate": { icon: "🏠", title: "Estate token", sub: "Inheritance — on a Supply pile",
+    text: "Its owner's Estates are also the Action card this token sits on: their Estates may be played as that card, in addition to being Estates." },
+  // — Adventures tokens sitting in front of a PLAYER —
+  "stok:-card": { icon: "−1🃏", title: "−1 Card token", sub: "in front of a player",
+    text: "When this player draws their hand in Clean-up they draw one card fewer, and then return the token.\n\nIt is a one-shot penalty, not a permanent one — but it sits there until the hand it costs actually gets drawn." },
+  "stok:-coin": { icon: "−$1", title: "−$1 token", sub: "in front of a player",
+    text: "The next time this player would get $ on their turn, they get $1 less and return the token.\n\nOne-shot, like the −1 Card token: it waits in front of them until it bites." },
+  "stok:journey": { icon: "🧭", title: "Journey token", sub: "in front of a player",
+    text: "The Journey token starts face up and gets turned over by the cards that use it. What those cards do depends on which way it is showing — so it is public, and worth watching.\n\nRight now it is face DOWN." },
+  "stok:estate": { icon: "🏠", title: "Inheritance", sub: "in front of a player",
+    text: "This player has set their Estate token on an Action card. Their Estates are also that card — they may be played as it, and they are still Estates for scoring." },
+};
+
+// A landscape's kind, as a heading and as one word on its own face. Derived
+// from the DATA rather than a hardcoded row, so a set that adds a kind (Ways,
+// Traits, Prophecies) gets its section for free.
+const KIND_PLURAL = {
+  event: "Events", project: "Projects", landmark: "Landmarks",
+  way: "Ways", trait: "Traits", prophecy: "Prophecies", ally: "Allies",
+};
+// The order the Kingdom browser lists the kinds in — buyable first, then the
+// ones that just sit there. A kind not listed here still gets a section; it
+// simply sorts to the end, which is the right default for a set we haven't
+// shipped yet.
+const KIND_ORDER = ["event", "project", "landmark", "way", "trait", "prophecy", "ally"];
+const kindPlural = (k) => KIND_PLURAL[k] || (k ? k.charAt(0).toUpperCase() + k.slice(1) + "s" : "Landscapes");
+// What a KIND of landscape is, as opposed to what one particular card does.
+// The distinction is the half a first-time reader is missing — "you buy an
+// Event instead of a card, with a Buy" is not printed on any Event — so the
+// detail modal leads with it and the card's own text follows.
+const LANDSCAPE_BLURB = {
+  event: "An Event is bought with a Buy, like a card — but you get its effect instead of a card, and it stays on the table for anyone to buy again. Its price never changes: Bridge and friends discount cards, not Events.",
+  project: "A Project is bought once, with a Buy, and you put a cube on it. From then on its ability is on for you for the REST OF THE GAME. You may only ever have two Projects.",
+  landmark: "A Landmark is never bought. It sits on the table all game and changes how the game is scored — every player is under it, whether they play to it or not.",
+  way: "A Way is never bought. When you play an Action card you may follow the Way instead of the card's own instructions — any Action, any turn.",
+  trait: "A Trait is never bought. It attaches to one Supply pile at setup, and every card from that pile has it for the whole game.",
+  prophecy: "A Prophecy is never bought. It starts covered by Sun tokens and takes effect for everyone once the last one is removed.",
 };
 // Platinum/Colony slot into the basics row when the Prosperity setup rule
 // put them in this game's supply
@@ -129,9 +222,11 @@ const faceClass = (types) => {
   return "dm-f-action";
 };
 
-// Right-click (desktop) / press-and-hold (touch) opens the card's detail modal,
+// Right-click (desktop) / press-and-hold (touch) opens the detail modal,
 // WHATEVER the plain click is wired to do — a card you can buy, play or pick is
 // exactly the card you most want to read first, and its click is already taken.
+// NOT card-only: every landscape, mat chip, token and counter on the board uses
+// this same hook, so the gesture means one thing everywhere (see THINGS).
 //
 // Android fires `contextmenu` on a long press, but iOS Safari does not (it runs
 // its own selection callout instead), so touch gets a real timer rather than
@@ -460,20 +555,114 @@ function Pop({ n }) {
   return <span key={n} className="dm-count-pop">{n}</span>;
 }
 
-// A mat chip (Island / Native Village / Set-aside). When the cards on it are
-// KNOWN — your own mats, or any public one (Island) — it's tappable to open a
-// viewer; a hover title alone is invisible on touch, which is what hid the
-// Native Village contents on a phone. A face-down mat (an opponent's Native
-// Village / set-aside) shows the count only and isn't tappable.
-function DmMatChip({ emoji, count, label, cards, onView }) {
+// A mat chip (Island / Native Village / Tavern / Set-aside). When the cards on
+// it are KNOWN — your own mats, or any public one (Island, Tavern) — it's
+// tappable to open a viewer; a hover title alone is invisible on touch, which is
+// what hid the Native Village contents on a phone. A face-down mat (an
+// opponent's Native Village / set-aside) shows the count only.
+//
+// The mat's own RULES are a second question from what is on it, and the answer
+// used to exist nowhere: press-and-hold / right-click opens the mat's
+// description, exactly as it does on a card. A face-down mat has no viewer, so
+// its plain click opens that description too — no dead clicks.
+function DmMatChip({ emoji, count, label, cards, onView, onInfo }) {
   const canView = Array.isArray(cards) && cards.length > 0;
+  const gesture = useCardInfoGesture(onInfo);
+  const click = canView ? () => onView({ label, cards }) : onInfo;
   return (
-    <span className={"dm-mat-chip" + (canView ? " dm-mat-chip-view" : "")}
-      title={label + ": " + (canView ? cards.join(", ") : "face down")}
-      role={canView ? "button" : undefined} tabIndex={canView ? 0 : undefined}
-      onClick={canView ? () => onView({ label, cards }) : undefined}
-      onKeyDown={canView ? (e) => { if (e.key === "Enter" || e.key === " ") onView({ label, cards }); } : undefined}>
+    <span className={"dm-mat-chip" + (click ? " dm-mat-chip-view" : "")}
+      title={label + ": " + (canView ? cards.join(", ") : "face down")
+        + (onInfo ? " — hold or right-click for what the mat does" : "")}
+      role={click ? "button" : undefined} tabIndex={click ? 0 : undefined}
+      onClick={click} {...gesture}
+      onKeyDown={click ? (e) => { if (e.key === "Enter" || e.key === " ") click(); } : undefined}>
       {emoji} {count}
+    </span>
+  );
+}
+
+// A landscape (Event / Project / Landmark / …). LANDSCAPE-orientation — wide
+// where a card is tall — because that is what they physically are and what
+// tells them apart from the Supply at a glance.
+//
+// It is a component rather than a render helper for one reason: it calls the
+// info-gesture hook, and hooks may not live in a function called from a `.map`.
+// The face's own text is TRUNCATED by its box (`.dm-ls-text` clips), so unlike
+// the tooltip theory this used to rest on, a long Event genuinely needs the
+// modal — press-and-hold / right-click, same as a card.
+function DmLandscape({ name, d, st, buyable, spent, seatOrder, names, myId, onBuy, onInfo, idx = 0 }) {
+  const gesture = useCardInfoGesture(onInfo);
+  const store = st.vp || 0;
+  const kind = d.kind || st.kind || "event";
+  // An Event prints a price; a LANDMARK prints none, because it cannot be
+  // bought at all. Debt (Empires) is the third dimension and reads "5D".
+  const priceLabel = kind === "landmark" ? ""
+    : [d.cost || !d.debt ? "$" + (d.cost ?? 0) : "",
+       d.debt ? d.debt + "D" : ""].filter(Boolean).join(" + ");
+  const cls = "dm-lscape dm-ls-" + kind
+    + (buyable ? " dm-ls-buyable" : "") + (spent ? " dm-ls-spent" : "");
+  // A non-buyable landscape stays a live element (never `disabled`) precisely so
+  // it keeps both its tooltip and its gesture: reading it must not depend on
+  // being able to afford it.
+  return (
+    <button type="button" className={cls}
+      style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}
+      title={`${name} — ${priceLabel || kind}\n${d.text || ""}`}
+      onClick={buyable && onBuy ? onBuy : onInfo} {...gesture}>
+      <span className="dm-ls-name">{name}</span>
+      <span className="dm-ls-text">{d.text || ""}</span>
+      <span className="dm-ls-foot">
+        <span className="dm-ls-kind">{kind}</span>
+        {priceLabel && <span className="dm-ls-cost">{priceLabel}</span>}
+        {/* What a Landmark shows instead of a price: the VP tokens left on
+            it. Arena and Battlefield drain over a game, and "if there are
+            none left you get nothing", so the count is real information. */}
+        {store > 0 && (
+          <span className="dm-ls-vp" title="VP tokens left on this landmark">
+            &#9733; <Pop n={store} />
+          </span>
+        )}
+        {/* PROJECT CUBES (Renaissance): a Project's ability is active for
+            whoever has a cube on it, for the rest of the game — so the
+            cubes ARE the state and every player needs to see them. One
+            coloured dot per owner, in seat order. */}
+        {st.kind === "project" && (st.bought_by || []).length > 0 && (
+          <span className="dm-ls-cubes">
+            {(seatOrder || []).filter((p) => (st.bought_by || []).includes(p)).map((p) => (
+              <span key={p} className={"dm-cube dm-cube-" + (seatOrder.indexOf(p) % 4)}
+                title={`${names?.[p] || p} has a cube on ${name}`} />
+            ))}
+          </span>
+        )}
+        {/* Sinister Plot's counters — per player, next to their cube */}
+        {(st.tokens?.[myId] || 0) > 0 && (
+          <span className="dm-ls-vp" title="your tokens here">
+            ● <Pop n={st.tokens[myId]} />
+          </span>
+        )}
+      </span>
+      {spent && <span className="dm-ls-tick" title="you have bought this">✓</span>}
+    </button>
+  );
+}
+
+// Every OTHER not-a-card thing that sits on the table: an Artifact badge, a
+// token on a pile, a token in front of a player, a counter in the resource bar.
+// One component so the gesture contract is identical to a card's — plain click
+// opens the description, and press-and-hold / right-click does too even when
+// something else owns the click (the resource counters carry spend BUTTONS, and
+// a hold on the counter must read the rule, never spend).
+function DmChip({ className = "", title, onInfo, children }) {
+  const gesture = useCardInfoGesture(onInfo);
+  return (
+    <span className={(className + (onInfo ? " dm-chip-info" : "")).trim() || undefined} title={title}
+      role={onInfo ? "button" : undefined} tabIndex={onInfo ? 0 : undefined}
+      onClick={onInfo ? (e) => { if (!e.target.closest("button")) onInfo(); } : undefined}
+      onKeyDown={onInfo ? (e) => {
+        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); onInfo(); }
+      } : undefined}
+      {...gesture}>
+      {children}
     </span>
   );
 }
@@ -811,7 +1000,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
   const [gameOverDismissed, setGameOverDismissed] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [showKingdom, setShowKingdom] = useState(false);
-  const [cardInfo, setCardInfo] = useState(null);    // card name → detail modal
+  // The detail modal is not card-only. `info` is a DESCRIPTOR — {kind:"card"|
+  // "landscape"|"thing", …} — because a mat, an Artifact and an Event are all
+  // things a player points at and asks "what does this do?", and until now only
+  // a card could answer. One state, one modal, one gesture (see THINGS).
+  const [info, setInfo] = useState(null);
   const [deckView, setDeckView] = useState(null);    // game-over: whose final deck to show
   const [matView, setMatView] = useState(null);      // {label, cards} for a mat viewer modal
   const [lobbyTab, setLobbyTab] = useState("open");  // mobile-only Open/Active/History selector
@@ -945,6 +1138,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // game dict says only which ones are on the table and their state.
   const landscapeData = catalog?.landscapes || {};
   const boardLandscapes = Object.keys(game?.landscapes || {}).sort();
+  // ...the same set, grouped by kind, for the Kingdom browser. Events, Projects
+  // and Landmarks are dealt WITH the kingdom and belong in the thing that calls
+  // itself "this game's Kingdom" — before this they existed only as a row above
+  // the Supply, which scrolls away and says nothing about what a Project IS.
+  const landscapeGroups = (() => {
+    const by = {};
+    for (const n of boardLandscapes) {
+      const k = landscapeData[n]?.kind || game.landscapes[n]?.kind || "event";
+      (by[k] = by[k] || []).push(n);
+    }
+    const rank = (k) => (KIND_ORDER.indexOf(k) + 1) || 99;
+    return Object.entries(by).sort((a, b) => rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0]));
+  })();
+  // Artifacts (Renaissance) exist ONLY as a badge in front of whoever holds one
+  // — so until someone takes it, an Artifact this game keeps available is
+  // literally unreadable anywhere on the board. The Kingdom browser is where it
+  // belongs, held or not.
+  const gameArtifacts = Object.keys(game?.artifacts || {}).sort();
   // MIRRORS engine.landscape_gate + the legal_moves enumeration. Display only,
   // as always — the server stays authoritative and will refuse anything this
   // gets wrong. Kept beside the pile affordance for exactly that reason.
@@ -1330,6 +1541,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
   };
   const abandonGame = () => { send({ action: "abandon" }); setConfirmAbandon(false); };
 
+  // ── the detail modal's three doors ──
+  // Everything readable on the board goes through one of these. A card and a
+  // landscape are named (their text is catalog data, so the modal reads it live
+  // rather than snapshotting it); a THING is a key into the static table, plus
+  // whatever per-instance facts the caller has (who holds this Artifact).
+  const showCard = (name) => { if (name) setInfo({ kind: "card", name }); };
+  const showLandscape = (name) => { if (name) setInfo({ kind: "landscape", name }); };
+  const showThing = (key, extra) => { if (THINGS[key]) setInfo({ kind: "thing", key, ...extra }); };
+  // An Artifact's rules text is the SERVER's (catalog.artifacts), and what the
+  // generic entry adds is the part no card explains: what an Artifact even is.
+  const showArtifact = (name) => setInfo({
+    kind: "thing", key: "artifact", title: name,
+    sub: game?.artifacts?.[name]
+      ? `held by ${names[game.artifacts[name]] || game.artifacts[name]}`
+      : "not taken yet",
+    lead: catalog?.artifacts?.[name]?.text || "",
+  });
+
   // Charlatan's game rule: Curse is also a Treasure (playable for $1)
   const typesFor = (c) => {
     const t = cards[c]?.types || [];
@@ -1342,18 +1571,18 @@ export default function Dontminion({ myId, authUser, onExit }) {
     const t = typesFor(card);
     if (!iAmActor && inAction && t.includes("action") && game.actions > 0) mv({ type: "play_action", card });
     else if (!iAmActor && inBuy && t.includes("treasure") && !bought) mv({ type: "play_treasure", card });
-    else setCardInfo(card);
+    else showCard(card);
   };
   const pileClick = (pile) => {
     if (iAmActor && constraint?.piles) {
       if (constraint.piles.includes(pile)) { mv({ type: "decision", pile }); return; }
-      setCardInfo(pileFace(pile)); return;
+      showCard(pileFace(pile)); return;
     }
     if (inBuy && !debtBlocks && game.buys > 0 && pileLeft(pile) > 0
         && isSupplyPile(pile) && affordable(pile)) {
       mv({ type: "buy", card: pile }); return;
     }
-    setCardInfo(pileFace(pile));
+    showCard(pileFace(pile));
   };
 
   // ── render helpers ──
@@ -1394,7 +1623,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
               <DmCardFace key={i} name={n} card={cards[n]} small
                 selected={pickIdx.includes(i)}
                 onClick={() => setPickIdx((s) => pickToggle(s, i, c.max))}
-                onInfo={() => setCardInfo(n)} />
+                onInfo={() => showCard(n)} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -1444,7 +1673,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 selected={orderIdx.includes(i)}
                 badge={orderIdx.includes(i) ? orderIdx.indexOf(i) + 1 : null}
                 onClick={() => setOrderIdx((s) => s.includes(i) ? s.filter((x) => x !== i) : [...s, i])}
-                onInfo={() => setCardInfo(n)} />
+                onInfo={() => showCard(n)} />
             ))}
           </div>
           <div className="dm-prompt-actions">
@@ -1537,7 +1766,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
         style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}>
         <DmCardFace name={face} card={cardData} small body
           highlight={highlight} disabled={disabled && !highlight}
-          onClick={() => pileClick(name)} onInfo={() => setCardInfo(face)} />
+          onClick={() => pileClick(name)} onInfo={() => showCard(face)} />
         {/* the count sits OUTSIDE the card (the card clips its overflow) */}
         <span className="dm-pile-count"><Pop n={count} /></span>
         {/* any active discount (Bridge, Quarry, Peddler's own rule) */}
@@ -1565,13 +1794,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
             )}
           </span>
         )}
+        {/* Adventures tokens on this pile. "+C" on a pile corner is a glyph
+            nobody can guess, so each one answers the info gesture with the
+            rule it stands for — and whose it is. */}
         {pileTokens(name).length > 0 && (
           <span className="dm-tokens">
             {pileTokens(name).map(({ pid, kind }, i) => (
-              <span key={i} className={"dm-tok" + (pid === myId ? " dm-tok-mine" : "")}
-                title={`${names[pid] || pid}'s ${kind} token`}>
+              <DmChip key={i} className={"dm-tok" + (pid === myId ? " dm-tok-mine" : "")}
+                title={`${names[pid] || pid}'s ${kind} token`}
+                onInfo={() => showThing("tok:" + kind, {
+                  sub: `${pid === myId ? "yours" : `${names[pid] || pid}'s`} — on ${name}`,
+                })}>
                 {TOKEN_GLYPH[kind] || "•"}
-              </span>
+              </DmChip>
             ))}
           </span>
         )}
@@ -1582,63 +1817,95 @@ export default function Dontminion({ myId, authUser, onExit }) {
   // A landscape face: LANDSCAPE-orientation (wide), because that is what they
   // physically are and what tells them apart from the Supply at a glance.
   // Click buys; the info gesture (right-click / press-and-hold) reads it, like
-  // every other face.
-  const renderLandscape = (name, idx = 0) => {
-    const d = landscapeData[name] || {};
-    const buyable = landscapeBuyable(name);
-    const spent = landscapeSpent(name);
-    const st = game?.landscapes?.[name] || {};
-    const store = st.vp || 0;
-    // An Event prints a price; a LANDMARK prints none, because it cannot be
-    // bought at all. Debt (Empires) is the third dimension and reads "5D".
-    const priceLabel = st.kind === "landmark" ? ""
-      : [d.cost || !d.debt ? "$" + (d.cost ?? 0) : "",
-         d.debt ? d.debt + "D" : ""].filter(Boolean).join(" + ");
-    const cls = "dm-lscape dm-ls-" + (d.kind || "event")
-      + (buyable ? " dm-ls-buyable" : "") + (spent ? " dm-ls-spent" : "");
-    // The face carries its own rules text and `title` carries the full version,
-    // so unlike a card a landscape needs no info MODAL — and a non-buyable one
-    // stays a live element (never `disabled`) precisely so it keeps its
-    // tooltip: reading it must not depend on being able to afford it.
+  // every other face — and a landscape you CAN'T buy (a Landmark, an Event you
+  // can't afford, one you already took) opens the detail modal on a plain click
+  // too, the same "nothing on the board is a dead click" rule the cards keep.
+  // `readOnly` is the Kingdom browser's copy: it is a reference shelf, so a
+  // click there must READ the Event, never spend a Buy on it from behind an
+  // open modal.
+  const renderLandscape = (name, idx = 0, readOnly = false) => (
+    <DmLandscape key={name} name={name} idx={idx}
+      d={landscapeData[name] || {}} st={game?.landscapes?.[name] || {}}
+      buyable={!readOnly && landscapeBuyable(name)} spent={landscapeSpent(name)}
+      seatOrder={seatOrder} names={names} myId={myId}
+      onBuy={() => mv({ type: "buy_landscape", name })}
+      onInfo={() => showLandscape(name)} />
+  );
+
+  // THE detail modal — one panel, three shapes. A card gets its real face beside
+  // the text; a landscape gets its real (wide) face; a thing gets an emblem,
+  // because there is no physical face to draw. Everything else about the panel —
+  // title, meta line, rules text, Close — is identical on purpose: the reader
+  // learns one thing to read, not three.
+  const renderInfoModal = () => {
+    if (!info) return null;
+    const close = () => setInfo(null);
+    let face = null, title = "", meta = "", text = "", tint = "";
+
+    if (info.kind === "card") {
+      const c = cards[info.name];
+      if (!c) return null;
+      tint = faceClass(c.types);
+      face = <div className="dm-cardinfo-face"><DmCardFace name={info.name} card={c} /></div>;
+      title = info.name;
+      meta = [
+        `Cost $${c.cost}`
+          + (effCost(info.name) !== printedCost(info.name) ? ` (now $${effCost(info.name)})` : "")
+          + (c.debt ? ` + ${c.debt} Debt` : "") + (c.potion ? " + Potion" : ""),
+        (c.types || []).map((t) => TYPE_LABEL[t] || t).join(" – "),
+        game.piles?.[info.name]
+          ? `${pileLeft(info.name)} left${game.piles[info.name].supply ? " in the Supply" : ""}` : "",
+      ].filter(Boolean).join(" · ");
+      text = c.text || "";
+    } else if (info.kind === "landscape") {
+      const d = landscapeData[info.name] || {};
+      const st = game?.landscapes?.[info.name] || {};
+      const kind = d.kind || st.kind || "event";
+      face = (
+        <div className="dm-cardinfo-face dm-cardinfo-lscape">
+          <DmLandscape name={info.name} d={d} st={st} buyable={false} spent={false}
+            seatOrder={seatOrder} names={names} myId={myId} />
+        </div>
+      );
+      title = info.name;
+      meta = [
+        kindPlural(kind).replace(/s$/, ""),
+        kind === "landmark" || kind === "way" || kind === "trait" ? ""
+          : [d.cost != null ? `costs $${d.cost}` : "", d.debt ? `${d.debt} Debt` : ""].filter(Boolean).join(" + "),
+        // "once per turn" / "once per game" is a real rule and it is printed
+        // nowhere on the face — only the ✓ tick hints at it after the fact.
+        d.once === "game" ? "once per game, per player" : d.once === "turn" ? "once per turn" : "",
+        (st.bought_by || []).length ? `${st.bought_by.length} cube${st.bought_by.length === 1 ? "" : "s"} on it` : "",
+        st.vp ? `${st.vp} VP left on it` : "",
+      ].filter(Boolean).join(" · ");
+      // What a landscape's kind MEANS is the half a first-time reader is
+      // missing, and it is not on the card either — so it leads the text.
+      text = [LANDSCAPE_BLURB[kind] || "", d.text || ""].filter(Boolean).join("\n\n");
+    } else {
+      const t = THINGS[info.key];
+      if (!t) return null;
+      face = <div className="dm-cardinfo-face dm-cardinfo-emblem"><span>{t.icon}</span></div>;
+      title = info.title || t.title;
+      meta = info.sub != null ? info.sub : t.sub;
+      text = [info.lead || "", t.text].filter(Boolean).join("\n\n");
+    }
+
     return (
-      <button key={name} type="button" className={cls}
-        style={{ animationDelay: Math.min(idx * 16, 260) + "ms" }}
-        title={`${name} — $${d.cost ?? "?"}\n${d.text || ""}`}
-        onClick={() => buyable && mv({ type: "buy_landscape", name })}>
-        <span className="dm-ls-name">{name}</span>
-        <span className="dm-ls-text">{d.text || ""}</span>
-        <span className="dm-ls-foot">
-          <span className="dm-ls-kind">{d.kind || "event"}</span>
-          {priceLabel && <span className="dm-ls-cost">{priceLabel}</span>}
-          {/* What a Landmark shows instead of a price: the VP tokens left on
-              it. Arena and Battlefield drain over a game, and "if there are
-              none left you get nothing", so the count is real information. */}
-          {store > 0 && (
-            <span className="dm-ls-vp" title="VP tokens left on this landmark">
-              &#9733; <Pop n={store} />
-            </span>
-          )}
-          {/* PROJECT CUBES (Renaissance): a Project's ability is active for
-              whoever has a cube on it, for the rest of the game — so the
-              cubes ARE the state and every player needs to see them. One
-              coloured dot per owner, in seat order. */}
-          {st.kind === "project" && (st.bought_by || []).length > 0 && (
-            <span className="dm-ls-cubes">
-              {seatOrder.filter((p) => (st.bought_by || []).includes(p)).map((p) => (
-                <span key={p} className={"dm-cube dm-cube-" + (seatOrder.indexOf(p) % 4)}
-                  title={`${names[p] || p} has a cube on ${name}`} />
-              ))}
-            </span>
-          )}
-          {/* Sinister Plot's counters — per player, next to their cube */}
-          {(st.tokens?.[myId] || 0) > 0 && (
-            <span className="dm-ls-vp" title="your tokens here">
-              ● <Pop n={st.tokens[myId]} />
-            </span>
-          )}
-        </span>
-        {spent && <span className="dm-ls-tick" title="you have bought this">✓</span>}
-      </button>
+      <div className="dm-backdrop" onClick={close}>
+        <div className={"dm-modal dm-cardinfo " + tint} onClick={(e) => e.stopPropagation()}>
+          <div className="dm-cardinfo-cols">
+            {face}
+            <div className="dm-cardinfo-detail">
+              <h2>{title}</h2>
+              {meta && <p className="dm-cardinfo-meta">{meta}</p>}
+              <p className="dm-cardinfo-text">{text}</p>
+            </div>
+          </div>
+          <div className="dm-prompt-actions">
+            <button className="btn btn-gold" onClick={close}>Close</button>
+          </div>
+        </div>
+      </div>
     );
   };
 
@@ -1660,26 +1927,30 @@ export default function Dontminion({ myId, authUser, onExit }) {
         )}
         <span className="dm-vp" title="victory points">🛡 <Pop n={game.vp?.[pid] ?? 0} /> VP</span>
         {(game.vp_tokens?.[pid] || 0) > 0 && (
-          <span className="dm-opp-turns" title="VP tokens (included in the total)">⭐ <Pop n={game.vp_tokens[pid]} /></span>
+          <DmChip className="dm-opp-turns" title="VP tokens (included in the total)"
+            onInfo={() => showThing("vp_tokens")}>⭐ <Pop n={game.vp_tokens[pid]} /></DmChip>
         )}
         {/* DEBT (Empires): public, and it stops that player buying ANYTHING
             until it is paid off at $1 per token — which is exactly why it is
             on every seat's row and not only your own. */}
         {(game.debt?.[pid] || 0) > 0 && (
-          <span className="dm-debt" title="Debt — can't buy anything until it's paid off ($1 per token)">
-            🪙 <Pop n={game.debt[pid]} /> Debt</span>
+          <DmChip className="dm-debt" title="Debt — can't buy anything until it's paid off ($1 per token)"
+            onInfo={() => showThing("debt")}>
+            🪙 <Pop n={game.debt[pid]} /> Debt</DmChip>
         )}
         <span className="dm-opp-turns" title="turns taken">⏱ {s.turns_taken ?? 0}</span>
         {/* VILLAGERS (Renaissance) — the other half of the Coffers mat. Public
             like Coffers: an opponent sitting on six Villagers is about to
             take a very long turn, and that is information the table has. */}
         {(game.villagers?.[pid] || 0) > 0 && (
-          <span className="dm-opp-turns" title="Villagers — each is +1 Action in their Action phase">
-            🧑 <Pop n={game.villagers[pid]} /></span>
+          <DmChip className="dm-opp-turns" title="Villagers — each is +1 Action in their Action phase"
+            onInfo={() => showThing("villagers")}>
+            🧑 <Pop n={game.villagers[pid]} /></DmChip>
         )}
         {(game.coffers?.[pid] || 0) > 0 && (
-          <span className="dm-opp-turns" title="Coffers — each is +$1, spendable any time in their turn">
-            🪙 <Pop n={game.coffers[pid]} /></span>
+          <DmChip className="dm-opp-turns" title="Coffers — each is +$1, spendable any time in their turn"
+            onInfo={() => showThing("coffers")}>
+            🪙 <Pop n={game.coffers[pid]} /></DmChip>
         )}
         {/* ARTIFACTS (Renaissance): one copy of each exists and it sits in
             front of whoever took it last — public, and taken FROM the
@@ -1687,17 +1958,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
         {Object.entries(game.artifacts || {})
           .filter(([, holder]) => holder === pid)
           .map(([a]) => (
-            <span key={a} className="dm-seat-tok"
-              title={`${a} — ${catalog?.artifacts?.[a]?.text || "Artifact"}`}>
+            <DmChip key={a} className="dm-seat-tok"
+              title={`${a} — ${catalog?.artifacts?.[a]?.text || "Artifact"}`}
+              onInfo={() => showArtifact(a)}>
               🏳 {a}
-            </span>
+            </DmChip>
           ))}
         {/* Adventures tokens that sit in front of a PLAYER rather than on a
             pile. Public markers, so they render for every seat — and the two
             negative ones matter enough to the reader that hiding them would be
             the surprise ("why did I only draw 4?"). */}
-        {seatTokens(s).map(({ key, glyph, title }) => (
-          <span key={key} className="dm-seat-tok" title={title}>{glyph}</span>
+        {seatTokens(s).map(({ key, thing, glyph, title, extra }) => (
+          <DmChip key={key} className="dm-seat-tok" title={title}
+            onInfo={() => showThing(thing, extra)}>{glyph}</DmChip>
         ))}
       </div>
     );
@@ -1715,7 +1988,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <DmPile kind="deck" label="deck" count={s.deck_count ?? 0} />
           <DmPile kind="discard" label="discard" count={s.discard_view?.count ?? 0}
             top={s.discard_view?.top} card={cards[s.discard_view?.top]}
-            onInfo={() => setCardInfo(s.discard_view?.top)} />
+            onInfo={() => showCard(s.discard_view?.top)} />
           <div className="dm-opp-hand dm-pile-slot" title={`${s.hand_count ?? 0} cards in hand`}>
             <div className="dm-fan">
               {handN > 0
@@ -1727,11 +2000,11 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-opp-inplay">
             {(s.duration_view || []).flatMap((e, i) => [
               <div key={"d" + i} className="dm-durwrap" title="Duration — stays in play">
-                <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => setCardInfo(e.card)} />
+                <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => showCard(e.card)} />
               </div>,
               ...(e.riders || []).map((r, j) => (
                 <div key={"d" + i + "r" + j} className="dm-durwrap">
-                  <DmCardFace name={r} card={cards[r]} small onInfo={() => setCardInfo(r)} />
+                  <DmCardFace name={r} card={cards[r]} small onInfo={() => showCard(r)} />
                 </div>
               )),
             ])}
@@ -1739,24 +2012,24 @@ export default function Dontminion({ myId, authUser, onExit }) {
               const ip = s.in_play || [];
               const ks = zoneKeys(ip, "o" + pid + (game.turn_number || 0));
               return ip.map((c, i) => (
-                <DmCardFace key={ks[i]} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
+                <DmCardFace key={ks[i]} name={c} card={cards[c]} small onInfo={() => showCard(c)} />
               ));
             })()}
             {(s.in_play || []).length === 0 && (s.duration_view || []).length === 0
               && <span className="dm-zone-hint">nothing in play</span>}
             {(s.island || []).length > 0 && (
               <DmMatChip emoji="🏝" count={s.island.length} label="Island mat"
-                cards={s.island} onView={setMatView} />
+                cards={s.island} onView={setMatView} onInfo={() => showThing("mat:island")} />
             )}
             {(s.village_count || 0) > 0 && (
               /* face down — the opponent's mat contents are hidden, count only */
               <DmMatChip emoji="🏕" count={s.village_count} label="Native Village mat"
-                cards={null} onView={setMatView} />
+                cards={null} onView={setMatView} onInfo={() => showThing("mat:village")} />
             )}
             {/* ...whereas a Tavern mat IS face up, so an opponent's contents show */}
             {(s.tavern || []).length > 0 && (
               <DmMatChip emoji="🍺" count={s.tavern.length} label="Tavern mat"
-                cards={s.tavern} onView={setMatView} />
+                cards={s.tavern} onView={setMatView} onInfo={() => showThing("mat:tavern")} />
             )}
           </div>
         </div>
@@ -2168,7 +2441,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 all when the game has none — no ghost row and no layout shift,
                 which is every game until Adventures (ph. 7) ships one. */}
             {boardLandscapes.length > 0 && (
-              <div className="dm-lscape-row">{boardLandscapes.map(renderLandscape)}</div>
+              <div className="dm-lscape-row">{boardLandscapes.map((n, i) => renderLandscape(n, i))}</div>
             )}
             <div className="dm-supply-row dm-basics">{basicsRowFor(game.supply).map(renderPile)}</div>
             <div className="dm-supply-row dm-kingdom">{kingdomByCost.map(renderPile)}</div>
@@ -2182,16 +2455,19 @@ export default function Dontminion({ myId, authUser, onExit }) {
           <div className="dm-me">
             {!over && game.turn === myId && (
               <div className="dm-resbar">
-                <span>Actions <b><Pop n={game.actions} /></b></span>
-                <span>Buys <b><Pop n={game.buys} /></b></span>
-                <span>Money <b>$<Pop n={game.coins} /></b></span>
+                {/* Even the three vanilla counters answer the gesture: "unspent
+                    money does not carry over" is the rule that costs a new
+                    player their first game, and it is written nowhere. */}
+                <DmChip onInfo={() => showThing("actions")}>Actions <b><Pop n={game.actions} /></b></DmChip>
+                <DmChip onInfo={() => showThing("buys")}>Buys <b><Pop n={game.buys} /></b></DmChip>
+                <DmChip onInfo={() => showThing("coins")}>Money <b>$<Pop n={game.coins} /></b></DmChip>
                 {/* Coffers: a SPENDABLE counter, not a resource that ticks
                     down on its own. Spendable "at any time during your turn",
                     so the button lives here rather than in the buy row — and
                     it is hidden while a decision is open, which is exactly
                     when the server refuses the move. */}
                 {myCoffers > 0 && (
-                  <span className="dm-counter">Coffers <b><Pop n={myCoffers} /></b>
+                  <DmChip className="dm-counter" onInfo={() => showThing("coffers")}>Coffers <b><Pop n={myCoffers} /></b>
                     {canSpend && (
                       <button className="btn btn-gold btn-sm dm-spend"
                         title="Spend 1 Coffers for +$1"
@@ -2206,14 +2482,15 @@ export default function Dontminion({ myId, authUser, onExit }) {
                         all
                       </button>
                     )}
-                  </span>
+                  </DmChip>
                 )}
                 {/* Villagers: Coffers' twin one column over — spent for +1
                     Action each, and only in your Action phase. The buttons
                     key on the SERVER's spendable count, so the phase rule is
                     never duplicated here. */}
                 {myVillagers > 0 && (
-                  <span className="dm-counter" title="Villagers — spend in your Action phase for +1 Action each">
+                  <DmChip className="dm-counter" title="Villagers — spend in your Action phase for +1 Action each"
+                    onInfo={() => showThing("villagers")}>
                     Villagers <b><Pop n={myVillagers} /></b>
                     {spendableVillagers > 0 && (
                       <button className="btn btn-gold btn-sm dm-spend"
@@ -2229,13 +2506,14 @@ export default function Dontminion({ myId, authUser, onExit }) {
                         all
                       </button>
                     )}
-                  </span>
+                  </DmChip>
                 )}
                 {/* Debt: not a resource you spend on cards — it is a debt that
                     blocks every buy until it's gone. Pay off any amount up to
                     what you can afford, at any time in your turn, for no Buy. */}
                 {myDebt > 0 && (
-                  <span className="dm-counter dm-debt" title="Debt — you can't buy anything until this is paid off ($1 per token)">
+                  <DmChip className="dm-counter dm-debt" title="Debt — you can't buy anything until this is paid off ($1 per token)"
+                    onInfo={() => showThing("debt")}>
                     Debt <b><Pop n={myDebt} /></b>
                     {payableDebt > 0 && (
                       <button className="btn btn-gold btn-sm dm-spend"
@@ -2251,11 +2529,12 @@ export default function Dontminion({ myId, authUser, onExit }) {
                         one
                       </button>
                     )}
-                  </span>
+                  </DmChip>
                 )}
                 {(game.potions ?? 0) > 0 && (
-                  <span title="Potions — spent on cards with a Potion in their cost">
-                    Potions <b><Pop n={game.potions} /></b></span>
+                  <DmChip title="Potions — spent on cards with a Potion in their cost"
+                    onInfo={() => showThing("potions")}>
+                    Potions <b><Pop n={game.potions} /></b></DmChip>
                 )}
                 {bridges > 0 && <span>Cards cost <b>−<Pop n={bridges} /></b></span>}
                 {hasModalPrompt && promptMin
@@ -2273,30 +2552,30 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-inplay">
               {(mySeat?.duration_view || []).flatMap((e, i) => [
                 <div key={"d" + i} className="dm-durwrap" title="Duration — stays in play">
-                  <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => setCardInfo(e.card)} />
+                  <DmCardFace name={e.card} card={cards[e.card]} small onInfo={() => showCard(e.card)} />
                 </div>,
                 ...(e.riders || []).map((r, j) => (
                   <div key={"d" + i + "r" + j} className="dm-durwrap">
-                    <DmCardFace name={r} card={cards[r]} small onInfo={() => setCardInfo(r)} />
+                    <DmCardFace name={r} card={cards[r]} small onInfo={() => showCard(r)} />
                   </div>
                 )),
               ])}
               {(mySeat?.in_play || []).map((c, i) => (
-                <DmCardFace key={inPlayKeys[i]} name={c} card={cards[c]} small onInfo={() => setCardInfo(c)} />
+                <DmCardFace key={inPlayKeys[i]} name={c} card={cards[c]} small onInfo={() => showCard(c)} />
               ))}
               {(mySeat?.in_play || []).length === 0 && (mySeat?.duration_view || []).length === 0
                 && <span className="dm-zone-hint">in play</span>}
               {(mySeat?.island || []).length > 0 && (
                 <DmMatChip emoji="🏝" count={mySeat.island.length} label="Island mat"
-                  cards={mySeat.island} onView={setMatView} />
+                  cards={mySeat.island} onView={setMatView} onInfo={() => showThing("mat:island")} />
               )}
               {(mySeat?.village_count || 0) > 0 && (
                 <DmMatChip emoji="🏕" count={mySeat.village_count} label="Native Village mat"
-                  cards={mySeat.village_mat} onView={setMatView} />
+                  cards={mySeat.village_mat} onView={setMatView} onInfo={() => showThing("mat:village")} />
               )}
               {(mySeat?.dur_aside_count || 0) > 0 && (
                 <DmMatChip emoji="⏳" count={mySeat.dur_aside_count} label="Set aside"
-                  cards={mySeat.dur_aside} onView={setMatView} />
+                  cards={mySeat.dur_aside} onView={setMatView} onInfo={() => showThing("mat:aside")} />
               )}
               {/* The Tavern mat is PUBLIC — the cards lie face up — so it is
                   the same chip for you and for an opponent, contents and all.
@@ -2304,7 +2583,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   WINDOW, so it arrives as an ordinary decision prompt. */}
               {(mySeat?.tavern || []).length > 0 && (
                 <DmMatChip emoji="🍺" count={mySeat.tavern.length} label="Tavern mat"
-                  cards={mySeat.tavern} onView={setMatView} />
+                  cards={mySeat.tavern} onView={setMatView} onInfo={() => showThing("mat:tavern")} />
               )}
             </div>
             <div className="dm-handrow">
@@ -2312,7 +2591,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                 <DmPile kind="deck" label="deck" count={mySeat?.deck_count ?? 0} />
                 <DmPile kind="discard" label="discard" count={mySeat?.discard_view?.count ?? 0}
                   top={mySeat?.discard_view?.top} card={cards[mySeat?.discard_view?.top]}
-                  onInfo={() => setCardInfo(mySeat?.discard_view?.top)} />
+                  onInfo={() => showCard(mySeat?.discard_view?.top)} />
               </div>
               <div className="dm-pile-slot dm-myhand">
                 <div className="dm-hand">
@@ -2322,7 +2601,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                       || (inBuy && t.includes("treasure") && !bought));
                     return <DmCardFace key={handKeys[i]} name={c} card={cards[c]}
                       highlight={playable} disabled={!playable && !over}
-                      onClick={() => handClick(c)} onInfo={() => setCardInfo(c)} />;
+                      onClick={() => handClick(c)} onInfo={() => showCard(c)} />;
                   })}
                   {(mySeat?.hand || []).length === 0 && <span className="dm-zone-hint">hand empty</span>}
                 </div>
@@ -2370,17 +2649,56 @@ export default function Dontminion({ myId, authUser, onExit }) {
               {kingdomByCost.map((n) => (
                 <div key={n} className="dm-pile-slot">
                   <DmCardFace name={pileFace(n)} card={cards[pileFace(n)]}
-                    onInfo={() => setCardInfo(pileFace(n))} />
+                    onInfo={() => showCard(pileFace(n))} />
                   <span className="dm-pile-count">{pileLeft(n)} left</span>
                   {game.bane === n && <span className="dm-bane" title="Young Witch's Bane">B</span>}
                 </div>
               ))}
             </div>
+            {/* Everything below is dealt with the Kingdom but is NOT a Supply
+                pile, so nothing above shows it: the landscapes (an Event scrolls
+                away above the Supply; a Landmark is never bought at all) and the
+                Artifacts (which live only as a badge in front of a holder, so an
+                untaken one appears nowhere on the board). Each one opens its own
+                description, same as a card. */}
+            {landscapeGroups.map(([kind, list]) => (
+              <div key={kind}>
+                <h3>{kindPlural(kind)}</h3>
+                <p className="dm-kg-note">{LANDSCAPE_BLURB[kind] || ""}</p>
+                <div className="dm-kgrid dm-kgrid-wide">
+                  {list.map((n, i) => renderLandscape(n, i, true))}
+                </div>
+              </div>
+            ))}
+            {gameArtifacts.length > 0 && (
+              <>
+                <h3>Artifacts</h3>
+                <p className="dm-kg-note">{THINGS.artifact.text.split("\n\n")[0]}</p>
+                <div className="dm-kgrid dm-kgrid-wide">
+                  {gameArtifacts.map((a) => (
+                    <button key={a} type="button" className="dm-lscape dm-ls-artifact"
+                      onClick={() => showArtifact(a)}>
+                      <span className="dm-ls-name">🏳 {a}</span>
+                      <span className="dm-ls-text">{catalog?.artifacts?.[a]?.text || ""}</span>
+                      <span className="dm-ls-foot">
+                        <span className="dm-ls-kind">artifact</span>
+                        <span className="dm-ls-holder">
+                          {game.artifacts[a]
+                            ? (game.artifacts[a] === myId ? "you have it"
+                               : `${names[game.artifacts[a]] || game.artifacts[a]} has it`)
+                            : "not taken yet"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             <h3>Basic supply</h3>
             <div className="dm-kgrid">
               {basicsRowFor(game.supply).map((n) => (
                 <div key={n} className="dm-pile-slot">
-                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
+                  <DmCardFace name={n} card={cards[n]} onInfo={() => showCard(n)} />
                   <span className="dm-pile-count">{pileLeft(n)} left</span>
                 </div>
               ))}
@@ -2392,7 +2710,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
                   {asidePiles.map((n) => (
                     <div key={n} className="dm-pile-slot">
                       <DmCardFace name={pileFace(n)} card={cards[pileFace(n)]}
-                        onInfo={() => setCardInfo(pileFace(n))} />
+                        onInfo={() => showCard(pileFace(n))} />
                       <span className="dm-pile-count">{pileLeft(n)} left</span>
                     </div>
                   ))}
@@ -2414,7 +2732,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
             <div className="dm-kgrid">
               {matView.cards.map((n, i) => (
                 <div key={n + "#" + i} className="dm-pile-slot">
-                  <DmCardFace name={n} card={cards[n]} onInfo={() => setCardInfo(n)} />
+                  <DmCardFace name={n} card={cards[n]} onInfo={() => showCard(n)} />
                 </div>
               ))}
             </div>
@@ -2424,32 +2742,7 @@ export default function Dontminion({ myId, authUser, onExit }) {
           </div>
         </div>
       )}
-      {cardInfo && cards[cardInfo] && (
-        <div className="dm-backdrop" onClick={() => setCardInfo(null)}>
-          <div className={"dm-modal dm-cardinfo " + faceClass(cards[cardInfo].types)} onClick={(e) => e.stopPropagation()}>
-            <div className="dm-cardinfo-cols">
-              <div className="dm-cardinfo-face">
-                <DmCardFace name={cardInfo} card={cards[cardInfo]} />
-              </div>
-              <div className="dm-cardinfo-detail">
-                <h2>{cardInfo}</h2>
-                <p className="dm-cardinfo-meta">
-                  Cost ${cards[cardInfo].cost}
-                  {effCost(cardInfo) !== printedCost(cardInfo) ? ` (now $${effCost(cardInfo)})` : ""}
-                  {" · "}{(cards[cardInfo].types || []).map((t) => TYPE_LABEL[t] || t).join(" – ")}
-                  {game.piles?.[cardInfo]
-                    ? ` · ${pileLeft(cardInfo)} left${game.piles[cardInfo].supply ? " in the Supply" : ""}`
-                    : ""}
-                </p>
-                <p className="dm-cardinfo-text">{cards[cardInfo].text}</p>
-              </div>
-            </div>
-            <div className="dm-prompt-actions">
-              <button className="btn btn-gold" onClick={() => setCardInfo(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {renderInfoModal()}
       {showRules && renderRules()}
       {renderGameOver()}
       {toast && <div className="dm-toast">{toast}</div>}
