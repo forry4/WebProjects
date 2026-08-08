@@ -21,7 +21,8 @@ fn main() {
     let k = 3usize;
 
     let opts: Vec<Option_> = (0..5)
-        .map(|d| Option_ { denom: d, target: 3, make: 9, over: 0, set_base: 3, short: 4, null: 12 })
+        .map(|d| Option_ { denom: d, target: 3, make: 9, over: 0, set_base: 3, short: 4, null: 12,
+                  opp: false, redeal: false })
         .collect();
 
     // Identified by the set asked for (shipped) vs. by the HAND, with the set
@@ -42,8 +43,8 @@ fn main() {
                     rng = Rng::new(99);
                 }
                 let n0 = dd.nodes;
-                solve_into(&v, &mut dd, &mut rng, k, wanted, 0, &mut cache);
-                let _ = price(&opts, &cache.worlds, cache.covered);
+                solve_into(&v, &mut dd, &mut rng, k, wanted, 0, 0, &mut cache);
+                let _ = price(&opts, &cache.worlds, cache.covered, cache.covered_opp);
                 nodes[turn] += dd.nodes - n0;
             }
         }

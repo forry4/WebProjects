@@ -756,7 +756,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (423)
+## Tests (425)
 
 `test_engine.py` rules (including the match SCORECARD: one line per banked
 round, derived from the result row, none for a pass-out, and a match that
@@ -1029,10 +1029,51 @@ says is legal. No thresholds.
   (denomination, level) per world against ~50 options; the points solve is the
   proxy and the payoff arithmetic is exact on top. `auction.rs` has made the
   same trade since the design campaign.
-* **Passing is valued at zero**, so the bot passes rather than buy a contract
-  that prices negative. It does NOT price what passing hands the opponent —
-  that needs their eval too, at double the cost. The classic opener must bid, so
-  there it takes the best option regardless.
+* **PASSING IS PRICED (2026-08-08), and it was the tier's biggest blind spot.**
+  It used to be valued at zero, so the bot passed rather than buy a contract
+  that priced negative. That makes a SACRIFICE unreachable by construction — a
+  sacrifice is a contract that prices negative, bought because passing prices
+  worse — and it also bought contracts it should have declined whenever the
+  opponent's standing contract was worse for them than a bad one is for us.
+  `engine.pass_options` now ships the pass as a priced option like any other:
+  the STANDING contract, priced from the opponent's side, flagged `opp: True`.
+  - **`opp` means SOLVE THE OTHER SIDE, not flip the sign.** The declarer LEADS
+    to trick 1 (worth ~0.93 points), so swapping who declares changes the
+    POSITION, not the perspective. `World` carries `opp_pts`/`opp_duck` from
+    their own `solve_world` pass, `Solved` tracks a second `covered_opp` mask,
+    and `price` negates the result because every option in the list is signed
+    for the seat being asked.
+  - **Cost is one extra solve per world**, for the standing denomination only —
+    not double, because our own side already solves up to five.
+  - **A skat pass-out is `redeal: True`, priced flat at 0** — a fresh deal
+    neither seat has seen — and needs no solve. Priced rather than omitted so
+    `pass` is always in the list when it is legal.
+  - **A skat pass prices EVERY game the standing number buys them**, because the
+    winner has not named one yet; the search takes the worst for us, which is
+    the same as assuming they declare well.
+  - **MEASURED: +0.7175 points per round** over 400 paired rounds, `bin/bidlab
+    solve nosac` — `NoSac` is exactly the old restriction ("refuse to overtake
+    unless expecting to make it"). The sacrifice-capable bidder sacrificed 4.2%
+    of rounds. Caveat: that harness runs the design campaign's `auction.rs` on
+    the pre-2026-08-07 scoring (set base N-1, doubling off), so read the sign
+    and the magnitude, not the third decimal.
+  - The classic opener must bid, so there is no pass option at all there.
+  - **Back-compat is by omission**: `opp`/`redeal` are optional and default
+    false, so a cached wasm older than the server prices every option as one it
+    could buy itself and falls back to the old "value <= 0 means pass" rule the
+    client still carries for exactly that window.
+
+* **A REJECTED OPTION EMPTIES THE WHOLE LIST, and that silenced the skat tier
+  entirely (found + fixed 2026-08-08).** `options_from_json` returns
+  `Vec::new()` on any malformed entry — deliberately, since a partial list would
+  be scored positionally against the wrong moves — and its denomination guard
+  was `(0..=4)`. **Grand is denomination 6**, and `skat_declarable` offers Grand
+  at every rung, so EVERY skat auction and declare decision came back empty, the
+  client answered nothing, and the room played out on the server bot while still
+  saying Hard. Silent, deal-independent, and live from the Grand release until
+  this fix. The guard is now `DENOMS.contains`, and
+  `every_denomination_the_server_can_offer_survives_the_option_reader` walks the
+  whole roster so the next denomination cannot repeat it.
 
 ## Not built yet
 

@@ -195,7 +195,7 @@ pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
     }
     let sign = if view.me == declarer { 1.0 } else { -1.0 };
     let mut rng = Rng::new(seed.to_bits() ^ 0x2545_F491_4F6C_DD1D);
-    let wanted = crate::bid::wanted_denoms(&opts);
+    let (wanted, wanted_opp) = crate::bid::wanted_denoms(&opts);
     let key = crate::bid::hand_key(&view, declarer, k.max(1));
     let mut cached = false;
     let sums = LAST_BID.with(|slot| {
@@ -209,15 +209,15 @@ pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
             Some((k0, s)) if k0 == key => s,
             _ => crate::bid::Solved::default(),
         };
-        cached = wanted & !entry.covered == 0;
+        cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
         if !cached {
             DD.with(|dd| {
                 let mut dd = dd.borrow_mut();
-                crate::bid::solve_into(&view, &mut dd, &mut rng, k.max(1), wanted,
+                crate::bid::solve_into(&view, &mut dd, &mut rng, k.max(1), wanted, wanted_opp,
                                        declarer, &mut entry);
             });
         }
-        let out = crate::bid::price(&opts, &entry.worlds, entry.covered);
+        let out = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp);
         *slot = Some((key, entry));
         out
     });

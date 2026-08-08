@@ -1144,6 +1144,49 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
             "short": SHORT_PENALTY, "null": NULL_MAKE}
 
 
+def pass_options(g: dict) -> list[dict]:
+    """PASSING, PRICED -- the option both bots used to value at zero.
+
+    A pass is not worth nothing. It hands the standing contract to the OPPONENT
+    at their price, so it is worth exactly minus what that contract pays them.
+    Valuing it at zero is why neither tier can SACRIFICE: a sacrifice is a
+    contract that prices negative, bought because passing prices worse, and a
+    bot comparing against zero can never reach that conclusion. It also makes
+    the bot buy contracts it should decline, whenever the opponent's standing
+    contract was worse for them than a bad one is for us.
+
+    The option is priced from the OPPONENT's side and carries `opp: True`, which
+    tells the search two things: solve this denomination with the OTHER seat
+    declaring (they lead, which is worth ~0.93 points and cannot be reused from
+    our own solve), and negate the result, because every option in the list is
+    signed for the seat being asked.
+
+    Passing out with nothing standing -- only skat allows it -- is a REDEAL, and
+    a redeal is worth 0 by symmetry: a fresh deal neither seat has seen. Priced
+    as such rather than omitted, so "pass" is always in the list when it is
+    legal and the search never has to special-case its absence.
+    """
+    a = g["auction"]
+    skat = mode_of(g) == "skat"
+    mv = {"kind": "pass"}
+    if a["declarer"] < 0:
+        # Nothing standing. Skat throws the hand in; classic cannot get here.
+        return [{"denom": 0, "level": 0, "target": 0, "make": 0, "over": 0,
+                 "set_base": 0, "short": 0, "null": 0, "redeal": True,
+                 "move": mv}]
+    if not skat:
+        return [_terms_for("classic", a["denom"], a["level"],
+                           doubling=classic_doubling(g))
+                | {"opp": True, "move": mv}]
+    # Skat: the number is a price and the winner has not named a game yet, so
+    # what passing concedes is the BEST declaration that number buys them. One
+    # option per candidate, each priced for them -- the search takes the worst
+    # for us, which is the same as assuming they declare well.
+    return [_terms_for("skat", d["denom"], d["min_level"])
+            | {"opp": True, "move": mv}
+            for d in skat_declarable(a["value"])]
+
+
 def auction_payoff_options(g: dict) -> list[dict]:
     """Every action open to the seat on turn, PRICED, each carrying ITS MOVE.
 
@@ -1174,6 +1217,8 @@ def auction_payoff_options(g: dict) -> list[dict]:
             for lvl, d in opt["bids"]:
                 out.append(_terms_for("classic", d, lvl)
                            | {"move": {"kind": "bid", "level": lvl, "denom": d}})
+        if opt["may_pass"]:
+            out.extend(pass_options(g))
     elif phase == "declare":
         for d in skat_declarable(g["auction"]["value"]):
             for lvl in range(d["min_level"], MAX_LEVEL + 1):

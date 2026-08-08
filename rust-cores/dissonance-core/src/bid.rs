@@ -54,6 +54,16 @@ pub struct Option_ {
     pub short: i32,
     /// The Null consolation, if it applies to this option.
     pub null: i32,
+    /// PRICED FOR THE OPPONENT. A pass hands the standing contract to them, so
+    /// it is worth minus what that contract pays THEM -- which needs a solve of
+    /// the same denomination with the other seat declaring (they lead) and the
+    /// result negated, because every option in the list is signed for the seat
+    /// being asked. False on every option a seat could buy for itself.
+    pub opp: bool,
+    /// A skat pass-out: nothing stands, the hand is thrown in. Worth 0 by
+    /// symmetry -- a fresh deal neither seat has seen -- and priced rather than
+    /// omitted so `pass` is always in the list when it is legal.
+    pub redeal: bool,
 }
 
 impl Option_ {
@@ -88,6 +98,11 @@ pub struct World {
     pub pts: [i32; NDENOM_SLOTS],
     /// Could the declarer take NO +2 trick, in that denomination as trump?
     pub duck: [bool; NDENOM_SLOTS],
+    /// The same two questions with the OPPONENT declaring, for pricing a pass.
+    /// A separate solve, not a sign flip of the above: the declarer LEADS, so
+    /// swapping who declares changes the position, not just the perspective.
+    pub opp_pts: [i32; NDENOM_SLOTS],
+    pub opp_duck: [bool; NDENOM_SLOTS],
 }
 
 /// The sampled deals AND what has been solved on them so far.
@@ -102,6 +117,10 @@ pub struct Solved {
     pub deals: Vec<State>,
     /// Bit d set once every deal has been solved in denomination d.
     pub covered: u8,
+    /// ...and the same for the OPPONENT-declaring solves a pass needs. Kept
+    /// apart because the two sides are asked for independently: an auction
+    /// round wants our five and their one, and the sets do not move together.
+    pub covered_opp: u8,
     pub worlds: Vec<World>,
 }
 
@@ -110,7 +129,8 @@ pub struct Solved {
 /// Only the denominations actually asked about: a declaration that has already
 /// fixed its trump asks about one, and paying for the other four would be four
 /// full 13-trick solves thrown away.
-fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut World) {
+fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut World,
+               for_opponent: bool) {
     // MTD(f) converges by a ladder of null-window probes, so each denomination
     // seeds the next: the same hand is worth a similar amount in hearts and in
     // spades, and the first full solve pays for the other four.
@@ -134,8 +154,15 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
         guess = raw;
         let diff = raw as i32;
         let p0 = (POOL as i32 + diff) / 2;
-        w.pts[d as usize] = if declarer == 0 { p0 } else { POOL as i32 - p0 };
-        w.duck[d as usize] = dd.null_no_even_makeable(&s, declarer);
+        let mine = if declarer == 0 { p0 } else { POOL as i32 - p0 };
+        let duck = dd.null_no_even_makeable(&s, declarer);
+        if for_opponent {
+            w.opp_pts[d as usize] = mine;
+            w.opp_duck[d as usize] = duck;
+        } else {
+            w.pts[d as usize] = mine;
+            w.duck[d as usize] = duck;
+        }
     }
 }
 
@@ -145,16 +172,17 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
 /// across workers exactly the way the card search's are — the option list is
 /// the server's and identical everywhere, so index `i` means the same candidate
 /// in every worker and in the pick.
-pub fn wanted_denoms(opts: &[Option_]) -> u8 {
-    let mut m = 0u8;
+pub fn wanted_denoms(opts: &[Option_]) -> (u8, u8) {
+    let (mut mine, mut theirs) = (0u8, 0u8);
     for o in opts {
         // Membership, not a range check: 5 is Null, which is never a trump,
         // and Grand's 6 sits above no-trump's 4 rather than beside it.
-        if DENOMS.contains(&o.denom) {
-            m |= 1 << o.denom;
+        if o.redeal || !DENOMS.contains(&o.denom) {
+            continue;
         }
+        if o.opp { theirs |= 1 << o.denom } else { mine |= 1 << o.denom }
     }
-    m
+    (mine, theirs)
 }
 
 /// THE EXPENSIVE HALF: sample `k` deals and solve each in every wanted
@@ -177,7 +205,7 @@ pub fn wanted_denoms(opts: &[Option_]) -> u8 {
 /// against what has been solved, not part of its identity: a subset is a hit,
 /// and a superset solves only the difference, on the same deals.
 pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
-                  wanted: u8, declarer: usize, cache: &mut Solved) {
+                  wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved) {
     let k = k.max(1);
     if cache.deals.len() != k {
         // A different world count is a different sample: start over rather than
@@ -186,15 +214,25 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
         cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
         cache.worlds = vec![World::default(); k];
         cache.covered = 0;
+        cache.covered_opp = 0;
     }
     let todo = wanted & !cache.covered;
-    if todo == 0 {
+    let todo_opp = wanted_opp & !cache.covered_opp;
+    if todo == 0 && todo_opp == 0 {
         return;
     }
     for (deal, w) in cache.deals.iter().zip(cache.worlds.iter_mut()) {
-        solve_world(dd, deal, declarer, todo, w);
+        if todo != 0 {
+            solve_world(dd, deal, declarer, todo, w, false);
+        }
+        if todo_opp != 0 {
+            // The other seat declaring, which is a DIFFERENT position and not a
+            // sign flip: the declarer leads to trick 1.
+            solve_world(dd, deal, 1 - declarer, todo_opp, w, true);
+        }
     }
     cache.covered |= todo;
+    cache.covered_opp |= todo_opp;
 }
 
 /// THE CHEAP HALF: price each option against already-solved deals.
@@ -203,15 +241,27 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
 /// solved must be left at zero rather than read out of a default `World`, where
 /// it would price as a flat 0 points in every deal — a plausible-looking number
 /// that would outrank genuinely bad contracts.
-pub fn price(opts: &[Option_], worlds: &[World], have: u8) -> Vec<f64> {
+pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8) -> Vec<f64> {
     let mut sums = vec![0f64; opts.len()];
     for w in worlds {
         for (i, o) in opts.iter().enumerate() {
-            let d = o.denom as usize;
-            if d >= NDENOM_SLOTS || have & (1 << d) == 0 {
+            // A pass-out is worth 0 in every world -- a fresh deal, by
+            // symmetry -- and needs no solve at all.
+            if o.redeal {
                 continue;
             }
-            sums[i] += o.payoff(w.pts[d], w.duck[d]) as f64;
+            let d = o.denom as usize;
+            let mask = if o.opp { have_opp } else { have };
+            if d >= NDENOM_SLOTS || mask & (1 << d) == 0 {
+                continue;
+            }
+            // NEGATED for a pass: the option is priced for the opponent, and
+            // every entry in this list is signed for the seat being asked.
+            sums[i] += if o.opp {
+                -o.payoff(w.opp_pts[d], w.opp_duck[d]) as f64
+            } else {
+                o.payoff(w.pts[d], w.duck[d]) as f64
+            };
         }
     }
     sums
@@ -249,10 +299,10 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     if opts.is_empty() {
         return Vec::new();
     }
-    let wanted = wanted_denoms(opts);
+    let (wanted, wanted_opp) = wanted_denoms(opts);
     let mut cache = Solved::default();
-    solve_into(v, dd, rng, k, wanted, declarer, &mut cache);
-    price(opts, &cache.worlds, cache.covered)
+    solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache);
+    price(opts, &cache.worlds, cache.covered, cache.covered_opp)
 }
 
 #[cfg(test)]
@@ -262,7 +312,7 @@ mod tests {
     /// A classic-mode option: a made contract pays flat, so `over` is 0.
     /// Set pays N + 4 a point short (2026-08-07: N, not N-1).
     fn opt(target: i32, make: i32, null: i32) -> Option_ {
-        Option_ { denom: 0, target, make, over: 0,
+        Option_ { denom: 0, target, make, over: 0, opp: false, redeal: false,
                   set_base: target, short: 4, null }
     }
 
@@ -326,14 +376,14 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, 0, &mut cache);
         assert_eq!(cache.covered, 0b11111);
         let after_open = dd.nodes;
         let pts = cache.worlds[0].pts;
 
         // The auction narrows, exactly as `auction_payoff_options` does.
         for wanted in [0b11111u8, 0b11110, 0b11100, 0b11000] {
-            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, &mut cache);
+            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, 0, &mut cache);
         }
         assert_eq!(dd.nodes, after_open, "a subset must not search a single node");
         assert_eq!(cache.worlds[0].pts, pts, "...nor disturb what was solved");
@@ -346,11 +396,11 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, 0, &mut cache);
         let first = cache.worlds[0].pts[0];
         let deals = cache.deals.clone();
 
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, 0, &mut cache);
         assert_eq!(cache.covered, 0b00011);
         // The new denomination is solved on the SAME deals, so the two are
         // comparable — a fresh sample would make the choice between them noise.
@@ -367,14 +417,62 @@ mod tests {
         // An option nobody solved must contribute nothing instead.
         let o = Option_ { denom: 3, ..opt(4, 16, 12) };
         let worlds = vec![World::default()];
-        assert_eq!(price(&[o], &worlds, 0b00000), vec![0.0]);
-        assert_eq!(price(&[o], &worlds, 0b01000), vec![-20.0]);   // -(4 + 4x4)
+        assert_eq!(price(&[o], &worlds, 0b00000, 0), vec![0.0]);
+        assert_eq!(price(&[o], &worlds, 0b01000, 0), vec![-20.0]);   // -(4 + 4x4)
+    }
+
+    #[test]
+    fn a_pass_is_priced_from_the_OPPONENTS_side_and_negated() {
+        // The whole point: a pass hands the standing contract to them, so it is
+        // worth MINUS what it pays them -- and that needs its own solve, because
+        // the declarer LEADS. A sign flip of our own solve would be a different
+        // (and wrong) number.
+        let mut dd = Dd::new(14);
+        let mut rng = Rng::new(5);
+        let g = crate::game::Game::deal(&mut Rng::new(31), 0, 0);
+        let v = View::of(&g, 0);
+        let mut cache = Solved::default();
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00100, 0b00100, 0, &mut cache);
+        assert_eq!(cache.covered, 0b00100);
+        assert_eq!(cache.covered_opp, 0b00100);
+
+        let mine = Option_ { denom: 2, target: 3, make: 9, over: 1, set_base: 3,
+                             short: 4, null: 12, opp: false, redeal: false };
+        let theirs = Option_ { opp: true, ..mine };
+        let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp);
+        let by_hand: f64 = cache.worlds.iter()
+            .map(|w| -theirs.payoff(w.opp_pts[2], w.opp_duck[2]) as f64).sum();
+        assert_eq!(sums[1], by_hand, "the pass is not the negated opponent solve");
+        // ...and it is a genuinely different number from our own side, or the
+        // separate solve would be buying nothing.
+        assert!(cache.worlds.iter().any(|w| w.opp_pts[2] != w.pts[2]),
+            "the two sides came out identical -- the opponent solve did not run");
+    }
+
+    #[test]
+    fn a_pass_out_is_priced_at_zero_and_needs_no_solve() {
+        let redeal = Option_ { denom: 0, target: 0, make: 0, over: 0, set_base: 0,
+                               short: 0, null: 0, opp: false, redeal: true };
+        let (mine, theirs) = wanted_denoms(&[redeal]);
+        assert_eq!((mine, theirs), (0, 0), "a pass-out asks for no solve at all");
+        let worlds = vec![World::default(); 3];
+        assert_eq!(price(&[redeal], &worlds, 0, 0), vec![0.0]);
+    }
+
+    #[test]
+    fn the_two_denomination_masks_are_kept_apart() {
+        let a = Option_ { denom: 2, target: 3, make: 9, over: 0, set_base: 3,
+                          short: 4, null: 12, opp: false, redeal: false };
+        let b = Option_ { denom: crate::cards::GRAND, opp: true, ..a };
+        let (mine, theirs) = wanted_denoms(&[a, b]);
+        assert_eq!(mine, 1 << 2);
+        assert_eq!(theirs, 1 << crate::cards::GRAND);
     }
 
     #[test]
     fn an_option_naming_no_denomination_is_skipped_not_panicked_on() {
         // The wire is server-supplied but not trusted to be in range.
-        let bad = Option_ { denom: 99, target: 1, make: 1, over: 0,
+        let bad = Option_ { denom: 99, target: 1, make: 1, over: 0, opp: false, redeal: false,
                             set_base: 0, short: 4, null: 12 };
         let mut dd = Dd::new(10);
         let mut rng = Rng::new(1);

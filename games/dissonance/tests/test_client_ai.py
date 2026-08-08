@@ -317,8 +317,19 @@ def test_an_auction_decision_ships_priced_options_that_each_carry_their_move(mod
     for o in auc["options"]:
         # Priced by `payoff_terms`' own arithmetic...
         assert {"target", "make", "set_base", "short", "null"} <= set(o)
-        # ...and carrying the move it stands for.
-        assert o["move"]["kind"] == "bid"
+        # ...and carrying the move it stands for. PASSING is one of them: it
+        # is worth minus what the standing contract pays the opponent, not
+        # zero, so it is priced like everything else rather than left to a
+        # client-side "value <= 0" rule.
+        assert o["move"]["kind"] in ("bid", "pass")
+    kinds = {o["move"]["kind"] for o in auc["options"]}
+    assert "bid" in kinds
+    if E.auction_options(room["game"])["may_pass"]:
+        assert "pass" in kinds, "a legal pass must be priced, not implicit"
+        for o in auc["options"]:
+            if o["move"]["kind"] == "pass":
+                assert o.get("opp") or o.get("redeal"), \
+                    "a pass is priced for the OPPONENT, or is a redeal worth 0"
     # A card-play request ships `payoff`; an auction one cannot, because there
     # is no contract yet for those terms to describe.
     assert "payoff" not in room["_ai_search"]
@@ -379,3 +390,59 @@ def test_an_auction_world_budget_is_its_own_and_far_smaller():
     task = _arm(room)
     assert room["_ai_search"]["max_worlds"] == m.CLIENT_AI_AUCTION_WORLDS
     task.cancel()      # nobody answers this one; don't leave it pending
+
+
+# --- pricing the pass -------------------------------------------------------
+
+
+def test_a_legal_pass_is_priced_for_the_opponent_not_left_at_zero():
+    """The blind spot both tiers used to share.
+
+    A pass hands the standing contract to the OPPONENT at their price, so it is
+    worth minus what that contract pays them. Valued at zero instead, a bot can
+    never SACRIFICE -- a sacrifice is a contract that prices negative, bought
+    because passing prices worse -- and it also buys contracts it should decline
+    whenever the opponent's standing contract was worse for them.
+    """
+    g = E.new_game(["alice", "bob"], random.Random(3), opener=0)
+    E.apply_bid(g, 0, 3, 2)
+    assert E.auction_options(g)["may_pass"] is True
+    opts = E.auction_payoff_options(g)
+    passes = [o for o in opts if o["move"]["kind"] == "pass"]
+    assert len(passes) == 1
+    p = passes[0]
+    assert p["opp"] is True, "priced for the opponent, and negated by the search"
+    # It is the STANDING contract, exactly as the opponent would play it.
+    assert (p["denom"], p["level"]) == (2, 3)
+    assert p["make"] == 9 and p["target"] == 3
+    # ...and it is the same arithmetic `_finish` would apply to that contract.
+    assert p | {"opp": True} == E._terms_for("classic", 2, 3) | {
+        "opp": True, "move": p["move"]}
+
+
+def test_the_classic_opener_gets_no_pass_because_it_may_not():
+    g = E.new_game(["alice", "bob"], random.Random(3), opener=0)
+    assert E.auction_options(g)["may_pass"] is False
+    assert not [o for o in E.auction_payoff_options(g) if o["move"]["kind"] == "pass"]
+
+
+def test_a_skat_pass_out_is_priced_at_zero_as_a_redeal():
+    """Nothing stands, so passing throws the hand in -- a fresh deal neither
+    seat has seen, worth 0 by symmetry. Priced rather than omitted so `pass` is
+    always in the list when it is legal."""
+    g = E.new_game(["alice", "bob"], random.Random(3), opener=0, mode="skat")
+    passes = [o for o in E.auction_payoff_options(g) if o["move"]["kind"] == "pass"]
+    assert len(passes) == 1 and passes[0]["redeal"] is True
+    assert passes[0]["make"] == passes[0]["set_base"] == passes[0]["null"] == 0
+
+
+def test_a_skat_pass_prices_every_game_the_standing_number_buys_them():
+    """The skat winner has not named a game yet, so what passing concedes is the
+    best declaration that number buys. One priced option per candidate; the
+    search takes the worst for us, which assumes they declare well."""
+    g = E.new_game(["alice", "bob"], random.Random(3), opener=0, mode="skat")
+    E.apply_skat_bid(g, 0, 12)
+    passes = [o for o in E.auction_payoff_options(g) if o["move"]["kind"] == "pass"]
+    assert len(passes) == len(E.skat_declarable(12)) >= 3
+    assert all(o["opp"] is True for o in passes)
+    assert {o["denom"] for o in passes} == {d["denom"] for d in E.skat_declarable(12)}

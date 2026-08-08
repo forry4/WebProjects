@@ -665,11 +665,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
           //   - Kontra/Re: the option is the standing contract and the decision
           //     is the SIGN. Declining is worth exactly zero, so a value at or
           //     below zero takes the `decline` move.
-          //   - Bidding: pass rather than buy a contract that prices negative,
-          //     when passing is legal at all (a classic opener must bid).
+          //   - Bidding: PASSING IS ONE OF THE PRICED OPTIONS now, worth minus
+          //     what the standing contract pays the opponent, so the argmax
+          //     above already covers it and nothing here compares against zero.
+          //     The old `!(sum[best] > 0) -> pass` rule is kept only as the
+          //     fallback for a server that did not price the pass (or a cached
+          //     wasm that dropped the flag): it is what made a sacrifice
+          //     unreachable, since a sacrifice is by definition a contract that
+          //     prices negative, bought because passing prices worse.
           let move = opt?.move;
+          const priced = as.auction.options.some((o) => o?.move?.kind === "pass");
           if (opt?.decline && !(sum[best] > 0)) move = opt.decline;
-          else if (as.auction.pass && !(sum[best] > 0)) move = as.auction.pass;
+          else if (!priced && as.auction.pass && !(sum[best] > 0)) move = as.auction.pass;
           if (!move) return;
           console.info(`[oddtrick client-AI] ${ok.length} workers, ${worlds} worlds, `
             + `${k} options in ${Math.round(performance.now() - t0)}ms ->`, move);

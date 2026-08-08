@@ -239,7 +239,16 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
     for o in arr {
         let n = |k: &str| o.get(k).and_then(|x| x.as_i64()).map(|x| x as i32);
         match (n("denom"), n("target"), n("make"), n("set_base"), n("short"), n("null")) {
-            (Some(d), Some(t), Some(m), Some(sb), Some(sh), Some(nu)) if (0..=4).contains(&d) => {
+            // MEMBERSHIP, not a range. Grand is denomination 6 -- it sits ABOVE
+            // no-trump's 4 rather than beside it, because 5 is the legacy Null
+            // marker -- so `(0..=4)` rejected every Grand option. And a rejected
+            // option empties the WHOLE list below, so the Hard tier answered
+            // nothing at all for any skat decision whose options span Grand,
+            // which is all of them: `skat_declarable` offers Grand at every
+            // rung. Silent, per the usual failure mode -- the room just played
+            // out on the server bot while still saying Hard.
+            (Some(d), Some(t), Some(m), Some(sb), Some(sh), Some(nu))
+                if crate::cards::DENOMS.contains(&(d as u8)) => {
                 out.push(crate::bid::Option_ {
                     denom: d as u8, target: t, make: m,
                     // Optional and flat by default, same as the card search's:
@@ -247,6 +256,13 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
                     // option, just under the rule it was built for.
                     over: n("over").unwrap_or(0),
                     set_base: sb, short: sh, null: nu,
+                    // Both OPTIONAL and both false by default, which is exactly
+                    // the pre-pass behaviour: a wasm older than the server sees
+                    // no flags, prices every option as one it could buy for
+                    // itself, and falls back to the old "value <= 0 means pass"
+                    // rule the client still carries.
+                    opp: o.get("opp").and_then(|x| x.as_bool()).unwrap_or(false),
+                    redeal: o.get("redeal").and_then(|x| x.as_bool()).unwrap_or(false),
                 });
             }
             _ => return Vec::new(),   // a malformed list is not a partial one
@@ -622,6 +638,42 @@ mod fixture_replay {
                 );
             }
         }
+    }
+
+    #[test]
+    fn every_denomination_the_server_can_offer_survives_the_option_reader() {
+        // A rejected option empties the WHOLE list (a malformed list is not a
+        // partial one), so ONE unreadable denomination silences the tier for
+        // that decision and the room quietly plays on the server bot. Grand is
+        // denomination 6 and `(0..=4)` rejected it, which is every skat
+        // decision, since `skat_declarable` offers Grand at every rung.
+        let opt = |d: u8| serde_json::json!({
+            "denom": d, "target": 3, "make": 9, "over": 1,
+            "set_base": 3, "short": 4, "null": 12 });
+        for d in crate::cards::DENOMS {
+            let got = options_from_json(&serde_json::json!([opt(d)]));
+            assert_eq!(got.len(), 1, "denomination {d} emptied the option list");
+            assert_eq!(got[0].denom, d);
+            assert!(!got[0].opp && !got[0].redeal, "flags default to the old behaviour");
+        }
+        // A whole list, as the server actually sends one.
+        let all: Vec<_> = crate::cards::DENOMS.iter().map(|&d| opt(d)).collect();
+        assert_eq!(options_from_json(&serde_json::json!(all)).len(), crate::cards::DENOMS.len());
+        // ...and something genuinely unreadable still empties it, deliberately.
+        assert!(options_from_json(&serde_json::json!([opt(9)])).is_empty());
+    }
+
+    #[test]
+    fn the_pass_flags_are_read_off_the_wire() {
+        let v = serde_json::json!([
+            {"denom": 2, "target": 3, "make": 9, "set_base": 3, "short": 4,
+             "null": 12, "opp": true},
+            {"denom": 0, "target": 0, "make": 0, "set_base": 0, "short": 0,
+             "null": 0, "redeal": true}]);
+        let got = options_from_json(&v);
+        assert_eq!(got.len(), 2);
+        assert!(got[0].opp && !got[0].redeal);
+        assert!(got[1].redeal && !got[1].opp);
     }
 
     #[test]
