@@ -131,7 +131,7 @@ export default function DissonanceRules() {
 					That rising scale is the whole point. It barely touches a declarer who
 					misses by one — which is what most failed contracts do — and it bites hard
 					on one who finishes miles short, which is what a <b>sacrifice</b> looks
-					like. A level-6 contract one short pays you 17; four short, 38.
+					like. A level-6 contract one short pays you 18; four short, 42.
 				</p>
 				<RulesTip>
 					<p>

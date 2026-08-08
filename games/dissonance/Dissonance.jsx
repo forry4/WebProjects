@@ -47,6 +47,9 @@ const NULL_MAKE = 12;
 // panel. Long enough to read two cards, short enough not to stall the bot,
 // whose own floor is 450ms — so its next lead lands while this is still up and
 // simply waits its turn.
+/** Used only until `/catalog` answers; the server's value is authoritative. */
+const SHORT_PENALTY_FALLBACK = 5;
+
 const TRICK_HOLD_MS = 700;
 
 const BOT_TIERS = [
@@ -560,6 +563,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // per-denomination bases so the "what clears this number" hint below is the
   // same arithmetic the engine validates with.
   const [catalog, setCatalog] = useState(null);
+  // The set-score rate, read from the server's own catalog rather than written
+  // as a literal: it has moved once (4 -> 5) and the Double's ramp is defined
+  // on top of it. DECLARED HERE, not earlier: `catalog` is a `const` from
+  // `useState`, so touching it above this line is a temporal dead zone -- which
+  // throws at render and blanks the entire screen rather than failing softly.
+  const shortRate = catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK;
   useEffect(() => {
     fetch(`${OT_HTTP}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
@@ -1439,13 +1448,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     <b>{2 * game.auction.level * game.auction.level}</b> instead of{" "}
                     {game.auction.level * game.auction.level}. If they fall short you
                     score <b>{2 * game.auction.level}</b> plus a RISING amount per
-                    point — <b>5, then 6, then 7</b> — instead of {game.auction.level}{" "}
-                    plus a flat 4.
+                    point — <b>{[1, 2, 3].map((i) => shortRate + i).join(", then ")}</b>{" "}
+                    — instead of {game.auction.level} plus a flat {shortRate}.
                   </div>
                   <div className="muted" style={{ fontSize: "0.72rem" }}>
                     So it barely touches a near miss and bites hard on a collapse:
-                    one short costs them {2 * game.auction.level + 5}, four short{" "}
-                    {2 * game.auction.level + 26}.
+                    one short costs them {2 * game.auction.level + shortRate + 1},
+                    four short {2 * game.auction.level + 4 * shortRate + 10}.
                   </div>
                   <div className="muted" style={{ fontSize: "0.72rem" }}>
                     Null is untouched — a declarer who wins no +2 trick still

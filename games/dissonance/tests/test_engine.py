@@ -311,14 +311,17 @@ def test_the_auction_survives_a_json_round_trip():
     # is the boundary the bonus must not move.
     (5, 9, (25 + 4, 0)),
     (5, 6, (25 + 1, 0)),
-    # Set pays the defender N + 4 a point short (2026-08-07: N, not N-1 -- at
-    # the floor the base used to contribute nothing, so the cheapest contract
-    # paid its breaker by the margin alone).
-    (5, 4, (0, 5 + 4 * 1)),
-    (5, 3, (0, 5 + 4 * 2)),
-    (5, 0, (0, 5 + 4 * 5)),
+    # Set pays the defender N + SHORT_PENALTY a point short. Two things have
+    # moved here: the base went N-1 -> N (2026-08-07, because at the floor the
+    # old base contributed nothing, so the cheapest contract paid its breaker by
+    # the margin alone), and the rate went 4 -> 5 (2026-08-08, to price the
+    # sacrifice bidding that pricing the pass unlocked). Written against the
+    # CONSTANT so the next move lands here as one edit rather than four.
+    (5, 4, (0, 5 + E.SHORT_PENALTY * 1)),
+    (5, 3, (0, 5 + E.SHORT_PENALTY * 2)),
+    (5, 0, (0, 5 + E.SHORT_PENALTY * 5)),
     (1, 1, (1, 0)),
-    (1, 0, (0, 1 + 4 * 1)),
+    (1, 0, (0, 1 + E.SHORT_PENALTY * 1)),
     (8, 8, (64, 0)),
     # The declarer's ceiling is the six +2 tricks, so this is the largest
     # overtrick bonus the game can pay -- and at level 1 it is 12x the contract.

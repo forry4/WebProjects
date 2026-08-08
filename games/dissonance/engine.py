@@ -90,11 +90,21 @@ MAX_LEVEL = 12
 MAX_RAISE = 2
 
 #: Set-score multiplier per point the declarer finished short.
-SHORT_PENALTY = 4
+#:
+#: 5, not 4 (2026-08-08). Raised to make SACRIFICING dearer: once the Hard tier
+#: started pricing the pass it began deliberately buying contracts it could not
+#: make -- 38% of classic rounds -- because being set was cheaper than conceding
+#: a made contract. The shortfall term is the whole cost of that play, so it is
+#: the lever, and Double is not: Double only fires when a defender reads the
+#: sacrifice correctly, while this prices every one of them.
+#:
+#: It applies to BOTH modes -- skat's set is `stake + SHORT_PENALTY x short`
+#: too.
+SHORT_PENALTY = 5
 
 #: THE DOUBLE'S ESCALATOR. Doubled, the first point short costs
 #: `SHORT_PENALTY + DOUBLE_RAMP`, the second `+ 2 x DOUBLE_RAMP`, and so on --
-#: 5, 6, 7, 8 at the shipped values.
+#: 6, 7, 8, 9 at the shipped values.
 #:
 #: WHY A RAMP RATHER THAN A BIGGER FLAT BASE. Doubling has to tell a SACRIFICE
 #: from a near-miss, and what separates them is not the LEVEL -- both cases have

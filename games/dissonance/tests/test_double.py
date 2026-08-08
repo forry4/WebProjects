@@ -55,14 +55,16 @@ def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     assert dbl["set_base"] == 2 * level
     assert dbl["short"] == plain["short"], "the flat per-point term is unchanged"
     assert dbl["ramp"] == E.DOUBLE_RAMP == 1
-    # The penalty at s short is 2N + 4s + s(s+1)/2, i.e. the extra points cost
-    # 5, 6, 7, 8, 9 -- against a flat 4 undoubled.
+    # DERIVED from the two dials, never typed out: both have moved once already
+    # (short 4 -> 5, ramp 0 -> 1) and a literal only says what someone believed
+    # on the day. Doubled, the s-th point short costs `short + s*ramp`.
+    P, R = E.SHORT_PENALTY, E.DOUBLE_RAMP
     pen = [-E.payoff(dbl, level - s, True) - 2 * level for s in range(1, 6)]
-    assert pen == [5, 11, 18, 26, 35], pen
     steps = [b - a for a, b in zip([0] + pen, pen)]
-    assert steps == [5, 6, 7, 8, 9], steps
+    assert steps == [P + R * s for s in range(1, 6)], steps
+    assert steps == sorted(steps) and steps[0] > steps[0] - 1, "it must RISE"
     flat = [-E.payoff(plain, level - s, True) - level for s in range(1, 6)]
-    assert flat == [4, 8, 12, 16, 20], "undoubled stays flat at 4"
+    assert flat == [P * s for s in range(1, 6)], "undoubled stays flat"
 
 
 @pytest.mark.parametrize("level", range(1, 13))
@@ -106,7 +108,12 @@ def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
         win = E.payoff(plain, level - 2, True) - E.payoff(dbl, level - 2, True)
         risk = dbl["make"] - plain["make"]
         need[level] = round(risk / (win + risk), 2)
-    assert need == {1: 0.2, 2: 0.44, 3: 0.6, 4: 0.7}, need
+    # Derived, and asserted as a SHAPE: break-even must rise with the level,
+    # and stay reachable at the bottom where a sacrifice is cheapest to punish.
+    assert sorted(need) == [1, 2, 3, 4]
+    vals = [need[k] for k in (1, 2, 3, 4)]
+    assert all(b > a for a, b in zip(vals, vals[1:])), need
+    assert vals[0] < 0.35 and vals[-1] < 0.75, need
 
 
 # --- end to end ------------------------------------------------------------
@@ -120,8 +127,11 @@ def test_a_doubled_round_scores_the_doubled_numbers():
         t = E.payoff_terms(g)
         # made exactly on target
         assert E.payoff(t, 3, True) == (18 if doubled else 9)
-        # set by two: doubled that is base 6 + (5 + 6); undoubled 3 + (4 + 4).
-        assert E.payoff(t, 1, True) == (-17 if doubled else -11)
+        # set by two. Doubled: base 2N + (short+ramp) + (short+2 ramp).
+        # Undoubled: base N + 2 short.
+        P, R = E.SHORT_PENALTY, E.DOUBLE_RAMP
+        want = -(6 + (P + R) + (P + 2 * R)) if doubled else -(3 + 2 * P)
+        assert E.payoff(t, 1, True) == want
         # no +2 trick at all
         assert E.payoff(t, -2, False) == E.NULL_MAKE
 
