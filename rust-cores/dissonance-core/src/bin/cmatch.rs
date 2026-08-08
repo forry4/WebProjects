@@ -33,6 +33,7 @@ fn arg(name: &str, dflt: i64) -> i64 {
 /// The shipped classic-mode scoring, as `engine.payoff_terms` builds it.
 fn contract_for(level: i32, declarer: usize) -> Contract {
     Contract {
+        ramp: 0,
         level,
         declarer,
         make_base: level * level,

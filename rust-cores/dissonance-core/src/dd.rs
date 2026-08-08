@@ -86,6 +86,10 @@ pub struct Contract {
     pub set_base: i32,
     /// Defender's reward per point the declarer finished short.
     pub short: i32,
+    /// The Double's escalator: the first point short costs `short + ramp`, the
+    /// second `short + 2 ramp`, and so on. 0 on every undoubled contract, which
+    /// is also what a payload written before it existed reads as.
+    pub ramp: i32,
     /// What the declarer scores for taking NO +2 TRICK ALL ROUND, if the rule
     /// is in play. `None` for the auction lab's synthetic contracts, which use
     /// this struct to ask a different question (`forced_floor`) and must not
@@ -114,7 +118,8 @@ impl Contract {
         if declarer_pts >= self.level {
             self.make_base + self.over * (declarer_pts - self.level)
         } else {
-            -(self.set_base + self.short * (self.level - declarer_pts))
+            let s = self.level - declarer_pts;
+            -(self.set_base + self.short * s + self.ramp * s * (s + 1) / 2)
         }
     }
 }

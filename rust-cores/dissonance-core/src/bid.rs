@@ -52,6 +52,8 @@ pub struct Option_ {
     pub over: i32,
     pub set_base: i32,
     pub short: i32,
+    /// The Double's escalator -- see `dd::Contract::ramp`. 0 undoubled.
+    pub ramp: i32,
     /// The Null consolation, if it applies to this option.
     pub null: i32,
     /// PRICED FOR THE OPPONENT. A pass hands the standing contract to them, so
@@ -79,7 +81,8 @@ impl Option_ {
         let contract = if guaranteed_pts >= self.target {
             self.make + self.over * (guaranteed_pts - self.target)
         } else {
-            -(self.set_base + self.short * (self.target - guaranteed_pts))
+            let s = self.target - guaranteed_pts;
+            -(self.set_base + self.short * s + self.ramp * s * (s + 1) / 2)
         };
         if can_duck {
             contract.max(self.null)
@@ -312,7 +315,7 @@ mod tests {
     /// A classic-mode option: a made contract pays flat, so `over` is 0.
     /// Set pays N + 4 a point short (2026-08-07: N, not N-1).
     fn opt(target: i32, make: i32, null: i32) -> Option_ {
-        Option_ { denom: 0, target, make, over: 0, opp: false, redeal: false,
+        Option_ { denom: 0, target, make, over: 0, ramp: 0, opp: false, redeal: false,
                   set_base: target, short: 4, null }
     }
 
@@ -437,7 +440,7 @@ mod tests {
         assert_eq!(cache.covered_opp, 0b00100);
 
         let mine = Option_ { denom: 2, target: 3, make: 9, over: 1, set_base: 3,
-                             short: 4, null: 12, opp: false, redeal: false };
+                             short: 4, ramp: 0, null: 12, opp: false, redeal: false };
         let theirs = Option_ { opp: true, ..mine };
         let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp);
         let by_hand: f64 = cache.worlds.iter()
@@ -452,7 +455,7 @@ mod tests {
     #[test]
     fn a_pass_out_is_priced_at_zero_and_needs_no_solve() {
         let redeal = Option_ { denom: 0, target: 0, make: 0, over: 0, set_base: 0,
-                               short: 0, null: 0, opp: false, redeal: true };
+                               short: 0, ramp: 0, null: 0, opp: false, redeal: true };
         let (mine, theirs) = wanted_denoms(&[redeal]);
         assert_eq!((mine, theirs), (0, 0), "a pass-out asks for no solve at all");
         let worlds = vec![World::default(); 3];
@@ -461,7 +464,7 @@ mod tests {
 
     #[test]
     fn the_two_denomination_masks_are_kept_apart() {
-        let a = Option_ { denom: 2, target: 3, make: 9, over: 0, set_base: 3,
+        let a = Option_ { denom: 2, target: 3, make: 9, over: 0, ramp: 0, set_base: 3,
                           short: 4, null: 12, opp: false, redeal: false };
         let b = Option_ { denom: crate::cards::GRAND, opp: true, ..a };
         let (mine, theirs) = wanted_denoms(&[a, b]);
@@ -472,7 +475,7 @@ mod tests {
     #[test]
     fn an_option_naming_no_denomination_is_skipped_not_panicked_on() {
         // The wire is server-supplied but not trusted to be in range.
-        let bad = Option_ { denom: 99, target: 1, make: 1, over: 0, opp: false, redeal: false,
+        let bad = Option_ { denom: 99, target: 1, make: 1, over: 0, ramp: 0, opp: false, redeal: false,
                             set_base: 0, short: 4, null: 12 };
         let mut dd = Dd::new(10);
         let mut rng = Rng::new(1);

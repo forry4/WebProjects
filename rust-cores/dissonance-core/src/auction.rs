@@ -717,7 +717,7 @@ pub fn eval_hand(
 pub fn forced_floor(dd: &mut Dd, s: &State, declarer: usize) -> i32 {
     const LOW: i32 = -30;
     let c = crate::dd::Contract {
-        level: LOW,
+        ramp: 0, level: LOW,
         declarer,
         make_base: 0,
         // -1: `over` is a BONUS per point above `level`, so a declarer holding

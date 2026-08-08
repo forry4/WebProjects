@@ -197,6 +197,20 @@ function Pile({ pile, onPlay }) {
   );
 }
 
+/** How the shortfall was charged, as the reader would add it up.
+ *
+ *  Undoubled it is a flat rate and multiplication is the honest shorthand
+ *  ("4 x 3"). Doubled it RAMPS -- 5, then 6, then 7 -- and a product would be a
+ *  lie, so the terms are spelled out. `ramp` is absent on a result row written
+ *  before the Double existed, which reads as the flat case, correctly. */
+function shortTail(res) {
+  const s = res.short || 0;
+  const ramp = res.ramp || 0;
+  const flat = res.short_rate ?? 4;
+  if (!ramp) return `${flat} × ${s}`;
+  return Array.from({ length: s }, (_, i) => flat + ramp * (i + 1)).join(" + ");
+}
+
 /** The contract, in the MIDDLE column so it survives a phone.
  *  The side panel already carries the full breakdown, but `.dis-side` is
  *  display:none under 760px — so on a phone the one thing the whole round is
@@ -1424,8 +1438,14 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     If {nameOf(declSeat)} makes it they score{" "}
                     <b>{2 * game.auction.level * game.auction.level}</b> instead of{" "}
                     {game.auction.level * game.auction.level}. If they fall short you
-                    score <b>{2 * game.auction.level} + 4</b> a point short instead of{" "}
-                    {Math.max(0, game.auction.level - 1)} + 4.
+                    score <b>{2 * game.auction.level}</b> plus a RISING amount per
+                    point — <b>5, then 6, then 7</b> — instead of {game.auction.level}{" "}
+                    plus a flat 4.
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.72rem" }}>
+                    So it barely touches a near miss and bites hard on a collapse:
+                    one short costs them {2 * game.auction.level + 5}, four short{" "}
+                    {2 * game.auction.level + 26}.
                   </div>
                   <div className="muted" style={{ fontSize: "0.72rem" }}>
                     Null is untouched — a declarer who wins no +2 trick still
@@ -1543,7 +1563,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       ? `${res.level} × ${res.level}${res.doubled ? " × 2" : ""}`
                         + ` = ${res.make_value ?? res.level * res.level}`
                         + `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : `${res.set_base ?? res.level} + 4 × ${res.short}`
+                      : `${res.set_base ?? res.level} + ${shortTail(res)}`
                         + ` = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                 </div>
                 {res.doubled && (

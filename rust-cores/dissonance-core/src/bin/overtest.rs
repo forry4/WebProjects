@@ -74,7 +74,7 @@ fn main() {
                             for (si, level) in levels.into_iter().enumerate() {
                                 // Priority 1: make it. Priority 2: land on it.
                                 let c = Contract {
-                                    level,
+                                    ramp: 0, level,
                                     declarer,
                                     make_base: 0,
                                     over: 1,

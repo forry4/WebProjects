@@ -92,6 +92,24 @@ MAX_RAISE = 2
 #: Set-score multiplier per point the declarer finished short.
 SHORT_PENALTY = 4
 
+#: THE DOUBLE'S ESCALATOR. Doubled, the first point short costs
+#: `SHORT_PENALTY + DOUBLE_RAMP`, the second `+ 2 x DOUBLE_RAMP`, and so on --
+#: 5, 6, 7, 8 at the shipped values.
+#:
+#: WHY A RAMP RATHER THAN A BIGGER FLAT BASE. Doubling has to tell a SACRIFICE
+#: from a near-miss, and what separates them is not the LEVEL -- both cases have
+#: that -- but how far short the declarer finishes: ordinary failures come up a
+#: median of 2 short with 48% of them by exactly 1, while sacrifices come up a
+#: median of 4. Scaling the base by N taxes the level; ramping taxes the
+#: shortfall, which only a sacrifice has.
+#:
+#: MEASURED: doubling a level-6 sacrifice goes from EV -0.24 (flat 2N) to +9.20
+#: with this ramp, while an ordinary level-6 contract stays at -11.70 -- and the
+#: worst single round is 93 rather than the 138 a +2 ramp allows, which matters
+#: in a match to 100. A +2 ramp measured +18.64 but pushed the sacrifice RATE
+#: from 36% to 7%, i.e. it removes the play rather than pricing it.
+DOUBLE_RAMP = 1
+
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:
 #: A per-mode dict like `MATCH_TARGET`, and like that one it currently reads the
@@ -1137,11 +1155,11 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": level * level * doubling, "over": over * doubling,
-                "set_base": level * doubling,
-                "short": SHORT_PENALTY, "null": NULL_MAKE}
+                "set_base": level * doubling, "short": SHORT_PENALTY,
+                "ramp": DOUBLE_RAMP, "null": NULL_MAKE}
     return {"denom": denom, "level": level, "target": level,
             "make": level * level, "over": over, "set_base": level,
-            "short": SHORT_PENALTY, "null": NULL_MAKE}
+            "short": SHORT_PENALTY, "ramp": 0, "null": NULL_MAKE}
 
 
 def pass_options(g: dict) -> list[dict]:
@@ -1259,15 +1277,22 @@ def payoff(terms: dict, declarer_pts: int, declarer_scored: bool) -> int:
     """Apply `payoff_terms`. Null is checked FIRST and wins -- it can never
     collide with a make, since only +2 tricks add points.
 
-    `over` defaults to 0 so terms written before it existed -- a fixture, an
-    armed decision replayed off an old save -- still price a make at the flat
-    stake rather than raising a KeyError.
+    `over` and `ramp` default to 0 so terms written before they existed -- a
+    fixture, an armed decision replayed off an old save -- still price at the
+    flat rates rather than raising a KeyError.
+
+    `ramp` is the Double's escalator: the first point short costs
+    `short + ramp`, the second `short + 2 ramp`, and so on, which sums to
+    `short x s + ramp x s(s+1)/2`. Zero on every undoubled contract, so an
+    undoubled set is the same flat arithmetic it always was.
     """
     if not declarer_scored:
         return terms["null"]
     if declarer_pts >= terms["target"]:
         return terms["make"] + terms.get("over", 0) * (declarer_pts - terms["target"])
-    return -(terms["set_base"] + terms["short"] * (terms["target"] - declarer_pts))
+    s = terms["target"] - declarer_pts
+    return -(terms["set_base"] + terms["short"] * s
+             + terms.get("ramp", 0) * s * (s + 1) // 2)
 
 
 def _split(value: int, declarer: int) -> list[int]:
@@ -1498,6 +1523,10 @@ def _finish(g: dict) -> None:
         "doubled": bool(g.get("doubled")),
         "make_value": payoff_terms(g)["make"],
         "set_base": payoff_terms(g)["set_base"],
+        # The two rates the review needs to spell the shortfall out as the sum
+        # it actually is. Both off the SAME terms `_finish` scored with.
+        "short_rate": payoff_terms(g)["short"],
+        "ramp": payoff_terms(g).get("ramp", 0),
         "declarer_pts": dpts,
         "declarer_etricks": g["etricks"][decl],
         "made": made,

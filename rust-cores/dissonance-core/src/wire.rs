@@ -218,6 +218,11 @@ pub fn contract_from_json(v: &Value) -> Option<Contract> {
         over: n("over").unwrap_or(0),
         set_base: n("set_base")?,
         short: n("short")?,
+        // Optional and 0 by default, exactly like `over`: a browser can hold a
+        // cached wasm older than the server, and an armed decision written
+        // before the term existed must still be searchable -- at the flat rate,
+        // which is what it was scored under when it was written.
+        ramp: n("ramp").unwrap_or(0),
         null: n("null"),
     })
 }
@@ -255,7 +260,7 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
                     // a cached wasm older than the server still prices every
                     // option, just under the rule it was built for.
                     over: n("over").unwrap_or(0),
-                    set_base: sb, short: sh, null: nu,
+                    set_base: sb, short: sh, ramp: n("ramp").unwrap_or(0), null: nu,
                     // Both OPTIONAL and both false by default, which is exactly
                     // the pre-pass behaviour: a wasm older than the server sees
                     // no flags, prices every option as one it could buy for

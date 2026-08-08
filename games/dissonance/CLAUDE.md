@@ -263,7 +263,8 @@ Skat keeps Kontra; classic gets this, and the two are deliberately different
 shapes. `g["doubled"]`, `classic_doubling`, `apply_double`.
 
     made   N^2  ->  2 N^2      (the overtrick rate doubles with it)
-    set      N  ->  2N         (reward LINEAR in N, risk quadratic)
+    set      N  ->  2N, and the shortfall RAMPS: 5, 6, 7, 8 a point
+                    (`DOUBLE_RAMP`) instead of a flat 4
     Null    12  ->  12         (untouched, as skat's Kontra leaves its own)
 
 **Kontra is symmetric and this is not**, which is the one thing to keep hold
@@ -274,32 +275,49 @@ Hard tier picks the better. Skat's Kontra can ship one option and decide on its
 sign precisely because its doubling cancels out of the comparison.
 
 **MEASURED, and the first measurement was of the WRONG SCENARIO.** Doubling
-wins N and risks N², so break-even climbs 50/67/75/80/83/86% across levels 1-6
-— while contracts bid NORMALLY fail only 4/9/18/24/37/56% (2000 self-play
-rounds). Against ordinary bidding no level is a profitable Double, and that is
-what an initial measurement said, full stop.
+risks N² and, flat, wins only N — so break-even climbed 50/67/75/80/83/86%
+across levels 1-6 while contracts bid NORMALLY fail only 4/9/18/24/37/56%
+(2500 self-play rounds). Against ordinary bidding no level was a profitable
+Double, and that is what an initial measurement said, full stop.
 
 **It is not for ordinary bidding.** The mechanic is for the SACRIFICE: a player
 about to concede a big made contract overtakes at a level they cannot reach,
-purely to deny it — 6♣ over 5♠, because 25 points is worse than being set.
-Forced sacrifices measure completely differently:
+purely to deny it — 6♣ over 5♠, because 25 points is worse than being set. And
+sacrificing PAYS at every level (gain over conceding +3.3 / +5.7 / +9.1 / +13.0
+at levels 3-6), so it is a default response, not a desperation move.
 
-| | set | Null escape | made | break-even | EV of doubling |
+**THE RAMP IS WHAT MADE THE MECHANIC WORK, and the reason is one line of data:**
+
+| when a contract is set | median shortfall | short by exactly 1 |
+|---|---|---|
+| ordinary bidding | 2 | **48%** |
+| sacrifice | 4 | 13% |
+
+Scaling the doubled base by N taxes the LEVEL, which both cases share. Ramping
+taxes the SHORTFALL, which only a sacrifice has. Measured EV of doubling:
+
+| scheme | ordinary lvl 6 | sac @5 | sac @6 | worst round | sacrifice RATE |
 |---|---|---|---|---|---|
-| ordinary level 6 | 56% | 0% | 44% | 86% | **−12.60** |
-| sacrifice at 6 | 78% | 9% | 13% | 86% | **−0.13** |
-| sacrifice at 5 | 70% | 10% | 20% | 83% | −1.44 |
+| 2N flat (first ship) | −13.82 | −1.63 | −0.24 | 48 | 36% → 36% |
+| 3N flat | −10.62 | +1.86 | +4.41 | 54 | 36% → 36% |
+| **2N +1 ramp (SHIPPED)** | **−11.70** | **+4.56** | **+9.20** | **93** | **36% → 23%** |
+| 2N +2 ramp | −9.58 | +10.75 | +18.64 | 138 | 36% → 7% |
 
-So the bet is aimed correctly and is a trap everywhere else — but **as priced
-today it is break-even at best, even against the case it exists for.** It was
-+0.97 until the classic set base moved N-1 → N the same day: that made the
-doubled base a literal doubling, and cut the doubling's REWARD from N+1 to N.
-At level 6 that one point is the entire margin. **If Double should actually pay
-against a sacrifice, the reward is the lever** — a doubled base of 3N puts the
-same measured case at about +4.7. That is a product decision, left open.
+`2N +1` was chosen because it turns Double on exactly at level 4 and above,
+which is where sacrificing becomes clearly profitable, and TAXES the play rather
+than removing it: a level-6 sacrifice still nets the sacrificer ≈+2.6 over
+conceding. `2N +2` drives the rate to 7%, i.e. it deletes a strategic option.
+The tail matters too — a match runs to 100, and `+2` allows a single round of
+138.
 
-**Do not re-measure this against self-play alone**: the bots never sacrifice, so
-a self-play sweep can only ever produce the first row.
+**Opening aggression does not move at all** (1.82 under every scheme): Double
+answers a SETTLED contract, and the opener acts before any of that is known.
+What moves is the END of the auction — settled level 6.20 → 6.08 → 5.89 as the
+sacrifice-overbidding it was made of gets taxed away.
+
+**Do not re-measure this against self-play alone**: the shipped bots did not
+sacrifice at all until the pass was priced, so a sweep can only ever produce the
+first row.
 
 * **The server tier declines every Double**, because it cannot TELL the two
   apart. The obvious signal is the defender's own holding and it does not

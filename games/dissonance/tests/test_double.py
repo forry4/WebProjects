@@ -3,13 +3,16 @@
 Skat doubles with Kontra, symmetrically: everything ×2 whichever way it falls.
 Classic's Double is NOT that, and the asymmetry is the design:
 
-    made   N^2  ->  2 N^2      (overtricks doubled with it)
-    set      N  ->  2N
-    Null    12  ->  12         (untouched)
+    made   N^2  ->  2 N^2                 (overtricks doubled with it)
+    set      N  ->  2N, and the shortfall RAMPS: 5, 6, 7, 8 a point instead
+                    of a flat 4
+    Null    12  ->  12                    (untouched)
 
-so it wins you N when it lands and costs N^2 when it does not -- reward linear
-in the level, risk quadratic. Every test here is about one of those three
-lines, or about the consequence of that asymmetry.
+The ramp is the part that makes the mechanic work. Doubling has to tell a
+SACRIFICE from a near-miss, and what separates them is not the level -- both
+have that -- but how far short the declarer finishes: ordinary failures are a
+median of 2 short with 48% by exactly 1, sacrifices a median of 4. Scaling by
+the level taxes what they share; ramping taxes what only a sacrifice has.
 """
 
 import random
@@ -46,12 +49,20 @@ def test_a_made_contract_pays_exactly_double(level):
 
 
 @pytest.mark.parametrize("level", range(1, 13))
-def test_a_set_contract_pays_2N_and_the_per_point_term_is_untouched(level):
+def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     plain, dbl = _terms(level, False), _terms(level, True)
-    assert plain["set_base"] == level
+    assert plain["set_base"] == level and plain["ramp"] == 0
     assert dbl["set_base"] == 2 * level
-    assert dbl["set_base"] - plain["set_base"] == level, "the reward is LINEAR in N"
-    assert dbl["short"] == plain["short"], "the per-point term is NOT doubled"
+    assert dbl["short"] == plain["short"], "the flat per-point term is unchanged"
+    assert dbl["ramp"] == E.DOUBLE_RAMP == 1
+    # The penalty at s short is 2N + 4s + s(s+1)/2, i.e. the extra points cost
+    # 5, 6, 7, 8, 9 -- against a flat 4 undoubled.
+    pen = [-E.payoff(dbl, level - s, True) - 2 * level for s in range(1, 6)]
+    assert pen == [5, 11, 18, 26, 35], pen
+    steps = [b - a for a, b in zip([0] + pen, pen)]
+    assert steps == [5, 6, 7, 8, 9], steps
+    flat = [-E.payoff(plain, level - s, True) - level for s in range(1, 6)]
+    assert flat == [4, 8, 12, 16, 20], "undoubled stays flat at 4"
 
 
 @pytest.mark.parametrize("level", range(1, 13))
@@ -59,20 +70,28 @@ def test_null_is_never_doubled(level):
     assert _terms(level, True)["null"] == _terms(level, False)["null"] == E.NULL_MAKE
 
 
-def test_the_bet_is_high_risk_for_low_reward_at_every_level():
-    """The property the whole mechanic exists to have, asserted rather than
-    asserted-in-prose: doubling risks more than it wins, by more at every step
-    up. If a future re-pricing makes doubling a free roll, this fails."""
-    ratios = []
-    for level in range(1, 13):
+def test_the_reward_grows_with_the_SHORTFALL_not_just_the_level():
+    """The design property, asserted rather than left in prose: what doubling
+    wins you must rise with how far short the declarer finishes, or it cannot
+    distinguish a sacrifice from a near-miss."""
+    for level in (3, 6):
         plain, dbl = _terms(level, False), _terms(level, True)
-        win = dbl["set_base"] - plain["set_base"]          # if it goes down
-        risk = dbl["make"] - plain["make"]                 # if it does not
-        assert win == level and risk == level * level
-        ratios.append(risk / win)
-    assert ratios[0] == 1, "at level 1 the bet is even money"
-    assert all(b > a for a, b in zip(ratios, ratios[1:])), \
-        f"the risk:reward ratio must worsen with every level: {ratios}"
+        wins = [E.payoff(plain, level - s, True) - E.payoff(dbl, level - s, True)
+                for s in range(1, 7)]
+        assert all(b > a for a, b in zip(wins, wins[1:])), wins
+        # A near-miss is barely taxed; a deep failure is taxed hard.
+        assert wins[0] < level + 2, f"a 1-short miss should stay cheap: {wins[0]}"
+        assert wins[5] > 3 * wins[0], f"a 6-short collapse should not: {wins}"
+
+
+def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
+    """It must stay a real bet. On the COMMON failure -- 1 short, 48% of them --
+    the risk of a made contract still dwarfs the reward."""
+    for level in range(2, 13):
+        plain, dbl = _terms(level, False), _terms(level, True)
+        win = E.payoff(plain, level - 1, True) - E.payoff(dbl, level - 1, True)
+        risk = dbl["make"] - plain["make"]
+        assert risk > win, f"level {level}: risk {risk} <= reward {win}"
 
 
 def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
@@ -82,10 +101,12 @@ def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
     need = {}
     for level in (1, 2, 3, 4):
         plain, dbl = _terms(level, False), _terms(level, True)
-        win = dbl["set_base"] - plain["set_base"]
+        # ...at the MEDIAN ordinary shortfall of 2, which is the case a
+        # defender doubling a genuine contract is actually betting against.
+        win = E.payoff(plain, level - 2, True) - E.payoff(dbl, level - 2, True)
         risk = dbl["make"] - plain["make"]
         need[level] = round(risk / (win + risk), 2)
-    assert need == {1: 0.5, 2: 0.67, 3: 0.75, 4: 0.8}
+    assert need == {1: 0.2, 2: 0.44, 3: 0.6, 4: 0.7}, need
 
 
 # --- end to end ------------------------------------------------------------
@@ -99,8 +120,8 @@ def test_a_doubled_round_scores_the_doubled_numbers():
         t = E.payoff_terms(g)
         # made exactly on target
         assert E.payoff(t, 3, True) == (18 if doubled else 9)
-        # set by two
-        assert E.payoff(t, 1, True) == -((6 if doubled else 3) + 4 * 2)
+        # set by two: doubled that is base 6 + (5 + 6); undoubled 3 + (4 + 4).
+        assert E.payoff(t, 1, True) == (-17 if doubled else -11)
         # no +2 trick at all
         assert E.payoff(t, -2, False) == E.NULL_MAKE
 
@@ -209,6 +230,7 @@ def test_the_hard_tier_is_offered_both_branches_priced():
     off = next(o for o in opts if o["move"]["on"] is False)
     assert on["make"] == 2 * off["make"]
     assert on["set_base"] == 6 and off["set_base"] == 3
+    assert on["ramp"] == 1 and off["ramp"] == 0
     assert all("decline" not in o for o in opts), \
         "both branches carry their own move; neither is an implicit zero"
 
@@ -310,11 +332,12 @@ def test_a_sacrifice_is_the_case_the_double_is_priced_for():
     is the lever: a doubled base of 3N puts the same case at about +4.7.
     """
     plain, dbl = _terms(6, False), _terms(6, True)
-    win = dbl["set_base"] - plain["set_base"]
     risk = dbl["make"] - plain["make"]
-    assert win == 6 and risk == 36
-    ordinary = 0.56 * win - 0.44 * risk        # measured, self-play
-    sacrifice = 0.78 * win - 0.13 * risk       # measured, forced sacrifice
+    def win(short):
+        return E.payoff(plain, 6 - short, True) - E.payoff(dbl, 6 - short, True)
+    # Measured shortfall medians: ordinary failures 2, sacrifices 4.
+    ordinary = 0.56 * win(2) - 0.44 * risk
+    sacrifice = 0.78 * win(4) - 0.13 * risk
     assert ordinary < -10, ordinary
-    assert -1 < sacrifice < 1, f"the sacrifice case is break-even, not profit: {sacrifice}"
-    assert sacrifice - ordinary > 10, "...but it is the case the mechanic is for"
+    assert sacrifice > 5, f"the ramp must make the sacrifice case pay: {sacrifice}"
+    assert sacrifice - ordinary > 15, "...and separate it from an honest contract"

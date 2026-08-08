@@ -121,25 +121,28 @@ export default function DissonanceRules() {
 				<ul>
 					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × N × N instead
 						of N × N, overtricks included.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2N + 4</b> for every point
-						they finished below N, instead of (N − 1) + 4.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2N</b>, and every point they
+						finish below N costs them <b>more than the last</b> — 5, then 6, then
+						7, then 8 — instead of a flat 4 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 12, doubled or not.</li>
 				</ul>
 				<p>
-					So it is <b>high risk for low reward</b>, on purpose. At level 3, doubling
-					wins you 4 more if the contract goes down and costs you 9 more if it
-					doesn't — and the ratio gets worse every level up. It is not a move to
-					make because you feel good about your hand.
+					That rising scale is the whole point. It barely touches a declarer who
+					misses by one — which is what most failed contracts do — and it bites hard
+					on one who finishes miles short, which is what a <b>sacrifice</b> looks
+					like. A level-6 contract one short pays you 17; four short, 38.
 				</p>
 				<RulesTip>
 					<p>
-						<b>What it's for.</b> Someone forced to open on a hopeless hand can bid
-						the minimum and take a cheap set — a sacrifice. Double is how you charge
-						them a little more for it. But note the escape: a declarer who has not
-						yet won a +2 trick can duck every one of them and take Null instead, and
-						Double doesn't touch Null. So the bet pays best against a declarer who
-						has <i>already</i> won a scoring trick and can no longer get out that way.
+						<b>What it's for.</b> When you're about to make a big contract, your
+						opponent's best move is often to <b>outbid you with nothing</b> — 6♣ over
+						your 5♠ — because being set costs them less than letting you score 25.
+						Double is how you charge them properly for that. Note the escape,
+						though: a declarer who hasn't yet won a +2 trick can duck every one of
+						them and take Null instead, and Double doesn't touch Null. So the bet
+						pays best against someone who has <i>already</i> won a scoring trick and
+						can no longer get out that way.
 					</p>
 				</RulesTip>
 			</RulesSection>
