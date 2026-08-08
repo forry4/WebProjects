@@ -19,6 +19,7 @@
  * Run: `npm run screens` (from webapp/). Needs Python + the backend requirements.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { chromium } from "playwright";
@@ -41,6 +42,63 @@ const SCREENS = [
 	{ path: "/books", chunk: "Books", marker: ".bk-app" },
 ];
 
+// Newest mtime across everything the bundle is built FROM — the same four trees
+// `deploy-pages.yml` filters its build on. Used only to decide whether an existing
+// dist/ may be REUSED (see runBuild): a flag alone would be a promise that some
+// caller really did just build, and the whole reason this harness builds at all is
+// that a stale dist/ makes a broken change look green. A timestamp cannot lie.
+function newestSourceMtime() {
+	let newest = 0;
+	const skipDirs = new Set(["node_modules", "dist", "__pycache__", "tests", "test-results"]);
+	// Only what can actually reach the bundle. Walking every file under games/
+	// would drag in the AI model blobs and training data for no signal.
+	const exts = /\.(jsx?|mjs|css|html|json|svg|png|jpe?g|woff2?|wasm|bin)$/i;
+	const walk = (dir) => {
+		let entries;
+		try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+		for (const e of entries) {
+			if (e.name.startsWith(".") || skipDirs.has(e.name)) continue;
+			const full = path.join(dir, e.name);
+			if (e.isDirectory()) walk(full);
+			else if (exts.test(e.name)) {
+				try { newest = Math.max(newest, statSync(full).mtimeMs); } catch { /* raced */ }
+			}
+		}
+	};
+	for (const d of ["webapp", "games", "shared", "books"]) walk(path.join(repoRoot, d));
+	return newest;
+}
+
+// BUILD FIRST — without this the harness happily tests whatever is already in
+// dist/, and a build that FAILS leaves the previous, working bundle in place, so a
+// broken change would sail through green. (Caught exactly that way.)
+//
+// The one exception is a caller that JUST built the identical bundle — `npm run
+// smoke` runs the same `vite build` with the same env moments earlier, in both CI
+// and .githooks/pre-push, so the pair used to pay for that build twice. Setting
+// SCREENS_REUSE_BUILD=1 offers the existing dist/, and this VERIFIES the offer
+// rather than taking it: unless dist/ is newer than every source file it is built
+// from, it rebuilds anyway. So the invariant survives a stale flag, a partial
+// build, and an edit made between the two gates.
+function runBuild() {
+	if (process.env.SCREENS_REUSE_BUILD === "1") {
+		let builtAt = 0;
+		try { builtAt = statSync(path.join(webappDir, "dist", "index.html")).mtimeMs; } catch {}
+		const srcAt = newestSourceMtime();
+		if (builtAt && builtAt > srcAt) {
+			console.log("  reusing the bundle the previous gate just built (dist/ is newer than every source)");
+			return Promise.resolve();
+		}
+		console.log(builtAt
+			? "  dist/ is older than a source file — building despite SCREENS_REUSE_BUILD"
+			: "  no dist/ to reuse — building");
+	}
+	return new Promise((res, rej) => {
+		const b = spawn("npx", ["vite", "build"], { cwd: webappDir, stdio: "ignore", shell: true });
+		b.on("exit", (code) => (code === 0 ? res() : rej(new Error(`vite build exited ${code}`))));
+	});
+}
+
 async function waitForHttp(url, timeoutMs, label) {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
@@ -52,6 +110,36 @@ async function waitForHttp(url, timeoutMs, label) {
 	}
 	throw new Error(`${label} did not come up at ${url} within ${timeoutMs}ms`);
 }
+
+// Poll until a measurement stops moving, rather than sleeping a guessed interval.
+// Two consecutive equal samples is the rule the FitText rig below already used
+// inline; hoisted so every resize and every "wait for the server to answer" can
+// use it. Faster than a fixed sleep when the page is quick, and — the half that
+// matters — still correct when the box is loaded, which a fixed sleep is not.
+async function settle(page, read, { tries = 25, gap = 60 } = {}) {
+	let prev;
+	for (let i = 0; i < tries; i++) {
+		const now = await page.evaluate(read).catch(() => null);
+		if (i > 0 && JSON.stringify(now) === JSON.stringify(prev)) return now;
+		prev = now;
+		await sleep(gap);
+	}
+	return prev;
+}
+
+// Card faces re-fit their title and body text from a ResizeObserver, so the frame
+// right after setViewportSize still carries the PREVIOUS width's sizes — which is
+// exactly what the fixed sleep after every resize was waiting out.
+const settleFits = (page) => settle(page, () => [
+	window.innerWidth, window.innerHeight,
+	[...document.querySelectorAll(".dm-card-name, .dm-card-body")]
+		.map((e) => getComputedStyle(e).fontSize).join(","),
+]);
+
+// Wait for a page-side predicate, capped, swallowing the timeout. The cap is the
+// old fixed sleep, so a genuinely slow answer still gets the window it used to.
+const until = (page, fn, ms, arg = null) => page.waitForFunction(fn, arg, { timeout: ms })
+	.then(() => true).catch(() => false);
 
 // CI installs the browser Playwright asks for and the first branch takes it.
 // The escape hatch is for a box that has a Chromium Playwright's pin does not
@@ -100,9 +188,12 @@ try {
 	// The port can't just be randomised — VITE_WS_URL bakes localhost:8000 into the
 	// bundle — so detect it and fail loudly instead.
 	const spawnedAt = Math.floor(Date.now() / 1000);
-	console.log("starting backend (uvicorn app:app) ...");
+	console.log("starting backend (uvicorn app:app) + building ...");
 	api = spawn("python", ["-m", "uvicorn", "app:app", "--port", String(API_PORT)],
 		{ cwd: repoRoot, stdio: "ignore", shell: true });
+	// The build needs nothing from the backend, so it runs WHILE uvicorn boots
+	// rather than after it. Started before the await so both clocks run together.
+	const built = runBuild();
 	await waitForHttp(`http://localhost:${API_PORT}/health`, 90_000, "backend");
 	const health = await (await fetch(`http://localhost:${API_PORT}/health`)).json();
 	if (!(health.started_at >= spawnedAt - 2)) {
@@ -111,15 +202,8 @@ try {
 			`we started at ${spawnedAt}). Kill it and re-run — otherwise this harness tests stale code.`);
 	}
 	console.log("  backend up (verified ours)");
-
-	// BUILD FIRST. Without this the harness happily tests whatever is already in
-	// dist/ — and a build that FAILS leaves the previous, working bundle in place,
-	// so a broken change would sail through green. (Caught exactly that way.)
-	console.log("building ...");
-	await new Promise((res, rej) => {
-		const b = spawn("npx", ["vite", "build"], { cwd: webappDir, stdio: "ignore", shell: true });
-		b.on("exit", (code) => (code === 0 ? res() : rej(new Error(`vite build exited ${code}`))));
-	});
+	await built;
+	console.log("  built");
 
 	console.log("serving the built frontend ...");
 	preview = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"],
@@ -130,45 +214,90 @@ try {
 	browser = await launchBrowser();
 	const failures = [];
 
-	for (const { path: route, chunk, marker } of SCREENS) {
-		const ctx = await browser.newContext();
-		// A guest identity skips the auth screen without touching the DB.
-		await ctx.addInitScript(() => localStorage.setItem("spender_user",
-			JSON.stringify({ id: "screens-harness", name: "Harness", guest: true })));
-		const page = await ctx.newPage();
-		const errors = [];
-		const assets = [];
-		page.on("pageerror", (e) => errors.push(String(e)));
-		page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
-		page.on("request", (r) => {
-			const u = r.url();
-			if (u.includes("/assets/")) assets.push(u.split("/").pop());
-		});
+	const shell = [];
 
-		await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
-		// The screen arrives after the backend ping resolves and the lazy chunk lands.
-		let markerCount = 0;
-		for (let i = 0; i < 20 && markerCount === 0; i++) {
-			markerCount = await page.locator(marker).count().catch(() => 0);
-			if (markerCount === 0) await sleep(400);
+	// Dissonance's cheapest legal bid, used by both blocks below. It is a helper and
+	// not four inline clicks because of a RACE that bites intermittently: the
+	// denomination buttons are disabled per LEVEL, so clicking a level and then
+	// immediately reading `:not([disabled])` can pick from the PREVIOUS render.
+	// The Bid button then stays disabled — and as the opener there is no Pass, so
+	// the harness spun in the auction until its loop ran out, and the failure
+	// surfaced as "no tricks were ever played" rather than as a stuck auction.
+	// Settle between clicks, and confirm the button really is live.
+	const disBidCheaply = async (page) => {
+		// NO LEVELS LEFT IS A REAL STATE, not a broken selector. Denominations are
+		// per-player no-repeat, so once this seat has named all five it can only
+		// pass — `bidLevels` empties and the whole level grid stops rendering.
+		// Reaching for it anyway burned a 5s actionability timeout an iteration,
+		// and the CALLER's "are we bidding" test keyed on the same vanished
+		// element, so the harness sat out its whole deadline in the auction and
+		// reported it as "no tricks were ever played".
+		const levels = page.locator(".dis-bidgrid button");
+		if (await levels.count() === 0) {
+			await page.getByRole("button", { name: /^Pass$/ }).first()
+				.click({ timeout: 5_000 }).catch(() => {});
+			return;
 		}
-		const rootLen = await page.evaluate(() => document.getElementById("root").innerHTML.length);
-		const gotChunk = assets.some((a) => a.startsWith(`${chunk}-`));
-
-		const problems = [];
-		if (markerCount === 0) problems.push(`no element matching "${marker}" (screen never mounted)`);
-		if (!gotChunk) problems.push(`lazy chunk ${chunk}-*.js was never fetched`);
-		if (rootLen < 5000) problems.push(`#root only ${rootLen} chars (looks like the loader)`);
-		if (errors.length) problems.push(`${errors.length} page error(s): ${errors[0].slice(0, 200)}`);
-
-		if (problems.length) {
-			failures.push(`${route}: ${problems.join("; ")}`);
-			console.log(`  FAIL ${route}`);
-			problems.forEach((p) => console.log(`         ${p}`));
-		} else {
-			console.log(`  OK   ${route.padEnd(10)} chunk=${chunk} #root=${rootLen}`);
+		await levels.first().click({ timeout: 5_000 }).catch(() => {});
+		await sleep(150);
+		const denoms = page.locator(".dis-denoms button:not([disabled])");
+		const n = await denoms.count();
+		for (let d = 0; d < n; d++) {
+			await denoms.nth(d).click({ timeout: 5_000 }).catch(() => {});
+			await sleep(150);
+			const bid = page.getByRole("button", { name: /^Bid / }).first();
+			if (await bid.count() && await bid.isEnabled()) {
+				await bid.click({ timeout: 5_000 }).catch(() => {});
+				return;
+			}
 		}
-		await ctx.close();
+		// Nothing legal at that level — pass if the rules allow it. The opener
+		// cannot, but by then some denomination above will have worked.
+		await page.getByRole("button", { name: /^Pass$/ }).first()
+			.click({ timeout: 5_000 }).catch(() => {});
+	};
+
+	async function routeMounts(log) {
+		for (const { path: route, chunk, marker } of SCREENS) {
+			const ctx = await browser.newContext();
+			// A guest identity skips the auth screen without touching the DB.
+			await ctx.addInitScript(() => localStorage.setItem("spender_user",
+				JSON.stringify({ id: "screens-harness", name: "Harness", guest: true })));
+			const page = await ctx.newPage();
+			const errors = [];
+			const assets = [];
+			page.on("pageerror", (e) => errors.push(String(e)));
+			page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()}`); });
+			page.on("request", (r) => {
+				const u = r.url();
+				if (u.includes("/assets/")) assets.push(u.split("/").pop());
+			});
+
+			await page.goto(`http://localhost:${PORT}${route}`, { waitUntil: "networkidle" });
+			// The screen arrives after the backend ping resolves and the lazy chunk lands.
+			let markerCount = 0;
+			for (let i = 0; i < 20 && markerCount === 0; i++) {
+				markerCount = await page.locator(marker).count().catch(() => 0);
+				if (markerCount === 0) await sleep(400);
+			}
+			const rootLen = await page.evaluate(() => document.getElementById("root").innerHTML.length);
+			const gotChunk = assets.some((a) => a.startsWith(`${chunk}-`));
+
+			const problems = [];
+			if (markerCount === 0) problems.push(`no element matching "${marker}" (screen never mounted)`);
+			if (!gotChunk) problems.push(`lazy chunk ${chunk}-*.js was never fetched`);
+			if (rootLen < 5000) problems.push(`#root only ${rootLen} chars (looks like the loader)`);
+			if (errors.length) problems.push(`${errors.length} page error(s): ${errors[0].slice(0, 200)}`);
+
+			if (problems.length) {
+				failures.push(`${route}: ${problems.join("; ")}`);
+				log(`  FAIL ${route}`);
+				problems.forEach((p) => log(`         ${p}`));
+			} else {
+				log(`  OK   ${route.padEnd(10)} chunk=${chunk} #root=${rootLen}`);
+			}
+			await ctx.close();
+		}
 	}
 
 	// ── Shell interactions ────────────────────────────────────────────────────
@@ -176,8 +305,7 @@ try {
 	// still works: the state it owns (screen, identity, routing) is exactly what a
 	// Spender.jsx shell/game split would break, and none of it is exercised by
 	// loading a deep link directly.
-	const shell = [];
-	{
+	async function shellNav(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "screens-harness", name: "Harness", guest: true })));
@@ -186,8 +314,8 @@ try {
 		page.on("pageerror", (e) => errors.push(String(e)));
 
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 		const has = async (sel, ms = 25_000) => {
 			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
@@ -233,14 +361,14 @@ try {
 	// nothing else here ever renders the auth screen. It is the site's front door
 	// and the first screen extracted out of Spender.jsx, so it gets its own pass
 	// with NO stored user.
-	{
+	async function authScreen(log) {
 		const ctx = await browser.newContext();           // deliberately unseeded
 		const page = await ctx.newPage();
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 		const has = async (sel, ms = 25_000) => {
 			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
@@ -275,7 +403,7 @@ try {
 	// conflates the site-level mode with Spender's own browser/waiting/game, and
 	// separating them is exactly the kind of change that renders fine and plays
 	// wrong.
-	{
+	async function spenderPlayTurn(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "play-harness", name: "Player", guest: true })));
@@ -283,8 +411,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 		const has = async (sel, ms = 25_000) => {
 			await page.waitForSelector(sel, { timeout: ms }).catch(() => {});
@@ -384,7 +512,7 @@ try {
 	// joins by the shared room code, and both must end up seated in the same room.
 	// This also exercises the join handshake and the broadcast fan-out to a SECOND
 	// socket, which the vs-AI walk never touches.
-	{
+	async function spenderWaitingRoom(log) {
 		const mk = async (id) => {
 			const c = await browser.newContext();
 			await c.addInitScript((pid) => localStorage.setItem("spender_user",
@@ -399,8 +527,8 @@ try {
 		host.on("pageerror", (e) => errors.push("host: " + e));
 		joiner.on("pageerror", (e) => errors.push("joiner: " + e));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await host.goto(`http://localhost:${PORT}/spender`, { waitUntil: "networkidle" });
@@ -464,7 +592,7 @@ try {
 	//      this modal used to have);
 	//   3. on a phone the create row SCROLLS SIDEWAYS instead of wrapping, and
 	//      the page itself must not scroll sideways with it.
-	{
+	async function rulesModal(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "rules-harness", name: "Rules", guest: true })));
@@ -472,8 +600,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		for (const route of ["/spender", "/coc", "/werewolf", "/duel", "/dontminion", "/dissonance"]) {
@@ -546,7 +674,7 @@ try {
 	// Base Set alone is the default, the LIST scrolls rather than the modal, and
 	// Select all toggles both ways. The set count grows every expansion phase, so
 	// the picker is the part of that modal most likely to be touched.
-	{
+	async function dmExpansionPicker(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "picker-harness", name: "Picker", guest: true })));
@@ -554,8 +682,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
@@ -680,7 +808,7 @@ try {
 	//      inset was smaller still because FitText measured the PADDING box.
 	//   2. on the smallest face (56px, the in-play rows) the cost coin sits
 	//      BESIDE the type labels, not wrapped under them.
-	{
+	async function dmCardFace(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "cardface-harness", name: "Face", guest: true })));
@@ -688,8 +816,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`${`http://localhost:${PORT}`}/dontminion`, { waitUntil: "networkidle" });
@@ -747,18 +875,10 @@ try {
 				// FitText refits from a ResizeObserver, so the reading right after a
 				// resize can be the PREVIOUS width's. Poll until two consecutive
 				// samples agree instead of trusting one fixed sleep — an
-				// intermittently-failing shared gate is worse than no gate.
-				let prev = null;
-				for (let i = 0; i < 12; i++) {
-					await sleep(150);
-					const now = await page.evaluate(() => {
-						const c = [...document.querySelectorAll(".dm-supply .dm-card")]
-							.find((x) => x.querySelector(".dm-fitspan")?.textContent === "Province");
-						return c ? getComputedStyle(c.querySelector(".dm-card-name")).fontSize : null;
-					});
-					if (now && now === prev) break;
-					prev = now;
-				}
+				// intermittently-failing shared gate is worse than no gate. The
+				// shared `settleFits` is that same rule at a 60ms rather than a
+				// 150ms step, which this sweep pays once per candidate width.
+				await settleFits(page);
 				const r = await page.evaluate(() => {
 					const card = [...document.querySelectorAll(".dm-supply .dm-card")]
 						.find((c) => c.querySelector(".dm-fitspan")?.textContent === "Province");
@@ -782,7 +902,7 @@ try {
 				!!rig && rig.overflow <= 0.5 && Math.abs(rig.gapLeft - rig.gapRight) < 1.5,
 				JSON.stringify(rig));
 			await page.setViewportSize({ width: 1280, height: 900 });
-			await sleep(400);
+			await settleFits(page);
 
 			// Longest type label on the SMALLEST face: clone a real card into the
 			// 56px in-play context rather than trusting a computed estimate.
@@ -881,7 +1001,7 @@ try {
 			// biconditional exercises the truncation logic on every deal without
 			// depending on which cards were dealt.
 			await page.setViewportSize({ width: 1000, height: 900 });   // squeezes kingdom piles to the 88px floor
-			await sleep(500);                                           // let FitBodyText's ResizeObserver refit
+			await settleFits(page);                                     // let FitBodyText's ResizeObserver refit
 			const bodyTxt = await page.evaluate(() => {
 				const rows = [...document.querySelectorAll(".dm-supply .dm-card")].map((c) => {
 					const el = c.querySelector(".dm-card-body");
@@ -925,7 +1045,7 @@ try {
 				bodyTxt.mismatch.length === 0 && bodyTxt.floorOff.length === 0,
 				JSON.stringify({ mismatch: bodyTxt.mismatch, floorOff: bodyTxt.floorOff }));
 			await page.setViewportSize({ width: 1280, height: 900 });
-			await sleep(400);
+			await settleFits(page);
 
 			// The log reads CHRONOLOGICALLY — oldest at the top, newest at the
 			// bottom — and follows the newest line. Both the brightened line and
@@ -952,7 +1072,11 @@ try {
 			// does buy — the pile count is the witness that it didn't.
 			await page.locator(".dm-turnbtns .btn", { hasText: /to buy phase/i })
 				.click({ timeout: 10_000 }).catch(() => {});
-			await sleep(800);
+			// The buy phase has arrived once the button that got us here is gone —
+			// which is the state the checks below actually need, and it lands well
+			// inside the 800ms this used to sleep unconditionally.
+			await until(page, () => ![...document.querySelectorAll(".dm-turnbtns .btn")]
+				.some((b) => /to buy phase/i.test(b.textContent)), 800);
 
 			const copperCount = () => page.evaluate(() => {
 				const el = [...document.querySelectorAll(".dm-supply .dm-pile-slot")]
@@ -1004,7 +1128,13 @@ try {
 
 			// ...and the gesture must not eat an ordinary tap.
 			await hold(80);
-			await sleep(800);
+			// A tap BUYS, so the witness is the pile count moving. Waiting for that
+			// is both faster and stricter than sleeping 800ms and hoping.
+			await until(page, (was) => {
+				const el = [...document.querySelectorAll(".dm-supply .dm-pile-slot")]
+					.find((x) => x.querySelector(".dm-fitspan")?.textContent === "Copper");
+				return (el?.querySelector(".dm-pile-count")?.textContent ?? null) !== was;
+			}, 800, c2);
 			const c3 = await copperCount();
 			const tapOpened = await infoOpen();
 			await closeInfo();
@@ -1057,7 +1187,17 @@ try {
 			// already spent by the tap test above, and the bot's reply logs plenty
 			await page.locator(".dm-turnbtns .btn", { hasText: /end turn/i })
 				.click({ timeout: 10_000 }).catch(() => {});
-			await sleep(2500);
+			// The check below needs the log to have GROWN (follow.n > logPre.n) and
+			// to have settled at the bottom, so wait for exactly that instead of
+			// sleeping long enough for the bot's whole reply. The cap is the old
+			// 2500ms, so a slow bot still gets the window it had.
+			await until(page, (n) => document.querySelectorAll(".dm-log .dm-log-line").length > n,
+				2500, logPre?.n ?? 0);
+			// ...then let the follow-scroll land before the gap is measured.
+			await settle(page, () => {
+				const el = document.querySelector(".dm-log");
+				return el ? [el.querySelectorAll(".dm-log-line").length, Math.round(el.scrollTop)] : null;
+			});
 			const follow = await page.evaluate(() => {
 				const el = document.querySelector(".dm-log");
 				const r = { gap: +(el.scrollHeight - el.scrollTop - el.clientHeight).toFixed(1),
@@ -1074,7 +1214,7 @@ try {
 			// count pills hang BELOW their slot — so "hand N" landed on top of the
 			// buttons (measured 6px into them). Nothing in the column may overlap.
 			await page.setViewportSize({ width: 390, height: 844 });
-			await sleep(600);
+			await settleFits(page);
 			const mob = await page.evaluate(() => {
 				const pill = document.querySelector(".dm-myhand .dm-pile-count");
 				const btns = document.querySelector(".dm-turnbtns");
@@ -1094,7 +1234,7 @@ try {
 			check("on a phone the hand count clears the buttons and the cards",
 				!mob.missing && mob.overlapWithButtons < 0 && !mob.onCard, JSON.stringify(mob));
 			await page.setViewportSize({ width: 1280, height: 900 });
-			await sleep(300);
+			await settleFits(page);
 		}
 		check("no page errors while rendering the board", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
@@ -1113,7 +1253,7 @@ try {
 	// line. Driven against a STUBBED /games/history rather than a seeded DB: the
 	// point is the reveal, and 55 synthetic rows make both the page size and the
 	// HISTORY_MAX cap exact instead of dependent on what this box has played.
-	{
+	async function lobbyHistory(log) {
 		const ctx = await browser.newContext();
 		// a session_token so the lobby actually fetches history (a guest is short-
 		// circuited to an empty list), and a SHORT viewport so the initial 10 rows
@@ -1127,8 +1267,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		// The shell validates the stored session on load and a definitively-dead
@@ -1194,7 +1334,7 @@ try {
 	// demanding one: a face implies a well-formed row, and no face implies no
 	// row. Never deal-dependent, and it exercises the real render path on all
 	// but ~1 run in 300 — the same shape as the body-text truncation check.
-	{
+	async function dmAdventures(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "adv-harness", name: "Adv", guest: true })));
@@ -1202,8 +1342,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
@@ -1269,7 +1409,7 @@ try {
 	//     render a row of misleading zeroes.
 	// Both are asserted as well-formedness biconditionals rather than demanding
 	// a particular deal, the same shape the rest of this file uses.
-	{
+	async function dmEmpires(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "emp-harness", name: "Emp", guest: true })));
@@ -1277,8 +1417,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
@@ -1352,7 +1492,7 @@ try {
 	//     rather than by any client-side rule.
 	// Written as well-formedness assertions rather than demanding a particular
 	// deal, the same shape as the rest of this file.
-	{
+	async function dmRenaissance(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "ren-harness", name: "Ren", guest: true })));
@@ -1360,8 +1500,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dontminion`, { waitUntil: "networkidle" });
@@ -1419,7 +1559,7 @@ try {
 	// human move and get an AI reply from the worker-pool search. Then, back online
 	// (the preview server is the asset origin; there's no SW on localhost to serve a
 	// reload's assets), a reload must resume the save from IndexedDB.
-	{
+	async function offlineSpender(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "offline-harness", name: "Offline", guest: true })));
@@ -1431,8 +1571,8 @@ try {
 		let poolReady = false;
 		page.on("console", (m) => { if (/\[client-AI\].*ready/.test(m.text())) poolReady = true; });
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
@@ -1509,7 +1649,7 @@ try {
 	// one-column grid — rendered shrunk to content against the right edge. The
 	// existing tier checks all measured the GRID, which was correctly 1fr; only
 	// the column's own box shows it. Checked on every game that pins columns.
-	{
+	async function phoneLobbyColumns(log) {
 		const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "phone-harness", name: "Phone", guest: true })));
@@ -1517,8 +1657,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		// EVERY game that pins columns — kept in step with the Python contract
@@ -1572,7 +1712,7 @@ try {
 	// mounted /dissonance screen says nothing about whether picking "Skat" deals a
 	// skat game, so this drives the segment, the deal, and the first bid — the
 	// value ladder is a middle panel that does not exist in classic mode at all.
-	{
+	async function dissonanceSkat(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "skat-harness", name: "Skat", guest: true })));
@@ -1580,8 +1720,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
@@ -1863,47 +2003,6 @@ try {
 		await ctx.close();
 	}
 
-	// Dissonance's cheapest legal bid, used by both blocks below. It is a helper and
-	// not four inline clicks because of a RACE that bites intermittently: the
-	// denomination buttons are disabled per LEVEL, so clicking a level and then
-	// immediately reading `:not([disabled])` can pick from the PREVIOUS render.
-	// The Bid button then stays disabled — and as the opener there is no Pass, so
-	// the harness spun in the auction until its loop ran out, and the failure
-	// surfaced as "no tricks were ever played" rather than as a stuck auction.
-	// Settle between clicks, and confirm the button really is live.
-	const disBidCheaply = async (page) => {
-		// NO LEVELS LEFT IS A REAL STATE, not a broken selector. Denominations are
-		// per-player no-repeat, so once this seat has named all five it can only
-		// pass — `bidLevels` empties and the whole level grid stops rendering.
-		// Reaching for it anyway burned a 5s actionability timeout an iteration,
-		// and the CALLER's "are we bidding" test keyed on the same vanished
-		// element, so the harness sat out its whole deadline in the auction and
-		// reported it as "no tricks were ever played".
-		const levels = page.locator(".dis-bidgrid button");
-		if (await levels.count() === 0) {
-			await page.getByRole("button", { name: /^Pass$/ }).first()
-				.click({ timeout: 5_000 }).catch(() => {});
-			return;
-		}
-		await levels.first().click({ timeout: 5_000 }).catch(() => {});
-		await sleep(150);
-		const denoms = page.locator(".dis-denoms button:not([disabled])");
-		const n = await denoms.count();
-		for (let d = 0; d < n; d++) {
-			await denoms.nth(d).click({ timeout: 5_000 }).catch(() => {});
-			await sleep(150);
-			const bid = page.getByRole("button", { name: /^Bid / }).first();
-			if (await bid.count() && await bid.isEnabled()) {
-				await bid.click({ timeout: 5_000 }).catch(() => {});
-				return;
-			}
-		}
-		// Nothing legal at that level — pass if the rules allow it. The opener
-		// cannot, but by then some denomination above will have worked.
-		await page.getByRole("button", { name: /^Pass$/ }).first()
-			.click({ timeout: 5_000 }).catch(() => {});
-	};
-
 	// ── Dissonance's Hard tier, searched in the browser ─────────────────────────
 	// Hard is the only bot on this site whose CARD PLAY runs client-side, and the
 	// whole path is invisible to Python: a module Worker loads wasm-pack glue, the
@@ -1913,7 +2012,7 @@ try {
 	// a stale filename, a CSP, a worker that throws — so the room keeps playing
 	// and keeps saying Hard. That is precisely why it needs a played game rather
 	// than a mounted screen.
-	{
+	async function dissonanceHard(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "hard-harness", name: "Hard", guest: true })));
@@ -1955,8 +2054,8 @@ try {
 		// the only visible sign the client tier ran, and the detail a failure here
 		// needs (every other path is a silent return to the server bot).
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
@@ -2070,7 +2169,7 @@ try {
 	// two finished tricks ran together with an 18ms frame between them.
 	// This plays a whole classic game AT FULL TILT — clicking the instant a card
 	// offers itself, which is the case that broke — and measures every dwell.
-	{
+	async function dissonanceBeat(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "hold-harness", name: "Hold", guest: true })));
@@ -2078,8 +2177,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
@@ -2248,7 +2347,11 @@ try {
 		}));
 		check("a whole game was played out", dwells.length >= 8,
 			`${dwells.length} finished tricks, ${trace.length} frames — ${JSON.stringify(stuck)}`);
-		check("every finished trick is held, even at full tilt",
+		// The shortest dwell rides in the NAME, so it prints on success too. This is
+		// the one assertion in the file whose margin can be eroded by nothing but
+		// load — it wants 550ms out of a 700ms hold — and a gate that shows its
+		// margin only once it has already failed gives no warning that it is drifting.
+		check(`every finished trick is held, even at full tilt (shortest ${shortest.ms}ms of 700)`,
 			dwells.length >= 8 && shortest.ms >= 550,
 			`shortest ${JSON.stringify(shortest)} of ${JSON.stringify(dwells.map((d) => d.ms))}`);
 		// The game-ending trick is the one this most easily loses: it arrives in
@@ -2358,7 +2461,7 @@ try {
 	// checks statically). Duel, because its default is Hard and its Easy tier
 	// starts a game instantly, so the assertion is over two DIFFERENT tiers
 	// rather than over the default agreeing with itself.
-	{
+	async function lastDifficulty(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "lastdiff-harness", name: "Diff", guest: true })));
@@ -2366,8 +2469,8 @@ try {
 		const errors = [];
 		page.on("pageerror", (e) => errors.push(String(e)));
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 		const openModal = async () => {
 			await page.goto(`http://localhost:${PORT}/duel`, { waitUntil: "networkidle" });
@@ -2417,7 +2520,7 @@ try {
 	// Download button does online), creates a local game, cuts the network once the
 	// search pool is armed, and plays the SETUP castle placement both ways — ours by
 	// clicking a legal hex, the bot's through the offline search loop.
-	{
+	async function offlineCoc(log) {
 		const boards = await (await fetch(`http://localhost:${API_PORT}/coc/boards`)).json();
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(([user, boardsJson]) => {
@@ -2431,8 +2534,8 @@ try {
 		let poolReady = false;
 		page.on("console", (m) => { if (/\[coc client-AI\].*ready/.test(m.text())) poolReady = true; });
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
@@ -2487,7 +2590,7 @@ try {
 	// cache. Seats are dealt randomly, so the scenario just waits for OUR turn
 	// (the bot's opening decision, if it goes first, runs the offline search),
 	// takes one token, and requires the bot's reply with the network OFF.
-	{
+	async function offlineDuel(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript((user) => {
 			localStorage.setItem("spender_user", user);
@@ -2498,8 +2601,8 @@ try {
 		let poolReady = false;
 		page.on("console", (m) => { if (/\[duel client-AI\].*ready/.test(m.text())) poolReady = true; });
 		const check = (name, cond, detail = "") => {
-			if (cond) console.log(`  OK   ${name}`);
-			else { shell.push(name); console.log(`  FAIL ${name}  ${detail}`); }
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
 		};
 
 		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
@@ -2558,6 +2661,80 @@ try {
 		check("no page errors in offline Duel play", errors.length === 0, errors[0]?.slice(0, 160) || "");
 		await ctx.close();
 	}
+
+	// ── Two lanes, run concurrently ───────────────────────────────
+	// Every block above owns its own browser context and its own room, so they are
+	// independent. They are NOT interchangeable, though, and a flat "run them all"
+	// would be wrong twice over.
+	//
+	// A client-WASM pool sizes itself at max(1, min(hc-1, 4)), so on a 4-core box two
+	// SEARCHING blocks at once oversubscribe the machine. Lane A therefore holds every
+	// block that arms a pool (dissonanceHard + the three offline blocks) together with
+	// the two that measure frame-level TIMING rather than settled layout: skat's panel
+	// recorder, and beat's per-trick dwells, which assert >= 550ms against a 700ms hold.
+	// They stay serial, in their existing order, so the adjacency those two were tuned
+	// against (beat immediately after Hard, comments there) is exactly what it was.
+	//
+	// Lane B holds the DOM/geometry blocks. They contend for nothing but the renderer
+	// and every one of them asserts a settled measurement, never an elapsed time.
+	//
+	// IF dissonanceBeat EVER TURNS FLAKY, move dmCardFace (lane B's heaviest, ~20s of
+	// resizes and re-fits) into lane A before touching the dwell thresholds: it costs
+	// ~10s of wall clock and removes the only real load running beside those frames.
+	//
+	// Output is buffered per block and flushed as one group, because two lanes writing
+	// line-by-line interleave into something no one can read. The group header carries
+	// the block's own wall time, which is what you want when deciding what to cut next.
+	const runLane = async (blocks) => {
+		for (const fn of blocks) {
+			const buf = [];
+			const t0 = Date.now();
+			try {
+				await fn((s) => buf.push(s));
+			} catch (e) {
+				// A block that throws must not take its LANE down with it: the other
+				// blocks still have findings, and losing them turns one broken selector
+				// into a run that proved nothing. Recorded as a failure, so the gate is
+				// still red — it just stays red for a readable reason.
+				buf.push(`  FAIL ${fn.name} threw: ${String(e?.message || e).slice(0, 200)}`);
+				shell.push(`${fn.name} threw`);
+			} finally {
+				console.log([`── ${fn.name} (${((Date.now() - t0) / 1000).toFixed(1)}s)`,
+					...buf].join("\n"));
+			}
+		}
+	};
+
+	// Lane A's ORDER is load-bearing, not arbitrary. The offline blocks go first so
+	// they overlap lane B's cheap opening blocks, which leaves dissonanceBeat — the
+	// most timing-sensitive thing in the file — running in the tail, where lane B has
+	// already finished and it has the box almost to itself. Measured: beat is the
+	// last ~20s either way, so this costs nothing and buys it a quiet machine.
+	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
+	// comments in those blocks were written against.
+	const laneA = [offlineSpender, offlineCoc, offlineDuel,
+		dissonanceSkat, dissonanceHard, dissonanceBeat];
+	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
+		rulesModal, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
+		dmEmpires, dmRenaissance, phoneLobbyColumns, lastDifficulty];
+
+	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant
+	// writing it — it then ran because it was simply the next statement. Now it has
+	// to be listed as well, and forgetting compiles, runs, and PASSES: the block just
+	// never executes, which is a green tick over coverage that did not happen. That
+	// is the same failure the repo's no-conditional-skips rule exists to stop, so it
+	// gets the same treatment — derived from the source rather than a hand-kept list,
+	// because a hardcoded roster only ever guards the set SHRINKING.
+	const declared = [...readFileSync(fileURLToPath(import.meta.url), "utf8")
+		.matchAll(/^\tasync function (\w+)\(log\)/gm)].map((m) => m[1]);
+	const scheduled = new Set([...laneA, ...laneB].map((f) => f.name));
+	const orphans = declared.filter((n) => !scheduled.has(n));
+	if (orphans.length) {
+		throw new Error(`these blocks are defined but in no lane, so they would never run: `
+			+ `${orphans.join(", ")} — add each to laneA or laneB (see the lane comment above).`);
+	}
+
+	await Promise.all([runLane(laneA), runLane(laneB)]);
 
 	if (failures.length || shell.length) {
 		console.error(`\nSCREENS FAIL — ${failures.length} screen(s), ${shell.length} shell interaction(s).`);

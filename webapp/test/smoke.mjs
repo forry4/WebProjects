@@ -150,7 +150,24 @@ async function checkPage(browser, pagePath, { checkCls = false, pathPrefix = nul
 		} catch {}
 	});
 	await page.goto(`http://localhost:${PORT}${pagePath}`, { waitUntil: "load", timeout: 30000 });
-	await sleep(3000); // let React mount, fonts load, and the first real screen settle
+	// SETTLE. The CLS path keeps the full fixed window: a layout shift is by
+	// definition something that happens LATE, so waiting only until the page looks
+	// ready is precisely the wrong test — it would stop measuring at the moment the
+	// shift is most likely to arrive. That budget is the gate, so it stays.
+	//
+	// The other three paths assert something entirely different (render + no crash +
+	// the URL survived), all of which are true as soon as #root has content. They
+	// were paying the same 3s for no coverage: 9 of smoke's ~16s spent waiting for a
+	// measurement nobody reads. Wait for the condition instead, with the old sleep
+	// as the ceiling so a genuinely slow mount still gets its full window.
+	if (checkCls) {
+		await sleep(3000); // let React mount, fonts load, and the first real screen settle
+	} else {
+		await page.waitForFunction(
+			() => (document.getElementById("root")?.innerHTML.length ?? 0) >= 100,
+			null, { timeout: 3000 },
+		).catch(() => {});
+	}
 	const rootLen = await page.evaluate(() => document.getElementById("root")?.innerHTML.length ?? 0);
 	const cls = await page.evaluate(() => Math.round((window.__cls || 0) * 1000) / 1000);
 	const pathname = await page.evaluate(() => window.location.pathname);

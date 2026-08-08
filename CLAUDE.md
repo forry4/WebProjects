@@ -453,6 +453,25 @@ covers the logic; each game's wiring is one line).
   chunk, and logs no page errors. Proven to work by injecting a mount-time throw into WhereWolf:
   **smoke PASSED, screens FAILED** with the exact TypeError. It builds first on purpose — a failed
   build leaves the previous working `dist/` in place, which once made a broken change look green.
+- **`screens` runs its ~20 blocks in TWO LANES, and a new block MUST be listed in one** (`laneA`/`laneB`
+  at the foot of the file; 116s → ~60s for the same 202 checks). The split is not arbitrary and is not
+  "parallelise everything": a client-WASM pool takes `max(1, min(hc-1, 4))` workers, so **lane A holds
+  every block that arms a pool (Dissonance Hard + the three offline blocks) plus the two that measure
+  frame-level TIMING** (skat's panel recorder; the beat block's per-trick dwells, which want ≥550ms out
+  of a 700ms hold) — two searching blocks at once oversubscribe a 4-core box. Lane A's ORDER matters
+  too: the offline blocks run first so the beat block lands in the tail with the machine nearly to
+  itself (measured shortest dwell 691–699ms of 700, i.e. the margin is intact). Lane B holds the
+  DOM/geometry blocks, which assert settled layout rather than elapsed time. **Forgetting to list a
+  block compiles, runs and PASSES with that block never executing** — a green tick over coverage that
+  did not happen — so the harness derives the roster from its own source and fails on any orphan
+  (verified non-vacuous by dropping one). If the beat block ever turns flaky, move `dmCardFace` into
+  lane A before touching any threshold. Output is buffered per block and flushed as one group with its
+  wall time, because two lanes logging line-by-line interleave into noise.
+- **The gates hand their build to each other: `SCREENS_REUSE_BUILD=1` (set by CI and `.githooks/pre-push`)
+  lets `screens` reuse the bundle `smoke` just built** — the same `vite build` was running twice. It is
+  **verified, not trusted**: `runBuild()` rebuilds anyway unless `dist/` is newer than every source file
+  under `webapp`/`games`/`shared`/`books`, so the build-first invariant survives a stale flag, a bailed
+  smoke run, or an edit made between the two gates. Never replace that check with the flag alone.
 - **The five non-shell games + Books are CODE-SPLIT** (`React.lazy` in Spender.jsx) — Spender itself is
   the shell, so it is not lazy. The entry chunk is ~310KB instead of ~600KB. Adding a game screen means
   a `lazy()` + `<Suspense>` branch, and a `SCREENS` entry in `webapp/test/screens.mjs`.
@@ -540,7 +559,8 @@ git push                      # deploy-pages.yml builds + publishes (~2-3 min)
   `.githooks/pre-push` runs the deploy workflows' own checks before a push that updates `main`
   lands: the Python suite for any non-docs change (matching `python-app.yml`, which has no path
   filter — and the suite reads `.jsx`/`.css` as text, so frontend edits genuinely can fail it),
-  plus `smoke` + `screens` when the push can change the bundle (the `deploy-pages.yml` filter:
+  plus `smoke` + `screens` when the push can change the bundle (~80s for the pair — see Testing:
+  screens runs in two lanes and reuses smoke's build; the `deploy-pages.yml` filter:
   `webapp/**`/`games/**`/`shared/**`/`books/**` minus `*.md` and Python `tests/` dirs). Pushes to
   other branches and docs-only pushes run nothing. `git push --no-verify` or `SKIP_GATES=1` skips
   it once; `GATES_DRY_RUN=1` prints what would run. It exists because nearly every red run in the

@@ -90,12 +90,17 @@ if [ "$need_py" = "1" ]; then
 fi
 
 if [ "$need_fe" = "1" ]; then
-    say "frontend gates — smoke, then screens (the Pages deploy gates, a few minutes)..."
+    say "frontend gates — smoke, then screens (the Pages deploy gates, ~80s)..."
     ( cd webapp && npm run smoke ) || {
         say "SMOKE FAILED — push to main blocked. Fix, or git push --no-verify."
         exit 1
     }
-    ( cd webapp && npm run screens ) || {
+    # smoke just ran the identical `vite build`, so hand that bundle over instead of
+    # building it twice. screens VERIFIES the offer rather than trusting it — it
+    # rebuilds unless dist/ is newer than every source file — so the build-first
+    # invariant survives even if smoke bailed early or a file was touched between
+    # the two. See runBuild() in webapp/test/screens.mjs.
+    ( cd webapp && SCREENS_REUSE_BUILD=1 npm run screens ) || {
         say "SCREENS FAILED — push to main blocked. Fix, or git push --no-verify."
         exit 1
     }
