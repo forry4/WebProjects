@@ -340,6 +340,226 @@ function roundTitle(r, nameOf) {
     + (r.null ? "Null" : r.made ? "made" : "set");
 }
 
+/** Right-click (desktop) / press-and-hold (touch) opens the match review.
+ *
+ *  A local port of Dontminion's `useCardInfoGesture` — the second copy of this
+ *  shape in the tree, so a third caller should extract it to `shared/`. Same
+ *  reasoning as the original: Android fires `contextmenu` on a long press but
+ *  iOS Safari does not, so touch gets a real timer, and both paths funnel one
+ *  `fired` flag so the release can never ALSO act on whatever is underneath.
+ */
+const REVIEW_HOLD_MS = 450;
+const REVIEW_HOLD_SLOP = 10;
+function useReviewGesture(onOpen) {
+  const timer = useRef(null);
+  const fired = useRef(false);
+  const from = useRef(null);
+  const clear = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  }, []);
+  useEffect(() => clear, [clear]);
+  if (!onOpen) return {};
+  const open = () => { clear(); fired.current = true; onOpen(); };
+  return {
+    onContextMenu: (e) => { e.preventDefault(); e.stopPropagation(); if (!fired.current) open(); },
+    onPointerDown: (e) => {
+      fired.current = false;
+      if (e.pointerType === "mouse") return;
+      from.current = { x: e.clientX, y: e.clientY };
+      clear();
+      timer.current = setTimeout(open, REVIEW_HOLD_MS);
+    },
+    onPointerMove: (e) => {
+      if (!timer.current || !from.current) return;
+      if (Math.abs(e.clientX - from.current.x) > REVIEW_HOLD_SLOP
+        || Math.abs(e.clientY - from.current.y) > REVIEW_HOLD_SLOP) clear();
+    },
+    onPointerUp: clear,
+    onPointerCancel: clear,
+    onPointerLeave: clear,
+    onClickCapture: (e) => {
+      if (fired.current) { e.preventDefault(); e.stopPropagation(); fired.current = false; }
+    },
+  };
+}
+
+/** Solved reviews, for the life of the tab. A banked round's deal is immutable
+ *  and the solve is exact, so a result can never go stale — reopening the modal
+ *  (or the same match from the lobby) must not pay the solver twice. */
+const REVIEW_CACHE = new Map();   // `${roomId}:${round}` -> value | null (unsolvable)
+
+/** The match review: every banked round, what actually happened beside what
+ *  DOUBLE DUMMY would have scored — the same deal, the same contract, replayed
+ *  from trick 1 by two players who can see all 32 cards. That is a property of
+ *  the DEAL, not a bot's opinion: the solve is exact and has no seed, so the
+ *  number is the same on every open and on both players' screens.
+ *
+ *  The solves run in ONE on-demand module worker — the review works at every
+ *  tier and with no live search pool (a Normal game, a human-vs-human room), so
+ *  it cannot lean on the Hard tier's workers being armed. One is enough: a
+ *  round costs ~250ms and the rows fill in as answers land.
+ */
+function MatchReviewModal({ game, mySeat, oppSeat, nameOf, roomId, onClose }) {
+  const m = game.match;
+  const rounds = (m && m.rounds) || [];
+  const [dd, setDd] = useState(() => {
+    const init = {};
+    for (const r of rounds) {
+      const hit = REVIEW_CACHE.get(`${roomId}:${r.round}`);
+      if (hit !== undefined) init[r.round] = hit;
+    }
+    return init;
+  });
+
+  useEffect(() => {
+    // Deliberately once per open: the deals under review are immutable, and a
+    // round banked WHILE the modal is up simply waits for the next open.
+    const todo = rounds.filter((r) => r.deal && !REVIEW_CACHE.has(`${roomId}:${r.round}`));
+    if (todo.length === 0 || typeof Worker === "undefined") return undefined;
+    let dead = false;
+    const fail = (rs) => {
+      for (const r of rs) REVIEW_CACHE.set(`${roomId}:${r.round}`, null);
+      if (!dead) setDd((prev) => {
+        const next = { ...prev };
+        for (const r of rs) next[r.round] = null;
+        return next;
+      });
+    };
+    let w;
+    try { w = new Worker(`${import.meta.env.BASE_URL}wasm/dissonance-worker.js`, { type: "module" }); }
+    catch { fail(todo); return undefined; }
+    const idFor = new Map();
+    let nextId = 1;
+    w.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.ready !== undefined) {
+        if (!d.ready) { fail(todo); try { w.terminate(); } catch {} return; }
+        for (const r of todo) {
+          const id = nextId++;
+          idFor.set(id, r.round);
+          w.postMessage({ id, kind: "review",
+            req: JSON.stringify({ deal: r.deal, payoff: r.deal.terms }) });
+        }
+        return;
+      }
+      if (d.id == null || !idFor.has(d.id)) return;
+      const round = idFor.get(d.id);
+      idFor.delete(d.id);
+      // An error here is deterministic (a deal the reader refuses), so it is
+      // cached like an answer — re-solving it on every open buys nothing.
+      const v = d.error != null || typeof d.value !== "number" ? null : d.value;
+      REVIEW_CACHE.set(`${roomId}:${round}`, v);
+      if (!dead) setDd((prev) => ({ ...prev, [round]: v }));
+      if (idFor.size === 0) { try { w.terminate(); } catch {} }
+    };
+    w.onerror = () => { fail(todo); try { w.terminate(); } catch {} };
+    return () => { dead = true; try { w.terminate(); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The review value is signed for the DECLARER, and exactly one side scores a
+  // round — so the sign says which. Rendered in the scorecard's own vocabulary:
+  // `+` is what you took, `−` is what it cost you.
+  const seatScores = (r, v) => {
+    const dSc = Math.max(v, 0);
+    const oSc = Math.max(-v, 0);
+    return r.declarer === mySeat ? [dSc, oSc] : [oSc, dSc];
+  };
+  const scoreCell = (mine, theirs, cls) => (
+    <span className={`${cls} ${mine >= theirs ? "good" : "bad"}`}>
+      {mine >= theirs ? `+${mine}` : `\u2212${theirs}`}
+    </span>
+  );
+  const ddCell = (r) => {
+    if (!r.deal) {
+      return <span className="dis-rv-dd muted"
+        title="No stored deal for this round — it predates the review, or was forfeited">—</span>;
+    }
+    const v = dd[r.round];
+    if (v === undefined) return <span className="dis-rv-dd muted">…</span>;
+    if (v === null) return <span className="dis-rv-dd muted" title="Could not be solved">—</span>;
+    const [mine, theirs] = seatScores(r, v);
+    return scoreCell(mine, theirs, "dis-rv-dd");
+  };
+
+  // Totals compare like with like: the actual side is summed over the SAME
+  // rounds the solver has answered, or a half-reviewed match would show a full
+  // actual total against a partial perfect-play one and read as a huge swing.
+  let reviewed = 0;
+  let actMine = 0, actTheirs = 0, ddMine = 0, ddTheirs = 0;
+  for (const r of rounds) {
+    const v = dd[r.round];
+    if (typeof v !== "number") continue;
+    reviewed += 1;
+    actMine += r.scores?.[mySeat] || 0;
+    actTheirs += r.scores?.[oppSeat] || 0;
+    const [a, b] = seatScores(r, v);
+    ddMine += a;
+    ddTheirs += b;
+  }
+
+  return (
+    <CreateModal title={`Match review — to ${m.target}`} onClose={onClose}>
+      <div className="dis-rv-body">
+        <div className="dis-rv-row dis-rv-hd">
+          <span>#</span><span>Contract</span><span>Pts</span>
+          <span title="What the round actually scored">Score</span>
+          <span title="What double dummy would have scored — both seats seeing all 32 cards, replayed from trick 1 under the same contract">Perfect</span>
+        </div>
+        {rounds.length === 0 && (
+          <div className="muted dis-rv-empty">
+            No rounds on the scorecard yet — this match predates it, or round 1
+            is still being played.
+          </div>
+        )}
+        {rounds.map((r, i) => {
+          const mine = r.scores?.[mySeat] || 0;
+          const theirs = r.scores?.[oppSeat] || 0;
+          return (
+            <div className="dis-rv-row" key={r.round ?? i} title={roundTitle(r, nameOf)}>
+              <span className="dis-mrow-n">{r.round ?? i + 1}</span>
+              <span className={`dis-mrow-ct${r.declarer === mySeat ? " mine" : ""}`}>
+                {r.abandoned ? "forfeit"
+                  : r.declarer < 0 ? "—"
+                    : <>{nameOf(r.declarer)}{" "}
+                      <b className={RED_DENOM(r.denom) ? "red" : ""}>
+                        {r.level}{DENOM_LABEL[r.denom] || ""}
+                      </b>
+                      {r.null ? " Null" : ""}</>}
+              </span>
+              <span className="dis-mrow-pts">
+                {r.declarer >= 0 && !r.abandoned
+                  ? `${r.pts?.[r.declarer] ?? 0}/${r.target}` : "—"}
+              </span>
+              {scoreCell(mine, theirs, "dis-rv-sc")}
+              {ddCell(r)}
+            </div>
+          );
+        })}
+        {reviewed > 0 && (
+          <div className="dis-rv-row dis-rv-total">
+            <span />
+            <span>{reviewed === rounds.length ? "Whole match"
+              : `Over ${reviewed} reviewed round${reviewed === 1 ? "" : "s"}`}</span>
+            <span />
+            {scoreCell(actMine, actTheirs, "dis-rv-sc")}
+            {scoreCell(ddMine, ddTheirs, "dis-rv-dd")}
+          </div>
+        )}
+      </div>
+      <div className="cm-hint">
+        Perfect is the exact double-dummy result: the same deal and the same
+        contract, with the card play redone by two players who can see every
+        card from trick 1. Beating it means the hidden cards broke your way;
+        trailing it is the cost of playing honestly in the dark.
+      </div>
+      <div className="dis-rv-foot">
+        <button type="button" className="btn dis-gobtn" onClick={onClose}>Got it</button>
+      </div>
+    </CreateModal>
+  );
+}
+
 /** What the declared skat game is worth right now, and why.
  *  `rows` renders it as side-panel score rows; otherwise as one inline line. */
 function SkatStake({ game, nameOf, rows }) {
@@ -480,6 +700,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  const [showReview, setShowReview] = useState(false);
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
@@ -511,6 +732,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
   roomIdRef.current = roomId;
 
   const game = roomData?.game || null;
+  // Right-click / press-and-hold on either "Match to N" box opens the review.
+  const reviewGesture = useReviewGesture(game?.match ? () => setShowReview(true) : null);
   const players = roomData?.players || {};
   const seats = game?.seats || [];
   const mySeat = game ? game.you : null;
@@ -1616,7 +1839,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   own is only half the story once there is a target: being set
                   for 3 reads very differently at 12-all and at 47-all. */}
               {res.match_scores && (
-                <div className="dis-match">
+                <div className="dis-match dis-reviewable" {...reviewGesture}
+                  title="Right-click or press and hold: the match review, with a perfect-play comparison">
                   <div className="muted">
                     {res.match_over
                       ? `Match to ${res.match_target}`
@@ -1883,7 +2107,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
               a fixed slot. Absent on a game saved before matches existed, which
               is one round and has no running total to show. */}
           {game.match && (
-            <div className="dis-panel dis-p-match">
+            <div className="dis-panel dis-p-match dis-reviewable" {...reviewGesture}
+              title="Right-click or press and hold: the match review, with a perfect-play comparison">
               <h4>Match to {game.match.target}</h4>
               <div className="dis-scorerow">
                 <span>{nameOf(mySeat)}</span><b>{game.match.scores[mySeat]}</b>
@@ -1908,6 +2133,11 @@ export default function Dissonance({ myId, authUser, onExit }) {
       </div>
 
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
+      {showReview && game?.match && (
+        <MatchReviewModal game={game} mySeat={mySeat} oppSeat={oppSeat}
+          nameOf={nameOf} roomId={roomData?.room_id}
+          onClose={() => setShowReview(false)} />
+      )}
       {confirmAbandon && (
         <CreateModal title="Abandon game?" onClose={() => setConfirmAbandon(false)}>
           <span className="cm-hint">

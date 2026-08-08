@@ -64,3 +64,32 @@ def test_a_reviewable_match_round_trips_through_compaction():
     after.pop("played", None)
     before.pop("played", None)
     assert after == before
+
+
+def test_a_blob_packed_before_the_string_encoding_still_expands():
+    """Rows already at rest carry `c` as an int list and `terms` verbatim.
+
+    The unpacker discriminates on shape rather than on a version bump, so those
+    rows must keep loading forever -- there is no migration pass to fix them.
+    """
+    old_style = {
+        "c": list(range(32)),
+        "trump": 2,
+        "leader": 1,
+        "terms": {"declarer": 1, "target": 3, "make": 9},
+    }
+    d = persist._unpack_deal(dict(old_style))
+    assert d["hands"] == [list(range(7)), list(range(7, 14))]
+    assert d["piles"][0][0] == [14, 15]
+    assert d["out"] == list(range(26, 32))
+    assert d["terms"] == old_style["terms"], "verbatim terms must survive"
+    assert d["trump"] == 2 and d["leader"] == 1
+
+
+def test_an_unrecognised_deck_width_is_left_verbose_not_corrupted():
+    # Fail OPEN: a deal this encoding does not recognise must come through
+    # unshrunk rather than mangled -- an unreadable save is the worse failure.
+    weird = {"hands": [[40], [1]], "piles": [[[2, 3]] * 3] * 2, "out": [9],
+             "trump": 0, "leader": 0, "terms": {"target": 1}}
+    packed = persist._pack_deal(dict(weird))
+    assert packed == weird, "an unencodable deal must pass through untouched"

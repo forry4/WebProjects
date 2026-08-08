@@ -2656,6 +2656,62 @@ try {
 				kept === 2, `header + rows = ${kept}`);
 		}
 
+		// ── the MATCH REVIEW modal ───────────────────────────────────────────
+		// Right-click on a "Match to N" box opens a review where every banked
+		// round shows what DOUBLE DUMMY would have scored beside what actually
+		// happened. Three contracts, each of which fails silently outside a
+		// browser: the gesture actually opens it (a stray preventDefault or a
+		// dropped handler renders a perfectly fine panel with no way in); the
+		// perfect-play cell RESOLVES (the whole worker -> wasm -> odd_review
+		// chain degrades to a "…" that never fills, which is exactly what a
+		// missing export or a mis-shaped deal looks like); and the answer is
+		// CACHED — the solve is exact, so a reopen must show the same number
+		// immediately, without paying the solver again.
+		{
+			const box = page.locator(".dis-reviewable").first();
+			const opened = await box.count() > 0
+				&& await box.click({ button: "right", timeout: 5_000 })
+					.then(() => true).catch(() => false)
+				&& await page.waitForSelector(".dis-rv-body", { timeout: 5_000 })
+					.then(() => true).catch(() => false);
+			check("right-click on the match box opens the review", opened);
+			if (opened) {
+				// One banked round -> a header row and one data row (the totals
+				// row only lands once a solve has answered).
+				const rows = await page.locator(".dis-rv-row:not(.dis-rv-hd):not(.dis-rv-total)").count();
+				check("the review lists every banked round", rows === 1, `${rows} rows`);
+				// The wasm loads cold here — this room is vs the NORMAL bot, so
+				// nothing has fetched it yet. That is the point: the review must
+				// work at every tier, not only where Hard already armed a pool.
+				const solved = await page.waitForFunction(() => {
+					const c = document.querySelector(".dis-rv-dd:not(.muted)");
+					return c && /^[+\u2212-]\d+$/.test(c.textContent.trim()) ? c.textContent.trim() : null;
+				}, null, { timeout: 25_000 }).then((h) => h.jsonValue()).catch(() => null);
+				check("the perfect-play cell resolves to a signed score", !!solved, String(solved));
+				const totals = await page.locator(".dis-rv-total").count();
+				check("...and the totals row compares actual with perfect", totals === 1);
+
+				await page.keyboard.press("Escape");
+				await page.waitForSelector(".dis-rv-body", { state: "detached", timeout: 5_000 })
+					.catch(() => {});
+				check("Escape closes the review",
+					await page.locator(".dis-rv-body").count() === 0);
+
+				// Reopen: the answer must already be there — same number, no "…"
+				// and no worker spin-up. An exact solve that changed between
+				// opens would be the bug the whole label depends on not having.
+				await box.click({ button: "right", timeout: 5_000 }).catch(() => {});
+				await page.waitForSelector(".dis-rv-body", { timeout: 5_000 }).catch(() => {});
+				const again = await page.evaluate(() =>
+					document.querySelector(".dis-rv-dd:not(.muted)")?.textContent.trim() || null);
+				check("a reopened review serves the cached answer instantly",
+					again === solved, `first ${solved}, reopened ${again}`);
+				await page.keyboard.press("Escape");
+				await page.waitForSelector(".dis-rv-body", { state: "detached", timeout: 5_000 })
+					.catch(() => {});
+			}
+		}
+
 		check("no page errors playing a game out", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();

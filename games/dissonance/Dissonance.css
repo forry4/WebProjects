@@ -524,3 +524,41 @@
    the whole reason the pause is worth having. */
 .dis-tp { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 .dis-tp.won .dis-card { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── The match review modal ─────────────────────────────────────────────────
+   Opened by right-click / press-and-hold on either "Match to N" box. It rides
+   the shared cm-backdrop/cm-panel shell, so only the rows are styled here —
+   in the scorecard's own vocabulary (dis-mrow-*), with two extra columns.
+   `.dis-rv-body` is the ONLY scroller (min-height: 0 is load-bearing: a flex
+   item will not shrink below its content, and without it a long match grows
+   the panel past its cap, nothing scrolls, and the button sinks below the
+   fold — the shape every per-game rules modal used to have). */
+.dis-reviewable { cursor: context-menu; }
+.dis-rv-body {
+  min-height: 0; max-height: min(52vh, 30rem); overflow-y: auto;
+  margin: 0.35rem 0 0.55rem; font-size: 0.82rem;
+}
+.dis-rv-row {
+  display: grid; grid-template-columns: 2ch minmax(0, 1fr) 4.5ch 4.5ch 4.5ch;
+  gap: 0.5rem; align-items: baseline; padding: 0.16rem 0.1rem;
+}
+.dis-rv-hd {
+  color: var(--text-dim); font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.06em; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  /* The panel's own colour, stated: `inherit` reads the transparent body and
+     the rows scroll straight through a see-through header. */
+  position: sticky; top: 0; background: var(--surface, #1b1712);
+}
+.dis-rv-row .dis-rv-sc, .dis-rv-row .dis-rv-dd,
+.dis-rv-hd span:nth-child(3), .dis-rv-hd span:nth-child(4),
+.dis-rv-hd span:nth-child(5), .dis-rv-row .dis-mrow-pts { text-align: right; }
+.dis-rv-sc.good, .dis-rv-dd.good { color: var(--accent); }
+.dis-rv-sc.bad, .dis-rv-dd.bad { color: #ff9a9a; }
+/* The perfect-play column is the modal's reason to exist — give it the weight. */
+.dis-rv-dd { font-weight: 700; }
+.dis-rv-total {
+  border-top: 1px solid rgba(255, 255, 255, 0.12); margin-top: 0.3rem;
+  padding-top: 0.3rem; font-weight: 600;
+}
+.dis-rv-empty { padding: 0.6rem 0.2rem; }
+.dis-rv-foot { display: flex; justify-content: flex-end; margin-top: 0.6rem; }

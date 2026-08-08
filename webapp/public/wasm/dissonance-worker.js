@@ -25,11 +25,16 @@
 //   { id, kind:"search", view, budget, maxWorlds, seed }
 //     -> { id, moves:[...], sum:[...], worlds:n }
 //   { id, kind:"pick", moves, sum } -> { id, card }
+//   { id, kind:"review", req } -> { id, value } | { id, error }
+//     One EXACT solve of a finished round's deal (`odd_review`) -- no seed and
+//     no pooling, because a review has no uncertainty to sample: the round is
+//     over and every card is known. Same answer every time, which is what lets
+//     the modal label it as a fact about the round rather than a bot's opinion.
 // Lifecycle: { ready:true } once the wasm loads, or { ready:false, error } if it
 //   won't (the main thread drops this worker; with none ready it never announces
 //   client_ai_ready and the SERVER plays the bot — the pre-existing path).
 
-import init, { odd_pick_card, odd_best_card, odd_pick_bid } from "./dissonance.js";
+import init, { odd_pick_card, odd_best_card, odd_pick_bid, odd_review } from "./dissonance.js";
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
@@ -69,6 +74,10 @@ self.onmessage = async (e) => {
       const r = JSON.parse(odd_pick_bid(String(msg.view), cap, Number(msg.seed) || 1));
       if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
       self.postMessage({ id: msg.id, sums: r.sums, worlds: r.worlds });
+    } else if (msg.kind === "review") {
+      const r = JSON.parse(odd_review(String(msg.req)));
+      if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
+      self.postMessage({ id: msg.id, value: r.value });
     } else if (msg.kind === "pick") {
       const card = odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
       self.postMessage({ id: msg.id, card });

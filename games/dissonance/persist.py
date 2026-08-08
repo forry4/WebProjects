@@ -41,21 +41,32 @@ def _unpack_hist(v: int) -> list:
 # The review snapshot is stored once per round for the life of a match, so its
 # shape is the one thing here that grows with the game rather than with the
 # round. MEASURED on played-out 7-10 round matches, after zlib at level 6:
-# verbose it cost +135% on the stored blob, flattened it costs +96%. The
-# nesting carries no information -- the partition is FIXED (7 + 7 in hand,
-# 3 x 2 piles each, 6 out of play), so structure is implied by position alone
-# and only the 32 card ids are real.
+# verbose it cost +135% on the stored blob; flattening the nesting took it to
+# +96%; the string encoding below reads +55-86%, i.e. ~46-52 bytes per round.
+# The partition is FIXED (7 + 7 in hand, 3 x 2 piles each, 6 out of play), so
+# structure is implied by position alone and only the 32 card ids are real --
+# and a permutation of 32 cards has a ~20-byte entropy floor, so per round this
+# is now within ~2x of the theoretical minimum. Squeeze harder and the next
+# byte costs real obscurity.
 #
 # Read the RATIO with the absolute beside it or it reads as a disaster: this
 # game's rows are ~600 bytes because only the CURRENT round's history is kept,
-# so a whole reviewable match is ~1.3KB. Nearly doubling a very small number is
+# so a whole reviewable match is ~1KB. Adding half of a very small number is
 # still a very small number, and the review is worth it.
 #
-# What is left is mostly `terms`, and it rides through untouched deliberately:
-# it is the contract's own arithmetic, it is what the review is priced against,
-# and inventing a second encoding for the numbers `payoff_terms` produces is
-# exactly the drift that function exists to stop.
-_DEAL_SLICES = ((0, 7), (7, 14))
+# `terms` is packed too, but only STRUCTURALLY (sorted keys -> one joined
+# string + a values list, restored by zipping them back). Nothing here knows or
+# assumes what keys `payoff_terms` produces -- inventing a second encoding of
+# the scoring itself is exactly the drift that function exists to stop, and a
+# content-agnostic pack cannot drift because it has no opinion.
+# One character per card, position -> slot. A deal is a PERMUTATION of the
+# 32-card deck, whose entropy floor is ~20 bytes -- a JSON list of 32 ints
+# costs ~110 raw and zlib cannot get near the floor through the punctuation.
+# One char from a 32-char alphabet per card is 34 bytes with quotes, and it
+# measured 17-19% off the whole deal cost. The alphabet is indexable by card
+# id, so encode/decode is a table lookup each way.
+_CARD_ALPHA = "0123456789ABCDEFGHIJKLMNOPQRSTUV"
+_CARD_ID = {ch: i for i, ch in enumerate(_CARD_ALPHA)}
 
 
 def _pack_deal(d: dict) -> dict:
@@ -66,8 +77,28 @@ def _pack_deal(d: dict) -> dict:
         for pile in d["piles"][q]:
             flat += list(pile)
     flat += list(d["out"])
+    if len(flat) != len(_CARD_ALPHA) or not all(
+            isinstance(c, int) and 0 <= c < len(_CARD_ALPHA) for c in flat):
+        # Not the fixed 32-card partition this encoding assumes (a future deck
+        # width, a corrupt row). Fail OPEN to the verbose shape -- an unreadable
+        # save is a far worse failure than an unshrunk one.
+        return d
     packed = {k: v for k, v in d.items() if k not in ("hands", "piles", "out")}
-    packed["c"] = flat
+    packed["c"] = "".join(_CARD_ALPHA[c] for c in flat)
+    # `terms` is packed GENERICALLY -- sorted keys joined into one string, the
+    # values positionally beside it -- so this file still knows nothing about
+    # what `payoff_terms` produces and cannot drift from it. The key string is
+    # identical on every round of a match, so zlib stores it once; what this
+    # actually removes is the per-round JSON syntax, measured at another ~10%.
+    # Keys ride ALONG rather than being assumed, because two rounds of one
+    # match can legitimately differ: a term added mid-life appears only in
+    # rounds banked after it shipped.
+    t = packed.get("terms")
+    if isinstance(t, dict) and all(isinstance(k, str) for k in t):
+        ks = sorted(t)
+        packed.pop("terms")
+        packed["tk"] = ",".join(ks)
+        packed["tv"] = [t[k] for k in ks]
     return packed
 
 
@@ -75,11 +106,15 @@ def _unpack_deal(d: dict) -> dict:
     if not isinstance(d, dict) or "c" not in d:
         return d
     f = d["c"]
-    out = {k: v for k, v in d.items() if k != "c"}
+    if isinstance(f, str):
+        f = [_CARD_ID[ch] for ch in f]
+    out = {k: v for k, v in d.items() if k not in ("c", "tk", "tv")}
     out["hands"] = [f[0:7], f[7:14]]
     out["piles"] = [[f[14 + q * 6 + i * 2: 16 + q * 6 + i * 2] for i in range(3)]
                     for q in (0, 1)]
     out["out"] = f[26:32]
+    if "tk" in d:
+        out["terms"] = dict(zip(d["tk"].split(","), d["tv"]))
     return out
 
 
