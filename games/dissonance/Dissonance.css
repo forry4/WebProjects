@@ -72,8 +72,16 @@
      cards, and 7 x 42px plus gaps fits a 390px phone with room to spare, so the
      overlap was buying nothing anyway. */
   /* ...and the mobile card is 42px, so its reserved row is smaller. See the
-     base `.dis-hand` rule for why this exists at all. */
+     base `.dis-hand` rule for why this exists at all. This still governs the
+     TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
+     off `--dis-cw` (see `.dis-seat` in the base rules). */
   .dis .dis-hand { gap: 0.18rem; flex-wrap: wrap; min-height: calc(42px * 1.4 + 2px); }
+  /* The seat's own gap, tighter on a phone. `.dis `-prefixed to out-specify the
+     base `.dis-seat` rule — this block precedes it, so equal specificity would
+     lose. The card WIDTH is deliberately not pinned here: seven fluid slots is
+     the whole point, and on a 390px phone that comes out well above the 42px
+     this used to hardcode. */
+  .dis .dis-seat { --dis-gap: 0.18rem; }
   .dis .dis-piles { gap: 0.35rem; }
   .dis .dis-pilewrap { --pk: 11px; }
   .dis .dis-bidgrid { grid-template-columns: repeat(4, 1fr); }
@@ -189,6 +197,52 @@
 .dis-hand { display: flex; align-items: flex-end; justify-content: center; flex-wrap: wrap; gap: 0.25rem;
   min-height: calc(56px * 1.4 + 2px); }
 
+/* A SEAT's cards fill the table: seven hand slots, left edge to right.
+   `.dis-table` is the query container rather than `.dis-seat`, because container
+   query units resolve against an ANCESTOR container — an element cannot measure
+   itself — and `--dis-cw` has to be readable by the seat for the piles as well as
+   the hand. `100cqw` is the table's CONTENT box, so the 0.9rem padding is already
+   out of it. The table is a `1fr` grid item, so its width never depends on its
+   contents and `contain: inline-size` costs nothing.
+   The size is pinned to SEVEN slots, not to how many cards are left: sizing by
+   `flex: 1` would swell the cards as the hand empties, and a card would change
+   size thirteen times a round.
+   `--dis-cw` is ONE number that the card width, the reserved row height and the
+   font all read. That is deliberate — the reserved height used to be a per
+   breakpoint literal (`calc(56px * 1.4 + 2px)`) precisely because `--cw` lived on
+   `.dis-card` and was out of scope here, so the two could drift and the empty-hand
+   row would stop reserving a real card's height. That collapse is the measured
+   layout shift the base rule above exists to prevent; keep them derived.
+   TWO bounds, whichever is smaller, and the second is not optional: the board
+   stacks FOUR card rows (a hand and a pile row per seat), so card height is a
+   vertical budget, not free. Measured on a 1280x900 desktop, filling the row
+   edge to edge alone wants a 136px card — 190px tall — and four of those plus
+   the trick run the board off the bottom of the screen. So width fills the row
+   until height says stop. On a phone and a narrow laptop the WIDTH term binds
+   and the hand spans the table exactly; on a wide desktop the height term does,
+   and the row stays centred rather than eating the window. */
+.dis-table { container-type: inline-size; }
+/* The TRICK takes the same token: the card you just played is the same object
+   that was in your hand a moment ago, and leaving it on the old fixed 56px made
+   it visibly shrink as it crossed the table. Both selectors are children of the
+   container, which is what lets them read `100cqw` — the container itself
+   cannot, since query units resolve against an ANCESTOR. */
+.dis-seat, .dis-trick {
+  --dis-slots: 7;
+  --dis-gap: 0.25rem;
+  --dis-cw: min(
+    calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+    calc((100dvh - 27rem) / 4 / 1.4)
+  );
+}
+.dis-seat .dis-hand {
+  width: 100%; gap: var(--dis-gap);
+  min-height: calc(var(--dis-cw) * 1.4 + 2px);
+}
+/* Both the hand and the piles — they are the same object at the same seat, and
+   the piles holding still at 56px while the hand grew read as two card sizes. */
+.dis-seat .dis-card, .dis-trick .dis-card { --cw: var(--dis-cw); font-size: calc(var(--dis-cw) * 0.28); }
+
 /* ── piles ──────────────────────────────────────────────────────────────── */
 .dis-piles { display: flex; gap: 0.6rem; justify-content: center; }
 .dis-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
@@ -211,7 +265,12 @@
 .dis-seatname b { color: var(--text); }
 
 .dis-trick {
-  min-height: 96px; display: flex; align-items: center; justify-content: center;
+  /* Reserved off the SAME token as the card, not a literal. 96px had slack over
+     a 56px card (78px tall) and silently lost it the moment cards grew — an
+     empty trick reserving less than the card that lands in it is the measured
+     layout shift the hand row already guards against, one row up the table. */
+  min-height: max(96px, calc(var(--dis-cw) * 1.4 + 2px));
+  display: flex; align-items: center; justify-content: center;
   gap: 1.2rem; position: relative;
 }
 /* The trick's value is the whole game, so the pill on the trick line is loud.
