@@ -50,15 +50,23 @@ permissions:
   pages: write
   id-token: write
 
-# Never cancel an in-flight Pages deploy; queue the next one instead so a rapid
-# second push waits rather than aborting a publish half-done.
-concurrency:
-  group: pages
-  cancel-in-progress: false
+# Concurrency is split PER JOB (below), not set here, because the two jobs want
+# opposite policies and a workflow-level group can only pick one:
+#   * build (the gates) IS cancellable — its only output is the artifact, and once
+#     a newer push exists, finishing the old gates proves nothing anyone will ship.
+#     Cancelling it is what lets a rapid follow-up push start its own gates
+#     immediately instead of queueing behind ~2 minutes of a superseded run.
+#   * deploy is NEVER cancelled — aborting a publish half-done is how a live site
+#     ends up serving a stale bundle, so deploys still strictly queue.
+# The visible cost: a superseded push shows a "cancelled" build run on main. That
+# is the feature working, not a failure — the newer run carries the coverage.
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    concurrency:
+      group: pages-build
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -77,9 +85,9 @@ jobs:
       # "gate stops being runnable" failure PLAYWRIGHT_CHROMIUM_PATH exists for.
       #
       # The install step below is deliberately UNCONDITIONAL: `playwright install`
-      # is idempotent, so on a cache hit it skips the download and still runs the
-      # apt `--with-deps` half. That keeps one code path instead of a hit/miss
-      # branch whose rarely-taken side is the one that breaks the deploy gate.
+      # is idempotent, so on a cache hit it skips the download and the step costs
+      # ~1s. That keeps one code path instead of a hit/miss branch whose
+      # rarely-taken side is the one that breaks the deploy gate.
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -89,9 +97,18 @@ jobs:
       # Gate the deploy: build the app, load it in a headless browser, and fail if
       # the page is blank / throws (e.g. a stray backtick in the CSS template). This
       # runs BEFORE the real Build step so its throwaway build can't ship.
+      #
+      # NO `--with-deps`, on purpose. The apt half cannot be cached (each run is a
+      # fresh VM, so system packages never persist — conditioning it on the browser
+      # cache would be incoherent), and it spent ~6s per run installing libraries
+      # ubuntu-latest already ships: the image preinstalls Google Chrome, which
+      # pulls in the same shared libraries Playwright's Chromium links against.
+      # If a future runner image ever drops them, the failure is LOUD and immediate
+      # — the smoke step's browser launch dies with a missing-.so error before
+      # anything can deploy — and the fix is putting `--with-deps` back on this line.
       - name: Install browser for smoke test
         working-directory: webapp
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
 
       - name: Smoke test (app must render, no blank page)
         working-directory: webapp
@@ -155,6 +172,11 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    # Deploys strictly queue and are never cancelled — see the concurrency note at
+    # the top of this file.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

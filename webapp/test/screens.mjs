@@ -1869,7 +1869,10 @@ try {
 				.click({ timeout: 10_000 }).catch(() => {});
 			// The bot answers, and the round moves on — to its own bid, or to
 			// the talon prompt if it passed. Either way the auction is NOT stuck.
-			await sleep(2500);
+			// The check below wants log >= 2, so wait for exactly that, capped at
+			// the 2500ms this used to sleep flat.
+			await until(page,
+				() => document.querySelectorAll(".dis-bidlog div").length >= 2, 2500);
 			const moved = await page.evaluate(() => ({
 				log: document.querySelectorAll(".dis-bidlog div").length,
 				phase: !!document.querySelector(".dis-auction, .dis-result"),
@@ -1883,15 +1886,21 @@ try {
 		// control, so a loop that only clicks cards never reaches play at all —
 		// which is exactly what this check caught the first time it ran. Take
 		// whichever control is on screen.
+		// The sleeps here are POLLING CADENCE, not settle windows: every exit in
+		// both loops below is evidence (.dis-lasttrick / .dis-result appearing),
+		// and a click landing on a not-yet-updated control is validated away by
+		// the server. Full-tilt play is already proven territory — the beat block
+		// deliberately runs at 90-260ms — so these run at the same pace rather
+		// than the 450/500ms they idled at when the block was written.
 		const step = async (name) => {
 			const b = page.getByRole("button", { name }).first();
 			if (await b.count() === 0) return false;
 			await b.click({ timeout: 5_000 }).catch(() => {});
-			await sleep(450);
+			await sleep(220);
 			return true;
 		};
 		let grandPicked = false;
-		for (let i = 0; i < 60; i++) {
+		for (let i = 0; i < 120; i++) {   // 2x the old 60: same wall-clock at half the sleep
 			if (await page.locator(".dis-lasttrick").count() > 0) break;
 			if (await step(/^Play Hand/)) continue;           // talon
 			// Pick GRAND at the declaration when it is offered, so this gate
@@ -1910,10 +1919,10 @@ try {
 			const card = page.locator(".dis-seat .dis-card.play").last();
 			if (await card.count() > 0) {
 				await card.click({ timeout: 5_000 }).catch(() => {});
-				await sleep(450);
+				await sleep(220);
 				continue;
 			}
-			await sleep(500);
+			await sleep(250);
 		}
 		const lt = await page.evaluate(() => {
 			const el = document.querySelector(".dis-lasttrick");
@@ -1980,15 +1989,18 @@ try {
 		// needs a live mid-play board. (Putting it earlier broke "the contract is
 		// on screen on a phone", which is a fair description of what a finished
 		// game looks like.)
-		for (let i = 0; i < 200; i++) {
+		// 400 x 120ms keeps the WALL-CLOCK budget the loop had at 200 x 260ms —
+		// halving the sleep without touching the bound would have silently halved
+		// the deadline instead, which reads as "round never finished" on a slow box.
+		for (let i = 0; i < 400; i++) {
 			if (await page.locator(".dis-result").count() > 0) break;
 			const card = page.locator(".dis-seat .dis-card.play").last();
 			if (await card.count() > 0) {
 				await card.click({ timeout: 5_000 }).catch(() => {});
-				await sleep(260);
+				await sleep(120);
 				continue;
 			}
-			await sleep(260);
+			await sleep(120);
 		}
 		const skatPanels = await page.evaluate(() => window.__panels || []);
 		const sRes = skatPanels.findIndex(([, p]) => p.includes("RESULT"));
