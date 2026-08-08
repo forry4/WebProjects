@@ -20,10 +20,11 @@ const GAMES = [
 	// APPEND new games only — webapp/test/screens.mjs clicks .home-game-card by INDEX.
 	{ id: "dontminion", name: "Dontminion", tagline: "A kingdom built one card at a time", status: "ready", screen: "dontminion", accent: "#b08d57", players: "1–4 players" },
 	{ id: "dissonance", name: "Dissonance", tagline: "Winning every trick is a losing plan", status: "ready", screen: "dissonance", accent: "#4fb783", players: "2 players" },
-	// Not a game of its own: Spender vs the client-WASM AI, playable with NO connection
-	// (local engine + IndexedDB saves — see games/spender/offline.js).
-	{ id: "offline", name: "Local vs AI", tagline: "Spender offline — no connection needed", status: "ready", screen: "offline", accent: "#7fb069", players: "1 player" },
 ];
+// Local vs AI (the offline hub) is deliberately NOT in the catalogue: with a connection the
+// home menu's real games supersede it, and without one you never get past the loading screen —
+// so its only entries are the loading screen's "Play offline vs AI" escape hatch and the
+// /offline URL itself (games/spender/offline.js).
 
 // Inline SVG rather than an icon font or image set: they inherit currentColor for the
 // per-card accent, and cost no extra request.
@@ -35,8 +36,6 @@ const GAME_EMBLEM = {
 	// A splayed hand of three cards — the deck-builder.
 	dontminion: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="9" y="4" width="7" height="10" rx="1" transform="rotate(8 12.5 9)" /><rect x="4" y="6" width="7" height="10" rx="1" transform="rotate(-12 7.5 11)" /><rect x="8.5" y="9" width="7" height="10" rx="1" /><path d="M10.5 12H14M10.5 14.5H14" /></svg>),
 	dissonance: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="3.5" y="6" width="8" height="11" rx="1.2" transform="rotate(-10 7.5 11.5)" /><rect x="12" y="6" width="8" height="11" rx="1.2" transform="rotate(10 16 11.5)" /><path d="M5.5 11h3M7 9.5v3" /><path d="M14.8 11.5h3" /></svg>),
-	// A gem inside a phone outline — the on-device game.
-	offline: (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"><rect x="7" y="3" width="10" height="18" rx="2" /><path d="M9.5 10.5H14.5L12 15.5Z M9.5 10.5L12 8.5L14.5 10.5" /><path d="M10.5 18.5H13.5" /></svg>),
 };
 
 export { SITE_NAME, GAMES, GAME_EMBLEM };
