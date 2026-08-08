@@ -448,6 +448,9 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
         "history": [],
         "played": [],
         "result": None,
+        # Classic's Double, set in its own phase between the swap and trick 1.
+        # Skat doubles with Kontra/Re on `contract` instead.
+        "doubled": False,
         # THE MATCH, which outlives this deal. `scores` is cumulative across
         # every scored round; `round` counts them; `over` is what ends the room.
         # A skat pass-out redeals without touching any of it -- an unplayed
@@ -727,7 +730,10 @@ def apply_swap(g: dict, seat: int, take, give) -> None:
         # point of taking it is to see whether it fixes a denomination for you.
         g["phase"] = "declare"
     else:
-        _start_play(g)
+        # Classic offers the defender the Double here: the contract is settled
+        # and the swap is done, so both seats know everything they are going to
+        # know before trick 1.
+        g["phase"] = "double"
 
 
 # --- skat: talon, declaration, announcements, Kontra ------------------------
@@ -828,6 +834,31 @@ def apply_declare(g: dict, seat: int, denom: int, level: int,
     ct["open"] = open_
     ct["mult"] = skat_multiplier(ct["hand"], sharp, open_)
     g["phase"] = "kontra"
+
+
+def apply_double(g: dict, seat: int, on: bool) -> None:
+    """Classic's Double: the defender raises the stakes, both ways at once.
+
+    There is no redouble. Skat has Kontra -> Re because its contract carries a
+    stack of announcements the declarer is already betting on; classic's is one
+    number, and a second round would just be the same bet at four times the
+    size with no new information between the two.
+
+    THE CONSEQUENCE OF LEAVING NULL ALONE, stated because it limits what this
+    mechanic can do: a declarer who sees a Double and knows the contract is
+    gone can duck every +2 trick and take the flat Null instead, which Double
+    does not touch. So Double cannot punish the CLEANEST sacrifice -- only one
+    where the declarer has already won a scoring trick and can no longer reach
+    Null. That is a rules consequence, not an implementation detail.
+    """
+    if g["phase"] != "double":
+        raise ValueError("not the Double phase")
+    if mode_of(g) == "skat":
+        raise ValueError("skat mode doubles with Kontra, not Double")
+    if seat == g["auction"]["declarer"]:
+        raise ValueError("only the defender may Double")
+    g["doubled"] = bool(on)
+    _start_play(g)
 
 
 def apply_kontra(g: dict, seat: int, on: bool) -> None:
@@ -1051,8 +1082,18 @@ def payoff_terms(g: dict) -> dict:
         terms = _terms_for("skat", a["denom"], a["level"], ct["sharp"],
                            ct["mult"], skat_doubling(ct))
     else:
-        terms = _terms_for("classic", a["denom"], a["level"])
+        terms = _terms_for("classic", a["denom"], a["level"],
+                           doubling=classic_doubling(g))
     return terms | {"declarer": a["declarer"]}
+
+
+def classic_doubling(g: dict) -> int:
+    """2 once the defender has Doubled, 1 otherwise.
+
+    `.get` because a classic game saved before Double existed has no such key
+    and is, correctly, not doubled.
+    """
+    return 2 if g.get("doubled") else 1
 
 
 def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
@@ -1076,6 +1117,28 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # level 1 the old base contributed nothing at all, so the cheapest contract
     # -- and ~42% of openings sit at the floor -- paid the defender by the
     # margin alone. Uniformly +1, so it never reorders two set results.
+    #
+    # DOUBLE (classic). The defender doubles both ends -- and since the base
+    # became N, "double" is now literally that on both:
+    #
+    #   made    N^2  ->  2 N^2      (the overtrick rate doubles with it)
+    #   set       N  ->  2N
+    #   Null     12  ->  12         (untouched -- see below)
+    #
+    # Still deliberately high risk for low reward, because the reward is linear
+    # in N and the risk quadratic: at level 3 doubling wins you 3 more when it
+    # lands and costs 9 more when it does not, and the ratio worsens every
+    # level. It is priced to be worth taking only against a contract you are
+    # confident is going down -- see `apply_double`.
+    #
+    # NULL IS NOT DOUBLED, and that is the same argument skat's Kontra makes:
+    # doubling a consolation would have the defender's own bet reward the very
+    # outcome it was betting against.
+    if doubling > 1:
+        return {"denom": denom, "level": level, "target": level,
+                "make": level * level * doubling, "over": over * doubling,
+                "set_base": level * doubling,
+                "short": SHORT_PENALTY, "null": NULL_MAKE}
     return {"denom": denom, "level": level, "target": level,
             "make": level * level, "over": over, "set_base": level,
             "short": SHORT_PENALTY, "null": NULL_MAKE}
@@ -1119,6 +1182,20 @@ def auction_payoff_options(g: dict) -> list[dict]:
                     out.append(_terms_for("skat", d["denom"], lvl, sharp, mult)
                                | {"move": {"kind": "declare", "denom": d["denom"],
                                            "level": lvl, "sharp": sharp, "open": False}})
+    elif phase == "double":
+        # TWO priced branches, not one option plus an implicit "declining is
+        # worth zero". Skat's Kontra can get away with the latter because it
+        # doubles both ways symmetrically, so only the SIGN of the standing
+        # contract decides it. Classic's Double is deliberately lopsided --
+        # a made contract doubles, a set one only steps N-1 -> 2N -- so the
+        # decision is a comparison between two different payoffs and the search
+        # has to see both. Priced from the DECLARER's side like every other
+        # option; the asker is the defender and the client flips the sign.
+        a = g["auction"]
+        for on in (True, False):
+            out.append(_terms_for("classic", a["denom"], a["level"],
+                                  doubling=2 if on else 1)
+                       | {"move": {"kind": "double", "on": on}})
     elif phase in ("kontra", "re"):
         # ONE option: the contract exactly as it stands. Its value signed for
         # the seat being asked is the whole decision -- a defender doubles a
@@ -1369,6 +1446,13 @@ def _finish(g: dict) -> None:
         "target": terms["target"],
         "null": null,
         "null_value": NULL_MAKE,
+        # The Double, and the two numbers the review needs to show its effect:
+        # what a made contract paid and what a set one paid. Both come off the
+        # SAME terms `_finish` scored with, so the panel cannot narrate an
+        # arithmetic the room did not apply.
+        "doubled": bool(g.get("doubled")),
+        "make_value": payoff_terms(g)["make"],
+        "set_base": payoff_terms(g)["set_base"],
         "declarer_pts": dpts,
         "declarer_etricks": g["etricks"][decl],
         "made": made,
@@ -1501,7 +1585,12 @@ def view_for(g: dict, seat: int) -> dict:
     # never sees them either, or Hand would be free information.
     sees_shown = over or (decl == seat and (
         bool(g.get("looked")) if skat
-        else g["phase"] in ("swap", "play")))
+        # "double" is in here with swap and play: the classic declarer has
+        # already been shown the talon by then, and dropping it for one phase
+        # would take back information it legitimately holds -- and hand the
+        # Hard tier's Double decision a different out-of-play set than the
+        # trick-1 decision immediately after it.
+        else g["phase"] in ("swap", "double", "play")))
     # Open: the declarer's hand is face up from trick 1. This is the only path
     # by which one seat legitimately sees the other's cards, and it is bought
     # with a multiplier.
@@ -1527,6 +1616,9 @@ def view_for(g: dict, seat: int) -> dict:
         },
         # Public from the moment it is made -- and only made after the auction.
         "contract": dict(ct) if skat else None,
+        # Classic's Double. Wholly public: it is a bet announced at the table,
+        # and both seats have to know what the round is now worth.
+        "doubled": bool(g.get("doubled")) if not skat else None,
         "looked": bool(g.get("looked")) if skat else None,
         "redeals": g.get("redeals", 0) if skat else 0,
         # The match this deal sits in. Wholly public -- both players' running
@@ -1613,7 +1705,9 @@ def turn_seat(g) -> int | None:
         return g["auction"]["to_act"]
     if g["phase"] in ("swap", "talon", "declare", "re"):
         return g["auction"]["declarer"]
-    if g["phase"] == "kontra":
+    # Both of these belong to the DEFENDER: classic's Double and skat's Kontra
+    # are the same decision under two names.
+    if g["phase"] in ("kontra", "double"):
         return 1 - g["auction"]["declarer"]
     return to_play(g)
 
@@ -1679,6 +1773,8 @@ def apply_move(g, pid, move: dict) -> None:
     elif kind == "declare":
         apply_declare(g, seat, int(move["denom"]), int(move.get("level") or 0),
                       move.get("sharp"), move.get("open"))
+    elif kind == "double":
+        apply_double(g, seat, bool(move.get("on")))
     elif kind == "kontra":
         apply_kontra(g, seat, bool(move.get("on")))
     elif kind == "re":

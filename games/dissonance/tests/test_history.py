@@ -50,6 +50,8 @@ def _play_round(g, rng):
         elif g["phase"] == "swap":
             _, mv = bot.act(g, seat, rng)
             E.apply_swap(g, seat, mv.get("take"), mv.get("give"))
+        elif g["phase"] == "double":
+            E.apply_double(g, seat, bot.choose_double(g, seat))
         else:
             E.apply_play(g, seat, bot.choose_card(g, seat))
     return g

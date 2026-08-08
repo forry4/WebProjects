@@ -68,7 +68,7 @@ CLIENT_AI_TIERS = ("hard",)
 #: swap are deliberately absent: they are choices about INFORMATION, and what
 #: declining to look is worth depends on a game that has not been named yet, so
 #: there is no contract for the solver to price them against.
-CLIENT_AI_PHASES = ("auction", "declare", "kontra", "re")
+CLIENT_AI_PHASES = ("auction", "declare", "kontra", "re", "double")
 
 #: How long the room waits for the browser to answer one decision before the
 #: server bot finishes it. Generous: the whole point of the tier is that the

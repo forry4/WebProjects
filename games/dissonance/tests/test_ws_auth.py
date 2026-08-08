@@ -198,6 +198,7 @@ def test_a_broadcast_never_carries_the_opponents_hand_or_the_hidden_piles():
     E.apply_bid(g, 0, 3, 1)
     E.apply_pass(g, 1)
     E.apply_swap(g, 0, g["shown"][0], sorted(g["hands"][0])[0])
+    E.apply_double(g, 1, True)      # doubled: the wire must redact it the same
     for _ in range(6):
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[0])

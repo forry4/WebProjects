@@ -256,6 +256,74 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## Double — classic's defender bet, priced for the SACRIFICE (2026-08-07)
+
+A `double` phase between the classic swap and trick 1, the DEFENDER to act.
+Skat keeps Kontra; classic gets this, and the two are deliberately different
+shapes. `g["doubled"]`, `classic_doubling`, `apply_double`.
+
+    made   N^2  ->  2 N^2      (the overtrick rate doubles with it)
+    set      N  ->  2N         (reward LINEAR in N, risk quadratic)
+    Null    12  ->  12         (untouched, as skat's Kontra leaves its own)
+
+**Kontra is symmetric and this is not**, which is the one thing to keep hold
+of: because a made contract doubles while a set one steps by N+1, DECLINING IS
+NOT WORTH ZERO — it is worth the undoubled contract. So `auction_payoff_options`
+prices BOTH branches as their own options, each carrying its own move, and the
+Hard tier picks the better. Skat's Kontra can ship one option and decide on its
+sign precisely because its doubling cancels out of the comparison.
+
+**MEASURED, and the first measurement was of the WRONG SCENARIO.** Doubling
+wins N and risks N², so break-even climbs 50/67/75/80/83/86% across levels 1-6
+— while contracts bid NORMALLY fail only 4/9/18/24/37/56% (2000 self-play
+rounds). Against ordinary bidding no level is a profitable Double, and that is
+what an initial measurement said, full stop.
+
+**It is not for ordinary bidding.** The mechanic is for the SACRIFICE: a player
+about to concede a big made contract overtakes at a level they cannot reach,
+purely to deny it — 6♣ over 5♠, because 25 points is worse than being set.
+Forced sacrifices measure completely differently:
+
+| | set | Null escape | made | break-even | EV of doubling |
+|---|---|---|---|---|---|
+| ordinary level 6 | 56% | 0% | 44% | 86% | **−12.60** |
+| sacrifice at 6 | 78% | 9% | 13% | 86% | **−0.13** |
+| sacrifice at 5 | 70% | 10% | 20% | 83% | −1.44 |
+
+So the bet is aimed correctly and is a trap everywhere else — but **as priced
+today it is break-even at best, even against the case it exists for.** It was
++0.97 until the classic set base moved N-1 → N the same day: that made the
+doubled base a literal doubling, and cut the doubling's REWARD from N+1 to N.
+At level 6 that one point is the entire margin. **If Double should actually pay
+against a sacrifice, the reward is the lever** — a doubled base of 3N puts the
+same measured case at about +4.7. That is a product decision, left open.
+
+**Do not re-measure this against self-play alone**: the bots never sacrifice, so
+a self-play sweep can only ever produce the first row.
+
+* **The server tier declines every Double**, because it cannot TELL the two
+  apart. The obvious signal is the defender's own holding and it does not
+  work: the set rate is 38-43% within normal play at EVERY strength gate and
+  78% within sacrifices at every gate. A gate at strength 11 fires on 58% of
+  sacrifices and 6% of genuine high contracts, which only pays if sacrifices
+  are half as common as real contracts. They are not.
+* **The Hard tier decides by search, and this is the point.** What separates a
+  sacrifice from a real contract is whether the target is REACHABLE, which is a
+  solve rather than a rank sum. It gets both branches priced and takes the one
+  worst for the declarer, so it doubles precisely when the contract is dead.
+  Needed NO Rust change and no wasm rebuild — `contract_from_json` and
+  `options_from_json` already read every term generically, which is the return
+  on shipping the scoring as numbers instead of as a second copy of the rules.
+* **The Null escape is real**: 9-10% of sacrificing declarers duck to the flat
+  12, which Double does not touch. Already counted in the EV above.
+
+**Inserting a phase is not free**, and this is the shape of the cost: 160 tests
+went red at once, essentially all of them drivers that walked swap -> play in
+one step. The one REAL bug among them was `view_for`'s `sees_shown`, which read
+`phase in ("swap", "play")` — so the classic declarer lost sight of the talon
+for exactly one phase, and the Hard tier would have been handed a different
+out-of-play set for the Double than for the opening lead immediately after it.
+
 ## The bots do not cheat — and this is TESTED, not asserted (2026-08-07)
 
 Every bot is handed the WHOLE game dict. `bot.act(g, seat)` and `_ask_the_client`
@@ -688,7 +756,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (369)
+## Tests (423)
 
 `test_engine.py` rules (including the match SCORECARD: one line per banked
 round, derived from the result row, none for a pass-out, and a match that
@@ -696,8 +764,10 @@ predates it gaining one without crashing) · `test_history.py` (5) the lobby
 History row — the MATCH standing rather than the last deal's, the rounds/target
 line, both seats reading the same match from their own side, a forfeit, and a
 pre-match save still read as one round · `test_rust_parity.py` the drift gate ·
-`test_bot_fairness.py` (8) the bots see only their own seat, by INVARIANCE over
-re-dealt hidden cards ·
+`test_bot_fairness.py` (14) the bots see only their own seat, by INVARIANCE
+over re-dealt hidden cards, plus EXACTLY what an auction decision may consult ·
+`test_double.py` (52) classic's Double: the doubled arithmetic, the phase, and
+the measured reason the server tier declines while the search does not ·
 `test_ws_auth.py` seat-identity binding + whole-payload redaction ·
 `test_integration.py` create → auction → 13 tricks → scored result → the NEXT
 round → the match, vs human and vs bot, in **both modes** (its vs-bot pair covers

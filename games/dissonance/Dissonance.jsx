@@ -224,6 +224,13 @@ function ContractChip({ game, nameOf, sharpBonus }) {
           {ct.value ? ` · ${ct.value * (ct.mult || 1) * doubling}` : ""}
         </span>
       )}
+      {/* Classic's Double, in the slot skat's Kontra uses. It has to be on the
+          chip and not only in the side panel: the panel is display:none on a
+          phone, and the doubled stake is the one number the rest of the round
+          is played against. */}
+      {game.doubled && (
+        <span className="dis-chip-mult">Double · {2 * a.level * a.level}</span>
+      )}
     </div>
   );
 }
@@ -493,6 +500,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // Skat's post-auction prompts each belong to exactly one seat; the server
   // only ships `talon` / `declare` to that seat, and Kontra/Re go by phase.
   const myKontra = isSkat && game?.phase === "kontra" && !iDeclare;
+  // Classic's Double is the same seat's decision as skat's Kontra: the DEFENDER.
+  const myDouble = !isSkat && game?.phase === "double" && !iDeclare;
   const myRe = isSkat && game?.phase === "re" && iDeclare;
   // Did the declarer actually SEE the talon? Classic always shows it to them;
   // skat only if they looked, and declining to look is what Hand means. The
@@ -1395,6 +1404,37 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <div className="muted">{nameOf(declSeat)} is naming the game…</div>
               )}
             </div>
+          ) : game.phase === "double" ? (
+            <div className="dis-auction">
+              <div className="muted">Double?</div>
+              <ContractLine game={game} />
+              {myDouble ? (
+                <>
+                  {/* The numbers, not an adjective. The whole point of Double is
+                      that the two sides of the bet are LOPSIDED, and a player
+                      cannot weigh that from the word "doubles". */}
+                  <div className="muted dis-hint">
+                    If {nameOf(declSeat)} makes it they score{" "}
+                    <b>{2 * game.auction.level * game.auction.level}</b> instead of{" "}
+                    {game.auction.level * game.auction.level}. If they fall short you
+                    score <b>{2 * game.auction.level} + 4</b> a point short instead of{" "}
+                    {Math.max(0, game.auction.level - 1)} + 4.
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.72rem" }}>
+                    Null is untouched — a declarer who wins no +2 trick still
+                    scores {catalog?.null_make ?? NULL_MAKE}, doubled or not.
+                  </div>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button className="btn dis-kontrabtn"
+                      onClick={() => doMove({ kind: "double", on: true })}>Double ×2</button>
+                    <button className="btn btn-ghost"
+                      onClick={() => doMove({ kind: "double", on: false })}>Let it stand</button>
+                  </div>
+                </>
+              ) : (
+                <div className="muted">Waiting for {nameOf(1 - declSeat)}…</div>
+              )}
+            </div>
           ) : game.phase === "kontra" || game.phase === "re" ? (
             <div className="dis-auction">
               <div className="muted">{game.phase === "re" ? "Re?" : "Kontra?"}</div>
@@ -1479,17 +1519,36 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 </div>
               </> : <>
                 <div className="muted">
-                  {`${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]} and scored ${scored(res.declarer_pts)}`}
+                  {`${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]}`}
+                  {res.doubled ? `, doubled by ${nameOf(1 - res.declarer)},` : ""}
+                  {` and scored ${scored(res.declarer_pts)}`}
                   {res.null ? ` — taking no scoring trick at all` : ""}
                 </div>
+                {/* The doubling is shown as the STEP it is, not as a bigger
+                    number arriving from nowhere. Both branches read the result
+                    row's own `make_value` / `set_base`, which come off the terms
+                    `_finish` scored with -- so the panel cannot narrate an
+                    arithmetic the room did not apply. */}
                 <div className="dis-maths">
                   {res.null
                     ? `flat ${res.null_value} to ${nameOf(res.declarer)}`
                     : res.made
-                      ? `${res.level} × ${res.level} = ${res.level * res.level}`
+                      ? `${res.level} × ${res.level}${res.doubled ? " × 2" : ""}`
+                        + ` = ${res.make_value ?? res.level * res.level}`
                         + `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : `${res.level} + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
+                      : `${res.set_base ?? res.level} + 4 × ${res.short}`
+                        + ` = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                 </div>
+                {res.doubled && (
+                  <div className="muted" style={{ fontSize: "0.8rem" }}>
+                    {res.null
+                      ? `Doubled — but Null is not: a declarer who wins no +2 trick
+                         scores the flat ${res.null_value} either way.`
+                      : res.made
+                        ? `Doubled: ${nameOf(1 - res.declarer)} took the bet and it landed.`
+                        : `Doubled: the set base went ${Math.max(0, res.level - 1)} → ${res.set_base}.`}
+                  </div>
+                )}
               </>}
               {res.null && (
                 <div className="muted" style={{ fontSize: "0.8rem" }}>
@@ -1701,8 +1760,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <span>Trump</span><b>{DENOM_NAME[game.auction.denom]}</b>
                 </div>
                 <div className="dis-scorerow">
-                  <span>Makes it for</span><b>{game.auction.level * game.auction.level}</b>
+                  <span>Makes it for</span>
+                  <b>{(game.doubled ? 2 : 1) * game.auction.level * game.auction.level}</b>
                 </div>
+                {game.doubled && (
+                  <div className="dis-scorerow">
+                    <span>Doubled · set pays</span>
+                    <b>{2 * game.auction.level} + 4 each</b>
+                  </div>
+                )}
               </>
               : <div className="muted">Being decided…</div>}
             {/* Live under every contract, so it belongs on the panel rather than

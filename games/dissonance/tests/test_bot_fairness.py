@@ -49,7 +49,9 @@ def _hidden_from(g: dict, seat: int) -> list[int]:
                 out.append(p[0])
     sees_shown = seat == g["auction"]["declarer"] and (
         bool(g.get("looked")) if E.mode_of(g) == "skat"
-        else g["phase"] in ("swap", "play"))
+        # "double" belongs with swap and play: by then the classic declarer has
+        # already been shown the talon.
+        else g["phase"] in ("swap", "double", "play"))
     shown = set(g["shown"]) if sees_shown else set()
     out.extend(c for c in g["out"] if c not in shown)
     return out
@@ -73,7 +75,9 @@ def _reshuffle_hidden(g: dict, seat: int, rng: random.Random) -> None:
                 p[0] = next(it)
     sees_shown = seat == g["auction"]["declarer"] and (
         bool(g.get("looked")) if E.mode_of(g) == "skat"
-        else g["phase"] in ("swap", "play"))
+        # "double" belongs with swap and play: by then the classic declarer has
+        # already been shown the talon.
+        else g["phase"] in ("swap", "double", "play"))
     shown = set(g["shown"]) if sees_shown else set()
     g["out"] = [c if c in shown else next(it) for c in g["out"]]
     if not sees_shown:

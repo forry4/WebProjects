@@ -112,6 +112,38 @@ export default function DissonanceRules() {
 				</RulesTip>
 			</RulesSection>
 
+			<RulesSection title="Double — the defender raises the stakes">
+				<p>
+					Once the contract is settled and the declarer has taken their talon card,
+					the <b>defender</b> gets one decision: <b>Double</b>, or let it stand.
+					It changes both ends of the bet, and deliberately not by the same amount:
+				</p>
+				<ul>
+					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × N × N instead
+						of N × N, overtricks included.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2N + 4</b> for every point
+						they finished below N, instead of (N − 1) + 4.</li>
+					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
+						the flat 12, doubled or not.</li>
+				</ul>
+				<p>
+					So it is <b>high risk for low reward</b>, on purpose. At level 3, doubling
+					wins you 4 more if the contract goes down and costs you 9 more if it
+					doesn't — and the ratio gets worse every level up. It is not a move to
+					make because you feel good about your hand.
+				</p>
+				<RulesTip>
+					<p>
+						<b>What it's for.</b> Someone forced to open on a hopeless hand can bid
+						the minimum and take a cheap set — a sacrifice. Double is how you charge
+						them a little more for it. But note the escape: a declarer who has not
+						yet won a +2 trick can duck every one of them and take Null instead, and
+						Double doesn't touch Null. So the bet pays best against a declarer who
+						has <i>already</i> won a scoring trick and can no longer get out that way.
+					</p>
+				</RulesTip>
+			</RulesSection>
+
 			<RulesSection title="Skat mode — bid a number, name the game later">
 				<p>
 					In the classic auction the level is <i>both</i> the price and the task, so

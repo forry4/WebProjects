@@ -970,6 +970,7 @@ def _drive(mode: str, seed: int, level: int = 4, denom: int = 2, pick=-1):
         E.apply_bid(g, 0, level, denom)
         E.apply_pass(g, 1)
         E.apply_swap(g, 0, None, None)
+        E.apply_double(g, 1, False)     # classic's defender declines
     while g["phase"] == "play":
         s = E.to_play(g)
         E.apply_play(g, s, E.legal_moves(g, s)[pick])
@@ -1034,6 +1035,7 @@ def test_no_trick_is_ever_skipped_while_overtricks_pay(mode):
             E.apply_bid(g, 0, 1, 2)
             E.apply_pass(g, 1)
             E.apply_swap(g, 0, None, None)
+            E.apply_double(g, 1, False)
         while g["phase"] == "play":
             assert not E._score_is_settled(g), (
                 f"seed {seed}: the round settled at trick {g['trick']} while "

@@ -359,7 +359,8 @@ def test_the_talon_and_the_swap_stay_on_the_server():
     declining to look is worth depends on a game that has not been named yet,
     so there is no payoff for the solver to price them against."""
     assert "talon" not in m.CLIENT_AI_PHASES and "swap" not in m.CLIENT_AI_PHASES
-    assert set(m.CLIENT_AI_PHASES) == {"auction", "declare", "kontra", "re"}
+    assert set(m.CLIENT_AI_PHASES) == {"auction", "declare", "kontra", "re",
+                                       "double"}
     g = E.new_game(["alice", m.AI_PID], random.Random(5), opener=0, mode="skat")
     E.apply_skat_bid(g, 0, 12)
     E.apply_pass(g, 1)

@@ -106,6 +106,8 @@ def test_a_two_player_room_plays_from_create_to_a_scored_result():
                 move = {"kind": "bid", "level": lvl, "denom": den}
         elif g["phase"] == "swap":
             move = {"kind": "swap", "take": None}
+        elif g["phase"] == "double":
+            move = {"kind": "double", "on": False}
         else:
             seat = E.seat_of(g, pid)
             move = {"kind": "play", "card": E.legal_moves(g, seat)[0]}
@@ -147,6 +149,8 @@ def test_a_vs_bot_room_is_creatable_and_the_bot_takes_its_turn():
                           "denom": opt["bids"][0][1]})
         elif g["phase"] == "swap":
             move = {"kind": "swap", "take": None}
+        elif g["phase"] == "double":
+            move = {"kind": "double", "on": False}
         else:
             move = {"kind": "play", "card": E.legal_moves(g, E.seat_of(g, pid))[0]}
         run(m._handle_move(ws, "B", pid, {"move": move}))
@@ -185,6 +189,8 @@ def test_a_vs_bot_match_carries_on_into_the_next_round():
                               "denom": opt["bids"][0][1]})
             elif g["phase"] == "swap":
                 move = {"kind": "swap", "take": None}
+            elif g["phase"] == "double":
+                move = {"kind": "double", "on": False}
             else:
                 move = {"kind": "play", "card": E.legal_moves(g, E.seat_of(g, pid))[0]}
             run(m._handle_move(ws, "N", pid, {"move": move}))

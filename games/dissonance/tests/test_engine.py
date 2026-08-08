@@ -29,15 +29,24 @@ def _play_out(g, rng):
         elif g["phase"] == "swap":
             _, mv = bot.act(g, seat, rng)
             E.apply_swap(g, seat, mv.get("take"), mv.get("give"))
+        elif g["phase"] == "double":
+            E.apply_double(g, seat, bot.choose_double(g, seat))
         else:
             E.apply_play(g, seat, bot.choose_card(g, seat))
     return g
 
 
 def _skip_swap(g):
-    """Resolve the swap phase by standing pat, for tests that target play."""
+    """Reach trick 1 from the swap, for tests that target play.
+
+    Stands pat on the swap AND declines the Double -- the two decisions between
+    the settled auction and the opening lead. A test that means to exercise
+    either one does it explicitly.
+    """
     assert g["phase"] == "swap"
     E.apply_swap(g, g["auction"]["declarer"], None, None)
+    if g["phase"] == "double":
+        E.apply_double(g, 1 - g["auction"]["declarer"], False)
 
 
 def _all_cards(g):
@@ -362,6 +371,7 @@ def test_a_view_never_leaks_a_card_the_seat_cannot_know(seed):
     # under the leak assertions below.
     if seed % 2:
         E.apply_swap(g, 0, g["shown"][0], sorted(g["hands"][0])[0])
+        E.apply_double(g, 1, True)      # and half of THOSE are doubled
     else:
         _skip_swap(g)
     for _ in range(9):
@@ -472,6 +482,7 @@ def _duck_everything(seed, level=4, denom=2):
     E.apply_bid(g, 0, level, denom)
     E.apply_pass(g, 1)
     E.apply_swap(g, 0, None, None)
+    E.apply_double(g, 1, False)
     while g["phase"] == "play":
         seat = E.to_play(g)
         moves = E.legal_moves(g, seat)
@@ -529,7 +540,8 @@ def test_the_swap_moves_exactly_one_card_each_way():
     assert len(g["out"]) == len(before_out) == E.N_OUT
     assert give in g["shown"], \
         "shown tracks what is OUT, so the discard takes the taken card's place"
-    assert g["swapped"] is True and g["phase"] == "play"
+    assert g["swapped"] is True and g["phase"] == "double", \
+        "the swap hands off to the defender's Double, not straight to trick 1"
     assert len(g["hands"][0]) == 7, "hand size is unchanged"
 
 
@@ -600,6 +612,8 @@ def test_every_card_the_wire_calls_shown_is_really_out_of_play(seed):
         elif g["phase"] == "swap":
             _, mv = bot.act(g, seat, rng)
             E.apply_swap(g, seat, mv.get("take"), mv.get("give"))
+        elif g["phase"] == "double":
+            E.apply_double(g, seat, bot.choose_double(g, seat))
         else:
             E.apply_play(g, seat, bot.choose_card(g, seat))
 

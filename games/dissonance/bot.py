@@ -215,6 +215,35 @@ def choose_declare(g: dict, seat: int) -> dict:
             "sharp": False, "open": False}
 
 
+#: THE SERVER TIER NEVER DOUBLES, and that is a measured decision rather than a
+#: gap. Doubling wins N when the contract goes down and costs N^2 when it does
+#: not, so break-even climbs 50/67/75/80/83/86% across levels 1-6 while
+#: contracts bid NORMALLY fail only 4/9/18/24/37/56% (2000 rounds of self-play).
+#: Against ordinary bidding no level is a profitable Double.
+#:
+#: BUT THE MECHANIC IS NOT FOR ORDINARY BIDDING. It is for the SACRIFICE: a
+#: player about to concede a big made contract overtakes at a level they cannot
+#: reach, purely to deny it -- 6C over 5S because 25 points is worse than being
+#: set. Forced sacrifices measure completely differently: 78% set at level 6
+#: against 56% for a genuine one. (EV -0.13 rather than -12.60 -- break-even, and
+#: it was +0.97 before the set base moved N-1 -> N; see the note in CLAUDE.md.)
+#:
+#: THIS TIER STILL CANNOT DO IT, because it cannot TELL the two apart. The
+#: obvious signal is the defender's own holding, and it does not work: within
+#: normal play the set rate is 38-43% at every strength gate, and within
+#: sacrifices 78% at every gate. A gate at strength 11 fires on 58% of
+#: sacrifices but also 6% of genuine high contracts, which only pays if
+#: sacrifices are about half as common as real contracts. They are not.
+#:
+#: What separates them is whether the contract is REACHABLE, which is a solve,
+#: not a rank sum. So the HARD tier does this one: the server hands it both
+#: branches priced (`auction_payoff_options`) and it compares them against its
+#: own double-dummy solve, so it doubles exactly when the contract is dead.
+def choose_double(g: dict, seat: int) -> bool:
+    """Classic's Double, from the defender's seat. Measured: always decline."""
+    return False
+
+
 def choose_kontra(g: dict, seat: int) -> bool:
     a = g["auction"]
     target = a["level"] + (E.SHARP_BONUS if g["contract"]["sharp"] else 0)
@@ -295,6 +324,8 @@ def act(g: dict, seat: int, rng=None):
         return ("move", {"kind": "swap", "take": sw["take"], "give": sw["give"]})
     if phase == "declare":
         return ("move", {"kind": "declare", **choose_declare(g, seat)})
+    if phase == "double":
+        return ("move", {"kind": "double", "on": choose_double(g, seat)})
     if phase == "kontra":
         return ("move", {"kind": "kontra", "on": choose_kontra(g, seat)})
     if phase == "re":
