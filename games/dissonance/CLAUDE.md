@@ -1382,14 +1382,14 @@ the same wasm export. It also asserts an AUCTION answer specifically (they log
 an option count; card answers log a card), because a tier whose auction search
 failed and whose card search worked answers most of the game and otherwise reads
 green. That is the exact shape of the Grand outage.
-## The match review — an exact double-dummy replay of every round (2026-08-08)
-
-Right-click / press-and-hold on either "Match to N" box (the side panel's, or
-the result panel's) opens a modal listing every banked round with what actually
-happened beside what DOUBLE DUMMY would have scored: the same deal, the same
-contract, the card play redone from trick 1 by two players who see all 32
-cards. Beating it means the hidden cards broke your way; trailing it is the
-cost of playing honestly in the dark.
+## The DD column — an exact double-dummy replay of every round (2026-08-08)
+The match scorecard (`MatchCard`, in the side panel's "Match to N" box) carries
+a fifth column, **DD**: what double dummy would have scored — the same deal,
+the same contract, the card play redone from trick 1 by two players who see
+all 32 cards. Hover the header for the full sentence. Beating it means the
+hidden cards broke your way; trailing it is the cost of playing honestly in
+the dark. (It began life as a right-click modal and was deliberately folded
+into the box itself — always visible, no gesture to discover, less code.)
 
 * **`odd_review` is the fifth wasm export**, and it is NOT `odd_pick_card` with
   a fully-specified view — that obvious implementation cannot work twice over.
@@ -1400,9 +1400,15 @@ cost of playing honestly in the dark.
   the partition check — which is *right*, for its own job). A finished round
   has no uncertainty left, so `wire.rs::deal_from_json` is a different reader:
   one exact `solve_contract`, no determinization, no seed. Same answer every
-  time — which is what lets the modal label the number a FACT about the round
+  time — which is what lets the column be labelled a FACT about the round
   rather than a bot's opinion, and the tests pin exactly that (including
   against a TT warmed on another deal, the state the export actually runs in).
+* **The value is the round's PAYOFF, signed for the declarer** — rendered in
+  the Score column's own vocabulary (`+` what you'd have taken, `−` what it
+  would have cost). It is deliberately NOT a "DD pts" (`p/target`) figure:
+  the payoff-optimal line's trick points are not unique (payoff-equal lines
+  differ in points), and deriving points back out of a payoff in JS would be
+  a second copy of the scoring — the drift `payoff_terms` exists to prevent.
 * **The data is `engine._deal_snapshot`, taken at `_start_play`** — it must be
   snapshotted, not reconstructed: by round end `history` says which card each
   seat played but never WHERE from (hand and pile-top plays are the same
@@ -1415,11 +1421,14 @@ cost of playing honestly in the dark.
   one path that banks mid-play with cards still live). The test asserts on the
   SERIALISED payload, per the nested-snapshot lesson.
 * **The solves run client-side in ONE on-demand worker** (`kind: "review"` in
-  dissonance-worker.js), because the review must work at every tier and in
-  human-vs-human rooms — it cannot lean on Hard's pool being armed. Results
-  are cached for the life of the tab (`REVIEW_CACHE`): the deal is immutable
-  and the solve exact, so a result can never go stale, and the browser gate
-  asserts a reopened modal serves the SAME number instantly.
+  dissonance-worker.js, driven by `useDdReviews`), created lazily when a
+  banked round has no cached answer and torn down when the batch is done —
+  the column renders at every tier and in human-vs-human rooms, so it cannot
+  lean on Hard's pool being armed. Results are cached for the life of the tab
+  (`REVIEW_CACHE`): the deal is immutable and the solve exact, so a result
+  can never go stale. The hook's dependency is the rounds COUNT, not the
+  array — a fresh array arrives on every broadcast, but a banked round never
+  changes.
 * **At rest the snapshot is packed** (`persist._pack_deal`): the partition is
   fixed (7+7 hands, 3×2 piles each, 6 out), so the 32 card ids flatten into a
   32-char string (`_CARD_ALPHA`), and `terms` packs STRUCTURALLY — sorted keys
@@ -1429,9 +1438,6 @@ cost of playing honestly in the dark.
   entropy floor. Rows written before the string encoding still load (the
   unpacker discriminates on shape); an unrecognisable deal fails OPEN to
   verbose, since an unreadable save is worse than an unshrunk one.
-* **The gesture is a local port of Dontminion's `useCardInfoGesture`** — the
-  second copy of that shape in the tree; a third caller should extract it to
-  `shared/`.
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
