@@ -1,6 +1,6 @@
 use dissonance::bots::*;
 use dissonance::cards::*;
-use dissonance::dd::Dd;
+use dissonance::dd::{Contract, Dd};
 use dissonance::game::{play_round, Bot, Game};
 use dissonance::rng::Rng;
 use dissonance::state::*;
@@ -316,6 +316,69 @@ fn solver_is_insensitive_to_table_size() {
         let b = Dd::new(20).solve(&g.s);
         assert_eq!(a, b, "seed {seed}");
     }
+}
+
+#[test]
+fn a_warm_contract_table_never_answers_for_a_different_contract() {
+    // FOUND 2026-08-08, and it was live in the served card search. `csearch`
+    // keyed on the position, the banked points and `escored` -- and on nothing
+    // about the CONTRACT, which is precisely what decides what a leaf is worth.
+    // So the second contract solved on a position got the first one's answer:
+    // measured +9 on one deal where a cold table said -15, -8 and -20.
+    //
+    // It reached the browser because `wasm.rs` keeps one `Dd` per worker for
+    // the life of the tab and never clears it, while the contract changes every
+    // round. The three offline bins that sweep contracts on one deal all call
+    // `Dd::clear` between them, which is exactly why nothing caught it.
+    //
+    // ONE `Dd` FOR EVERY CONTRACT, against one FRESH `Dd` each. Sharing is the
+    // whole point; a version that made a new solver per contract would pass
+    // against the bug.
+    //
+    // It runs from MID-ROUND positions, and that is a cost decision, not a
+    // coverage one: from trick 0 the same 24 contracts took 112s -- two full
+    // 13-trick contract solves apiece -- to catch a table bug that a
+    // seven-trick position exposes just as well. The suite's own rule is to
+    // profile the slow test before assuming it is doing real work.
+    let mut shared = Dd::new(16);
+    let (mut checked, mut differ) = (0, 0);
+    for seed in 500..504u64 {
+        let mut g = Game::deal(&mut Rng::new(seed), 2, 0);
+        let mut r = Rng::new(seed);
+        while g.s.trick < 6 {
+            let mut m = [0u8; 16];
+            let n = g.s.legal(&mut m);
+            g.apply(m[r.below(n)]);
+        }
+        let mut first: Option<i32> = None;
+        for declarer in 0..2usize {
+            for level in [1i32, 4, 7] {
+                let c = Contract {
+                    level,
+                    declarer,
+                    make_base: level * level,
+                    over: 1,
+                    set_base: level,
+                    short: 5,
+                    ramp: 0,
+                    null: Some(12),
+                };
+                let warm = shared.solve_contract(&g.s, &c);
+                let cold = Dd::new(16).solve_contract(&g.s, &c);
+                assert_eq!(warm, cold, "seed {seed} declarer {declarer} level {level}");
+                checked += 1;
+                match first {
+                    None => first = Some(cold),
+                    Some(f) => differ += (f != cold) as i32,
+                }
+            }
+        }
+    }
+    assert!(checked >= 20, "only {checked} contracts");
+    // ...and the contracts really do pay differently, or the assertion above is
+    // satisfied by every answer being the same number for honest reasons.
+    assert!(differ > 8, "only {differ} contracts differed from the first -- this \
+                         test would pass against the bug it exists for");
 }
 
 #[test]

@@ -276,6 +276,62 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
     out
 }
 
+// ── the OFFLINE oracle: a whole deal, for resolving a settled contract ───────
+
+/// A complete deal — every hand and every pile, nothing redacted.
+///
+/// NOT A SERVING PATH. `view_from_json` is the redaction boundary and stays the
+/// only thing the browser is ever handed; this reads GROUND TRUTH and exists so
+/// an offline harness can resolve a settled contract by an exact double-dummy
+/// solve of the real cards instead of by playing them with a heuristic. That is
+/// `bin/bidlab`'s own method, and it is what takes card-play noise out of an
+/// auction measurement entirely: a difference between two bidding strategies
+/// becomes a difference in BIDDING, full stop.
+///
+/// The field names are `play.jsonl`'s, deliberately — `bin/gen_fixtures` already
+/// writes exactly this shape, so there is one encoding of a deal in the repo
+/// rather than one per harness.
+pub fn deal_from_json(v: &Value) -> Option<State> {
+    let hands = v.get("hands")?.as_array()?;
+    let piles = v.get("piles")?.as_array()?;
+    let mut s = State {
+        hand: [0; 2],
+        pile: [[Pile::default(); 3]; 2],
+        trump: u8_at(v, "trump")?,
+        trick: 0,
+        leader: u8_at(v, "leader")?,
+        led: -1,
+        pts: [0, 0],
+        escored: 0,
+    };
+    for p in 0..2usize {
+        s.hand[p] = mask_of(hands.get(p)?);
+        let row = piles.get(p)?.as_array()?;
+        for i in 0..3usize {
+            let pl = row.get(i)?.as_array()?;
+            // [bottom, top], the layout `Pile::c` uses and `gen_fixtures` emits.
+            s.pile[p][i] = Pile {
+                c: [pl.first()?.as_u64()? as u8, pl.get(1)?.as_u64()? as u8],
+                n: 2,
+            };
+        }
+    }
+    // Fail closed on anything that is not a fresh, complete deal: the caller is
+    // about to spend an exact solve on it, and a deal missing a card resolves
+    // to a confident wrong number rather than to an error.
+    // DERIVED, not a literal 7: a seat is dealt `NDEALT` cards of which six sit
+    // in its three two-card piles, and a hardcoded hand size is wrong under
+    // three of the four deck-width features.
+    let in_hand = NDEALT as u32 - 6;
+    if s.hand[0].count_ones() != in_hand || s.hand[1].count_ones() != in_hand {
+        return None;
+    }
+    if s.hand[0] & s.hand[1] != 0 {
+        return None;
+    }
+    Some(s)
+}
+
 // ── the Expert tier's auction search ─────────────────────────────────────────
 
 /// Which tree edge each option in the server's list stands for.

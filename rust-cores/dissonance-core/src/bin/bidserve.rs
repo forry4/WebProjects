@@ -14,6 +14,22 @@
 //!   stdin :  one armed request per line, `{"view":..., "auction":{...}}`
 //!   stdout:  `{"sums":[...]}` per line, in the option list's own order
 //!
+//! It also answers a second, OFFLINE-ONLY request: `{"resolve": {...}}` takes a
+//! whole deal plus the settled contract's `payoff_terms` and returns what that
+//! contract is worth under exact double-dummy play.
+//!
+//!   stdin :  `{"resolve":{"hands":[[..],[..]],"piles":[...],"trump":d,
+//!                         "leader":s,"terms":{...}}}`
+//!   stdout:  `{"payoff":i,"pts":i,"duck":bool}`
+//!
+//! WHY IT LIVES HERE RATHER THAN IN THE ARENA. Resolving a round by PLAYING it
+//! with the greedy policy scores both arms' auctions against a policy neither
+//! tier would use, and adds the card play's variance on top of the bidding's --
+//! and the bidding's is what the arena is trying to see. `bin/bidlab` has
+//! resolved by exact solve since the design campaign for exactly that reason.
+//! Reusing this process means the arena needs no second binary and no second
+//! copy of the deal encoding.
+//!
 //! It calls the SAME `wire::answer_auction` the browser entry does — it used to
 //! reproduce `odd_pick_bid`'s body, and with Expert riding in on the same
 //! request there are now two search modes that would have to be kept in step in
@@ -25,8 +41,41 @@
 //! changes no decision.
 use dissonance::dd::Dd;
 use dissonance::rng::Rng;
-use dissonance::wire::answer_auction;
+use dissonance::state::POOL;
+use dissonance::wire::{answer_auction, contract_from_json, deal_from_json};
 use std::io::{self, BufRead, Write};
+
+/// Resolve one settled contract on the REAL deal, exactly.
+///
+/// Returns three things, and the second and third are what make this more than
+/// a scorer:
+///
+/// * `payoff` — the exact declarer-minus-defender value under contract-optimal
+///   play. This is the answer, and it is what an auction arena should score a
+///   round with: it has no card-play noise in it at all.
+/// * `pts` — the declarer's total under POINTS-optimal play. A separate solve,
+///   reported apart because it is NOT the total they finish on while playing
+///   for the contract, and because a lower-variance yardstick is worth having
+///   beside a noisy payoff.
+/// * `duck` — can the declarer guarantee taking no +2 trick, i.e. is the Null
+///   consolation available.
+///
+/// THE LAST TWO ARE THE SERVED TIER'S OWN LEAF. `bid::Option_::payoff(pts,
+/// duck)` is exactly `max(contract_from_points, null_if_duckable)` — so a
+/// caller that has all three can compare the served leaf against the exact
+/// value on every single round, for the price of two cheap extra solves. That
+/// comparison is the whole "is the points proxy good enough" question, and it
+/// costs nothing to ask once the harness is resolving this way anyway.
+fn resolve(dd: &mut Dd, req: &serde_json::Value) -> Option<(i32, i32, bool)> {
+    let s = deal_from_json(req)?;
+    let c = contract_from_json(req.get("terms")?)?;
+    let payoff = dd.solve_contract(&s, &c);
+    let diff = dd.solve(&s) as i32;
+    let p0 = (POOL as i32 + diff) / 2;
+    let pts = if c.declarer == 0 { p0 } else { POOL as i32 - p0 };
+    let duck = dd.null_no_even_makeable(&s, c.declarer);
+    Some((payoff, pts, duck))
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -44,6 +93,20 @@ fn main() {
             Ok(v) => v,
             Err(e) => { writeln!(out, "{{\"error\":\"{e}\"}}").unwrap(); continue }
         };
+        if let Some(req) = v.get("resolve") {
+            match resolve(&mut dd, req) {
+                Some((payoff, pts, duck)) => {
+                    writeln!(out, "{{\"payoff\":{payoff},\"pts\":{pts},\"duck\":{duck}}}")
+                        .unwrap();
+                }
+                // Loud, not silent: a deal that does not read back is a harness
+                // bug, and a resolver that quietly returned 0 would look like a
+                // legitimate result on every round.
+                None => { writeln!(out, "{{\"error\":\"unresolvable deal\"}}").unwrap(); }
+            }
+            out.flush().unwrap();
+            continue;
+        }
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let mut rng = Rng::new(seed);
         match answer_auction(&v, k, &mut dd, &mut rng, &mut cache) {

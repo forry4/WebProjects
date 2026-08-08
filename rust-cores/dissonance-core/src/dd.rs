@@ -98,6 +98,47 @@ pub struct Contract {
 }
 
 impl Contract {
+    /// THIS CONTRACT'S IDENTITY, for the transposition table.
+    ///
+    /// IT HAS TO BE THERE, and its absence was a real bug (found 2026-08-08).
+    /// `csearch` keys on the position, the banked points and `escored` -- all
+    /// correct, all necessary, and none of them says WHICH CONTRACT is being
+    /// paid off. Two contracts differ in exactly what the leaves are worth, so
+    /// a table shared between them returns the first one's answer for the
+    /// second: measured on one deal, three of four probes came back +9 where a
+    /// cold table said -15, -8 and -20.
+    ///
+    /// It bit the SERVED tier because `wasm.rs` holds one `Dd` per worker for
+    /// the life of the tab and never clears it, while the contract changes
+    /// every round. (The three offline bins that sweep contracts on one deal --
+    /// `bench`, `design`, `overtest` -- all call `Dd::clear` between them,
+    /// which is how the shape stayed hidden.) Keying is better than clearing:
+    /// it keeps the table warm across rounds, and it cannot be forgotten at a
+    /// call site.
+    ///
+    /// `declarer` is in here for the same reason as the terms -- the same deal
+    /// under the same numbers is a different game depending on who is playing
+    /// it.
+    #[inline]
+    pub fn key(&self) -> u64 {
+        let mut h: u64 = 0x9E37_79B9_7F4A_7C15;
+        for x in [
+            self.level as i64,
+            self.declarer as i64,
+            self.make_base as i64,
+            self.over as i64,
+            self.set_base as i64,
+            self.short as i64,
+            self.ramp as i64,
+            // `None` and `Some(n)` are different contracts, and a synthetic one
+            // with no consolation must never share a table with a real one.
+            self.null.map_or(i64::MIN, |n| n as i64),
+        ] {
+            h = mix(h ^ x as u64);
+        }
+        h
+    }
+
     /// Declarer score minus defender score, given the declarer's final total
     /// and whether they ever won a +2 trick.
     ///
@@ -146,6 +187,9 @@ pub struct Dd {
     ctt: Vec<CEntry>,
     cmask: usize,
     mask: usize,
+    /// The contract `csearch` is currently paying off, as a hash. Set once per
+    /// `solve_contract` rather than recomputed per node.
+    ckey: u64,
     pub nodes: u64,
     /// Bisection switches, for isolating a value regression to one technique.
     pub use_bounds: bool,
@@ -198,6 +242,7 @@ impl Dd {
             ctt: vec![CEntry::default(); cn],
             cmask: cn - 1,
             mask: n - 1,
+            ckey: 0,
             nodes: 0,
             use_bounds: true,
             use_mtdf: true,
@@ -239,6 +284,7 @@ impl Dd {
     /// forcing unwanted winners on them. Plain alpha-beta over `payoff` at the
     /// leaves, so no branch here assumes which way the term points.
     pub fn solve_contract(&mut self, s: &State, c: &Contract) -> i32 {
+        self.ckey = c.key();
         self.csearch(s, c, -1_000_000, 1_000_000)
     }
 
@@ -256,8 +302,11 @@ impl Dd {
         // So must `escored`: two positions identical in cards and points can
         // pay off differently when one declarer has already broken their Null,
         // and a table that conflated them would return the other one's value.
+        // ...and so must the CONTRACT: the terms are what the leaves are worth,
+        // so two contracts on one position are two different games. See
+        // `Contract::key`.
         let key = key_of(s)
-            ^ mix(0x9E37_79B9_7F4A_7C15
+            ^ mix(self.ckey
                 ^ ((s.pts[0] as i64 as u64) << 8)
                 ^ ((s.escored as u64) << 40));
         let slot = (key as usize) & self.cmask;
