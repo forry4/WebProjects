@@ -1174,6 +1174,35 @@ capping play, arrived at deliberately.
   few thousand, leaving the tie-break two orders of magnitude below the smallest
   real difference, pool included. It can order ties and nothing else.
 
+**MEASURED, AND IT IS A WASH. Do not claim Expert is stronger until this moves.**
+`tools/auction_arena.py` (the harness lives with the code, and drives
+`bin/bidserve`, i.e. the same `wire::answer_auction` the browser calls).
+CRN-paired: every deal played twice with the tiers swapped, greedy card play and
+the server's talon on BOTH sides, so the auction is the only difference; the
+mirror `hard`-vs-`hard` reads exactly **+0.0000**.
+
+| | expert − hard, payoff/round | n (paired deals) |
+|---|---|---|
+| classic, deals 0–299 | **+1.71 ± 0.94** | 300 |
+| classic, deals 300–749 | **−0.68 ± 0.74** | 450 |
+| **classic, pooled** | **+0.28 ± 0.58** | **750** |
+| skat, deals 0–89 | −3.50 ± 3.70 | 90 |
+
+The two classic halves sit ~2σ apart, which is exactly what this variance looks
+like — per-round scores run σ≈26, so 750 paired deals only resolves ±0.6 and the
+first 300 on their own were a **partial run reported too early**. The pooled
+answer is indistinguishable from zero. Expert is CORRECT (the tree runs, the
+protocol is sound, the legality gate holds, the browser answers every auction
+decision) and it is not yet measurably better than Hard.
+
+The likely reason is the third approximation below rather than the search: the
+tree's model of the opponent both knows our hand and bids by the same
+points-proxy leaf, so it will happily credit them with replies a real Hard
+opponent never makes, and over-defending against those cancels what capping
+buys. The tie-break is what keeps the damage bounded. **Anything spent here
+next should go on the LEAF, not on the tree** — and on a cheaper measurement
+loop, because ±0.5 needs ~3000 paired deals, which is hours of four cores.
+
 **THREE APPROXIMATIONS, stated because they are the difference between this and
 an exact answer.**
 1. **The leaf is `bid.rs`'s** — what a declarer can guarantee with both sides
