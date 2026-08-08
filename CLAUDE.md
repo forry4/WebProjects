@@ -536,6 +536,18 @@ git add <files> && git commit -m "..."
 git push                      # deploy-pages.yml builds + publishes (~2-3 min)
 ```
 
+- **Pre-push gate (opt-in, once per clone): `git config core.hooksPath .githooks`.**
+  `.githooks/pre-push` runs the deploy workflows' own checks before a push that updates `main`
+  lands: the Python suite for any non-docs change (matching `python-app.yml`, which has no path
+  filter — and the suite reads `.jsx`/`.css` as text, so frontend edits genuinely can fail it),
+  plus `smoke` + `screens` when the push can change the bundle (the `deploy-pages.yml` filter:
+  `webapp/**`/`games/**`/`shared/**`/`books/**` minus `*.md` and Python `tests/` dirs). Pushes to
+  other branches and docs-only pushes run nothing. `git push --no-verify` or `SKIP_GATES=1` skips
+  it once; `GATES_DRY_RUN=1` prints what would run. It exists because nearly every red run in the
+  2026-08-06/07 launch ledger was a gate that would have failed locally in about a minute. Caveat:
+  `core.hooksPath` redirects ALL hooks to `.githooks/`, so personal hooks in `.git/hooks` stop
+  firing — move them in if you have any.
+
 - **Backend** (`**/*.py`) deploys to Render on push to main. The deploy job **verifies itself**: it
   polls `/health` until it reports the pushed commit and FAILS if that never happens.
 - **The deploy hook returning 200 is NOT a successful deploy** (this cost a real gap): it only means

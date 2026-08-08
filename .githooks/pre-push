@@ -1,0 +1,105 @@
+#!/bin/sh
+# Pre-push gate: run the deploy workflows' own checks BEFORE the push, so a red
+# suite is caught on this machine instead of becoming a red run on main.
+#
+# Nearly every red run in the 2026-08-06/07 launch ledger would have been
+# caught by exactly this: the Python suite is ~1 min since the -n auto work,
+# and smoke+screens are the same gates deploy-pages.yml runs.
+#
+# ACTIVATION is opt-in, once per clone:   git config core.hooksPath .githooks
+# (core.hooksPath redirects ALL hooks to this directory — if you keep personal
+# hooks in .git/hooks, copy them in here or they stop firing.)
+#
+# Escape hatches:
+#   git push --no-verify        skip the hook this once (git's own switch)
+#   SKIP_GATES=1 git push       same, for tooling that can't pass flags
+#   GATES_DRY_RUN=1 git push    print which gates WOULD run, run none
+#
+# Scope, deliberately narrow:
+#   * Only pushes that update refs/heads/main are gated — deploys only fire
+#     there, and a feature-branch push should never pay a multi-minute toll.
+#   * A push touching only *.md runs nothing (neither deploy fires on docs).
+#   * The Python suite runs for ANY other change, matching python-app.yml
+#     (no path filter there — and the suite reads .jsx and .css as text, so
+#     frontend edits genuinely can fail it: test_history_limit,
+#     test_btn_has_a_variant, test_css_tokens).
+#   * smoke + screens run only when the push can change the BUNDLE — the
+#     deploy-pages.yml filter: webapp/**, games/**, shared/**, books/**,
+#     minus *.md and minus Python tests/ dirs. webapp/test/ (singular) is
+#     the gate itself and is deliberately inside the filter.
+
+[ "$SKIP_GATES" = "1" ] && exit 0
+
+ZERO=0000000000000000000000000000000000000000
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha> per ref being pushed
+ranges=""
+while read -r _local_ref local_sha remote_ref remote_sha; do
+    [ "$remote_ref" = "refs/heads/main" ] || continue
+    [ "$local_sha" = "$ZERO" ] && continue          # deleting the ref
+    if [ "$remote_sha" = "$ZERO" ]; then
+        # remote main doesn't exist yet; diff against our tracking ref if any
+        if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+            ranges="$ranges origin/main..$local_sha"
+        fi
+    else
+        ranges="$ranges $remote_sha..$local_sha"
+    fi
+done
+
+[ -z "$ranges" ] && exit 0
+
+files=$(for r in $ranges; do git diff --name-only "$r" 2>/dev/null; done | sort -u)
+[ -z "$files" ] && exit 0
+
+need_py=0
+need_fe=0
+for f in $files; do
+    case "$f" in *.md) continue ;; esac
+    need_py=1
+    case "$f" in */tests/*) continue ;; esac        # Python tests never reach the bundle
+    case "$f" in
+        webapp/*|games/*|shared/*|books/*) need_fe=1 ;;
+    esac
+done
+
+say() { printf '[pre-push] %s\n' "$*"; }
+
+if [ "$GATES_DRY_RUN" = "1" ]; then
+    say "dry run — would gate: pytest=$need_py smoke+screens=$need_fe"
+    exit 0
+fi
+
+[ "$need_py" = "0" ] && [ "$need_fe" = "0" ] && exit 0
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+PY=$(command -v python || command -v python3)
+if [ -z "$PY" ]; then
+    say "python not found on PATH — cannot run the gates (git push --no-verify to override)"
+    exit 1
+fi
+
+if [ "$need_py" = "1" ]; then
+    say "Python suite (the Render deploy gate, ~1 min; --no-verify skips)..."
+    "$PY" -m pytest -q || {
+        say "PYTEST FAILED — push to main blocked. Fix, or git push --no-verify."
+        exit 1
+    }
+fi
+
+if [ "$need_fe" = "1" ]; then
+    say "frontend gates — smoke, then screens (the Pages deploy gates, a few minutes)..."
+    ( cd webapp && npm run smoke ) || {
+        say "SMOKE FAILED — push to main blocked. Fix, or git push --no-verify."
+        exit 1
+    }
+    ( cd webapp && npm run screens ) || {
+        say "SCREENS FAILED — push to main blocked. Fix, or git push --no-verify."
+        exit 1
+    }
+fi
+
+say "all gates green — pushing."
+exit 0
