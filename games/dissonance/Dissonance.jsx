@@ -1556,24 +1556,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
 
         {/* side panel */}
         <div className="dis-side">
-          {/* THE MATCH, above the contract, because it is the thing being
-              played for: a round is only worth what it moves this by. Absent
-              on a game saved before matches existed, which is one round and
-              has no running total to show. */}
-          {game.match && (
-            <div className="dis-panel dis-p-match">
-              <h4>Match to {game.match.target}</h4>
-              <div className="dis-scorerow">
-                <span>{nameOf(mySeat)}</span><b>{game.match.scores[mySeat]}</b>
-              </div>
-              <div className="dis-scorerow">
-                <span>{nameOf(oppSeat)}</span><b>{game.match.scores[oppSeat]}</b>
-              </div>
-              <div className="muted" style={{ fontSize: "0.72rem" }}>
-                Round {game.match.round}
-              </div>
-            </div>
-          )}
           <div className="dis-panel dis-p-contract">
             <h4>Contract</h4>
             {isSkat && <>
@@ -1682,6 +1664,28 @@ export default function Dissonance({ myId, authUser, onExit }) {
               Always adds up to +5.
             </div>
           </div>
+          {/* THE MATCH SITS LAST, and is pinned there by `order` as well as by
+              being last in the DOM. The two together are deliberate: `order`
+              alone would leave a screen reader hearing it in the middle of the
+              panel, and DOM position alone would quietly stop being the bottom
+              the first time a panel is appended after it — and the panels above
+              it are CONDITIONAL (last trick, the talon), so "the bottom" is not
+              a fixed slot. Absent on a game saved before matches existed, which
+              is one round and has no running total to show. */}
+          {game.match && (
+            <div className="dis-panel dis-p-match">
+              <h4>Match to {game.match.target}</h4>
+              <div className="dis-scorerow">
+                <span>{nameOf(mySeat)}</span><b>{game.match.scores[mySeat]}</b>
+              </div>
+              <div className="dis-scorerow">
+                <span>{nameOf(oppSeat)}</span><b>{game.match.scores[oppSeat]}</b>
+              </div>
+              <div className="muted" style={{ fontSize: "0.72rem" }}>
+                Round {game.match.round}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
