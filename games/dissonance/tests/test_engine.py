@@ -5,6 +5,7 @@ also asserted there, and `test_rust_parity.py` pins the two implementations to
 each other on real playthroughs.
 """
 
+import json
 import random
 
 import pytest
@@ -935,3 +936,111 @@ def test_a_match_saved_before_the_opener_was_derived_keeps_its_phase():
     g["result"] = {"round": 3, "scores": [0, 0]}
     E.next_round(g, 0, 3)
     assert g["opener"] == 1, "round 4 must follow round 3, not restart the pattern"
+
+
+# --- the round review's deal snapshot ----------------------------------------
+#
+# The review is an exact double-dummy solve of the position card play started
+# from, so the snapshot IS the feature: a wrong one is a review of a different
+# deal, which would look perfectly plausible on screen.
+
+
+def _to_trick_one(seed, level=3, denom=2):
+    """Deal, settle the auction with a plain bid, stand pat, decline the Double."""
+    g = E.new_game(["a", "b"], random.Random(seed))
+    E.apply_bid(g, 0, level, denom)
+    E.apply_pass(g, 1)
+    _skip_swap(g)
+    assert g["phase"] == "play"
+    return g
+
+
+def test_the_deal_snapshot_is_the_whole_deck_split_the_way_play_started():
+    g = _to_trick_one(11)
+    d = g["deal"]
+    assert [len(h) for h in d["hands"]] == [7, 7]
+    assert [len(p) for p in d["piles"][0]] == [2, 2, 2]
+    assert [len(p) for p in d["piles"][1]] == [2, 2, 2]
+    assert len(d["out"]) == 6
+    # Disjoint AND complete -- the same arithmetic `deal_from_json` fails closed
+    # on, asserted from the PRODUCING side so the two cannot drift apart.
+    cards = [c for h in d["hands"] for c in h]
+    cards += [c for q in (0, 1) for p in d["piles"][q] for c in p]
+    cards += list(d["out"])
+    assert len(cards) == 32
+    assert len(set(cards)) == 32, "a card was claimed twice"
+    assert d["trump"] == g["trump"]
+    assert d["leader"] == g["leader"] == g["auction"]["declarer"]
+
+
+def test_the_snapshot_is_taken_AFTER_the_talon_swap():
+    """The review must price the hand that was PLAYED, not the one dealt.
+
+    The swap moves a card between hand and the out-set, so a snapshot taken at
+    the deal would review a position the round never reached.
+    """
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 3, 2)
+    E.apply_pass(g, 1)
+    dec = g["auction"]["declarer"]
+    take, give = g["shown"][0], sorted(g["hands"][dec])[0]
+    E.apply_swap(g, dec, take, give)
+    if g["phase"] == "double":
+        E.apply_double(g, 1 - dec, False)
+    assert g["phase"] == "play"
+    d = g["deal"]
+    assert take in d["hands"][dec], "the swapped-IN card is missing from the reviewed hand"
+    assert give not in d["hands"][dec], "the discard is still in the reviewed hand"
+    assert give in d["out"], "the discard is not in the reviewed out-set"
+    assert take not in d["out"]
+
+
+def test_a_pile_is_snapshotted_bottom_first():
+    # Orientation is the one field a wrong answer would not announce: a flipped
+    # pile is still a legal position, just not this one.
+    g = _to_trick_one(5)
+    for q in (0, 1):
+        for i in range(3):
+            assert g["deal"]["piles"][q][i] == list(g["piles"][q][i])
+            assert g["deal"]["piles"][q][i][-1] == E.pile_tops(g, q)[i]
+
+
+def test_the_snapshot_carries_the_contract_it_must_be_priced_against():
+    # A review of round 3 has to price round 3's contract, and `payoff_terms`
+    # can only ever read the one the game is currently on.
+    g = _to_trick_one(7)
+    assert g["deal"]["terms"] == E.payoff_terms(g)
+
+
+def test_a_banked_round_carries_its_deal_and_the_live_one_never_ships():
+    """The redaction that makes this safe at all.
+
+    A banked round is finished and wholly public, so its cards ride on the wire
+    with the rest of the match. The round being PLAYED holds both hands, and
+    `view_for` must not carry it at any phase -- shipping it would hand a seat
+    the opponent's cards, which is the whole game.
+    """
+    g = _play_out(E.new_game(["a", "b"], random.Random(3)), random.Random(3))
+    row = g["match"]["rounds"][-1]
+    assert "deal" in row and len(row["deal"]["hands"]) == 2
+
+    live = _to_trick_one(3)
+    for seat in (0, 1):
+        v = E.view_for(live, seat)
+        assert "deal" not in v, "the live round's deal is on the wire"
+        # Assert on the SERIALISED payload: the failure this repo has already
+        # paid for is something that NESTS a whole-game snapshot, which defeats
+        # field-by-field redaction while every field check still passes.
+        blob = json.dumps(v)
+        assert '"deal"' not in blob
+        opp = sorted(live["hands"][1 - seat])
+        assert str(opp)[1:-1] not in blob, "the opponent's hand is in the payload"
+
+
+def test_a_round_abandoned_mid_play_banks_no_deal_to_review():
+    g = _to_trick_one(9)
+    res = E.abandon_result(g, 0)
+    E._bank_round(g, res)
+    row = g["match"]["rounds"][-1]
+    assert row.get("abandoned") is True
+    assert "deal" not in row, "there is nothing to review in a round nobody finished"

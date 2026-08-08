@@ -934,6 +934,38 @@ def _start_play(g: dict) -> None:
     # The DECLARER leads to trick 1. Measured worth +0.93 pts under the
     # original parity, so this is a real part of the contract's value.
     g["leader"] = a["declarer"]
+    g["deal"] = _deal_snapshot(g)
+
+
+def _deal_snapshot(g: dict) -> dict:
+    """The position at the top of trick 1, kept so the round can be REVIEWED.
+
+    The review answers "what was this deal worth to perfect card play", which
+    is an exact double-dummy solve of the position play started from -- so it
+    needs the cards as they stood the moment the auction stopped mattering.
+
+    IT HAS TO BE SNAPSHOTTED RATHER THAN RECONSTRUCTED. By the end of the round
+    every hand is empty and every pile is spent, and `history` records which
+    card each seat played, never WHERE it came from -- a card played from a
+    pile top and one played from hand are the same entry. So the split between
+    hand and piles, which is exactly what makes the position, is gone. Taken
+    here rather than at the deal because the talon swap happens in between and
+    the review must price the hand actually played, not the one dealt.
+
+    Small on purpose, and stored per round for the life of the match: 32 card
+    ids and a handful of scalars. `terms` rides along because a review of round
+    3 has to price round 3's contract, and `payoff_terms` can only read the
+    contract the game is CURRENTLY on.
+    """
+    return {
+        "hands": [sorted(g["hands"][0]), sorted(g["hands"][1])],
+        # [bottom, top] per pile, the order the solver's own `Pile.c` uses.
+        "piles": [[list(p) for p in g["piles"][q]] for q in (0, 1)],
+        "out": sorted(g["out"]),
+        "trump": g["trump"],
+        "leader": g["leader"],
+        "terms": payoff_terms(g),
+    }
 
 
 # --- card play -------------------------------------------------------------
@@ -1457,6 +1489,21 @@ def _round_summary(g: dict, m: dict, res: dict) -> dict:
     }
     if res.get("abandoned_by") is not None:
         row["abandoned"] = True
+        # No deal snapshot on an abandoned round, deliberately. There is nothing
+        # to review: the play did not happen, so "what perfect card play was
+        # worth" has no actual result to sit beside, and a comparison against a
+        # forfeit would read as a verdict on cards nobody played. It also keeps
+        # the one case where a round is banked MID-PLAY from putting a live
+        # hand anywhere near the wire.
+        return row
+    # The reviewable position. Only ever added HERE, at bank time, which is what
+    # makes it safe: `g["deal"]` itself is internal and never leaves the server
+    # (it holds BOTH hands, so shipping it during play would hand a seat the
+    # opponent's cards), while a banked round is finished and wholly public --
+    # the same reason `match` rides on the wire at all.
+    deal = g.get("deal")
+    if deal:
+        row["deal"] = deal
     return row
 
 
