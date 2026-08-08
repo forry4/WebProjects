@@ -1174,34 +1174,83 @@ capping play, arrived at deliberately.
   few thousand, leaving the tie-break two orders of magnitude below the smallest
   real difference, pool included. It can order ties and nothing else.
 
-**MEASURED, AND IT IS A WASH. Do not claim Expert is stronger until this moves.**
-`tools/auction_arena.py` (the harness lives with the code, and drives
-`bin/bidserve`, i.e. the same `wire::answer_auction` the browser calls).
-CRN-paired: every deal played twice with the tiers swapped, greedy card play and
-the server's talon on BOTH sides, so the auction is the only difference; the
-mirror `hard`-vs-`hard` reads exactly **+0.0000**.
+**MEASURED AT 2250 PAIRED DEALS: THE TREE BUYS NOTHING.** `tools/auction_arena.py`
+(the harness lives with the code and drives `bin/bidserve`, i.e. the same
+`wire::answer_auction` the browser calls). CRN-paired: every deal played twice
+with the tiers swapped, greedy card play and the server's talon on BOTH sides so
+the auction is the only difference; the mirror `hard`-vs-`hard` reads exactly
+**+0.0000**.
 
-| | expert − hard, payoff/round | n (paired deals) |
+| classic, expert − hard | payoff/round | n (paired deals) |
 |---|---|---|
-| classic, deals 0–299 | **+1.71 ± 0.94** | 300 |
-| classic, deals 300–749 | **−0.68 ± 0.74** | 450 |
-| **classic, pooled** | **+0.28 ± 0.58** | **750** |
-| skat, deals 0–89 | −3.50 ± 3.70 | 90 |
+| deals 0–299 | +1.71 ± 0.94 | 300 |
+| deals 300–749 | −0.68 ± 0.74 | 450 |
+| deals 750–2249 | −0.56 ± 0.41 | 1500 |
+| **pooled** | **−0.28 ± 0.33**, 95% CI **[−0.93, +0.38]** | **2250** |
 
-The two classic halves sit ~2σ apart, which is exactly what this variance looks
-like — per-round scores run σ≈26, so 750 paired deals only resolves ±0.6 and the
-first 300 on their own were a **partial run reported too early**. The pooled
-answer is indistinguishable from zero. Expert is CORRECT (the tree runs, the
-protocol is sound, the legality gate holds, the browser answers every auction
-decision) and it is not yet measurably better than Hard.
+Per-deal σ is 15.8 even after pairing, so the first 300 deals on their own said
+**+1.71 and I reported that** — it was a partial run. At 2250 the interval
+excludes anything better than +0.38: Expert is not stronger than Hard, and there
+is no longer room for it to be meaningfully so. Skat is separately unmeasured
+(−3.50 ± 3.70 at n=90 resolves nothing).
 
-The likely reason is the third approximation below rather than the search: the
-tree's model of the opponent both knows our hand and bids by the same
-points-proxy leaf, so it will happily credit them with replies a real Hard
-opponent never makes, and over-defending against those cancels what capping
-buys. The tie-break is what keeps the damage bounded. **Anything spent here
-next should go on the LEAF, not on the tree** — and on a cheaper measurement
-loop, because ±0.5 needs ~3000 paired deals, which is hours of four cores.
+**AND YET IT BIDS COMPLETELY DIFFERENTLY, which is why the wash is a ceiling and
+not a bug.** `tools/auction_style.py`, self-play, 320 classic deals, identical
+cards for both tiers:
+
+| | Hard | Expert |
+|---|---|---|
+| opens at level 1 | 11% | **32%** |
+| mean opening level | 3.63 | 3.33 |
+| **passes when overtaken** | 41% | **77%** |
+| **the cap line** (open ≤2, then pass) | 8% | **26%** |
+| …settling at | mean 3.35 | **mean 2.95** |
+| settled level | mean 4.71 | 4.22 |
+| settled at 3 | 11% | **25%** |
+| contract made | 50% | **63%** |
+
+It plays the open-low-and-pass line 3.3x as often as Hard and the cap HOLDS —
+67 of its 83 such auctions settle at exactly 3. And it opens lighter for real,
+not because it was dealt worse: paired on the same hand it opens lower 43% of
+the time (same 32%, higher 25%, mean −0.30 levels), and the gap survives
+bucketing by what the hand is worth on Hard's own yardstick, widening on the
+best hands (−0.21 / −0.25 / −0.33 / −0.23 / −0.47 across quintiles).
+
+**WHERE IT GIVES THE GAIN BACK, measured.** In 10% of rounds Expert opens ≤2 and
+the opponent simply PASSES — leaving it declaring at level 1 or 2 on hands Hard
+priced at a mean of +8.4, which it then makes 93% of the time. A made level-1
+pays `1 + (pts − 1)`, i.e. exactly the trick points, where a level-4 taking the
+same tricks pays `16 + over`. **Hard does this zero times in 320 deals.**
+
+**WHY LOOKAHEAD LOSES HERE — four mechanisms, and none of them is the search.**
+1. **The modelled opponent knows our hand.** The tree runs from OUR information
+   set: our cards are fixed across every sampled world, only theirs vary, so at
+   every MIN node they choose knowing our exact holding. They never overbid into
+   our strength and always find the punishing reply — against which aggression
+   genuinely is worthless, so the search shades everything down. The 10% giveaway
+   above is that assumption meeting an opponent that does not punish.
+2. **Minimax best-responds to a minimaxer, and it faces Hard**, which bids
+   myopically. The mismatch costs more the more plies you commit to it.
+3. **The optimiser's curse compounds with depth.** The leaf is a noisy estimate
+   over 3 sampled worlds; Hard takes ONE max over ~50 of them, Expert takes
+   max/min repeatedly down the tree, so our branches are shaded down and theirs
+   up at every level.
+4. **Ties** — the acute form of (1), already found and patched; see below.
+
+**WHAT IT DOES NOT MODEL: THE TALON.** `bid::solve_world` builds its `State`
+from the deal AS DEALT. The LEAD is modelled explicitly (the declarer leads,
+worth ~0.93), but the SWAP is not — the declarer's hand carries no talon card,
+so winning the auction is priced without the thing winning it buys. That biases
+both tiers toward conceding, and Expert compounds it at every node.
+- **It currently costs almost nothing, and that is a statement about the SWAP
+  POLICY rather than about the talon.** Measured over 3000 paired deals (same
+  deal, same auction, greedy play, only the swap differing): the server bot's
+  swap is worth **−0.083 ± 0.029 trick points and −0.477 ± 0.226 score**, and
+  it moves the declarer's points in 64% of rounds. It is doing a great deal and
+  gaining less than nothing. So the search's blind spot matches reality today —
+  and **fixing the swap would open one**, since the talon and swap deliberately
+  stay server-side (they are decisions about INFORMATION, with no contract to
+  price them against).
 
 **THREE APPROXIMATIONS, stated because they are the difference between this and
 an exact answer.**
@@ -1232,8 +1281,20 @@ green. That is the exact shape of the Grand outage.
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
-* **The Expert tier's leaf is still a points solve.** Pricing a candidate
-  exactly needs a `solve_contract` per (denomination, level) per world; the tree
-  makes the option list smaller than Hard's ~50, so this is now closer to
-  affordable than it was.
+* **The Expert tier's leaf is still a points solve, and that is where the next
+  effort belongs** — not on the tree, which demonstrably reaches the lines it
+  was built for. Pricing a candidate exactly needs a `solve_contract` per
+  (denomination, level) per world; the tree makes the option list smaller than
+  Hard's ~50, so this is closer to affordable than it was.
+* **The server bot's talon swap is worth −0.48 score, i.e. it is a LOSS.**
+  Measured 2026-08-08 over 3000 paired deals (see the Expert section). It fires
+  in 64% of rounds and gains nothing, and it is the swap EVERY tier plays,
+  because the talon deliberately stays server-side. Fixing it helps Easy through
+  Expert at once — and would then open the auction search's talon blind spot,
+  which today costs nothing precisely because the swap is worthless.
+* **Modelling the opponent's UNCERTAINTY in the auction tree.** The single
+  clearest reason Expert's lookahead does not pay is that its modelled opponent
+  is handed our exact hand. Anything that makes their branch choose without it
+  (a sampled-opponent-view search, or simply capping how sharply their reply is
+  modelled) attacks the mechanism the measurements point at.
 * A `/review`.
