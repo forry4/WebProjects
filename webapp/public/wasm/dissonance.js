@@ -27,6 +27,13 @@ export function odd_best_card(pooled_json) {
  *
  * An empty option list is not an error: it is a seat whose only legal action
  * is to pass, and the caller reads that off the same emptiness.
+ *
+ * THE EXPERT TIER RIDES IN ON THE SAME CALL. When the request carries an
+ * `auction.search` block, each option is valued by MINIMAX over the auction
+ * tree (`auc_search`) instead of by "what does this contract pay me". The
+ * protocol does not move at all — same indices, same summing across the pool,
+ * same move handed back — so only what the numbers MEAN changes, and a wasm
+ * older than the server (or a malformed block) simply prices the Hard way.
  * @param {string} request_json
  * @param {number} k
  * @param {number} seed

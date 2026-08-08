@@ -774,7 +774,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (425)
+## Tests (442)
 
 `test_engine.py` rules (including the match SCORECARD: one line per banked
 round, derived from the result row, none for a pass-out, and a match that
@@ -799,7 +799,11 @@ whole-card-space assertion that no other contract moved), and the **overtrick
 bonus** (the make boundary, the flat-through-the-multipliers rule, and that no
 trick is ever skipped) · `test_client_ai.py` (12) the Hard tier's protocol: the armed
 request, the re-validation, the stale drop, the watchdog, and the picker/server
-tier agreement.
+tier agreement · `test_expert.py` (16) what the server ships so the browser can
+SEARCH the auction: the payload is the auction verbatim, every settlement it
+prices is `_terms_for`'s own answer, every option the server offers has a row to
+settle on, unreachable rows are pruned, and only an EXPERT room carries the
+block at all.
 
 Rust side, `cargo test --features bridge` runs `wire::fixture_replay` (the
 wire-reader gate above) plus `tests/engine.rs`, the 16-test mirror of
@@ -849,8 +853,9 @@ identical from the outside.
 
 ## The Hard tier — an exact solver, in the player's browser (2026-08-07)
 
-`easy` / `normal` / **`hard`**. Hard's CARD PLAY is `dissonance-core`'s `PimcBot`
-compiled to WASM and run client-side.
+`easy` / `normal` / **`hard`** / **`expert`**. Hard's CARD PLAY is
+`dissonance-core`'s `PimcBot` compiled to WASM and run client-side; Expert is
+that plus a search over the AUCTION (its own section below).
 
 **WHAT THE BROWSER ACTUALLY BUYS — measured 2026-08-07 on the v2 rules, since
 the old "69.8% behind `pimc:8`" figure predates the 32-card deck, Grand and the
@@ -941,7 +946,8 @@ says whether that sits at the knee the way 8 does here.
   other games shipped without it for months.
 * **Only card play goes to the browser.** An auction decision is `eval_hand`:
   ten exact solves per sampled world against card play's one, i.e. multiple
-  seconds for a bid. Hard is a card-play tier until that is measured.
+  seconds for a bid. Hard is a card-play tier until that is measured. (It has
+  been, twice over: the Hard AUCTION and then Expert's tree, both below.)
 * **Nothing is trusted.** The card arrives over the human's own socket and is
   re-validated against `legal_moves` for the BOT's seat; a refusal is treated
   exactly like silence. A tampered client can only weaken its own opponent.
@@ -1093,10 +1099,112 @@ says is legal. No thresholds.
   `every_denomination_the_server_can_offer_survives_the_option_reader` walks the
   whole roster so the next denomination cannot repeat it.
 
+## EXPERT — the auction as a game tree (2026-08-08)
+
+A fourth tier: `easy` / `normal` / `hard` / **`expert`**. Expert is Hard in
+every respect except one — its AUCTION decisions are a minimax over the bidding
+tree (`rust-cores/dissonance-core/src/auc_search.rs`) instead of a price list.
+
+**WHY, precisely.** Hard prices each option as "if I end up declaring THIS
+contract, what does it pay". Pricing the pass told it what CONCEDING costs; it
+still has no model of the opponent's REPLY, so two things are unreachable:
+
+* **underbidding to CAP an auction.** `MAX_RAISE` is 2, so opening at 1 holds
+  the responder to level 3 on their turn. Opening at 1 on a hand worth 4 prices
+  as ~1 point, so the myopic search never picks it — even when capping them at 3
+  is the whole play. (This is exactly the line the design brief described: *"if
+  you have a terrible hand, you can open at the 1 level and pass when they bid
+  3, limiting how much they can score."*)
+* **judging a RE-ENTRY.** Measured on shipped Hard: of 43 classic rounds that
+  opened at level 1, only 30% passed when overtaken.
+
+**IT COSTS NO EXTRA SOLVES OF ITS OWN.** The expensive half is `bid::Solved`,
+already cached per hand; every leaf here is arithmetic. What it *does* ask for
+is more DENOMINATIONS — whatever either seat could still bid, on both sides,
+rather than Hard's own five plus the opponent's one — so the first decision of a
+hand roughly doubles and every one after it is free. Measured natively at k=3,
+one process, classic: **0.81s → 1.56s for the first decision, ~0 for the rest**;
+skat 1.11s → 2.66s. In a browser that is spread over the worker pool (one world
+each rather than three), so it lands around 0.5s / 0.9s against a 12s watchdog.
+
+**WHAT CROSSES THE WIRE IS DATA, NOT RULES — with exactly ONE exception, and it
+is gated.** `engine.auction_search_payload` ships three things on the armed
+request as `auction.search`: where the bidding stands, the legality knobs, and a
+priced row per settlement still reachable, each built by `_terms_for`. So the
+SCORING is not duplicated at all, the same discipline `payoff_terms` established
+for card play — change a payoff and Expert follows with no bot code.
+- **The auction's LEGALITY is mirrored**, because it is a function of the node
+  the SEARCH is standing on and the server is not standing there. `legal_bids`
+  therefore reimplements `auction_options`, and
+  `wire::auction_legality::the_tree_offers_exactly_the_bids_the_engine_calls_legal`
+  replays `tests/fixtures/auction.jsonl` (299 real auction nodes across both
+  modes, from `tools/gen_auction_fixtures.py`) and demands the same set at every
+  one. Drift here is silent in the usual way: a tree that believes one extra bid
+  is legal prefers a line the room refuses, `_validated_bot_move` throws the
+  answer away, and the room plays the server bot while still saying Expert.
+- A second test asserts the FIXTURE still reaches the states worth covering —
+  the classic opener (the only node where passing is illegal), the ceiling where
+  the raise cap stops binding, spent denominations, and a skat node mid-pass-out.
+  A regenerate that quietly stopped reaching them would pass the first test
+  while covering nothing.
+
+**THE PROTOCOL DOES NOT MOVE.** Expert rides in on `odd_pick_bid`, returns the
+same per-option vector indexed by the server's own option list, pools across
+workers by addition and hands back a move the server handed it. So the frontend
+needed one line (the tier id) and a cached wasm older than the server just
+prices the Hard way — the cached-bundle window degrades to Hard, not to nothing.
+`wire::answer_auction` is the one body both the browser entry and `bin/bidserve`
+call; the harness used to reproduce `odd_pick_bid` and with two search modes
+that is one copy too many.
+
+**TIES ARE THE COMMON CASE, AND THE INDEX IS A TERRIBLE WAY TO BREAK THEM.**
+This was the first version's real bug and it is worth keeping hold of, because
+the search looked like it was working. Whenever the opponent has a reply that
+equalises whatever we open with, every one of our openings has the SAME minimax
+value — on 25 classic deals the top four openings were exactly tied on 4 of the
+first 6, and taking the earliest index opened at level 1 in **13 of 25** against
+Hard's 1 of 25. That is not the search capping an auction, it is the search
+having no opinion and the enumeration order answering for it. So Hard's price is
+the tie-break (`tree + 1e-5 * myopic`): among lines the opponent equalises,
+prefer the one that pays best if they do not. Agreement with Hard on the opening
+went 4/25 → 11/25, and Expert still opens at level 1 in 9 of 25 — which is the
+capping play, arrived at deliberately.
+- The weight is safe rather than tuned: both halves are sums of integer payoffs,
+  so a genuine tree difference is ≥1 per worker while the price is bounded by a
+  few thousand, leaving the tie-break two orders of magnitude below the smallest
+  real difference, pool included. It can order ties and nothing else.
+
+**THREE APPROXIMATIONS, stated because they are the difference between this and
+an exact answer.**
+1. **The leaf is `bid.rs`'s** — what a declarer can guarantee with both sides
+   playing for POINTS. Same proxy Hard uses, same reason.
+2. **The opponent is modelled against OUR sample**, so their branch is chosen
+   knowing our hand exactly. Inherent to searching from one seat's information
+   set. It is however LESS strategy-fusion than per-world minimax would be: the
+   leaf sums over worlds *before* the min/max, so the opponent has to commit to
+   one bid across the whole sample.
+3. **Classic's Double is not modelled.** The tree stops when the auction
+   settles; the defender's bet is priced on its own turn, by Hard's pricing,
+   which is exactly right for a decision with no reply after it.
+
+**Expert is deliberately identical to Hard everywhere else.** `declare`,
+`kontra`, `re` and `double` have no reply after them, so a tree over them would
+be one node deep — `SEARCH_AUCTION_TIERS` is a separate, smaller list than
+`CLIENT_AI_TIERS` for exactly that reason.
+
+**The browser gate drives EXPERT, not Hard, and that is strictly more coverage
+for the same minutes** — Expert is Hard plus the auction on the same request and
+the same wasm export. It also asserts an AUCTION answer specifically (they log
+an option count; card answers log a card), because a tier whose auction search
+failed and whose card search worked answers most of the game and otherwise reads
+green. That is the exact shape of the Grand outage.
+
 ## Not built yet
 
-* **Pricing the pass.** See above: the bot knows what a contract is worth to it,
-  not what letting the opponent have it costs.
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
+* **The Expert tier's leaf is still a points solve.** Pricing a candidate
+  exactly needs a `solve_contract` per (denomination, level) per world; the tree
+  makes the option list smaller than Hard's ~50, so this is now closer to
+  affordable than it was.
 * A `/review`.

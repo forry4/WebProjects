@@ -35,7 +35,7 @@ use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::POOL;
 use crate::view::View;
-use crate::wire::{contract_from_json, options_from_json, view_from_json};
+use crate::wire::{answer_auction, contract_from_json, view_from_json};
 
 /// Transposition table size, per worker. 2^18 entries is ~4MB for the plain
 /// table plus ~2MB for the contract one — times a pool of at most four workers.
@@ -170,64 +170,31 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
 ///
 /// An empty option list is not an error: it is a seat whose only legal action
 /// is to pass, and the caller reads that off the same emptiness.
+///
+/// THE EXPERT TIER RIDES IN ON THE SAME CALL. When the request carries an
+/// `auction.search` block, each option is valued by MINIMAX over the auction
+/// tree (`auc_search`) instead of by "what does this contract pay me". The
+/// protocol does not move at all — same indices, same summing across the pool,
+/// same move handed back — so only what the numbers MEAN changes, and a wasm
+/// older than the server (or a malformed block) simply prices the Hard way.
 #[wasm_bindgen]
 pub fn odd_pick_bid(request_json: &str, k: usize, seed: f64) -> String {
     let v: serde_json::Value = match serde_json::from_str(request_json) {
         Ok(v) => v,
         Err(_) => return err("bad request"),
     };
-    let view = match view_from_json(v.get("view").unwrap_or(&v)) {
-        Some(x) => x,
-        None => return err("not a searchable position"),
-    };
-    let auc = match v.get("auction") {
-        Some(a) => a,
-        None => return err("no auction request"),
-    };
-    let opts = options_from_json(auc.get("options").unwrap_or(&serde_json::Value::Null));
-    // Whoever would be DECLARING under these options — not necessarily the seat
-    // being asked. A defender deciding on Kontra is pricing the opponent's
-    // contract, so the solve is from the opponent's side and only the sign at
-    // the end belongs to the asker.
-    let declarer = auc.get("declarer").and_then(|x| x.as_u64()).unwrap_or(view.me as u64) as usize;
-    if declarer > 1 {
-        return err("no such declarer");
-    }
-    let sign = if view.me == declarer { 1.0 } else { -1.0 };
     let mut rng = Rng::new(seed.to_bits() ^ 0x2545_F491_4F6C_DD1D);
-    let (wanted, wanted_opp) = crate::bid::wanted_denoms(&opts);
-    let key = crate::bid::hand_key(&view, declarer, k.max(1));
-    let mut cached = false;
-    let sums = LAST_BID.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if opts.is_empty() {
-            return Vec::new();
-        }
-        // A different hand starts a new entry; the same hand extends the one it
-        // has, and asking about nothing new does no work at all.
-        let mut entry = match slot.take() {
-            Some((k0, s)) if k0 == key => s,
-            _ => crate::bid::Solved::default(),
-        };
-        cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
-        if !cached {
-            DD.with(|dd| {
-                let mut dd = dd.borrow_mut();
-                crate::bid::solve_into(&view, &mut dd, &mut rng, k.max(1), wanted, wanted_opp,
-                                       declarer, &mut entry);
-            });
-        }
-        let out = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp);
-        *slot = Some((key, entry));
-        out
+    let out = DD.with(|dd| {
+        let mut dd = dd.borrow_mut();
+        LAST_BID.with(|slot| answer_auction(&v, k, &mut dd, &mut rng, &mut slot.borrow_mut()))
     });
-    let body = sums
-        .iter()
-        .map(|x| (x * sign).to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    let (sums, cached) = match out {
+        Ok(x) => x,
+        Err(e) => return err(e),
+    };
+    let body = sums.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
     format!("{{\"sums\":[{}],\"worlds\":{},\"cached\":{}}}",
-            body, if opts.is_empty() { 0 } else { k.max(1) }, cached)
+            body, if sums.is_empty() { 0 } else { k.max(1) }, cached)
 }
 
 /// The card the pooled sums choose: highest total, ties to the earliest legal

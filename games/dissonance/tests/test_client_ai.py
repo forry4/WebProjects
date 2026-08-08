@@ -262,7 +262,9 @@ def test_the_client_never_answers_and_the_server_finishes_the_turn(monkeypatch):
 
 def test_hard_is_offered_and_the_other_tiers_stay_server_side():
     assert "hard" in m.DIFFICULTIES
-    assert m.CLIENT_AI_TIERS == ("hard",)
+    # Expert is Hard plus a minimax over the AUCTION, so it is client-served for
+    # the same reason and by the same protocol -- see `test_expert.py`.
+    assert m.CLIENT_AI_TIERS == ("hard", "expert")
     # Easy and Normal are the shipped ladder; handing a one-trick-deep policy a
     # solver would be a strength change dressed up as a serving one.
     assert set(m.CLIENT_AI_TIERS).isdisjoint({"easy", "normal"})

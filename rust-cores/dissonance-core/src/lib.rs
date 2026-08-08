@@ -7,6 +7,7 @@
 //! Layers: `state` is the rules, `dd` solves a known deal exactly, `view` is
 //! the information set plus its determinizer, `bots` are the players.
 
+pub mod auc_search;
 pub mod auction;
 pub mod bid;
 pub mod bots;

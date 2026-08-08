@@ -56,6 +56,7 @@ const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, blunders often" },
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
   { id: "hard", name: "Hard", desc: "Solves the hand exactly, in your browser" },
+  { id: "expert", name: "Expert", desc: "Hard, and searches the auction as a game tree" },
 ];
 const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
 
@@ -64,7 +65,11 @@ const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is 
 // which is unthinkable on Render's free tier and unremarkable on a laptop.
 // Every failure path (no Worker, no wasm, a search error, a slow phone) is a
 // no-op that leaves the server's heuristic bot to play the move.
-const CLIENT_AI_TIERS = ["hard"];
+// Expert is the same client search with one extra block on the armed request:
+// its AUCTION decisions carry `auction.search`, which the wasm minimaxes
+// instead of pricing. Nothing in this file has to know that — the option list,
+// the pooling by index and the move handed back are identical.
+const CLIENT_AI_TIERS = ["hard", "expert"];
 //: A flat floor per move, so the bot's pace does not advertise how fast the
 //  player's machine is — and so it never lands inside the completed-trick beat.
 const CLIENT_AI_MIN_MS = 600;

@@ -1283,6 +1283,79 @@ def auction_payoff_options(g: dict) -> list[dict]:
     return out
 
 
+#: The terms table's key for a settled classic contract. Mirrored by
+#: `auc_search::Bid::key` in Rust; eight bits for the denomination because Grand
+#: is 6 and skat's own key space is the bare ladder value, so the two modes
+#: never share a table and the encoding only has to be unambiguous within one.
+def _settlement_key(mode: str, denom: int, level: int, value: int) -> int:
+    return value if mode == "skat" else (level << 8) | denom
+
+
+def auction_search_payload(g: dict) -> dict | None:
+    """THE EXPERT TIER'S AUCTION, as data: where the bidding stands, the
+    legality knobs, and a priced row per settlement still reachable.
+
+    Hard prices each option MYOPICALLY -- "if I end up declaring this contract,
+    what does it pay" -- which cannot underbid to CAP an auction and cannot
+    judge re-entering after being overtaken, because both of those are questions
+    about the opponent's reply. Expert minimaxes the auction tree instead
+    (`rust-cores/dissonance-core/src/auc_search.rs`), and this is everything it
+    needs beyond the view it already gets.
+
+    THE SPLIT IS THE SAME ONE `payoff_terms` MAKES. The search mirrors the
+    auction's LEGALITY (which is a small, stable rule set, gated by
+    `tests/test_expert.py` replaying `auction_options` against it) and mirrors
+    none of its SCORING: every leaf price is a row built here by `_terms_for`,
+    so changing a payoff still moves the bot with no bot code at all.
+
+    Returns None outside the auction. The other client-searched phases --
+    `declare`, `kontra`, `re`, `double` -- have no reply after them, so Hard's
+    pricing is already exactly right there and Expert is deliberately identical.
+    """
+    if g["phase"] != "auction":
+        return None
+    a = g["auction"]
+    skat = mode_of(g) == "skat"
+    rules = {"mode": "skat" if skat else "classic",
+             "min_level": MIN_LEVEL, "max_level": MAX_LEVEL,
+             "max_raise": MAX_RAISE, "top_denom": GRAND if skat else NOTRUMP,
+             "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
+    # Only settlements the auction can still REACH. The bidding only ever
+    # ascends, so everything below the standing bid is unreachable and would be
+    # ~60 rows of JSON re-broadcast on every room update for nothing. The
+    # standing bid itself stays: that is what a pass settles on.
+    terms = []
+    if skat:
+        state = {"level": 0, "denom": 0, "value": a["value"],
+                 "declarer": a["declarer"], "used": [0, 0],
+                 "passes": a.get("passes", 0), "to_act": a["to_act"]}
+        for v in SKAT_VALUES:
+            if v < a["value"]:
+                continue
+            # A number is a PRICE, not a shape -- the winner names their game
+            # afterwards -- so a rung carries one row per declaration it buys
+            # and the search takes the declarer's best. Same approximation
+            # `pass_options` already makes: each denomination at its cheapest
+            # level that clears the number.
+            for d in skat_declarable(v):
+                terms.append(_terms_for("skat", d["denom"], d["min_level"])
+                             | {"key": _settlement_key("skat", d["denom"], 0, v)})
+    else:
+        # `denom` is -1 while nothing stands, which is a sentinel this side and
+        # an unsigned field on the wire. It is unread when `level` is 0, so it
+        # is normalised rather than encoded: a -1 read back as 255 would be a
+        # denomination the rank comparison silently treats as the highest there
+        # is.
+        state = {"level": a["level"], "denom": max(a["denom"], 0), "value": 0,
+                 "declarer": a["declarer"], "used": list(a["used"]),
+                 "passes": 0, "to_act": a["to_act"]}
+        for lvl in range(max(MIN_LEVEL, a["level"]), MAX_LEVEL + 1):
+            for d in range(NOTRUMP + 1):
+                terms.append(_terms_for("classic", d, lvl)
+                             | {"key": _settlement_key("classic", d, lvl, 0)})
+    return {"state": state, "rules": rules, "terms": terms}
+
+
 def payoff(terms: dict, declarer_pts: int, declarer_scored: bool) -> int:
     """Apply `payoff_terms`. Null is checked FIRST and wins -- it can never
     collide with a make, since only +2 tricks add points.

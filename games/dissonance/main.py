@@ -49,7 +49,7 @@ TABLE = "dissonance_games"
 #: of creating an empty one beside it and orphaning every saved game.
 LEGACY_TABLE = "oddtrick_games"
 AI_PID = "bot"
-DIFFICULTIES = ("easy", "normal", "hard")
+DIFFICULTIES = ("easy", "normal", "hard", "expert")
 DEFAULT_DIFFICULTY = "normal"
 
 #: Tiers whose card play is searched in the PLAYER'S BROWSER (`rust-cores/
@@ -62,7 +62,18 @@ DEFAULT_DIFFICULTY = "normal"
 #: Easy and Normal stay server-side ON PURPOSE. Their strength is the shipped
 #: ladder, and handing a one-trick-deep policy a solver is a strength change
 #: dressed up as a serving one.
-CLIENT_AI_TIERS = ("hard",)
+CLIENT_AI_TIERS = ("hard", "expert")
+
+#: Tiers whose AUCTION is a MINIMAX over the bidding tree rather than a price
+#: list. Everything else about Expert is Hard: the same PIMC card play, the same
+#: solved worlds, the same protocol -- `engine.auction_search_payload` simply
+#: rides along on the armed request and `auc_search.rs` values each option by
+#: what the auction is worth AFTER the opponent answers it.
+#:
+#: The other client-searched phases are deliberately NOT in this: `declare`,
+#: `kontra`, `re` and `double` have no reply after them, so a tree over them
+#: would be one node deep and Hard's pricing is already the whole answer.
+SEARCH_AUCTION_TIERS = ("expert",)
 
 #: Phases beyond `play` whose decision the browser searches. The talon and the
 #: swap are deliberately absent: they are choices about INFORMATION, and what
@@ -586,6 +597,13 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                          if g["phase"] == "auction"
                          and engine.auction_options(g)["may_pass"] else None),
             }
+            # EXPERT: the same options, valued by a tree instead of a price.
+            # Optional on the wire and ignored by any wasm that predates it, so
+            # the cached-bundle window degrades to Hard rather than to nothing.
+            if _valid_difficulty(room.get("ai_difficulty")) in SEARCH_AUCTION_TIERS:
+                search = engine.auction_search_payload(g)
+                if search:
+                    room["_ai_search"]["auction"]["search"] = search
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()
         mine = seq

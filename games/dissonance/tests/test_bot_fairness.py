@@ -217,8 +217,8 @@ def test_the_hard_tier_is_only_ever_handed_its_own_seats_view(mode):
 
     from games.dissonance import main as m
 
-    assert m.CLIENT_AI_TIERS == ("hard",), \
-        "only the Hard tier is client-served; the others never see a wire payload"
+    assert set(m.CLIENT_AI_TIERS) == {"hard", "expert"}, \
+        "a new client-served tier ships a payload nothing here has checked"
 
     for seed in range(4):
         g = E.new_game(["a", "b"], random.Random(780 + seed), opener=0, mode=mode)
@@ -231,15 +231,23 @@ def test_the_hard_tier_is_only_ever_handed_its_own_seats_view(mode):
             assert guard < 300, f"stuck in {g['phase']}"
             seat = E.turn_seat(g)
             for who in (0, 1):
+                # The Expert tier's auction payload rides on the same request,
+                # so it goes through the same invariance rather than being
+                # argued about: it is built from `g["auction"]` and constants,
+                # which is exactly the claim being checked.
                 armed = json.dumps({"view": E.view_for(g, who),
-                                    "payoff": E.payoff_terms(g)}, sort_keys=True)
+                                    "payoff": E.payoff_terms(g),
+                                    "search": E.auction_search_payload(g)},
+                                   sort_keys=True)
                 snapshot = {"hands": [list(h) for h in g["hands"]],
                             "piles": [[list(p) for p in row] for row in g["piles"]],
                             "out": list(g["out"]), "shown": list(g["shown"])}
                 for trial in range(3):
                     _reshuffle_hidden(g, who, random.Random(5000 + trial))
                     after = json.dumps({"view": E.view_for(g, who),
-                                        "payoff": E.payoff_terms(g)}, sort_keys=True)
+                                        "payoff": E.payoff_terms(g),
+                                        "search": E.auction_search_payload(g)},
+                                       sort_keys=True)
                     assert after == armed, (
                         f"{mode}: the request armed for seat {who} in phase "
                         f"{g['phase']} moved when only cards it cannot see moved")

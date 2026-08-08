@@ -14,13 +14,18 @@
 //!   stdin :  one armed request per line, `{"view":..., "auction":{...}}`
 //!   stdout:  `{"sums":[...]}` per line, in the option list's own order
 //!
-//! Reproduces `odd_pick_bid`'s body rather than calling it (it is behind the
-//! wasm cfg). The LAST_BID cache is deliberately absent: it is a latency
-//! optimisation and changes no decision.
-use dissonance::bid;
+//! It calls the SAME `wire::answer_auction` the browser entry does — it used to
+//! reproduce `odd_pick_bid`'s body, and with Expert riding in on the same
+//! request there are now two search modes that would have to be kept in step in
+//! two places. A harness that does not reproduce the serving shape is a lesson
+//! this repo has already paid for once.
+//!
+//! The `Solved` cache is carried across lines, exactly as a worker carries it
+//! across an auction: it is a latency optimisation keyed on the cards and
+//! changes no decision.
 use dissonance::dd::Dd;
 use dissonance::rng::Rng;
-use dissonance::wire::{options_from_json, view_from_json};
+use dissonance::wire::answer_auction;
 use std::io::{self, BufRead, Write};
 
 fn main() {
@@ -31,6 +36,7 @@ fn main() {
     let stdin = io::stdin();
     let mut out = io::stdout();
     let mut seed: u64 = 0x5EED_1234;
+    let mut cache: Option<(u64, dissonance::bid::Solved)> = None;
     for line in stdin.lock().lines() {
         let line = match line { Ok(l) => l, Err(_) => break };
         if line.trim().is_empty() { continue }
@@ -38,30 +44,15 @@ fn main() {
             Ok(v) => v,
             Err(e) => { writeln!(out, "{{\"error\":\"{e}\"}}").unwrap(); continue }
         };
-        let view = match v.get("view").and_then(|x| view_from_json(x)) {
-            Some(x) => x,
-            None => { writeln!(out, "{{\"error\":\"unsearchable\"}}").unwrap(); continue }
-        };
-        let auc = v.get("auction").cloned().unwrap_or(serde_json::Value::Null);
-        let opts = options_from_json(auc.get("options").unwrap_or(&serde_json::Value::Null));
-        if opts.is_empty() {
-            writeln!(out, "{{\"sums\":[]}}").unwrap();
-            out.flush().unwrap();
-            continue;
-        }
-        // Whoever would be DECLARING under these options -- not always the seat
-        // asked. A defender weighing Kontra prices the OPPONENT's contract.
-        let declarer = auc.get("declarer").and_then(|x| x.as_u64())
-            .unwrap_or(view.me as u64) as usize;
-        let sign = if view.me == declarer { 1.0 } else { -1.0 };
         seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
         let mut rng = Rng::new(seed);
-        let (wanted, wanted_opp) = bid::wanted_denoms(&opts);
-        let mut cache = bid::Solved::default();
-        bid::solve_into(&view, &mut dd, &mut rng, k, wanted, wanted_opp, declarer, &mut cache);
-        let sums = bid::price(&opts, &cache.worlds, cache.covered, cache.covered_opp);
-        let body: Vec<String> = sums.iter().map(|x| (x * sign).to_string()).collect();
-        writeln!(out, "{{\"sums\":[{}]}}", body.join(",")).unwrap();
+        match answer_auction(&v, k, &mut dd, &mut rng, &mut cache) {
+            Ok((sums, _)) => {
+                let body: Vec<String> = sums.iter().map(|x| x.to_string()).collect();
+                writeln!(out, "{{\"sums\":[{}]}}", body.join(",")).unwrap();
+            }
+            Err(e) => { writeln!(out, "{{\"error\":\"{e}\"}}").unwrap(); }
+        }
         out.flush().unwrap();
     }
 }

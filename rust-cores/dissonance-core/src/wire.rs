@@ -25,7 +25,7 @@
 
 use crate::auction::HandEval;
 use crate::cards::*;
-use crate::dd::Contract;
+use crate::dd::{Contract, Dd};
 use crate::state::{Pile, State};
 use crate::view::{Knowledge, View};
 use serde_json::Value;
@@ -274,6 +274,224 @@ pub fn options_from_json(v: &Value) -> Vec<crate::bid::Option_> {
         }
     }
     out
+}
+
+// ── the Expert tier's auction search ─────────────────────────────────────────
+
+/// Which tree edge each option in the server's list stands for.
+///
+/// Read off the MOVE the server already attached to every option, rather than
+/// shipped as a second parallel array: the two would have to be kept in step,
+/// and a misalignment would price one option and send another. Returns `None`
+/// on anything it does not recognise, and the caller falls back to Hard's
+/// myopic pricing — a search that mislabels its own root moves is worse than no
+/// search at all.
+pub fn edges_from_json(v: &Value) -> Option<Vec<crate::auc_search::Bid>> {
+    use crate::auc_search::Bid;
+    let arr = v.as_array()?;
+    let mut out = Vec::with_capacity(arr.len());
+    for o in arr {
+        let mv = o.get("move")?;
+        match mv.get("kind").and_then(|x| x.as_str())? {
+            "pass" => out.push(Bid::Pass),
+            "bid" => match (mv.get("level").and_then(|x| x.as_u64()),
+                            mv.get("denom").and_then(|x| x.as_u64()),
+                            mv.get("value").and_then(|x| x.as_u64())) {
+                (Some(l), Some(d), _) => out.push(Bid::Contract { level: l as u8, denom: d as u8 }),
+                (_, _, Some(v)) => out.push(Bid::Number { value: v as u16 }),
+                _ => return None,
+            },
+            _ => return None,   // declare / kontra / double are not auction edges
+        }
+    }
+    Some(out)
+}
+
+/// The Expert tier's auction payload: where the bidding stands, the legality
+/// knobs, and a priced row per settlement the auction could still reach.
+///
+/// Every number here is the server's — `engine.auction_search_payload` builds
+/// the rows with the same `_terms_for` the room will score with — so the search
+/// mirrors the auction's LEGALITY and nothing about its scoring.
+pub fn auc_search_from_json(v: &Value)
+    -> Option<(crate::auc_search::AucState, crate::auc_search::AucRules,
+               crate::auc_search::TermsTable)> {
+    let rules = auc_rules_from_json(v.get("rules")?)?;
+    let state = auc_state_from_json(v.get("state")?)?;
+    // The rows are read with the SAME reader the myopic pricing uses, so a term
+    // means one thing on this side of the wire however it arrived.
+    let rows = v.get("terms")?.as_array()?;
+    let mut terms = crate::auc_search::TermsTable::new();
+    for row in rows {
+        let key = row.get("key").and_then(|x| x.as_u64())? as u16;
+        // `options_from_json` is all-or-nothing by design; here one row at a
+        // time, since a table missing a settlement prices that leaf at 0 rather
+        // than mis-pricing every other one.
+        let one = options_from_json(&Value::Array(vec![row.clone()]));
+        match one.into_iter().next() {
+            Some(o) => terms.insert(key, o),
+            None => return None,
+        }
+    }
+    if terms.is_empty() {
+        return None;
+    }
+    Some((state, rules, terms))
+}
+
+/// The auction's legality knobs. Split out from the payload so the parity gate
+/// can replay a node without also carrying its price table -- the fixture is
+/// about which EDGES exist, and shipping ~60 priced rows per node to assert
+/// that would be most of the file.
+pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
+    use crate::auc_search::{AucMode, AucRules};
+    let mode = match r.get("mode").and_then(|x| x.as_str())? {
+        "skat" => AucMode::Skat,
+        "classic" => AucMode::Classic,
+        _ => return None,
+    };
+    let n = |k: &str| r.get(k).and_then(|x| x.as_u64());
+    let rules = AucRules {
+        mode,
+        min_level: n("min_level")? as u8,
+        max_level: n("max_level")? as u8,
+        max_raise: n("max_raise")? as u8,
+        top_denom: n("top_denom")? as u8,
+        ladder: r.get("ladder").and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())
+            .unwrap_or_default(),
+    };
+    // The KEY must be there in skat, but it may legitimately be EMPTY -- a bid
+    // standing on the ladder's top rung leaves nothing that outranks it, and
+    // that node is perfectly searchable (its only edge is a pass, straight to
+    // the leaf). Rejecting an empty ladder confused "no rungs left" with "the
+    // field never arrived"; only the second is a malformed payload.
+    if mode == AucMode::Skat && !r.get("ladder").map(|x| x.is_array()).unwrap_or(false) {
+        return None;
+    }
+    Some(rules)
+}
+
+/// Where the bidding has got to.
+pub fn auc_state_from_json(s: &Value) -> Option<crate::auc_search::AucState> {
+    use crate::auc_search::AucState;
+    let n = |k: &str| s.get(k).and_then(|x| x.as_u64());
+    let used = s.get("used").and_then(|x| x.as_array())
+        .map(|a| [a.first().and_then(|x| x.as_u64()).unwrap_or(0) as u8,
+                  a.get(1).and_then(|x| x.as_u64()).unwrap_or(0) as u8])
+        .unwrap_or([0, 0]);
+    let declarer = s.get("declarer").and_then(|x| x.as_i64())?;
+    if !(-1..2).contains(&declarer) {
+        return None;
+    }
+    let state = AucState {
+        level: n("level").unwrap_or(0) as u8,
+        denom: n("denom").unwrap_or(0) as u8,
+        value: n("value").unwrap_or(0) as u16,
+        declarer: declarer as i8,
+        used,
+        passes: n("passes").unwrap_or(0) as u8,
+        to_act: n("to_act")? as u8,
+    };
+    if state.to_act > 1 {
+        return None;
+    }
+    Some(state)
+}
+
+/// ONE armed auction request, answered. Both the browser entry (`wasm.rs`) and
+/// the offline harness (`bin/bidserve`) call this, which is the whole reason it
+/// exists: the harness used to reproduce the entry's body, and the repo has
+/// already paid for a measurement harness that did not reproduce the SERVING
+/// shape. With Expert riding in on the same call there are now two search
+/// modes to keep in step, and two copies of that choice is one too many.
+///
+/// `cache` is the caller's `Solved` slot, keyed by `bid::hand_key` — the
+/// browser keeps one per worker across a whole auction, the harness may pass a
+/// fresh one. It is a latency optimisation and changes no decision.
+///
+/// Returns the per-option sums SIGNED FOR THE ASKER, in the server's own order,
+/// plus whether the solve was already in hand.
+pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rng,
+                      cache: &mut Option<(u64, crate::bid::Solved)>)
+    -> Result<(Vec<f64>, bool), &'static str> {
+    let view = view_from_json(v.get("view").unwrap_or(v)).ok_or("not a searchable position")?;
+    let auc = v.get("auction").ok_or("no auction request")?;
+    let null = Value::Null;
+    let opts = options_from_json(auc.get("options").unwrap_or(&null));
+    // Whoever would be DECLARING under these options — not necessarily the seat
+    // being asked. A defender deciding on Kontra is pricing the opponent's
+    // contract, so the solve is from the opponent's side and only the sign at
+    // the end belongs to the asker.
+    let declarer = auc.get("declarer").and_then(|x| x.as_u64()).unwrap_or(view.me as u64) as usize;
+    if declarer > 1 {
+        return Err("no such declarer");
+    }
+    if opts.is_empty() {
+        return Ok((Vec::new(), false));
+    }
+    let sign = if view.me == declarer { 1.0 } else { -1.0 };
+    // EXPERT: a tree instead of a price list. It needs the same solved worlds,
+    // just more of them — whatever either seat could still bid, on both sides —
+    // so the extra denominations join the same cache request rather than being
+    // a second pass over the deals.
+    let expert = auc_search_from_json(auc.get("search").unwrap_or(&null))
+        // The tree signs its answer for the ASKER; only a decision that asks
+        // about its own seat can use it, which is exactly the auction phase.
+        .filter(|_| declarer == view.me)
+        .and_then(|(st, rules, terms)| {
+            let edges = edges_from_json(auc.get("options").unwrap_or(&null))?;
+            if edges.len() != opts.len() {
+                return None;      // the tree cannot label the list it must rank
+            }
+            Some((st, rules, terms, edges))
+        });
+    let (wanted, wanted_opp) = match &expert {
+        Some((_, _, terms, _)) => (terms.denoms_mask(), terms.denoms_mask()),
+        None => crate::bid::wanted_denoms(&opts),
+    };
+    let key = crate::bid::hand_key(&view, declarer, k.max(1));
+    // A different hand starts a new entry; the same hand extends the one it
+    // has, and asking about nothing new does no work at all.
+    let mut entry = match cache.take() {
+        Some((k0, s)) if k0 == key => s,
+        _ => crate::bid::Solved::default(),
+    };
+    let cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
+    if !cached {
+        crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer, &mut entry);
+    }
+    let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp);
+    let sums = match &expert {
+        Some((st, rules, terms, edges)) => {
+            let mut s = crate::auc_search::Search::new(view.me, rules.clone(), terms, &entry);
+            let tree = s.values(*st, edges);
+            // TIES ARE THE COMMON CASE AND THE INDEX IS A TERRIBLE WAY TO BREAK
+            // THEM. Whenever the opponent has a reply that equalises whatever we
+            // open with, every one of our openings has the SAME minimax value --
+            // measured on 25 classic deals, the top four openings were exactly
+            // tied on 4 of the first 6, and taking the earliest index opened at
+            // level 1 in 13 of 25 (against Hard's 1 of 25). That is not the
+            // search capping an auction, it is the search having no opinion and
+            // the enumeration order answering for it.
+            //
+            // So Hard's price is the TIE-BREAK: among lines the opponent
+            // equalises, prefer the one that pays best if they do not. It is
+            // strictly the right order of authority -- the tree models a
+            // stronger opponent than the one across the table, and when the
+            // tree is indifferent its model is exactly what should stop mattering.
+            //
+            // WEIGHT. Both halves are sums of integer payoffs, so a genuine tree
+            // difference is at least 1 per worker; the price is bounded by a few
+            // thousand at any k the client asks for, so 1e-5 keeps the whole
+            // tie-break term two orders of magnitude below the smallest real
+            // difference, pool included. It can order ties and nothing else.
+            tree.iter().zip(&myopic).map(|(t, m)| t + 1e-5 * m).collect()
+        }
+        None => myopic,
+    };
+    *cache = Some((key, entry));
+    Ok((sums.iter().map(|x| x * sign).collect(), cached))
 }
 
 // ── HandEval, across workers ─────────────────────────────────────────────────
@@ -764,5 +982,103 @@ mod fixture_replay {
             "no void was inferred anywhere in the fixtures — the reader is not \
              reading history"
         );
+    }
+}
+
+#[cfg(test)]
+mod auction_legality {
+    // THE AUCTION'S LEGALITY, held to the engine's own answer.
+    //
+    // Everything the Expert tier's tree needs is shipped as DATA except this:
+    // the leaf prices come from `_terms_for` rows on the wire, but which edges
+    // exist at a node the search is standing on cannot be, because the server
+    // is not standing there. So `auc_search::legal_bids` mirrors
+    // `engine.auction_options`, and this is the only thing keeping them equal.
+    //
+    // The drift is silent by construction: a tree that believes one extra bid
+    // is legal prefers a line the room refuses, `_validated_bot_move` throws
+    // the answer away, and the decision falls through to the server bot — a
+    // room that says Expert and plays Normal, with nothing red anywhere.
+    //
+    // Regenerate with `games/dissonance/tools/gen_auction_fixtures.py`.
+    use super::*;
+    use crate::auc_search::{legal_bids, Bid};
+    use std::collections::BTreeSet;
+
+    fn rows() -> Vec<Value> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../games/dissonance/tests/fixtures/auction.jsonl"
+        );
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!("{path}: {e}\nRegenerate with:\n  PYTHONPATH=<repo root> python -m \
+                    games.dissonance.tools.gen_auction_fixtures > \
+                    games/dissonance/tests/fixtures/auction.jsonl")
+        });
+        text.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("fixture line is not JSON"))
+            .collect()
+    }
+
+    /// Comparable, sorted, and printable — the failure has to name the bid that
+    /// differs, not just the count.
+    fn as_set(bids: &[Bid]) -> BTreeSet<(u8, u8, u16)> {
+        bids.iter()
+            .map(|b| match *b {
+                Bid::Pass => (0, 0, 0),
+                Bid::Contract { level, denom } => (1, denom, level as u16),
+                Bid::Number { value } => (2, 0, value),
+            })
+            .collect()
+    }
+
+    fn wanted(row: &Value) -> BTreeSet<(u8, u8, u16)> {
+        row["legal"].as_array().unwrap().iter()
+            .map(|e| {
+                if e.get("pass").is_some() {
+                    (0, 0, 0)
+                } else if let Some(v) = e.get("value") {
+                    (2, 0, v.as_u64().unwrap() as u16)
+                } else {
+                    (1, e["denom"].as_u64().unwrap() as u8, e["level"].as_u64().unwrap() as u16)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_tree_offers_exactly_the_bids_the_engine_calls_legal() {
+        let all = rows();
+        assert!(all.len() > 100, "only {} auction nodes — regenerate", all.len());
+        let mut got = Vec::new();
+        for (i, row) in all.iter().enumerate() {
+            let rules = auc_rules_from_json(&row["rules"])
+                .unwrap_or_else(|| panic!("node {i}: the rules did not read back"));
+            let state = auc_state_from_json(&row["state"])
+                .unwrap_or_else(|| panic!("node {i}: the state did not read back"));
+            legal_bids(&state, &rules, &mut got);
+            assert_eq!(as_set(&got), wanted(row),
+                       "node {i} ({}): {state:?}", row["mode"]);
+        }
+    }
+
+    /// A fixture that stopped reaching the interesting states would pass the
+    /// test above while covering nothing. These are the shapes it exists for.
+    #[test]
+    fn the_fixture_still_reaches_the_states_worth_covering() {
+        let all = rows();
+        let count = |f: &dyn Fn(&Value) -> bool| all.iter().filter(|r| f(r)).count();
+        let classic = |r: &Value| r["mode"] == "classic";
+        assert!(count(&|r| classic(r) && r["state"]["level"].as_u64() == Some(0)) > 5,
+                "no classic opener — the only node where passing is illegal");
+        assert!(count(&|r| classic(r) && r["state"]["level"].as_u64().unwrap() >= 11) > 5,
+                "nothing at the ceiling — where the raise cap stops binding");
+        assert!(count(&|r| r["state"]["used"][0].as_u64().unwrap()
+                         | r["state"]["used"][1].as_u64().unwrap() != 0) > 40,
+                "no spent denominations — the per-seat no-repeat rule is uncovered");
+        assert!(count(&|r| r["mode"] == "skat") > 40, "skat's ladder is uncovered");
+        assert!(count(&|r| r["state"]["passes"].as_u64().unwrap() > 0) > 0,
+                "no skat node mid-pass-out — the one pass that is not a leaf");
     }
 }

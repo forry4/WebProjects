@@ -2167,8 +2167,8 @@ try {
 		await ctx.close();
 	}
 
-	// ── Dissonance's Hard tier, searched in the browser ─────────────────────────
-	// Hard is the only bot on this site whose CARD PLAY runs client-side, and the
+	// ── Dissonance's client-searched tiers, in the browser ──────────────────────
+	// Dissonance is the only game here whose CARD PLAY runs client-side, and the
 	// whole path is invisible to Python: a module Worker loads wasm-pack glue, the
 	// glue fetches a .wasm from /wasm/, the page announces `client_ai_ready`, and
 	// the server then ships one armed decision at a time. Every failure in that
@@ -2176,6 +2176,14 @@ try {
 	// a stale filename, a CSP, a worker that throws — so the room keeps playing
 	// and keeps saying Hard. That is precisely why it needs a played game rather
 	// than a mounted screen.
+	//
+	// IT DRIVES **EXPERT**, NOT HARD, AND THAT IS STRICTLY MORE COVERAGE FOR THE
+	// SAME MINUTES. Expert is Hard plus a minimax over the auction, riding on the
+	// same armed request and the same wasm export — so an Expert game exercises
+	// every step Hard does AND the auction search on top. Hard's own difference
+	// is the ABSENCE of the `auction.search` block, which is a Python assertion
+	// (`test_expert.py`) and needs no browser. Playing both here would double the
+	// most expensive block in the gate to re-check the cheap half.
 	async function dissonanceHard(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
@@ -2238,13 +2246,13 @@ try {
 		await page.getByRole("button", { name: /new game|create/i }).first()
 			.click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
-		for (const label of [/^VS AI$/, /^Hard$/, /^Classic$/]) {
+		for (const label of [/^VS AI$/, /^Expert$/, /^Classic$/]) {
 			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
 				.click({ timeout: 10_000 }).catch(() => {});
 		}
 		const picked = await page.evaluate(() =>
 			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
-		check("Hard is offered in the create modal", picked.includes("Hard"), JSON.stringify(picked));
+		check("Expert is offered in the create modal", picked.includes("Expert"), JSON.stringify(picked));
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
@@ -2316,6 +2324,16 @@ try {
 		// which is a different fix from the socket never being armed.
 		check("...and the searches really ran in the browser", searches.length >= armed - 1,
 			`${searches.length} logged of ${armed} armed: ${JSON.stringify(searches.slice(0, 2))}`);
+		// THE AUCTION SPECIFICALLY. Card decisions and auction decisions come back
+		// on the same socket action, so a tier whose auction search failed and
+		// whose card search worked answers most of the game and reads green here.
+		// That is the exact shape of the Grand outage: `options_from_json` rejected
+		// denomination 6, every skat auction answered nothing, and the room played
+		// out on the server bot still labelled Hard. Auction answers log an option
+		// count; card answers log a card.
+		check("...including the auction, which is the Expert tier's whole difference",
+			searches.some((s) => /options in/.test(s)),
+			`no auction answer among ${searches.length}: ${JSON.stringify(searches.slice(0, 3))}`);
 		check("no page errors driving the client-side search",
 			!errors.some((e) => !e.startsWith("[info]")), errors.slice(0, 3).join(" | ").slice(0, 300));
 		await ctx.close();
