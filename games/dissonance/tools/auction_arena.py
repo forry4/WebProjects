@@ -204,7 +204,9 @@ def play(m, tier_of, qual, events):
                         kind = "passed"
                     events.append(("decision", tier, kind))
                     if opening and mv.get("kind") == "bid":
-                        events.append(("open", tier, mv.get("level") or mv.get("value")))
+                        events.append(("open", tier,
+                                       mv.get("level") or mv.get("value"),
+                                       mv.get("denom", -1)))
                 elif phase_now == "double" and mv.get("kind") == "double":
                     events.append(("double", tier, bool(mv.get("on"))))
             # THE CONTROL VARIATE, captured for free. The opening node is asked
@@ -258,9 +260,15 @@ def play(m, tier_of, qual, events):
         # optimum went through Null.
         nonull = solve({k: v for k, v in terms.items() if k != "null"})
         outcome = "null" if payoff > nonull else ("made" if nonull > 0 else "set")
+        # The whole trajectory: what was opened, by whom, where it settled, who
+        # took it there. `log[0]` is the opening bid; the opener may not pass in
+        # classic, so it is always a bid entry.
+        first = g["auction"]["log"][0] if g["auction"].get("log") else {}
         events.append(("settled", tier_of[decl],
                        g["auction"]["level"] or g["auction"]["value"],
-                       outcome, bool(g.get("doubled"))))
+                       outcome, bool(g.get("doubled")),
+                       first.get("level") or first.get("value") or 0,
+                       tier_of.get(first.get("seat"), "?")))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)
@@ -282,7 +290,12 @@ qual = {}
 dropped = 0
 stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
              "doubles": collections.Counter(), "declared": collections.Counter(),
-             "outcome": collections.Counter()} for t in {TIER_A, TIER_B}}
+             "outcome": collections.Counter(), "open_denom": collections.Counter(),
+             "traject": collections.Counter()} for t in {TIER_A, TIER_B}}
+#: deal -> {tier: opening level}. The CRN pairing puts BOTH tiers on the same
+#: opener hand (same seat, same deal, flips swap only which tier sits there),
+#: so this is a same-hand joint distribution of the two policies' openings.
+joint = {}
 for m in range(LO, HI):
     got = []
     for flip in (0, 1):
@@ -291,11 +304,14 @@ for m in range(LO, HI):
         out = play(m, tier_of, qual, events)
         if out is None:
             continue
+        opened_this_flip = None
         for e in events:
             if e[0] == "decision":
                 stats[e[1]]["decisions"][e[2]] += 1
             elif e[0] == "open":
                 stats[e[1]]["opens"][e[2]] += 1
+                stats[e[1]]["open_denom"][f"{e[2]}:{e[3]}"] += 1
+                opened_this_flip = (e[1], e[2])
             elif e[0] == "double":
                 stats[e[1]]["doubles"]["on" if e[2] else "off"] += 1
             elif e[0] == "settled":
@@ -303,6 +319,14 @@ for m in range(LO, HI):
                 stats[e[1]]["outcome"][f"{e[2]}:{e[3]}"] += 1
                 if e[4]:
                     stats[e[1]]["doubles"]["suffered"] += 1
+                # The TRAJECTORY, attributed to the OPENER's tier: opened at
+                # e[5], settled at e[2], and whether the opener kept it. This is
+                # the open->settled matrix -- the only way to tell "a level is
+                # rare because nobody opens there" from "it never survives".
+                if len(e) > 6 and e[6] in stats:
+                    stats[e[6]]["traject"][f"{e[5]}>{e[2]}:{'kept' if e[6] == e[1] else 'lost'}:{e[3]}"] += 1
+        if opened_this_flip is not None:
+            joint.setdefault(m, {})[opened_this_flip[0]] = opened_this_flip[1]
         margin, decl, fp = out
         # Signed for tier A's seat this flip.
         row = margin if decl == flip else -margin
@@ -345,6 +369,9 @@ if len(pairs) > 3 and statistics.pstdev(qof) > 0:
 print("SHARD " + json.dumps({"pairs": pairs, "diff_pairs": diff_pairs, "qof": qof,
                              "dropped": dropped,
                              "stats": {t: {k: dict(v) for k, v in d.items()}
-                                       for t, d in stats.items()}}))
+                                       for t, d in stats.items()},
+                             "joint": [[v.get(TIER_A), v.get(TIER_B)]
+                                       for v in joint.values()
+                                       if TIER_A in v and TIER_B in v]}))
 for p in PROC.values():
     p.stdin.close()
