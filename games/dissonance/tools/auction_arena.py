@@ -157,7 +157,7 @@ def ask(g, seat, tier):
     return mv, sums, opts
 
 
-def play(m, tier_of, qual):
+def play(m, tier_of, qual, events):
     """One round: the auction by the tiers, the talon by the server bot, the
     resolution per `RESOLVE`.
 
@@ -166,6 +166,21 @@ def play(m, tier_of, qual):
     downstream of those is deterministic (the server bot's swap included), so
     two flips with equal fingerprints had IDENTICAL rounds and their pair is
     exactly zero by construction.
+
+    `events` collects HOW each tier bid, attributed to the tier that made the
+    decision -- the strength number says who won, these say what they did:
+
+    * per auction decision, the corrected sacrifice taxonomy (a chosen bid is a
+      SACRIFICE only when a pass was on offer and the search still priced the
+      bid negative -- a forced classic opening is not a choice, and on a bad
+      hand every option prices negative, where taking the least-bad is simply
+      correct play);
+    * the OPENING level, per tier;
+    * the Double answer, per tier;
+    * per settled round, the level, the declaring tier, the doubled flag, and
+      the OUTCOME under exact play -- classified by resolving the contract
+      twice, with and without the Null consolation: made iff the null-less
+      value is positive, Null iff the consolation strictly improved on it.
     """
     g = E.new_game(["a", "b"], random.Random(600000 + m), opener=m % 2, mode=MODE)
     guard = 0
@@ -174,7 +189,24 @@ def play(m, tier_of, qual):
         seat = E.turn_seat(g)
         mv = None
         if g["phase"] in ("auction", "declare", "kontra", "re", "double"):
+            phase_now = g["phase"]
+            opening = phase_now == "auction" and not g["auction"]["log"]
             mv, sums, opts = ask(g, seat, tier_of[seat])
+            if mv is not None and sums is not None:
+                tier = tier_of[seat]
+                if phase_now == "auction":
+                    best = max(range(len(sums)), key=lambda j: sums[j])
+                    has_pass = any(o["move"]["kind"] == "pass" for o in opts)
+                    if mv.get("kind") == "bid":
+                        kind = ("forced_open" if not has_pass
+                                else "sacrifice" if sums[best] < 0 else "bid_positive")
+                    else:
+                        kind = "passed"
+                    events.append(("decision", tier, kind))
+                    if opening and mv.get("kind") == "bid":
+                        events.append(("open", tier, mv.get("level") or mv.get("value")))
+                elif phase_now == "double" and mv.get("kind") == "double":
+                    events.append(("double", tier, bool(mv.get("on"))))
             # THE CONTROL VARIATE, captured for free. The opening node is asked
             # of Hard in exactly one of a deal's two flips (the tiers swap
             # seats), and its myopic best bid price IS the hand-quality
@@ -205,17 +237,31 @@ def play(m, tier_of, qual):
     terms = E.payoff_terms(g)
     decl = terms["declarer"]
     if RESOLVE == "dd":
-        req = {"resolve": {"hands": [list(h) for h in g["hands"]],
-                           "piles": [[list(x) for x in row] for row in g["piles"]],
-                           "trump": g["auction"]["denom"], "leader": decl,
-                           "terms": terms}}
+        deal = {"hands": [list(h) for h in g["hands"]],
+                "piles": [[list(x) for x in row] for row in g["piles"]],
+                "trump": g["auction"]["denom"], "leader": decl}
         p = proc_for("resolver", k=1)
-        p.stdin.write(json.dumps(req) + "\n")
-        p.stdin.flush()
-        r = json.loads(p.stdout.readline())
-        if "payoff" not in r:
-            raise SystemExit(f"deal {m}: unresolvable ({r})")   # harness bug, be loud
-        return r["payoff"], decl, fp
+
+        def solve(t):
+            p.stdin.write(json.dumps({"resolve": {**deal, "terms": t}}) + "\n")
+            p.stdin.flush()
+            r = json.loads(p.stdout.readline())
+            if "payoff" not in r:
+                raise SystemExit(f"deal {m}: unresolvable ({r})")   # harness bug, be loud
+            return r["payoff"]
+
+        payoff = solve(terms)
+        # The OUTCOME, from a second solve with the consolation off the table.
+        # `contract_from_json` reads a missing `null` as None, so this is the
+        # pure contract value: positive means MADE under exact play (every make
+        # pays at least its base), and the full solve beating it means the
+        # optimum went through Null.
+        nonull = solve({k: v for k, v in terms.items() if k != "null"})
+        outcome = "null" if payoff > nonull else ("made" if nonull > 0 else "set")
+        events.append(("settled", tier_of[decl],
+                       g["auction"]["level"] or g["auction"]["value"],
+                       outcome, bool(g.get("doubled"))))
+        return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)
         E.apply_play(g, s, B.choose_card(g, s))
@@ -234,13 +280,29 @@ diff_pairs = []       # ...the subset where the two arms' auctions differed
 qof = []              # quality covariate, aligned with `pairs`
 qual = {}
 dropped = 0
+stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
+             "doubles": collections.Counter(), "declared": collections.Counter(),
+             "outcome": collections.Counter()} for t in {TIER_A, TIER_B}}
 for m in range(LO, HI):
     got = []
     for flip in (0, 1):
         tier_of = {flip: TIER_A, 1 - flip: TIER_B}
-        out = play(m, tier_of, qual)
+        events = []
+        out = play(m, tier_of, qual, events)
         if out is None:
             continue
+        for e in events:
+            if e[0] == "decision":
+                stats[e[1]]["decisions"][e[2]] += 1
+            elif e[0] == "open":
+                stats[e[1]]["opens"][e[2]] += 1
+            elif e[0] == "double":
+                stats[e[1]]["doubles"]["on" if e[2] else "off"] += 1
+            elif e[0] == "settled":
+                stats[e[1]]["declared"][e[2]] += 1
+                stats[e[1]]["outcome"][f"{e[2]}:{e[3]}"] += 1
+                if e[4]:
+                    stats[e[1]]["doubles"]["suffered"] += 1
         margin, decl, fp = out
         # Signed for tier A's seat this flip.
         row = margin if decl == flip else -margin
@@ -281,6 +343,8 @@ if len(pairs) > 3 and statistics.pstdev(qof) > 0:
     print(f"  quality-adjusted:   {amu:+.4f} +- {ase:.4f}  "
           f"(beta {beta:+.3f}, se {'-' if ase < se else '+'}{abs(1 - ase / max(se, 1e-9)):.0%})")
 print("SHARD " + json.dumps({"pairs": pairs, "diff_pairs": diff_pairs, "qof": qof,
-                             "dropped": dropped}))
+                             "dropped": dropped,
+                             "stats": {t: {k: dict(v) for k, v in d.items()}
+                                       for t, d in stats.items()}}))
 for p in PROC.values():
     p.stdin.close()
