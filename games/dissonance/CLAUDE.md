@@ -1269,18 +1269,31 @@ same tricks pays `16 + over`. **Hard does this zero times in 320 deals.**
    up at every level.
 4. **Ties** — the acute form of (1), already found and patched; see below.
 
-**WHAT IT DOES NOT MODEL: THE TALON.** `bid::solve_world` builds its `State`
-from the deal AS DEALT. The LEAD is modelled explicitly (the declarer leads,
-worth ~0.93), but the SWAP is not — the declarer's hand carries no talon card,
-so winning the auction is priced without the thing winning it buys. That biases
-both tiers toward conceding, and Expert compounds it at every node.
-- **This blind spot is now OPEN (2026-08-08).** It used to cost nothing because
-  the swap itself was worthless (the old policy measured −0.477 ± 0.226 score
-  against standing pat); the fitted replacement is **+1.500 ± 0.208** against
-  pat, so winning a classic auction now buys ~+1.5 the search cannot see.
-  Valuing the swap inside `solve_world` (apply the chooser to each determinized
-  world's talon before solving, both sides) is the queued fix — measure it, on
-  the arena, before believing it.
+**THE TALON IS IN THE LEAF NOW (2026-08-09), and it measured exactly what the
+theory said it should.** `bid::solve_world` used to build its `State` from the
+deal AS DEALT — the lead modelled explicitly (~0.93), the swap not at all — so
+once the swap fix made a classic swap worth **+1.500 ± 0.208**, every
+declarable contract was under-priced by about that much, a one-directional
+lean toward conceding. Now each determinized world samples 3 of its 6
+out-cards as that world's talon (stored with the deal in `Solved.shown`, never
+re-drawn — the cache fills denominations incrementally and a moving talon
+would put between-denomination noise right back), and whoever declares gets
+the fitted chooser's exchange applied as one hand edit before the solve, per
+denomination, both sides of the pass.
+- **Measured: talon model on-vs-off is +1.54 ± 0.51, CI [+0.54, +2.54]** (600
+  paired deals, dd-resolved, deployed shapes) — the campaign's second result
+  to exclude zero, and the size matches the swap's own value almost exactly.
+- **The weights cross the wire** (`bot.swap_policy_terms` → `auction.swap` on
+  every classic auction request, both tiers → `bid::SwapPolicy`), so a re-fit
+  server-side moves the leaf with no Rust change. Only the FEATURE arithmetic
+  lives twice, and `tests/fixtures/swap_policy.jsonl` (476 decisions, both
+  branches engineered to appear) holds the two copies to one answer.
+  Optional on the wire: an older wasm ignores it and prices the deal as dealt.
+- **A harness lesson found on the way:** bidserve's one-slot `Solved` cache is
+  evicted by cross-phase asks (a double ask keys differently), which is
+  harmless in serving but broke the arena's mirror when a deal is replayed —
+  the second flip re-solved fresh worlds. The arena now routes non-auction
+  asks to their own process; mirrors read exactly 0.0000 again.
 
 ## The classic swap policy is FITTED, and the old one was backwards (2026-08-08)
 

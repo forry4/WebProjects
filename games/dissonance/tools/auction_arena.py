@@ -119,14 +119,29 @@ def ask(g, seat, tier):
             # injects the optional wire field the server does not send yet, so
             # the two models can be arena'd against each other before either
             # becomes the shipped default.
-            if tier == "expertm":
+            if "m" in tier[len("expert"):]:
                 s["rules"]["opp_model"] = "myopic"
             auc["search"] = s
+    # A trailing `t` on either tier name adds the TALON MODEL -- the fitted
+    # swap weights the server ships on classic auction requests -- so the
+    # model can be measured against its own absence before it is the default.
+    if tier.endswith("t") and g["phase"] == "auction" and E.mode_of(g) == "classic":
+        auc["swap"] = B.swap_policy_terms()
     per_k, nproc = _kspec(K_A if tier == TIER_A else K_B)
     req = json.dumps({"view": E.view_for(g, seat), "auction": auc}) + "\n"
     sums = None
+    # NON-AUCTION asks (double / kontra / declare) go to a SEPARATE process.
+    # bidserve's Solved cache is one slot; a double ask keys differently (other
+    # declarer, no swap field) and EVICTS the auction entry -- harmless in
+    # serving, where the auction is over before the double arrives, but this
+    # harness replays the same deal twice, and the second flip's auction then
+    # re-solved fresh worlds off an advanced seed. With the talon model's extra
+    # per-world variance that flipped the odd argmax and broke the mirror
+    # (hardt-hardt read -1.67 where hard-hard read exactly 0). Splitting the
+    # channels restores flip determinism and changes no measured answer.
+    chan = "auc" if g["phase"] == "auction" else "aux"
     for i in range(nproc):
-        p = proc_for((tier, seat, i), k=per_k, seed=i * 7919)
+        p = proc_for((chan, tier, seat, i), k=per_k, seed=i * 7919)
         p.stdin.write(req)
         p.stdin.flush()
         res = json.loads(p.stdout.readline())

@@ -332,6 +332,36 @@ pub fn deal_from_json(v: &Value) -> Option<State> {
     Some(s)
 }
 
+/// The classic talon-swap policy, as fitted weights off the armed request.
+///
+/// All-or-nothing: a row missing one weight is a malformed policy, and pricing
+/// with half a policy would be a quiet third behaviour nobody measured. Absent
+/// entirely (`None`) means "price the deal as dealt", the pre-2026-08-08 rule
+/// and the correct reading for a skat room or an older server.
+pub fn swap_from_json(v: &Value) -> Option<crate::bid::SwapPolicy> {
+    let arr8 = |k: &str| -> Option<[f64; 8]> {
+        let a = v.get(k)?.as_array()?;
+        let mut out = [0.0; 8];
+        if a.len() != 8 {
+            return None;
+        }
+        for (i, x) in a.iter().enumerate() {
+            out[i] = x.as_f64()?;
+        }
+        Some(out)
+    };
+    let n = |k: &str| v.get(k).and_then(|x| x.as_f64());
+    Some(crate::bid::SwapPolicy {
+        take_w: arr8("take_w")?,
+        give_w: arr8("give_w")?,
+        take_trump: n("take_trump")?,
+        give_trump: n("give_trump")?,
+        void: n("void")?,
+        singleton: n("singleton")?,
+        length: n("length")?,
+    })
+}
+
 // ── the Expert tier's auction search ─────────────────────────────────────────
 
 /// Which tree edge each option in the server's list stands for.
@@ -515,7 +545,13 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
         Some((_, _, terms, _)) => (terms.denoms_mask(), terms.denoms_mask()),
         None => crate::bid::wanted_denoms(&opts),
     };
-    let key = crate::bid::hand_key(&view, declarer, k.max(1));
+    // The talon model rides on the auction request as fitted weights; see
+    // `bid::SwapPolicy`. It is part of the CACHE IDENTITY -- worlds solved
+    // with the swap applied answer a different question than worlds solved
+    // as dealt, and the contract-table bug was this exact shape.
+    let swap = auc.get("swap").and_then(swap_from_json);
+    let key = crate::bid::hand_key(&view, declarer, k.max(1))
+        ^ swap.as_ref().map_or(0, |sp| sp.key());
     // A different hand starts a new entry; the same hand extends the one it
     // has, and asking about nothing new does no work at all.
     let mut entry = match cache.take() {
@@ -524,7 +560,8 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
     };
     let cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
     if !cached {
-        crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer, &mut entry);
+        crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer,
+                               &mut entry, swap.as_ref());
     }
     let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp);
     let sums = match &expert {
@@ -1145,5 +1182,65 @@ mod auction_legality {
         assert!(count(&|r| r["mode"] == "skat") > 40, "skat's ladder is uncovered");
         assert!(count(&|r| r["state"]["passes"].as_u64().unwrap() > 0) > 0,
                 "no skat node mid-pass-out — the one pass that is not a leaf");
+    }
+}
+
+#[cfg(test)]
+mod swap_policy_parity {
+    // THE SWAP-POLICY ARITHMETIC, held to Python's answer. The WEIGHTS cross
+    // the wire so they live once (`bot.swap_policy_terms`), but the FEATURES
+    // -- trumpness, void, singleton, take-suit length, the tie-break -- are
+    // arithmetic implemented in both `bot.choose_swap` and
+    // `bid::SwapPolicy::choose`. Two implementations of one function drift
+    // silently, and a drifted leaf model prices every auction against a talon
+    // nobody would actually take.
+    //
+    // The fixture's first line carries the weights, so this test builds its
+    // policy FROM the fixture and never grows a third copy of the constants.
+    //
+    // Regenerate with `games/dissonance/tools/gen_swap_fixtures.py`.
+    use super::*;
+
+    fn lines() -> Vec<Value> {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../games/dissonance/tests/fixtures/swap_policy.jsonl"
+        );
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!("{path}: {e}\nRegenerate with:\n  PYTHONPATH=<repo root> python -m \
+                    games.dissonance.tools.gen_swap_fixtures > \
+                    games/dissonance/tests/fixtures/swap_policy.jsonl")
+        });
+        text.lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l).expect("fixture line is not JSON"))
+            .collect()
+    }
+
+    #[test]
+    fn the_leaf_swaps_exactly_the_card_the_server_bot_would() {
+        let all = lines();
+        let policy = swap_from_json(&all[0]["policy"])
+            .expect("the fixture's own policy header did not read back");
+        assert!(all.len() > 300, "only {} rows — regenerate", all.len() - 1);
+        let (mut swaps, mut pats) = (0, 0);
+        for (i, row) in all[1..].iter().enumerate() {
+            let hand = mask_of(&row["hand"]);
+            let shown = mask_of(&row["shown"]);
+            let denom = row["denom"].as_u64().unwrap() as u8;
+            let got = policy.choose(hand, shown, denom);
+            let want = match (row["take"].as_u64(), row["give"].as_u64()) {
+                (Some(t), Some(g)) => Some((t as u8, g as u8)),
+                _ => None,
+            };
+            assert_eq!(got, want, "row {i}: hand {hand:#x} shown {shown:#x} denom {denom}");
+            match want {
+                Some(_) => swaps += 1,
+                None => pats += 1,
+            }
+        }
+        // Both BRANCHES, or the assertion above is half a test: random talons
+        // essentially never produce a pat, so the generator engineers them.
+        assert!(swaps > 300 && pats >= 10, "{swaps} swaps / {pats} pats");
     }
 }

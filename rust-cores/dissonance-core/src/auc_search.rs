@@ -596,7 +596,8 @@ mod tests {
             w.pts[d] = pts;
             w.opp_pts[d] = opp;
         }
-        Solved { deals: Vec::new(), covered: 0x7f, covered_opp: 0x7f, worlds: vec![w] }
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f,
+                 worlds: vec![w] }
     }
 
     fn classic_terms() -> TermsTable {

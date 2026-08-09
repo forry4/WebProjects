@@ -316,6 +316,22 @@ _SWAP_SINGLETON = 0.67
 _SWAP_LENGTH = 1.24
 
 
+def swap_policy_terms() -> dict:
+    """The fitted classic swap weights, AS DATA for the armed auction request.
+
+    The Hard/Expert auction leaf models the talon (`bid::SwapPolicy` in the
+    Rust core): each determinized world gives the prospective declarer its best
+    exchange from that world's sampled talon before solving. The weights cross
+    the wire from here so a re-fit moves the leaf with no Rust change and no
+    wasm rebuild; only the feature arithmetic lives twice, and
+    `tests/fixtures/swap_policy.jsonl` holds the two copies to one answer.
+    """
+    return {"take_w": list(_SWAP_TAKE_W), "give_w": list(_SWAP_GIVE_W),
+            "take_trump": _SWAP_TAKE_TRUMP, "give_trump": _SWAP_GIVE_TRUMP,
+            "void": _SWAP_VOID, "singleton": _SWAP_SINGLETON,
+            "length": _SWAP_LENGTH}
+
+
 def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
     """Pick the talon exchange, or stand pat.
 

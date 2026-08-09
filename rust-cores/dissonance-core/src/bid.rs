@@ -29,7 +29,7 @@
 //! and "can I duck in THIS trump" is a per-denomination question, where the old
 //! Null was always played at no trump.
 
-use crate::cards::{DENOMS, NDENOM_SLOTS};
+use crate::cards::{esuit, rank, Mask, DENOMS, NDENOM_SLOTS};
 use crate::dd::Dd;
 use crate::rng::Rng;
 use crate::state::{State, POOL};
@@ -92,6 +92,105 @@ impl Option_ {
     }
 }
 
+/// The classic talon swap, as DATA from the server (2026-08-08).
+///
+/// WHY THE LEAF MODELS THE TALON AT ALL. `solve_world` used to solve the deal
+/// AS DEALT, so winning an auction was priced without the thing winning it
+/// buys. That was harmless while the server's swap policy was worth -0.48
+/// against standing pat; the fitted replacement is worth **+1.500 +- 0.208**,
+/// so a leaf that ignores it now under-prices every contract we could declare
+/// by about a point and a half -- a one-directional bias toward CONCEDING, on
+/// top of the tree's other documented leans the same way.
+///
+/// THE WEIGHTS CROSS THE WIRE; only the feature arithmetic lives here. They
+/// are `bot.py`'s fitted constants (`_SWAP_TAKE_W` et al.), shipped on the
+/// armed request, so re-fitting the policy server-side moves this leaf with no
+/// Rust change and no wasm rebuild -- the same discipline as `payoff_terms`.
+/// `tests/fixtures/swap_policy.jsonl` holds the two implementations of the
+/// arithmetic to one answer.
+///
+/// Absent from the request (an old server, a skat room, a non-auction phase)
+/// the leaf prices the deal as dealt, exactly as before.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SwapPolicy {
+    pub take_w: [f64; 8],
+    pub give_w: [f64; 8],
+    pub take_trump: f64,
+    pub give_trump: f64,
+    pub void: f64,
+    pub singleton: f64,
+    pub length: f64,
+}
+
+impl SwapPolicy {
+    /// The exchange `bot.choose_swap`'s classic branch would make, or None to
+    /// stand pat. Iteration is ascending card id on both axes with a strict
+    /// `>`, which is the Python branch's own tie-break once `shown` is read in
+    /// sorted order; f64 throughout so equal inputs give equal sums.
+    pub fn choose(&self, hand: Mask, shown: Mask, trump: u8) -> Option<(u8, u8)> {
+        let tc = crate::cards::trump_class(trump);
+        let mut best: Option<(u8, u8)> = None;
+        let mut best_score = 0.0f64;
+        let mut sm = shown;
+        while sm != 0 {
+            let t = sm.trailing_zeros() as u8;
+            sm &= sm - 1;
+            let mut hm = hand;
+            while hm != 0 {
+                let h = hm.trailing_zeros() as u8;
+                hm &= hm - 1;
+                let mut sc = self.take_w[rank(t) as usize] + self.give_w[rank(h) as usize];
+                if esuit(t, trump) == tc {
+                    sc += self.take_trump;
+                }
+                if esuit(h, trump) == tc {
+                    sc += self.give_trump;
+                }
+                let (mut give_suit, mut take_suit) = (0u32, 0u32);
+                let mut m = hand;
+                while m != 0 {
+                    let c = m.trailing_zeros() as u8;
+                    m &= m - 1;
+                    let e = esuit(c, trump);
+                    give_suit += (e == esuit(h, trump)) as u32;
+                    take_suit += (e == esuit(t, trump)) as u32;
+                }
+                if give_suit == 1 {
+                    sc += self.void;
+                } else if give_suit == 2 {
+                    sc += self.singleton;
+                }
+                sc += self.length * take_suit as f64 / 7.0;
+                if sc > best_score {
+                    best_score = sc;
+                    best = Some((t, h));
+                }
+            }
+        }
+        best
+    }
+
+    /// Cache identity: an entry solved under one policy must never answer for
+    /// another (or for none). The contract-table bug was this exact shape.
+    pub fn key(&self) -> u64 {
+        let mut h: u64 = 0x51A9_0000_0001;
+        let mut mix = |x: f64| {
+            h ^= x.to_bits();
+            h = h.wrapping_mul(0x1000_0000_01b3);
+        };
+        for w in self.take_w {
+            mix(w);
+        }
+        for w in self.give_w {
+            mix(w);
+        }
+        for w in [self.take_trump, self.give_trump, self.void, self.singleton, self.length] {
+            mix(w);
+        }
+        h
+    }
+}
+
 /// What one sampled deal says about a seat's hand, per denomination.
 #[derive(Clone, Copy, Default)]
 pub struct World {
@@ -118,6 +217,12 @@ pub struct World {
 pub struct Solved {
     /// The determinizations, kept so a missing denomination can be filled in.
     pub deals: Vec<State>,
+    /// Three of each deal's six out-cards, sampled once as that world's talon
+    /// SHOWN set. Sampled WITH the deal and stored, never re-drawn: the cache
+    /// fills denominations incrementally, and a shown set that moved between
+    /// fills would price denominations against different talons -- the exact
+    /// between-denomination noise the `covered` mask exists to prevent.
+    pub shown: Vec<Mask>,
     /// Bit d set once every deal has been solved in denomination d.
     pub covered: u8,
     /// ...and the same for the OPPONENT-declaring solves a pass needs. Kept
@@ -133,7 +238,7 @@ pub struct Solved {
 /// fixed its trump asks about one, and paying for the other four would be four
 /// full 13-trick solves thrown away.
 fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut World,
-               for_opponent: bool) {
+               for_opponent: bool, shown: Mask, swap: Option<&SwapPolicy>) {
     // MTD(f) converges by a ladder of null-window probes, so each denomination
     // seeds the next: the same hand is worth a similar amount in hearts and in
     // spades, and the first full solve pays for the other four.
@@ -144,7 +249,7 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
         }
         // The declarer leads, which is the shipped rule and worth ~0.93 points
         // — evaluating from the wrong lead misprices every hand the same way.
-        let s = State {
+        let mut s = State {
             trump: d,
             trick: 0,
             led: -1,
@@ -153,6 +258,15 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
             escored: 0,
             ..*base
         };
+        // THE TALON. Whoever declares gets shown three out-cards and may swap
+        // one in; the policy is denomination-aware, so the edit is per trump.
+        // The give card goes to the out set, which the State represents only
+        // by absence -- so the whole swap is one hand edit.
+        if let Some(sp) = swap {
+            if let Some((take, give)) = sp.choose(s.hand[declarer], shown, d) {
+                s.hand[declarer] = (s.hand[declarer] & !(1 << give)) | (1 << take);
+            }
+        }
         let raw = dd.solve_from(&s, guess);
         guess = raw;
         let diff = raw as i32;
@@ -208,13 +322,46 @@ pub fn wanted_denoms(opts: &[Option_]) -> (u8, u8) {
 /// against what has been solved, not part of its identity: a subset is a hit,
 /// and a superset solves only the difference, on the same deals.
 pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
-                  wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved) {
+                  wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved,
+                  swap: Option<&SwapPolicy>) {
     let k = k.max(1);
     if cache.deals.len() != k {
         // A different world count is a different sample: start over rather than
         // mixing two of them.
         let mut buf: Vec<u8> = Vec::with_capacity(16);
         cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
+        // The world's out-cards are whatever the determinizer did not place;
+        // three of them are that world's talon. Sampled here, kept for the
+        // entry's whole life (see the field's doc).
+        cache.shown = cache.deals.iter().map(|d| {
+            let mut placed: Mask = d.hand[0] | d.hand[1];
+            for q in 0..2 {
+                for i in 0..3 {
+                    let p = &d.pile[q][i];
+                    for j in 0..p.n as usize {
+                        placed |= 1 << p.c[j];
+                    }
+                }
+            }
+            let mut out = crate::cards::ALL & !placed;
+            let mut shown: Mask = 0;
+            for _ in 0..3 {
+                if out == 0 {
+                    break;
+                }
+                let n = out.count_ones();
+                let mut pick = rng.below(n as usize) as u32;
+                let mut o = out;
+                while pick > 0 {
+                    o &= o - 1;
+                    pick -= 1;
+                }
+                let c = o.trailing_zeros();
+                shown |= 1 << c;
+                out &= !(1 << c);
+            }
+            shown
+        }).collect();
         cache.worlds = vec![World::default(); k];
         cache.covered = 0;
         cache.covered_opp = 0;
@@ -224,14 +371,17 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     if todo == 0 && todo_opp == 0 {
         return;
     }
-    for (deal, w) in cache.deals.iter().zip(cache.worlds.iter_mut()) {
+    for ((deal, w), &shown) in cache.deals.iter().zip(cache.worlds.iter_mut())
+        .zip(cache.shown.iter())
+    {
         if todo != 0 {
-            solve_world(dd, deal, declarer, todo, w, false);
+            solve_world(dd, deal, declarer, todo, w, false, shown, swap);
         }
         if todo_opp != 0 {
             // The other seat declaring, which is a DIFFERENT position and not a
-            // sign flip: the declarer leads to trick 1.
-            solve_world(dd, deal, 1 - declarer, todo_opp, w, true);
+            // sign flip: the declarer leads to trick 1. The SAME shown set:
+            // `shown_at_deal` is fixed before the auction, whoever wins it.
+            solve_world(dd, deal, 1 - declarer, todo_opp, w, true, shown, swap);
         }
     }
     cache.covered |= todo;
@@ -304,7 +454,7 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     }
     let (wanted, wanted_opp) = wanted_denoms(opts);
     let mut cache = Solved::default();
-    solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache);
+    solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache, None);
     price(opts, &cache.worlds, cache.covered, cache.covered_opp)
 }
 
@@ -379,14 +529,14 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, 0, &mut cache, None);
         assert_eq!(cache.covered, 0b11111);
         let after_open = dd.nodes;
         let pts = cache.worlds[0].pts;
 
         // The auction narrows, exactly as `auction_payoff_options` does.
         for wanted in [0b11111u8, 0b11110, 0b11100, 0b11000] {
-            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, 0, &mut cache);
+            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, 0, &mut cache, None);
         }
         assert_eq!(dd.nodes, after_open, "a subset must not search a single node");
         assert_eq!(cache.worlds[0].pts, pts, "...nor disturb what was solved");
@@ -399,11 +549,11 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, 0, &mut cache, None);
         let first = cache.worlds[0].pts[0];
         let deals = cache.deals.clone();
 
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, 0, &mut cache, None);
         assert_eq!(cache.covered, 0b00011);
         // The new denomination is solved on the SAME deals, so the two are
         // comparable — a fresh sample would make the choice between them noise.
@@ -435,7 +585,7 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(31), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00100, 0b00100, 0, &mut cache);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00100, 0b00100, 0, &mut cache, None);
         assert_eq!(cache.covered, 0b00100);
         assert_eq!(cache.covered_opp, 0b00100);
 

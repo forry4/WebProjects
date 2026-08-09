@@ -623,6 +623,14 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                          if g["phase"] == "auction"
                          and engine.auction_options(g)["may_pass"] else None),
             }
+            # THE TALON MODEL (classic auctions only). The fitted swap weights
+            # ride along so the leaf can give each determinized world's
+            # prospective declarer its best exchange before solving -- without
+            # this, winning an auction is priced without the ~+1.5 the swap is
+            # now worth, a one-directional lean toward conceding. Optional on
+            # the wire; an older wasm ignores it and prices the deal as dealt.
+            if g["phase"] == "auction" and engine.mode_of(g) == "classic":
+                room["_ai_search"]["auction"]["swap"] = bot.swap_policy_terms()
             # EXPERT: the same options, valued by a tree instead of a price.
             # Optional on the wire and ignored by any wasm that predates it, so
             # the cached-bundle window degrades to Hard rather than to nothing.

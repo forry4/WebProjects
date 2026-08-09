@@ -270,6 +270,14 @@ def test_only_an_expert_room_gets_the_search_block(monkeypatch):
         loop.run_until_complete(asyncio.sleep(0))
         auc = room["_ai_search"]["auction"]
         assert ("search" in auc) is want, f"{tier} carried search={'search' in auc}"
+        # The TALON MODEL rides on every classic auction request, Hard's and
+        # Expert's alike -- the leaf that prices contracts is shared, and
+        # without the swap weights it under-prices every declarable contract
+        # by the ~+1.5 the swap is worth (measured: talon model on-vs-off is
+        # +1.54 +- 0.51). The weights must be bot.py's own, or a re-fit there
+        # would strand the leaf on stale numbers.
+        from games.dissonance import bot as B
+        assert auc.get("swap") == B.swap_policy_terms(), tier
         # ...and the WORLD BUDGET rides with the tier: 8 for Expert's auction
         # (the measured lever -- see CLIENT_AI_AUCTION_WORLDS_EXPERT), 3 for
         # Hard's. A tier that got the search block but Hard's budget would be
