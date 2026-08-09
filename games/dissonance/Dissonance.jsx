@@ -193,7 +193,7 @@ function Card({ c, onClick, sel, small, ghost }) {
         <span className="dis-r">{RANKS[rankOf(c)]}</span>
         <span className="dis-s">{SUIT_GLYPH[suitOf(c)]}</span>
       </span>
-      {/* The card's WORTH, bottom-left, rendered on every card and shown by
+      {/* The card's WORTH, bottom-right, rendered on every card and shown by
           CSS only inside `.dis-cardpts` (a card-scored skat room). Always in
           the markup so the board class alone decides — a Card has no idea
           which room it is in, and threading the game through every call site
@@ -1345,7 +1345,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
           {/* middle */}
           {game.phase === "auction" && isSkat ? (
             <div className="dis-auction">
-              <div className="muted">Auction · a number, not a game</div>
+              <div className="muted">Auction</div>
               <ContractLine game={game} />
               {game.auction.value > 0 && (<>
                 <div className="muted">{nameOf(declSeat)} holds it at {game.auction.value}</div>
@@ -1377,11 +1377,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     </button>
                     <button className="btn btn-ghost" onClick={doPass}>Pass</button>
                   </div>
-                  <div className="muted dis-hint">
-                    {game.auction.value === 0
-                      ? "Pass and your opponent takes the talon and the lead — at their own price. Both of you passing throws the hand in."
-                      : "Push them one rung past their hand, or let them have it."}
-                  </div>
+                  {/* Only the open-pass beat gets a hint: what passing DOES
+                      is genuinely non-obvious there. Mid-auction advice was
+                      dropped — it read as chatter on every bid. */}
+                  {game.auction.value === 0 && (
+                    <div className="muted dis-hint">
+                      Pass and your opponent takes the talon and the lead — at
+                      their own price. Both of you passing throws the hand in.
+                    </div>
+                  )}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
               <div className="dis-bidlog">
