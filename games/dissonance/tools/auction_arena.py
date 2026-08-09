@@ -61,7 +61,26 @@ from games.dissonance import engine as E, bot as B
 
 BIN = "rust-cores/dissonance-core/target/release/bidserve"
 MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
+#: `<k>` or `<kA>:<kB>` -- per-tier world counts, so a tier can be measured at
+#: the budget it would actually deploy with (Expert's 3s allowance buys k=8
+#: where Hard's latency target picked 3). The resolver ignores k entirely.
+#:
+#: A trailing `p` (e.g. `8p`) runs that tier THE WAY THE BROWSER DOES: four
+#: worker processes, each with its own quarter of the worlds and its own seed
+#: stream, per-option sums added, argmax over the total. For Hard's linear
+#: pricing that is identical to one process with the combined k; for Expert's
+#: tree it is NOT -- four independent 2-world trees summed are a different
+#: computation from one 8-world tree, and a measurement of the second says
+#: nothing certain about shipping the first. The Duel campaign paid for this
+#: lesson already ("a measurement harness must reproduce the SERVING shape").
 K = sys.argv[2] if len(sys.argv) > 2 else "3"
+K_A, _, K_B = K.partition(":")
+K_B = K_B or K_A
+POOL_N = 4
+
+
+def _kspec(spec):
+    return (int(spec[:-1]) // POOL_N, POOL_N) if spec.endswith("p") else (int(spec), 1)
 N = int(sys.argv[3]) if len(sys.argv) > 3 else 60
 TIER_A = sys.argv[4] if len(sys.argv) > 4 else "expert"
 TIER_B = sys.argv[5] if len(sys.argv) > 5 else "hard"
@@ -73,9 +92,10 @@ assert RESOLVE in ("dd", "play"), RESOLVE
 PROC = {}
 
 
-def proc_for(key):
+def proc_for(key, k=None, seed=0):
     if key not in PROC:
-        PROC[key] = subprocess.Popen([BIN, K], stdin=subprocess.PIPE,
+        PROC[key] = subprocess.Popen([BIN, str(k), "18", str(seed)],
+                                     stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, text=True)
     return PROC[key]
 
@@ -92,17 +112,28 @@ def ask(g, seat, tier):
     auc = {"phase": g["phase"],
            "declarer": (g["auction"]["declarer"] if g["phase"] in ("kontra", "re") else seat),
            "options": opts}
-    if tier == "expert" and g["phase"] == "auction":
+    if tier.startswith("expert") and g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:
+            # `expertm` is Expert with the MYOPIC opponent model -- the harness
+            # injects the optional wire field the server does not send yet, so
+            # the two models can be arena'd against each other before either
+            # becomes the shipped default.
+            if tier == "expertm":
+                s["rules"]["opp_model"] = "myopic"
             auc["search"] = s
-    p = proc_for((tier, seat))
-    p.stdin.write(json.dumps({"view": E.view_for(g, seat), "auction": auc}) + "\n")
-    p.stdin.flush()
-    res = json.loads(p.stdout.readline())
-    sums = res.get("sums")
-    if not sums or len(sums) != len(opts):
-        return None, None, None
+    per_k, nproc = _kspec(K_A if tier == TIER_A else K_B)
+    req = json.dumps({"view": E.view_for(g, seat), "auction": auc}) + "\n"
+    sums = None
+    for i in range(nproc):
+        p = proc_for((tier, seat, i), k=per_k, seed=i * 7919)
+        p.stdin.write(req)
+        p.stdin.flush()
+        res = json.loads(p.stdout.readline())
+        part = res.get("sums")
+        if not part or len(part) != len(opts):
+            return None, None, None
+        sums = part if sums is None else [a + b for a, b in zip(sums, part)]
     i = max(range(len(opts)), key=lambda j: sums[j])
     o = opts[i]
     mv = o.get("move")
@@ -139,7 +170,13 @@ def play(m, tier_of, qual):
                     and tier_of[seat] == "hard" and m not in qual):
                 bids = [s for s, o in zip(sums, opts) if o["move"]["kind"] == "bid"]
                 if bids:
-                    qual[m] = max(bids) / max(1, int(K))
+                    # Per-world normalised; a pooled spec's TOTAL k is what the
+                    # summed sums are proportional to. (The first version did
+                    # int("4p") here and killed all four shards -- and the
+                    # mirror never covers this line, because it only runs on
+                    # the HARD flip of a mixed pairing.)
+                    per, np_ = _kspec(K_B if TIER_B == "hard" else K_A)
+                    qual[m] = max(bids) / max(1, per * np_)
         if mv is None:
             kind, p = B.act(g, seat, random.Random(m))
             mv = ({"kind": "pass"} if p.get("pass")
@@ -157,7 +194,7 @@ def play(m, tier_of, qual):
                            "piles": [[list(x) for x in row] for row in g["piles"]],
                            "trump": g["auction"]["denom"], "leader": decl,
                            "terms": terms}}
-        p = proc_for("resolver")
+        p = proc_for("resolver", k=1)
         p.stdin.write(json.dumps(req) + "\n")
         p.stdin.flush()
         r = json.loads(p.stdout.readline())

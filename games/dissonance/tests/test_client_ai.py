@@ -381,12 +381,16 @@ def test_the_talon_and_the_swap_stay_on_the_server():
     assert E.auction_payoff_options(g) == []
 
 
-def test_an_auction_world_budget_is_its_own_and_far_smaller():
+def test_an_auction_world_budget_is_its_own_knob():
     """A card decision solves the deal once; an auction decision solves it in
     every denomination — measured 417ms against 74ms natively. The first wired
     version inherited the card cap and spent 7.5-9.2s on a bid, which the
-    watchdog then timed out."""
-    assert m.CLIENT_AI_AUCTION_WORLDS < m.CLIENT_AI_MAX_WORLDS
+    watchdog then timed out. The budgets are separate KNOBS; since 2026-08-08
+    they happen to both read 8 (the auction cap was raised on measurement:
+    hard k=8 - hard k=3 = +0.86 +- 0.49), and what matters is that the auction
+    one is the one an auction decision gets. Pooled 4 ways that is ~850ms a
+    bid, still far under the card play's wall-clock ceiling."""
+    assert m.CLIENT_AI_AUCTION_WORLDS <= m.CLIENT_AI_MAX_WORLDS
     room = _auction_room("skat")
     room["client_ai"] = True
     task = _arm(room)

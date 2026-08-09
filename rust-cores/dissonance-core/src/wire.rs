@@ -416,6 +416,15 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         ladder: r.get("ladder").and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())
             .unwrap_or_default(),
+        // OPTIONAL, and the default is the original minimax: a payload from a
+        // server that has never heard of opponent models must behave exactly
+        // as it always did. An unknown string is a malformed payload.
+        opp: match r.get("opp_model").and_then(|x| x.as_str()) {
+            None => crate::auc_search::OppModel::Minimax,
+            Some("minimax") => crate::auc_search::OppModel::Minimax,
+            Some("myopic") => crate::auc_search::OppModel::Myopic,
+            Some(_) => return None,
+        },
     };
     // The KEY must be there in skat, but it may legitimately be EMPTY -- a bid
     // standing on the ladder's top rung leaves nothing that outranks it, and

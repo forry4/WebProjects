@@ -91,14 +91,37 @@ CLIENT_AI_TIMEOUT = 12.0
 CLIENT_AI_BUDGET_MS = 2500
 CLIENT_AI_MAX_WORLDS = 8
 
-#: ...and far fewer for an AUCTION decision, because a world costs a different
-#: amount there. A card decision solves the deal ONCE; an auction decision has
-#: to solve it in every denomination -- measured at 417ms natively against 74ms,
-#: and the first wired version inherited the card cap and spent 7.5-9.2s on a
-#: bid. Three worlds is one per worker on a typical pool, and the estimate is
-#: much less noisy than a mid-play one anyway: it is a whole-hand question, and
-#: the design lab's own `eval_hand` sweeps ran at k=4.
-CLIENT_AI_AUCTION_WORLDS = 3
+#: ...and fewer for an AUCTION decision, because a world costs a different
+#: amount there: a card decision solves the deal ONCE, an auction decision in
+#: every denomination (417ms native against 74ms).
+#:
+#: 8, RAISED FROM 3 (2026-08-08), because the world count turned out to be the
+#: lever the whole opponent-model campaign was looking for. Measured, all
+#: CRN-paired, resolved by exact double-dummy, classic:
+#:
+#:   hard   k=8 vs hard k=3    +0.86 +- 0.49  payoff/round
+#:   expert k=8 vs hard k=3    +1.36 +- 0.48  CI [+0.43, +2.29]
+#:   expert k=3 vs hard k=3    -0.28 +- 0.33  (the tree alone bought nothing)
+#:
+#: Hard's pricing is LINEAR in the worlds, so the browser pool splitting this
+#: cap four ways and summing (4 x 2 worlds, ~850ms a bid) computes exactly the
+#: single k=8 answer that was measured. Note the old "3" was a fiction anyway:
+#: perWorker = ceil(3/4) = 1 across four workers, so deployed Hard was really
+#: k=4 all along.
+CLIENT_AI_AUCTION_WORLDS = 8
+
+#: EXPERT's auction runs the SAME k=8 but as ONE TREE IN ONE WORKER, and that
+#: serving shape is load-bearing, not a style choice. A minimax tree is not
+#: linear in its worlds: four 2-world trees summed were MEASURED weaker than
+#: one 8-world tree over the same total (pooled 4x2 vs deployed hard: +0.14 +-
+#: 0.45; one tree: +1.36 +- 0.48 vs hard k=3, +0.40 +- 0.45 vs hard at its
+#: real k=4). The client reads `auction.search` and sends the whole budget to
+#: one worker (~3.4s for the FIRST decision of a hand, ~0 after -- the Solved
+#: cache); the card play still fans out. The tree's marginal over
+#: worlds-matched Hard is ~+0.5 and not yet resolved past noise, but its
+#: point estimate is positive at this shape and the tree is what plays the
+#: capping/underbidding style the tier exists for.
+CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
@@ -565,6 +588,9 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             "seat": seat,
             "budget_ms": CLIENT_AI_BUDGET_MS,
             "max_worlds": (CLIENT_AI_MAX_WORLDS if g["phase"] == "play"
+                           else CLIENT_AI_AUCTION_WORLDS_EXPERT
+                           if _valid_difficulty(room.get("ai_difficulty"))
+                           in SEARCH_AUCTION_TIERS
                            else CLIENT_AI_AUCTION_WORLDS),
             # The bot's OWN redacted view -- the same builder that feeds a human
             # seat, so there is no second projection to keep in step and the bot

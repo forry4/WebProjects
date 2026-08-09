@@ -662,7 +662,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
     const t0 = performance.now();
     // The server's cap counts WORLDS in total, and worlds are summed across the
     // pool, so split it rather than handing every worker the whole budget.
-    const perWorker = Math.max(1, Math.ceil((as.max_worlds || 8) / pool.length));
+    //
+    // EXCEPT a TREE-searched auction decision (Expert), which goes to ONE
+    // worker with the whole budget. Pooling sums per-option values, and for
+    // Hard's linear pricing four workers' quarter-samples summed ARE one
+    // combined sample — but a minimax tree is not linear in its worlds, and
+    // four small trees summed were MEASURED weaker than one big one (pooled
+    // 4x2: +0.14 ± 0.45 vs hard; one tree over the same 8 worlds: +1.36 ±
+    // 0.48). The other workers idle for one bid; the card play still fans out.
+    const solo = !!(as.auction && as.auction.search);
+    const crew = solo ? [pool[0]] : pool;
+    const perWorker = solo ? (as.max_worlds || 8)
+      : Math.max(1, Math.ceil((as.max_worlds || 8) / pool.length));
     (async () => {
       try {
         // An AUCTION decision ranks the options the server priced; a card
@@ -670,7 +681,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
         // spaces are the server's or a pure function of the position, so index
         // i means the same thing in every worker.
         const kind = as.auction ? "bid" : "search";
-        const parts = await Promise.all(pool.map((wk, i) => wk.request({
+        const parts = await Promise.all(crew.map((wk, i) => wk.request({
           kind, view, budget: as.budget_ms, maxWorlds: perWorker,
           seed: ((as.decision * 2654435761) ^ (i * 40503 + 1)) >>> 0,
         }).catch(() => null)));

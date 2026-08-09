@@ -1174,7 +1174,29 @@ capping play, arrived at deliberately.
   few thousand, leaving the tie-break two orders of magnitude below the smallest
   real difference, pool included. It can order ties and nothing else.
 
-**MEASURED AT 2250 PAIRED DEALS: THE TREE BUYS NOTHING.** `tools/auction_arena.py`
+**THE WORLD COUNT WAS THE LEVER (2026-08-08, the Phase-3 campaign).** Every
+opponent-model idea lost or washed; more worlds won. All CRN-paired, dd-resolved,
+classic, ~600 deals per row unless said:
+
+| experiment | result |
+|---|---|
+| expert minimax k=3 vs hard k=3 | −0.28 ± 0.33 (n=2250) |
+| expert MYOPIC-OPPONENT k=3 vs hard k=3 | **−0.62 ± 0.50** — best-responding to a model is brittle to the same leaf noise the tree already has; code kept behind the optional `opp_model` wire field, default `minimax`, for future sweeps |
+| expert k=8 (one tree) vs hard k=3 | **+1.36 ± 0.48, CI [+0.43, +2.29]** |
+| hard k=8 vs hard k=3 | +0.86 ± 0.49 — most of the k=8 gain is the worlds |
+| expert POOLED 4×2 vs deployed hard | **+0.14 ± 0.45 — the pooling trap.** Four 2-world trees summed are NOT one 8-world tree; the tree is nonlinear in its worlds and quarter-sample trees are noise-dominated. Caught at the serving-shape gate, before shipping |
+| expert ONE tree k=8 vs hard 4×1 | +0.40 ± 0.45 — hard's deployed shape was really k=4 all along (`perWorker = ceil(3/4) = 1` across four workers), which absorbed most of the +1.36 |
+
+**What shipped from it:** `CLIENT_AI_AUCTION_WORLDS` 3 → **8** for every auction
+tier (Hard's pricing is linear in the worlds, so the pooled 4×2 computes exactly
+the measured single k=8: +0.86 for ~850ms a bid), and Expert's auction runs the
+same k=8 as **ONE TREE IN ONE WORKER** (`solo` dispatch in `Dissonance.jsx`,
+~3.4s for the first decision of a hand, ~0 after). The tree's marginal over
+worlds-matched Hard is ~+0.5 with a CI that does not yet exclude zero; it keeps
+its place because the point estimate is positive at the shipped shape and the
+tree is what plays the capping style the tier exists for.
+
+`tools/auction_arena.py`
 (the harness lives with the code and drives `bin/bidserve`, i.e. the same
 `wire::answer_auction` the browser calls). **Since 2026-08-08 the arena resolves
 by exact double-dummy of the real deal (`resolve=dd`, the default)** — per-deal

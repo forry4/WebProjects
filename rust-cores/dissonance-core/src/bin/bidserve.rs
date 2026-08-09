@@ -84,7 +84,12 @@ fn main() {
     let mut dd = Dd::new(bits);
     let stdin = io::stdin();
     let mut out = io::stdout();
-    let mut seed: u64 = 0x5EED_1234;
+    // An optional third argument OFFSETS the seed stream. Two processes fed
+    // identical request lines otherwise sample IDENTICAL worlds -- which turns
+    // any attempt to emulate the browser's worker pool (four workers, each
+    // sampling its own worlds, sums added) into four copies of one worker.
+    let mut seed: u64 = 0x5EED_1234 ^ args.get(2)
+        .and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
     let mut cache: Option<(u64, dissonance::bid::Solved)> = None;
     for line in stdin.lock().lines() {
         let line = match line { Ok(l) => l, Err(_) => break };

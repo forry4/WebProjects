@@ -270,6 +270,13 @@ def test_only_an_expert_room_gets_the_search_block(monkeypatch):
         loop.run_until_complete(asyncio.sleep(0))
         auc = room["_ai_search"]["auction"]
         assert ("search" in auc) is want, f"{tier} carried search={'search' in auc}"
+        # ...and the WORLD BUDGET rides with the tier: 8 for Expert's auction
+        # (the measured lever -- see CLIENT_AI_AUCTION_WORLDS_EXPERT), 3 for
+        # Hard's. A tier that got the search block but Hard's budget would be
+        # the unmeasured configuration nobody arena'd.
+        want_k = (m.CLIENT_AI_AUCTION_WORLDS_EXPERT if want
+                  else m.CLIENT_AI_AUCTION_WORLDS)
+        assert room["_ai_search"]["max_worlds"] == want_k, tier
         if want:
             # It has to survive the JSON boundary -- the armed request is
             # broadcast as room state, not handed over in process.

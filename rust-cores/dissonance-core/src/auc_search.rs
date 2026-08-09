@@ -102,6 +102,31 @@ pub struct AucRules {
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
     pub ladder: Vec<u16>,
+    /// How the opponent's turns are modelled -- see `OppModel`.
+    pub opp: OppModel,
+}
+
+/// What the search believes the seat across the table will do.
+///
+/// `Minimax` is the classical assumption and it is MEASURABLY too strong here,
+/// in a specific, diagnosed way: the tree runs from OUR information set, so at
+/// every MIN node the modelled opponent chooses knowing our exact holding, and
+/// it best-responds with the search's own depth -- while the opponent it
+/// actually faces prices one contract at a time. Against that phantom,
+/// aggression is worthless, so the search shades everything down; measured, it
+/// opened <=2 and got LEFT THERE by a real opponent's simple pass in 10% of
+/// rounds, declaring level 1-2 on hands worth ~+8.4.
+///
+/// `Myopic` replaces the min with the reply a HARD-tier opponent would pick:
+/// their own best option, priced their way (each candidate contract by its own
+/// payoff on their side of the sampled worlds, the pass by conceding ours),
+/// with no lookahead past it. That is a best response to the bidder the tier
+/// actually plays against -- and only their MODEL changes; our side still
+/// searches the full tree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OppModel {
+    Minimax,
+    Myopic,
 }
 
 /// One thing a seat may do. The two bid shapes are separate variants rather
@@ -349,6 +374,53 @@ impl<'a> Search<'a> {
         }
     }
 
+    /// What bid `b` is worth TO THE OPPONENT, priced the way the Hard tier
+    /// prices its own options: a contract by its payoff with them declaring
+    /// (their side of the sampled worlds -- a separate solve, not a sign
+    /// flip, because the declarer leads), a pass by minus what the standing
+    /// contract pays its declarer, an open pass by the redeal's flat zero.
+    ///
+    /// SUMMED over the worlds before any choice is made, exactly as the real
+    /// Hard argmaxes one summed vector -- a per-world argmax would model an
+    /// opponent that adapts its bid to cards it has not seen.
+    fn opp_myopic(&self, s: &AucState, b: Bid) -> f64 {
+        match step(s, &self.rules, b) {
+            // Their pass settles what stands; its value to them is minus its
+            // value to whoever holds it, and `settled` is already signed for
+            // US, so their side is the negation exactly when we hold it.
+            Step::Settled(t) => -self.settled(&t),
+            Step::Redeal => 0.0,
+            Step::Node(_) => match b {
+                // Their open pass in skat: nothing stands, Hard prices the
+                // redeal at 0 and so does the model.
+                Bid::Pass => 0.0,
+                _ => {
+                    let rows = match self.terms.get(b.key()) {
+                        Some(r) if !r.is_empty() => r,
+                        _ => return f64::NEG_INFINITY, // unpriced: never chosen
+                    };
+                    let mask = self.worlds.covered_opp;
+                    let mut total = 0.0;
+                    for w in &self.worlds.worlds {
+                        let mut best: Option<i32> = None;
+                        for o in rows {
+                            let d = o.denom as usize;
+                            if d >= w.opp_pts.len() || mask & (1 << o.denom) == 0 {
+                                continue;
+                            }
+                            let v = o.payoff(w.opp_pts[d], w.opp_duck[d]);
+                            best = Some(best.map_or(v, |x: i32| x.max(v)));
+                        }
+                        if let Some(v) = best {
+                            total += v as f64;
+                        }
+                    }
+                    total
+                }
+            },
+        }
+    }
+
     /// Minimax value of `s` to `me`.
     pub fn value(&mut self, s: AucState) -> f64 {
         if let Some(&v) = self.memo.get(&s) {
@@ -358,6 +430,24 @@ impl<'a> Search<'a> {
         let maxing = s.to_act as usize == self.me;
         let mut moves = Vec::with_capacity(64);
         legal_bids(&s, &self.rules, &mut moves);
+        if !maxing && self.rules.opp == OppModel::Myopic {
+            // THE OPPONENT PLAYS HARD, NOT US-IN-A-MIRROR. Pick the one reply
+            // a myopic bidder would make from their side and evaluate only
+            // that child -- ties to the earliest, the same rule everywhere.
+            let mut pick: Option<(Bid, f64)> = None;
+            for &b in &moves {
+                let v = self.opp_myopic(&s, b);
+                if pick.map_or(true, |(_, pv)| v > pv) {
+                    pick = Some((b, v));
+                }
+            }
+            let best = match pick {
+                Some((b, _)) => self.step_value(&s, b),
+                None => self.settled(&s),
+            };
+            self.memo.insert(s, best);
+            return best;
+        }
         let mut best = if maxing { f64::NEG_INFINITY } else { f64::INFINITY };
         for b in moves {
             let v = self.step_value(&s, b);
@@ -416,12 +506,12 @@ mod tests {
 
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
-                   top_denom: 4, ladder: Vec::new() }
+                   top_denom: 4, ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
-                   top_denom: 6, ladder }
+                   top_denom: 6, ladder, opp: OppModel::Minimax }
     }
 
     fn bids(s: &AucState, r: &AucRules) -> Vec<Bid> {
