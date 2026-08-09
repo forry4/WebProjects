@@ -2271,6 +2271,18 @@ try {
 			const st = await page.evaluate(() => {
 				const q = (s) => document.querySelector(s);
 				if (q(".dis-result")) return { over: true };
+				// THE DOUBLE PROMPT, when the BOT declared and this seat is the
+				// defender. Unhandled it is a 240s stall that reports as "no
+				// tricks were ever played" — and it went unseen from the day
+				// Double shipped, because disBidCheaply overtakes through five
+				// denominations before passing, so the harness almost always
+				// wins the auction and the prompt goes to the server bot
+				// instead. The deals where the bot outlasts all five overtakes
+				// are real, just rare: two CI runs in a row finally drew one.
+				// Decline, which is also what the server tier always answers.
+				const dbl = [...document.querySelectorAll(".dis-auction button")]
+					.find((b) => /^Let it stand$/.test(b.textContent.trim()));
+				if (dbl) { dbl.click(); return { acted: true }; }
 				// Stand pat FIRST: the swap panel shares `.dis-auction`.
 				const pat = [...document.querySelectorAll("button")]
 					.find((b) => /stand pat/i.test(b.textContent));
@@ -2476,6 +2488,18 @@ try {
 			const st = await page.evaluate(() => {
 				const q = (s) => document.querySelector(s);
 				if (q(".dis-result")) return { over: true };
+				// THE DOUBLE PROMPT, when the BOT declared and this seat is the
+				// defender. Unhandled it is a 240s stall that reports as "no
+				// tricks were ever played" — and it went unseen from the day
+				// Double shipped, because disBidCheaply overtakes through five
+				// denominations before passing, so the harness almost always
+				// wins the auction and the prompt goes to the server bot
+				// instead. The deals where the bot outlasts all five overtakes
+				// are real, just rare: two CI runs in a row finally drew one.
+				// Decline, which is also what the server tier always answers.
+				const dbl = [...document.querySelectorAll(".dis-auction button")]
+					.find((b) => /^Let it stand$/.test(b.textContent.trim()));
+				if (dbl) { dbl.click(); return { acted: true }; }
 				// Stand pat FIRST: the swap panel shares `.dis-auction`.
 				const pat = [...document.querySelectorAll("button")]
 					.find((b) => /stand pat/i.test(b.textContent));
