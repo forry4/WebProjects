@@ -1186,7 +1186,8 @@ classic, ~600 deals per row unless said:
 | hard k=8 vs hard k=3 | +0.86 ± 0.49 — most of the k=8 gain is the worlds |
 | expert POOLED 4×2 vs deployed hard | **+0.14 ± 0.45 — the pooling trap.** Four 2-world trees summed are NOT one 8-world tree; the tree is nonlinear in its worlds and quarter-sample trees are noise-dominated. Caught at the serving-shape gate, before shipping |
 | expert ONE tree k=8 vs hard 4×1 | +0.40 ± 0.45 — hard's deployed shape was really k=4 all along (`perWorker = ceil(3/4) = 1` across four workers), which absorbed most of the +1.36 |
-| **the shipped pairing**: expert one-tree k=8 vs hard pooled 4×2 (=k8) | **+0.26 ± 0.42** — the tree's own marginal once Hard has equal worlds; positive point estimate, CI not yet past zero |
+| **the shipped pairing**: expert one-tree k=8 vs hard pooled 4×2 (=k8) | +0.26 ± 0.42 at n=600, pre-talon — unresolved then, superseded by the row below |
+| **the shipped pairing, RE-MEASURED with the talon model in the leaf (n=1600)** | **+1.19 ± 0.32, CI [+0.57, +1.81]** — the tree's marginal over worlds-matched Hard, finally clear of zero. A better leaf helped the TREE more than the pricer, which is the campaign's story closing: the tree composes leaf values through max/min chains, so leaf error hurt it most and leaf accuracy pays it most |
 
 **What shipped from it:** `CLIENT_AI_AUCTION_WORLDS` 3 → **8** for every auction
 tier (Hard's pricing is linear in the worlds, so the pooled 4×2 computes exactly
@@ -1194,10 +1195,16 @@ the measured single k=8: +0.86 for ~850ms a bid), and Expert's auction runs the
 same k=8 as **ONE TREE IN ONE WORKER** (`solo` dispatch in `Dissonance.jsx`,
 ~3.4s for the first decision of a hand, ~0 after — and note the OLD deployed
 Expert was four ONE-world trees summed, the deepest point of the pooling trap).
-The tree's marginal over worlds-matched Hard measured **+0.26 ± 0.42** at the
-shipped pairing; it keeps its place because the point estimate is positive and
-the tree is what plays the capping style the tier exists for. Resolving that
-marginal past noise needs ~2500 more paired deals — queued, not assumed.
+The tree's marginal over worlds-matched Hard is **+1.19 ± 0.32 (CI [+0.57,
++1.81], 1600 paired deals, both tiers with the talon model)** — the queued
+resolution run, completed 2026-08-09. The same run's bidding profile (collected
+in-arena, exact-play outcome labels): Expert opens BIMODALLY — 30% at level 1,
+the cap line, plus a 5–6 mass, against Hard's unimodal 3–5 — declares fewer
+contracts at higher levels (1409 at mean 5.67 vs Hard's 1791 at 4.79),
+sacrifices slightly less (13% vs 16% of decisions), Doubles the opponent more
+(25% vs 16.5% of opportunities), and its DEFENCE carries much of the edge: it
+holds Hard's level-5/6 contracts to 33%/24% made while making its own at
+48%/38%.
 
 `tools/auction_arena.py`
 (the harness lives with the code and drives `bin/bidserve`, i.e. the same
