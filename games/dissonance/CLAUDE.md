@@ -5,9 +5,10 @@ even-numbered tricks score **+2** to whoever wins them, odd-numbered ones
 **−1**. Six positive against seven negative, so both players' totals always sum
 to exactly **+5** — sweeping all thirteen tricks scores 5, while taking exactly
 the six even ones scores 12. The game is about *which* tricks you win.
-(THREE modes since 2026-08-09: classic, skat — a second auction — and
-**minor**, where even tricks pay **+1** and the pool is **−1**; its own
-section below.)
+(THREE modes since 2026-08-09: classic, skat — a second auction, and since
+the same day a second CURRENCY: skat scores the CARDS captured, not the trick
+parity — and **minor**, where even tricks pay **+1** and the pool is **−1**;
+each has its own section below.)
 
 **Renamed from Oddtrick (2026-08-07)** — the working name is gone from the route
 (`/dissonance`), the `MODES` entry, the home card, the package, the Rust crate,
@@ -59,7 +60,7 @@ That crate also holds the design campaign (`CAMPAIGN.md`) — every scoring rule
 below was chosen from measurement, and the negative results are recorded so
 nobody re-spends on them.
 
-## Minor mode — the third mode, and the first to touch the trick VALUES (2026-08-09)
+## Minor mode — the third mode, and the first to touch the trick VALUES (2026-08-09; skat's card scoring, below, was the second and went further)
 
 `mode: "minor"` — even tricks pay **+1** instead of +2 (odd tricks stay −1),
 over the CLASSIC auction shape. Same room-flag machinery as skat: one table,
@@ -149,6 +150,86 @@ before the 4→5 move and the ramp — it now renders rate+ramp from the catalog
 `screens.mjs` drives the create-modal segment to a dealt minor room inside
 the `dissonanceSkat` block (same lane, no new roster entry): the marker is
 the 1..6 ladder or the "+1 trick" Null price, per who opened.
+
+## Skat scores the CARDS, not the trick number (2026-08-09)
+
+Skat mode's rounds are scored in a different currency from classic/minor: a
+completed trick pays its winner the SUM OF ITS TWO CARDS — **9/10/J/Q are +2
+each, 7/8/K/A are −1 each** (`CARD_VALUES`) — so a trick is worth **−2, +1 or
++4**, and the trick-number parity means nothing in this mode. 16 cards at +2
+against 16 at −1 put the deck at **+16**; six cards sit out, so a round's pool
+is `played_pool(g)` = 16 − the out-cards' worth — **deal-dependent (4..22,
+measured mean ~14.5)**, never a constant. The design tension the values buy:
+the ranks that WIN tricks (K, A) are −1 liabilities — the second player ducks
+a 7 under your ace and hands you a −2 trick — while the +2 cards sit in the
+middle where they rarely win a trick on their own. The auction, the ladder,
+the announcements, Null and all the payoff arithmetic are unchanged; only what
+"trick points" MEANS moved.
+
+**How the flag reaches every consumer — the `even_val` pattern, one wire rung
+further:**
+* **Python**: `card_points` / `uses_card_points` / `played_pool`;
+  `apply_play` dispatches on the mode; **`etricks` generalises for free** — a
+  "scoring trick" is one with positive value in either currency, which is
+  exactly what the Null consolation means (a declarer may freely win −2
+  tricks). `view_for` ships **`card_pts`** (+ `card_values` for the board's
+  corner chips); `_deal_snapshot` carries **`cards`** — explicit and
+  DEFAULT-FALSE on the wire, so a skat round banked before the change reviews
+  under the parity it was played at, for free. `pool_for("skat")` returns
+  **None** on purpose — a caller assuming a constant must fail loudly.
+* **Rust**: `State.cards` (runtime, like `even`). `State::play` sums the two
+  cards; `State::pool()` computes pts-banked + in-play worth (correct from any
+  position); `completed_trick_value` is the one place both currencies meet and
+  is what `nsearch`/`tsearch` read for "scoring trick". **Three solver
+  invariants had to move, all in `dd.rs`, all gated by
+  `solver_matches_brute_force`'s new card arm:** (1) the MTD(f) ladder's
+  stride-2 parity trick DOES NOT EXIST here (−2/+1/+4 mix both parities → step
+  by 1); (2) the static bounds are ±4 a trick (`build_bounds_cards`, loose but
+  sound); (3) the equivalence collapse may only merge rank-adjacent cards of
+  EQUAL WORTH — the 8/9 and Q/K boundaries change every trick they land in,
+  and an unguarded merge is a silently wrong VALUE, not a crash. `dd::key_of`
+  mixes the flag (bit 42) and `bid::hand_key` mixes it too — same argument as
+  the contract-table bug, one cache further out. `tests/engine.rs` also gates
+  the per-trick recount and `null_no_even_makeable` against naive recursions
+  under cards.
+* **The wire is rung 3.** `odd_wire()` = 3; the worker now reads the export's
+  VALUE (after init — a wasm-bindgen export throws before the module loads)
+  and refuses any payload whose `card_pts`/`cards` it cannot honour; the
+  server refuses to arm a SKAT room for `wire < 3`
+  (`_handle_client_ai_ready`), exactly minor's three-part handshake at the
+  next rung. Classic rooms still accept any vintage. **The artifact was
+  rebuilt and committed with this change** (glue + wasm from one `wasm-pack`
+  run, export table unchanged); a stale cached wasm degrades skat Hard/Expert
+  rooms to the server bot honestly, per decision.
+* **Fixtures**: `play.jsonl` — 1 in 4 fixtures card-scored (`"cards":true`),
+  with coverage tests on the Python side so a regenerate that dropped them
+  fails; `views.jsonl` / `payoff.jsonl` (rows −12..24 for skat — card totals
+  range far past the parity pool) / `auction.jsonl` all regenerated.
+* **Frontend**: the board gets `.dis-cardpts` and every card renders a
+  corner worth-chip that CSS shows only there (colour + glyph, never colour
+  alone); the trick line shows the held trick's real value and, mid-trick,
+  the led card's "so far"; Null copy reads `nullCond(game)` ("no positive
+  trick"); the skat result maths line now prints `short_rate` off the row —
+  it had a literal 4 that survived the 4→5 move unnoticed.
+
+**The bots were re-anchored, measured in `tools/skat_calibration.py`** (bot
+self-play, 400 rounds, same harness as `minor_calibration`): the play policy's
+card branch scores the exact one-trick delta when following (bank the sum /
+shed the sum) and leads low keeping +2s back — mirrored in `policy.rs` and
+`bot.policy_score` as ever. Bidding runs a card-currency rank curve
+(`_SKAT_RANK_VALUE`; best-denomination strength p50 ~14.8, p90 ~16.4) into its
+own level map (`_SKAT_LEVEL_NEEDS`), calibrated to: settled levels 2–6
+(30/31/22/12/4%), **made 85%** (classic's same-harness figure: 82%), median
+overtricks 6, mean winning payoff ~20 → implied match length ~5.0 rounds
+against classic's 6.2 on the identical harness. `_KONTRA_TARGET`/`_KONTRA_
+STRENGTH` were re-anchored to the new scale but remain GUESSES, as before.
+**The old skat match-length medians ("median 11 to 100") describe the parity
+game and are stale**; the skatlab-class sweeps queued against skat (talon
+policy, announcement rates, Kontra) now also predate the currency and must be
+run on it. `skatlab` itself deals `cards = true` and converts through
+`State::pool()` since this change, but `skat.rs`'s lab `Decl::payoff` still
+pays a flat stake (no overtrick term) — the lab lags the engine there, as it
+already did.
 
 ## Two auctions, one game (skat mode, 2026-08-07)
 
@@ -300,7 +381,8 @@ a pile card. The defender learns *that* a swap happened, never which cards.
 mandatory **and a pile top counts as a card you hold**. May ruff when void,
 never forced to. Winner leads next.
 
-**Scoring** (contract only; trick points are the yardstick *and* the margin):
+**Scoring** (contract only; trick points are the yardstick *and* the margin —
+and in skat mode "trick points" means CARD points, per the section above):
 make → **N² + 1 per trick point past N**; set → defender scores
 **N + 4 × shortfall**. **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **12** (skat: **20**) instead, whatever they

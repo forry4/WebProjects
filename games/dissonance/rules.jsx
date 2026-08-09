@@ -57,7 +57,7 @@ export default function DissonanceRules() {
 				</p>
 				<RulesDefs items={[
 					{ t: "Classic", d: "Bid a level and a denomination together. Simple, and your bid tells your opponent what you intend to play." },
-					{ t: "Skat", d: "Bid a bare NUMBER. Only after winning do you name the game — and many games clear the same number, so the auction happens behind the denomination." },
+					{ t: "Skat", d: "Bid a bare NUMBER. Only after winning do you name the game — and many games clear the same number, so the auction happens behind the denomination. Skat also scores differently: the CARDS you capture are worth points, not the trick numbers — see its section." },
 				]} />
 				<p className="rl-note">
 					Classic is described first; the Skat auction has its own section further
@@ -93,7 +93,8 @@ export default function DissonanceRules() {
 			<RulesSection title="Null — the way out of a hand gone wrong">
 				<p>
 					You never bid Null. It sits under <i>every</i> contract at once: if you are the
-					declarer and you finish the round having won <b>no +2 trick at all</b>, you score
+					declarer and you finish the round having won <b>no scoring trick at all</b> — no
+					+2 trick in classic, no trick worth more than zero in Skat mode — you score
 					a flat <b>12</b> (<b>20</b> in Skat mode) instead of being set — whatever you
 					declared, and however far short of it you finished.
 				</p>
@@ -157,9 +158,22 @@ export default function DissonanceRules() {
 				<p>
 					A game is worth <b>base × level</b>, and the price is set by
 					<i> colour</i>: <b>the reds ♦♥ cost 2, the blacks ♠♣ cost 3, Grand
-					costs 4 and no-trump costs 5</b>. The level means exactly what it does
-					in classic mode — the trick points you promise to score.
+					costs 4 and no-trump costs 5</b>. The level is still the trick points
+					you promise to score — but Skat mode counts them differently.
 				</p>
+				<RulesTip>
+					<p>
+						<b>Skat scores the cards, not the trick number.</b> Every card you
+						capture is worth points: <b>9, 10, J and Q are +2 each</b>;{" "}
+						<b>7, 8, K and A are −1 each</b>. A trick pays its winner the sum
+						of its two cards — <b>−2, +1 or +4</b> — so the board shows each
+						card's worth in its corner. The aces and kings still <i>win</i>{" "}
+						tricks, but they poison what they capture; the cards worth taking
+						sit in the middle, where they rarely win a trick on their own. Six
+						cards sit out of every deal, so a round's total pool moves with the
+						deal — around 13 on average.
+					</p>
+				</RulesTip>
 				<p>
 					<b>Grand</b> is a sixth game, and skat mode is the only place you can
 					buy it. The four <b>10s are trump</b> and they leave their suits
@@ -171,8 +185,9 @@ export default function DissonanceRules() {
 					<p>
 						<b>The second 10 played wins.</b> They are all tens, so there is
 						nothing to rank them by — which makes leading one a way to
-						<i> lose</i> a trick on purpose. Seven of the thirteen tricks are
-						worth −1, so that is a tool, not a penalty. With only four trumps in
+						<i> lose</i> a trick on purpose. That is a real tool for refusing a
+						bad trick — just remember the 10 itself is worth +2 to whoever
+						takes it. With only four trumps in
 						the deck (and some of them usually out of play), Grand plays much
 						closer to no-trump than to a suit game — which is why it is priced
 						just below it.
@@ -197,8 +212,9 @@ export default function DissonanceRules() {
 					{ t: "Kontra", d: "The defender, who has just learned what game they're facing, may double everything. The declarer may Re it back to ×4 of the announced total." },
 				]} />
 				<p>
-					<b>Scoring.</b> Make everything you announced and you score{" "}
-					<b>value × multiplier</b>, plus <b>1 for every trick point past your
+					<b>Scoring.</b> Trick points are the card points above. Make everything
+					you announced and you score{" "}
+					<b>value × multiplier</b>, plus <b>1 for every card point past your
 					target</b>. Miss any part of it — the level, or the Sharp margin on top —
 					and your opponent scores that same number, plus 5 for every point you
 					finished short. The overtrick bonus is flat: 1 a point whatever the

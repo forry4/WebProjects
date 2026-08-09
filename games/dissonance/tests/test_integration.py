@@ -316,8 +316,9 @@ def test_a_skat_room_plays_from_create_to_a_scored_result():
 
         # Flat, not behind an `if`: since the overtrick bonus every round runs
         # all thirteen tricks, so an early end is a regression and must not
-        # read as the other half of a legitimate pair.
-        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.POOL
+        # read as the other half of a legitimate pair. The pool is the deal's
+        # own -- skat scores captured cards (2026-08-09).
+        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.played_pool(g)
         res = g["result"]
         assert res["mode"] == "skat" and res["value"] > 0
         winner = (res["declarer"] if (res["made"] or res["null"])
@@ -360,7 +361,7 @@ def test_a_vs_bot_skat_room_is_creatable_and_the_bot_takes_every_phase(monkeypat
     # Unseeded deal, so the pool invariant is stated the way the engine means
     # it: over a round that ran to thirteen tricks.
     if room["game"]["trick"] == E.NTRICKS:
-        assert sum(room["game"]["pts"]) == E.POOL
+        assert sum(room["game"]["pts"]) == E.played_pool(room["game"])
     else:
         assert room["game"]["result"]["ended_early"]
     assert "error" not in ws.types(), "the bot never produced an illegal move"

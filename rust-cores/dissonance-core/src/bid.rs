@@ -32,7 +32,7 @@
 use crate::cards::{esuit, rank, Mask, DENOMS, NDENOM_SLOTS};
 use crate::dd::Dd;
 use crate::rng::Rng;
-use crate::state::{State, POOL};
+use crate::state::State;
 use crate::view::View;
 
 /// One thing the seat could do, priced by the SERVER. Every number here comes
@@ -441,7 +441,13 @@ pub fn hand_key(v: &View, declarer: usize, k: usize) -> u64 {
     mix(v.pool);
     mix(v.opp_hand_n as u64);
     mix((declarer as u64) << 8 | ((k as u64) << 16));
-    mix(v.s.trump as u64 | ((v.first_leader as u64) << 8));
+    // The SCORING is part of what was solved: worlds priced under the parity
+    // must never answer for card scoring or the other way around -- the
+    // contract-table bug's exact shape, one cache further out.
+    mix(v.s.trump as u64
+        | ((v.first_leader as u64) << 8)
+        | ((v.s.even as u64) << 16)
+        | ((v.s.cards as u64) << 24));
     for q in 0..2 {
         for i in 0..3 {
             let p = &v.s.pile[q][i];

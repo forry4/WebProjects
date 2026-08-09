@@ -43,9 +43,14 @@ def _game_from(fx):
     MINOR mode -- the generator plays every fourth fixture there, so the
     port's runtime-parity path (`trick_value_in`) is gated by replay the same
     way Grand's trump is. Absent on a fixture file from before the mode,
-    which is classic.
+    which is classic. `cards` marks a CARD-SCORED fixture (skat mode's
+    currency since 2026-08-09), also one in four, gating `card_points` the
+    same way; absent means parity.
     """
-    mode = "minor" if fx.get("even", 2) == 1 else "classic"
+    if fx.get("cards"):
+        mode = "skat"
+    else:
+        mode = "minor" if fx.get("even", 2) == 1 else "classic"
     g = E.new_game(["a", "b"], mode=mode)
     g["hands"] = [sorted(fx["hands"][0]), sorted(fx["hands"][1])]
     g["piles"] = [[list(p) for p in fx["piles"][0]], [list(p) for p in fx["piles"][1]]]
@@ -69,16 +74,27 @@ def _game_from(fx):
     # +2 tricks, so `_score_is_settled` would need more points than the game
     # contains. Asserted rather than assumed, because it is a coincidence of two
     # constants and would rot in silence.
-    even = E.even_value(mode)
     top = E.max_level_for(mode)
-    ceiling = sum(v for v in (E.trick_value(t, even) for t in range(E.NTRICKS))
-                  if v > 0)
-    assert top >= ceiling, (
-        "the mode's max level no longer exceeds what a declarer can score, so "
-        "this harness can settle a round early and truncate the replay")
+    if E.uses_card_points(mode):
+        # Card scoring never settles early at all (`_score_is_settled` returns
+        # False for it outright -- its floor arithmetic is parity-shaped), so
+        # the ceiling coincidence below is not needed here.
+        assert not E._score_is_settled(dict(g, auction={
+            "level": 1, "denom": 0, "declarer": 0, "used": [0, 0],
+            "to_act": 0, "log": [], "value": 0}))
+    else:
+        even = E.even_value(mode)
+        ceiling = sum(v for v in (E.trick_value(t, even)
+                                  for t in range(E.NTRICKS)) if v > 0)
+        assert top >= ceiling, (
+            "the mode's max level no longer exceeds what a declarer can score, "
+            "so this harness can settle a round early and truncate the replay")
     g["auction"] = {"level": top, "denom": fx["trump"],
                     "declarer": fx["leader"], "used": [0, 0],
-                    "to_act": fx["leader"], "log": []}
+                    "to_act": fx["leader"], "log": [],
+                    # Skat's finisher reads the numeric bid off the auction;
+                    # zero is honest for a synthetic contract.
+                    "value": 0, "passes": 0}
     return g
 
 
@@ -109,13 +125,18 @@ def test_card_play_matches_the_rust_reference_exactly():
 
 
 def test_the_port_agrees_on_which_tricks_are_worth_what():
-    """A parity break in trick VALUES would show up as scores, so pin it directly."""
+    """A break in trick VALUES would show up as scores, so pin it directly.
+    The pool is per-currency: the parity modes' constant, or the worth of the
+    26 dealt-in cards for a card-scored fixture."""
     fx = _load()
     for f in fx[:50]:
         g = _game_from(f)
         for c in f["moves"]:
             E.apply_play(g, E.to_play(g), c)
-        assert sum(g["pts"]) == E.pool_for(E.mode_of(g))
+        if E.uses_card_points(E.mode_of(g)):
+            assert sum(g["pts"]) == E.played_pool(g)
+        else:
+            assert sum(g["pts"]) == E.pool_for(E.mode_of(g))
         assert g["pts"] == f["pts"]
 
 
@@ -124,7 +145,7 @@ def test_the_fixtures_cover_the_minor_parity():
     path replayed by nothing while the file still looked comprehensive --
     the exact shape the Grand fixtures already guard against."""
     fx = _load()
-    minor = [f for f in fx if f.get("even", 2) == 1]
+    minor = [f for f in fx if f.get("even", 2) == 1 and not f.get("cards")]
     assert len(minor) >= len(fx) // 8, (
         "only %d of %d fixtures play minor parity" % (len(minor), len(fx)))
     for f in minor[:20]:
@@ -133,3 +154,23 @@ def test_the_fixtures_cover_the_minor_parity():
             E.apply_play(g, E.to_play(g), c)
         assert sum(g["pts"]) == -1
         assert g["pts"] == f["pts"]
+
+
+def test_the_fixtures_cover_card_scoring():
+    """Same guard for the card-scored (skat) fixtures: a regenerate that
+    quietly stopped sampling them would leave `card_points` replayed by
+    nothing while the file still looked comprehensive."""
+    fx = _load()
+    cards = [f for f in fx if f.get("cards")]
+    assert len(cards) >= len(fx) // 8, (
+        "only %d of %d fixtures play card scoring" % (len(cards), len(fx)))
+    for f in cards[:20]:
+        g = _game_from(f)
+        for c in f["moves"]:
+            E.apply_play(g, E.to_play(g), c)
+        assert sum(g["pts"]) == E.played_pool(g)
+        assert g["pts"] == f["pts"]
+    # ...and at least one of them really has a deal-dependent pool away from
+    # the parity constant, or the whole distinction proved nothing.
+    pools = {E.played_pool(_game_from(f)) for f in cards}
+    assert pools - {5}, "every card fixture's pool read the parity constant"

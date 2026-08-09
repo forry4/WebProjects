@@ -324,13 +324,25 @@ def test_a_minor_room_only_arms_a_client_that_speaks_even_val(_isolated_rooms):
     assert m.ROOMS["r1"].get("client_ai")
 
 
-def test_classic_and_skat_rooms_accept_any_client_vintage(_isolated_rooms):
+def test_classic_rooms_accept_any_client_vintage_and_skat_needs_wire_3(_isolated_rooms):
+    """Classic never changed shape, so any bundle may search it. Skat scores
+    CARDS since 2026-08-09, and an older wasm would search the parity game --
+    legal moves, wrong game -- so a skat room arms only a `wire: 3` client,
+    the same fail-closed gate minor mode runs at `wire: 2`."""
     run = asyncio.get_event_loop().run_until_complete
-    for i, mode in enumerate(("classic", "skat")):
-        rid = "r%d" % i
-        m.ROOMS[rid] = _room(mode)
-        run(m._handle_client_ai_ready(_FakeWS(), rid, "alice", {"ready": True}))
-        assert m.ROOMS[rid].get("client_ai"), mode
+    m.ROOMS["r0"] = _room("classic")
+    run(m._handle_client_ai_ready(_FakeWS(), "r0", "alice", {"ready": True}))
+    assert m.ROOMS["r0"].get("client_ai"), "classic accepts any vintage"
+
+    m.ROOMS["r1"] = _room("skat")
+    run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice", {"ready": True}))
+    assert not m.ROOMS["r1"].get("client_ai"), "no wire field: refused"
+    run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice",
+                                  {"ready": True, "wire": 2}))
+    assert not m.ROOMS["r1"].get("client_ai"), "wire 2 predates card scoring"
+    run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice",
+                                  {"ready": True, "wire": 3}))
+    assert m.ROOMS["r1"].get("client_ai"), "the current bundle is armed"
 
 
 def test_the_catalog_serves_the_minor_numbers():

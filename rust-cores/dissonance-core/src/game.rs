@@ -83,9 +83,11 @@ impl Game {
             pts: [0; 2],
             escored: 0,
             // The offline labs and the fixture generator run the classic
-            // parity; a caller wanting minor sets `g.s.even` after the deal
-            // (the cards are parity-independent).
+            // parity; a caller wanting minor sets `g.s.even` after the deal,
+            // and one wanting card scoring sets `g.s.cards` (the deal itself
+            // is scoring-independent).
             even: 2,
+            cards: false,
         };
         let mut k = 0;
         for p in 0..2 {

@@ -41,25 +41,36 @@ import * as wasm from "./dissonance.js";
 
 const { default: init, odd_pick_card, odd_best_card, odd_pick_bid, odd_review } = wasm;
 
-// Does this artifact speak wire 2 (minor mode's `even_val`)? Probed off the
-// EXPORT TABLE, because that is the one thing an old artifact cannot fake: a
-// wasm without the field's reader would silently search a minor room under
-// classic trick values -- legal moves, wrong game, nothing red anywhere. The
+// Which wire vintage this artifact speaks. Probed off the EXPORT TABLE and
+// then off the export's own VALUE, because those are the things an old
+// artifact cannot fake: a wasm without a field's reader would silently search
+// the wrong game -- classic trick values in a minor room, the old parity in a
+// card-scored skat room -- legal moves, wrong game, nothing red anywhere. The
 // probe turns that into the ordinary per-decision server-bot fallback.
-const WIRE = typeof wasm.odd_wire === "function" ? 2 : 1;
+// Resolved AFTER init (a wasm-bindgen export throws before the module loads);
+// 1 = pre-minor, 2 = even_val, 3 = card_pts (skat's card scoring).
+let WIRE = 1;
 
-// The parity a request needs: 2 unless it explicitly carries a minor value.
-function neededEven(req) {
+// The vintage a request needs: 3 for card scoring, 2 for a non-classic
+// parity, 1 for everything else.
+function neededWire(req) {
   const v = req && (req.view || req.deal || req);
+  if (v && (v.card_pts === true || v.cards === true)) return 3;
   const e = v && (v.even_val ?? v.even);
-  return typeof e === "number" ? e : 2;
+  if (typeof e === "number" && e !== 2) return 2;
+  return 1;
 }
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
 
 init()
-  .then(() => { readyResolve(true); self.postMessage({ ready: true, wire: WIRE }); })
+  .then(() => {
+    try { WIRE = typeof wasm.odd_wire === "function" ? Number(wasm.odd_wire()) || 1 : 1; }
+    catch { WIRE = 1; }
+    readyResolve(true);
+    self.postMessage({ ready: true, wire: WIRE });
+  })
   .catch((err) => { readyResolve(false); self.postMessage({ ready: false, error: String(err) }); });
 
 self.onmessage = async (e) => {
@@ -68,14 +79,15 @@ self.onmessage = async (e) => {
   const ok = await readyP;
   if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
-    // Refuse to search a parity this artifact does not read, in EVERY kind:
+    // Refuse to search a scoring this artifact does not read, in EVERY kind:
     // the error goes back to the main thread, which drops the answer and the
-    // server bot plays that one decision -- the same path a timeout takes.
-    if (WIRE < 2 && (msg.kind === "search" || msg.kind === "bid" || msg.kind === "review")) {
+    // server bot plays that one decision (a review simply shows no number) --
+    // the same path a timeout takes.
+    if (msg.kind === "search" || msg.kind === "bid" || msg.kind === "review") {
       let req = null;
       try { req = JSON.parse(String(msg.view ?? msg.req)); } catch { /* let the wasm report it */ }
-      if (req && neededEven(req) !== 2) {
-        self.postMessage({ id: msg.id, error: "artifact predates minor parity" });
+      if (req && neededWire(req) > WIRE) {
+        self.postMessage({ id: msg.id, error: "artifact predates this scoring" });
         return;
       }
     }

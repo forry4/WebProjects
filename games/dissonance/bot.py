@@ -4,7 +4,10 @@ The card-play policy is a direct port of ``policy.rs`` from the Rust core: one
 trick deep, take the +2 tricks as cheaply as possible and shed the -1 tricks as
 expensively as possible. It is the floor the searching bot has to clear: a
 CRN-paired arena on the v2 rules puts ``pimc:8`` **+1.10 +/- 0.10 trick points
-per round** ahead of it, on a pool of 5.
+per round** ahead of it, on a pool of 5. (Skat mode scores CAPTURED CARDS since
+2026-08-09 -- its branch of the policy reads the cards, its bidding runs a
+card-currency curve and level map, and that arena figure describes the parity
+modes only.)
 
 THIS FILE IS ALSO WHAT HARD FALLS BACK TO. The Hard tier is the Rust core
 compiled to WASM and run client-side, and when the browser does not answer a
@@ -23,7 +26,9 @@ from . import engine as E
 
 
 def _want_win(g: dict, seat: int) -> bool:
-    """Whether the mover wants THIS trick.
+    """Whether the mover wants THIS trick. PARITY MODES ONLY -- in skat's card
+    scoring a trick has no value until the cards are in it, so `policy_score`
+    reads the cards instead of calling this.
 
     Everyone wants the +2 tricks and nobody wants the -1s.
 
@@ -42,20 +47,40 @@ def _want_win(g: dict, seat: int) -> bool:
 
 
 def policy_score(g: dict, c: int, seat: int | None = None) -> float:
-    """Higher is more attractive for the player to move."""
+    """Higher is more attractive for the player to move.
+
+    CARD SCORING (skat, 2026-08-09) has its own branch, because "do I want this
+    trick" stops being a property of the trick number: following, the trick's
+    value IS the two cards (led + this candidate), so the score is the exact
+    one-trick delta -- win it and bank the sum, duck and hand the sum over --
+    with a small tie-break toward spending the lower rank either way. Leading,
+    the reply is unknown; lead LOW (a low card usually loses the trick, and
+    mandatory follow-suit makes the opponent capture it) and keep the +2 cards
+    back rather than leading them into the opponent's ducking range. Kept in
+    the same rough 0..4 range as the parity branch so `policy_probs`'
+    temperature means the same thing in both currencies.
+    """
     if seat is None:
         seat = E.to_play(g)
-    want_win = _want_win(g, seat)
     r = E.rank(c) / (E.NRANK - 1.0)
     led = g["led"]
+    trump = g["trump"]
+    if E.uses_card_points(E.mode_of(g)):
+        if led is not None:
+            tv = E.card_points(led) + E.card_points(c)
+            w = E.beats(led, c, trump)
+            return 2.0 + 0.5 * (tv if w else -tv) - 0.05 * r
+        trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
+        return 1.0 + (1.0 - r) - 0.4 * max(0, E.card_points(c)) - trumpish
+    want_win = _want_win(g, seat)
     if led is not None:
-        w = E.beats(led, c, g["trump"])
+        w = E.beats(led, c, trump)
         if want_win:
             return 3.0 - r if w else 1.0 - r
         return 0.6 - r if w else 3.0 + r
     # Grand counts here too: its trump class is a real one, it is just made
     # of the four tens rather than a suit.
-    trumpish = 1.0 if E.esuit(c, g["trump"]) == E.trump_class(g["trump"]) else 0.0
+    trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
     if want_win:
         return 1.0 + r + trumpish
     # Lead low: under mandatory follow-suit this is how a -1 trick gets forced
@@ -90,6 +115,20 @@ _RANK_VALUE = [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 _UNKNOWN_RANK_VALUE = sum(_RANK_VALUE) / len(_RANK_VALUE)
 
 
+#: CARD-SCORING rank worth (skat mode since 2026-09 -- the mode scores captured
+#: cards, 9/10/J/Q +2 and 7/8/K/A -1, so this curve answers a different
+#: question than `_RANK_VALUE`: not "does this rank win tricks" but "how many
+#: card points does holding it tend to bring home". The +2 ranks carry most of
+#: it (a card you hold is a card you decide the timing of); the aces and kings
+#: keep real worth as CONTROL (they decide who wins the tricks the +2s fall
+#: into) despite being -1 themselves; the 7/8 are the ducking material that
+#: refuses the -2 tricks. Shallow on purpose, like `_RANK_VALUE` -- the LEVEL
+#: MAP below is what was calibrated, so only the curve's shape matters here.
+_SKAT_RANK_VALUE = [0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
+
+_SKAT_UNKNOWN_RANK_VALUE = sum(_SKAT_RANK_VALUE) / len(_SKAT_RANK_VALUE)
+
+
 def hand_strength(g: dict, seat: int, denom: int) -> float:
     """Cheap estimate of the points this seat could take in `denom`.
 
@@ -99,12 +138,21 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
     table could see of theirs. Not opponent knowledge, so it never played a card
     it could not have played; it simply valued its own hand with information the
     rules do not give it, in both auctions and in the talon swap.
+
+    The rank curve is per CURRENCY: the parity modes rate ranks as
+    trick-winners (`_RANK_VALUE`); card scoring rates them as points brought
+    home (`_SKAT_RANK_VALUE`). Same shape, same unknown-card treatment, and
+    `_level_for`'s per-mode maps absorb the different scales.
     """
     cards = E.playable(g, seat) + [
         p[0] for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i == 1]
     unknown = sum(1 for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i != 1)
-    total = sum(_RANK_VALUE[E.rank(c)] for c in cards)
-    total += unknown * _UNKNOWN_RANK_VALUE
+    if E.uses_card_points(E.mode_of(g)):
+        curve, mean = _SKAT_RANK_VALUE, _SKAT_UNKNOWN_RANK_VALUE
+    else:
+        curve, mean = _RANK_VALUE, _UNKNOWN_RANK_VALUE
+    total = sum(curve[E.rank(c)] for c in cards)
+    total += unknown * mean
     if denom == E.GRAND:
         # There are only four trumps in a Grand game, so LENGTH is not the
         # question -- holding any of them at all is. Each is worth roughly a
@@ -140,15 +188,31 @@ _MINOR_LEVEL_NEEDS = ((6, 25.0), (5, 22.5), (4, 20.0), (3, 17.5), (2, 15.0))
 
 _CLASSIC_LEVEL_NEEDS = ((6, 15.0), (5, 12.5), (4, 10.5), (3, 8.5), (2, 6.5))
 
+#: CARD SCORING's strength -> level map (skat mode, 2026-08-09), CALIBRATED BY
+#: SELF-PLAY (tools/skat_calibration.py -- see that file's header for the run).
+#: The scale is nothing like classic's: the pool is ~13 rather than 5, the
+#: declarer (lead + talon + free choice of game) banks well above half of it,
+#: so mid levels are routine where classic's were a stretch. The map runs off
+#: `_SKAT_RANK_VALUE` totals (median best-denomination strength ~11.5) and is
+#: deliberately looser at the bottom: a level under the floor here is a bid
+#: wasted, not a contract saved.
+_SKAT_LEVEL_NEEDS = ((9, 18.6), (8, 17.2), (7, 16.2), (6, 15.5), (5, 14.9),
+                     (4, 14.3), (3, 13.7), (2, 13.0))
+
 
 def _level_for(strength: float, mode: str = "classic") -> int:
     """Map a strength estimate onto a contract level.
 
     `mode` picks the ladder scale: minor's rungs are dearer per level because
-    even tricks pay half. Skat deliberately keeps the classic map -- its level
-    is a price-ladder artefact on the same +2 parity.
+    even tricks pay half, and skat's run on the card-scoring currency (pool
+    ~13, so the whole map sits higher and reaches deeper into the ladder).
     """
-    needs = _MINOR_LEVEL_NEEDS if mode == "minor" else _CLASSIC_LEVEL_NEEDS
+    if mode == "skat":
+        needs = _SKAT_LEVEL_NEEDS
+    elif mode == "minor":
+        needs = _MINOR_LEVEL_NEEDS
+    else:
+        needs = _CLASSIC_LEVEL_NEEDS
     for lvl, need in needs:
         if strength >= need:
             return lvl
@@ -194,17 +258,21 @@ def choose_bid(g: dict, seat: int, rng=None) -> dict:
 # self-play sweep that has not been run; until it is, this tier is deliberately
 # reluctant rather than tuned.
 
-#: A defender only doubles a promise this greedy...
-_KONTRA_TARGET = 8
-#: ...and only when its own holding in the declared denomination backs the read.
-_KONTRA_STRENGTH = 10.0
+#: A defender only doubles a promise this greedy... Re-anchored for card
+#: scoring (2026-08-09): the target is card points on a ~13-point pool, where a
+#: mid hand banks 6-8, so "greedy" starts around 9 rather than the parity
+#: game's 8-of-12 ceiling. Still guesses, not measurements, as before.
+_KONTRA_TARGET = 9
+#: ...and only when its own holding in the declared denomination backs the read
+#: (a `_SKAT_RANK_VALUE` total; median best-denomination strength is ~11.5).
+_KONTRA_STRENGTH = 12.5
 
 
 def skat_ceiling(g: dict, seat: int) -> int:
     """The largest number this hand can afford to be held to."""
     best = 0
     for d in E.SKAT_DENOMS:
-        want = _level_for(hand_strength(g, seat, d))
+        want = _level_for(hand_strength(g, seat, d), "skat")
         best = max(best, E.SKAT_BASE[d] * want)
     return best
 
@@ -232,7 +300,7 @@ def choose_declare(g: dict, seat: int) -> dict:
         d = opt["denom"]
         strength = hand_strength(g, seat, d)
         # How far past what the hand is worth this bid drags the level.
-        stretch = opt["min_level"] - _level_for(strength)
+        stretch = opt["min_level"] - _level_for(strength, "skat")
         key = (max(0, stretch), -strength)
         if best_key is None or key < best_key:
             best, best_key = opt, key
@@ -396,7 +464,13 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
         return best
 
     def worth(c: int) -> float:
-        v = _RANK_VALUE[E.rank(c)]
+        # Card scoring rates the talon differently: a card TAKEN joins the
+        # played pool (a +2 is points you now control the timing of) and the
+        # discard leaves it entirely (shipping a -1 to the talon deletes the
+        # liability from the round). The skat curve encodes exactly that
+        # preference; still the old separable rule, per the swaplab note above.
+        v = (_SKAT_RANK_VALUE if E.uses_card_points(E.mode_of(g))
+             else _RANK_VALUE)[E.rank(c)]
         if E.esuit(c, denom) == E.trump_class(denom):
             v += 0.8  # a trump is worth having -- a Grand ten most of all
         return v

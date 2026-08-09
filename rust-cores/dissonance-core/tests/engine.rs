@@ -110,6 +110,132 @@ fn minor_parity_scores_plus_one_evens_and_pools_to_minus_one() {
 }
 
 #[test]
+fn card_scoring_scores_the_cards_and_pools_to_the_deal() {
+    // Skat mode's currency since 2026-08-09: a completed trick pays the sum
+    // of its two cards (9/10/J/Q +2, 7/8/K/A -1), so the pool is whatever the
+    // 26 dealt-in cards add up to -- deal-dependent, never the parity
+    // constant by anything but coincidence.
+    use dissonance::state::{card_points, CARD_POOL};
+    let per_deck: i32 = (0..dissonance::cards::NCARD)
+        .map(|c| card_points(c) as i32)
+        .sum();
+    assert_eq!(per_deck, CARD_POOL as i32);
+    // The default deck: 16 cards at +2 against 16 at -1.
+    assert_eq!(CARD_POOL, 16);
+    let mut saw_off_constant = false;
+    for seed in 0..100 {
+        let mut a = RandomBot { rng: Rng::new(seed) };
+        let mut b = GreedyBot;
+        let mut g = Game::deal(&mut Rng::new(seed ^ 0x55), (seed % 5) as u8, (seed % 2) as u8);
+        g.s.cards = true;
+        let mut out_worth = 0i8;
+        let mut m = g.out;
+        while m != 0 {
+            out_worth += card_points(m.trailing_zeros() as u8);
+            m &= m - 1;
+        }
+        assert_eq!(g.s.pool(), CARD_POOL - out_worth, "the pool is the deal's");
+        let pts = play_round(&mut g, &mut [&mut a, &mut b]);
+        assert_eq!(pts[0] + pts[1], CARD_POOL - out_worth);
+        assert_eq!(g.s.trick, NTRICKS);
+        saw_off_constant |= pts[0] + pts[1] != POOL;
+    }
+    assert!(saw_off_constant, "every pool read the parity constant -- vacuous");
+}
+
+#[test]
+fn a_card_scored_trick_is_worth_its_two_cards() {
+    // Replay one round move by move and recount the score by hand: each
+    // completed trick's delta must be card_points(led) + card_points(follow),
+    // banked to the winner, with `escored` set exactly on positive tricks.
+    use dissonance::state::card_points;
+    for seed in 0..40u64 {
+        let mut g = Game::deal(&mut Rng::new(seed + 300), (seed % 5) as u8, 0);
+        g.s.cards = true;
+        let mut r = Rng::new(seed ^ 0x1234);
+        let mut pts = [0i8; 2];
+        let mut escored = 0u8;
+        while !g.over() {
+            let mut m = [0u8; 16];
+            let n = g.s.legal(&mut m);
+            let c = m[r.below(n)];
+            let led = g.s.led;
+            g.apply(c);
+            if led >= 0 {
+                let tv = card_points(led as u8) + card_points(c);
+                assert!([-2, 1, 4].contains(&tv), "impossible trick value {tv}");
+                // The engine hands the winner the next lead, which is how a
+                // recount identifies them without reimplementing `beats`.
+                let winner = g.s.leader;
+                pts[winner as usize] += tv;
+                if tv > 0 {
+                    escored |= 1 << winner;
+                }
+            }
+        }
+        assert_eq!(pts, g.s.pts, "seed {seed}: recount diverged");
+        assert_eq!(escored, g.s.escored, "seed {seed}: escored diverged");
+    }
+}
+
+#[test]
+fn the_null_and_trick_searches_read_card_scoring_tricks() {
+    // `null_no_even_makeable` (the duck the auction prices) means "no
+    // POSITIVE trick" in whichever currency the game scores. Under card
+    // scoring a positive trick is one whose two cards sum above zero, so a
+    // declarer may freely win -2 tricks -- gate it against a naive recursion
+    // that restates the rule from scratch.
+    use dissonance::dd::Dd;
+    use dissonance::state::card_points;
+    fn naive_duck(s: &State, declarer: u8) -> bool {
+        if s.done() {
+            return true;
+        }
+        let mut m = [0u8; 16];
+        let n = s.legal(&mut m);
+        let maxing = s.to_play() == declarer;
+        for i in 0..n {
+            let mut t = *s;
+            let completing = t.led >= 0;
+            let tv = if completing {
+                card_points(t.led as u8) + card_points(m[i])
+            } else {
+                0
+            };
+            t.play(m[i]);
+            let fatal = completing && t.leader == declarer && tv > 0;
+            let ok = !fatal && naive_duck(&t, declarer);
+            if maxing && ok {
+                return true;
+            }
+            if !maxing && !ok {
+                return false;
+            }
+        }
+        !maxing
+    }
+    let mut dd = Dd::new(14);
+    let mut makeable = 0;
+    for seed in 0..24u64 {
+        let mut g = Game::deal(&mut Rng::new(seed + 700), (seed % 5) as u8, 0);
+        g.s.cards = true;
+        let mut r = Rng::new(seed ^ 0x77AA);
+        while g.s.trick < 8 {
+            let mut m = [0u8; 16];
+            let n = g.s.legal(&mut m);
+            g.apply(m[r.below(n)]);
+        }
+        for declarer in 0..2u8 {
+            dd.clear();
+            let fast = dd.null_no_even_makeable(&g.s, declarer as usize);
+            assert_eq!(fast, naive_duck(&g.s, declarer), "seed {seed} decl {declarer}");
+            makeable += fast as u32;
+        }
+    }
+    assert!(makeable > 0, "no endgame duck was makeable -- the gate is vacuous");
+}
+
+#[test]
 fn the_solver_agrees_with_itself_across_parities() {
     // The same deal solved under both parities: the minor value must equal a
     // brute recount of the minor-scored line, and the TT must not hand one
@@ -321,6 +447,7 @@ fn solver_matches_brute_force() {
     let mut checked = 0;
     let mut grand_seeds = 0;
     let mut minor_seeds = 0;
+    let mut card_seeds = 0;
     for seed in 0..48u64 {
         // Over DENOMS, so GRAND is covered. It is not decoration here: the
         // equivalence collapse prunes on the follow-suit CLASS, and Grand is
@@ -333,15 +460,22 @@ fn solver_matches_brute_force() {
             grand_seeds += 1;
         }
         let mut g = Game::deal(&mut Rng::new(seed), trump, (seed % 2) as u8);
-        // Every third seed solves under MINOR parity (+1 evens). `naive` goes
-        // through `State::play` and is parity-correct by construction, so this
-        // is an EXACT gate on the runtime-parity solver -- including the
-        // MTD(f) ladder, whose stepping parity is different under minor and
-        // whose failure mode is converging on a value the position cannot
-        // reach.
+        // Every third seed solves under MINOR parity (+1 evens), and every
+        // third under CARD SCORING (skat mode's currency since 2026-08-09).
+        // `naive` goes through `State::play` and is correct in every currency
+        // by construction, so this is an EXACT gate on the runtime solver --
+        // including the MTD(f) ladder, whose stepping parity differs under
+        // minor and does not EXIST under card scoring (trick values -2/+1/+4
+        // mix both parities, so the ladder must step by 1), and the
+        // equivalence collapse, which under card scoring may only merge
+        // rank-adjacent cards of EQUAL worth (the 8/9 and Q/K boundaries are
+        // where a wrong merge changes the value).
         if seed % 3 == 2 {
             g.s.even = 1;
             minor_seeds += 1;
+        } else if seed % 3 == 1 {
+            g.s.cards = true;
+            card_seeds += 1;
         }
         let mut r = Rng::new(seed ^ 0xABCD);
         while g.s.trick < 8 {
@@ -356,6 +490,7 @@ fn solver_matches_brute_force() {
     assert_eq!(checked, 48);
     assert!(grand_seeds > 0, "the trump sweep never reached Grand");
     assert!(minor_seeds > 0, "the parity sweep never reached minor");
+    assert!(card_seeds > 0, "the sweep never reached card scoring");
 }
 
 #[test]

@@ -30,13 +30,17 @@ fn main() {
         // whole Grand path ungated.
         let trump = DENOMS[(rng.next_u64() % DENOMS.len() as u64) as usize];
         let leader = (rng.next_u64() % 2) as u8;
-        // Every fourth fixture plays MINOR parity (+1 evens), so the Python
-        // port's `trick_value_in` path is gated the same way Grand's trump is:
-        // by the fixtures covering it, or not at all. On the index rather than
-        // the RNG so the split cannot drift with an unrelated draw.
+        // Every fourth fixture plays MINOR parity (+1 evens) and every fourth
+        // plays CARD SCORING (skat mode's currency since 2026-08-09), so the
+        // Python port's `trick_value_in` AND `card_points` paths are gated the
+        // same way Grand's trump is: by the fixtures covering them, or not at
+        // all. On the index rather than the RNG so the split cannot drift
+        // with an unrelated draw.
         let even: i8 = if i % 4 == 3 { 1 } else { 2 };
+        let cards = i % 4 == 1;
         let mut g = Game::deal(&mut Rng::new(i + 1), trump, leader);
         g.s.even = even;
+        g.s.cards = cards;
 
         // The dealt layout, before a card is played.
         let mut hands = String::new();
@@ -84,12 +88,12 @@ fn main() {
         }
 
         assert_eq!(g.s.pts[0] + g.s.pts[1], g.s.pool());
-        if even == 2 {
+        if even == 2 && !cards {
             assert_eq!(g.s.pool(), POOL);
         }
         println!(
             "{{\"hands\":[{}],\"piles\":[{}],\"out\":[{}],\"trump\":{},\"leader\":{},\
-             \"even\":{},\"moves\":[{}],\"pts\":[{},{}]}}",
+             \"even\":{},\"cards\":{},\"moves\":[{}],\"pts\":[{},{}]}}",
             hands,
             piles,
             out.join(","),
@@ -99,6 +103,7 @@ fn main() {
             trump,
             leader,
             even,
+            cards,
             moves.join(","),
             g.s.pts[0],
             g.s.pts[1]

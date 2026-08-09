@@ -113,12 +113,25 @@ const suitOf = (c) => Math.floor(c / 8);
 const rankOf = (c) => c % 8;
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
 const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
-// Trick NUMBER t (1-based): even ones pay `even` (+2 classic/skat, +1 in
-// minor mode — the view ships `even_val`), odd ones cost 1.
+// Trick NUMBER t (1-based): even ones pay `even` (+2 classic, +1 in minor
+// mode — the view ships `even_val`), odd ones cost 1. PARITY MODES ONLY.
 const trickValue = (t0, even = 2) => (t0 % 2 === 1 ? even : -1);
 // What an even trick pays in this room. Off the VIEW, not the mode string,
 // so a future re-pricing needs no client change at all.
 const evenVal = (game) => game?.even_val ?? 2;
+// CARD SCORING (skat, 2026-08-09): captured cards score — 9/10/J/Q +2,
+// 7/8/K/A −1 — and a trick is worth the sum of its two cards. The flag and
+// the per-rank table both come off the VIEW (`card_pts` / `card_values`); the
+// local table below is the render fallback for the corner chips and mirrors
+// `engine.CARD_VALUES` (also served as `catalog.card_values`) — a mismatch
+// could mislabel a chip, never score a point.
+const CARD_VALS = [-1, -1, 2, 2, 2, 2, -1, -1];
+const cardPts = (game) => game?.card_pts === true;
+const cardVal = (game, c) => (game?.card_values || CARD_VALS)[rankOf(c)];
+// The Null consolation's condition, in this room's own words: no positive
+// trick under card scoring, no +even trick under the parities.
+const nullCond = (game) =>
+  cardPts(game) ? "no positive trick" : `no +${evenVal(game)} trick`;
 
 /** Does `follow` beat `led`? A mirror of `engine.beats` — kept in step with it
  *  by hand, like `trickValue` above. Only used to mark who TOOK the previous
@@ -140,9 +153,12 @@ function lastTrick(game) {
   if (done === 0) return null;
   const [a, b] = [h[2 * (done - 1)], h[2 * done - 1]];
   const winner = beats(a[1], b[1], game.trump) ? b[0] : a[0];
-  // Trick index `done - 1` is 0-based, matching `trickValue`.
-  return { plays: [a, b], winner, value: trickValue(done - 1, evenVal(game)),
-           number: done };
+  // Trick index `done - 1` is 0-based, matching `trickValue`. Under card
+  // scoring the trick is worth its two CARDS, whichever number it was.
+  const value = cardPts(game)
+    ? cardVal(game, a[1]) + cardVal(game, b[1])
+    : trickValue(done - 1, evenVal(game));
+  return { plays: [a, b], winner, value, number: done };
 }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -176,6 +192,14 @@ function Card({ c, onClick, sel, small, ghost }) {
       <span className="dis-ix">
         <span className="dis-r">{RANKS[rankOf(c)]}</span>
         <span className="dis-s">{SUIT_GLYPH[suitOf(c)]}</span>
+      </span>
+      {/* The card's WORTH, bottom-left, rendered on every card and shown by
+          CSS only inside `.dis-cardpts` (a card-scored skat room). Always in
+          the markup so the board class alone decides — a Card has no idea
+          which room it is in, and threading the game through every call site
+          for a cosmetic chip is how props rot. */}
+      <span className={`dis-pts ${CARD_VALS[rankOf(c)] > 0 ? "pos" : "neg"}`}>
+        {CARD_VALS[rankOf(c)] > 0 ? `+${CARD_VALS[rankOf(c)]}` : CARD_VALS[rankOf(c)]}
       </span>
     </div>
   );
@@ -1284,7 +1308,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
   })();
 
   return (
-    <div className="dis">
+    // `dis-cardpts` is what turns the per-card worth chips on: skat scores
+    // captured cards (2026-08-09), and a board that did not say which cards
+    // are the +2s would be a memory quiz, not a card game.
+    <div className={`dis${cardPts(game) ? " dis-cardpts" : ""}`}>
       <style>{styles}</style>
       <LobbyHeader title="Dissonance" menu={<OddMenu onLeave={leaveToLobby}
         onRules={() => setShowRules(true)}
@@ -1617,7 +1644,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     four short {2 * game.auction.level + 4 * shortRate + 10}.
                   </div>
                   <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    Null is untouched — a declarer who wins no +{evenVal(game)} trick still
+                    Null is untouched — a declarer who wins {nullCond(game)} still
                     scores {nullMake}, doubled or not.
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -1710,7 +1737,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     {res.mult > 1 || res.doubling > 1 ? ` = ${res.stake}` : ""}
                     {res.made
                       ? `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : ` + 4 × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
+                      : ` + ${res.short_rate ?? 4} × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                   </>}
                 </div>
               </> : <>
@@ -1738,7 +1765,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 {res.doubled && (
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {res.null
-                      ? `Doubled — but Null is not: a declarer who wins no +${evenVal(game)} trick
+                      ? `Doubled — but Null is not: a declarer who wins ${nullCond(game)}
                          scores the flat ${res.null_value} either way.`
                       : res.made
                         ? `Doubled: ${nameOf(1 - res.declarer)} took the bet and it landed.`
@@ -1748,7 +1775,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               </>}
               {res.null && (
                 <div className="muted" style={{ fontSize: "0.8rem" }}>
-                  Null: a declarer who wins no +{evenVal(game)} trick all round
+                  Null: a declarer who wins {nullCond(game)} all round
                   scores it instead of being set, whatever they declared.
                 </div>
               )}
@@ -1856,13 +1883,25 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     reading it here labelled the two cards you are looking at
                     with the next trick's number and the next trick's value. */}
                 <div className="dis-trickinfo">
-                  Trick {heldTrick ? heldTrick.number : game.trick + 1} of 13 ·{" "}
-                  <span className={`dis-val ${(heldTrick ? heldTrick.value : game.trick_value) > 0 ? "good" : "bad"}`}>
-                    {(() => {   // the VALUE, not a hardcoded label — minor's evens pay +1
-                      const v = heldTrick ? heldTrick.value : game.trick_value;
-                      return v > 0 ? `+${v}` : "−1";
-                    })()}
-                  </span>
+                  Trick {heldTrick ? heldTrick.number : game.trick + 1} of 13
+                  {(() => {
+                    // Parity rooms label the trick with its fixed value. A
+                    // card-scored room cannot until both cards are down, so
+                    // mid-trick it shows the sum SO FAR (the led card's worth)
+                    // and the held beat shows what the trick really paid.
+                    const fmt = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
+                    if (heldTrick) {
+                      const v = heldTrick.value;
+                      return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)}</span></>;
+                    }
+                    if (cardPts(game)) {
+                      if (game.led === null || game.led === undefined) return null;
+                      const v = cardVal(game, game.led);
+                      return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)} so far</span></>;
+                    }
+                    const v = game.trick_value;
+                    return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)}</span></>;
+                  })()}
                 </div>
               </div>
               <ContractChip game={game} nameOf={nameOf}
@@ -1977,7 +2016,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 in the contract line: the declarer always has this out. */}
             {game.auction.level > 0 && (
               <div className="dis-scorerow">
-                <span>Or Null (no +{evenVal(game)} trick)</span>
+                <span>Or Null ({nullCond(game)})</span>
                 <b>{isSkat ? (catalog?.skat_null_value ?? "") : nullMake}</b>
               </div>
             )}

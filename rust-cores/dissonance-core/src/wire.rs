@@ -75,6 +75,13 @@ pub fn view_from_json(v: &Value) -> Option<View> {
         // generic -- but the WORKER refuses a minor view on an older wasm by
         // probing for `odd_wire`, which is the fail-closed half of this pair.
         even: v.get("even_val").and_then(|x| x.as_i64()).unwrap_or(2) as i8,
+        // CARD SCORING (the server's skat mode since 2026-08-09): captured
+        // cards score instead of the trick parity. OPTIONAL and defaulting to
+        // false -- every payload from before the field is a parity game --
+        // with the same fail-closed pair as `even_val`: the worker refuses a
+        // card-scored view on an artifact whose `odd_wire()` is below 3, and
+        // the server refuses to arm a skat room for such a client at all.
+        cards: v.get("card_pts").and_then(|x| x.as_bool()).unwrap_or(false),
     };
     // Which seats have already won a +2 trick. Not derivable from `pts` -- a
     // total of -1 is one +2 trick and three -1s just as easily as one -1 alone
@@ -328,6 +335,10 @@ pub fn deal_from_json(v: &Value) -> Option<State> {
         // confidently wrong number in a column labelled a fact. Optional,
         // defaulting to 2: every snapshot from before the field is classic.
         even: v.get("even").and_then(|x| x.as_i64()).unwrap_or(2) as i8,
+        // Card scoring, same discipline: a skat round banked BEFORE the card
+        // values shipped was played under the parity, and the absent key
+        // reviews it that way for free.
+        cards: v.get("cards").and_then(|x| x.as_bool()).unwrap_or(false),
     };
     if s.leader > 1 {
         return None;
@@ -939,6 +950,14 @@ mod fixture_replay {
                 f["even_val"].as_i64().unwrap_or(2),
                 "fixture {i}: even_val did not reach State.even"
             );
+            // ...and so must card scoring (skat, 2026-08-09): a reader that
+            // dropped the flag would search a skat room under the old parity,
+            // legal moves and all, with nothing else here going red.
+            assert_eq!(
+                v.s.cards,
+                f["card_pts"].as_bool().unwrap_or(false),
+                "fixture {i}: card_pts did not reach State.cards"
+            );
 
             // My own hand, exactly. The opponent's is a COUNT and a hole.
             let mine: Mask = f["hand"]
@@ -1370,6 +1389,43 @@ mod review {
             "declarer": declarer, "target": 4, "make": 16,
             "set_base": 4, "short": 4, "over": 1, "null": 12,
         })
+    }
+
+    #[test]
+    fn the_scoring_flags_reach_the_reviewed_state() {
+        // A snapshot from before card scoring has no `cards` key and must
+        // review under the parity it was played at; a card-scored round's
+        // snapshot says so and must solve the card game. Reviewing one under
+        // the other is a confidently wrong number in a column labelled a fact.
+        let bare = deal_from_json(&deal_json(2, 1)).unwrap();
+        assert!(!bare.cards);
+        assert_eq!(bare.even, 2);
+        let mut j = deal_json(2, 1);
+        j["cards"] = serde_json::json!(true);
+        let carded = deal_from_json(&j).unwrap();
+        assert!(carded.cards);
+        // ...and the two really are different games: over a handful of real
+        // deals the same contract must not price identically under both
+        // readings every time, or the flag reaches the State and decides
+        // nothing. Any single deal CAN coincide, so the assertion is over the
+        // sweep.
+        let c = crate::dd::Contract {
+            level: 4, declarer: 0, make_base: 16, over: 1,
+            set_base: 4, short: 4, ramp: 0, null: Some(12),
+        };
+        let mut dd = Dd::new(14);
+        let mut differed = false;
+        for seed in 0..6u64 {
+            let g = crate::game::Game::deal(&mut crate::rng::Rng::new(seed + 40), 2, 1);
+            let mut carded = g.s;
+            carded.cards = true;
+            dd.clear();
+            let a = dd.solve_contract(&g.s, &c);
+            dd.clear();
+            let b = dd.solve_contract(&carded, &c);
+            differed |= a != b;
+        }
+        assert!(differed, "the cards flag did not change the reviewed game");
     }
 
     #[test]

@@ -1,8 +1,17 @@
 # Skat mode — a second auction over the same card play
 
 A separate game mode alongside the shipped auction. Same 32-card deck, same
-piles, same parity scoring, same talon — a different way to arrive at a
-contract. The shipped v2 auction stays exactly as it is.
+piles, same talon — a different way to arrive at a contract. The shipped v2
+auction stays exactly as it is.
+
+> **2026-08-09: skat no longer scores the trick parity.** The mode now scores
+> the CARDS captured — 9/10/J/Q are +2 each, 7/8/K/A are −1 each, a trick
+> pays the sum of its two cards (−2/+1/+4) and the pool is deal-dependent
+> (16 minus the out-cards' worth, mean ~14.5). Everything in this document
+> about the AUCTION shape still stands; every number below that leans on the
+> +5 parity pool (trick-point ceilings, the 12-point declarer ceiling, the
+> skatlab payoff sweeps) describes the old currency. The live description is
+> `games/dissonance/CLAUDE.md`, "Skat scores the CARDS".
 
 ## The one idea worth stealing
 

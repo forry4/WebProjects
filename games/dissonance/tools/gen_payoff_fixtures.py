@@ -88,8 +88,12 @@ def main() -> None:
     for g in _contracts():
         terms = E.payoff_terms(g)
         # Every total the round can reach, and both sides of the Null cliff.
+        # Card scoring (skat, 2026-08-09) reaches a much wider range than the
+        # parity pool: the whole deck is worth 16 gross of the out-cards, and
+        # a total is bounded by the captured cards' extremes.
+        lo, hi = ((-12, 25) if E.uses_card_points(E.mode_of(g)) else (-7, 13))
         rows = [[p, s, E.payoff(terms, p, s)]
-                for p in range(-7, 13) for s in (False, True)]
+                for p in range(lo, hi) for s in (False, True)]
         out.append(json.dumps({"mode": E.mode_of(g), "terms": terms, "rows": rows},
                               separators=(",", ":")))
     sys.stdout.write("\n".join(out) + "\n")

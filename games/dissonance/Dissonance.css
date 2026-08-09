@@ -139,6 +139,21 @@
 }
 .dis-card .dis-r { font-size: 0.95em; }
 .dis-card .dis-s { font-size: 1.15em; }
+/* The card's WORTH under card scoring (skat, 2026-08-09). In the markup on
+   every card, shown only inside a `.dis-cardpts` board -- the room's class,
+   not the card, decides. Bottom-LEFT, diagonal to the rank index, so a pile's
+   buried-card offset (up and to the right) never covers either corner's
+   information. Colour is the sign, not the suit, and it is paired with the
+   +/− glyph itself so colour is never the only signal. */
+.dis-pts {
+  display: none;
+  position: absolute; bottom: 4%; left: 7%;
+  font-size: 0.62em; font-weight: 700; line-height: 1;
+  padding: 0.1em 0.25em; border-radius: 0.5em;
+}
+.dis-cardpts .dis-pts { display: block; }
+.dis-pts.pos { color: #1d6b2f; background: rgba(29, 107, 47, 0.12); }
+.dis-pts.neg { color: #9c3540; background: rgba(156, 53, 64, 0.10); }
 .dis-card.red { color: #c0233a; }
 .dis-card.black { color: #17171a; }
 .dis-card.play { cursor: pointer; }

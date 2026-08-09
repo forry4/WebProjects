@@ -144,14 +144,15 @@ export function odd_review(request_json) {
 
 /**
  * The wire vintage this artifact speaks. 2 = understands `even_val` /
- * `even` (minor mode's runtime trick value, 2026-08-09).
+ * `even` (minor mode's runtime trick value, 2026-08-09); 3 = understands
+ * `card_pts` / `cards` (skat mode's card scoring, same day).
  *
- * THE WORKER PROBES FOR THIS EXPORT before searching a minor-parity payload:
- * an older wasm has no such symbol, would silently read the view WITHOUT
- * `even_val`, and would return legal-but-wrong-game moves with nothing red
- * anywhere -- the exact failure shape the `shown` rewrite already paid for.
- * Probing for the export turns "stale artifact in a minor room" into the
- * ordinary per-decision fallback to the server bot.
+ * THE WORKER PROBES THIS EXPORT before searching a minor or card-scored
+ * payload: an older wasm would silently read the view WITHOUT the field and
+ * return legal-but-wrong-game moves with nothing red anywhere -- the exact
+ * failure shape the `shown` rewrite already paid for. The probe (absence of
+ * the export, or a value below what the payload needs) turns "stale artifact
+ * in that room" into the ordinary per-decision fallback to the server bot.
  * @returns {number}
  */
 export function odd_wire() {

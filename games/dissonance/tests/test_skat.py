@@ -18,6 +18,14 @@ from games.dissonance import engine as E
 # --- helpers ---------------------------------------------------------------
 
 
+
+def _pool_of(g: dict) -> int:
+    """The completed round's pool in this game's own currency: the worth of
+    the 26 dealt-in cards under card scoring, the parity constant otherwise."""
+    if E.uses_card_points(E.mode_of(g)):
+        return E.played_pool(g)
+    return E.pool_for(E.mode_of(g))
+
 def _skat(opener: int = 0) -> dict:
     return E.new_game(["alice", "bob"], None, opener=opener, mode="skat")
 
@@ -274,7 +282,7 @@ def test_a_grand_round_plays_from_the_declaration_to_a_scored_result():
         assert guard <= E.NTRICKS * 2
     assert g["phase"] == "over"
     if not g["result"]["ended_early"]:
-        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == E.POOL
+        assert g["trick"] == E.NTRICKS and sum(g["pts"]) == _pool_of(g)
     assert g["result"]["denom"] == E.GRAND
     assert g["result"]["base"] == E.SKAT_BASE[E.GRAND]
 
@@ -780,7 +788,7 @@ def test_a_skat_round_plays_from_the_deal_to_a_scored_result():
     # the helper, not six green local runs: this assertion passed here and went
     # red in CI on the first deal that settled at trick 10.
     if g["trick"] == E.NTRICKS:
-        assert sum(g["pts"]) == E.POOL
+        assert sum(g["pts"]) == _pool_of(g)
     else:
         assert g["result"]["ended_early"]
     res = g["result"]
@@ -994,7 +1002,7 @@ def test_a_contract_that_cannot_fail_plays_on_for_the_overtricks(mode):
         res = g["result"]
         assert g["trick"] == E.NTRICKS, f"seed {seed} ended at trick {g['trick']}"
         assert res["ended_early"] is False
-        assert sum(g["pts"]) == E.POOL, "a completed round conserves the pool"
+        assert sum(g["pts"]) == _pool_of(g), "a completed round conserves the pool"
         if res["made"]:
             stake, target = _contract_of(res, mode)
             assert res["over"] == res["declarer_pts"] - target
@@ -1062,7 +1070,7 @@ def test_a_contract_that_cannot_be_MADE_still_plays_on(mode):
     assert hopeless is not None, f"no seed in 400 busted a {mode} contract"
     assert hopeless["trick"] == E.NTRICKS, "a set contract runs to thirteen"
     assert hopeless["result"]["ended_early"] is False
-    assert sum(hopeless["pts"]) == E.POOL
+    assert sum(hopeless["pts"]) == _pool_of(hopeless)
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
@@ -1079,7 +1087,95 @@ def test_null_gets_no_early_exit_of_its_own(mode):
     assert ducked is not None, f"no seed in 400 reached Null in {mode}"
     assert ducked["trick"] == E.NTRICKS
     assert ducked["result"]["ended_early"] is False
-    assert sum(ducked["pts"]) == E.POOL
+    assert sum(ducked["pts"]) == _pool_of(ducked)
     decl = ducked["result"]["declarer"]
     assert ducked["result"]["scores"][decl] == (
         E.SKAT_NULL_VALUE if mode == "skat" else E.NULL_MAKE)
+
+
+# --- card scoring (2026-08-09): the cards captured are the points ------------
+
+
+def test_card_values_price_the_middle_ranks_up_and_the_ends_down():
+    """9/10/J/Q are +2, 7/8/K/A are -1 -- and the whole deck sums to +16, so
+    the dealt-in pool is 16 minus whatever the six out-cards are worth."""
+    assert E.CARD_VALUES == [-1, -1, 2, 2, 2, 2, -1, -1]
+    assert E.CARD_POOL == 16
+    for c in range(E.NCARD):
+        want = 2 if E.RANK_NAMES[E.rank(c)] in ("9", "10", "J", "Q") else -1
+        assert E.card_points(c) == want, E.card_name(c)
+    assert E.uses_card_points("skat")
+    assert not E.uses_card_points("classic") and not E.uses_card_points("minor")
+    # The parity pool is meaningless for a card-scored mode and must fail loud
+    # rather than read 5.
+    assert E.pool_for("skat") is None
+    assert E.pool_for("classic") == 5 and E.pool_for("minor") == -1
+
+
+def test_a_skat_round_scores_by_the_cards_captured():
+    """Recount every trick off the public record: the winner banks the SUM of
+    the trick's two cards (-2, +1 or +4), and `etricks` marks exactly the
+    positive ones -- which is what the Null consolation means by a scoring
+    trick in this currency."""
+    for seed in range(8):
+        g = _drive("skat", seed, level=2, denom=seed % 4, pick=0)
+        assert g["trick"] == E.NTRICKS
+        h = g["history"]
+        pts, et = [0, 0], [0, 0]
+        for t in range(E.NTRICKS):
+            a, b = h[2 * t], h[2 * t + 1]
+            winner = b[0] if E.beats(a[1], b[1], g["trump"]) else a[0]
+            v = E.card_points(a[1]) + E.card_points(b[1])
+            assert v in (-2, 1, 4), "a trick is two cards from {-1, +2}"
+            pts[winner] += v
+            if v > 0:
+                et[winner] += 1
+        assert pts == g["pts"], f"seed {seed}: recount diverged"
+        assert et == g["etricks"], f"seed {seed}: scoring-trick count diverged"
+        assert sum(pts) == E.played_pool(g)
+
+
+def test_the_parity_modes_are_untouched_by_card_scoring():
+    """Classic still pays the trick NUMBER's value; a recount by cards must
+    generally disagree with it, or the two currencies collapsed silently."""
+    diverged = False
+    for seed in range(6):
+        g = _drive("classic", seed, level=1, denom=seed % 4, pick=0)
+        assert sum(g["pts"]) == E.POOL
+        h = g["history"]
+        card_pts = [0, 0]
+        for t in range(E.NTRICKS):
+            a, b = h[2 * t], h[2 * t + 1]
+            winner = b[0] if E.beats(a[1], b[1], g["trump"]) else a[0]
+            card_pts[winner] += E.card_points(a[1]) + E.card_points(b[1])
+        diverged |= card_pts != g["pts"]
+    assert diverged, "classic scored exactly like cards on every seed -- vacuous"
+
+
+def test_the_view_flags_card_scoring_and_ships_the_values():
+    skat = _declared()
+    v = E.view_for(skat, 0)
+    assert v["card_pts"] is True
+    assert v["card_values"] == E.CARD_VALUES
+    # A card-scored trick has no value until both cards are down, so the
+    # per-trick label is 0 and the client renders off the cards instead.
+    assert v["trick_value"] == 0
+    import random as _r
+    classic = E.new_game(["a", "b"], _r.Random(5))
+    cv = E.view_for(classic, 0)
+    assert cv["card_pts"] is False and cv["card_values"] is None
+
+
+def test_the_deal_snapshot_says_it_was_card_scored():
+    """The DD review replays the round under the scoring it was PLAYED at, and
+    a snapshot from before the change has no `cards` key -- absent means the
+    parity, which is exactly what those rounds were."""
+    skat = _declared()
+    assert skat["deal"]["cards"] is True
+    import random as _r
+    classic = E.new_game(["a", "b"], _r.Random(6))
+    E.apply_bid(classic, 0, 1, 0)
+    E.apply_pass(classic, 1)
+    E.apply_swap(classic, 0, None, None)
+    E.apply_double(classic, 1, False)
+    assert classic["deal"]["cards"] is False

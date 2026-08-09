@@ -1018,14 +1018,19 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
             return
         if _valid_difficulty(room.get("ai_difficulty")) not in CLIENT_AI_TIERS:
             return
-        # MINOR MODE NEEDS A CLIENT THAT SPEAKS even_val (`wire: 2`). An older
-        # cached bundle never sends the field, and its wasm would silently
-        # search a minor position under CLASSIC trick values -- a legal but
-        # wrong-game move every time, with nothing red anywhere. Refusing to
-        # arm keeps the honest degradation path: the room plays the server bot,
-        # exactly as if the browser were absent. Classic and skat rooms accept
-        # any vintage, as before.
-        if room.get("mode") == "minor" and int(msg.get("wire") or 1) < 2:
+        # MINOR MODE NEEDS A CLIENT THAT SPEAKS even_val (`wire: 2`), and SKAT
+        # MODE NEEDS ONE THAT SPEAKS card_pts (`wire: 3`, card scoring
+        # 2026-08-09). An older cached bundle never sends the field, and its
+        # wasm would silently search the position under the WRONG scoring --
+        # classic trick values in a minor room, the trick parity in a
+        # card-scored skat room -- a legal but wrong-game move every time, with
+        # nothing red anywhere. Refusing to arm keeps the honest degradation
+        # path: the room plays the server bot, exactly as if the browser were
+        # absent. Classic rooms accept any vintage, as before.
+        wire = int(msg.get("wire") or 1)
+        if room.get("mode") == "minor" and wire < 2:
+            return
+        if room.get("mode") == "skat" and wire < 3:
             return
         room["client_ai"] = bool(msg.get("ready", True))
     # A decision may already be waiting: the room armed one, the tab reloaded,
@@ -1132,6 +1137,12 @@ async def catalog():
         # Everything the client renders about it comes from here rather than
         # being hardcoded beside a "+2" somewhere.
         "even_value": dict(engine.EVEN_TRICK_VALUE),
+        # Skat scores CARDS since 2026-08-09: per-rank worth, served so the
+        # client renders the values off the wire instead of hardcoding the
+        # table. Its `pools` entry is None -- a card-scored round's pool is a
+        # property of the deal (`engine.played_pool`), not the mode.
+        "card_values": list(engine.CARD_VALUES),
+        "card_modes": [m for m in engine.MODES if engine.uses_card_points(m)],
         "pools": {m: engine.pool_for(m) for m in engine.MODES},
         "max_levels": {m: engine.max_level_for(m) for m in engine.MODES},
         "minor_null_make": engine.MINOR_NULL_MAKE,

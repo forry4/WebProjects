@@ -70,6 +70,22 @@ fn build_bounds(even: i8, max: bool) -> [i16; 14] {
     a
 }
 
+/// The card-scoring bounds: a trick's value is its cards (-2, +1 or +4), so
+/// the tightest per-trick figure known without looking at the hands is ±4 --
+/// winning a double-positive trick swings the differential by 4 either way.
+/// Deliberately loose (the true remaining swing depends on which cards are
+/// left); a loose bound prunes less and is still sound, and `mtdf` only uses
+/// it as a bracket.
+fn build_bounds_cards(max: bool) -> [i16; 14] {
+    let mut a = [0i16; 14];
+    let mut t = 13usize;
+    while t > 0 {
+        t -= 1;
+        a[t] = a[t + 1] + if max { 4 } else { -4 };
+    }
+    a
+}
+
 /// A contract to be played out exactly, rather than for maximum points.
 ///
 /// Once anything about the payoff depends on the MARGIN -- an overtrick bonus,
@@ -196,11 +212,13 @@ pub struct Dd {
     /// The contract `csearch` is currently paying off, as a hash. Set once per
     /// `solve_contract` rather than recomputed per node.
     ckey: u64,
-    /// The differential bounds for the parity currently being solved -- see
-    /// `build_bounds`. `bounds_even` says which parity they describe.
+    /// The differential bounds for the scoring currently being solved -- see
+    /// `build_bounds`. `bounds_even` says which parity they describe;
+    /// `bounds_cards` whether they are the card-scoring bounds instead.
     maxd: [i16; 14],
     mind: [i16; 14],
     bounds_even: i8,
+    bounds_cards: bool,
     pub nodes: u64,
     /// Bisection switches, for isolating a value regression to one technique.
     pub use_bounds: bool,
@@ -239,10 +257,13 @@ fn key_of(s: &State) -> u64 {
     // worth different points under classic (+2) and minor (+1) parity, and a
     // worker's table outlives a decision -- a review or a next round could ask
     // about the other mode and read a poisoned entry with nothing red anywhere.
+    // `cards` for the same reason: card scoring is a third value of the same
+    // layout, and it must never share an entry with either parity.
     let t = (s.trick as u64)
         | ((s.leader as u64) << 8)
         | ((((s.led as i16) as u16) as u64) << 16)
-        | ((s.even as u64) << 33);
+        | ((s.even as u64) << 33)
+        | ((s.cards as u64) << 42);
     // Mix each component on its own before combining. Folding two fields
     // together with XOR first would let their overlapping bit ranges alias,
     // which silently returns another position's value out of the table.
@@ -264,6 +285,7 @@ impl Dd {
             maxd: build_bounds(2, true),
             mind: build_bounds(2, false),
             bounds_even: 2,
+            bounds_cards: false,
             nodes: 0,
             use_bounds: true,
             use_mtdf: true,
@@ -271,13 +293,24 @@ impl Dd {
         }
     }
 
-    /// Point the differential bounds at this parity. Cheap when it already is.
+    /// Point the differential bounds at this game's scoring. Cheap when they
+    /// already are. Card scoring gets its own tables (±4 a trick, no parity);
+    /// the parity modes each get theirs, per `even`.
     #[inline]
-    fn ensure_even(&mut self, even: i8) {
-        if self.bounds_even != even {
-            self.maxd = build_bounds(even, true);
-            self.mind = build_bounds(even, false);
-            self.bounds_even = even;
+    fn ensure_mode(&mut self, s: &State) {
+        if s.cards {
+            if !self.bounds_cards {
+                self.maxd = build_bounds_cards(true);
+                self.mind = build_bounds_cards(false);
+                self.bounds_cards = true;
+            }
+            return;
+        }
+        if self.bounds_cards || self.bounds_even != s.even {
+            self.maxd = build_bounds(s.even, true);
+            self.mind = build_bounds(s.even, false);
+            self.bounds_even = s.even;
+            self.bounds_cards = false;
         }
     }
 
@@ -475,9 +508,12 @@ impl Dd {
             t.play(moves[i]);
             // Only a trick the declarer must not win ends the line. Under
             // `scoring_only` the -1 tricks are theirs to take.
+            // "Scoring trick" is per-currency: positive parity value, or a
+            // positive card sum -- `completed_trick_value` reads the pre-play
+            // state, whose `led` is still standing when `completing` holds.
             let fatal = completing
                 && t.leader as usize == declarer
-                && (!scoring_only || trick_value(s.trick) > 0);
+                && (!scoring_only || s.completed_trick_value(moves[i]) > 0);
             let v = if fatal {
                 false
             } else {
@@ -567,8 +603,10 @@ impl Dd {
             let mut t = *s;
             let completing = t.led >= 0;
             t.play(moves[i]);
-            let counts = !scoring_only || trick_value(s.trick) > 0;
-            let got = i32::from(completing && t.leader as usize == declarer && counts);
+            // Per-currency like `nsearch`'s: the card sum only exists when the
+            // move completes a trick, so the check short-circuits behind it.
+            let got = i32::from(completing && t.leader as usize == declarer
+                && (!scoring_only || s.completed_trick_value(moves[i]) > 0));
             // The child reports the count AFTER this trick's `got`, so its
             // window must be shifted by it -- the same trap that was live in
             // `search` once already.
@@ -604,9 +642,9 @@ impl Dd {
     }
 
     // NOTE for future entry points: every public path into `search`/`mtdf`
-    // must `ensure_even(s.even)` first (solve_from and solve_root do), or a
-    // minor solve runs on classic bounds and the MTD(f) ladder converges on
-    // a value the position cannot reach.
+    // must `ensure_mode(s)` first (solve_from and solve_root do), or a
+    // minor or card-scored solve runs on classic bounds and the MTD(f) ladder
+    // converges on a value the position cannot reach.
 
     /// `solve`, seeded. MTD(f) converges by a ladder of null-window probes, so
     /// starting near the answer skips most of the rungs — `solve_root` has done
@@ -614,7 +652,7 @@ impl Dd {
     /// between DENOMINATIONS: the same hand is worth a similar amount in hearts
     /// and in spades, so the first solve pays for the other four.
     pub fn solve_from(&mut self, s: &State, guess: i16) -> i16 {
-        self.ensure_even(s.even);
+        self.ensure_mode(s);
         if self.use_mtdf {
             self.mtdf(s, guess)
         } else {
@@ -632,10 +670,29 @@ impl Dd {
         if lo >= hi {
             return lo;
         }
+        // CARD SCORING HAS NO PARITY INVARIANT: a trick is worth -2, +1 or +4,
+        // which mixes both parities, so the ladder must step by 1 -- the
+        // standard MTD(f) null window. Stepping by 2 here converges on values
+        // the position cannot reach, the exact failure the parity tables were
+        // rebuilt per-mode to avoid.
+        if s.cards {
+            let mut g = guess.clamp(lo, hi);
+            while lo < hi {
+                let beta = if g <= lo { lo + 1 } else { g };
+                let v = self.search(s, beta - 1, beta);
+                if v < beta {
+                    hi = v;
+                } else {
+                    lo = v;
+                }
+                g = v;
+            }
+            return g;
+        }
         // Parity of the reachable value set: each remaining trick contributes
         // an odd amount exactly when its |value| is odd -- classic's -1 tricks,
         // or EVERY trick under minor parity. `maxd` carries the right answer
-        // for whichever parity `ensure_even` last installed.
+        // for whichever parity `ensure_mode` last installed.
         let par = (self.maxd[t] & 1).abs();
         let mut g = guess.clamp(lo, hi);
         if (g & 1).abs() != par {
@@ -658,7 +715,7 @@ impl Dd {
     /// Each is solved exactly — PIMC averages these across determinizations,
     /// so bounds from a narrowed window would be wrong to average.
     pub fn solve_root(&mut self, s: &State, moves: &[u8], out: &mut [i16]) {
-        self.ensure_even(s.even);
+        self.ensure_mode(s);
         let mut guess = 0i16;
         for (i, &c) in moves.iter().enumerate() {
             let mut t = *s;
@@ -810,15 +867,37 @@ impl Dd {
                     & (((1 as Mask) << c) - 1);
                 if below != 0 {
                     let lower = Mask::BITS - 1 - below.leading_zeros();
-                    if hand & (1 << lower) != 0 {
+                    // Under CARD SCORING adjacency is not enough: two adjacent
+                    // cards of different worth (the 8/9 and Q/K boundaries)
+                    // change the value of every trick they land in, so only
+                    // equal-worth neighbours are interchangeable. The parity
+                    // modes never read a card's worth, so there the old rule
+                    // stands whole.
+                    if hand & ((1 as Mask) << lower) != 0
+                        && (!s.cards || card_points(lower as u8) == card_points(c))
+                    {
                         continue; // the lower card plays identically
                     }
                 }
             }
             let r = rank(c) as i32;
-            // Order by this trick's intent: on a +2 trick the mover wants it,
-            // on a -1 trick they want to duck it.
-            let mut sc = if s.led >= 0 {
+            // Order by this trick's intent. Parity modes: on a +2 trick the
+            // mover wants it, on a -1 trick they want to duck it. Card
+            // scoring: following, the trick's worth is the two cards, so order
+            // by the immediate delta (bank it if winning, shed it if ducking);
+            // leading, lead low and keep the +2 cards back. Ordering only --
+            // a bad guess costs nodes, never the value.
+            let mut sc = if s.cards {
+                if s.led >= 0 {
+                    let tv = (card_points(s.led as u8) + card_points(c)) as i32;
+                    let w = beats(s.led as u8, c, s.trump);
+                    500 + 100 * (if w { tv } else { -tv }) - r
+                } else {
+                    let trumpish = esuit(c, s.trump) == trump_class(s.trump);
+                    (6 - r) - if trumpish { 7 } else { 0 }
+                        - 3 * (card_points(c).max(0) as i32)
+                }
+            } else if s.led >= 0 {
                 let w = beats(s.led as u8, c, s.trump);
                 match (want_win, w) {
                     (true, true) => 1000 - r,   // win as cheaply as possible

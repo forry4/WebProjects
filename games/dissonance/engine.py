@@ -17,9 +17,18 @@ Skat mode (2026-08-07) is a SECOND auction over that same card play, chosen per
 room: you bid a bare NUMBER, and only after winning do you declare the game
 (denomination + level) that satisfies it, optionally escalating against
 yourself with Hand / Sharp / Open before the defender's Kontra. The deal, the
-piles, the talon, follow-suit, the parity and the redaction machinery are
-shared verbatim -- ``apply_move`` dispatches on ``g["mode"]`` and both paths
-converge on ``_start_play``. See ``rust-cores/dissonance-core/SKAT_MODE.md``.
+piles, the talon, follow-suit and the redaction machinery are shared verbatim
+-- ``apply_move`` dispatches on ``g["mode"]`` and both paths converge on
+``_start_play``. See ``rust-cores/dissonance-core/SKAT_MODE.md``.
+
+Since 2026-08-09 skat mode also scores DIFFERENTLY: the trick-number parity is
+gone and the CARDS captured in a trick are what score -- 9/10/J/Q are worth +2
+each, 7/8/K/A are worth -1 each (``CARD_VALUES``). A trick is worth the sum of
+its two cards (-2, +1 or +4), the winner banks it, and the round's pool is
+whatever the 26 dealt-in cards add up to (16 minus the out-cards' worth), so it
+varies deal by deal. The tension the values buy: the ranks that WIN tricks
+(K, A) are themselves liabilities, and the ranks worth capturing (9..Q) sit in
+the middle where they rarely win a trick on their own.
 
 Minor mode (2026-08-09) is the THIRD mode and the first to touch the trick
 VALUES rather than the auction: even tricks pay +1 instead of +2 (odd tricks
@@ -87,7 +96,8 @@ NFOLLOW = 5
 DENOM_NAMES = SUIT_NAMES + ["no-trump", "Null", "grand"]
 
 NTRICKS = 13
-POOL = 5  # both players' point totals always sum to this (CLASSIC/SKAT parity)
+POOL = 5  # both players' totals always sum to this (CLASSIC parity; minor is
+#           -1 via pool_for, and skat scores CARDS so its pool is per-deal)
 
 MIN_LEVEL = 1
 MAX_LEVEL = 12
@@ -236,7 +246,13 @@ MODES = ("classic", "skat", "minor")
 DEFAULT_MODE = "classic"
 
 #: What an EVEN-numbered trick pays its winner, per mode. Odd tricks are -1
-#: everywhere -- the parity is the game and no mode touches it.
+#: in the parity modes.
+#:
+#: SKAT'S ENTRY IS VESTIGIAL since card scoring (2026-08-09): its rounds score
+#: captured cards (`CARD_VALUES`) and never read a trick's parity value. The
+#: row stays at 2 so `even_val` on the wire keeps its historical value for any
+#: old reader, and `uses_card_points` -- not this table -- is what says how a
+#: mode scores.
 #:
 #: MINOR (2026-08-09): even tricks pay +1 instead of +2, over the classic
 #: auction. The pool flips NEGATIVE (6 x 1 - 7 = -1): winning every trick now
@@ -260,8 +276,51 @@ def even_value(mode: str) -> int:
     return EVEN_TRICK_VALUE.get(mode, EVEN_TRICK_VALUE[DEFAULT_MODE])
 
 
-def pool_for(mode: str) -> int:
-    """Both players' totals over a completed round: six evens minus seven odds."""
+#: SKAT MODE SCORES THE CARDS, NOT THE TRICK NUMBER (2026-08-09). Indexed by
+#: rank (7 8 9 10 J Q K A): the four middle ranks are worth +2 each, the two
+#: ends -1 each. A completed trick pays its winner the SUM of its two cards --
+#: -2, +1 or +4 -- so "which tricks you win" becomes "which CARDS you win",
+#: and the parity machinery (`trick_value`, `even_value`, `pool_for`) simply
+#: does not apply to this mode any more.
+#:
+#: Why these signs: the ranks that WIN tricks (K, A) are liabilities worth -1,
+#: so raw high-card power costs points to use -- the second player can duck a
+#: 7 under your ace and hand you a -2 trick. The +2 cards sit in the middle
+#: (9..Q), strong enough to take a trick only when the big cards are spent.
+#: 16 cards at +2 against 16 at -1 puts the whole deck at +16; six cards sit
+#: out, so a round's REAL pool is `played_pool` and varies with the deal
+#: (4..22, mean 13).
+CARD_VALUES = [-1, -1, 2, 2, 2, 2, -1, -1]
+
+#: What all 32 cards add up to. The dealt-in pool is this minus the out-cards.
+CARD_POOL = NSUIT * sum(CARD_VALUES)
+
+
+def card_points(c: int) -> int:
+    """What capturing this card is worth, in skat mode."""
+    return CARD_VALUES[c % NRANK]
+
+
+def uses_card_points(mode: str) -> bool:
+    """Does this mode score captured cards rather than the trick parity?"""
+    return mode == "skat"
+
+
+def played_pool(g: dict) -> int:
+    """Both players' totals over a COMPLETED skat round: the worth of the 26
+    dealt-in cards. Deal-dependent -- `out` is the six cards nobody plays (the
+    swap keeps it current), so the pool is everything minus those."""
+    return CARD_POOL - sum(card_points(c) for c in g["out"])
+
+
+def pool_for(mode: str):
+    """Both players' totals over a completed round: six evens minus seven odds.
+
+    PARITY MODES ONLY. Skat scores captured cards (2026-08-09), so its pool is
+    a property of the DEAL (`played_pool`), not the mode -- None here, so a
+    caller that assumed a constant fails loudly rather than reading 5."""
+    if uses_card_points(mode):
+        return None
     return 6 * even_value(mode) - 7
 
 
@@ -1055,6 +1114,11 @@ def _deal_snapshot(g: dict) -> dict:
         # replayed at classic trick values would be a confidently wrong number
         # in a column labelled a fact. Optional on the wire, defaulting to 2.
         "even": even_value(mode_of(g)),
+        # CARD SCORING (skat, 2026-08-09). Explicit rather than inferred from
+        # the terms, and defaulting to False on the wire: a skat round banked
+        # BEFORE the change was played under the parity and must be reviewed
+        # under it, which the absent key preserves for free.
+        "cards": uses_card_points(mode_of(g)),
         "terms": payoff_terms(g),
     }
 
@@ -1114,7 +1178,15 @@ def apply_play(g: dict, seat: int, c: int) -> None:
         return
 
     winner = seat if beats(g["led"], c, g["trump"]) else g["leader"]
-    v = trick_value_in(g, g["trick"])
+    # SKAT MODE SCORES THE CARDS (2026-08-09): a trick is worth the sum of the
+    # two cards in it (-2, +1 or +4), whichever trick number it is. The parity
+    # modes read the trick index as always. `etricks` below generalises for
+    # free: a "scoring trick" is one with positive value in either currency,
+    # which is exactly what the Null consolation needs it to mean.
+    if uses_card_points(mode_of(g)):
+        v = card_points(g["led"]) + card_points(c)
+    else:
+        v = trick_value_in(g, g["trick"])
     g["pts"][winner] += v
     if v > 0:
         g["etricks"][winner] += 1
@@ -1174,6 +1246,12 @@ def _score_is_settled(g: dict) -> bool:
     # total is now part of the score rather than only the yardstick. Below the
     # declarer guard because `payoff_terms` reads a SETTLED contract.
     if payoff_terms(g).get("over"):
+        return False
+    # CARD SCORING (skat, 2026-08-09) never settles early, bonus or no bonus:
+    # the floor arithmetic below counts -1 tricks off the trick INDEX, which is
+    # a different game. If the shelf ever reopens for skat it needs its own
+    # bound (worst case: forced to win every remaining trick at -2 each).
+    if uses_card_points(mode_of(g)):
         return False
     # NEVER STOP WITH A SINGLE TRICK LEFT. Cutting the round one trick from home
     # saves nothing and costs the players the hand's last beat -- and that beat
@@ -1665,9 +1743,10 @@ def _finish_skat(g: dict) -> None:
     stake = ct["value"] * ct["mult"] * skat_doubling(ct)
     terms = payoff_terms(g)
     target = terms["target"]
-    # The consolation. A declarer who took no +2 trick cannot have reached any
-    # target (only +2 tricks add points), so it always REPLACES a set -- it is
-    # never a bonus on top of a made contract.
+    # The consolation. A declarer who took no positive trick cannot have
+    # reached any target (only positive tricks add points -- under card scoring
+    # every trick they DID win was worth -2), so it always REPLACES a set -- it
+    # is never a bonus on top of a made contract.
     null = g["etricks"][decl] == 0
     made = (not null) and dpts >= target
     short = 0 if (null or made) else target - dpts
@@ -1704,6 +1783,10 @@ def _finish_skat(g: dict) -> None:
         "declarer_etricks": g["etricks"][decl],
         "made": made,
         "short": short,
+        # The per-point set rate, off the SAME terms this round was scored
+        # with -- the result panel prints the arithmetic, and it had a literal
+        # 4 in it that survived the 4 -> 5 move unnoticed.
+        "short_rate": terms["short"],
         "over": over,
         "over_bonus": terms.get("over", 0),
         "scores": scores,
@@ -1942,12 +2025,27 @@ def view_for(g: dict, seat: int) -> dict:
         "opp_hand": sorted(g["hands"][opp]) if (open_now and opp == decl) else None,
         "trump": g["trump"],
         "trick": g["trick"],
-        "trick_value": trick_value_in(g, g["trick"]) if g["phase"] == "play" else 0,
+        # In card-scoring mode a trick has no value until both cards are down,
+        # so this reads 0 there and the client labels the trick off the CARDS
+        # (`card_values` below). Parity modes ship the trick's fixed value.
+        "trick_value": (0 if uses_card_points(mode_of(g))
+                        else trick_value_in(g, g["trick"])
+                        if g["phase"] == "play" else 0),
         # What an even trick pays in this room -- the ONE number the classic
         # parity baked into every consumer. The client-side searcher reads it
         # into `State.even` (`wire.rs`, optional, defaulting to classic's 2),
         # and the board labels tricks with it instead of a hardcoded +2.
         "even_val": even_value(mode_of(g)),
+        # CARD SCORING (2026-08-09). True in skat mode: captured cards score
+        # (`CARD_VALUES`, shipped so the client renders the per-rank worth
+        # rather than hardcoding it). The client-side searcher reads the flag
+        # into `State.cards` -- a wasm too old for it (`wire < 3`) would search
+        # the PARITY game with nothing red anywhere, which is why the server
+        # refuses to arm a skat room for an older client
+        # (`_handle_client_ai_ready`) and the worker refuses the payload.
+        "card_pts": uses_card_points(mode_of(g)),
+        "card_values": (list(CARD_VALUES)
+                        if uses_card_points(mode_of(g)) else None),
         "leader": g["leader"],
         "led": g["led"],
         "pts": list(g["pts"]),

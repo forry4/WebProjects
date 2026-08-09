@@ -696,9 +696,14 @@ pub fn eval_hand(
                     ..w
                 };
                 let diff = dd.solve(&s) as i32;
-                let p0 = (crate::state::POOL as i32 + diff) / 2;
+                // The STATE's pool, not the classic constant -- under card
+                // scoring (skatlab's game since 2026-08-09) the pool is the
+                // deal's, and for every parity state this is the same number
+                // it always was.
+                let pool = s.pool() as i32;
+                let p0 = (pool + diff) / 2;
                 row[declarer][d] =
-                    (if declarer == 0 { p0 } else { crate::state::POOL as i32 - p0 }) as i8;
+                    (if declarer == 0 { p0 } else { pool - p0 }) as i8;
                 if need_floor {
                     frow[declarer][d] = forced_floor(dd, &s, declarer) as i8;
                 }

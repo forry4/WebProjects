@@ -90,8 +90,48 @@ pub struct State {
     /// of the position's identity, so `dd::key_of` mixes it into the
     /// transposition key -- two solves of one card layout under different
     /// parities must never share an entry.
+    ///
+    /// Unread while `cards` is set -- card scoring has no parity.
     pub even: i8,
+    /// CARD SCORING (the server's SKAT mode since 2026-08-09): a completed
+    /// trick pays its winner the SUM OF ITS TWO CARDS (`card_points`: 9/10/J/Q
+    /// +2, 7/8/K/A -1 -- so -2, +1 or +4 a trick) instead of the trick
+    /// number's parity value. Runtime state for the same reason `even` is: one
+    /// artifact serves every room, reading `card_pts` off the view (`cards`
+    /// off a deal snapshot), defaulting to false so every older payload and
+    /// every offline harness is the parity game it always was. Part of the
+    /// position's identity (`dd::key_of`), and it changes three solver
+    /// invariants `dd.rs` handles explicitly: the differential's fixed parity
+    /// (gone -- MTD(f) must step by 1), the per-trick bounds (±4, off the
+    /// cards rather than the index), and rank-adjacent equivalence (two
+    /// adjacent cards of DIFFERENT worth play differently).
+    pub cards: bool,
 }
+
+/// What capturing a card is worth under card scoring: +2 for the four middle
+/// ranks (9 10 J Q -- expressed relative to `TEN` so the `rank7`..`rank10`
+/// research decks keep the same four), -1 for everything else.
+#[inline(always)]
+pub const fn card_points(c: u8) -> i8 {
+    let r = c % NRANK;
+    // TEN is 9's neighbour: positive ranks are 9, 10, J, Q.
+    if r + 1 >= TEN && r <= TEN + 2 {
+        2
+    } else {
+        -1
+    }
+}
+
+/// The whole deck's worth under card scoring: 4 suits x (4 x 2 - 4 x 1).
+pub const CARD_POOL: i8 = {
+    let mut s = 0i8;
+    let mut c = 0u8;
+    while c < NCARD {
+        s += card_points(c);
+        c += 1;
+    }
+    s
+};
 
 /// Which parity of trick NUMBER scores +2. Default: even-numbered tricks.
 #[cfg(feature = "odd-positive")]
@@ -166,15 +206,48 @@ pub fn beats(led: u8, follow: u8, trump: u8) -> bool {
 }
 
 impl State {
-    /// This game's value of the (0-indexed) trick.
+    /// This game's value of the (0-indexed) trick. PARITY MODES ONLY -- under
+    /// card scoring a trick's value is its cards (`completed_trick_value`),
+    /// not its number, and there is nothing meaningful to return here.
     #[inline(always)]
     pub fn trick_value_at(&self, trick: u8) -> i8 {
         trick_value_with(trick, self.even)
     }
 
+    /// What completing the CURRENT trick with `follow` pays its winner --
+    /// valid only while a card is led. The one place both scoring rules meet.
+    #[inline(always)]
+    pub fn completed_trick_value(&self, follow: u8) -> i8 {
+        debug_assert!(self.led >= 0);
+        if self.cards {
+            card_points(self.led as u8) + card_points(follow)
+        } else {
+            trick_value_with(self.trick, self.even)
+        }
+    }
+
     /// Both players' totals over this game's completed round.
+    ///
+    /// Under card scoring the pool is a property of the DEAL -- the worth of
+    /// the 26 dealt-in cards -- so it is computed as points already banked
+    /// plus everything still in play (every in-play card ends up captured by
+    /// somebody; the led card, having left its owner's holding but not yet
+    /// been banked, counts too). Correct from any position, which the parity
+    /// arithmetic is as well.
     #[inline(always)]
     pub fn pool(&self) -> i8 {
+        if self.cards {
+            let mut s = self.pts[0] + self.pts[1];
+            let mut m = self.in_play();
+            if self.led >= 0 {
+                m |= 1 << (self.led as u8);
+            }
+            while m != 0 {
+                s += card_points(m.trailing_zeros() as u8);
+                m &= m - 1;
+            }
+            return s;
+        }
         let mut s = 0i8;
         let mut t = 0u8;
         while t < NTRICKS {
@@ -279,7 +352,11 @@ impl State {
         } else {
             self.leader
         };
-        let v = self.trick_value_at(self.trick);
+        // Card scoring pays the winner the trick's two cards; the parity modes
+        // pay the trick number's value. `escored` below generalises for free:
+        // a "scoring trick" is one with positive value in either currency,
+        // which is exactly what the Null consolation means by it.
+        let v = self.completed_trick_value(c);
         self.pts[winner as usize] += v;
         if v > 0 {
             self.escored |= 1 << winner;

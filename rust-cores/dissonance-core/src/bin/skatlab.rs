@@ -89,8 +89,10 @@ fn pts_in(dd: &mut Dd, base: &dissonance::state::State, denom: u8, decl: usize,
         ..*base
     };
     let diff = dd.solve(&s) as i32;
-    let p0 = (POOL as i32 + diff) / 2;
-    if decl == 0 { p0 } else { POOL as i32 - p0 }
+    // The state's own pool: skat scores cards since 2026-08-09, so the pool is
+    // the deal's, not the parity constant.
+    let pool = s.pool() as i32;
+    if decl == 0 { (pool + diff) / 2 } else { pool - (pool + diff) / 2 }
 }
 
 fn null_makes(dd: &mut Dd, base: &dissonance::state::State, decl: usize,
@@ -291,7 +293,10 @@ fn main() {
                         break;
                     }
                     let seed = idx as u64 + 1;
-                    let g = Game::deal_shown(&mut Rng::new(seed), 4, 0, 3);
+                    let mut g = Game::deal_shown(&mut Rng::new(seed), 4, 0, 3);
+                    // Skat scores CARDS since 2026-08-09 -- the lab measures
+                    // the game the server actually plays.
+                    g.s.cards = true;
                     let evs: Vec<HandEval> = (0..2)
                         .map(|p| {
                             let v = g.view(p);

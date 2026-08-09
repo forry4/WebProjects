@@ -89,7 +89,8 @@ games/
                        #   tests/test_rust_parity.py is the drift gate. THREE modes
                        #   over the shared card play, picked per room
                        #   (`mode: classic|skat|minor` — minor re-prices even
-                       #   tricks to +1) — see its CLAUDE.md
+                       #   tricks to +1; skat scores the CARDS captured,
+                       #   9/10/J/Q +2 and 7/8/K/A −1) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the

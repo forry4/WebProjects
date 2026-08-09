@@ -10,10 +10,30 @@ use crate::cards::*;
 use crate::state::*;
 
 /// Higher is more attractive for the player to move.
+///
+/// CARD SCORING (skat mode, 2026-08-09) has its own branch, mirrored by
+/// `bot.policy_score` in Python: following, the trick's value IS the two
+/// cards, so the score is the exact one-trick delta (bank the sum if winning,
+/// hand it over if ducking) with a small tie-break toward the lower rank;
+/// leading, lead low and keep the +2 cards back. Same rough 0..4 range as the
+/// parity branch so the softmax temperature means the same thing.
 #[inline]
 pub fn policy_score(s: &State, c: u8) -> f32 {
-    let want_win = trick_value(s.trick) > 0;
     let r = rank(c) as f32 / 6.0;
+    if s.cards {
+        if s.led >= 0 {
+            let tv = (card_points(s.led as u8) + card_points(c)) as f32;
+            let w = beats(s.led as u8, c, s.trump);
+            return 2.0 + 0.5 * (if w { tv } else { -tv }) - 0.05 * r;
+        }
+        let trumpish = if esuit(c, s.trump) == trump_class(s.trump) {
+            1.0
+        } else {
+            0.0
+        };
+        return 1.0 + (1.0 - r) - 0.4 * card_points(c).max(0) as f32 - trumpish;
+    }
+    let want_win = trick_value(s.trick) > 0;
     if s.led >= 0 {
         let w = beats(s.led as u8, c, s.trump);
         match (want_win, w) {

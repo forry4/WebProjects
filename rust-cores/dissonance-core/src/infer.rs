@@ -56,8 +56,9 @@ fn rewind(v: &View, now: &State) -> State {
         pts: [0, 0],
         // The rewind replays from the DEAL, so it re-derives this on the way.
         escored: 0,
-        // The parity travels with the position -- a replay accumulates points.
+        // The scoring travels with the position -- a replay accumulates points.
         even: now.even,
+        cards: now.cards,
     }
 }
 
