@@ -45,20 +45,26 @@ impl Default for Entry {
     }
 }
 
-/// `MAXD[t]` / `MIND[t]`: the largest and smallest differential still
-/// obtainable when the trick with index `t` is about to be played. Player 0
-/// gains 2 by winning a +2 trick and gains 1 by making the opponent eat a -1
-/// trick, so each remaining trick is worth 2 or 1 in absolute terms.
-static MAXD: [i16; 14] = build_bounds(true);
-static MIND: [i16; 14] = build_bounds(false);
-
-const fn build_bounds(max: bool) -> [i16; 14] {
+/// `maxd[t]` / `mind[t]` (on `Dd`): the largest and smallest differential
+/// still obtainable when the trick with index `t` is about to be played.
+/// Player 0 gains `|v|` by winning a trick worth `v` -- 2 or 1 in the classic
+/// parity, 1 and 1 under minor mode's +1 evens.
+///
+/// PER-SOLVE STATE, NOT CONSTANTS, and the reason is `mtdf`'s parity ladder,
+/// not the pruning: the ladder steps by 2 on the invariant that every
+/// reachable value shares one parity, and WHICH parity that is depends on the
+/// even-trick value (classic: odd exactly when a -1 trick remains; minor:
+/// every trick swings the differential by an odd 1, so the parity is the
+/// remaining-trick COUNT's). Classic tables under minor step the ladder right
+/// past the true value. `ensure_even` rebuilds the 14 entries only when a
+/// solve arrives under the other parity -- free in the serving path, where a
+/// worker sees one mode for the life of a decision.
+fn build_bounds(even: i8, max: bool) -> [i16; 14] {
     let mut a = [0i16; 14];
     let mut t = 13usize;
     while t > 0 {
         t -= 1;
-        // 2 for a +2 trick, 1 for a -1 trick, whichever parity those are.
-        let w: i16 = if trick_value(t as u8) == 2 { 2 } else { 1 };
+        let w: i16 = trick_value_with(t as u8, even).unsigned_abs() as i16;
         a[t] = a[t + 1] + if max { w } else { -w };
     }
     a
@@ -190,6 +196,11 @@ pub struct Dd {
     /// The contract `csearch` is currently paying off, as a hash. Set once per
     /// `solve_contract` rather than recomputed per node.
     ckey: u64,
+    /// The differential bounds for the parity currently being solved -- see
+    /// `build_bounds`. `bounds_even` says which parity they describe.
+    maxd: [i16; 14],
+    mind: [i16; 14],
+    bounds_even: i8,
     pub nodes: u64,
     /// Bisection switches, for isolating a value regression to one technique.
     pub use_bounds: bool,
@@ -224,7 +235,14 @@ fn key_of(s: &State) -> u64 {
     // overflows a wider one, and the failure mode is a silent hash collision
     // returning another position's value.
     let h = mix(s.hand[0]) ^ mix(s.hand[1]).rotate_left(29) ^ mix(s.trump as u64 | (1 << 60));
-    let t = (s.trick as u64) | ((s.leader as u64) << 8) | ((((s.led as i16) as u16) as u64) << 16);
+    // `even` is in the key because it is in the VALUE: the same card layout is
+    // worth different points under classic (+2) and minor (+1) parity, and a
+    // worker's table outlives a decision -- a review or a next round could ask
+    // about the other mode and read a poisoned entry with nothing red anywhere.
+    let t = (s.trick as u64)
+        | ((s.leader as u64) << 8)
+        | ((((s.led as i16) as u16) as u64) << 16)
+        | ((s.even as u64) << 33);
     // Mix each component on its own before combining. Folding two fields
     // together with XOR first would let their overlapping bit ranges alias,
     // which silently returns another position's value out of the table.
@@ -243,10 +261,23 @@ impl Dd {
             cmask: cn - 1,
             mask: n - 1,
             ckey: 0,
+            maxd: build_bounds(2, true),
+            mind: build_bounds(2, false),
+            bounds_even: 2,
             nodes: 0,
             use_bounds: true,
             use_mtdf: true,
             use_equiv: true,
+        }
+    }
+
+    /// Point the differential bounds at this parity. Cheap when it already is.
+    #[inline]
+    fn ensure_even(&mut self, even: i8) {
+        if self.bounds_even != even {
+            self.maxd = build_bounds(even, true);
+            self.mind = build_bounds(even, false);
+            self.bounds_even = even;
         }
     }
 
@@ -572,12 +603,18 @@ impl Dd {
         self.solve_from(s, 0)
     }
 
+    // NOTE for future entry points: every public path into `search`/`mtdf`
+    // must `ensure_even(s.even)` first (solve_from and solve_root do), or a
+    // minor solve runs on classic bounds and the MTD(f) ladder converges on
+    // a value the position cannot reach.
+
     /// `solve`, seeded. MTD(f) converges by a ladder of null-window probes, so
     /// starting near the answer skips most of the rungs — `solve_root` has done
     /// this between sibling moves since the campaign. The auction wants it
     /// between DENOMINATIONS: the same hand is worth a similar amount in hearts
     /// and in spades, so the first solve pays for the other four.
     pub fn solve_from(&mut self, s: &State, guess: i16) -> i16 {
+        self.ensure_even(s.even);
         if self.use_mtdf {
             self.mtdf(s, guess)
         } else {
@@ -591,13 +628,15 @@ impl Dd {
     /// ladder step by 2 and halve the number of probes.
     fn mtdf(&mut self, s: &State, guess: i16) -> i16 {
         let t = s.trick as usize;
-        let (mut lo, mut hi) = (MIND[t], MAXD[t]);
+        let (mut lo, mut hi) = (self.mind[t], self.maxd[t]);
         if lo >= hi {
             return lo;
         }
         // Parity of the reachable value set: each remaining trick contributes
-        // an odd amount exactly when it is a -1 trick.
-        let par = (MAXD[t] & 1).abs();
+        // an odd amount exactly when its |value| is odd -- classic's -1 tricks,
+        // or EVERY trick under minor parity. `maxd` carries the right answer
+        // for whichever parity `ensure_even` last installed.
+        let par = (self.maxd[t] & 1).abs();
         let mut g = guess.clamp(lo, hi);
         if (g & 1).abs() != par {
             g += 1;
@@ -619,6 +658,7 @@ impl Dd {
     /// Each is solved exactly — PIMC averages these across determinizations,
     /// so bounds from a narrowed window would be wrong to average.
     pub fn solve_root(&mut self, s: &State, moves: &[u8], out: &mut [i16]) {
+        self.ensure_even(s.even);
         let mut guess = 0i16;
         for (i, &c) in moves.iter().enumerate() {
             let mut t = *s;
@@ -642,11 +682,11 @@ impl Dd {
         // Nothing left to play for can still decide the node.
         let t = s.trick as usize;
         if self.use_bounds {
-            if MAXD[t] <= alpha {
-                return MAXD[t];
+            if self.maxd[t] <= alpha {
+                return self.maxd[t];
             }
-            if MIND[t] >= beta {
-                return MIND[t];
+            if self.mind[t] >= beta {
+                return self.mind[t];
             }
         }
         self.nodes += 1;

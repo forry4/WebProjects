@@ -280,6 +280,7 @@ impl OracleBot {
                 led: -1,
                 pts: [0; 2],
                 escored: 0,
+                even: 2,
             },
         }
     }

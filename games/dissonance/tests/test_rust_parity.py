@@ -37,8 +37,16 @@ def _load():
 
 
 def _game_from(fx):
-    """Rebuild the exact dealt position the reference started from."""
-    g = E.new_game(["a", "b"])
+    """Rebuild the exact dealt position the reference started from.
+
+    `even` is the fixture's even-trick value: 2 is the classic parity, 1 is
+    MINOR mode -- the generator plays every fourth fixture there, so the
+    port's runtime-parity path (`trick_value_in`) is gated by replay the same
+    way Grand's trump is. Absent on a fixture file from before the mode,
+    which is classic.
+    """
+    mode = "minor" if fx.get("even", 2) == 1 else "classic"
+    g = E.new_game(["a", "b"], mode=mode)
     g["hands"] = [sorted(fx["hands"][0]), sorted(fx["hands"][1])]
     g["piles"] = [[list(p) for p in fx["piles"][0]], [list(p) for p in fx["piles"][1]]]
     g["out"] = list(fx["out"])
@@ -61,11 +69,14 @@ def _game_from(fx):
     # +2 tricks, so `_score_is_settled` would need more points than the game
     # contains. Asserted rather than assumed, because it is a coincidence of two
     # constants and would rot in silence.
-    ceiling = sum(v for v in (E.trick_value(t) for t in range(E.NTRICKS)) if v > 0)
-    assert E.MAX_LEVEL >= ceiling, (
-        "MAX_LEVEL no longer exceeds what a declarer can score, so this harness "
-        "can settle a round early and truncate the replay")
-    g["auction"] = {"level": E.MAX_LEVEL, "denom": fx["trump"],
+    even = E.even_value(mode)
+    top = E.max_level_for(mode)
+    ceiling = sum(v for v in (E.trick_value(t, even) for t in range(E.NTRICKS))
+                  if v > 0)
+    assert top >= ceiling, (
+        "the mode's max level no longer exceeds what a declarer can score, so "
+        "this harness can settle a round early and truncate the replay")
+    g["auction"] = {"level": top, "denom": fx["trump"],
                     "declarer": fx["leader"], "used": [0, 0],
                     "to_act": fx["leader"], "log": []}
     return g
@@ -104,5 +115,21 @@ def test_the_port_agrees_on_which_tricks_are_worth_what():
         g = _game_from(f)
         for c in f["moves"]:
             E.apply_play(g, E.to_play(g), c)
-        assert sum(g["pts"]) == E.POOL
+        assert sum(g["pts"]) == E.pool_for(E.mode_of(g))
+        assert g["pts"] == f["pts"]
+
+
+def test_the_fixtures_cover_the_minor_parity():
+    """A regenerate that quietly stopped sampling minor would leave the +1
+    path replayed by nothing while the file still looked comprehensive --
+    the exact shape the Grand fixtures already guard against."""
+    fx = _load()
+    minor = [f for f in fx if f.get("even", 2) == 1]
+    assert len(minor) >= len(fx) // 8, (
+        "only %d of %d fixtures play minor parity" % (len(minor), len(fx)))
+    for f in minor[:20]:
+        g = _game_from(f)
+        for c in f["moves"]:
+            E.apply_play(g, E.to_play(g), c)
+        assert sum(g["pts"]) == -1
         assert g["pts"] == f["pts"]

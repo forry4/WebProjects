@@ -34,13 +34,32 @@
 //   won't (the main thread drops this worker; with none ready it never announces
 //   client_ai_ready and the SERVER plays the bot — the pre-existing path).
 
-import init, { odd_pick_card, odd_best_card, odd_pick_bid, odd_review } from "./dissonance.js";
+// NAMESPACE import, not named: a NEW worker beside an OLD cached glue must
+// degrade per-feature, and a named import of a symbol the old module lacks is
+// a SyntaxError that kills the whole worker -- classic rooms included.
+import * as wasm from "./dissonance.js";
+
+const { default: init, odd_pick_card, odd_best_card, odd_pick_bid, odd_review } = wasm;
+
+// Does this artifact speak wire 2 (minor mode's `even_val`)? Probed off the
+// EXPORT TABLE, because that is the one thing an old artifact cannot fake: a
+// wasm without the field's reader would silently search a minor room under
+// classic trick values -- legal moves, wrong game, nothing red anywhere. The
+// probe turns that into the ordinary per-decision server-bot fallback.
+const WIRE = typeof wasm.odd_wire === "function" ? 2 : 1;
+
+// The parity a request needs: 2 unless it explicitly carries a minor value.
+function neededEven(req) {
+  const v = req && (req.view || req.deal || req);
+  const e = v && (v.even_val ?? v.even);
+  return typeof e === "number" ? e : 2;
+}
 
 let readyResolve;
 const readyP = new Promise((res) => (readyResolve = res));
 
 init()
-  .then(() => { readyResolve(true); self.postMessage({ ready: true }); })
+  .then(() => { readyResolve(true); self.postMessage({ ready: true, wire: WIRE }); })
   .catch((err) => { readyResolve(false); self.postMessage({ ready: false, error: String(err) }); });
 
 self.onmessage = async (e) => {
@@ -49,6 +68,17 @@ self.onmessage = async (e) => {
   const ok = await readyP;
   if (!ok) { self.postMessage({ id: msg.id, error: "wasm not loaded" }); return; }
   try {
+    // Refuse to search a parity this artifact does not read, in EVERY kind:
+    // the error goes back to the main thread, which drops the answer and the
+    // server bot plays that one decision -- the same path a timeout takes.
+    if (WIRE < 2 && (msg.kind === "search" || msg.kind === "bid" || msg.kind === "review")) {
+      let req = null;
+      try { req = JSON.parse(String(msg.view ?? msg.req)); } catch { /* let the wasm report it */ }
+      if (req && neededEven(req) !== 2) {
+        self.postMessage({ id: msg.id, error: "artifact predates minor parity" });
+        return;
+      }
+    }
     if (msg.kind === "search") {
       const view = String(msg.view);
       const budget = Number(msg.budget) || 2000;

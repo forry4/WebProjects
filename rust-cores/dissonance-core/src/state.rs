@@ -81,6 +81,16 @@ pub struct State {
     /// scores the Null consolation instead of being set, so the payoff has a
     /// cliff at exactly this bit and a solver optimising points cannot see it.
     pub escored: u8,
+    /// What a POSITIVE-parity trick pays its winner in this game: 2 in the
+    /// classic rules, 1 in the server's MINOR mode (2026-08-09). Runtime state
+    /// rather than a build feature because it is a ROOM FLAG on the server --
+    /// one wasm artifact serves every mode, reading the value off the wire
+    /// (`wire.rs`, `even_val`, defaulting to 2 so every older payload and
+    /// every offline harness is exactly the game it always was). It is part
+    /// of the position's identity, so `dd::key_of` mixes it into the
+    /// transposition key -- two solves of one card layout under different
+    /// parities must never share an entry.
+    pub even: i8,
 }
 
 /// Which parity of trick NUMBER scores +2. Default: even-numbered tricks.
@@ -90,11 +100,23 @@ pub const POSITIVE_IS_ODD: bool = true;
 pub const POSITIVE_IS_ODD: bool = false;
 
 /// Value of the (0-indexed) trick. `trick` 0 is trick NUMBER 1.
+///
+/// The CLASSIC value -- fine for every sign-only caller (the parity never
+/// moves between modes) and for the offline labs, which run the classic
+/// rules. Anything that accumulates or converts POINTS must go through
+/// `trick_value_with` / `State::pool` instead, or minor mode is silently
+/// scored as classic.
 #[inline(always)]
 pub const fn trick_value(trick: u8) -> i8 {
+    trick_value_with(trick, 2)
+}
+
+/// Value of the (0-indexed) trick when a positive-parity trick pays `even`.
+#[inline(always)]
+pub const fn trick_value_with(trick: u8, even: i8) -> i8 {
     let odd_numbered = trick % 2 == 0;
     if odd_numbered == POSITIVE_IS_ODD {
-        2
+        even
     } else {
         -1
     }
@@ -113,6 +135,11 @@ const fn compute_pool() -> i8 {
 /// Total of both players' scores at the end of any complete round. 6 positive
 /// and 7 negative tricks gives +5; flipped it is 7 positive and 6 negative,
 /// giving +8.
+///
+/// The CLASSIC pool. A `State` knows its own (`State::pool`), which is what
+/// every serving-path conversion of a solved differential back into points
+/// must use -- minor mode's pool is NEGATIVE (-1) and `(POOL + diff) / 2`
+/// there is simply a different player's total.
 pub const POOL: i8 = compute_pool();
 
 pub const NTRICKS: u8 = 13;
@@ -139,6 +166,24 @@ pub fn beats(led: u8, follow: u8, trump: u8) -> bool {
 }
 
 impl State {
+    /// This game's value of the (0-indexed) trick.
+    #[inline(always)]
+    pub fn trick_value_at(&self, trick: u8) -> i8 {
+        trick_value_with(trick, self.even)
+    }
+
+    /// Both players' totals over this game's completed round.
+    #[inline(always)]
+    pub fn pool(&self) -> i8 {
+        let mut s = 0i8;
+        let mut t = 0u8;
+        while t < NTRICKS {
+            s += trick_value_with(t, self.even);
+            t += 1;
+        }
+        s
+    }
+
     #[inline(always)]
     pub fn to_play(&self) -> u8 {
         if self.led < 0 {
@@ -234,7 +279,7 @@ impl State {
         } else {
             self.leader
         };
-        let v = trick_value(self.trick);
+        let v = self.trick_value_at(self.trick);
         self.pts[winner as usize] += v;
         if v > 0 {
             self.escored |= 1 << winner;

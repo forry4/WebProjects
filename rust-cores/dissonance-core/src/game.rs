@@ -82,6 +82,10 @@ impl Game {
             led: -1,
             pts: [0; 2],
             escored: 0,
+            // The offline labs and the fixture generator run the classic
+            // parity; a caller wanting minor sets `g.s.even` after the deal
+            // (the cards are parity-independent).
+            even: 2,
         };
         let mut k = 0;
         for p in 0..2 {
@@ -171,6 +175,6 @@ pub fn play_round(g: &mut Game, bots: &mut [&mut dyn Bot; 2]) -> [i8; 2] {
         let c = bots[p].pick(&v);
         g.apply(c);
     }
-    debug_assert_eq!(g.s.pts[0] + g.s.pts[1], POOL);
+    debug_assert_eq!(g.s.pts[0] + g.s.pts[1], g.s.pool());
     g.s.pts
 }

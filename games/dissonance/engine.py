@@ -21,6 +21,13 @@ piles, the talon, follow-suit, the parity and the redaction machinery are
 shared verbatim -- ``apply_move`` dispatches on ``g["mode"]`` and both paths
 converge on ``_start_play``. See ``rust-cores/dissonance-core/SKAT_MODE.md``.
 
+Minor mode (2026-08-09) is the THIRD mode and the first to touch the trick
+VALUES rather than the auction: even tricks pay +1 instead of +2 (odd tricks
+stay -1), over the classic auction shape. The pool goes negative (-1), the
+level ladder compresses to 1..6, and the scoring is re-anchored to the smaller
+scale -- see ``EVEN_TRICK_VALUE`` for the map of what follows from the one
+number.
+
 Ported from ``rust-cores/dissonance-core`` (``state.rs`` + ``auction.rs``),
 which is the solver-validated reference. ``tests/test_rust_parity.py`` replays
 fixtures generated there and asserts identical states, so this file must not
@@ -80,10 +87,25 @@ NFOLLOW = 5
 DENOM_NAMES = SUIT_NAMES + ["no-trump", "Null", "grand"]
 
 NTRICKS = 13
-POOL = 5  # both players' point totals always sum to this
+POOL = 5  # both players' point totals always sum to this (CLASSIC/SKAT parity)
 
 MIN_LEVEL = 1
 MAX_LEVEL = 12
+
+#: MINOR MODE'S LEVEL CEILING. With even tricks at +1 a declarer's absolute
+#: ceiling is sweeping the six even tricks for 6 points, so the classic 1..12
+#: ladder would carry six rungs nobody can reach. DERIVED-in-spirit from the
+#: parity (6 even tricks x +1); `test_minor.py` asserts the relationship so a
+#: trick-value change cannot silently strand the ladder above the game.
+MINOR_MAX_LEVEL = 6
+
+#: What the Null consolation pays in minor mode. 6, for the same reason classic
+#: pays 12: it is exactly a made level-1 contract's CEILING under the overtrick
+#: bonus (1 + (max_pts - 1) x 1 = max_pts), so ducking to Null is never worth
+#: more than the cheapest contract played out perfectly -- the relationship the
+#: classic number already has, carried to the minor scale rather than copied as
+#: a literal.
+MINOR_NULL_MAKE = 6
 #: An overtake must raise the contract by 1 or 2. Measured: a cap of exactly 2
 #: relocates the punishment-landing pile from level 2 to level 3, which is
 #: where the distribution had a hole. A cap of 3 empties level 3 again.
@@ -98,9 +120,21 @@ MAX_RAISE = 2
 #: the lever, and Double is not: Double only fires when a defender reads the
 #: sacrifice correctly, while this prices every one of them.
 #:
-#: It applies to BOTH modes -- skat's set is `stake + SHORT_PENALTY x short`
-#: too.
+#: It applies to classic AND skat -- skat's set is `stake + SHORT_PENALTY x
+#: short` too. Minor mode has its own rate below.
 SHORT_PENALTY = 5
+
+#: Minor mode's per-point set rate. 2, NOT the classic 5, and the argument is
+#: scale, measured in self-play (tools/minor_calibration.py): minor's payoffs
+#: run a quarter of classic's (make ceiling 36 vs 144) while its SHORTFALLS
+#: keep the same magnitude (median 2 in both sweeps), so a per-point rate
+#: carried over unscaled makes the set the biggest number on the table --
+#: at 5, two-thirds of minor rounds ended in a set paying ~11 against made
+#: contracts paying 1-6, i.e. every round read "whoever had to open loses".
+#: 2 tracks the ceiling ratio and puts a typical set (~5) beside a typical
+#: make instead of on top of it. The sacrifice still gets taxed: classic's
+#: Double and its shortfall RAMP apply in minor unchanged.
+MINOR_SHORT_PENALTY = 2
 
 #: THE DOUBLE'S ESCALATOR. Doubled, the first point short costs
 #: `SHORT_PENALTY + DOUBLE_RAMP`, the second `+ 2 x DOUBLE_RAMP`, and so on --
@@ -150,7 +184,7 @@ DOUBLE_RAMP = 1
 #:    12 against Null's flat 12, and a skat stake of 6 from 6 to 15 against 20.
 #:    The cliff is narrowed, not removed, and the measurement behind it was taken
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
-OVER_BONUS = {"classic": 1, "skat": 1}
+OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
@@ -198,8 +232,41 @@ N_SHOWN = 3
 # Nothing below touches the deck, the piles, the talon, follow-suit or the
 # parity. Only the phase machine between the deal and trick 1 changes.
 
-MODES = ("classic", "skat")
+MODES = ("classic", "skat", "minor")
 DEFAULT_MODE = "classic"
+
+#: What an EVEN-numbered trick pays its winner, per mode. Odd tricks are -1
+#: everywhere -- the parity is the game and no mode touches it.
+#:
+#: MINOR (2026-08-09): even tricks pay +1 instead of +2, over the classic
+#: auction. The pool flips NEGATIVE (6 x 1 - 7 = -1): winning every trick now
+#: scores -1, and even a perfect declarer tops out at 6, so ducking is worth
+#: relatively more everywhere and the whole contract ladder compresses to 1..6
+#: (`MINOR_MAX_LEVEL`). Everything downstream is re-anchored to that scale
+#: rather than re-designed: make N^2 (1..36), set N + SHORT_PENALTY x short,
+#: the Double and its ramp unchanged, Null at a made level-1's ceiling
+#: (`MINOR_NULL_MAKE`), match to `MATCH_TARGET["minor"]`.
+#:
+#: The value threads to the solver AT RUNTIME: `view_for` ships `even_val`,
+#: `wire.rs` reads it into `State.even`, and `_deal_snapshot` carries `even` so
+#: the DD review replays the round under the right parity. A wasm too old to
+#: read the field is refused per-decision by the worker (and the ready
+#: handshake), so a minor room degrades to the server bot rather than being
+#: searched under classic values.
+EVEN_TRICK_VALUE = {"classic": 2, "skat": 2, "minor": 1}
+
+
+def even_value(mode: str) -> int:
+    return EVEN_TRICK_VALUE.get(mode, EVEN_TRICK_VALUE[DEFAULT_MODE])
+
+
+def pool_for(mode: str) -> int:
+    """Both players' totals over a completed round: six evens minus seven odds."""
+    return 6 * even_value(mode) - 7
+
+
+def max_level_for(mode: str) -> int:
+    return MINOR_MAX_LEVEL if mode == "minor" else MAX_LEVEL
 
 #: A game is a MATCH of rounds, played until one side reaches this.
 #:
@@ -218,7 +285,12 @@ DEFAULT_MODE = "classic"
 #: a hand with no contract in it loses to a hand with one, and the auction is
 #: the only lever either player has. Over several rounds the deals average out
 #: and what is left is the bidding judgement, which is the part worth playing.
-MATCH_TARGET = {"classic": 100, "skat": 100}
+#: (Minor's 25 is NOT the other modes' 100 rescaled by feel: its payoffs run
+#: about a quarter of classic's -- make ceiling 36 vs 144, typical winning
+#: round ~3.6 vs ~16 in the calibration sweep -- so 25 buys the same match
+#: length classic's 100 does. Measured in tools/minor_calibration.py, ~7
+#: bot-self-play rounds against classic's ~6 under the identical harness.)
+MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:
@@ -346,9 +418,19 @@ def card_name(c: int) -> str:
     return f"{RANK_NAMES[rank(c)]}{SUIT_CHARS[suit(c)]}"
 
 
-def trick_value(trick: int) -> int:
-    """Value of the 0-indexed trick. Trick index 0 is trick NUMBER 1 (odd)."""
-    return 2 if trick % 2 == 1 else -1
+def trick_value(trick: int, even: int = 2) -> int:
+    """Value of the 0-indexed trick. Trick index 0 is trick NUMBER 1 (odd).
+
+    `even` is what an even-numbered trick pays in this room's mode
+    (`EVEN_TRICK_VALUE`); the default keeps every classic-parity caller --
+    including the Rust fixtures' replay -- exactly as it was.
+    """
+    return even if trick % 2 == 1 else -1
+
+
+def trick_value_in(g: dict, trick: int) -> int:
+    """`trick_value` under this game's mode."""
+    return trick_value(trick, even_value(mode_of(g)))
 
 
 def esuit(c: int, trump: int) -> int:
@@ -396,8 +478,11 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
     """Deal a round. `seats` is [pid0, pid1]; `opener` names the first bidder.
 
     `mode` selects which auction runs on top of the identical deal: "classic"
-    (level + denomination, the shipped v2 auction) or "skat" (a numeric ladder
-    followed by a declaration). Everything from `_start_play` onwards is shared.
+    (level + denomination, the shipped v2 auction), "skat" (a numeric ladder
+    followed by a declaration), or "minor" (the classic auction with even
+    tricks paying +1 -- the one mode whose difference is in the card play's
+    VALUES, not its phases). Everything from `_start_play` onwards is shared,
+    with `trick_value_in` reading the mode's even-trick value.
 
     `match` carries a running match in. Omit it for the first round of a new
     one; `next_round` passes the standing one back so the deal changes and the
@@ -549,16 +634,17 @@ def auction_options(g: dict) -> dict:
             "may_pass": True,
         }
     me = a["to_act"]
+    top = max_level_for(mode_of(g))
     free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
     if a["level"] == 0:
         # The opener must bid; passing out is not offered.
         for d in free:
-            bids.extend([lvl, d] for lvl in range(MIN_LEVEL, MAX_LEVEL + 1))
+            bids.extend([lvl, d] for lvl in range(MIN_LEVEL, top + 1))
         return {"bids": bids, "may_pass": False}
     # Ranked denominations: an overtake stands at the SAME level in a
     # higher-ranked denomination, or raises by up to MAX_RAISE in any unused one.
-    lo, hi = a["level"], min(MAX_LEVEL, a["level"] + MAX_RAISE)
+    lo, hi = a["level"], min(top, a["level"] + MAX_RAISE)
     for d in free:
         for lvl in range(lo, hi + 1):
             if lvl == a["level"] and d <= a["denom"]:
@@ -964,6 +1050,11 @@ def _deal_snapshot(g: dict) -> dict:
         "out": sorted(g["out"]),
         "trump": g["trump"],
         "leader": g["leader"],
+        # The parity the round was PLAYED under. The DD review rebuilds a State
+        # from this snapshot (`wire.rs::deal_from_json`), and a minor round
+        # replayed at classic trick values would be a confidently wrong number
+        # in a column labelled a fact. Optional on the wire, defaulting to 2.
+        "even": even_value(mode_of(g)),
         "terms": payoff_terms(g),
     }
 
@@ -1023,7 +1114,7 @@ def apply_play(g: dict, seat: int, c: int) -> None:
         return
 
     winner = seat if beats(g["led"], c, g["trump"]) else g["leader"]
-    v = trick_value(g["trick"])
+    v = trick_value_in(g, g["trick"])
     g["pts"][winner] += v
     if v > 0:
         g["etricks"][winner] += 1
@@ -1142,7 +1233,9 @@ def payoff_terms(g: dict) -> dict:
         terms = _terms_for("skat", a["denom"], a["level"], ct["sharp"],
                            ct["mult"], skat_doubling(ct))
     else:
-        terms = _terms_for("classic", a["denom"], a["level"],
+        # `mode_of`, not a literal: minor mode runs the classic auction shape
+        # in its own currency, and the terms are where the currency lives.
+        terms = _terms_for(mode_of(g), a["denom"], a["level"],
                            doubling=classic_doubling(g))
     return terms | {"declarer": a["declarer"]}
 
@@ -1194,14 +1287,20 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # NULL IS NOT DOUBLED, and that is the same argument skat's Kontra makes:
     # doubling a consolation would have the defender's own bet reward the very
     # outcome it was betting against.
+    # MINOR shares every shape below -- N^2 make, set base N, the Double and its
+    # ramp -- and differs in the two prices that are re-anchored to its smaller
+    # scale rather than copied: the consolation (MINOR_NULL_MAKE) and the
+    # per-point set rate (MINOR_SHORT_PENALTY).
+    null = MINOR_NULL_MAKE if mode == "minor" else NULL_MAKE
+    short = MINOR_SHORT_PENALTY if mode == "minor" else SHORT_PENALTY
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": level * level * doubling, "over": over * doubling,
-                "set_base": level * doubling, "short": SHORT_PENALTY,
-                "ramp": DOUBLE_RAMP, "null": NULL_MAKE}
+                "set_base": level * doubling, "short": short,
+                "ramp": DOUBLE_RAMP, "null": null}
     return {"denom": denom, "level": level, "target": level,
             "make": level * level, "over": over, "set_base": level,
-            "short": SHORT_PENALTY, "ramp": 0, "null": NULL_MAKE}
+            "short": short, "ramp": 0, "null": null}
 
 
 def pass_options(g: dict) -> list[dict]:
@@ -1235,7 +1334,7 @@ def pass_options(g: dict) -> list[dict]:
                  "set_base": 0, "short": 0, "null": 0, "redeal": True,
                  "move": mv}]
     if not skat:
-        return [_terms_for("classic", a["denom"], a["level"],
+        return [_terms_for(mode_of(g), a["denom"], a["level"],
                            doubling=classic_doubling(g))
                 | {"opp": True, "move": mv}]
     # Skat: the number is a price and the winner has not named a game yet, so
@@ -1275,7 +1374,7 @@ def auction_payoff_options(g: dict) -> list[dict]:
                                | {"move": {"kind": "bid", "value": v}})
         else:
             for lvl, d in opt["bids"]:
-                out.append(_terms_for("classic", d, lvl)
+                out.append(_terms_for(mode_of(g), d, lvl)
                            | {"move": {"kind": "bid", "level": lvl, "denom": d}})
         if opt["may_pass"]:
             out.extend(pass_options(g))
@@ -1298,7 +1397,7 @@ def auction_payoff_options(g: dict) -> list[dict]:
         # option; the asker is the defender and the client flips the sign.
         a = g["auction"]
         for on in (True, False):
-            out.append(_terms_for("classic", a["denom"], a["level"],
+            out.append(_terms_for(mode_of(g), a["denom"], a["level"],
                                   doubling=2 if on else 1)
                        | {"move": {"kind": "double", "on": on}})
     elif phase in ("kontra", "re"):
@@ -1348,8 +1447,13 @@ def auction_search_payload(g: dict) -> dict | None:
         return None
     a = g["auction"]
     skat = mode_of(g) == "skat"
+    # `rules.mode` names the auction's SHAPE, which is what the search tree
+    # branches on -- minor mode runs the classic auction and ships "classic"
+    # with its own `max_level`, so the mirror needs no third arm and an older
+    # wasm reads the payload without a new string to choke on. The CURRENCY
+    # difference rides in the priced rows below, as always.
     rules = {"mode": "skat" if skat else "classic",
-             "min_level": MIN_LEVEL, "max_level": MAX_LEVEL,
+             "min_level": MIN_LEVEL, "max_level": max_level_for(mode_of(g)),
              "max_raise": MAX_RAISE, "top_denom": GRAND if skat else NOTRUMP,
              "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
     # Only settlements the auction can still REACH. The bidding only ever
@@ -1381,9 +1485,9 @@ def auction_search_payload(g: dict) -> dict | None:
         state = {"level": a["level"], "denom": max(a["denom"], 0), "value": 0,
                  "declarer": a["declarer"], "used": list(a["used"]),
                  "passes": 0, "to_act": a["to_act"]}
-        for lvl in range(max(MIN_LEVEL, a["level"]), MAX_LEVEL + 1):
+        for lvl in range(max(MIN_LEVEL, a["level"]), max_level_for(mode_of(g)) + 1):
             for d in range(NOTRUMP + 1):
-                terms.append(_terms_for("classic", d, lvl)
+                terms.append(_terms_for(mode_of(g), d, lvl)
                              | {"key": _settlement_key("classic", d, lvl, 0)})
     return {"state": state, "rules": rules, "terms": terms}
 
@@ -1636,7 +1740,10 @@ def _finish(g: dict) -> None:
         # False while overtricks pay -- see `_score_is_settled`, which is
         # shelved rather than removed, so the key and its reader stay.
         "ended_early": g["trick"] < NTRICKS,
-        "mode": "classic",
+        # The room's real mode ("classic" or "minor" -- skat has its own
+        # finisher), so the history row and the result panel narrate the game
+        # that was played rather than the shape it borrowed.
+        "mode": mode_of(g),
         "declarer": decl,
         "level": a["level"],
         "denom": a["denom"],
@@ -1645,7 +1752,9 @@ def _finish(g: dict) -> None:
         # key in both modes rather than knowing which mode hides it where.
         "target": terms["target"],
         "null": null,
-        "null_value": NULL_MAKE,
+        # Off the SAME terms `_finish` scored with (12 classic, 6 minor), so
+        # the panel cannot narrate a consolation the room did not pay.
+        "null_value": terms["null"],
         # The Double, and the two numbers the review needs to show its effect:
         # what a made contract paid and what a set one paid. Both come off the
         # SAME terms `_finish` scored with, so the panel cannot narrate an
@@ -1833,7 +1942,12 @@ def view_for(g: dict, seat: int) -> dict:
         "opp_hand": sorted(g["hands"][opp]) if (open_now and opp == decl) else None,
         "trump": g["trump"],
         "trick": g["trick"],
-        "trick_value": trick_value(g["trick"]) if g["phase"] == "play" else 0,
+        "trick_value": trick_value_in(g, g["trick"]) if g["phase"] == "play" else 0,
+        # What an even trick pays in this room -- the ONE number the classic
+        # parity baked into every consumer. The client-side searcher reads it
+        # into `State.even` (`wire.rs`, optional, defaulting to classic's 2),
+        # and the board labels tricks with it instead of a hardcoded +2.
+        "even_val": even_value(mode_of(g)),
         "leader": g["leader"],
         "led": g["led"],
         "pts": list(g["pts"]),

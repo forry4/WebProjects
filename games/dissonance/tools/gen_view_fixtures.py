@@ -71,11 +71,20 @@ def _forced_grand(rng: random.Random) -> dict:
 
 def main() -> None:
     out = []
-    for i in range(GAMES + 1):
+    # GAMES bot-settled games alternating classic/skat, then the forced Grand
+    # game, then a MINOR game -- appended for the same reason Grand's is: the
+    # wire reader's `even_val` path (minor mode's +1 evens, 2026-08-09) must
+    # be replayed by the fixtures or it is covered by nothing while the file
+    # still looks comprehensive.
+    for i in range(GAMES + 2):
         rng = random.Random(1000 + i)
         mode = "skat" if i % 2 else "classic"
         if i == GAMES:
             g = _forced_grand(rng)
+        elif i == GAMES + 1:
+            g = E.new_game(["a", "b"], rng, opener=0, mode="minor")
+            _settle(g, rng)
+            assert E.view_for(g, 0)["even_val"] == 1
         else:
             g = E.new_game(["a", "b"], rng, opener=i % 2, mode=mode)
             _settle(g, rng)

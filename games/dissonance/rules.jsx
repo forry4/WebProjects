@@ -18,7 +18,7 @@ export default function DissonanceRules() {
 			<RulesFacts items={[
 				{ k: "Players", v: "2 (friend or bot)" },
 				{ k: "Length", v: "A few minutes a round; a match is about 10 of them" },
-				{ k: "You win by", v: "Being first to 100 points" },
+				{ k: "You win by", v: "Being first to 100 points (25 in Minor mode)" },
 			]} />
 
 			<RulesSection title="If you've never played a trick-taking game">
@@ -200,7 +200,7 @@ export default function DissonanceRules() {
 					<b>Scoring.</b> Make everything you announced and you score{" "}
 					<b>value × multiplier</b>, plus <b>1 for every trick point past your
 					target</b>. Miss any part of it — the level, or the Sharp margin on top —
-					and your opponent scores that same number, plus 4 for every point you
+					and your opponent scores that same number, plus 5 for every point you
 					finished short. The overtrick bonus is flat: 1 a point whatever the
 					contract cost, so Kontra never multiplies it.
 				</p>
@@ -211,6 +211,37 @@ export default function DissonanceRules() {
 					you make against yourself, after your opponent is out of the loop — and
 					then they get the last word.
 				</p>
+			</RulesSection>
+
+			<RulesSection title="Minor mode — even tricks pay only +1">
+				<p>
+					The classic auction, played in a harsher currency: an even trick pays{" "}
+					<b>+1</b> instead of +2, and the odd ones still cost 1. The two trick
+					scores now add up to <b>−1</b> — winning <i>everything</i> scores minus
+					one — so even more than in classic, the game is about which tricks you
+					refuse.
+				</p>
+				<ul>
+					<li>A perfect declarer tops out at <b>6</b> points, so contracts run{" "}
+						<b>1–6</b> instead of 1–12. Level 1 is a real ask: the average split
+						is below zero, so every contract has to be won.</li>
+					<li>Scoring keeps classic's shape at the smaller scale: make{" "}
+						<b>N²</b> plus 1 per overtrick, fall short and your opponent scores{" "}
+						<b>N plus 2 per point short</b> — cheaper per point than classic's 5,
+						because the payoffs are about a quarter the size.</li>
+					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
+						ceiling, the same relationship classic's 12 has.</li>
+					<li>The Double works unchanged, ramp and all. The <b>match plays to
+						25</b>, which buys about the same number of rounds as classic's 100.</li>
+				</ul>
+				<RulesTip>
+					<p>
+						With par below zero, the <i>defender</i> starts ahead — a declarer who
+						can't get there should be thinking about ducking to Null from early
+						on, and a defender should be thinking about forcing one even trick on
+						them to break it.
+					</p>
+				</RulesTip>
 			</RulesSection>
 
 			<RulesSection title="Playing the cards">

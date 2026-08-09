@@ -38,6 +38,19 @@ def _contracts():
             E.apply_pass(g, 1)
             E.apply_swap(g, 0, None, None)
             yield g
+    # MINOR: the same classic shape on the re-anchored prices (Null 6, set
+    # rate 2, ladder 1..6), both Doubled and not -- a fixture set that never
+    # priced a minor contract would leave the solver held to nothing there.
+    for level in range(E.MIN_LEVEL, E.MINOR_MAX_LEVEL + 1):
+        for denom in range(E.NOTRUMP + 1):
+            for doubled in (False, True):
+                g = E.new_game(["a", "b"], random.Random(level * 16 + denom),
+                               opener=0, mode="minor")
+                E.apply_bid(g, 0, level, denom)
+                E.apply_pass(g, 1)
+                E.apply_swap(g, 0, None, None)
+                E.apply_double(g, 1, doubled)
+                yield g
     # DERIVE the level from the bid rather than writing the pair out. Hand-typed
     # levels rot the moment the bases move: three of the four here stopped
     # reaching their bid when the denominations were re-priced by colour, and

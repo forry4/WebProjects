@@ -629,7 +629,14 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # this, winning an auction is priced without the ~+1.5 the swap is
             # now worth, a one-directional lean toward conceding. Optional on
             # the wire; an older wasm ignores it and prices the deal as dealt.
-            if g["phase"] == "auction" and engine.mode_of(g) == "classic":
+            # `!= "skat"`, not `== "classic"`: minor mode swaps exactly the way
+            # classic does (contract settled, then the talon), so its auction
+            # leaf wants the model too. The weights were FITTED on classic's
+            # +2 parity -- an approximation in minor, but the shape they encode
+            # (low cards are worth taking) holds under either even value, and
+            # pricing the swap at zero is the measured ~1.5-point lean this
+            # field exists to remove. Minor's own fit is a queued swaplab run.
+            if g["phase"] == "auction" and engine.mode_of(g) != "skat":
                 room["_ai_search"]["auction"]["swap"] = bot.swap_policy_terms()
             # EXPERT: the same options, valued by a tree instead of a price.
             # Optional on the wire and ignored by any wasm that predates it, so
@@ -1011,6 +1018,15 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
             return
         if _valid_difficulty(room.get("ai_difficulty")) not in CLIENT_AI_TIERS:
             return
+        # MINOR MODE NEEDS A CLIENT THAT SPEAKS even_val (`wire: 2`). An older
+        # cached bundle never sends the field, and its wasm would silently
+        # search a minor position under CLASSIC trick values -- a legal but
+        # wrong-game move every time, with nothing red anywhere. Refusing to
+        # arm keeps the honest degradation path: the room plays the server bot,
+        # exactly as if the browser were absent. Classic and skat rooms accept
+        # any vintage, as before.
+        if room.get("mode") == "minor" and int(msg.get("wire") or 1) < 2:
+            return
         room["client_ai"] = bool(msg.get("ready", True))
     # A decision may already be waiting: the room armed one, the tab reloaded,
     # and the reconnect's own broadcast carries `ai_search` -- so re-scheduling
@@ -1112,6 +1128,15 @@ async def catalog():
         "sharp_bonus": engine.SHARP_BONUS,
         # Per mode, because the shape is per mode even while both read 1.
         "over_bonus": dict(engine.OVER_BONUS),
+        # Minor mode (2026-08-09): even tricks +1 over the classic auction.
+        # Everything the client renders about it comes from here rather than
+        # being hardcoded beside a "+2" somewhere.
+        "even_value": dict(engine.EVEN_TRICK_VALUE),
+        "pools": {m: engine.pool_for(m) for m in engine.MODES},
+        "max_levels": {m: engine.max_level_for(m) for m in engine.MODES},
+        "minor_null_make": engine.MINOR_NULL_MAKE,
+        "minor_short_penalty": engine.MINOR_SHORT_PENALTY,
+        "match_targets": dict(engine.MATCH_TARGET),
     }
 
 

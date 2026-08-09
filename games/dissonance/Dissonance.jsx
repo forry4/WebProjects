@@ -83,8 +83,9 @@ const CLIENT_AI_MIN_MS = 600;
 const MODES = [
   { id: "classic", label: "Classic", title: "Bid a level and a denomination — the shipped auction" },
   { id: "skat", label: "Skat", title: "Bid a number, then declare the game that satisfies it" },
+  { id: "minor", label: "Minor", title: "Even tricks pay only +1 — a harsher, quieter game to 25" },
 ];
-const MODE_LABEL = { classic: "Classic", skat: "Skat" };
+const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor" };
 
 /** The announcement stack, spelled out for the result and side panels. */
 function multParts(ct) {
@@ -112,8 +113,12 @@ const suitOf = (c) => Math.floor(c / 8);
 const rankOf = (c) => c % 8;
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
 const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
-// Trick NUMBER t (1-based): even ones pay +2, odd ones cost 1.
-const trickValue = (t0) => (t0 % 2 === 1 ? 2 : -1);
+// Trick NUMBER t (1-based): even ones pay `even` (+2 classic/skat, +1 in
+// minor mode — the view ships `even_val`), odd ones cost 1.
+const trickValue = (t0, even = 2) => (t0 % 2 === 1 ? even : -1);
+// What an even trick pays in this room. Off the VIEW, not the mode string,
+// so a future re-pricing needs no client change at all.
+const evenVal = (game) => game?.even_val ?? 2;
 
 /** Does `follow` beat `led`? A mirror of `engine.beats` — kept in step with it
  *  by hand, like `trickValue` above. Only used to mark who TOOK the previous
@@ -136,7 +141,8 @@ function lastTrick(game) {
   const [a, b] = [h[2 * (done - 1)], h[2 * done - 1]];
   const winner = beats(a[1], b[1], game.trump) ? b[0] : a[0];
   // Trick index `done - 1` is 0-based, matching `trickValue`.
-  return { plays: [a, b], winner, value: trickValue(done - 1), number: done };
+  return { plays: [a, b], winner, value: trickValue(done - 1, evenVal(game)),
+           number: done };
 }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -521,10 +527,11 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
   );
 }
 
-/** Which auction a room runs. Classic is the default, so only skat is marked. */
+/** Which mode a room runs. Classic is the default, so only the others are
+ *  marked -- skat's second auction, and minor's +1 evens. */
 function ModeBadge({ mode }) {
-  if (mode !== "skat") return null;
-  return <span className="dis-modebadge">{MODE_LABEL.skat}</span>;
+  if (mode !== "skat" && mode !== "minor") return null;
+  return <span className="dis-modebadge">{MODE_LABEL[mode]}</span>;
 }
 
 function ContractLine({ game }) {
@@ -609,6 +616,9 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // Client-side search: the worker pool, whether it came up, and the two
   // idempotence keys (armed once per room+socket, dispatched once per decision).
   const wasmPoolRef = useRef(null);
+  // The loaded artifact's wire vintage (see the ready handshake below); 1
+  // until a pool reports otherwise, which is also what a pre-wire worker is.
+  const wasmWireRef = useRef(1);
   const [wasmReady, setWasmReady] = useState(false);
   const clientAiArmedRef = useRef(null);
   const aiDispatchRef = useRef(null);
@@ -682,7 +692,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // on top of it. DECLARED HERE, not earlier: `catalog` is a `const` from
   // `useState`, so touching it above this line is a temporal dead zone -- which
   // throws at render and blanks the entire screen rather than failing softly.
-  const shortRate = catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK;
+  //
+  // MINOR MODE has its own two prices (set rate 2, Null 6 -- re-anchored to a
+  // scale whose payoffs run a quarter of classic's), so both are picked by the
+  // room's mode. `game?.mode` is safely undefined outside a room, where
+  // nothing renders either number.
+  const isMinorRoom = game?.mode === "minor";
+  const shortRate = isMinorRoom
+    ? (catalog?.minor_short_penalty ?? 2)
+    : (catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK);
+  const nullMake = isMinorRoom
+    ? (catalog?.minor_null_make ?? 6)
+    : (catalog?.null_make ?? NULL_MAKE);
   useEffect(() => {
     fetch(`${OT_HTTP}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
@@ -713,7 +734,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
       const ready = new Promise((res) => (resolveReady = res));
       w.onmessage = (e) => {
         const d = e.data || {};
-        if (d.ready !== undefined) { resolveReady(!!d.ready); return; }
+        // `wire` is the artifact's protocol vintage (2 = speaks minor mode's
+        // `even_val`). A cached worker from before the field resolves plain
+        // booleans, which reads as wire 1 below — exactly right.
+        if (d.ready !== undefined) { resolveReady(d.ready ? { wire: d.wire || 1 } : false); return; }
         if (d.id != null && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); }
       };
       w.onerror = () => resolveReady(false);
@@ -732,6 +756,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
       const live = pool.filter((_, i) => flags[i]);
       if (live.length > 0) {
         wasmPoolRef.current = live;
+        // The pool's wire vintage is its WEAKEST member: a mixed pool would
+        // answer a minor decision with only some workers' worlds, so the
+        // announcement below has to promise no more than all of them speak.
+        wasmWireRef.current = Math.min(...flags.filter(Boolean).map((f) => f.wire || 1));
         setWasmReady(true);
       } else {
         console.warn("[dissonance client-AI] no WASM workers loaded -> server bot");
@@ -747,7 +775,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
     if (wasmReady && connected && roomData?.room_id
       && clientAiArmedRef.current !== roomData.room_id) {
       clientAiArmedRef.current = roomData.room_id;
-      send({ action: "client_ai_ready" });
+      // `wire` tells the server what this client's artifact speaks. A minor
+      // room refuses to arm anything below 2 (the server-side half of the
+      // fail-closed pair; the worker's own export probe is the other), so an
+      // honest number here is what keeps a stale-wasm tab on the server bot
+      // instead of searching the wrong game.
+      send({ action: "client_ai_ready", wire: wasmWireRef.current });
     }
   }, [wasmReady, connected, roomData?.room_id, send]);
 
@@ -1147,13 +1180,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
             ) : (
               <span className="cm-hint">Dissonance is head-to-head — one friend joins from the lobby.</span>
             )}
-            <CmRow label="Auction">
+            <CmRow label="Mode">
               <CmSeg value={newMode} onChange={setNewMode}
                 options={MODES.map((m) => ({ value: m.id, label: m.label, title: m.title }))} />
               <span className="cm-hint">
                 {newMode === "skat"
                   ? "Bid a number; name the game only after you win it. Then Hand, Sharp, Open — and their Kontra."
-                  : "Bid a level and a denomination, ranked ♣ < ♦ < ♥ < ♠ < NT."}
+                  : newMode === "minor"
+                    ? "Classic's auction, but even tricks pay only +1 — contracts run 1–6, every one is a fight, and the match plays to 25."
+                    : "Bid a level and a denomination, ranked ♣ < ♦ < ♥ < ♠ < NT."}
               </span>
             </CmRow>
             <div className="cm-footer">
@@ -1161,7 +1196,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 Creating: <b>{createOpp === "ai"
                   ? `${BOT_TIERS.find((t) => t.id === createDiff)?.name || createDiff} bot`
                   : "vs Friend"}</b>
-                {", "}<b>{MODE_LABEL[newMode]}</b> auction
+                {", "}<b>{MODE_LABEL[newMode]}</b>{newMode === "minor" ? " mode" : " auction"}
               </span>
               <button type="button" className="cm-create"
                 onClick={() => createGame(createOpp === "ai", createDiff)}>
@@ -1582,8 +1617,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     four short {2 * game.auction.level + 4 * shortRate + 10}.
                   </div>
                   <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    Null is untouched — a declarer who wins no +2 trick still
-                    scores {catalog?.null_make ?? NULL_MAKE}, doubled or not.
+                    Null is untouched — a declarer who wins no +{evenVal(game)} trick still
+                    scores {nullMake}, doubled or not.
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
@@ -1703,7 +1738,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 {res.doubled && (
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {res.null
-                      ? `Doubled — but Null is not: a declarer who wins no +2 trick
+                      ? `Doubled — but Null is not: a declarer who wins no +${evenVal(game)} trick
                          scores the flat ${res.null_value} either way.`
                       : res.made
                         ? `Doubled: ${nameOf(1 - res.declarer)} took the bet and it landed.`
@@ -1713,8 +1748,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
               </>}
               {res.null && (
                 <div className="muted" style={{ fontSize: "0.8rem" }}>
-                  Null: a declarer who wins no +2 trick all round scores it
-                  instead of being set, whatever they declared.
+                  Null: a declarer who wins no +{evenVal(game)} trick all round
+                  scores it instead of being set, whatever they declared.
                 </div>
               )}
               <div className="dis-scorerow" style={{ gap: "1.5rem", fontSize: "1.1rem" }}>
@@ -1823,7 +1858,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <div className="dis-trickinfo">
                   Trick {heldTrick ? heldTrick.number : game.trick + 1} of 13 ·{" "}
                   <span className={`dis-val ${(heldTrick ? heldTrick.value : game.trick_value) > 0 ? "good" : "bad"}`}>
-                    {(heldTrick ? heldTrick.value : game.trick_value) > 0 ? "+2" : "−1"}
+                    {(() => {   // the VALUE, not a hardcoded label — minor's evens pay +1
+                      const v = heldTrick ? heldTrick.value : game.trick_value;
+                      return v > 0 ? `+${v}` : "−1";
+                    })()}
                   </span>
                 </div>
               </div>
@@ -1927,7 +1965,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 {game.doubled && (
                   <div className="dis-scorerow">
                     <span>Doubled · set pays</span>
-                    <b>{2 * game.auction.level} + 4 each</b>
+                    {/* The catalog's rate plus the rising ramp, not a literal —
+                        the old "+ 4 each" here predated BOTH the 4 -> 5 move
+                        and the ramp, and minor's rate is 2. */}
+                    <b>{2 * game.auction.level} + {shortRate + 1}, {shortRate + 2}…</b>
                   </div>
                 )}
               </>
@@ -1936,8 +1977,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 in the contract line: the declarer always has this out. */}
             {game.auction.level > 0 && (
               <div className="dis-scorerow">
-                <span>Or Null (no +2 trick)</span>
-                <b>{isSkat ? (catalog?.skat_null_value ?? "") : (catalog?.null_make ?? NULL_MAKE)}</b>
+                <span>Or Null (no +{evenVal(game)} trick)</span>
+                <b>{isSkat ? (catalog?.skat_null_value ?? "") : nullMake}</b>
               </div>
             )}
             {game.swapped !== null && game.swapped !== undefined && (
@@ -1968,7 +2009,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <div className="dis-lt-note">
                   <div>#{prev.number}</div>
                   <div className={`dis-val ${prev.value > 0 ? "good" : "bad"}`}>
-                    {prev.value > 0 ? "+2" : "−1"}
+                    {prev.value > 0 ? `+${prev.value}` : "−1"}
                   </div>
                   <div className="muted">{nameOf(prev.winner)} took it</div>
                 </div>

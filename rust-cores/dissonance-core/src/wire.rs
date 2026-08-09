@@ -67,6 +67,14 @@ pub fn view_from_json(v: &Value) -> Option<View> {
         },
         pts: [0, 0],
         escored: 0,   // filled from `etricks` below
+        // What an even trick pays in this room (minor mode ships 1). OPTIONAL
+        // and defaulting to classic's 2: every payload written before the
+        // field existed is a classic-parity game, and that is exactly how it
+        // was scored. A NEW payload carrying a value this wasm cannot handle
+        // does not arise -- the field is a small int and the arithmetic is
+        // generic -- but the WORKER refuses a minor view on an older wasm by
+        // probing for `odd_wire`, which is the fail-closed half of this pair.
+        even: v.get("even_val").and_then(|x| x.as_i64()).unwrap_or(2) as i8,
     };
     // Which seats have already won a +2 trick. Not derivable from `pts` -- a
     // total of -1 is one +2 trick and three -1s just as easily as one -1 alone
@@ -315,6 +323,11 @@ pub fn deal_from_json(v: &Value) -> Option<State> {
         led: -1,
         pts: [0, 0],
         escored: 0,
+        // The parity the round was PLAYED under -- `engine._deal_snapshot`
+        // stamps it, and a minor round reviewed at classic values would be a
+        // confidently wrong number in a column labelled a fact. Optional,
+        // defaulting to 2: every snapshot from before the field is classic.
+        even: v.get("even").and_then(|x| x.as_i64()).unwrap_or(2) as i8,
     };
     if s.leader > 1 {
         return None;
@@ -818,12 +831,13 @@ mod payoff_parity {
     fn the_solver_scores_a_finished_round_exactly_as_the_engine_does() {
         let all = rows();
         assert!(all.len() > 40, "only {} contracts — regenerate", all.len());
-        let (mut classic, mut skat, mut checked, mut nulls) = (0, 0, 0, 0);
+        let (mut classic, mut skat, mut minor, mut checked, mut nulls) = (0, 0, 0, 0, 0);
         for (i, f) in all.iter().enumerate() {
             let c = contract_from_json(&f["terms"])
                 .unwrap_or_else(|| panic!("fixture {i}: terms did not read back"));
             match f["mode"].as_str() {
                 Some("skat") => skat += 1,
+                Some("minor") => minor += 1,
                 _ => classic += 1,
             }
             for row in f["rows"].as_array().unwrap() {
@@ -841,7 +855,7 @@ mod payoff_parity {
                 }
             }
         }
-        assert!(classic > 0 && skat > 0, "both modes must be covered");
+        assert!(classic > 0 && skat > 0 && minor > 0, "all three modes must be covered");
         // The overtrick bonus is optional on the wire and defaults to flat, so
         // a fixture set that never carried one would pass this whole table
         // while the term was being dropped in `contract_from_json`.
@@ -899,6 +913,7 @@ mod fixture_replay {
         assert!(all.len() > 100, "only {} fixtures — regenerate", all.len());
         let mut classic = 0;
         let mut skat = 0;
+        let mut minor = 0;
         for (i, f) in all.iter().enumerate() {
             let v = view_from_json(f).unwrap_or_else(|| {
                 panic!(
@@ -909,12 +924,21 @@ mod fixture_replay {
             });
             match f["mode"].as_str() {
                 Some("skat") => skat += 1,
+                Some("minor") => minor += 1,
                 _ => classic += 1,
             }
             assert_eq!(v.me, f["you"].as_u64().unwrap() as usize);
             assert_eq!(v.s.trump, f["trump"].as_u64().unwrap() as u8);
             assert_eq!(v.s.trick, f["trick"].as_u64().unwrap() as u8);
             assert!(v.s.trick < NTRICKS);
+            // The runtime parity must land in the State the searcher actually
+            // solves -- a reader that dropped it would score minor as classic
+            // and stay green on every other assertion here.
+            assert_eq!(
+                v.s.even as i64,
+                f["even_val"].as_i64().unwrap_or(2),
+                "fixture {i}: even_val did not reach State.even"
+            );
 
             // My own hand, exactly. The opponent's is a COUNT and a hole.
             let mine: Mask = f["hand"]
@@ -930,7 +954,8 @@ mod fixture_replay {
                 "fixture {i}"
             );
         }
-        assert!(classic > 0 && skat > 0, "both auction modes must be covered");
+        assert!(classic > 0 && skat > 0 && minor > 0,
+                "all three modes must be covered");
     }
 
     #[test]
@@ -1233,6 +1258,15 @@ mod auction_legality {
         assert!(count(&|r| r["mode"] == "skat") > 40, "skat's ladder is uncovered");
         assert!(count(&|r| r["state"]["passes"].as_u64().unwrap() > 0) > 0,
                 "no skat node mid-pass-out — the one pass that is not a leaf");
+        // MINOR: the classic shape at max_level 6. Its whole legality delta is
+        // the cap, so the states worth demanding are the opener's 1..6 and a
+        // node at the minor ceiling, where a tree hardcoding 12 anywhere
+        // would offer overtakes the room refuses.
+        let minor = |r: &Value| r["mode"] == "minor";
+        assert!(count(&|r| minor(r) && r["rules"]["max_level"].as_u64() == Some(6)) > 20,
+                "minor's capped ladder is uncovered");
+        assert!(count(&|r| minor(r) && r["state"]["level"].as_u64().unwrap() >= 5) > 0,
+                "nothing at minor's ceiling — where its raise cap stops binding");
     }
 }
 

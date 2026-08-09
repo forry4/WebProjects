@@ -5,6 +5,9 @@ even-numbered tricks score **+2** to whoever wins them, odd-numbered ones
 **−1**. Six positive against seven negative, so both players' totals always sum
 to exactly **+5** — sweeping all thirteen tricks scores 5, while taking exactly
 the six even ones scores 12. The game is about *which* tricks you win.
+(THREE modes since 2026-08-09: classic, skat — a second auction — and
+**minor**, where even tricks pay **+1** and the pool is **−1**; its own
+section below.)
 
 **Renamed from Oddtrick (2026-08-07)** — the working name is gone from the route
 (`/dissonance`), the `MODES` entry, the home card, the package, the Rust crate,
@@ -55,6 +58,97 @@ cargo run --release --bin gen_fixtures 400 > ../../games/dissonance/tests/fixtur
 That crate also holds the design campaign (`CAMPAIGN.md`) — every scoring rule
 below was chosen from measurement, and the negative results are recorded so
 nobody re-spends on them.
+
+## Minor mode — the third mode, and the first to touch the trick VALUES (2026-08-09)
+
+`mode: "minor"` — even tricks pay **+1** instead of +2 (odd tricks stay −1),
+over the CLASSIC auction shape. Same room-flag machinery as skat: one table,
+one route, chosen in the create modal, badged on lobby cards. Unlike skat it
+changes no phase — a minor round is classic's phase machine (swap, Double and
+all) in a different currency.
+
+**Everything follows from the one number, and the map of what it drags along
+is `EVEN_TRICK_VALUE`'s docstring.** The pool goes NEGATIVE (6×1 − 7 = −1):
+winning every trick scores −1, par is −0.5, and a perfect declarer tops out at
+6 — so the ladder compresses to **1..6** (`MINOR_MAX_LEVEL`, asserted derived
+from the parity, never typed beside it).
+
+**The re-anchored prices, and why (all measured in
+`tools/minor_calibration.py`, bot self-play, 400-600 rounds/config):**
+* **make N² + 1/overtrick, set base N** — classic's shapes, unchanged.
+* **set rate 2, not classic's 5 (`MINOR_SHORT_PENALTY`)** — payoffs run about
+  a quarter of classic's (ceiling 36 vs 144) while shortfalls keep the same
+  magnitude (median ~2 in both sweeps), so the classic rate made the set the
+  biggest number on the table: two-thirds of rounds ended in a set paying ~11
+  against makes of 1–6, i.e. "whoever had to open loses". 2 tracks the
+  ceiling ratio. The Double and its shortfall ramp apply unchanged.
+* **Null 6 (`MINOR_NULL_MAKE`)** — the same relationship classic's 12 has:
+  exactly a made level-1's CEILING under the overtrick bonus (1 + 5). The
+  cliff this buys is proportionally bigger than classic's (minor makes rarely
+  reach their ceiling) — a declarer who bought cheap has an even stronger
+  licence to duck. Deliberate, same as classic's documented stance; the rate
+  it produces under searching tiers is unmeasured (`skatlab`-class question).
+* **match to 25 (`MATCH_TARGET`)** — buys ~7 self-play rounds against
+  classic's ~6 under the identical harness. NOT 100 rescaled by feel.
+
+**The mode is structurally DECLARER-HOSTILE, and that is the design, priced:**
+even level 1 asks the declarer to beat par by 1.5 points and makes only ~45%
+under greedy play (searching tiers do better); level 2 ≈ classic level 5 in
+margin terms, because each even trick swung moves the differential by 2 rather
+than classic's 4. The server bot's map (`bot._MINOR_LEVEL_NEEDS`) is therefore
+COMPRESSED — level 2 fires around p96 of hand strength, 4+ effectively never —
+and its settled distribution is ~87% level 1. Rungs 3–6 are sacrifice space,
+the role classic's unused 7–12 play. An open question a `skatlab`-class sweep
+should answer: with sub-50% make rates, does Hard-vs-Hard converge on "Double
+every contract"? (Break-even is around a 45-50% set rate.)
+
+**How the value reaches every consumer — one runtime number, three surfaces:**
+* **Python**: `trick_value(t, even)` + `trick_value_in(g, t)`;
+  `payoff_terms`/`_terms_for` take the real mode; `pool_for`,
+  `max_level_for`. `view_for` ships **`even_val`**; `_deal_snapshot` carries
+  **`even`** (the DD review must replay the round's own parity);
+  `persist._pack_deal` passes it through generically.
+* **Rust**: `State.even` (runtime, default 2). `State::play` scores with it,
+  `State::pool()` replaces POOL on every serving-path diff→points conversion
+  (`bid.rs`), `dd::key_of` mixes it into the TT key (two parities of one card
+  layout are different positions), and — the subtle one — **the MTD(f)
+  bounds/parity tables are per-`Dd` state (`ensure_even`), because the
+  ladder's stride-2 parity trick is DIFFERENT under minor** (every trick
+  swings odd) and classic tables step the ladder right past reachable values.
+  `wire.rs` reads `even_val` (view) / `even` (deal), optional, default 2.
+  Gates: `solver_matches_brute_force` sweeps the parity like it sweeps Grand;
+  fixtures — `play.jsonl` (1 in 4 minor), `views.jsonl` (a minor game),
+  `payoff.jsonl` (minor contracts, doubled and not), `auction.jsonl` (minor
+  nodes; its `rules.mode` is **"classic"** — the SHAPE — with `max_level` 6,
+  so the legality mirror needed no third arm).
+* **Expert/Hard auction**: free ride. `auction_payoff_options` and
+  `auction_search_payload` are already data; the classic swap-policy weights
+  now ride on minor auctions too (`!= "skat"` in main.py — fitted on +2,
+  an approximation; minor's own swaplab run is queued with skat's).
+
+**THE STALE-WASM GATE IS A THREE-PART HANDSHAKE, and it exists because an old
+artifact reading a minor view would silently search the WRONG GAME** (it
+ignores `even_val`, scores +2, returns legal-but-misvalued moves — the exact
+shape of the `shown` outage, with nothing red anywhere). Fail-closed:
+1. the wasm exports **`odd_wire()` = 2**; the worker probes for the export
+   and refuses minor payloads on an artifact without it (per-decision error →
+   server bot, the ordinary degradation);
+2. the page reports the pool's weakest `wire` in **`client_ai_ready`**;
+3. the server refuses to arm a MINOR room for `wire < 2`
+   (`_handle_client_ai_ready`) — so an old cached bundle that never sends the
+   field plays the server bot, honestly labelled by nothing happening.
+Classic and skat rooms accept any vintage, as before. `test_minor.py` pins
+the server half; the worker half is the export-table probe.
+
+**Frontend**: trick labels print the VALUE off the wire (`evenVal(game)` /
+`view.trick_value`), never a hardcoded "+2" — three sites carried the literal.
+`shortRate`/`nullMake` are mode-picked off `/catalog` (which now serves
+`even_value`, `pools`, `max_levels`, `minor_null_make`, `minor_short_penalty`,
+`match_targets`). The "Doubled · set pays" row had said "+ 4 each" since
+before the 4→5 move and the ramp — it now renders rate+ramp from the catalog.
+`screens.mjs` drives the create-modal segment to a dealt minor room inside
+the `dissonanceSkat` block (same lane, no new roster entry): the marker is
+the 1..6 ladder or the "+1 trick" Null price, per who opened.
 
 ## Two auctions, one game (skat mode, 2026-08-07)
 
@@ -774,8 +868,16 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (442)
+## Tests (490)
 
+`test_minor.py` (24) minor mode end to end — the ±1 parity and the −1 pool,
+the derived 1..6 ladder, the re-anchored prices (Null 6, set rate 2, the
+Double's arithmetic), Null-replaces-set, the result row naming its mode and
+prices, `even_val` on the view / `even` on the deal snapshot surviving
+persist, minor-priced auction options and the Expert payload's
+classic-shape-with-minor-ceiling, the bot inside the ladder, and the
+three-part stale-wasm gate's server half (a minor room arms only a `wire: 2`
+client; classic/skat accept any vintage) ·
 `test_engine.py` rules (including the match SCORECARD: one line per banked
 round, derived from the result row, none for a pass-out, and a match that
 predates it gaining one without crashing) · `test_history.py` (5) the lobby

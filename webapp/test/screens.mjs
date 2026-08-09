@@ -2165,6 +2165,57 @@ try {
 			sRes <= 0 || sBefore.includes("board"),
 			`the frame before RESULT showed: ${sBefore} | tail=${JSON.stringify(skatPanels.slice(-8))}`);
 		await ctx.close();
+
+		// ── MINOR mode, same failure class as skat's opening check: a room FLAG
+		// picked in the create modal (the Renaissance lesson — a mounted screen
+		// says nothing about whether picking "Minor" deals a minor game). What
+		// separates a minor room from a classic one on screen is the LADDER: the
+		// classic bid grid capped at level 6, straight off the server's option
+		// list — so that cap is the deal-really-happened marker, the way skat's
+		// value ladder is above.
+		const mctx = await browser.newContext();
+		await mctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "minor-harness", name: "Minor", guest: true })));
+		const mpage = await mctx.newPage();
+		const merrors = [];
+		mpage.on("pageerror", (e) => merrors.push(String(e)));
+		await mpage.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await mpage.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
+		await mpage.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await mpage.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		for (const label of [/^VS AI$/, /^Easy$/, /^Minor$/]) {
+			await mpage.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const mpicked = await mpage.evaluate(() =>
+			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		check("the create modal offers Minor as a third mode",
+			mpicked.includes("Minor"), JSON.stringify(mpicked));
+		await mpage.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		const mgrid = await mpage.waitForSelector(".dis-bidgrid button", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("a minor room deals into the classic bid grid", mgrid);
+		if (mgrid) {
+			// WHO OPENS IS RANDOM (seats are shuffled at the deal), so the grid is
+			// either the opener's full ladder or an overtake range above the bot's
+			// opening bid. Each case has its own minor-only marker: the full
+			// ladder reads exactly 1..6 where classic's reads 1..12, and once the
+			// bot's contract stands the side panel prices Null against "no +1
+			// trick" where classic says +2. Assert whichever case this deal is.
+			const m = await mpage.evaluate(() => ({
+				levels: [...document.querySelectorAll(".dis-bidgrid button")].map((b) => +b.textContent),
+				nullRow: [...document.querySelectorAll(".dis-scorerow")]
+					.map((r) => r.textContent).find((t) => t.includes("Null")) || "",
+			}));
+			const openerCase = Math.min(...m.levels) === 1 && Math.max(...m.levels) === 6;
+			const overtakeCase = m.nullRow.includes("+1") && Math.max(...m.levels) <= 6;
+			check("the room is really minor: a 1..6 ladder or a +1-trick Null price",
+				openerCase || overtakeCase, JSON.stringify(m));
+		}
+		check("no page errors creating a minor room", merrors.length === 0,
+			merrors[0]?.slice(0, 160) || "");
+		await mctx.close();
 	}
 
 	// ── Dissonance's client-searched tiers, in the browser ──────────────────────

@@ -278,7 +278,25 @@ pub fn odd_best_card(pooled_json: &str) -> i32 {
 
 /// The constant-sum pool, so the client can label a value without hardcoding a
 /// rule the `odd-positive` feature is allowed to change.
+///
+/// The CLASSIC pool -- minor mode's is -1, and a client that needs a per-mode
+/// pool reads it from the server's `/catalog` (`pools`), which is authoritative
+/// the way this constant cannot be.
 #[wasm_bindgen]
 pub fn odd_pool() -> i32 {
     POOL as i32
+}
+
+/// The wire vintage this artifact speaks. 2 = understands `even_val` /
+/// `even` (minor mode's runtime trick value, 2026-08-09).
+///
+/// THE WORKER PROBES FOR THIS EXPORT before searching a minor-parity payload:
+/// an older wasm has no such symbol, would silently read the view WITHOUT
+/// `even_val`, and would return legal-but-wrong-game moves with nothing red
+/// anywhere -- the exact failure shape the `shown` rewrite already paid for.
+/// Probing for the export turns "stale artifact in a minor room" into the
+/// ordinary per-decision fallback to the server bot.
+#[wasm_bindgen]
+pub fn odd_wire() -> i32 {
+    2
 }

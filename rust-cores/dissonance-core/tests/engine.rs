@@ -91,6 +91,52 @@ fn a_round_plays_every_card_and_scores_to_the_pool() {
 }
 
 #[test]
+fn minor_parity_scores_plus_one_evens_and_pools_to_minus_one() {
+    // The server's minor mode: `State.even == 1`. The parity itself does not
+    // move -- only what an even trick PAYS -- so legality is untouched and the
+    // pool follows the one number.
+    assert_eq!(dissonance::state::trick_value_with(1, 1), 1);
+    assert_eq!(dissonance::state::trick_value_with(0, 1), -1);
+    for seed in 0..100 {
+        let mut a = RandomBot { rng: Rng::new(seed) };
+        let mut b = GreedyBot;
+        let mut g = Game::deal(&mut Rng::new(seed ^ 0x77), (seed % 5) as u8, (seed % 2) as u8);
+        g.s.even = 1;
+        assert_eq!(g.s.pool(), 6 - 7, "six evens at +1 against seven -1s");
+        let pts = play_round(&mut g, &mut [&mut a, &mut b]);
+        assert_eq!(pts[0] + pts[1], -1);
+        assert_eq!(g.s.trick, NTRICKS);
+    }
+}
+
+#[test]
+fn the_solver_agrees_with_itself_across_parities() {
+    // The same deal solved under both parities: the minor value must equal a
+    // brute recount of the minor-scored line, and the TT must not hand one
+    // parity the other's answer -- the two solves share a `Dd` on purpose.
+    use dissonance::dd::Dd;
+    let mut dd = Dd::new(14);
+    for seed in 0..20u64 {
+        let g = Game::deal(&mut Rng::new(seed + 900), (seed % 5) as u8, 0);
+        let classic = dd.solve(&g.s);
+        let mut minor_s = g.s;
+        minor_s.even = 1;
+        let minor = dd.solve(&minor_s);
+        // Re-ask classic AFTER the minor solve warmed the table: a poisoned
+        // key would return the minor number here.
+        assert_eq!(dd.solve(&g.s), classic, "seed {seed}: TT poisoned across parities");
+        // Exhaustive check of the minor value on a small tail position is
+        // covered by the parity fixtures; here pin the coarse invariant that
+        // a minor differential is reachable by minor swings at all.
+        assert!(minor.abs() <= 13, "seed {seed}: minor diff out of range");
+        assert_eq!(
+            (minor - minor_s.pool() as i16) % 2, 0,
+            "seed {seed}: minor value off the reachable parity lattice"
+        );
+    }
+}
+
+#[test]
 fn follow_suit_is_mandatory_and_pile_tops_count() {
     let mut rng = Rng::new(4242);
     for i in 0..300 {
@@ -274,6 +320,7 @@ fn solver_matches_brute_force() {
     let mut dd = Dd::new(18);
     let mut checked = 0;
     let mut grand_seeds = 0;
+    let mut minor_seeds = 0;
     for seed in 0..48u64 {
         // Over DENOMS, so GRAND is covered. It is not decoration here: the
         // equivalence collapse prunes on the follow-suit CLASS, and Grand is
@@ -286,6 +333,16 @@ fn solver_matches_brute_force() {
             grand_seeds += 1;
         }
         let mut g = Game::deal(&mut Rng::new(seed), trump, (seed % 2) as u8);
+        // Every third seed solves under MINOR parity (+1 evens). `naive` goes
+        // through `State::play` and is parity-correct by construction, so this
+        // is an EXACT gate on the runtime-parity solver -- including the
+        // MTD(f) ladder, whose stepping parity is different under minor and
+        // whose failure mode is converging on a value the position cannot
+        // reach.
+        if seed % 3 == 2 {
+            g.s.even = 1;
+            minor_seeds += 1;
+        }
         let mut r = Rng::new(seed ^ 0xABCD);
         while g.s.trick < 8 {
             let mut m = [0u8; 16];
@@ -298,6 +355,7 @@ fn solver_matches_brute_force() {
     }
     assert_eq!(checked, 48);
     assert!(grand_seeds > 0, "the trump sweep never reached Grand");
+    assert!(minor_seeds > 0, "the parity sweep never reached minor");
 }
 
 #[test]

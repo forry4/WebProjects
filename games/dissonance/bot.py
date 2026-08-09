@@ -38,7 +38,7 @@ def _want_win(g: dict, seat: int) -> bool:
     the double-dummy value function cannot see. Both want the contract-aware
     solve (`dd::solve_contract`) that already exists for the auction.
     """
-    return E.trick_value(g["trick"]) > 0
+    return E.trick_value_in(g, g["trick"]) > 0
 
 
 def policy_score(g: dict, c: int, seat: int | None = None) -> float:
@@ -122,9 +122,34 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
     return total
 
 
-def _level_for(strength: float) -> int:
-    """Map a strength estimate onto a contract level."""
-    for lvl, need in ((6, 15.0), (5, 12.5), (4, 10.5), (3, 8.5), (2, 6.5)):
+#: Minor mode's strength -> level map, CALIBRATED BY SELF-PLAY (2026-08-09,
+#: tools/minor_calibration.py). A minor level is far more than "half a classic
+#: level": each even trick swung to the declarer moves the pts DIFFERENCE by 2
+#: rather than classic's 4, so margins accumulate at half speed against the
+#: same target spacing -- measured, a p90 hand overtaking to level 2 made it
+#: only ~12-18% of the time, which is negative EV against every set price
+#: tried. So the map is deliberately COMPRESSED against the strength scale
+#: (best-denomination strength runs median 10.7 / p90 13.8 / p99 16.4): level
+#: 2 fires around p96 and the rungs above 3 are effectively sacrifice space,
+#: the same role classic's unused 7..12 play. The settled distribution this
+#: yields is ~87% at level 1 -- an honest floor for a mode whose par is
+#: NEGATIVE (-0.5), where even the floor contract is a real ask (~45% made
+#: under greedy play; the searching tiers do better, and the Null consolation
+#: is the declarer's escape).
+_MINOR_LEVEL_NEEDS = ((6, 25.0), (5, 22.5), (4, 20.0), (3, 17.5), (2, 15.0))
+
+_CLASSIC_LEVEL_NEEDS = ((6, 15.0), (5, 12.5), (4, 10.5), (3, 8.5), (2, 6.5))
+
+
+def _level_for(strength: float, mode: str = "classic") -> int:
+    """Map a strength estimate onto a contract level.
+
+    `mode` picks the ladder scale: minor's rungs are dearer per level because
+    even tricks pay half. Skat deliberately keeps the classic map -- its level
+    is a price-ladder artefact on the same +2 parity.
+    """
+    needs = _MINOR_LEVEL_NEEDS if mode == "minor" else _CLASSIC_LEVEL_NEEDS
+    for lvl, need in needs:
         if strength >= need:
             return lvl
     return E.MIN_LEVEL
@@ -140,7 +165,7 @@ def choose_bid(g: dict, seat: int, rng=None) -> dict:
 
     denoms = sorted({d for _, d in bids})
     best_d = max(denoms, key=lambda d: hand_strength(g, seat, d))
-    want = _level_for(hand_strength(g, seat, best_d))
+    want = _level_for(hand_strength(g, seat, best_d), E.mode_of(g))
     mine = [lvl for lvl, d in bids if d == best_d]
     if not mine:
         return {"pass": True}

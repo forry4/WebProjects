@@ -93,6 +93,21 @@ def _forced_classic_lines(out: list[dict]) -> None:
     out.append(_row(g))
 
 
+def _forced_minor_lines(out: list[dict]) -> None:
+    """Minor is the classic SHAPE with `max_level` 6, and the cap is the whole
+    of what its legality adds -- so the forced lines are the ceiling states: an
+    opener seeing exactly 1..6, and the raise cap running into a ceiling half
+    of classic's. A tree that hardcoded 12 anywhere prefers an overtake the
+    room refuses, which is the silent degradation this file exists to stop."""
+    g = E.new_game(["a", "b"], random.Random(19), opener=0, mode="minor")
+    out.append(_row(g))                          # the opener's 1..6
+    E.apply_bid(g, 0, E.MINOR_MAX_LEVEL - 1, 0)
+    out.append(_row(g))                          # one rung left under the cap
+    g = E.new_game(["a", "b"], random.Random(23), opener=0, mode="minor")
+    E.apply_bid(g, 0, E.MINOR_MAX_LEVEL, E.NOTRUMP)
+    out.append(_row(g))                          # nothing outranks it
+
+
 def _forced_skat_lines(out: list[dict]) -> None:
     """A skat pass-out is a NODE, not a leaf -- the first open pass hands the
     deal over and the auction goes on, and only the second throws it in. A
@@ -112,10 +127,11 @@ def main() -> None:
     out: list[dict] = []
     rng = random.Random(4242)
     for i in range(24):
-        for mode in ("classic", "skat"):
+        for mode in ("classic", "skat", "minor"):
             g = E.new_game(["a", "b"], random.Random(90000 + i), opener=i % 2, mode=mode)
             _walk(g, rng, out)
     _forced_classic_lines(out)
+    _forced_minor_lines(out)
     _forced_skat_lines(out)
     sys.stdout.write("\n".join(json.dumps(r, separators=(",", ":")) for r in out) + "\n")
 

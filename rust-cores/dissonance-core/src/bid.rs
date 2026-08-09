@@ -270,8 +270,12 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
         let raw = dd.solve_from(&s, guess);
         guess = raw;
         let diff = raw as i32;
-        let p0 = (POOL as i32 + diff) / 2;
-        let mine = if declarer == 0 { p0 } else { POOL as i32 - p0 };
+        // The STATE's pool, not the classic constant: under minor parity the
+        // pool is -1, and `(POOL + diff) / 2` would be the other player's
+        // total half the time.
+        let pool = s.pool() as i32;
+        let p0 = (pool + diff) / 2;
+        let mine = if declarer == 0 { p0 } else { pool - p0 };
         let duck = dd.null_no_even_makeable(&s, declarer);
         if for_opponent {
             w.opp_pts[d as usize] = mine;
