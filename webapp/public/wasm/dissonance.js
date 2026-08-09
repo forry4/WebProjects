@@ -98,6 +98,45 @@ export function odd_pool() {
     const ret = wasm.odd_pool();
     return ret;
 }
+
+/**
+ * THE ROUND REVIEW: what the card play was worth to a perfect declarer.
+ *
+ * `{"deal": {...}, "payoff": {...}}` -> `{"value": i32}`, the exact
+ * double-dummy payoff of the round from the START of trick 1, signed for the
+ * DECLARER — the same convention `solve_root_contract` uses, and the same one
+ * `payoff` itself is written in.
+ *
+ * WHY THIS IS NOT `odd_pick_card` WITH A FULLY-SPECIFIED VIEW. That is the
+ * obvious implementation and it cannot work: a view carries a POOL of cards
+ * the seat cannot place and the searcher samples worlds from it, so even a
+ * payload naming every card gets reshuffled — and the wire's partition check
+ * rejects the payload first anyway (see `deal_from_json`). A review has no
+ * uncertainty left in it by construction: the round is over and every card has
+ * been revealed, so this solves the ONE true deal exactly rather than
+ * averaging over sampled ones. It is the cheapest search this crate does for
+ * the same reason — one solve, no determinization, no pooling.
+ *
+ * So there is nothing to aggregate and no seed: two callers handed the same
+ * deal get the same number, which is what makes it safe to show a player as a
+ * fact about their round rather than as a bot's opinion.
+ * @param {string} request_json
+ * @returns {string}
+ */
+export function odd_review(request_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_review(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -207,11 +246,15 @@ function __wbg_finalize_init(instance, module) {
 
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
+        if (!module.ok) {
+            throw new Error(`failed to fetch Wasm: ${module.status} ${module.statusText} fetching '${module.url}'`);
+        }
+
         if (typeof WebAssembly.instantiateStreaming === 'function') {
             try {
                 return await WebAssembly.instantiateStreaming(module, imports);
             } catch (e) {
-                const validResponse = module.ok && expectedResponseType(module.type);
+                const validResponse = expectedResponseType(module.type);
 
                 if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
                     console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
