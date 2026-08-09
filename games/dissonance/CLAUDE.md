@@ -1186,15 +1186,18 @@ classic, ~600 deals per row unless said:
 | hard k=8 vs hard k=3 | +0.86 ± 0.49 — most of the k=8 gain is the worlds |
 | expert POOLED 4×2 vs deployed hard | **+0.14 ± 0.45 — the pooling trap.** Four 2-world trees summed are NOT one 8-world tree; the tree is nonlinear in its worlds and quarter-sample trees are noise-dominated. Caught at the serving-shape gate, before shipping |
 | expert ONE tree k=8 vs hard 4×1 | +0.40 ± 0.45 — hard's deployed shape was really k=4 all along (`perWorker = ceil(3/4) = 1` across four workers), which absorbed most of the +1.36 |
+| **the shipped pairing**: expert one-tree k=8 vs hard pooled 4×2 (=k8) | **+0.26 ± 0.42** — the tree's own marginal once Hard has equal worlds; positive point estimate, CI not yet past zero |
 
 **What shipped from it:** `CLIENT_AI_AUCTION_WORLDS` 3 → **8** for every auction
 tier (Hard's pricing is linear in the worlds, so the pooled 4×2 computes exactly
 the measured single k=8: +0.86 for ~850ms a bid), and Expert's auction runs the
 same k=8 as **ONE TREE IN ONE WORKER** (`solo` dispatch in `Dissonance.jsx`,
-~3.4s for the first decision of a hand, ~0 after). The tree's marginal over
-worlds-matched Hard is ~+0.5 with a CI that does not yet exclude zero; it keeps
-its place because the point estimate is positive at the shipped shape and the
-tree is what plays the capping style the tier exists for.
+~3.4s for the first decision of a hand, ~0 after — and note the OLD deployed
+Expert was four ONE-world trees summed, the deepest point of the pooling trap).
+The tree's marginal over worlds-matched Hard measured **+0.26 ± 0.42** at the
+shipped pairing; it keeps its place because the point estimate is positive and
+the tree is what plays the capping style the tier exists for. Resolving that
+marginal past noise needs ~2500 more paired deals — queued, not assumed.
 
 `tools/auction_arena.py`
 (the harness lives with the code and drives `bin/bidserve`, i.e. the same
