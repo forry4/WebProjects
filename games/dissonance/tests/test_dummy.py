@@ -345,12 +345,18 @@ def test_the_bot_does_not_overtake_its_own_dummy():
     assert checked > 0, "the position never arose -- the test proves nothing"
 
 
-def test_dummy_mode_is_card_scored_and_not_client_searchable():
+def test_dummy_mode_is_card_scored_searchable_but_not_reviewable():
     assert E.uses_card_points("dummy") is True
     assert E.pool_for("dummy") is None
     assert E.has_dummy("dummy") and not E.has_dummy("skat")
-    # The Rust core is two-seat, so the browser must never be armed here.
-    assert E.client_searchable("dummy") is False
+    # SEARCHABLE since `dummy.rs` gave the crate a three-seat searcher, but
+    # NOT REVIEWABLE -- the two questions came apart that day. Playing well
+    # needs a good move; the DD column needs an EXACT solve, which free discard
+    # over three hands puts ~4x10^11 nodes out of reach.
+    assert E.client_searchable("dummy") is True
+    assert E.round_reviewable("dummy") is False
+    for m in ("classic", "skat", "minor"):
+        assert E.client_searchable(m) and E.round_reviewable(m)
     for m in ("classic", "skat", "minor"):
         assert E.client_searchable(m) is True
         assert E.has_dummy(m) is False
@@ -446,3 +452,66 @@ def test_a_round_dealt_before_the_wide_deck_is_voided_rather_than_jammed():
     finally:
         M.load_game_state = real
         M.ROOMS.pop(rid, None)
+
+
+def test_a_dummy_room_arms_only_a_client_that_can_search_three_hands():
+    """RUNG 5 on the wire, and it is a legality-class rung like must-head's: an
+    artifact without `odd_pick_dummy` cannot answer a three-seat position at
+    all, and one that guessed would answer for the wrong HAND — the seat on
+    turn is a POSITION and the actor is the side commanding it.
+
+    Refusing to arm keeps the honest degradation: the room plays the server bot
+    exactly as if the browser were absent, rather than at full speed under a
+    Hard label with every answer dropped on the floor.
+    """
+    import asyncio
+
+    from games.dissonance import main as M
+
+    class _WS:
+        async def send_text(self, _):
+            pass
+
+    def arm(mode: str, wire: int) -> bool:
+        rid = "ARMCHK"
+        M.ROOMS[rid] = {
+            "players": {"alice": "alice"}, "host": "alice", "status": "playing",
+            "game": None, "meta": {}, "mode": mode, "sockets": {},
+            "vs_ai": True, "ai_player": M.AI_PID, "ai_difficulty": "hard",
+        }
+        try:
+            asyncio.new_event_loop().run_until_complete(
+                M._handle_client_ai_ready(_WS(), rid, "alice",
+                                          {"ready": True, "wire": wire}))
+            return bool(M.ROOMS[rid].get("client_ai"))
+        finally:
+            M.ROOMS.pop(rid, None)
+
+    # A dummy room needs 5 and refuses every older artifact...
+    for w in (1, 2, 3, 4):
+        assert arm("dummy", w) is False, f"armed a wire-{w} client"
+    assert arm("dummy", 5) is True
+    # ...while the modes below it are unmoved, so lifting the refusal did not
+    # quietly raise the bar for anybody else.
+    assert arm("classic", 1) is True
+    assert arm("skat", 4) is True
+    assert arm("minor", 2) is True
+
+
+def test_a_dummy_auction_decision_is_never_armed_for_the_browser():
+    """Its CARD play is searched client-side; its AUCTION is not, and that gate
+    is about cost rather than seat count. Pricing one auction option is a solve
+    per denomination, which is the ~4x10^11-node tree the card search exists to
+    avoid — so dummy's auction stays on the server's priced ladder.
+
+    Arming it anyway is NOT a harmless no-op, which is why this is a test: the
+    browser would refuse the payload, send nothing, and the room would wait out
+    the whole `CLIENT_AI_TIMEOUT` before taking the decision back — 12 seconds
+    a bid, five or six bids a round, on the tier a player picked to enjoy the
+    game more.
+    """
+    assert E.auction_searchable("dummy") is False
+    for m in ("classic", "skat", "minor"):
+        assert E.auction_searchable(m) is True
+    # ...and the CARD play is still searched, which is the whole point.
+    assert E.client_searchable("dummy") is True

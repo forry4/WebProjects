@@ -702,7 +702,8 @@ async def _schedule_bot_turn(room_id: str) -> None:
             phase = g["phase"]
             if phase == "play":
                 choices = len(engine.legal_moves(g, seat))
-            elif phase in CLIENT_AI_PHASES:
+            elif phase in CLIENT_AI_PHASES and engine.auction_searchable(
+                    engine.mode_of(g)):
                 opts = engine.auction_payoff_options(g)
                 # Kontra ships one option and the decision is its SIGN, so a
                 # single option is a real choice there and nowhere else.
@@ -1041,19 +1042,25 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
         # pinned at 4, so turning `MUST_HEAD` off puts skat back to rung 3 and
         # re-admits every cached bundle with no second edit here.
         mode = room.get("mode") or ""
-        # A MODE THE SEARCH CORE CANNOT PLAY IS NEVER ARMED. Dummy mode deals
-        # a third hand and the Rust core is two-seat to its bones, so an armed
-        # client would answer with a card for the wrong hand, the engine would
-        # refuse it, and the room would run on the server bot at full speed
-        # while still calling itself Hard. The create modal does not offer the
-        # searching tiers there either (`/catalog`'s `searchable_modes`), so
-        # this is the second of two locks rather than the only one.
+        # A MODE THE SEARCH CORE CANNOT PLAY IS NEVER ARMED. Every shipped mode
+        # is searchable since `dummy.rs` (2026-08-10) gave the crate a
+        # three-seat searcher; the lock stays because what it guards is real --
+        # an armed client that cannot play the room's game answers with a card
+        # for the wrong hand, the engine refuses it, and the room runs on the
+        # server bot at full speed while still calling itself Hard.
         if not engine.client_searchable(mode):
             return
         wire = int(msg.get("wire") or 1)
         need = 1
         if mode == "minor":
             need = 2
+        elif engine.has_dummy(mode):
+            # RUNG 5: a three-seat position needs `odd_pick_dummy`, and an
+            # artifact without it cannot answer one at all. Worse than the
+            # scoring rungs and on a par with must-head's: a wasm that guessed
+            # would answer for the wrong HAND, since the seat on turn is a
+            # POSITION and the actor is the side commanding it.
+            need = 5
         elif engine.uses_card_points(mode):
             need = 4 if engine.must_head_mode(mode) else 3
         if wire < need:

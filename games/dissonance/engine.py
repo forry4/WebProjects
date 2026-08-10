@@ -355,16 +355,59 @@ def ntricks_in(g: dict) -> int:
 def client_searchable(mode: str) -> bool:
     """Can `rust-cores/dissonance-core` search this mode at all?
 
-    FALSE FOR DUMMY, and it is the honest half of shipping a third hand: the
-    Rust core is two-seat to its bones -- `State.hand` is `[Mask; 2]`, the
-    solver's minimax alternates between two players, the wire reader partitions
-    a two-hand pool. A three-seat search is its own project, so until it exists
-    a dummy room must never ARM the browser: an armed client would answer with
-    a card for the wrong hand, the engine would refuse it, and the room would
-    play the server bot at full speed while the label said Hard. `main.py`
-    reads this to refuse arming, and the create modal reads it (via
-    `/catalog`) to stop offering the tiers at all -- a tier that cannot run is
-    worse than one that is not on the menu.
+    TRUE EVERYWHERE since 2026-08-10, when `dummy.rs` gave the crate a
+    three-seat searcher. It was false for dummy for exactly as long as the core
+    was two-seat to its bones (`State.hand` is `[Mask; 2]`, a minimax that
+    alternates two players, a wire reader that partitions a two-hand pool), and
+    the refusal was the honest half of shipping a third hand: an armed client
+    would have answered with a card for the wrong HAND, the engine would have
+    refused it, and the room would have played the server bot at full speed
+    while the label said Hard.
+
+    The function stays rather than being deleted, because what it guards is not
+    "is there a searcher" but "does the ARTIFACT in this browser have one" --
+    and that is the wire rung (`_handle_client_ai_ready`), which is derived
+    from the room's rules and not pinned. A future mode with no searcher can
+    turn itself off here in one line.
+    """
+    return mode in MODES
+
+
+def auction_searchable(mode: str) -> bool:
+    """Can the browser search this mode's AUCTION decisions?
+
+    FALSE FOR DUMMY, and unlike `client_searchable` this one is about COST
+    rather than seat count. Pricing an auction option is `bid.rs` solving the
+    deal in every denomination -- five exact solves a world -- and dummy's tree
+    is the ~4x10^11-node one its card search exists to avoid. So its auction
+    stays with the server's own priced ladder, and Expert is Hard there.
+
+    ARMING IT ANYWAY IS NOT A HARMLESS NO-OP, which is the reason this is a
+    gate and not a comment: the browser would refuse the payload, send nothing,
+    and the room would wait out the FULL `CLIENT_AI_TIMEOUT` before the server
+    bot took the decision back -- 12 seconds per bid, five or six bids a round,
+    on a tier the player chose to make the game better.
+    """
+    return not has_dummy(mode)
+
+
+def round_reviewable(mode: str) -> bool:
+    """Can a finished round of this mode be priced EXACTLY, for the DD column?
+
+    FALSE FOR DUMMY, and it is a different question from `client_searchable`
+    even though the two read alike for three modes and were once one gate. The
+    column is labelled a FACT about the round -- what the deal was worth to
+    perfect play -- so it rests on an exact double-dummy solve. Dummy's tree is
+    ~4x10^11 nodes with free discard over three hands, which is why its Hard
+    tier searches to a DEPTH and averages over worlds instead. A depth-limited
+    estimate is a fine way to choose a card and not a fact about anything, so
+    the column stays empty there rather than filling with a number that reads
+    like an oracle.
+
+    Splitting them was forced by a test: the snapshot site used to read
+    `client_searchable`, so giving dummy a searcher silently switched on a
+    review column nothing could compute -- and would have written a per-round
+    snapshot into every saved dummy row to feed it.
     """
     return not has_dummy(mode)
 
@@ -1434,10 +1477,13 @@ def _start_play(g: dict) -> None:
     # shape of the tier: lead low, drop the dummy's +2 on it, and dare the
     # defender to take a trick they do not want.
     g["leader"] = a["declarer"]
-    # NO ROUND REVIEW WITH A DUMMY. The DD column is an exact solve, and the
-    # solver is two-seat (`client_searchable`) -- a snapshot nothing can price
-    # would be dead weight in every saved row and a column that never fills.
-    if client_searchable(mode_of(g)):
+    # NO ROUND REVIEW WITH A DUMMY -- and this is `round_reviewable`, NOT
+    # `client_searchable`, because the two questions came apart the day dummy
+    # got a searcher. Playing a mode well needs only a good move; REVIEWING one
+    # needs an EXACT solve, which is what makes the column a fact about the
+    # round rather than a bot's opinion. A snapshot nothing can price would be
+    # dead weight in every saved row and a column that never fills.
+    if round_reviewable(mode_of(g)):
         g["deal"] = _deal_snapshot(g)
 
 

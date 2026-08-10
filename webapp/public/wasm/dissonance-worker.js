@@ -40,6 +40,11 @@
 import * as wasm from "./dissonance.js";
 
 const { default: init, odd_pick_card, odd_best_card, odd_pick_bid, odd_review } = wasm;
+// Read off the namespace rather than destructured, so a cached artifact without
+// them is a runtime refusal (the ordinary per-decision fallback) instead of a
+// module-load crash that takes the whole worker with it.
+const odd_pick_dummy = wasm.odd_pick_dummy;
+const odd_best_dummy = wasm.odd_best_dummy;
 
 // Which wire vintage this artifact speaks. Probed off the EXPORT TABLE and
 // then off the export's own VALUE, because those are the things an old
@@ -58,6 +63,10 @@ let WIRE = 1;
 function neededWire(req) {
   const v = req && (req.view || req.deal || req);
   if (!v) return 1;
+  // 5 for DUMMY: a three-seat position needs `odd_pick_dummy`, and an artifact
+  // without it cannot answer one at all. Checked FIRST because a dummy payload
+  // also carries card scoring, and this is the higher requirement.
+  if (v.mode === "dummy") return 5;
   if (v.must_head === true || v.head === true) return 4;
   if (v.card_pts === true || v.cards === true) return 3;
   const e = v.even_val ?? v.even;
@@ -100,9 +109,28 @@ self.onmessage = async (e) => {
       const budget = Number(msg.budget) || 2000;
       const cap = (msg.maxWorlds >>> 0) || 8;
       const t0 = Date.now();
+      // DUMMY mode is a different searcher over a different state (three hands,
+      // the 40-card deck, free discard), so it is a different export. Same
+      // {moves, sum, worlds} shape back, so the chunked world loop, the pooling
+      // and the pick are all unchanged below.
+      // The payload is WRAPPED (`{view, payoff, auction}`), so read the mode
+      // through the wrapper exactly as `neededWire` does. Reading the top level
+      // found no `mode` and searched every dummy room with the two-seat core.
+      let dummy = false;
+      try {
+        const q = JSON.parse(view) || {};
+        dummy = (q.view || q).mode === "dummy";
+      } catch { /* let the wasm report it */ }
+      if (dummy && typeof odd_pick_dummy !== "function") {
+        self.postMessage({ id: msg.id, error: "artifact cannot search three hands" });
+        return;
+      }
+      const search = dummy ? odd_pick_dummy : odd_pick_card;
       let sum = null, moves = null, worlds = 0, seed = Number(msg.seed) || 1;
+      let seat = 0;
       do {
-        const r = JSON.parse(odd_pick_card(view, 1, seed++));
+        const r = JSON.parse(search(view, 1, seed++));
+        if (typeof r.seat === "number") seat = r.seat;
         if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
         if (!sum) { moves = r.moves; sum = r.sum.slice(); }
         else for (let i = 0; i < sum.length; i++) sum[i] += r.sum[i];
@@ -111,7 +139,11 @@ self.onmessage = async (e) => {
         if (r.worlds === 0) { worlds = 0; break; }
         worlds += r.worlds;
       } while (worlds < cap && Date.now() - t0 < budget);
-      self.postMessage({ id: msg.id, moves, sum, worlds });
+      // `seat` rides back so the PICK knows which side the pooled values are
+      // signed for. Every value in the core is signed for side 0, and in a
+      // dummy room the bot is as often side 1 -- taking the max there would
+      // pick the card WORST for it, at full speed, with nothing red anywhere.
+      self.postMessage({ id: msg.id, moves, sum, worlds, dummy, seat });
     } else if (msg.kind === "bid") {
       // An auction decision. One call per world budget rather than the card
       // search's chunked loop: a world here is five full solves, so the
@@ -125,7 +157,12 @@ self.onmessage = async (e) => {
       if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
       self.postMessage({ id: msg.id, value: r.value });
     } else if (msg.kind === "pick") {
-      const card = odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
+      // The pick rule lives in the CORE in both cases -- a copy that drifted
+      // would be a different bot with the same name.
+      const card = msg.dummy
+        ? odd_best_dummy(JSON.stringify(msg.moves), JSON.stringify(msg.sum),
+                         (msg.seat >>> 0) || 0)
+        : odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
       self.postMessage({ id: msg.id, card });
     }
   } catch (err) {

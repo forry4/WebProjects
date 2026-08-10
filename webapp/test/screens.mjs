@@ -2387,7 +2387,11 @@ try {
 	// is the ABSENCE of the `auction.search` block, which is a Python assertion
 	// (`test_expert.py`) and needs no browser. Playing both here would double the
 	// most expensive block in the gate to re-check the cheap half.
-	async function dissonanceHard(log) {
+	// THE HARD/EXPERT TIER, driven per MODE. Parameterised rather than copied:
+	// the checks are the same questions (did the server arm, did the browser
+	// answer, did anything throw) and a second copy would drift from this one
+	// the first time the protocol moved.
+	async function dissonanceTier(log, mode, tierLabel) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript(() => localStorage.setItem("spender_user",
 			JSON.stringify({ id: "hard-harness", name: "Hard", guest: true })));
@@ -2449,13 +2453,18 @@ try {
 		await page.getByRole("button", { name: /new game|create/i }).first()
 			.click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
-		for (const label of [/^VS AI$/, /^Expert$/, /^Classic$/]) {
+		const tierRe = new RegExp(`^${tierLabel}$`);
+		const modeRe = new RegExp(`^${mode}$`, "i");
+		for (const label of [/^VS AI$/, tierRe, modeRe]) {
 			await page.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
 				.click({ timeout: 10_000 }).catch(() => {});
 		}
 		const picked = await page.evaluate(() =>
 			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
-		check("Expert is offered in the create modal", picked.includes("Expert"), JSON.stringify(picked));
+		check(`${tierLabel} is offered for ${mode} in the create modal`,
+			picked.includes(tierLabel), JSON.stringify(picked));
+		check(`...and ${mode} is the selected mode`,
+			picked.some((t) => modeRe.test(t)), JSON.stringify(picked));
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
@@ -2502,8 +2511,15 @@ try {
 					|| [...document.querySelectorAll(".dis-auction button")]
 						.some((b) => !b.disabled && /^(Pass|Bid )/.test(b.textContent.trim())));
 				if (bidding) return { bidding: true };
-				const seats = document.querySelectorAll(".dis-seat");
-				const card = seats[seats.length - 1]?.querySelector(".dis-card.play");
+				// ANY playable card, not the last seat's. Only cards this seat may
+				// actually play carry `.play` (an opponent's never do), so the
+				// narrower selector bought nothing — and in a DUMMY room it was
+				// simply wrong: three seats, and when this player commands the
+				// dummy the card they must play sits in the DUMMY's element.
+				// Keying on the last seat left the human permanently on turn, so
+				// the bot never got a decision, so nothing was ever armed — which
+				// reads exactly like the search tier being broken.
+				const card = document.querySelector(".dis-card.play");
 				if (card) { card.click(); return { acted: true }; }
 				return {};
 			});
@@ -2546,12 +2562,45 @@ try {
 		// denomination 6, every skat auction answered nothing, and the room played
 		// out on the server bot still labelled Hard. Auction answers log an option
 		// count; card answers log a card.
-		check("...including the auction, which is the Expert tier's whole difference",
-			searches.some((s) => /options in/.test(s)),
-			`no auction answer among ${searches.length}: ${JSON.stringify(searches.slice(0, 3))}`);
+		// THE AUCTION, but only where the browser searches one. Dummy's auction
+		// stays server-side (`engine.auction_searchable`) because pricing an
+		// option is a solve per denomination, so demanding an auction answer
+		// there would fail a tier that is working exactly as designed.
+		if (mode !== "Dummy") {
+			check("...including the auction, which is the Expert tier's whole difference",
+				searches.some((s) => /options in/.test(s)),
+				`no auction answer among ${searches.length}: ${JSON.stringify(searches.slice(0, 3))}`);
+		} else {
+			check("...and NO auction answer, because dummy prices its auction server-side",
+				!searches.some((s) => /options in/.test(s)),
+				`unexpected auction answer: ${JSON.stringify(searches.slice(0, 3))}`);
+			check("...and a CARD answer, which is what the three-seat searcher is for",
+				searches.some((s) => /-> card /.test(s)),
+				`no card answer among ${searches.length}: ${JSON.stringify(searches.slice(0, 3))}`);
+		}
+		// EACH MODE ASSERTS ITS OWN DISCRIMINATOR, because what is new differs.
+		// Classic's is the auction (above): the Grand outage was an auction
+		// search that answered nothing while the card search worked, which reads
+		// green everywhere else. DUMMY's is the opposite — its auction is
+		// server-priced by design, so the only thing `odd_pick_dummy` can be
+		// proved by is a CARD answer. Demanding both of both fails classic,
+		// whose loop deliberately stops on evidence and can reach four answers
+		// before a card is ever played.
 		check("no page errors driving the client-side search",
 			!errors.some((e) => !e.startsWith("[info]")), errors.slice(0, 3).join(" | ").slice(0, 300));
 		await ctx.close();
+	}
+
+	// Classic exercises the exact two-seat solver; DUMMY exercises `dummy.rs`'s
+	// three-seat depth-limited one, which is a different searcher, a different
+	// wasm export and a different wire rung (5). Both go in lane A: each arms a
+	// worker pool, and two searching blocks at once oversubscribe a 4-core box.
+	async function dissonanceHard(log) {
+		return dissonanceTier(log, "Classic", "Expert");
+	}
+
+	async function dissonanceHardDummy(log) {
+		return dissonanceTier(log, "Dummy", "Hard");
 	}
 
 	// ── Dissonance's completed-trick beat ───────────────────────────────────────
@@ -3154,7 +3203,7 @@ try {
 	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
 	// comments in those blocks were written against.
 	const laneA = [offlineSpender, offlineCoc, offlineDuel,
-		dissonanceSkat, dissonanceHard, dissonanceBeat];
+		dissonanceSkat, dissonanceHard, dissonanceHardDummy, dissonanceBeat];
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty];

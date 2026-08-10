@@ -17,6 +17,24 @@ export function odd_best_card(pooled_json) {
 }
 
 /**
+ * The pick rule for a pooled dummy answer, HERE rather than in the worker's
+ * JS -- a copy that drifted would be a different bot with the same name, which
+ * is the argument `odd_best_card` already rests on.
+ * @param {string} moves_json
+ * @param {string} sums_json
+ * @param {number} seat
+ * @returns {number}
+ */
+export function odd_best_dummy(moves_json, sums_json, seat) {
+    const ptr0 = passStringToWasm0(moves_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(sums_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.odd_best_dummy(ptr0, len0, ptr1, len1, seat);
+    return ret;
+}
+
+/**
  * Price every auction option the server offered, over `k` sampled deals.
  *
  * `{"sums":[f64...],"worlds":k}`, indexed by the SERVER'S option list — which
@@ -81,6 +99,36 @@ export function odd_pick_card(view_json, k, seed) {
         const ptr0 = passStringToWasm0(view_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.odd_pick_card(ptr0, len0, k, seed);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * DUMMY MODE's card search. A separate export from `odd_pick_card` because it
+ * is a separate searcher over a separate state (`dummy.rs` -- three hands, the
+ * 40-card deck, free discard, and a depth-limited search rather than an exact
+ * solve, for reasons measured in that file's header).
+ *
+ * Returns the same `{moves, sum, worlds}` shape every other search export
+ * returns, so the worker pools it by summing index-wise exactly as it already
+ * does. `moves` is `State3::legal`'s ascending card order, a pure function of
+ * the position, which is what makes index i the same card in every worker.
+ * @param {string} view_json
+ * @param {number} k
+ * @param {number} seed
+ * @returns {string}
+ */
+export function odd_pick_dummy(view_json, k, seed) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(view_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_pick_dummy(ptr0, len0, k, seed);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
@@ -160,6 +208,9 @@ export function odd_review(request_json) {
  * failure shape the `shown` rewrite already paid for. The probe (absence of
  * the export, or a value below what the payload needs) turns "stale artifact
  * in that room" into the ordinary per-decision fallback to the server bot.
+ * RUNG 5 IS DUMMY MODE, and like rung 4 it carries LEGALITY rather than
+ * scoring: an artifact without `odd_pick_dummy` cannot answer a three-seat
+ * position at all, and one that guessed would answer for the wrong HAND.
  * @returns {number}
  */
 export function odd_wire() {

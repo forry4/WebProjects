@@ -950,7 +950,16 @@ export default function Dissonance({ myId, authUser, onExit }) {
           for (let a = 0; a < k; a++) sum[a] += p.sum[a];
           worlds += p.worlds;
         }
-        const res = await pool[0].request({ kind: "pick", moves: good[0].moves, sum });
+        // DUMMY: the pooled values are signed for SIDE 0 like everything in the
+        // core, and the bot is side 1 half the time -- so the pick has to be
+        // told which side is asking. Carried back from the workers rather than
+        // re-derived here, so the one place that knows is the one that read the
+        // view. Off a worker that answered, never `good[0]` blindly.
+        const dummy = good.some((p) => p.dummy);
+        const seat = good.find((p) => p.dummy)?.seat ?? 0;
+        const res = await pool[0].request({
+          kind: "pick", moves: good[0].moves, sum, dummy, seat,
+        });
         const card = res?.card;
         if (typeof card !== "number" || card < 0) return;
         // Every failure above is a silent return that hands the decision back to

@@ -430,15 +430,78 @@ asks whether the current winner is on ITS OWN side, and weights a
 not-yet-final card lower (0.3 against 0.5) because the defender can still take
 it off you — which is exactly the dummy's dilemma at position two.
 
-**HARD AND EXPERT DO NOT RUN HERE, and that is enforced twice.** The Rust core
-is two-seat to its bones (`State.hand` is `[Mask; 2]`, the solver alternates
-between two players, the wire reader partitions a two-hand pool), so a
-three-seat search is its own project. `engine.client_searchable` says so;
-`_handle_client_ai_ready` refuses to arm a dummy room at all, and `/catalog`
-ships `searchable_modes` so the create modal need not offer a tier that cannot
-run. Without both, an armed client would answer with a card for the wrong hand,
-the engine would refuse it, and the room would play the server bot at full
-speed while the label said Hard — the failure this repo has paid for twice.
+**HARD RUNS HERE NOW — a THREE-SEAT searcher, and it is not an exact solver
+(2026-08-10).** `rust-cores/dissonance-core/src/dummy.rs` is a self-contained
+module: the wide deck, three hands, free discard, `side_of`, a determinizer and
+a depth-limited alpha-beta. Deliberately self-contained rather than a
+generalisation of `state.rs`/`dd.rs`/`wire.rs`, which are two-seat to their
+bones and held to this engine by 400 committed parity fixtures and a committed
+wasm — generalising them would have risked three shipped modes' solver to serve
+a fourth. The duplication is the price; nothing in that file can change what
+classic, skat or minor play, and the existing 47-test gate is untouched.
+
+* **EXACT DOUBLE DUMMY IS OUT, and the third hand is not why.** Node counts for
+  one crude alpha-beta at k tricks remaining:
+
+  | k | two-seat (shipped) | dummy + follow-suit | dummy, free discard |
+  |---|---|---|---|
+  | 5 | 583 | 10,392 | 30,998 |
+  | 7 | 10,282 | 183,003 | 2,430,759 |
+  | 10 | 570,342 | 18,648,672 | — |
+  | 12 | 24,182,296 | — | — |
+
+  At 13 tricks the third hand costs ~**8x** the two-seat game (servable);
+  **free discard costs another ~500x**, putting an exact solve near 4×10¹¹
+  nodes — minutes a world against a ~70ms budget. The campaign's own numbers
+  say exactness was never where the strength lived: `pimc:1`, one *exact*
+  world, measured **+0.04 ± 0.11** against greedy while `pimc:8` measured
+  +1.10. So this keeps the averaging and spends the budget on DEPTH.
+* **Depth 3 with a MATERIAL leaf, and the obvious reading of the measurement is
+  a trap.** Against greedy the playout leaf looks far ahead (+11.79 vs +9.79),
+  but head to head depth-2-playout LOSES to depth-3-material by −2.62 ± 0.81.
+  The vs-greedy column is biased because the playout leaf rolls out *with the
+  greedy policy*, so against greedy its leaf is a perfect opponent model —
+  which is also why depth-1-playout "beats" depth-2-playout, an otherwise
+  impossible inversion. **A rollout leaf must never be judged against the
+  policy it rolls out with.** Shipped: 15ms a decision, +9.79 ± 1.34 over
+  greedy (`bin/dbench`, `bin/darena`; mirror exactly 0.0000).
+* **ITS AUCTION IS NOT SEARCHED, and that gate is about COST**
+  (`engine.auction_searchable`). Pricing one option is `bid.rs` solving the
+  deal in every denomination — the same tree the card search exists to avoid —
+  so dummy's auction stays on the server's priced ladder and **Expert is Hard
+  here**. Arming it anyway is NOT a harmless no-op: the browser would refuse
+  the payload, send nothing, and the room would wait out the full 12s
+  `CLIENT_AI_TIMEOUT` per bid, five or six bids a round.
+* **`client_searchable` and `round_reviewable` are now DIFFERENT questions**,
+  and splitting them was forced by a test. The deal-snapshot site read
+  `client_searchable`, so giving dummy a searcher silently switched on the DD
+  review column — which is an exact solve and still cannot price three hands —
+  and would have written a per-round snapshot into every saved dummy row to
+  feed a column that never fills. Playing well needs a good move; REVIEWING
+  needs an exact one.
+* **Rung 5 on the wire**, and it is a legality-class rung like must-head's: an
+  artifact without `odd_pick_dummy` cannot answer a three-seat position at all,
+  and one that guessed would answer for the wrong HAND. `odd_wire()` = 5, the
+  worker refuses a dummy payload without the export, and
+  `_handle_client_ai_ready` requires 5 for a dummy room.
+* **The pooled values are signed for SIDE 0**, so the pick has to be told which
+  side is asking — the bot is side 1 half the time, and taking the max there
+  would pick the card WORST for it, at full speed, with nothing red anywhere.
+  `seat` rides back from the worker that read the view, and `odd_best_dummy`
+  applies it in the CORE rather than in the worker's JS.
+
+**Two bugs that only the gates could find, both silent:**
+* **The wire reader read the BARE view; the browser sends a WRAPPED one**
+  (`{view, payoff, auction}`). All 468 fixture rows passed while every real
+  decision returned "not a searchable dummy position" and the room played the
+  server bot under a Hard label. `dview_from_json` unwraps either shape now,
+  and `the_wrapped_payload_the_browser_actually_sends_is_read_too` pins it.
+* **The browser harness looked for a playable card in the LAST `.dis-seat`.**
+  A dummy room has three, and when the human commands the dummy their card sits
+  in the DUMMY's element — so the human stayed permanently on turn, the bot
+  never got a decision, and nothing was ever armed. That reads exactly like the
+  search tier being broken. Any `.dis-card.play` now, which was always correct:
+  only cards this seat may play carry the class.
 
 **Two consequences worth knowing:** a dummy round banks **no review snapshot**
 (the DD column is an exact solve, and nothing can price three hands), and its

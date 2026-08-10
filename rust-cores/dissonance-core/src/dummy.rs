@@ -816,3 +816,348 @@ mod tests {
         assert_eq!(sorted, orig, "ascending card order, so index i is stable");
     }
 }
+
+// --- determinization -------------------------------------------------------
+
+/// What one seat can honestly see of a dummy round. Everything else is
+/// resampled per world.
+#[derive(Clone, Debug, Default)]
+pub struct DView {
+    /// The seat this view belongs to: 0 or 1, never the dummy.
+    pub me: u8,
+    /// My own hand, exactly.
+    pub my_hand: Vec<u8>,
+    /// The DUMMY'S hand, exactly -- it is face up from the deal, to both
+    /// players. That is the mode's premise, and it is why a dummy world has
+    /// markedly less to resample than any other mode's.
+    pub dummy_hand: Vec<u8>,
+    /// How many cards the opponent holds in hand.
+    pub opp_hand_n: usize,
+    /// Per position, per pile: the top (or None if the pile is spent) and the
+    /// covered card if it is public. `n` is how many cards remain.
+    pub piles: [[(Option<u8>, Option<u8>, u8); 3]; 3],
+    pub trump: u8,
+    pub trick: u8,
+    pub leader: u8,
+    /// Cards down in the current trick, as (position, card) in play order.
+    pub plays: Vec<(u8, u8)>,
+    /// Points already banked, by SIDE.
+    pub pts: [i8; 2],
+    pub escored: u8,
+    /// Every card already played, plus every card visible anywhere -- the
+    /// complement of what a world has to invent.
+    pub seen: Mask,
+}
+
+impl DView {
+    /// The cards this seat cannot place: the opponent's hand, every covered
+    /// outer pile bottom (its own included -- a seat is not shown its own),
+    /// and whatever sits out of play.
+    pub fn unseen(&self) -> Mask {
+        let all: Mask = (1 << D_NCARD) - 1;
+        all & !self.seen
+    }
+
+    fn hidden_slots(&self) -> usize {
+        let mut n = 0;
+        for q in 0..3 {
+            for i in 0..3 {
+                let (_, under, cnt) = self.piles[q][i];
+                if cnt == 2 && under.is_none() {
+                    n += 1;
+                }
+            }
+        }
+        n
+    }
+
+    /// Deal one world consistent with everything above. Returns None when the
+    /// arithmetic does not balance -- FAIL CLOSED, exactly as `wire.rs` does
+    /// for the two-seat modes: a searcher fed a world that cannot exist returns
+    /// a legal card computed from a lie, which the room then plays at full
+    /// speed while still saying Hard.
+    pub fn determinize(&self, seed: u64) -> Option<State3> {
+        let mut pool: Vec<u8> = Vec::new();
+        let mut m = self.unseen();
+        while m != 0 {
+            pool.push(m.trailing_zeros() as u8);
+            m &= m - 1;
+        }
+        let slots = self.hidden_slots();
+        if pool.len() < self.opp_hand_n + slots {
+            return None; // more hidden holdings than there are cards for
+        }
+        // Shuffle the pool; the leftovers after hands and pile bottoms are
+        // whatever sat out of play, which nobody plays and nothing reads.
+        let mut s = seed | 1;
+        for i in (1..pool.len()).rev() {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            let j = (s % (i as u64 + 1)) as usize;
+            pool.swap(i, j);
+        }
+        let mut k = 0;
+        let opp = 1 - self.me;
+        let mut hand = [0 as Mask; 3];
+        for &c in &self.my_hand {
+            hand[self.me as usize] |= 1 << c;
+        }
+        for &c in &self.dummy_hand {
+            hand[DUMMY_POS as usize] |= 1 << c;
+        }
+        for _ in 0..self.opp_hand_n {
+            hand[opp as usize] |= 1 << pool[k];
+            k += 1;
+        }
+        let mut pile = [[Pile::default(); 3]; 3];
+        for q in 0..3 {
+            for i in 0..3 {
+                let (top, under, cnt) = self.piles[q][i];
+                pile[q][i] = match (cnt, top, under) {
+                    (0, _, _) => Pile::default(),
+                    (1, Some(t), _) => Pile { c: [t, 0], n: 1 },
+                    (2, Some(t), Some(u)) => Pile::new(u, t),
+                    (2, Some(t), None) => {
+                        let u = pool[k];
+                        k += 1;
+                        Pile::new(u, t)
+                    }
+                    _ => return None, // a shape the server cannot produce
+                };
+            }
+        }
+        let mut st = State3 {
+            hand,
+            pile,
+            trump: self.trump,
+            trick: self.trick,
+            leader: self.leader,
+            play: [-1, -1, -1],
+            nplay: 0,
+            pts: self.pts,
+            escored: self.escored,
+        };
+        // Replay the trick in progress so `to_play` and the fold agree with the
+        // server's, rather than trusting a count.
+        for (pos, c) in self.plays.iter().copied() {
+            if st.to_play() != pos {
+                return None;
+            }
+            st.play[st.nplay as usize] = c as i8;
+            st.nplay += 1;
+            // The card is already out of its holder's hand server-side.
+            st.hand[pos as usize] &= !(1 << c);
+            for i in 0..3 {
+                if st.pile[pos as usize][i].top() == Some(c) {
+                    st.pile[pos as usize][i].pop_top();
+                    break;
+                }
+            }
+        }
+        Some(st)
+    }
+}
+
+/// PIMC: sample `k` worlds, search each, and SUM each legal card's value across
+/// them. Summing (rather than voting) is what makes the pooled answer identical
+/// to one worker with the combined k, which is what lets the browser split the
+/// worlds across a worker pool -- the same contract `odd_best_card` already
+/// rests on for the two-seat modes.
+///
+/// The returned vector is indexed by `State3::legal`'s ascending card order,
+/// which is a pure function of the position and therefore the same in every
+/// world and every worker.
+pub fn pimc(v: &DView, k: u32, depth: u8, leaf: Leaf, seed: u64) -> Option<Vec<(u8, i32)>> {
+    let probe = v.determinize(seed)?;
+    let mut buf = [0u8; 16];
+    let n = probe.legal(&mut buf);
+    let mut out: Vec<(u8, i32)> = buf[..n].iter().map(|&c| (c, 0)).collect();
+    let mut worlds = 0;
+    for w in 0..k {
+        let st = match v.determinize(seed.wrapping_add(0x9e37_79b9_7f4a_7c15u64.wrapping_mul(w as u64 + 1))) {
+            Some(s) => s,
+            None => continue,
+        };
+        let mut s = Search::new(leaf);
+        for (c, val) in s.root(&st, depth) {
+            if let Some(slot) = out.iter_mut().find(|x| x.0 == c) {
+                slot.1 += val as i32;
+            }
+        }
+        worlds += 1;
+    }
+    if worlds == 0 {
+        return None;
+    }
+    Some(out)
+}
+
+/// The pick rule, HERE rather than in the worker's JS -- a copy that drifted
+/// would be a different bot wearing the same name. Highest total to the side
+/// asking, ties to the earliest legal card.
+pub fn best_card(vals: &[(u8, i32)], side: u8) -> Option<u8> {
+    vals.iter()
+        .copied()
+        .reduce(|a, b| {
+            let better = if side == 0 { b.1 > a.1 } else { b.1 < a.1 };
+            if better { b } else { a }
+        })
+        .map(|x| x.0)
+}
+
+// --- the wire --------------------------------------------------------------
+//
+// A SECOND PARITY SURFACE, and it fails silently by nature: a reader that
+// mis-sizes the hidden pool or drops a visible card still returns a legal
+// card, just a worse one -- a room that says Hard while playing below it, with
+// nothing red anywhere. Hence the fixture replay in `tests/dummy_wire.rs` and
+// the fail-closed partition check in `DView::determinize`.
+
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+mod wire {
+    use super::*;
+    use serde_json::Value;
+
+    fn u8s(v: &Value) -> Vec<u8> {
+        v.as_array()
+            .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u8).collect())
+            .unwrap_or_default()
+    }
+
+    /// Read `engine.view_for`'s payload for a DUMMY room into a `DView`.
+    ///
+    /// Returns None for anything it cannot honour -- a non-dummy view, a seat
+    /// that is the dummy, a pile shape the server cannot produce, or a card
+    /// count that does not balance. Every None is the ordinary per-decision
+    /// degradation: the server plays that one decision with its own bot.
+    pub fn dview_from_json(s: &str) -> Option<DView> {
+        let raw: Value = serde_json::from_str(s).ok()?;
+        // The browser wraps the payload (`{view, payoff, auction}`) while the
+        // fixtures and the harnesses hand over a bare view. Accept both, as
+        // `wire.rs` already does -- the wrapper is what the worker actually
+        // sends, and reading only the bare shape made every real decision
+        // return "not a searchable dummy position" while all 468 fixtures
+        // passed. Silent, naturally: the room just played the server bot.
+        let v: &Value = raw.get("view").unwrap_or(&raw);
+        if v.get("mode")?.as_str()? != "dummy" {
+            return None;
+        }
+        if v.get("phase")?.as_str()? != "play" {
+            return None;
+        }
+        let me = v.get("you")?.as_u64()? as u8;
+        if me >= DUMMY_POS {
+            return None;
+        }
+        let my_hand = u8s(v.get("hand")?);
+        let dummy_hand = u8s(v.get("dummy")?);
+        let opp_hand_n = v.get("opp_hand_n")?.as_u64()? as usize;
+        let trump = v.get("trump")?.as_u64()? as u8;
+        // Dummy runs the classic auction: suits and no-trump only. A Grand here
+        // would mean the server changed the mode's auction without this reader
+        // learning the rule, which must fail closed rather than mis-play tens.
+        if trump > NOTRUMP {
+            return None;
+        }
+        let trick = v.get("trick")?.as_u64()? as u8;
+        let leader = v.get("leader")?.as_u64()? as u8;
+        if leader >= DUMMY_POS {
+            return None; // the dummy never leads
+        }
+        let pts_raw = u8s(v.get("pts")?);
+        let pts_arr = v.get("pts")?.as_array()?;
+        let mut pts = [0i8; 2];
+        for i in 0..2 {
+            pts[i] = pts_arr.get(i)?.as_i64()? as i8;
+        }
+        let _ = pts_raw;
+        let mut escored = 0u8;
+        for (i, e) in v.get("etricks")?.as_array()?.iter().enumerate() {
+            if i < 2 && e.as_i64().unwrap_or(0) > 0 {
+                escored |= 1 << i;
+            }
+        }
+
+        let mut seen: Mask = 0;
+        let mut mark = |c: u8| -> Option<()> {
+            if c >= D_NCARD {
+                return None;
+            }
+            seen |= 1 << c;
+            Some(())
+        };
+        for &c in my_hand.iter().chain(dummy_hand.iter()) {
+            mark(c)?;
+        }
+        // Every card already played is placed for good.
+        for h in v.get("history")?.as_array()? {
+            let e = h.as_array()?;
+            mark(e.get(1)?.as_u64()? as u8)?;
+        }
+        let mut plays: Vec<(u8, u8)> = Vec::new();
+        for p in v.get("plays")?.as_array()? {
+            let e = p.as_array()?;
+            let pos = e.first()?.as_u64()? as u8;
+            let c = e.get(1)?.as_u64()? as u8;
+            mark(c)?;
+            plays.push((pos, c));
+        }
+
+        let mut piles = [[(None, None, 0u8); 3]; 3];
+        let parr = v.get("piles")?.as_array()?;
+        if parr.len() != 3 {
+            return None;
+        }
+        for (q, seat) in parr.iter().enumerate() {
+            let ps = seat.as_array()?;
+            if ps.len() != 3 {
+                return None;
+            }
+            for (i, p) in ps.iter().enumerate() {
+                let n = p.get("n")?.as_u64()? as u8;
+                let top = p.get("top").and_then(|x| x.as_u64()).map(|x| x as u8);
+                let under = p.get("under").and_then(|x| x.as_u64()).map(|x| x as u8);
+                if let Some(t) = top {
+                    mark(t)?;
+                }
+                if let Some(u) = under {
+                    mark(u)?;
+                }
+                if n > 0 && top.is_none() {
+                    return None; // a live pile must show its top
+                }
+                piles[q][i] = (top, under, n);
+            }
+        }
+
+        let dv = DView {
+            me,
+            my_hand,
+            dummy_hand,
+            opp_hand_n,
+            piles,
+            trump,
+            trick,
+            leader,
+            plays,
+            pts,
+            escored,
+            seen,
+        };
+        // THE PARTITION CHECK. Everything unseen must be exactly the opponent's
+        // hand, the covered outer bottoms, and the cards out of play -- and a
+        // dummy deal puts exactly ONE card out (three seats of thirteen off
+        // forty). Anything else means this reader and the server disagree about
+        // the deal, so it must not search.
+        let unseen = dv.unseen().count_ones() as usize;
+        let want = dv.opp_hand_n + dv.hidden_slots();
+        if unseen < want || unseen - want != (D_NCARD - 3 * D_NDEALT) as usize {
+            return None;
+        }
+        Some(dv)
+    }
+}
+
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub use wire::dview_from_json;

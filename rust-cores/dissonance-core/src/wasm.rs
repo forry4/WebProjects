@@ -304,7 +304,79 @@ pub fn odd_pool() -> i32 {
 /// failure shape the `shown` rewrite already paid for. The probe (absence of
 /// the export, or a value below what the payload needs) turns "stale artifact
 /// in that room" into the ordinary per-decision fallback to the server bot.
+/// RUNG 5 IS DUMMY MODE, and like rung 4 it carries LEGALITY rather than
+/// scoring: an artifact without `odd_pick_dummy` cannot answer a three-seat
+/// position at all, and one that guessed would answer for the wrong HAND.
 #[wasm_bindgen]
 pub fn odd_wire() -> i32 {
-    4
+    5
+}
+
+/// DUMMY MODE's card search. A separate export from `odd_pick_card` because it
+/// is a separate searcher over a separate state (`dummy.rs` -- three hands, the
+/// 40-card deck, free discard, and a depth-limited search rather than an exact
+/// solve, for reasons measured in that file's header).
+///
+/// Returns the same `{moves, sum, worlds}` shape every other search export
+/// returns, so the worker pools it by summing index-wise exactly as it already
+/// does. `moves` is `State3::legal`'s ascending card order, a pure function of
+/// the position, which is what makes index i the same card in every worker.
+#[wasm_bindgen]
+pub fn odd_pick_dummy(view_json: &str, k: usize, seed: f64) -> String {
+    use crate::dummy::{best_card, dview_from_json, pimc, Leaf};
+    let v = match dview_from_json(view_json) {
+        Some(x) => x,
+        None => return err("not a searchable dummy position"),
+    };
+    // Depth 3 with a material leaf: measured at 15ms a decision against a ~70ms
+    // budget, and +9.79 +- 1.34 points a round over the greedy policy the
+    // server falls back to. See `dummy.rs` for why it is not the playout leaf.
+    let vals = match pimc(&v, k.max(1) as u32, 3, Leaf::Material, seed.to_bits()) {
+        Some(x) => x,
+        None => return err("no world was searchable"),
+    };
+    if vals.is_empty() {
+        return err("no legal move");
+    }
+    let mut m = String::from("[");
+    let mut s = String::from("[");
+    for (i, (c, val)) in vals.iter().enumerate() {
+        if i > 0 {
+            m.push(',');
+            s.push(',');
+        }
+        m.push_str(&c.to_string());
+        // Signed for SIDE 0 like every value in this module; the worker pools
+        // by addition and `odd_best_dummy` applies the seat's own sign.
+        s.push_str(&val.to_string());
+    }
+    m.push(']');
+    s.push(']');
+    format!(
+        "{{\"moves\":{},\"sum\":{},\"worlds\":{},\"seat\":{}}}",
+        m, s, k.max(1), v.me
+    )
+}
+
+/// The pick rule for a pooled dummy answer, HERE rather than in the worker's
+/// JS -- a copy that drifted would be a different bot with the same name, which
+/// is the argument `odd_best_card` already rests on.
+#[wasm_bindgen]
+pub fn odd_best_dummy(moves_json: &str, sums_json: &str, seat: i32) -> i32 {
+    let m: Vec<u8> = match serde_json::from_str(moves_json) {
+        Ok(x) => x,
+        Err(_) => return -1,
+    };
+    let s: Vec<i32> = match serde_json::from_str(sums_json) {
+        Ok(x) => x,
+        Err(_) => return -1,
+    };
+    if m.is_empty() || m.len() != s.len() {
+        return -1;
+    }
+    let pairs: Vec<(u8, i32)> = m.into_iter().zip(s).collect();
+    match crate::dummy::best_card(&pairs, seat.max(0) as u8) {
+        Some(c) => c as i32,
+        None => -1,
+    }
 }
