@@ -75,9 +75,9 @@ const NOTRUMP = 4;
 function Den({ d }) {
   const label = DENOM_LABEL[d] || "";
   if (!label) return null;
-  return d === 1 || d === 2
-    ? <span className="dis-suit-r">{label}</span>
-    : <>{label}</>;
+  if (d > 3) return <>{label}</>;   // NT / Null / Grand are words, not suits
+  return <span className={d === 1 || d === 2 ? "dis-suit-r" : "dis-suit-b"}>
+    {label}</span>;
 }
 
 /** A card named in TEXT — the talon reveal, the swap buttons — with the same
@@ -86,7 +86,7 @@ function Den({ d }) {
  *  the light card stock; this one is a glyph inside a sentence. */
 function CardName({ c }) {
   if (c === null || c === undefined) return null;
-  return <>{RANKS[rankOf(c)]}<span className={isRed(c) ? "dis-suit-r" : ""}>
+  return <>{RANKS[rankOf(c)]}<span className={isRed(c) ? "dis-suit-r" : "dis-suit-b"}>
     {SUIT_GLYPH[suitOf(c)]}</span></>;
 }
 
