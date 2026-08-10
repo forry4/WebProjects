@@ -41,8 +41,16 @@ const NCARD = 32;   // the base deck; ids at or above this are the new lows
 const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT", "Null", "Grand"];
 const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump",
   "Null — win no +2 trick", "Grand (the four 10s are trump)"];
-// The two reds, for the one bit of colour the labels carry.
-const RED_DENOM = (d) => d === 1 || d === 2;
+// A DENOMINATION LABEL CARRIES NO COLOUR (2026-08-09). ♦ and ♥ used to be
+// tinted red wherever a contract was written out, on the playing-card
+// convention -- but it was applied to only some of the places a contract
+// appears (the chip, the scorecard, the pickers; never the bid log, the
+// result panel or the History row), so the colour looked like it MEANT
+// something and did not. In the match box it read worst of all, sitting one
+// column from a Score that is red when you lost the round.
+//
+// Actual CARDS keep their suit colours (`isRed` / `.dis-card.red`): a card is
+// a card, and that convention is universal and consistently applied.
 const NOTRUMP = 4;
 // Null is a CONSOLATION, not a contract: take no +2 trick as declarer and you
 // score this instead of being set, whatever you actually declared. There is no
@@ -386,12 +394,11 @@ function ContractChip({ game, nameOf, sharpBonus }) {
   const a = game.auction || {};
   if (!a.level) return null;
   const ct = game.contract || {};
-  const red = RED_DENOM(a.denom);
   const doubling = ct.re ? 4 : ct.kontra ? 2 : 1;
   const parts = multParts(ct);
   return (
     <div className="dis-chip">
-      <span className={`dis-chip-den${red ? " red" : ""}`}>
+      <span className="dis-chip-den">
         {a.level}{DENOM_LABEL[a.denom]}
       </span>
       <span className="dis-chip-who">
@@ -496,9 +503,7 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
               {r.abandoned ? "forfeit"
                 : r.declarer < 0 ? "—"
                   : <>{nameOf(r.declarer)}{" "}
-                    <b className={RED_DENOM(r.denom) ? "red" : ""}>
-                      {r.level}{DENOM_LABEL[r.denom] || ""}
-                    </b>
+                    <b>{r.level}{DENOM_LABEL[r.denom] || ""}</b>
                     {/* The defender's bet, on the line it doubled. A doubled
                         round otherwise looked ordinary with a surprising
                         number beside it — which is the row a reader most wants
@@ -686,7 +691,7 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
     <div className="dis-clears">
       <span className="muted">{prefix}</span>
       {levelsFor(value, bases, maxLevel).map((x) => (
-        <span key={x.denom} className={`dis-clear${RED_DENOM(x.denom) ? " red" : ""}`}>
+        <span key={x.denom} className="dis-clear">
           {x.level}{DENOM_LABEL[x.denom]}
         </span>
       ))}
@@ -710,11 +715,10 @@ function ContractLine({ game }) {
       : <span className="muted">no bid yet</span>;
   }
   if (!a.level) return <span className="muted">no contract yet</span>;
-  const red = RED_DENOM(a.denom);
   return (
     <span className="dis-contract">
       <b>{a.level}</b>
-      <span style={{ color: red ? "#ff8a9c" : undefined }}>{DENOM_LABEL[a.denom]}</span>
+      <span>{DENOM_LABEL[a.denom]}</span>
     </span>
   );
 }
@@ -1632,7 +1636,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       const ok = bidLevel !== null && denomOkAt(bidLevel, d);
                       return (
                         <button key={d}
-                          className={`${bidDenom === d ? "on " : ""}${d === 1 || d === 2 ? "red" : ""}`}
+                          className={bidDenom === d ? "on" : ""}
                           disabled={!ok}
                           title={ok ? DENOM_NAME[d]
                             : bidLevel === null ? "pick a level first"
@@ -1775,7 +1779,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     <div className="dis-denoms">
                       {d.denoms.map((x) => (
                         <button key={x.denom}
-                          className={`${declDenom === x.denom ? "on " : ""}${RED_DENOM(x.denom) ? "red" : ""}`}
+                          className={declDenom === x.denom ? "on" : ""}
                           title={`${DENOM_NAME[x.denom]} — base ${x.base}, so at least level ${x.min_level}`}
                           // Switching denomination resets the announcements: the
                           // level moves with it, and a stale Open without its

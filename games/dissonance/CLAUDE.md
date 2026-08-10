@@ -360,6 +360,19 @@ read the same (5.60 / 5.61 / 5.57) — the third seat is not carrying the mean.
     `test_a_playable_save_is_never_deleted_by_the_unplayable_guard` walks whole
     rounds in all four modes asserting it at every ply, because one that is
     right at the deal and wrong at trick 9 would destroy live games.
+  - **THE LOBBY IS WHERE IT ACTUALLY GETS DROPPED, and the first delete missed
+    that.** `load_game_to_memory` only runs when someone OPENS a room, so a
+    game nobody clicks sat in Active exactly as before — the delete was there
+    and the symptom was unchanged. `list_user_games` drops it too, and free:
+    that function already decodes every row's `state_json` to work out whose
+    turn it is.
+  - **`_unplayable` is ONE predicate read by both paths**, because two copies
+    of "can this be played" drift and the first symptom is a game that vanishes
+    from one and not the other. It **fails safe on absence of evidence**:
+    `list_user_games` hands over `{}` for a row whose blob will not decode, and
+    treating "I cannot tell" as unplayable would turn one transient decode
+    error into destroyed games — so a dict with no deal in it is left alone,
+    and a test pins that an undecodable row SURVIVES.
   - The tests drive the SEAM, not the predicate: a predicate that passes says
     nothing about whether anything calls it. The result panel keeps its
     no-result branch as a NET, since the cost is a dozen lines and the failure

@@ -315,8 +315,7 @@ def load_game_to_memory(room_id: str) -> bool:
     # the deck and `deal_is_current` is arithmetic rather than a heuristic. A
     # predicate that could be WRONG must never drive an irreversible delete.
     g = state.get("game")
-    if isinstance(g, dict) and g.get("phase") != "over" and (
-            g.get("v", 1) < engine.VERSION or not engine.deal_is_current(g)):
+    if _unplayable(g):
         LOG.info("dropping unplayable save %s (v=%s, mode=%s)",
                  room_id, g.get("v"), g.get("mode"))
         delete_game(room_id)
@@ -393,6 +392,16 @@ def list_user_games(user_id: str) -> list[dict]:
         # turn and is waiting on EITHER player to deal the next one. Keyed on the
         # turn alone it would sit in Active with no prompt on either side, which
         # is exactly how a match gets forgotten.
+        # ...AND THE LOBBY IS WHERE AN UNPLAYABLE SAVE ACTUALLY GETS DROPPED.
+        # The load path deletes one too, but a room is only loaded when someone
+        # OPENS it, so a game nobody clicks sits in Active forever — which is
+        # precisely the complaint, and the first fix missed it. The decode above
+        # is already paid for, so the check is free here.
+        if _unplayable(g):
+            LOG.info("dropping unplayable save %s from the lobby", r["id"])
+            delete_game(r["id"])
+            ROOMS.pop(normalize_room(r["id"]), None)
+            continue
         your_turn = bool(g) and engine.may_act(g, user_id)
         out.append({
             "id": r["id"], "status": r["status"],
@@ -459,6 +468,26 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def _unplayable(g) -> bool:
+    """Is this saved round one this engine cannot resume?
+
+    ONE predicate, read by BOTH the load path and the lobby list, because two
+    copies of "can this be played" would drift and the first symptom would be a
+    game that vanishes from one and not the other.
+
+    FAILS SAFE ON ABSENCE OF EVIDENCE, which matters more here than anywhere
+    else in this file: the answer drives an irreversible DELETE, and
+    `list_user_games` hands over `{}` when a row's `state_json` will not decode.
+    Treating "I cannot tell" as "unplayable" would turn one transient decode
+    error into destroyed games, so a dict without a deal in it is left alone.
+    """
+    if not isinstance(g, dict) or not g.get("hands"):
+        return False
+    if g.get("phase") == "over":
+        return False
+    return g.get("v", 1) < engine.VERSION or not engine.deal_is_current(g)
 
 
 def delete_game(game_id: str) -> None:
