@@ -729,7 +729,7 @@
    columns would step in and out by a character as the numbers changed and the
    header would line up with nothing. One grid, one set of column widths. */
 .dis-mcard {
-  display: grid; grid-template-columns: 1.35rem minmax(0, 1fr) auto auto auto;
+  display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto auto auto;
   gap: 0.12rem 0.4rem; align-items: baseline;
   /* ROWS PACK TO THE TOP. The card takes the slack in its column now (so a
      long match uses the height it is given), and a grid's default
@@ -740,23 +740,26 @@
   margin-top: 0.45rem; padding-top: 0.4rem;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   max-height: 9.2rem; overflow-y: auto;
-  /* The column is 17rem wide on a desktop and the row is five short fields,
-     four of them numbers — 0.72rem was sized for a 260px column that had to
-     hold everything else too. 0.88rem is MEASURED, not picked: the limit is
-     the declarer's name, the row's only elastic field, and against a
-     thirteen-character one it starts ellipsising at 15.2px (0.95rem) in the
-     narrowest column this grid ever gets. Nothing can WRAP at any size — the
-     name column is `nowrap` and every other field is a short number — so the
-     failure mode is a truncated name, not a second line. `screens.mjs`
-     measures the row height and the card's own overflow rather than trusting
-     either claim. */
-  font-size: 0.88rem; font-variant-numeric: tabular-nums;
+  /* 0.72rem was sized for a 260px column that had to hold the whole side
+     panel. The match has a column to itself now, so the type follows it.
+
+     1rem IS THE MEASURED ANSWER TO THE RIGHT QUESTION, and the first attempt
+     asked the wrong one. Nothing here can WRAP or overflow at ANY size — the
+     name column is `nowrap` and the other four are short numbers in `auto`
+     tracks, so the `1fr` name column simply absorbs whatever the numbers take
+     (verified to 22px: no cell overflows its box, the card never overflows its
+     column, a row stays one line). What actually changes with size is only
+     whether a LONG declarer name ellipsises, which that column has always been
+     built to do. So the cap is legibility, not layout: 1rem matches the panel
+     headings around it, and a name past ~12 characters gets the ellipsis it
+     was always going to get in a 250px row. */
+  font-size: 1rem; font-variant-numeric: tabular-nums;
 }
 .dis-mrow { display: contents; }
 .dis-mrow-pts, .dis-mrow-sc, .dis-mrow-dd, .dis-mrow-hd span:nth-child(3),
 .dis-mrow-hd span:nth-child(4), .dis-mrow-hd span:nth-child(5) { justify-self: end; }
 .dis-mrow-hd {
-  color: var(--text-dim); font-size: 0.72rem;
+  color: var(--text-dim); font-size: 0.78rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .dis-mrow-n { color: var(--text-dim); }
