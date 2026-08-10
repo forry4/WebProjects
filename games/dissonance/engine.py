@@ -291,9 +291,16 @@ DUMMY = "dummy"
 #: `turn_seat` maps the dummy's back to the declarer, who actually acts.
 DUMMY_POS = 2
 
-#: (hands dealt, cards in hand, cards out of play, tricks) per mode.
-_LAYOUT = {DUMMY: (3, 4, 2, 10)}
-_LAYOUT_DEFAULT = (2, 7, N_OUT, NTRICKS)
+#: (hands dealt, cards in hand, cards out of play, tricks, piles) per mode.
+#:
+#: THE PILE COUNT IS A DIAL, and it is the one that decides how much CHOICE a
+#: player gets: only a pile's top is playable, so every card in a pile is a
+#: card the deal chose for you. Measured (`tools/agency_probe.py`): classic's
+#: 7 + three piles is 46% of a holding on rails and 4.07 legal cards at a
+#: decision; dummy's 4 + three piles is 60% on rails and 2.89, with a third of
+#: all plies forced outright.
+_LAYOUT = {DUMMY: (3, 4, 2, 10, 3)}
+_LAYOUT_DEFAULT = (2, 7, N_OUT, NTRICKS, 3)
 
 
 def layout_for(mode: str):
@@ -711,15 +718,16 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
     # THREE hands in dummy mode, and the third is the dummy -- same shape as a
     # player's (some in hand, three 2-card piles), because the piles are what
     # keep even a face-up seat from being fully solved.
-    nhands, in_hand, n_out, _ = layout_for(mode)
+    nhands, in_hand, n_out, _, npiles = layout_for(mode)
     hands, piles = [], []
     k = 0
     for _ in range(nhands):
         hands.append(sorted(deck[k:k + in_hand]))
         k += in_hand
         # Each pile is [bottom, top]; only the last element is playable.
-        piles.append([[deck[k + 2 * i], deck[k + 2 * i + 1]] for i in range(3)])
-        k += 6
+        piles.append([[deck[k + 2 * i], deck[k + 2 * i + 1]]
+                      for i in range(npiles)])
+        k += 2 * npiles
     out = deck[k:k + n_out]
 
     g = {
