@@ -127,7 +127,25 @@ POOL = 5  # both players' totals always sum to this (CLASSIC parity; minor is
 #           -1 via pool_for, and skat scores CARDS so its pool is per-deal)
 
 MIN_LEVEL = 1
+
+#: SKAT'S CEILING, and the generator of its value ladder (base x level, 1..12,
+#: 32 rungs topping out at 60). It is also the PARITY CEILING -- six +2 tricks
+#: and none of the -1s is 12 points -- which is why the parity modes used it as
+#: their bid ladder's top for a year. They no longer do; see below.
 MAX_LEVEL = 12
+
+#: THE PARITY MODES' BID LADDER TOPS OUT HERE, and this is a product cap rather
+#: than an arithmetic one (2026-08-10). 11 and 12 are reachable -- 11 is six
+#: even tricks plus one odd, 12 is a clean parity sweep -- but they are hands
+#: nobody bids, and carrying them made the level grid twelve buttons wide.
+#: Ten is two rows of five, and it is where the bots' own ladders already
+#: stopped (classic's tops out at 6, dummy's at 10).
+#:
+#: SKAT IS DELIBERATELY UNTOUCHED. Its levels are a multiplier on a base, not a
+#: points promise, so `SKAT_VALUES`, `skat_declarable` and `apply_declare` all
+#: keep reading `MAX_LEVEL` -- capping them would move 8 rungs off the ladder
+#: and re-price the whole mode.
+PARITY_MAX_LEVEL = 10
 
 #: MINOR MODE'S LEVEL CEILING. With even tricks at +1 a declarer's absolute
 #: ceiling is sweeping the six even tricks for 6 points, so the classic 1..12
@@ -599,7 +617,19 @@ def pool_for(mode: str):
 
 
 def max_level_for(mode: str) -> int:
-    return MINOR_MAX_LEVEL if mode == "minor" else MAX_LEVEL
+    """The top of the BID LADDER for a mode -- not the same thing as the top of
+    the scale it is denominated in.
+
+    Skat's levels multiply a base, so its ladder is the whole 1..MAX_LEVEL
+    range. The parity modes' levels are a promise in trick points, and both cap
+    below their arithmetic ceiling on purpose: minor at its ceiling of 6 (there
+    is nothing above it), classic and dummy at PARITY_MAX_LEVEL, which is a
+    product cap two rungs under theirs."""
+    if mode == "minor":
+        return MINOR_MAX_LEVEL
+    if uses_card_points(mode):
+        return MAX_LEVEL
+    return PARITY_MAX_LEVEL
 
 #: A game is a MATCH of rounds, played until one side reaches this.
 #:

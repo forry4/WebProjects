@@ -1301,8 +1301,15 @@ mod auction_legality {
         let classic = |r: &Value| r["mode"] == "classic";
         assert!(count(&|r| classic(r) && r["state"]["level"].as_u64() == Some(0)) > 5,
                 "no classic opener — the only node where passing is illegal");
-        assert!(count(&|r| classic(r) && r["state"]["level"].as_u64().unwrap() >= 11) > 5,
+        // CEILING-RELATIVE, not `>= 11`. Classic's ladder used to end at the
+        // parity ceiling of 12 and now stops at 10 (a product cap), so a
+        // literal here asserts a level nothing can reach and fails as "the
+        // fixtures are thin" rather than "the cap moved".
+        assert!(count(&|r| classic(r) && r["state"]["level"].as_u64().unwrap() + 1
+                         >= r["rules"]["max_level"].as_u64().unwrap()) > 5,
                 "nothing at the ceiling — where the raise cap stops binding");
+        assert!(count(&|r| classic(r) && r["rules"]["max_level"].as_u64() == Some(10)) > 20,
+                "classic's ladder is not the capped one the engine ships");
         assert!(count(&|r| r["state"]["used"][0].as_u64().unwrap()
                          | r["state"]["used"][1].as_u64().unwrap() != 0) > 40,
                 "no spent denominations — the per-seat no-repeat rule is uncovered");

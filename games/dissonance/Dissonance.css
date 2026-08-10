@@ -84,7 +84,7 @@
   .dis .dis-seat { --dis-gap: 0.18rem; }
   .dis .dis-piles { gap: 0.35rem; }
   .dis .dis-pilewrap { --pk: 11px; }
-  .dis .dis-bidgrid { grid-template-columns: repeat(4, 1fr); }
+  .dis .dis-bidgrid { grid-template-columns: repeat(5, 1fr); }
   .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
   /* While BIDDING the board is exactly the viewport and the ladder takes
      whatever is left, scrolling inside itself. A viewport-relative cap cannot
@@ -484,6 +484,42 @@
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-mcard {
     flex: 1 1 auto; min-height: 4rem; max-height: none;
   }
+  /* ── THE PANEL SITS BESIDE THE CARDS, NOT BETWEEN THEM ──────────────────
+     The auction and the round-end report used to be a row IN the column, so
+     they pushed the two seats apart and the card budget had to pay for them:
+     `--dis-rows: 4` against a `30rem` reserve, versus play's 5 against
+     17.5rem. Two costs, both visible. The cards CHANGED SIZE when the round
+     ended — a board you have been reading for thirteen tricks redraws smaller
+     at the one moment you want to compare it with what you just played — and
+     the report is the tallest thing this screen ever shows, so it scrolled
+     inside itself while a third of the felt sat empty either side.
+
+     Beside the cards, both go away: the seats keep the PLAY budget (so the
+     cards are the size they have been all round, at every phase) and the
+     panel gets a full-height column to be tall in.
+
+     The seats auto-place down column 1 and the panel is pinned to column 2
+     spanning the explicit grid, so the row count is the only thing that has
+     to know about the dummy — `.dis-3seat` already says so. `min-height: 0`
+     on the panel is what keeps it OUT of the row sizing: an auto track sizes
+     to a spanning item's min-content otherwise, and the report would set the
+     seats' heights. */
+  .dis-game .dis-table:has(> .dis-auction),
+  .dis-game .dis-table:has(> .dis-result) {
+    --dis-rows: 5; --dis-reserve-in: 17.5rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
+    grid-template-rows: repeat(2, auto);
+    align-content: space-between;
+  }
+  .dis-game .dis-table.dis-3seat:has(> .dis-auction),
+  .dis-game .dis-table.dis-3seat:has(> .dis-result) {
+    grid-template-rows: repeat(3, auto);
+  }
+  .dis-game .dis-table:has(> .dis-auction) > .dis-seat,
+  .dis-game .dis-table:has(> .dis-result) > .dis-seat { grid-column: 1; }
+  .dis-game .dis-table > .dis-auction,
+  .dis-game .dis-table > .dis-result { grid-column: 2; grid-row: 1 / -1; }
   /* The SAME trade on the other flank: the info panels stack from the top and
      used to leave the bottom third of the column as bare page. The trick
      history is the one list here that is never finished, so it takes the
@@ -564,7 +600,7 @@
   font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em;
   display: flex; align-items: center; gap: 0.4rem;
 }
-.dis-bidgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.35rem; width: 100%; max-width: 420px; }
+.dis-bidgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.35rem; width: 100%; max-width: 420px; }
 .dis-bidgrid button, .dis-denoms button {
   padding: 0.5rem 0.2rem; border-radius: 9px; font-weight: 700;
   background: rgba(255, 255, 255, 0.07); color: var(--text);
@@ -693,18 +729,29 @@
    columns would step in and out by a character as the numbers changed and the
    header would line up with nothing. One grid, one set of column widths. */
 .dis-mcard {
-  display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto auto auto;
+  display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto auto auto;
   gap: 0.12rem 0.4rem; align-items: baseline;
+  /* ROWS PACK TO THE TOP. The card takes the slack in its column now (so a
+     long match uses the height it is given), and a grid's default
+     `align-content` is stretch — which spread four played rounds evenly down
+     a 900px column, a ladder of lonely lines with no relation to each other.
+     `start` keeps them a list. */
+  align-content: start;
   margin-top: 0.45rem; padding-top: 0.4rem;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   max-height: 9.2rem; overflow-y: auto;
-  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+  /* The column is 17rem wide on a desktop and the row is five short fields,
+     four of them numbers — 0.72rem was sized for a 260px column that had to
+     hold everything. The declarer's name is the only elastic field and it
+     ellipsises, so the row cannot wrap; `screens.mjs` measures a row against
+     one line height rather than trusting that. */
+  font-size: 0.8rem; font-variant-numeric: tabular-nums;
 }
 .dis-mrow { display: contents; }
 .dis-mrow-pts, .dis-mrow-sc, .dis-mrow-dd, .dis-mrow-hd span:nth-child(3),
 .dis-mrow-hd span:nth-child(4), .dis-mrow-hd span:nth-child(5) { justify-self: end; }
 .dis-mrow-hd {
-  color: var(--text-dim); font-size: 0.6rem;
+  color: var(--text-dim); font-size: 0.66rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .dis-mrow-n { color: var(--text-dim); }

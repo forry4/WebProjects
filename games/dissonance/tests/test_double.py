@@ -38,17 +38,24 @@ def _terms(level, doubled):
     return E.payoff_terms(g)
 
 
+#: Classic's bid ladder top. Was a literal 13-exclusive range, which quietly
+#: became "two rungs past what anyone can bid" when the ladder capped at 10 --
+#: and a parametrize over unbiddable levels fails as an illegal-bid ValueError
+#: rather than as the arithmetic claim it means to make.
+_TOP = E.max_level_for("classic")
+
+
 # --- the arithmetic --------------------------------------------------------
 
 
-@pytest.mark.parametrize("level", range(1, 13))
+@pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_a_made_contract_pays_exactly_double(level):
     plain, dbl = _terms(level, False), _terms(level, True)
     assert dbl["make"] == 2 * plain["make"] == 2 * level * level
     assert dbl["over"] == 2 * plain["over"], "overtricks double with the contract"
 
 
-@pytest.mark.parametrize("level", range(1, 13))
+@pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     plain, dbl = _terms(level, False), _terms(level, True)
     assert plain["set_base"] == level and plain["ramp"] == 0
@@ -67,7 +74,7 @@ def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     assert flat == [P * s for s in range(1, 6)], "undoubled stays flat"
 
 
-@pytest.mark.parametrize("level", range(1, 13))
+@pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_null_is_never_doubled(level):
     assert _terms(level, True)["null"] == _terms(level, False)["null"] == E.NULL_MAKE
 
@@ -89,7 +96,7 @@ def test_the_reward_grows_with_the_SHORTFALL_not_just_the_level():
 def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
     """It must stay a real bet. On the COMMON failure -- 1 short, 48% of them --
     the risk of a made contract still dwarfs the reward."""
-    for level in range(2, 13):
+    for level in range(2, _TOP + 1):
         plain, dbl = _terms(level, False), _terms(level, True)
         win = E.payoff(plain, level - 1, True) - E.payoff(dbl, level - 1, True)
         risk = dbl["make"] - plain["make"]
@@ -286,7 +293,7 @@ def test_the_break_even_curve_never_meets_the_failure_curve():
     reward is linear in N and the risk quadratic, so break-even rises without
     bound while a failure rate cannot pass 100%."""
     prev = 0.0
-    for level in range(1, 13):
+    for level in range(E.MIN_LEVEL, _TOP + 1):
         plain, dbl = _terms(level, False), _terms(level, True)
         win = dbl["set_base"] - plain["set_base"]
         risk = dbl["make"] - plain["make"]

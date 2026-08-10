@@ -1074,7 +1074,7 @@ def test_a_contract_that_cannot_be_MADE_still_plays_on(mode):
     down is a real contest rather than dead time."""
     hopeless = None
     for seed in range(400):
-        g = _drive(mode, seed, level=E.MAX_LEVEL, denom=4, pick=0)
+        g = _drive(mode, seed, level=E.max_level_for(mode), denom=4, pick=0)
         if not g["result"]["made"] and not g["result"]["null"]:
             hopeless = g
             break

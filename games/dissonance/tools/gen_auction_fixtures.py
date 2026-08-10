@@ -84,12 +84,16 @@ def _forced_classic_lines(out: list[dict]) -> None:
         out.append(_row(g))
         E.apply_bid(g, g["auction"]["to_act"], lvl + 1, d1)
         out.append(_row(g))
-    # The raise cap at the ceiling: MAX_LEVEL - 1 leaves exactly one rung.
+    # The raise cap at the ceiling: one rung under the top leaves exactly one.
+    # CLASSIC'S CEILING, not `MAX_LEVEL` — the parity ladder caps two rungs
+    # below the multiplier one since 2026-08-10, and this generator naming the
+    # wrong constant is how the ceiling states stop being ceiling states.
+    top = E.max_level_for("classic")
     g = E.new_game(["a", "b"], random.Random(9), opener=0)
-    E.apply_bid(g, 0, E.MAX_LEVEL - 1, 0)
+    E.apply_bid(g, 0, top - 1, 0)
     out.append(_row(g))
     g = E.new_game(["a", "b"], random.Random(11), opener=0)
-    E.apply_bid(g, 0, E.MAX_LEVEL, E.NOTRUMP)
+    E.apply_bid(g, 0, top, E.NOTRUMP)
     out.append(_row(g))
 
 

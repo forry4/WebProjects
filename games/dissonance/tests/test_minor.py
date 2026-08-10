@@ -83,7 +83,11 @@ def test_the_ladder_is_derived_from_the_parity_not_typed_beside_it():
                               for t in range(E.NTRICKS)) if v > 0)
     assert E.MINOR_MAX_LEVEL == ceiling == 6
     assert E.max_level_for("minor") == 6
-    assert E.max_level_for("classic") == E.max_level_for("skat") == E.MAX_LEVEL
+    # ...and the OTHER modes cap below their own ceilings for different
+    # reasons: classic's 10 is a product cap two rungs under its parity ceiling
+    # of 12, skat's 12 is the multiplier ladder's full range.
+    assert E.max_level_for("classic") == E.PARITY_MAX_LEVEL == 10
+    assert E.max_level_for("skat") == E.MAX_LEVEL == 12
 
 
 # ── the auction: classic's shape on the compressed ladder ────────────────────

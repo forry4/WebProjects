@@ -1384,6 +1384,38 @@ Four things there are load-bearing and were each paid for:
   of panels with bare page under them. That is also why the wide tier shows all
   thirteen tricks instead of a five-row window.
 
+**The auction and the round-end report sit BESIDE the cards** (≥1200px), in a
+17–24rem rail inside `.dis-table` — the seats auto-place down column 1, the panel
+is pinned to column 2 spanning the explicit grid, and `.dis-3seat` is the only
+thing that has to know the row count. They used to be a row *between* the seats,
+which cost twice: the card budget paid for them (`--dis-rows: 4` against a `30rem`
+reserve, versus play's 5 against 17.5rem), so **the board visibly redrew smaller
+for the auction and again for the report** — at the one moment you want to
+compare it with what you just played — and the report, the tallest thing this
+screen ever shows, scrolled inside itself while a third of the felt sat empty.
+In the rail both go away: the seats keep the PLAY budget at every phase, and the
+report has a full-height column to be tall in. `min-height: 0` on the panel is
+what keeps it out of the row sizing — an auto track otherwise sizes to a spanning
+item's min-content, and the report would be setting the seats' heights.
+`screens.mjs` asserts the card width is **identical at the auction, in play and
+at the report**, which is the claim that matters and the one nothing else sees.
+
+**The parity modes' bid ladder tops out at 10** (`PARITY_MAX_LEVEL`), and that is
+a product cap, not an arithmetic one: 11 and 12 are reachable (six even tricks
+plus one odd, and a clean sweep) but never bid, and twelve buttons is not a shape
+— ten is two rows of five. **Skat is deliberately untouched**: its levels
+multiply a base rather than promise points, so `SKAT_VALUES`, `skat_declarable`
+and `apply_declare` all keep reading `MAX_LEVEL` (12) and its 32-rung ladder is
+unmoved. Three things had to move with it, and each is the kind that fails
+confusingly: `test_rust_parity`'s synthetic contract took `max_level_for` and now
+takes the **parity ceiling** (it exists to stop `_score_is_settled` firing, and
+the two stopped being the same number); `gen_auction_fixtures` named `MAX_LEVEL`
+for its ceiling states, so the states it generates stopped being ceiling states;
+and `wire.rs` asserted classic nodes at `level >= 11`, which is now unreachable
+and would have failed as "the fixtures are thin". All three are ceiling-relative
+now. The Expert auction search needed nothing — it already reads `max_level` off
+the wire, which is why minor worked the same way.
+
 **The trick line is STACKED under the cards, in flow** (`.dis-trickcards` +
 `.dis-trickinfo`). It used to be one row with the line absolutely positioned at
 `bottom: -4px` — a 4px offset against a ~14px name label — so "Trick 5 of 13 ·

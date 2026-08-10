@@ -68,7 +68,7 @@ export default function DissonanceRules() {
 
 			<RulesSection title="The auction">
 				<p>
-					Before playing, you bid for the contract. A bid is a <b>number (1–12)</b> and a
+					Before playing, you bid for the contract. A bid is a <b>number (1–10)</b> and a
 					<b> denomination</b> — one of the four suits, or <b>no-trump</b>. The number is a
 					promise: <i>I will finish with at least this many trick points.</i>
 				</p>
@@ -256,7 +256,7 @@ export default function DissonanceRules() {
 				</p>
 				<ul>
 					<li>A perfect declarer tops out at <b>6</b> points, so contracts run{" "}
-						<b>1–6</b> instead of 1–12. Level 1 is a real ask: the average split
+						<b>1–6</b> instead of 1–10. Level 1 is a real ask: the average split
 						is below zero, so every contract has to be won.</li>
 					<li>Scoring keeps classic's shape at the smaller scale: make{" "}
 						<b>N²</b> plus 1 per overtrick, fall short and your opponent scores{" "}

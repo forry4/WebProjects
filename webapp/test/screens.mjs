@@ -2286,7 +2286,7 @@ try {
 			// WHO OPENS IS RANDOM (seats are shuffled at the deal), so the grid is
 			// either the opener's full ladder or an overtake range above the bot's
 			// opening bid. Each case has its own minor-only marker: the full
-			// ladder reads exactly 1..6 where classic's reads 1..12, and once the
+			// ladder reads exactly 1..6 where classic's reads 1..10, and once the
 			// bot's contract stands the side panel prices Null against "no +1
 			// trick" where classic says +2. Assert whichever case this deal is.
 			const m = await mpage.evaluate(() => ({
@@ -2728,6 +2728,41 @@ try {
 		await page.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
 		await page.waitForSelector(".dis-bidgrid, .dis-trick", { timeout: 25_000 }).catch(() => {});
 
+		// THE AUCTION, MEASURED BEFORE A CARD IS PLAYED. Three claims, and they
+		// are only checkable here — the panel is gone by trick 1.
+		//
+		//  * The ladder tops out at the mode's cap, in two rows of five. Classic
+		//    ran 1..12 until 2026-08-10 (its parity ceiling); 11 and 12 were
+		//    reachable but never bid, and twelve buttons is not a shape.
+		//  * The panel sits BESIDE the cards on a desktop. It used to be a row
+		//    between the two seats.
+		//  * ...which is what lets the cards keep the PLAY size through every
+		//    phase. They used to shrink for the auction and again for the
+		//    round-end report, because the card budget was paying for the panel.
+		const auc = await page.evaluate(() => {
+			const x = (s) => { const e = document.querySelector(s); if (!e) return null;
+				const r = e.getBoundingClientRect();
+				return { x: Math.round(r.x), w: Math.round(r.width) }; };
+			const grid = document.querySelector(".dis-bidgrid");
+			const card = document.querySelector(".dis-seat .dis-card");
+			return {
+				levels: [...document.querySelectorAll(".dis-bidgrid button")].map((b) => +b.textContent),
+				cols: grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : null,
+				seat: x(".dis-seat"), panel: x(".dis-auction"),
+				cardW: card ? Math.round(card.getBoundingClientRect().width) : 0,
+			};
+		});
+		// WHO OPENS IS RANDOM (seats shuffle at the deal), so the full 1..10 is
+		// only on screen when this seat opens; either way nothing above the cap
+		// may be offered, and the grid's width is the same in both cases.
+		check("no bid above the mode's cap is ever offered",
+			auc.levels.length > 0 && Math.max(...auc.levels) <= 10, JSON.stringify(auc));
+		check("...and the ladder is five wide, so ten rungs are two rows",
+			auc.cols === 5, JSON.stringify(auc));
+		check("the auction panel sits beside the cards, not between the seats",
+			!!auc.panel && !!auc.seat && auc.panel.x >= auc.seat.x + auc.seat.w - 1,
+			JSON.stringify(auc));
+
 		// NO FACE-UP CARD IS DIMMED, in any form. Cards render identically whether
 		// or not they are playable; legality lives in the `play` affordance and is
 		// enforced server-side. Two earlier versions of this failed differently:
@@ -2842,6 +2877,19 @@ try {
 		}));
 		check("a whole game was played out", dwells.length >= 8,
 			`${dwells.length} finished tricks, ${trace.length} frames — ${JSON.stringify(stuck)}`);
+		// THE CARDS ARE THE SAME SIZE AT THE END AS AT THE AUCTION. This is the
+		// point of moving the panels into a rail: the board no longer redraws at
+		// a different scale for the auction and again for the report, which it
+		// did for as long as the middle column had to pay for them.
+		const endW = await page.evaluate(() => {
+			const c = document.querySelector(".dis-seat .dis-card");
+			const p = document.querySelector(".dis-result");
+			return { cardW: c ? Math.round(c.getBoundingClientRect().width) : 0,
+				result: !!p, resultX: p ? Math.round(p.getBoundingClientRect().x) : null };
+		});
+		check("the cards never change size between the auction, play and the report",
+			endW.cardW > 0 && endW.cardW === auc.cardW,
+			JSON.stringify({ auction: auc.cardW, ...endW }));
 		// The shortest dwell rides in the NAME, so it prints on success too. This is
 		// the one assertion in the file whose margin can be eroded by nothing but
 		// load — it wants 550ms out of a 700ms hold — and a gate that shows its
@@ -2963,11 +3011,34 @@ try {
 				return c && /^[+\u2212-]\d+$/.test(c.textContent.trim()) ? c.textContent.trim() : null;
 			}, null, { timeout: 25_000 }).then((h) => h.jsonValue()).catch(() => null);
 			check("the scorecard's DD column resolves to a signed score", !!solved, String(solved));
-			const cells = await page.evaluate(() => ({
-				rows: document.querySelectorAll(".dis-mcard .dis-mrow:not(.dis-mrow-hd)").length,
-				dd: document.querySelectorAll(".dis-mcard .dis-mrow-dd").length,
-				hd: document.querySelector(".dis-mcard .dis-mrow-hd")?.children.length,
-			}));
+			const cells = await page.evaluate(() => {
+				// A ROW IS ONE LINE TALL. The scorecard's type grew from 0.72rem
+				// to 0.8rem when the match got a column of its own, and the only
+				// elastic field in the row is the declarer's name — which
+				// ellipsises, so nothing can wrap. Measured rather than trusted:
+				// this is exactly the change that would silently double a row.
+				const cs = [...document.querySelectorAll(".dis-mcard .dis-mrow-ct")];
+				const line = cs.length
+					? Math.max(...cs.map((c) => c.getBoundingClientRect().height)) : 0;
+				const card = document.querySelector(".dis-mcard");
+				return {
+					rows: document.querySelectorAll(".dis-mcard .dis-mrow:not(.dis-mrow-hd)").length,
+					dd: document.querySelectorAll(".dis-mcard .dis-mrow-dd").length,
+					hd: document.querySelector(".dis-mcard .dis-mrow-hd")?.children.length,
+					lineH: Math.round(line),
+					fontPx: card ? Math.round(parseFloat(getComputedStyle(card).fontSize)) : 0,
+					// ...and the rows pack to the TOP. The card takes the slack in
+					// its column now, and a grid stretches its auto rows by
+					// default — which spread four played rounds evenly down a
+					// 900px column instead of listing them.
+					alignContent: card ? getComputedStyle(card).alignContent : null,
+				};
+			});
+			check("a scorecard row is one line tall at the larger type",
+				cells.fontPx >= 12 && cells.lineH > 0 && cells.lineH <= cells.fontPx * 1.7,
+				JSON.stringify(cells));
+			check("...and its rows pack to the top rather than spreading",
+				cells.alignContent === "start", JSON.stringify(cells));
 			check("every banked round has a DD cell under a 5-column header",
 				!!cells.rows && cells.dd === cells.rows && cells.hd === 5, JSON.stringify(cells));
 			await sleep(700);

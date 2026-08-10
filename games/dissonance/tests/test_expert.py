@@ -237,7 +237,8 @@ def test_the_skat_ladder_is_what_the_engine_says_is_bidable():
 def test_the_rules_are_the_engines_own_knobs():
     for g, mode, top in ((_classic(), "classic", E.NOTRUMP), (_skat(), "skat", E.GRAND)):
         r = E.auction_search_payload(g)["rules"]
-        assert r == {"mode": mode, "min_level": E.MIN_LEVEL, "max_level": E.MAX_LEVEL,
+        assert r == {"mode": mode, "min_level": E.MIN_LEVEL,
+                     "max_level": E.max_level_for(mode),
                      "max_raise": E.MAX_RAISE, "top_denom": top,
                      "ladder": [v for v in E.SKAT_VALUES if v > 0] if mode == "skat" else []}
 

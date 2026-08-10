@@ -82,6 +82,13 @@ def _game_from(fx):
     # +2 tricks, so `_score_is_settled` would need more points than the game
     # contains. Asserted rather than assumed, because it is a coincidence of two
     # constants and would rot in silence.
+    #
+    # It is the mode's ARITHMETIC ceiling, which since 2026-08-10 is NOT the top
+    # of its bid ladder: classic caps bidding at 10 as a product decision while
+    # its parity ceiling is still 12. This contract is synthetic — it exists
+    # only to stop `_score_is_settled` firing — so it takes the ceiling, and the
+    # assertion below is that the ceiling really does prevent early settlement
+    # rather than that two constants happen to line up.
     top = E.max_level_for(mode)
     if E.uses_card_points(mode):
         # Card scoring never settles early at all (`_score_is_settled` returns
@@ -94,9 +101,12 @@ def _game_from(fx):
         even = E.even_value(mode)
         ceiling = sum(v for v in (E.trick_value(t, even)
                                   for t in range(E.NTRICKS)) if v > 0)
-        assert top >= ceiling, (
-            "the mode's max level no longer exceeds what a declarer can score, "
-            "so this harness can settle a round early and truncate the replay")
+        top = max(top, ceiling)
+        assert not E._score_is_settled(dict(g, auction={
+            "level": top, "denom": 0, "declarer": 0, "used": [0, 0],
+            "to_act": 0, "log": [], "value": 0})), (
+            "a round at this level can settle before trick 13, which truncates "
+            "the replay and diverges every fixture's final points")
     g["auction"] = {"level": top, "denom": fx["trump"],
                     "declarer": fx["leader"], "used": [0, 0],
                     "to_act": fx["leader"], "log": [],
