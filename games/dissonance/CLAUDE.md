@@ -249,8 +249,16 @@ are the players; **seat 2 is the dummy**.
 * **Its outer pile bottoms are hidden from everyone, the declarer included** —
   a fully open dummy makes the endgame a double-dummy problem for both seats.
   The dummy is OPEN, not SOLVED.
-* **The declarer plays it.** Winning the auction already bought the lead; now
-  it buys the control that was missing.
+* **WHOEVER LEADS THE TRICK PLAYS IT** (`DUMMY_COMMAND = "leader"`, since
+  2026-08-10). The first rule gave it to the declarer for the whole round and
+  that OVERSHOT, measured: two of three hands plus the lead banked them **69%
+  of the pool** before they decided anything. Command now follows the lead, so
+  the third hand is a prize fought over rather than a gift — and it carries
+  this game's own tension, since winning a trick can cost points and still be
+  worth it for the command it buys. Measured: the declarer's share falls
+  **0.69 → 0.57** and contracts made fall 73% → 61%. The whole rule lives in
+  `side_of`, which `playing_seat`, the trick winner and the next leader all
+  derive from.
 * **It plays SECOND, always, and never leads** — a trick it takes passes the
   lead to the declarer. Three reasons in order: its card is information in the
   middle of the trick both players react to; the third seat is therefore
@@ -276,6 +284,28 @@ answer), `history` records a POSITION (which hand a card came from is what a
 replay and the board need), and the frontend compares against `turn_seat` —
 comparing `to_play` told the declarer it was not their move on a third of the
 plies they actually have to make.
+
+**THE AUCTION IS STILL A LOTTERY, AND THE FIX IS NOT IN THE LADDER.** Measured
+in `tools/dummy_auction_design.py` and `tools/dummy_matrix.py`:
+* the points a declarer takes correlate **+0.07** with the hand they can see —
+  and **+0.06** with a CHEATING count of the cards really in their two hands,
+  so no honest estimator can do better and no pricing of the rungs helps;
+* every card is −1 or +2 and both are 2 mod 3, so **three** of them always sum
+  to a multiple of 3 (two do not: −2/+1/+4). Every total is a multiple of 3,
+  so contracts of 7, 8 and 9 are **literally the same contract** and two
+  thirds of the ladder is duplicate rungs;
+* make pays N² against a set's N + 5×short, so at levels 9–12 the reward is
+  quadratic against linear risk — forced-level EV runs +10.4 at level 1 to
+  **+58.2 at level 9**, i.e. there is no such thing as bidding too high.
+
+`DUMMY_COMMAND = "leader"` fixes the SHARE and is orthogonal to all of that
+(it moves the correlation only +0.07 → +0.15). **What moves predictability is
+whether card VALUE is aligned with trick-winning POWER**, measured over five
+tables: the shipped anti-aligned one reads +0.07, a monotonic aligned one
+(−1,−1,0,1,2,3,4,5) reads **+0.39**, and a table spread WIDE but still
+anti-aligned reads **−0.18** — so it is alignment, not spread. Until that is
+decided the level map below is not worth re-tuning; it would be calibrated
+against a coin flip.
 
 **Measured** (`tools/dummy_calibration.py`, 300 self-play rounds): pool mean
 15.1, declarer takes a mean of 10.4 (p50 12) — so contracts settle at **levels
