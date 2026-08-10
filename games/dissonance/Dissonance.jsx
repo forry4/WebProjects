@@ -302,6 +302,22 @@ const ptsLabel = (n) => `${n} ${n === 1 ? "pt" : "pts"}`;
 const nullCond = (game) =>
   cardPts(game) ? "no positive trick" : `no +${evenVal(game)} trick`;
 
+/** What both seats' points must add up to over a whole round.
+ *
+ *  This was the literal "Always adds up to +5." — classic's parity and nobody
+ *  else's. Minor pays 1 for an even trick, so its pool is −1; skat scores the
+ *  CARDS CAPTURED and its pool is a property of the DEAL (which cards sat out),
+ *  so there is no constant to state and the note says what it can instead.
+ *  Derived from the wire (`tricks`, `even_val`) rather than a per-mode table,
+ *  so the next parity mode gets a correct sentence without touching this. */
+function poolNote(game) {
+  if (cardPts(game)) return "Both totals are the cards you capture.";
+  const n = game?.tricks ?? 13;
+  const evens = Math.floor(n / 2);        // tricks 2, 4, … pay
+  const pool = evens * evenVal(game) - (n - evens);
+  return `Always adds up to ${pool > 0 ? "+" : ""}${pool}.`;
+}
+
 /** Does `follow` beat `led`? A mirror of `engine.beats` — kept in step with it
  *  by hand, like `trickValue` above. Only used to mark who TOOK the previous
  *  trick, so a drift here mislabels a badge and cannot affect play: every move
@@ -316,27 +332,39 @@ const beats = (led, follow, trump) => {
 /** The two cards of the last COMPLETED trick, with who played each and who took
  *  it. `history` is [seat, card, source] in play order, two entries per trick,
  *  so a trailing odd entry is the card currently face up on the table. */
-function lastTrick(game) {
+/** EVERY completed trick, oldest first: who played what, who took it, and what
+ *  it was worth. The Last-trick panel and the round's trick history are the
+ *  same question asked at two lengths, so they share one derivation -- a
+ *  second copy of the winner fold is exactly where the two would drift. */
+function trickList(game) {
   const h = game.history || [];
   // THREE cards to a trick once there is a dummy. Off the wire (`tricks` is
   // the round length, `seats` the width) rather than assumed, so the one
   // renderer serves both shapes.
   const w = game.dummy ? 3 : 2;
   const done = Math.floor(h.length / w);
-  if (done === 0) return null;
-  const plays = h.slice(w * (done - 1), w * done);
-  // The winner, folded exactly as the engine folds it: carry the best card
-  // forward and ask whether the next one beats it.
-  let winner = plays[0];
-  for (const p of plays.slice(1)) {
-    if (beats(winner[1], p[1], game.trump)) winner = p;
+  const out = [];
+  for (let n = 1; n <= done; n++) {
+    const plays = h.slice(w * (n - 1), w * n);
+    // The winner, folded exactly as the engine folds it: carry the best card
+    // forward and ask whether the next one beats it.
+    let winner = plays[0];
+    for (const p of plays.slice(1)) {
+      if (beats(winner[1], p[1], game.trump)) winner = p;
+    }
+    // Trick index `n - 1` is 0-based, matching `trickValue`. Under card
+    // scoring the trick is worth the CARDS in it, whichever number it was.
+    const value = cardPts(game)
+      ? plays.reduce((t, p) => t + cardVal(game, p[1]), 0)
+      : trickValue(n - 1, evenVal(game));
+    out.push({ plays, winner: winner[0], value, number: n });
   }
-  // Trick index `done - 1` is 0-based, matching `trickValue`. Under card
-  // scoring the trick is worth the CARDS in it, whichever number it was.
-  const value = cardPts(game)
-    ? plays.reduce((t, p) => t + cardVal(game, p[1]), 0)
-    : trickValue(done - 1, evenVal(game));
-  return { plays, winner: winner[0], value, number: done };
+  return out;
+}
+
+function lastTrick(game) {
+  const all = trickList(game);
+  return all.length ? all[all.length - 1] : null;
 }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -428,10 +456,50 @@ function shortTail(res) {
   return Array.from({ length: s }, (_, i) => flat + ramp * (i + 1)).join(" + ");
 }
 
-/** The contract, in the MIDDLE column so it survives a phone.
- *  The side panel already carries the full breakdown, but `.dis-side` is
- *  display:none under 760px — so on a phone the one thing the whole round is
- *  about was invisible from the moment the auction ended. */
+/** THE BIDDING, as it happened. It used to sit inside the auction panel in the
+ *  middle column, which meant it vanished the moment the auction ended -- and
+ *  "what did they bid to get here" is a question you ask most while PLAYING.
+ *  It lives in the Contract box now, under the contract it produced. */
+function BidLog({ game, nameOf, skat }) {
+  const log = game.auction?.log || [];
+  if (!log.length) return null;
+  return (
+    <div className="dis-bidlog">
+      {log.map((e, i) => (
+        <div key={i}>
+          <span>{nameOf(e.seat)}</span>
+          <span>{e.pass ? "pass"
+            : skat ? e.value
+              : <>{e.level}<Den d={e.denom} /></>}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** THE ROUND'S TRICKS: which one, who took it, what it paid. The board only
+ *  ever showed the LAST one, so the shape of the round -- who has been taking
+ *  the +2s, whether the -1s are landing on the right seat -- had to be held in
+ *  your head. Newest FIRST, because the recent tricks are the ones being
+ *  reasoned about; the list scrolls in place rather than growing the panel. */
+function TrickHistory({ game, nameOf }) {
+  const tricks = trickList(game);
+  if (!tricks.length) return null;
+  return (
+    <div className="dis-trickhist">
+      {tricks.slice().reverse().map((t) => (
+        <div key={t.number} className="dis-th-row">
+          <span className="dis-th-n">#{t.number}</span>
+          <span className="dis-th-who">{nameOf(t.winner)}</span>
+          <span className={`dis-val ${t.value > 0 ? "good" : "bad"}`}>
+            {t.value > 0 ? `+${t.value}` : t.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ContractChip({ game, nameOf, sharpBonus }) {
   const a = game.auction || {};
   if (!a.level) return null;
@@ -1645,14 +1713,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   )}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
-              <div className="dis-bidlog">
-                {(game.auction.log || []).map((e, i) => (
-                  <div key={i}>
-                    <span>{nameOf(e.seat)}</span>
-                    <span>{e.pass ? "pass" : e.value}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           ) : game.phase === "auction" ? (
             <div className="dis-auction">
@@ -1706,14 +1766,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </div>}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
-              <div className="dis-bidlog">
-                {(game.auction.log || []).map((e, i) => (
-                  <div key={i}>
-                    <span>{nameOf(e.seat)}</span>
-                    <span>{e.pass ? "pass" : <>{e.level}<Den d={e.denom} /></>}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           ) : game.phase === "swap" ? (
             <div className="dis-auction">
@@ -2175,14 +2227,21 @@ export default function Dissonance({ myId, authUser, onExit }) {
           ) : (
             <>
               <div className="dis-trick">
-                {trickCards.length === 0
-                  ? <div className="muted">{myTurn ? "Your lead" : "Waiting…"}</div>
-                  : trickCards.map((t, i) => (
-                    <div key={i} className={`dis-tp${t.won ? " won" : ""}`}>
-                      <Card c={t.c} />
-                      <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
-                    </div>
-                  ))}
+                {/* The cards are their own ROW inside the trick band, with the
+                    trick line stacked under it. It used to be one row with the
+                    line absolutely positioned over the bottom edge, which drew
+                    it straight through the "who played this" name under a card
+                    whenever the band was squeezed — a real overlap, measured. */}
+                <div className="dis-trickcards">
+                  {trickCards.length === 0
+                    ? <div className="muted">{myTurn ? "Your lead" : "Waiting…"}</div>
+                    : trickCards.map((t, i) => (
+                      <div key={i} className={`dis-tp${t.won ? " won" : ""}`}>
+                        <Card c={t.c} />
+                        <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
+                      </div>
+                    ))}
+                </div>
                 {/* While a finished trick is held, this line is ABOUT that
                     trick — the server's counter has already moved on, so
                     reading it here labelled the two cards you are looking at
@@ -2260,7 +2319,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
         </div>
 
         {/* side panel */}
-        <div className="dis-side">
+        {/* THE INFO COLUMN (right on a desktop): what the round IS -- the
+            talon you bought, the contract with the bidding that produced it,
+            the last trick, and the points with the round's trick history. The
+            MATCH gets a column of its own (below, left on a desktop): it is
+            about the match rather than this round, and the scorecard is the
+            one panel with real content to show. DOM order is board, info,
+            match -- which is how a phone stacks them; the desktop grid places
+            the match column to the LEFT explicitly. */}
+        <div className="dis-side dis-side-info">
           {/* THE TALON FIRST, for the seat that bought the right to see it.
               Three cards you know are out of play is the one thing in this
               column you play FROM rather than read after the fact, so it sits
@@ -2341,6 +2408,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <b>{isSkat ? (catalog?.skat_null_value ?? "") : nullMake}</b>
               </div>
             )}
+            {/* HOW THE CONTRACT WAS BOUGHT, under the contract itself. */}
+            <BidLog game={game} nameOf={nameOf} skat={isSkat} />
             {game.swapped !== null && game.swapped !== undefined && (
               <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
                 {game.swapped
@@ -2381,18 +2450,23 @@ export default function Dissonance({ myId, authUser, onExit }) {
             <div className="dis-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>
             <div className="dis-scorerow"><span>{nameOf(oppSeat)}</span><b>{game.pts[oppSeat]}</b></div>
             <div className="muted" style={{ fontSize: "0.72rem", marginTop: "0.3rem" }}>
-              Always adds up to +5.
+              {poolNote(game)}
             </div>
+            {/* ...and where those points came from, trick by trick. */}
+            <TrickHistory game={game} nameOf={nameOf} />
           </div>
-          {/* THE MATCH SITS LAST, and is pinned there by `order` as well as by
-              being last in the DOM. The two together are deliberate: `order`
-              alone would leave a screen reader hearing it in the middle of the
-              panel, and DOM position alone would quietly stop being the bottom
-              the first time a panel is appended after it — and the panels above
-              it are CONDITIONAL (last trick, the talon), so "the bottom" is not
-              a fixed slot. Absent on a game saved before matches existed, which
-              is one round and has no running total to show. */}
-          {game.match && (
+        </div>
+        {/* THE MATCH COLUMN. Its own grid item rather than a panel inside the
+            info column, which is what lets a wide desktop put it on the far
+            side of the felt — see the three-column tier in the stylesheet. It
+            stays LAST in the DOM because that is the order a phone stacks
+            (board, then this round, then the match) and the order a screen
+            reader hears; the desktop grid places it to the left explicitly
+            rather than by source order. Absent on a game saved before matches
+            existed, which is one round with no running total to show — and the
+            grid asks `:has()` rather than assuming the element is there. */}
+        {game.match && (
+          <div className="dis-side dis-side-match">
             <div className="dis-panel dis-p-match">
               <h4>Match to {game.match.target}</h4>
               <div className="dis-scorerow">
@@ -2413,8 +2487,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <MatchCard rounds={game.match.rounds} mySeat={mySeat}
                 oppSeat={oppSeat} nameOf={nameOf} roomId={roomData?.room_id} />
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}

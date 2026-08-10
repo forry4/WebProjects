@@ -1337,6 +1337,76 @@ The gate plays a whole game at full tilt and asserts every dwell; it reads
 695–700ms on all thirteen tricks. A polling loop from Node cannot see a state
 that lasts one frame, so it samples per `requestAnimationFrame` in the page.
 
+## The board screen — pinned to the viewport, three columns wide (2026-08-10)
+
+Nothing on a game screen may be below the fold: at any normal resolution the
+whole board is visible and **there is no page scrollbar to have**. `.dis-game`
+is `100dvh`, a flex column, `overflow: hidden`; the table takes what the header
+leaves and is a `container-type: size` box, so the card budget reads the table's
+**real height** (`100cqh`) rather than guessing from the window. Seats keep their
+card-derived height; the variable-height panels (`.dis-auction`, `.dis-result`)
+take the slack and scroll **inside themselves**, so a miscalculation shows up as
+a scrollbar on one panel and never as a hand clipped off the bottom. Below 761px
+wide or 600px tall the page scrolls instead — that is the honest answer for a
+phone and for a window too short to fit a board plus an auction panel at any card
+size.
+
+`.dis-main` is a grid, and **every tier places all three items by hand**. The DOM
+order is board → `.dis-side-info` → `.dis-side-match`, which is what a phone
+stacks and a screen reader hears; the desktop grid overrides it:
+
+| width | shape |
+|---|---|
+| ≤760 | one column, everything stacked, the page scrolls |
+| 761–1199 | felt left, info panel over match panel in one right-hand column |
+| ≥1200 | **match left, felt centre, info right** |
+
+Four things there are load-bearing and were each paid for:
+
+* **`align-items: stretch`, not the base `start`.** A size container with no
+  definite height reports `100cqh: 0`, which drove the card budget negative and
+  collapsed the board to a 31px sliver.
+* **The felt FILLS its column (`width: 100%`).** It briefly sized itself to its
+  seven cards instead — but the cards are height-capped on any normal desktop, so
+  hugging them left the surplus width as bare *page*, not table: black where the
+  user wanted green. The flanking panel columns take most of that width for
+  content now; the rest belongs to the felt.
+* **…and that width must stay DEFINITE.** The same 31px sliver has now appeared
+  twice: once from `margin-inline: auto` beating `justify-self: stretch`, once
+  from a malformed comment above the declaration silently dropping it. A size
+  container has no contents to fall back on. `screens.mjs` asserts the felt is
+  ≥45% of the grid, which catches both.
+* **`:has(> .dis-side-match)` gates the three-column tier.** The match panel is
+  conditional (a game saved before matches existed has none), and reserving a
+  column for an absent element re-creates the empty flank.
+* **Each flank has one panel that takes the slack** — the scorecard on the left,
+  the trick history on the right — so the columns are full rather than a stack
+  of panels with bare page under them. That is also why the wide tier shows all
+  thirteen tricks instead of a five-row window.
+
+**The trick line is STACKED under the cards, in flow** (`.dis-trickcards` +
+`.dis-trickinfo`). It used to be one row with the line absolutely positioned at
+`bottom: -4px` — a 4px offset against a ~14px name label — so "Trick 5 of 13 ·
+−1" drew straight through the "who played this" name under a card. Reserving a
+padding band for it did **not** fix it: on a short screen the cards sit at their
+`3.4rem` floor, so the board is deliberately over budget and this row is what
+shrinks — and flex content overflows a shrunken box right back through the band.
+Stacked in flow, a squeeze cannot make two rows overlap. `screens.mjs` measures
+the two rects, because nothing else can see it.
+
+The Contract panel carries the **bidding** and the Points panel the **round's
+trick history** (`BidLog` / `TrickHistory`, both off one `trickList(game)`
+derivation shared with the Last-trick panel). The bid log used to live inside the
+auction panel, so it vanished the moment the auction ended — which is when
+"what did they bid to get here" is asked most. Those two panels used to be
+`display: none` on a phone as duplicates of the contract chip and the seat rows;
+they are not duplicates any more, so the phone shows them.
+
+`poolNote(game)` replaced a hardcoded "Always adds up to +5." — classic's parity
+and nobody else's. It is derived from the wire (`tricks`, `even_val`), so minor
+reads −1 and the next parity mode is correct without an edit; card scoring has no
+constant to state (its pool is a property of the deal) and gets its own sentence.
+
 ## Layout
 
 | file | what |

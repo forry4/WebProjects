@@ -122,8 +122,19 @@
      both seat rows). Every rule here is `.dis `-prefixed because this @media
      block PRECEDES the base rules, so a single-class override would lose. */
   .dis .dis-side { display: flex; }
-  .dis .dis-p-contract, .dis .dis-p-points { display: none; }
-  .dis .dis-main { grid-template-columns: 1fr; }
+  /* Contract and Points USED to be dropped here as duplicates — the chip in
+     the middle column carries the contract, the seat rows carry the points.
+     They are not duplicates any more: the bidding lives under the contract and
+     the round's trick history under the points, and neither is reachable from
+     anywhere else on a phone. (The bidding was previously inside the auction
+     panel, so hiding these two would have deleted it outright the moment the
+     auction ended.) They stack below the board like the rest of the column. */
+  .dis .dis-main { grid-template-columns: 1fr; grid-template-rows: none; }
+  /* The desktop tiers place every item by hand; a phone is one column and the
+     placement has to be handed back, or the table keeps its `1 / span 2`. */
+  .dis .dis-main > .dis-table,
+  .dis .dis-main > .dis-side-info,
+  .dis .dis-main > .dis-side-match { grid-column: auto; grid-row: auto; }
 }
 
 /* ── cards ──────────────────────────────────────────────────────────────── */
@@ -353,26 +364,42 @@
      table a DEFINITE height -- and a size container with no definite height
      reports `100cqh: 0`, which drove the card budget negative and collapsed
      the whole board to a 31px sliver. It is the load-bearing line here. */
-  .dis-game .dis-main { flex: 1 1 auto; min-height: 0; padding: 0 16px 12px; align-items: stretch; }
+  /* Symmetric padding. It used to be `0 16px 12px` — the board sat flush
+     against the header with a 12px buffer only underneath, which reads as the
+     whole screen having slipped upward. */
+  .dis-game .dis-main { flex: 1 1 auto; min-height: 0; padding: 12px 16px; align-items: stretch; }
+  /* THE SIDE PANELS ARE TWO GRID ITEMS, and every desktop tier has to place
+     BOTH of them by hand. They used to be one `.dis-side` column; the match
+     now lives in its own element so a wide screen can put it on the far side
+     of the felt. Auto-placement would drop it under the table, so the narrow
+     desktop tier stacks the two explicitly in the right-hand column — info
+     takes the slack and scrolls, the match sits under it at its own height,
+     which is exactly the single column they used to share. */
+  .dis-game .dis-main {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 17rem);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .dis-game .dis-main > .dis-table { grid-column: 1; grid-row: 1 / span 2; }
+  .dis-game .dis-main > .dis-side-info { grid-column: 2; grid-row: 1; }
+  .dis-game .dis-main > .dis-side-match { grid-column: 2; grid-row: 2; }
   .dis-game .dis-table {
     height: 100%; min-height: 0; overflow: hidden;
     container-type: size;
-    /* Hug the cards instead of stretching. The board can only be as wide as
-       seven cards, and the cards are capped by HEIGHT on any normal desktop --
-       so a full-width table left half its felt empty (1648px of green around
-       836px of content at 1080p). The same budget, run forward: the 71px is
-       the header plus this grid's bottom padding, and being a little off only
-       makes the felt a little wider than the hand, which is why the exact
-       figure lives in `--dis-reserve-in` and this one does not have to. */
-    --dis-cw-approx: calc((100dvh - 71px - var(--dis-reserve-in)) / var(--dis-rows) / 1.4);
-    /* An EXPLICIT width with `justify-self`, not `max-width` with an auto
-       margin: an auto inline margin beats `justify-self: stretch`, so the
-       table fell back to sizing from its contents -- and a SIZE container has
-       no contents to size from, which is how a 1616px column produced a 31px
-       board. A definite width is also what the container query needs. */
-    width: max(34rem, min(100%, calc(var(--dis-cw-approx) * var(--dis-slots)
-           + var(--dis-gap) * (var(--dis-slots) - 1) + 1.8rem + 2px)));
-    justify-self: center;
+    /* THE FELT FILLS ITS COLUMN. It briefly did the opposite -- an explicit
+       width sized from the card budget, so the table hugged its seven cards --
+       and that was the wrong trade: the cards are capped by HEIGHT on any
+       normal desktop, so hugging them left the surplus width as bare PAGE
+       either side of the board rather than as table. Black, not green. The
+       panels flanking it (above) take most of that width for content now; what
+       is left belongs to the felt.
+
+       `width: 100%`, not `justify-self: stretch`: a SIZE container has no
+       contents to size from, so the moment its width comes from anywhere
+       intrinsic it collapses to its padding -- a 31px sliver in a 1616px
+       column, which is how this was found the first time and again when a
+       malformed comment above silently dropped this very declaration. A
+       definite width is also what the container query needs. */
+    width: 100%;
   }
   /* The card budget, measured off the table itself rather than the window.
      The FLOOR is what stops a short screen from starving the cards: the
@@ -422,8 +449,68 @@
   .dis .lby-cols { padding-inline: 16px; }
 }
 
+/* ── WIDE DESKTOP: a column each side of the felt ───────────────────────────
+   At 1080p the two-column board spent its width on nothing. Everything the
+   round is about was stacked in one right-hand column — most of it empty below
+   the fold — and the whole left half of the screen was bare page. So the match
+   gets the LEFT column and the round's own information keeps the right; the
+   felt takes what is between them, and there is no bare page left over.
+
+   1200px is where that pays: two 17rem flanks plus the gutters leave ~600px of
+   middle, comfortably more than the seven cards need at any height this tier
+   can produce. Below it the tier above keeps the single right-hand column —
+   flanking a 400px middle would start costing the cards, which is the wrong
+   trade.
+
+   `:has()` rather than a class on the root: the match panel is CONDITIONAL (a
+   game saved before matches existed has none), and reserving a third column
+   for an element that is not there would re-create the empty flank this is
+   here to remove. */
+@media (min-width: 1200px) and (min-height: 600px) {
+  .dis-game .dis-main:has(> .dis-side-match) {
+    grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr) minmax(15rem, 17rem);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match { grid-column: 1; grid-row: 1; }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-table { grid-column: 2; grid-row: 1; }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info { grid-column: 3; grid-row: 1; }
+  /* The match panel FILLS the column it has been given, and the scorecard is
+     what takes the slack — a six-row window scrolling inside a mostly empty
+     column is the shape this layout exists to stop. `min-height: 0` down the
+     chain is what keeps the LIST the scroller rather than the column. */
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-p-match {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-mcard {
+    flex: 1 1 auto; min-height: 4rem; max-height: none;
+  }
+  /* The SAME trade on the other flank: the info panels stack from the top and
+     used to leave the bottom third of the column as bare page. The trick
+     history is the one list here that is never finished, so it takes the
+     slack — at 1080p that is all thirteen tricks on screen instead of a
+     five-row window with black underneath it. */
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info .dis-p-points {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info .dis-trickhist {
+    flex: 1 1 auto; min-height: 3rem; max-height: none;
+  }
+}
+
 /* ── table ──────────────────────────────────────────────────────────────── */
-.dis-main { display: grid; grid-template-columns: 1fr 260px; gap: 0.75rem; align-items: start; }
+/* Two columns, and the side panels are TWO items stacked in the right-hand
+   one. This is the fallback the viewport-pinned tiers above do not cover — a
+   window under 600px tall, where the page scrolls instead — so it still has to
+   place all three by hand: auto-placement would put the match column under the
+   TABLE, in a fresh row, which is neither of the two layouts anyone wants. */
+.dis-main {
+  display: grid; gap: 0.75rem; align-items: start;
+  grid-template-columns: 1fr 260px;
+  grid-template-rows: auto auto;
+}
+.dis-main > .dis-table { grid-column: 1; grid-row: 1 / span 2; }
+.dis-main > .dis-side-info { grid-column: 2; grid-row: 1; }
+.dis-main > .dis-side-match { grid-column: 2; grid-row: 2; }
 .dis-table {
   display: flex; flex-direction: column; gap: 0.9rem;
   padding: 0.9rem; border-radius: 14px;
@@ -438,11 +525,23 @@
   /* Reserved off the SAME token as the card, not a literal. 96px had slack over
      a 56px card (78px tall) and silently lost it the moment cards grew — an
      empty trick reserving less than the card that lands in it is the measured
-     layout shift the hand row already guards against, one row up the table. */
-  min-height: max(96px, calc(var(--dis-cw) * 1.4 + 2px));
-  display: flex; align-items: center; justify-content: center;
-  gap: 1.2rem; position: relative;
+     layout shift the hand row already guards against, one row up the table.
+
+     THE TRICK LINE IS STACKED UNDER THE CARDS, in flow. It used to be one row
+     with the line absolutely positioned at `bottom: -4px` — a 4px offset
+     against a ~14px name label, so it drew through the name under a card. Two
+     rounds of reserving a padding band for it did not fix that either: when
+     the board is tight (a short screen holds the cards at their 3.4rem floor,
+     so the table is deliberately over budget) this row is what shrinks, and
+     flex content overflows a shrunken box straight back through the band.
+     Stacked in flow, a squeeze cannot make two rows overlap — the whole
+     column just gets shorter. */
+  min-height: max(96px, calc(var(--dis-cw) * 1.4 + 2px + 1.25rem));
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0.15rem; position: relative;
 }
+.dis-trickcards { display: flex; align-items: center; justify-content: center; gap: 1.2rem; }
 /* The trick's value is the whole game, so the pill on the trick line is loud.
    It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
    used to sit under the board was removed as noise. */
@@ -450,9 +549,12 @@
 .dis-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
 .dis-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
 
+/* In flow under the cards, not positioned over them (see `.dis-trick`).
+   `flex-shrink: 0` so a squeezed band takes it out of the CARDS' height rather
+   than crushing a one-line label to nothing. */
 .dis-trickinfo {
-  position: absolute; left: 50%; transform: translateX(-50%);
-  bottom: -4px; font-size: 0.72rem; color: var(--text-dim);
+  flex-shrink: 0;
+  font-size: 0.72rem; line-height: 1.15; color: var(--text-dim);
 }
 
 
@@ -532,16 +634,47 @@
 .dis-gobtn .dis-suit-r, .dis-gobtn .dis-suit-b { text-shadow: none; }
 .dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
 .dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
+/* IN THE CONTRACT PANEL the log is a footnote under the contract it produced,
+   not a panel of its own — hence the rule and the smaller type, matching the
+   scorecard's treatment under the match total. It scrolls in place: an auction
+   is usually three or four calls but has no fixed length, and a long one must
+   not push the Last trick panel off the bottom of the column. */
+.dis-p-contract .dis-bidlog {
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 7.5rem; overflow-y: auto; font-size: 0.72rem;
+}
+
+/* THE ROUND'S TRICKS, under the running points they explain. Newest first, so
+   the rows being reasoned about are the ones at the top and the list does not
+   have to be scrolled to be current. Same shape as the scorecard above it: a
+   rule, quieter type, tabular numbers, and a fixed window that scrolls rather
+   than a panel that keeps growing. */
+.dis-trickhist {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  margin-top: 0.45rem; padding-top: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 11rem; overflow-y: auto;
+  font-size: 0.72rem; font-variant-numeric: tabular-nums;
+}
+.dis-th-row {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.12rem 0.35rem; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.dis-th-n { color: var(--text-dim); flex: 0 0 auto; min-width: 1.6rem; }
+/* The only variable-width thing in the row, so it ellipsises rather than
+   wrapping the row to two lines — the same treatment the scorecard's declarer
+   column gets, for the same reason. */
+.dis-th-who { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dis-th-row .dis-val { font-size: 0.7rem; padding: 0.05rem 0.4rem; flex: 0 0 auto; }
 
 /* ── side panel ─────────────────────────────────────────────────────────── */
 .dis-side { display: flex; flex-direction: column; gap: 0.7rem; }
-/* The match standing is ALWAYS the last panel. It is last in the DOM too, so
-   this only has to hold the line against a panel appended after it later —
-   which is a real risk here, because the panels between are conditional (the
-   last trick appears after trick 1, the talon only if you bought it), so
-   "the bottom" is not a fixed position in the list. Everything else defaults
-   to order 0, so one rule is the whole mechanism, on the phone (where the
-   panel stacks below the board) exactly as on the desktop column. */
+/* The match panel now has a `.dis-side` of its own (`.dis-side-match`), so it
+   is last by being the last COLUMN rather than by ordering within a shared
+   list. The `order` is kept because it costs nothing and still holds the line
+   if a second panel is ever added beside it. */
 .dis-p-match { order: 1; }
 .dis-panel { padding: 0.7rem; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
 .dis-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }

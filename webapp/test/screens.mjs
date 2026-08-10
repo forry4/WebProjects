@@ -2089,6 +2089,86 @@ try {
 		check("no page errors in the skat auction", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 
+		// THE DESKTOP BOARD IS THREE COLUMNS, and which side each lands on is a
+		// GEOMETRIC fact, not a source-order one: the DOM is board, info, match
+		// (the order a phone stacks and a screen reader hears), and the wide
+		// grid places the match to the LEFT explicitly. A regression there
+		// auto-places the match under the table and looks like a stray panel
+		// rather than a broken layout, so it is measured by x-coordinate.
+		//
+		// The felt FILLING its column is the other half. It briefly sized itself
+		// to its seven cards, which left the surplus width as bare page — and a
+		// `container-type: size` table whose width stops being definite collapses
+		// to its padding (31px in a 1616px column, twice now: once from an auto
+		// margin, once from a malformed CSS comment that dropped the whole
+		// declaration). A ratio catches both, and nothing else in the gate would.
+		const cols = await page.evaluate(() => {
+			const box = (s) => {
+				const el = document.querySelector(s);
+				if (!el) return null;
+				const r = el.getBoundingClientRect();
+				return { x: Math.round(r.x), w: Math.round(r.width) };
+			};
+			const t = box(".dis-table"), i = box(".dis-side-info"), m = box(".dis-side-match");
+			const main = box(".dis-main");
+			return { t, i, m, main, width: window.innerWidth,
+				scrolls: document.documentElement.scrollHeight
+					> document.documentElement.clientHeight + 1 };
+		});
+		check("the match column sits left of the felt, the round's info right of it",
+			!!cols.t && !!cols.i && !!cols.m
+				&& cols.m.x + cols.m.w <= cols.t.x + 1
+				&& cols.i.x >= cols.t.x + cols.t.w - 1,
+			JSON.stringify(cols));
+		// >= 45% of the grid, not of the window: two panel columns are entitled
+		// to the rest. A collapsed table reads ~2%.
+		check("...and the felt fills the column it was given",
+			!!cols.t && !!cols.main && cols.t.w >= cols.main.w * 0.45,
+			JSON.stringify(cols));
+		check("the desktop board does not scroll", cols.scrolls === false,
+			JSON.stringify(cols));
+		// THE TRICK LINE vs THE NAME UNDER A CARD. The line used to be absolutely
+		// positioned over the bottom of the trick band, 4px clear of a ~14px
+		// label, so "Trick 5 of 13 · −1" drew straight through "Bot". Only
+		// geometry can see it — the text is all present and all "visible".
+		//
+		// It needs a card ON THE TABLE, which is not a state the board sits in:
+		// a trick clears itself. So play one and measure inside the hold, and
+		// treat "never got a reading" as a FAILURE rather than skipping — a null
+		// here would be a green tick over a check that never ran.
+		let trickLine = null;
+		for (let i = 0; i < 14 && trickLine === null; i++) {
+			trickLine = await page.evaluate(() => {
+				const info = document.querySelector(".dis-trickinfo");
+				const label = document.querySelector(".dis-tp .muted");
+				if (!info || !label) return null;
+				const a = info.getBoundingClientRect(), b = label.getBoundingClientRect();
+				return { overlaps: !(a.bottom <= b.top + 1 || a.top >= b.bottom - 1),
+					gap: Math.round((a.top - b.bottom) * 10) / 10 };
+			});
+			if (trickLine !== null) break;
+			const c = page.locator(".dis-seat .dis-card.play").last();
+			if (await c.count() > 0) await c.click({ timeout: 3_000 }).catch(() => {});
+			await sleep(150);
+		}
+		check("the trick line does not draw over the name under a played card",
+			trickLine !== null && trickLine.overlaps === false,
+			JSON.stringify(trickLine));
+		// THE BIDDING AND THE ROUND'S TRICKS live in the two panels, and both
+		// are the only place either can be read: the bid log used to sit inside
+		// the auction panel and vanished the moment the auction ended.
+		const logs = await page.evaluate(() => ({
+			bids: document.querySelectorAll(".dis-p-contract .dis-bidlog > div").length,
+			tricks: document.querySelectorAll(".dis-p-points .dis-th-row").length,
+			firstTrick: document.querySelector(".dis-p-points .dis-th-row")?.innerText
+				?.replace(/\s+/g, " ").trim() || "",
+		}));
+		check("the bidding is still on screen after the auction has ended",
+			logs.bids >= 2, JSON.stringify(logs));
+		check("...and every completed trick is listed with who took it and what it paid",
+			logs.tricks >= 1 && /^#\d+ .+ [+−-]?\d+$/.test(logs.firstTrick),
+			JSON.stringify(logs));
+
 		// Everything the board tells you must survive a PHONE. The side panel is
 		// where the last trick, the talon and the move log live, and the mobile
 		// sheet used to display:none the whole column — so three things a player
@@ -2107,9 +2187,14 @@ try {
 				lastTrick: vis(".dis-p-last"),
 				contractChip: vis(".dis-chip"),
 				lastTrickCards: document.querySelectorAll(".dis-lasttrick .dis-card").length,
-				// Deliberately hidden — duplicated by the chip and the seat rows.
+				// These two USED to be dropped on a phone as duplicates of the
+				// chip and the seat rows. They are not duplicates any more —
+				// they carry the bidding and the round's trick history, which
+				// live nowhere else — so a phone must show them.
 				contractPanel: vis(".dis-p-contract"),
 				pointsPanel: vis(".dis-p-points"),
+				phoneBids: document.querySelectorAll(".dis-p-contract .dis-bidlog > div").length,
+				phoneTricks: document.querySelectorAll(".dis-p-points .dis-th-row").length,
 				pageScrollsSideways: document.documentElement.scrollWidth
 					> document.documentElement.clientWidth + 1,
 			};
@@ -2120,8 +2205,9 @@ try {
 			JSON.stringify(onPhone));
 		check("the contract is on screen on a phone", onPhone.contractChip === true,
 			JSON.stringify(onPhone));
-		check("...and the panels the chip duplicates are dropped, not stacked twice",
-			onPhone.contractPanel === false && onPhone.pointsPanel === false,
+		check("...and the bidding and the trick history survive a phone too",
+			onPhone.contractPanel === true && onPhone.pointsPanel === true
+				&& onPhone.phoneBids >= 2 && onPhone.phoneTricks >= 1,
 			JSON.stringify(onPhone));
 		check("the phone board does not scroll sideways",
 			onPhone.pageScrollsSideways === false, JSON.stringify(onPhone));
