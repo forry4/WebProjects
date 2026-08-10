@@ -2345,6 +2345,19 @@ def _finish(g: dict) -> None:
         # SAME terms `_finish` scored with, so the panel cannot narrate an
         # arithmetic the room did not apply.
         "doubled": bool(g.get("doubled")),
+        # WHAT THE DOUBLE WAS ACTUALLY WORTH: this same round, scored as if the
+        # defender had let it stand. The panel used to narrate the Double by
+        # its set BASE ("the set base went 4 -> 10"), which told a reader
+        # nothing about the bet they had just watched -- and quoted the old
+        # N-1 base at that, a number the game stopped charging in 2026-08.
+        # The honest number is the difference the bet made, and it is one
+        # `payoff` call against the undoubled terms rather than any new rule.
+        #
+        # Signed for the declarer, exactly like `payoff` itself. Doubling
+        # scales both ends and the ramp only adds, so it can never flip WHO
+        # won -- the panel compares magnitudes against the same seat.
+        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"]),
+                            dpts, not null),
         "make_value": payoff_terms(g)["make"],
         "set_base": payoff_terms(g)["set_base"],
         # The two rates the review needs to spell the shortfall out as the sum

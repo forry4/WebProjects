@@ -776,6 +776,16 @@ So a made round reads *"Alice bid 4♠ and took 3 extra points"* over
   (`4 × 4 = 16 + 3 = 19`); the shape is now constant — `+ 0` on a contract
   brought home exactly included, because a formula whose SHAPE moves with its
   values has to be re-parsed every round.
+* **A DOUBLE IS REPORTED AS THE DIFFERENCE IT MADE (2026-08-09)** — "Doubling
+  earned Alice 55 — 110 instead of 55", not "the set base went 9 → 20". The old
+  line narrated an internal term rather than the bet the player had just
+  watched, and quoted `level - 1` for the undoubled base: the **pre-2026-08
+  N−1 rule**, a number the game had not charged in months. `_finish` now puts
+  `undoubled` on the row — this same round re-scored through `payoff` with the
+  bet taken off — so the comparison is the engine's arithmetic, not a second
+  copy in JS. Two properties make the panel's magnitude comparison sound and
+  both are asserted: a Double can never flip WHO won (it scales both ends and
+  the ramp only adds), and it can only raise the stake it was placed on.
 * **A DOUBLE MULTIPLIES THE OVERTRICK RATE TOO, and the old line dropped it**:
   it printed `4 × 4 × 2 = 32 + 3 = 38`, which does not add up, because the tail
   only ever showed the raw points while the payoff charged `over_bonus × over`.

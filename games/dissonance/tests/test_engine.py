@@ -1182,3 +1182,33 @@ def test_a_skat_kontra_shows_on_the_scorecard_as_the_multiplier_it_is():
         while g["phase"] == "play":
             E.apply_play(g, E.to_play(g), bot.choose_card(g, E.to_play(g)))
         assert g["match"]["rounds"][-1]["doubling"] == want, (kontra, re_)
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "dummy"])
+def test_the_result_row_says_what_the_double_was_worth(mode):
+    """THE PANEL REPORTS A DOUBLE AS THE DIFFERENCE IT MADE, so the row has to
+    carry this same round scored with the bet taken off.
+
+    It replaced a line that narrated the set BASE moving -- which said nothing
+    about the round just played, and quoted the pre-2026-08 N-1 base at that.
+    """
+    for seed in range(10):
+        for dbl in (False, True):
+            rng = random.Random(seed)
+            g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+            res = _play_out_any(g, rng, force_double=dbl)["result"]
+            decl = res["declarer"]
+            signed = (res["scores"][decl] if res["scores"][decl]
+                      else -res["scores"][1 - decl])
+            want = E.payoff(E._terms_for(mode, res["denom"], res["level"]),
+                            res["declarer_pts"], not res["null"])
+            assert res["undoubled"] == want, "not the undoubled re-score"
+            if not dbl:
+                assert res["undoubled"] == signed, (
+                    "an undoubled round must price identically either way")
+                continue
+            # The two properties the panel's arithmetic leans on.
+            assert (signed >= 0) == (res["undoubled"] >= 0), (
+                "a Double must never flip WHO won the round")
+            assert abs(signed) >= abs(res["undoubled"]), (
+                "a Double can only raise the stake it was placed on")

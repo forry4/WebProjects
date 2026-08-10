@@ -140,6 +140,33 @@ const Lvl = ({ children }) => <span className="dis-n-lvl">{children}</span>;
 const Pts = ({ children }) => <span className="dis-n-pts">{children}</span>;
 const Score = ({ children }) => <span className="dis-n-score">{children}</span>;
 
+/** WHAT THE DOUBLE WAS WORTH — the bet's outcome as the difference it made.
+ *
+ *  The defender doubles, so the line is written from their side: it EARNED
+ *  them the extra on a set contract and COST them the extra on a made one.
+ *  Both numbers are the engine's (`undoubled` is this same round re-scored
+ *  with the bet taken off), so nothing here re-derives the doubling rule.
+ *
+ *  Doubling scales both ends and its ramp only adds, so it can never flip who
+ *  won the round — which is what lets this compare two magnitudes for the
+ *  same seat rather than reasoning about signs. */
+function DoubleWorth({ res, nameOf }) {
+  const got = Math.abs(res.scores[res.made ? res.declarer : 1 - res.declarer]);
+  const would = Math.abs(res.undoubled ?? 0);
+  const defender = nameOf(1 - res.declarer);
+  // A round where the bet changed nothing is possible in principle (a Null
+  // is the live case, and it has its own line) -- say so rather than
+  // announcing a difference of zero as a result.
+  if (!res.undoubled || got === would) {
+    return <>Doubled: it made no difference to this round.</>;
+  }
+  return res.made
+    ? <>Doubling cost {defender} <b>{got - would}</b> — {nameOf(res.declarer)}{" "}
+      scored {got} instead of {would}.</>
+    : <>Doubling earned {defender} <b>{got - would}</b> — {got} instead of{" "}
+      {would}.</>;
+}
+
 /** The classic/minor round's arithmetic, spelled out and never simplified.
  *
  *  Deliberately NOT reduced to an intermediate ("4 × 4 = 16 + 3 = 19"): the
@@ -1942,13 +1969,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     cannot narrate an arithmetic the room did not apply. */}
                 <ResultMaths res={res} nameOf={nameOf} />
                 {res.doubled && (
+                  /* WHAT THE BET WAS WORTH, as the difference it made. This
+                     used to report the set BASE moving ("the set base went
+                     4 → 10"), which says nothing about the round just played
+                     and quoted a base the game stopped charging in 2026-08.
+                     `undoubled` is the engine's own re-score of this same
+                     round with the Double taken off, so the comparison is
+                     never a second copy of the scoring. */
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {res.null
                       ? `Doubled — but Null is not: a declarer who wins ${nullCond(game)}
                          scores the flat ${res.null_value} either way.`
-                      : res.made
-                        ? `Doubled: ${nameOf(1 - res.declarer)} took the bet and it landed.`
-                        : `Doubled: the set base went ${Math.max(0, res.level - 1)} → ${res.set_base}.`}
+                      : <DoubleWorth res={res} nameOf={nameOf} />}
                   </div>
                 )}
               </>}
