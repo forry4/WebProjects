@@ -295,6 +295,10 @@ const cardVal = (game, c) => {
 const cardWorth = (c) => CARD_VALS[rankOf(c)];
 // The Null consolation's condition, in this room's own words: no positive
 // trick under card scoring, no +even trick under the parities.
+/** "1 pt" / "N pts" — the trick-point unit, so a target never reads "1 pts".
+ *  Abbreviated because its two callers are tight one-line rows (the contract
+ *  chip, which is the phone's only contract line, and the side panel). */
+const ptsLabel = (n) => `${n} ${n === 1 ? "pt" : "pts"}`;
 const nullCond = (game) =>
   cardPts(game) ? "no positive trick" : `no +${evenVal(game)} trick`;
 
@@ -439,9 +443,12 @@ function ContractChip({ game, nameOf, sharpBonus }) {
       <span className="dis-chip-den">
         {a.level}<Den d={a.denom} />
       </span>
+      {/* POINTS, not "score": the target is a promise in TRICK points, and
+          "score" is reserved for what the round pays out. This is the line a
+          phone leans on -- the side panel is display:none there. */}
       <span className="dis-chip-who">
-        {nameOf(a.declarer)} must score{" "}
-        {a.level + (ct.sharp ? sharpBonus : 0)}
+        {nameOf(a.declarer)} must take{" "}
+        {ptsLabel(a.level + (ct.sharp ? sharpBonus : 0))}
       </span>
       {(parts.length > 0 || doubling > 1) && (
         <span className="dis-chip-mult">
@@ -704,7 +711,7 @@ function SkatStake({ game, nameOf, rows }) {
 
 /** What `value` would COMMIT you to in each denomination — the lowest level
  *  whose base x level reaches it, which is the number of trick points you would
- *  then have to score.
+ *  then have to take.
  *
  *  Every denomination, not only the ones that hit the number exactly. The
  *  decision at the ladder is "if I win here, what am I promising?", and for four
@@ -1648,9 +1655,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
             <div className="dis-auction">
               <div className="muted">Auction</div>
               <ContractLine game={game} />
+              {/* POINTS, not "score" — the level is a promise in TRICK points,
+                  and "score" is what the round pays out. Same vocabulary the
+                  result panel keeps to. (This comment sits OUTSIDE the `&&`:
+                  a JSX comment is a child expression, and one inside those
+                  parens is a syntax error.) */}
               {game.auction.level > 0 && (
                 <div className="muted">
-                  {nameOf(game.auction.declarer)} to score at least {game.auction.level}
+                  {nameOf(game.auction.declarer)} to take at least{" "}
+                  {game.auction.level} {game.auction.level === 1 ? "point" : "points"}
                 </div>
               )}
               {myTurn ? (
@@ -1861,7 +1874,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       {`${row?.base} × ${declLevel} = ${value}`}
                       {mult > 1 ? ` × ${mult} (${multParts({ ...d, sharp: declSharp, open: declOpen }).join(" + ")})` : ""}
                       {" = "}<b>{value * mult}</b>
-                      {` · you must score ${declLevel + (declSharp ? d.sharp_bonus : 0)}`}
+                      {` · you must take ${ptsLabel(declLevel + (declSharp ? d.sharp_bonus : 0))}`}
                     </div>
                     <button className="btn dis-gobtn" disabled={!ok}
                       onClick={() => doDeclare(declDenom, declLevel, declSharp, declOpen)}>
@@ -2297,7 +2310,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               ? <>
                 <div className="dis-scorerow">
                   <span>{nameOf(game.auction.declarer)} needs</span>
-                  <b>{game.auction.level}</b>
+                  <b>{ptsLabel(game.auction.level)}</b>
                 </div>
                 <div className="dis-scorerow">
                   <span>Trump</span><b>{DENOM_NAME[game.auction.denom]}</b>
