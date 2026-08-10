@@ -370,8 +370,6 @@
 .dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
 .dis-denoms { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
 .dis-denoms button { min-width: 56px; font-size: 1.1rem; }
-.dis-denoms button.red { color: #ff8a9c; }
-.dis-denoms button.on.red { color: var(--ink); }
 .dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
 .dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
 
@@ -422,7 +420,6 @@
 .dis-mrow-ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .dis-mrow-ct.mine { color: var(--text); }
 .dis-mrow-ct b { color: var(--text); }
-.dis-mrow-ct b.red { color: #ff8a9c; }
 /* THE DEFENDER'S BET on the round it doubled. Gold rather than the good/bad
    pair the Score column uses: a Double is not itself good or bad news — it
    doubles whichever way the round fell — and it must not read as a third
@@ -534,7 +531,6 @@
   padding: 0.05rem 0.4rem; border-radius: 6px; font-weight: 700;
   background: rgba(255, 255, 255, 0.08);
 }
-.dis-clear.red { color: #ff8a9c; }
 
 .dis-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
 
@@ -605,8 +601,9 @@
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.09);
 }
+/* NO SUIT TINT on a contract label -- see the note by `DENOM_LABEL`. Only a
+   real card face is suit-coloured (`.dis-card.red`). */
 .dis-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
-.dis-chip-den.red { color: #ff8a9c; }
 .dis-chip-mult {
   font-weight: 700; color: var(--accent);
   padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);
