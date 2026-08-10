@@ -729,7 +729,7 @@
    columns would step in and out by a character as the numbers changed and the
    header would line up with nothing. One grid, one set of column widths. */
 .dis-mcard {
-  display: grid; grid-template-columns: 1.25rem minmax(0, 1fr) auto auto auto;
+  display: grid; grid-template-columns: 1.35rem minmax(0, 1fr) auto auto auto;
   gap: 0.12rem 0.4rem; align-items: baseline;
   /* ROWS PACK TO THE TOP. The card takes the slack in its column now (so a
      long match uses the height it is given), and a grid's default
@@ -742,16 +742,21 @@
   max-height: 9.2rem; overflow-y: auto;
   /* The column is 17rem wide on a desktop and the row is five short fields,
      four of them numbers — 0.72rem was sized for a 260px column that had to
-     hold everything. The declarer's name is the only elastic field and it
-     ellipsises, so the row cannot wrap; `screens.mjs` measures a row against
-     one line height rather than trusting that. */
-  font-size: 0.8rem; font-variant-numeric: tabular-nums;
+     hold everything else too. 0.88rem is MEASURED, not picked: the limit is
+     the declarer's name, the row's only elastic field, and against a
+     thirteen-character one it starts ellipsising at 15.2px (0.95rem) in the
+     narrowest column this grid ever gets. Nothing can WRAP at any size — the
+     name column is `nowrap` and every other field is a short number — so the
+     failure mode is a truncated name, not a second line. `screens.mjs`
+     measures the row height and the card's own overflow rather than trusting
+     either claim. */
+  font-size: 0.88rem; font-variant-numeric: tabular-nums;
 }
 .dis-mrow { display: contents; }
 .dis-mrow-pts, .dis-mrow-sc, .dis-mrow-dd, .dis-mrow-hd span:nth-child(3),
 .dis-mrow-hd span:nth-child(4), .dis-mrow-hd span:nth-child(5) { justify-self: end; }
 .dis-mrow-hd {
-  color: var(--text-dim); font-size: 0.66rem;
+  color: var(--text-dim); font-size: 0.72rem;
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .dis-mrow-n { color: var(--text-dim); }

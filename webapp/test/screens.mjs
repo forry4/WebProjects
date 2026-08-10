@@ -3027,6 +3027,11 @@ try {
 					hd: document.querySelector(".dis-mcard .dis-mrow-hd")?.children.length,
 					lineH: Math.round(line),
 					fontPx: card ? Math.round(parseFloat(getComputedStyle(card).fontSize)) : 0,
+					// ...and the ROW still fits its column. The name ellipsises,
+					// so a too-large type shows up here — the fixed-width number
+					// columns push the grid past its box — long before it shows
+					// up as a second line.
+					overflowsX: card ? card.scrollWidth > card.clientWidth + 1 : null,
 					// ...and the rows pack to the TOP. The card takes the slack in
 					// its column now, and a grid stretches its auto rows by
 					// default — which spread four played rounds evenly down a
@@ -3035,7 +3040,8 @@ try {
 				};
 			});
 			check("a scorecard row is one line tall at the larger type",
-				cells.fontPx >= 12 && cells.lineH > 0 && cells.lineH <= cells.fontPx * 1.7,
+				cells.fontPx >= 14 && cells.lineH > 0 && cells.lineH <= cells.fontPx * 1.7
+					&& cells.overflowsX === false,
 				JSON.stringify(cells));
 			check("...and its rows pack to the top rather than spreading",
 				cells.alignContent === "start", JSON.stringify(cells));
