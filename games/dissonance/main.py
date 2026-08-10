@@ -296,8 +296,15 @@ def load_game_to_memory(room_id: str) -> bool:
     # resumed -- void it rather than corrupt it. The prod table was verified
     # EMPTY when v2 shipped, so this guard exists for completeness, not for a
     # population.
+    #
+    # ...and the SECOND arm is for a live population: a dummy round dealt before
+    # the wide deck holds ten cards a seat, and this engine's layout says
+    # thirteen. A round in progress plays from its own hands, so nothing catches
+    # the mismatch until trick 11, where the room simply jams with no legal move
+    # and nothing red anywhere. Same treatment: void it, do not migrate it.
     g = state.get("game")
-    if isinstance(g, dict) and g.get("v", 1) < engine.VERSION and g.get("phase") != "over":
+    if isinstance(g, dict) and g.get("phase") != "over" and (
+            g.get("v", 1) < engine.VERSION or not engine.deal_is_current(g)):
         g["phase"] = "over"
         g.setdefault("result", None)
         state["status"] = "over"

@@ -333,6 +333,16 @@ read the same (5.60 / 5.61 / 5.57) — the third seat is not carrying the mean.
   `bot.swap_policy_terms` slices the same way for the opposite reason: Rust's
   `SwapPolicy` indexes by its own 0..7 rank, so ten entries would price a 7 as
   a 5 client-side. (Dummy has no talon, so the rows are unreachable there.)
+* **A dummy round dealt BEFORE this is voided on load, not migrated.** A round
+  in progress plays from its own hands, so a ten-card round resumed under the
+  thirteen-card layout runs fine to trick 10 and then jams with no legal move —
+  a hung room with nothing red anywhere, not an error. `engine.deal_is_current`
+  counts the union of hands / piles / out / played against `deck_size` (every
+  card is in exactly one of them at every moment, so the union IS the deck) and
+  `load_game_to_memory` closes any round that fails it, the same call it
+  already makes for pre-v2 saves. Unlike that one this had a live population:
+  dummy shipped the same day. The test drives the SEAM, not the predicate — a
+  predicate that passes says nothing about whether anything calls it.
 * **Rust is untouched and stays that way.** `client_searchable("dummy")` is
   False, so the core never sees a wide-deck game; the parity fixtures, the
   `views.jsonl` wire fixtures and the committed wasm all describe the 32-card

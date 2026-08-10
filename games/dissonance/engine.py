@@ -434,6 +434,28 @@ def card_points(c: int) -> int:
     return CARD_VALUES[rank(c)]
 
 
+def deal_is_current(g: dict) -> bool:
+    """Does this saved deal use the deck the mode deals TODAY?
+
+    A round in progress carries its own hands, piles and out-pile, so it goes on
+    being played under the shape it was DEALT with while `layout_for` and
+    `deck_size` describe the shape a NEW deal gets. That is fine until the two
+    disagree: a dummy round dealt at ten cards a seat resumed under the
+    thirteen-card layout runs out of cards at trick 11 and jams with no legal
+    move, which is a hung room rather than an error anyone can see.
+
+    Counting is the whole test -- every card is in exactly one of hands, piles,
+    the out-pile and the played list at every moment of a round, so the union is
+    the deck. Voiding a stale round rather than migrating it is the same call
+    `load_game_to_memory` already makes for pre-v2 saves.
+    """
+    seen = set(g.get("out") or [])
+    seen |= {c for h in (g.get("hands") or []) for c in h}
+    seen |= {c for pile in (g.get("piles") or []) for p in pile for c in p}
+    seen |= set(g.get("played") or [])
+    return len(seen) == deck_size(mode_of(g))
+
+
 def wire_card_values(mode: str) -> list:
     """`CARD_VALUES` sliced to the ranks this mode's deck actually holds.
 

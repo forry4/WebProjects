@@ -401,3 +401,48 @@ def test_a_two_seat_history_is_still_packed():
     packed = persist.compact_state({"game": g})
     assert isinstance(packed["game"]["history"][0], int), "still packed"
     assert persist.expand_state(packed)["game"]["history"] == g["history"]
+
+
+def test_a_round_dealt_before_the_wide_deck_is_voided_rather_than_jammed():
+    """A dummy round in progress plays from the hands it was DEALT, so a
+    ten-card round resumed under the thirteen-card layout runs fine until trick
+    11 and then jams with no legal move — a hung room, not an error. The load
+    path voids it instead (`engine.deal_is_current`), the same call the pre-v2
+    guard already makes.
+
+    Driven through `load_game_to_memory` rather than asserting the predicate
+    alone, because the guard is only worth anything at the seam -- the
+    predicate passing says nothing about whether anything calls it.
+    """
+    from games.dissonance import main as M
+
+    g = _to_play()
+    assert E.deal_is_current(g), "a freshly dealt round is current by definition"
+    for mode in E.MODES:
+        fresh = E.new_game(["a", "b"], random.Random(3), mode=mode)
+        assert E.deal_is_current(fresh), mode
+
+    # The old shape: three hands of ten off the 32-card deck.
+    old = E.new_game(["a", "b"], random.Random(9), mode="dummy")
+    deck = list(range(E.NCARD))
+    old["hands"] = [sorted(deck[i * 4:i * 4 + 4]) for i in range(3)]
+    old["piles"] = [[[deck[12 + i * 6 + 2 * j], deck[12 + i * 6 + 2 * j + 1]]
+                     for j in range(3)] for i in range(3)]
+    old["out"] = deck[30:32]
+    old["played"] = []
+    assert not E.deal_is_current(old)
+
+    rid = "WIDEDK"
+    row = {"players": {"p": "alice"}, "host": "p", "status": "playing",
+           "game": old, "meta": {}, "mode": "dummy"}
+    real = M.load_game_state
+    M.load_game_state = lambda _rid: row
+    M.ROOMS.pop(rid, None)
+    try:
+        assert M.load_game_to_memory(rid)
+        loaded = M.ROOMS[rid]
+        assert loaded["game"]["phase"] == "over", "a stale deal must not resume"
+        assert loaded["status"] == "over"
+    finally:
+        M.load_game_state = real
+        M.ROOMS.pop(rid, None)
