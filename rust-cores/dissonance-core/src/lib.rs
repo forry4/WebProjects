@@ -13,6 +13,7 @@ pub mod bid;
 pub mod bots;
 pub mod cards;
 pub mod dd;
+pub mod dummy;
 pub mod game;
 pub mod infer;
 pub mod policy;

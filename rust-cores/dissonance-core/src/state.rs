@@ -50,6 +50,14 @@ impl Pile {
         self.c[self.n as usize] = 0;
     }
 
+    /// `pop` for callers outside this module — `dummy.rs` drives the same Pile
+    /// with its own three-hand state. Kept as a second name rather than making
+    /// `pop` public so every existing call site reads exactly as it did.
+    #[inline(always)]
+    pub fn pop_top(&mut self) {
+        self.pop();
+    }
+
     pub fn new(bottom: u8, top: u8) -> Self {
         Pile {
             c: [bottom, top],
