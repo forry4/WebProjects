@@ -423,6 +423,15 @@
 .dis-mrow-ct.mine { color: var(--text); }
 .dis-mrow-ct b { color: var(--text); }
 .dis-mrow-ct b.red { color: #ff8a9c; }
+/* THE DEFENDER'S BET on the round it doubled. Gold rather than the good/bad
+   pair the Score column uses: a Double is not itself good or bad news — it
+   doubles whichever way the round fell — and it must not read as a third
+   suit colour beside the contract it follows. */
+.dis-mrow-dbl {
+  margin-left: 0.25rem; padding: 0 0.22rem; border-radius: 3px;
+  font-size: 0.72em; font-weight: 800; letter-spacing: 0.02em;
+  color: var(--gold-light, #e8c96a); background: rgba(201, 168, 76, 0.16);
+}
 .dis-mrow-pts { color: var(--text-dim); }
 .dis-mrow-sc { font-weight: 700; }
 .dis-mrow-sc.good { color: var(--accent); }
@@ -441,6 +450,17 @@
 .dis-result .made { color: #6fe0a0; }
 .dis-result .set { color: #ff9a9a; }
 .dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* THE ROUND'S TWO CURRENCIES, colour-keyed between the sentence and the
+   formula under it: the same number is the same colour in both, so "took 3
+   extra points" and the `+ 3` it becomes read as one quantity rather than two
+   coincidences. The contract is the plain full-strength text (the dark
+   theme's stand-in for black), trick POINTS are blue, and the SCORE — the
+   only number that reaches the scoreboard — is the green this panel already
+   uses for a made contract. */
+.dis-n-lvl { color: var(--text); font-weight: 700; }
+.dis-n-pts { color: #7fb8ff; font-weight: 700; }
+.dis-n-score { color: #6fe0a0; font-weight: 700; }
 
 /* The match standing under the round's own result: separated by a rule, since
    the two score rows are the same shape and read as one list otherwise. */

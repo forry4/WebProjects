@@ -2205,6 +2205,16 @@ def _round_summary(g: dict, m: dict, res: dict) -> dict:
         "target": res.get("target", res.get("level", 0)),
         "made": bool(res.get("made")),
         "null": bool(res.get("null")),
+        # THE DEFENDER'S BET, as the MULTIPLIER rather than either mode's word
+        # for it: classic Doubles, skat Kontras and the declarer may Re on top,
+        # and all three do the one thing the scorecard has to show -- this
+        # round was played for 2x or 4x. Without it a doubled round sat in the
+        # match box as an ordinary line with a surprising number beside it,
+        # which is exactly the round a reader most wants explained.
+        #
+        # Read off `res`, which already carries skat's `doubling` (1/2/4) and
+        # classic's `doubled` (a bool), so nothing re-derives the rule here.
+        "doubling": int(res.get("doubling") or (2 if res.get("doubled") else 1)),
         "scores": [int(res["scores"][0]), int(res["scores"][1])],
     }
     if res.get("abandoned_by") is not None:
@@ -2381,6 +2391,19 @@ def _finish(g: dict) -> None:
         # SAME terms `_finish` scored with, so the panel cannot narrate an
         # arithmetic the room did not apply.
         "doubled": bool(g.get("doubled")),
+        # WHAT THE DOUBLE WAS ACTUALLY WORTH: this same round, scored as if the
+        # defender had let it stand. The panel used to narrate the Double by
+        # its set BASE ("the set base went 4 -> 10"), which told a reader
+        # nothing about the bet they had just watched -- and quoted the old
+        # N-1 base at that, a number the game stopped charging in 2026-08.
+        # The honest number is the difference the bet made, and it is one
+        # `payoff` call against the undoubled terms rather than any new rule.
+        #
+        # Signed for the declarer, exactly like `payoff` itself. Doubling
+        # scales both ends and the ramp only adds, so it can never flip WHO
+        # won -- the panel compares magnitudes against the same seat.
+        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"]),
+                            dpts, not null),
         "make_value": payoff_terms(g)["make"],
         "set_base": payoff_terms(g)["set_base"],
         # The two rates the review needs to spell the shortfall out as the sum

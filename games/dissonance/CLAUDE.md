@@ -818,6 +818,52 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
+
+The round has two quantities that are both "how much", and the panel used one
+verb for both. They are now fixed vocabulary, in the classic/minor result
+panel and in `rules.jsx`:
+
+* **points** = TRICK points, the currency the contract is measured in;
+* **score** = what the round pays onto the scoreboard.
+
+So a made round reads *"Alice bid 4♠ and took 3 extra points"* over
+`(4 × 4) + 3 = 19 to Alice`, and a set one *"…finished 2 points short"* over
+`4 + (5 × 2) = 14 to Bob`.
+
+* **The formula is COLOUR-KEYED to the sentence and deliberately NOT
+  simplified.** The contract level is plain full-strength text, trick points
+  are blue, the score is the panel's green (`.dis-n-lvl` / `.dis-n-pts` /
+  `.dis-n-score`), so the `3` in "took 3 extra points" and the `+ 3` it turns
+  into are visibly one number. The old line reduced through an intermediate
+  (`4 × 4 = 16 + 3 = 19`); the shape is now constant — `+ 0` on a contract
+  brought home exactly included, because a formula whose SHAPE moves with its
+  values has to be re-parsed every round.
+* **A DOUBLE IS REPORTED AS THE DIFFERENCE IT MADE (2026-08-09)** — "Doubling
+  earned Alice 55 — 110 instead of 55", not "the set base went 9 → 20". The old
+  line narrated an internal term rather than the bet the player had just
+  watched, and quoted `level - 1` for the undoubled base: the **pre-2026-08
+  N−1 rule**, a number the game had not charged in months. `_finish` now puts
+  `undoubled` on the row — this same round re-scored through `payoff` with the
+  bet taken off — so the comparison is the engine's arithmetic, not a second
+  copy in JS. Two properties make the panel's magnitude comparison sound and
+  both are asserted: a Double can never flip WHO won (it scales both ends and
+  the ramp only adds), and it can only raise the stake it was placed on.
+* **A DOUBLE MULTIPLIES THE OVERTRICK RATE TOO, and the old line dropped it**:
+  it printed `4 × 4 × 2 = 32 + 3 = 38`, which does not add up, because the tail
+  only ever showed the raw points while the payoff charged `over_bonus × over`.
+  Doubling now rides inside the term it multiplies.
+* **Twice a hardcoded rate has outlived the number it copied.** `+ 4 × short`
+  survived the 4 → 5 move in BOTH the skat maths line and the side panel, each
+  printing a sum that did not reach the score displayed beside it — the score
+  was right, only the story about it was wrong, so nothing failed.
+  `_finish_skat` now puts `short_rate` on its row (classic already did) and
+  both lines read it. **`test_the_result_row_carries_every_term_its_own_score_
+  needs` is the gate**: it plays real rounds in all three modes, forces the
+  Double so the ramped branch is reached, and re-adds the row's own terms to
+  demand they reproduce its score. Verified non-vacuous by putting the stale 4
+  back — it fails.
+
 ## Double — classic's defender bet, priced for the SACRIFICE (2026-08-07)
 
 A `double` phase between the classic swap and trick 1, the DEFENDER to act.
@@ -1046,6 +1092,17 @@ the bidding judgement, which is the part worth playing.
     the panel that narrates the same round — re-reading made/null/target off the
     board would have been a second copy of the scoring, which is what
     `payoff_terms` exists to prevent.
+  - **A DOUBLED ROUND SAYS SO ON ITS LINE (2026-08-09)** — `doubling` on the
+    row, rendered as a gold `×2` / `×4` chip after the contract. Without it a
+    doubled round sat in the box as an ordinary line with a surprising number
+    beside it, which is precisely the row a reader wants explained. It carries
+    the MULTIPLIER rather than either mode's word for the bet, so classic's
+    Double and skat's Kontra-then-Re land in one field and the box needs no
+    idea which auction the room ran; it is read off `res` (skat already had
+    `doubling`, classic has `doubled`), so no rule is re-derived here. Absent
+    on a round banked before it shipped, which reads as undoubled — correctly.
+    Gated by `test_the_scorecard_line_says_a_round_was_doubled` and the skat
+    Kontra/Re case beside it, both verified non-vacuous.
   - **`rounds` is `setdefault`ed, never created in `new_game`** — same reason
     `match_of` exists. A match already in progress when this shipped has no
     scorecard and must go on banking rounds rather than KeyError; its earlier

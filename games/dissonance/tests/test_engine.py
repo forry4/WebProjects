@@ -1044,3 +1044,171 @@ def test_a_round_abandoned_mid_play_banks_no_deal_to_review():
     row = g["match"]["rounds"][-1]
     assert row.get("abandoned") is True
     assert "deal" not in row, "there is nothing to review in a round nobody finished"
+
+
+def _row_reproduces_its_score(res) -> bool:
+    """Re-add the result row's own terms and see if they reach its score.
+
+    This is the RESULT PANEL's arithmetic, written out the way the panel writes
+    it: the row is the only thing the panel has, so if these terms cannot
+    reconstruct the score, the panel is printing a sum that does not reach its
+    own total.
+    """
+    decl = res["declarer"]
+    if res["null"]:
+        printed, winner = res["null_value"], decl
+    elif res["made"]:
+        # (N x N [x2]) + rate x over
+        base = res["level"] * res["level"] * (2 if res.get("doubled") else 1)
+        if res["mode"] == "skat":
+            base = res["stake"]
+        printed = base + res.get("over_bonus", 0) * res["over"]
+        winner = decl
+    else:
+        base = (res["stake"] if res["mode"] == "skat"
+                else res["level"] * (2 if res.get("doubled") else 1))
+        ramp, flat, s = res.get("ramp", 0), res["short_rate"], res["short"]
+        tail = (sum(flat + ramp * (i + 1) for i in range(s)) if ramp
+                else flat * s)
+        printed, winner = base + tail, 1 - decl
+    return printed == res["scores"][winner]
+
+
+def _play_out_any(g, rng, force_double=False):
+    """Drive ANY mode to its result. `_play_out` above speaks classic's bid
+    shape only; this one goes through `bot.act` + `apply_move`, which is the
+    same mapping the room server uses, so skat's number ladder and its
+    declaration work unchanged."""
+    guard = 0
+    while g["phase"] != "over":
+        guard += 1
+        assert guard < 300, "game failed to terminate"
+        seat = E.turn_seat(g)
+        pid = g["seats"][seat]
+        # The server bot never Doubles (measured), so the ramped set branch --
+        # the one whose arithmetic is spelled term by term -- is unreachable
+        # from self-play alone and has to be asked for.
+        if force_double and g["phase"] == "double":
+            E.apply_double(g, seat, True)
+            continue
+        kind, mv = bot.act(g, seat, rng)
+        if kind == "bid":
+            mv = ({"kind": "pass"} if mv.get("pass")
+                  else {"kind": "bid", "level": mv["level"], "denom": mv["denom"]})
+        elif kind == "play":
+            mv = {"kind": "play", "card": mv}
+        elif kind == "swap":
+            mv = {"kind": "swap", "take": mv.get("take"), "give": mv.get("give")}
+        E.apply_move(g, pid, mv)
+    return g
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "skat"])
+def test_the_result_row_carries_every_term_its_own_score_needs(mode):
+    """THE PANEL PRINTS THE ARITHMETIC, AND THE ARITHMETIC HAS ONE OWNER.
+
+    Twice now the result panel has hardcoded a rate that the engine later
+    moved -- "+ 4 x short" survived the 4 -> 5 change in both the skat line and
+    the side panel -- and each time it printed a sum that did not add up to the
+    score displayed beside it. Nothing caught it, because the score itself was
+    right and only the story about it was wrong.
+
+    So every rate the panel needs must be ON the row, off the same terms
+    `_finish` scored with, and this walks real played-out rounds asserting the
+    row can rebuild its own number. It fails if a term is dropped from the row
+    OR if the payoff arithmetic changes shape without the row following.
+    """
+    seen = set()
+    for seed in range(60):
+        for dbl in ((False, True) if mode != "skat" else (False,)):
+            rng = random.Random(seed)
+            g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+            res = _play_out_any(g, rng, force_double=dbl)["result"]
+            assert _row_reproduces_its_score(res), (
+                "seed %d (doubled=%s): the row's terms do not reach its score -- %r"
+                % (seed, dbl, res))
+            outcome = "null" if res["null"] else "made" if res["made"] else "set"
+            seen.add(outcome)
+            if dbl and outcome == "set":
+                seen.add("ramped set")
+    # Non-vacuity: a sweep that only ever produced made contracts would pass
+    # while the set branch -- the one that has broken twice -- went unchecked.
+    assert {"made", "set"} <= seen, "only reached %s" % sorted(seen)
+    if mode != "skat":
+        assert "ramped set" in seen, "the Double's ramp branch was never reached"
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "dummy"])
+def test_the_scorecard_line_says_a_round_was_doubled(mode):
+    """A DOUBLED ROUND MUST BE VISIBLE IN THE MATCH BOX.
+
+    Otherwise it sits there as an ordinary line with a surprising number
+    beside it -- the one row a reader actually wants explained. The row
+    carries the MULTIPLIER rather than either mode's word for the bet, so
+    classic's Double and skat's Kontra/Re land in one field.
+    """
+    for seed in range(12):
+        rng = random.Random(seed)
+        g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+        _play_out_any(g, rng, force_double=True)
+        row = g["match"]["rounds"][-1]
+        assert row["doubling"] == 2, "a doubled round must say so on its line"
+        # ...and the line agrees with the result the panel prints from.
+        assert row["scores"] == g["result"]["scores"]
+
+    # The undoubled control: the field is present and reads 1, so the frontend
+    # can test `> 1` rather than distinguishing absent from false.
+    rng = random.Random(99)
+    g = E.new_game(["a", "b"], rng, opener=0, mode=mode)
+    _play_out_any(g, rng, force_double=False)
+    assert g["match"]["rounds"][-1]["doubling"] == 1
+
+
+def test_a_skat_kontra_shows_on_the_scorecard_as_the_multiplier_it_is():
+    """Kontra doubles and Re doubles again -- the same field, so the match box
+    needs no idea which auction the room ran."""
+    for kontra, re_, want in ((False, False, 1), (True, False, 2), (True, True, 4)):
+        g = E.new_game(["a", "b"], random.Random(5), opener=0, mode="skat")
+        E.apply_skat_bid(g, 0, E.SKAT_VALUES[0])
+        E.apply_pass(g, 1)
+        E.apply_look(g, 0)
+        E.apply_swap(g, 0, None, None)
+        d = E.skat_declarable(g["auction"]["value"])[0]
+        E.apply_declare(g, 0, d["denom"], d["min_level"])
+        E.apply_kontra(g, 1, kontra)
+        if kontra:
+            E.apply_re(g, 0, re_)
+        rng = random.Random(5)
+        while g["phase"] == "play":
+            E.apply_play(g, E.to_play(g), bot.choose_card(g, E.to_play(g)))
+        assert g["match"]["rounds"][-1]["doubling"] == want, (kontra, re_)
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "dummy"])
+def test_the_result_row_says_what_the_double_was_worth(mode):
+    """THE PANEL REPORTS A DOUBLE AS THE DIFFERENCE IT MADE, so the row has to
+    carry this same round scored with the bet taken off.
+
+    It replaced a line that narrated the set BASE moving -- which said nothing
+    about the round just played, and quoted the pre-2026-08 N-1 base at that.
+    """
+    for seed in range(10):
+        for dbl in (False, True):
+            rng = random.Random(seed)
+            g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+            res = _play_out_any(g, rng, force_double=dbl)["result"]
+            decl = res["declarer"]
+            signed = (res["scores"][decl] if res["scores"][decl]
+                      else -res["scores"][1 - decl])
+            want = E.payoff(E._terms_for(mode, res["denom"], res["level"]),
+                            res["declarer_pts"], not res["null"])
+            assert res["undoubled"] == want, "not the undoubled re-score"
+            if not dbl:
+                assert res["undoubled"] == signed, (
+                    "an undoubled round must price identically either way")
+                continue
+            # The two properties the panel's arithmetic leans on.
+            assert (signed >= 0) == (res["undoubled"] >= 0), (
+                "a Double must never flip WHO won the round")
+            assert abs(signed) >= abs(res["undoubled"]), (
+                "a Double can only raise the stake it was placed on")

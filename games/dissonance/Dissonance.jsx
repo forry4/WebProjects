@@ -115,10 +115,101 @@ function multParts(ct) {
  *  growing a "+ 0". Both modes share it: the chain in front differs, the tail
  *  does not. The numbers are the RESULT ROW's — `over` and the final score are
  *  the engine's own, never recomputed here.
+ *
+ *  SKAT ONLY since the classic result panel was re-worded (see `ResultMaths`),
+ *  which spells its formula out term by term instead and never simplifies.
  */
 function overTail(res) {
   if (!res?.over) return "";
   return ` + ${res.over} = ${res.scores[res.declarer]}`;
+}
+
+/** THE TWO CURRENCIES, told apart by colour as well as by word.
+ *
+ *  The round has two numbers that are both "how much", and the panel used the
+ *  verb "scored" for both: TRICK POINTS are what you take at the table and what
+ *  a contract is measured against, SCORE is what the round pays. So the words
+ *  are now fixed — "points" is only ever the trick currency, "score" only ever
+ *  the payout — and the formula is colour-keyed to the sentence above it, so
+ *  "took 3 extra points" and the `+ 3` it turns into are visibly the same 3.
+ *
+ *  `lvl` (the contract) is plain, `pts` is the trick-point quantity, `score` is
+ *  what lands on the scoreboard. Every number is the RESULT ROW's own — this
+ *  colours the arithmetic, it never computes it. */
+const Lvl = ({ children }) => <span className="dis-n-lvl">{children}</span>;
+const Pts = ({ children }) => <span className="dis-n-pts">{children}</span>;
+const Score = ({ children }) => <span className="dis-n-score">{children}</span>;
+
+/** WHAT THE DOUBLE WAS WORTH — the bet's outcome as the difference it made.
+ *
+ *  The defender doubles, so the line is written from their side: it EARNED
+ *  them the extra on a set contract and COST them the extra on a made one.
+ *  Both numbers are the engine's (`undoubled` is this same round re-scored
+ *  with the bet taken off), so nothing here re-derives the doubling rule.
+ *
+ *  Doubling scales both ends and its ramp only adds, so it can never flip who
+ *  won the round — which is what lets this compare two magnitudes for the
+ *  same seat rather than reasoning about signs. */
+function DoubleWorth({ res, nameOf }) {
+  const got = Math.abs(res.scores[res.made ? res.declarer : 1 - res.declarer]);
+  const would = Math.abs(res.undoubled ?? 0);
+  const defender = nameOf(1 - res.declarer);
+  // A round where the bet changed nothing is possible in principle (a Null
+  // is the live case, and it has its own line) -- say so rather than
+  // announcing a difference of zero as a result.
+  if (!res.undoubled || got === would) {
+    return <>Doubled: it made no difference to this round.</>;
+  }
+  return res.made
+    ? <>Doubling cost {defender} <b>{got - would}</b> — {nameOf(res.declarer)}{" "}
+      scored {got} instead of {would}.</>
+    : <>Doubling earned {defender} <b>{got - would}</b> — {got} instead of{" "}
+      {would}.</>;
+}
+
+/** The classic/minor round's arithmetic, spelled out and never simplified.
+ *
+ *  Deliberately NOT reduced to an intermediate ("4 × 4 = 16 + 3 = 19"): the
+ *  reader wants to see the contract they bought and the points they took as
+ *  separate, recognisable terms, so the shape stays `(N × N) + P = X` — the
+ *  "+ 0" of a contract brought home exactly included, because a formula that
+ *  changes shape with its values is one the eye has to re-parse every round.
+ *
+ *  DOUBLING RIDES INSIDE THE TERMS IT ACTUALLY MULTIPLIES, and getting that
+ *  wrong was live here: the old line printed `4 × 4 × 2 = 32 + 3 = 38`, which
+ *  does not add up, because a Double doubles the overtrick RATE too
+ *  (`over_bonus`) and the tail only ever showed the raw points. */
+function ResultMaths({ res, nameOf }) {
+  const lvl = res.level;
+  if (res.null) {
+    return <div className="dis-maths">
+      flat <Score>{res.null_value}</Score> to {nameOf(res.declarer)}
+    </div>;
+  }
+  if (res.made) {
+    const rate = res.over_bonus ?? 1;
+    return <div className="dis-maths">
+      (<Lvl>{lvl}</Lvl> × <Lvl>{lvl}</Lvl>{res.doubled ? " × 2" : ""}) +{" "}
+      {rate > 1
+        ? <>({rate} × <Pts>{res.over}</Pts>)</>
+        : <Pts>{res.over}</Pts>}
+      {" = "}<Score>{res.scores[res.declarer]}</Score> to {nameOf(res.declarer)}
+    </div>;
+  }
+  // Set: the base is the level (doubled, twice it), then the shortfall charge.
+  // Undoubled that is a flat rate times the points missed; doubled it RAMPS,
+  // so the terms are spelled out rather than faked as a product.
+  const ramp = res.ramp || 0;
+  const flat = res.short_rate ?? 4;
+  const s = res.short || 0;
+  return <div className="dis-maths">
+    {res.doubled ? <>(<Lvl>{lvl}</Lvl> × 2)</> : <Lvl>{lvl}</Lvl>} + (
+    {ramp
+      ? Array.from({ length: s }, (_, i) => flat + ramp * (i + 1)).join(" + ")
+      : <>{flat} × <Pts>{s}</Pts></>}
+    ){" = "}<Score>{res.scores[1 - res.declarer]}</Score> to{" "}
+    {nameOf(1 - res.declarer)}
+  </div>;
 }
 
 const suitOf = (c) => (c < NCARD ? Math.floor(c / 8)
@@ -408,6 +499,19 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
                     <b className={RED_DENOM(r.denom) ? "red" : ""}>
                       {r.level}{DENOM_LABEL[r.denom] || ""}
                     </b>
+                    {/* The defender's bet, on the line it doubled. A doubled
+                        round otherwise looked ordinary with a surprising
+                        number beside it — which is the row a reader most wants
+                        explained. Absent on a round banked before the field
+                        shipped, which reads as undoubled, correctly. */}
+                    {r.doubling > 1
+                      ? <span className="dis-mrow-dbl"
+                          title={r.doubling === 4
+                            ? "Doubled and redoubled — this round was played for 4×"
+                            : "Doubled — this round was played for 2×"}>
+                          ×{r.doubling}
+                        </span>
+                      : ""}
                     {r.null ? " Null" : ""}</>}
             </span>
             {/* The declarer's trick points against what they promised — the
@@ -435,7 +539,8 @@ function roundTitle(r, nameOf) {
   const who = nameOf(r.declarer);
   const what = `${r.level}${DENOM_LABEL[r.denom] || ""}`;
   const took = `took ${r.pts?.[r.declarer] ?? 0} of ${r.target}`;
-  return `Round ${r.round}: ${who} declared ${what}, ${took} — `
+  const bet = r.doubling > 1 ? ` (doubled, ×${r.doubling})` : "";
+  return `Round ${r.round}: ${who} declared ${what}${bet}, ${took} — `
     + (r.null ? "Null" : r.made ? "made" : "set");
 }
 
@@ -1746,15 +1851,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     point — <b>{[1, 2, 3].map((i) => shortRate + i).join(", then ")}</b>{" "}
                     — instead of {game.auction.level} plus a flat {shortRate}.
                   </div>
-                  <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    So it barely touches a near miss and bites hard on a collapse:
-                    one short costs them {2 * game.auction.level + shortRate + 1},
-                    four short {2 * game.auction.level + 4 * shortRate + 10}.
-                  </div>
-                  <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    Null is untouched — a declarer who wins {nullCond(game)} still
-                    scores {nullMake}, doubled or not.
-                  </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
                       onClick={() => doMove({ kind: "double", on: true })}>Double ×2</button>
@@ -1868,39 +1964,55 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     {res.mult > 1 || res.doubling > 1 ? ` = ${res.stake}` : ""}
                     {res.made
                       ? `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : ` + ${res.short_rate ?? 4} × ${res.short} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
+                      // `shortTail`, not a literal: the rate moved 4 -> 5 and
+                      // this line kept charging the old one, printing a sum
+                      // that did not reach the score beside it. The helper
+                      // reads `short_rate` off the row the engine scored with,
+                      // and spells a ramp out rather than faking it as a
+                      // product -- which skat has none of today, and would be
+                      // wrong here the day it does.
+                      : ` + ${shortTail(res)} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
                   </>}
                 </div>
               </> : <>
+                {/* POINTS vs SCORE. The sentence says what happened in TRICK
+                    POINTS — the currency the contract is measured in — and the
+                    line below turns that into SCORE. The two quantities are
+                    colour-keyed across both, so the P in "took 3 extra points"
+                    and the `+ 3` in the formula are visibly one number. */}
                 <div className="muted">
-                  {`${nameOf(res.declarer)} bid ${res.level}${DENOM_LABEL[res.denom]}`}
-                  {res.doubled ? `, doubled by ${nameOf(1 - res.declarer)},` : ""}
-                  {` and scored ${scored(res.declarer_pts)}`}
-                  {res.null ? ` — taking no scoring trick at all` : ""}
+                  {nameOf(res.declarer)} bid <Lvl>{res.level}</Lvl>
+                  {DENOM_LABEL[res.denom]}
+                  {res.doubled ? <>, doubled by {nameOf(1 - res.declarer)},</> : ""}
+                  {res.null
+                    // `nullCond`, so the condition is stated in the room's own
+                    // currency ("no +2 trick", "no positive trick") rather than
+                    // in a word that only fits the parity modes.
+                    ? <> and won {nullCond(game)} at all</>
+                    : res.made
+                      ? <> and took <Pts>{scored(res.over)}</Pts>{" "}
+                        extra {res.over === 1 ? "point" : "points"}</>
+                      : <> and finished <Pts>{res.short}</Pts>{" "}
+                        {res.short === 1 ? "point" : "points"} short</>}
                 </div>
                 {/* The doubling is shown as the STEP it is, not as a bigger
-                    number arriving from nowhere. Both branches read the result
-                    row's own `make_value` / `set_base`, which come off the terms
-                    `_finish` scored with -- so the panel cannot narrate an
-                    arithmetic the room did not apply. */}
-                <div className="dis-maths">
-                  {res.null
-                    ? `flat ${res.null_value} to ${nameOf(res.declarer)}`
-                    : res.made
-                      ? `${res.level} × ${res.level}${res.doubled ? " × 2" : ""}`
-                        + ` = ${res.make_value ?? res.level * res.level}`
-                        + `${overTail(res)} to ${nameOf(res.declarer)}`
-                      : `${res.set_base ?? res.level} + ${shortTail(res)}`
-                        + ` = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
-                </div>
+                    number arriving from nowhere. Every term is the result row's
+                    own -- off the terms `_finish` scored with -- so the panel
+                    cannot narrate an arithmetic the room did not apply. */}
+                <ResultMaths res={res} nameOf={nameOf} />
                 {res.doubled && (
+                  /* WHAT THE BET WAS WORTH, as the difference it made. This
+                     used to report the set BASE moving ("the set base went
+                     4 → 10"), which says nothing about the round just played
+                     and quoted a base the game stopped charging in 2026-08.
+                     `undoubled` is the engine's own re-score of this same
+                     round with the Double taken off, so the comparison is
+                     never a second copy of the scoring. */
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {res.null
                       ? `Doubled — but Null is not: a declarer who wins ${nullCond(game)}
                          scores the flat ${res.null_value} either way.`
-                      : res.made
-                        ? `Doubled: ${nameOf(1 - res.declarer)} took the bet and it landed.`
-                        : `Doubled: the set base went ${Math.max(0, res.level - 1)} → ${res.set_base}.`}
+                      : <DoubleWorth res={res} nameOf={nameOf} />}
                   </div>
                 )}
               </>}
