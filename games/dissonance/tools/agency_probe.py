@@ -95,10 +95,13 @@ def main(n: int) -> None:
     print(f"\n{'mode':>9} {'hand/piles':>11} {'on rails':>9} "
           f"{'choices':>8} {'forced':>7} {'plies':>6}")
     for mode in ("classic", "skat", "dummy"):
-        _, in_hand, _, _ = E.layout_for(mode)
-        rails = 6 / (in_hand + 6)
+        # Unpacked by NAME-ish rather than by width: the layout gained a pile
+        # count, and a fixed-arity unpack breaks silently-late on the next one.
+        layout = E.layout_for(mode)
+        in_hand, npiles = layout[1], layout[4]
+        rails = 2 * npiles / (in_hand + 2 * npiles)
         a = agency(mode, n)
-        print(f"{mode:>9} {f'{in_hand}+6':>11} {100 * rails:>8.0f}% "
+        print(f"{mode:>9} {f'{in_hand}+{2 * npiles}':>11} {100 * rails:>8.0f}% "
               f"{a['choices']:>8.2f} {100 * a['forced']:>6.0f}% {a['plies']:>6.0f}")
 
     print(f"\n  dummy, by seat position (0/1 = players, 2 = the dummy):")

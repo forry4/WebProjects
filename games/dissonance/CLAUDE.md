@@ -265,6 +265,19 @@ are the players; **seat 2 is the dummy**.
   always the real player who did not lead, so the duck-or-take decision stays
   a human one every trick; and it gives the declarer a new move — lead low,
   drop the dummy's +2 on it, and dare the defender to take a fat trick.
+* **NO FOLLOW-SUIT** (2026-08-10), the only mode without it, and MEASURED
+  against the classic prior rather than in spite of it. The FOLLOWERS were the
+  seats with nothing to decide — 2.27 legal cards against a leader's 4.11 —
+  and free discard levels that to 4.11 / 4.11 / 4.10, with forced plies
+  falling **33% → 13%** and hand-predicts-points doubling **+0.11 → +0.21**
+  (classic's own choices-per-decision is 4.07, so this lands exactly there).
+  The collapse the classic prior warns of does NOT happen here: the leader
+  keeps the lead on 55% of tricks under follow-suit and 50% without it, so
+  unwanted tricks do not simply fall to whoever led — because under CARD
+  scoring a trick's worth is chosen by the other two seats rather than fixed
+  by its number, which is exactly the premise the prior rests on and does not
+  hold in this mode. Ducking out does not become free either (Null 3% → 1%).
+  Ruffs rise 0.37 → 0.57 a trick, so the denomination you name matters more.
 * **No talon.** Two out-cards cannot support showing three, and the declarer's
   prize is the dummy. That also removes skat's Hand/Sharp/Open, which are all
   announcements ABOUT the talon.

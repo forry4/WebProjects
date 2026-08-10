@@ -290,6 +290,7 @@ export default function DissonanceRules() {
 					bottoms stay hidden from <i>everyone</i>, so it is open, not solved.
 				</p>
 				<RulesDefs items={[
+					{ t: "No following suit", d: "Play ANY card you can reach, always — this is the one mode that does not make you follow the suit led. Nobody can be forced into a trick they do not want, and the player answering last always has a real choice." },
 					{ t: "Whoever leads plays it", d: "The dummy belongs to the player who leads the trick — so you are choosing two of the three cards, and the opponent answers last." },
 					{ t: "It always plays second", d: "Leader, then the dummy, then the other player. The dummy never leads: a trick it wins leaves the lead where it was." },
 					{ t: "Command follows the lead", d: "Win a trick and you take the dummy with it. Lose the lead and you hand it over." },
@@ -323,9 +324,11 @@ export default function DissonanceRules() {
 						never compulsory.</li>
 					<li>The highest trump wins the trick; if no trump was played, the highest card of the
 						suit led wins. The winner leads the next trick.</li>
-					<li><b>Skat mode only:</b> if you can follow suit and can beat the
-						led card, you must — see that section. Classic and Minor let you
-						duck freely, which is most of what those modes are about.</li>
+					<li><b>Dummy mode only:</b> you do <b>not</b> have to follow suit at
+						all — any card you can reach is legal. With three cards to a
+						trick and the points sitting in the cards themselves, being able
+						to refuse a trick is what gives the last player a real decision.
+						Every other mode makes you follow.</li>
 					<li>Trick 1 is odd (−1), trick 2 is even (+2), and so on alternating to trick 13.</li>
 				</ul>
 			</RulesSection>

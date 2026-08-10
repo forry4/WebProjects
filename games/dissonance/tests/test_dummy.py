@@ -141,20 +141,59 @@ def test_a_completed_round_conserves_the_deal_pool():
         assert not set(g["played"]) & set(g["out"])
 
 
-def test_follow_suit_still_binds_all_three_hands():
+def test_dummy_mode_is_free_discard_and_the_parity_modes_are_not():
+    """FREE DISCARD (2026-08-10): every playable card is legal, always. The
+    followers were the seats with nothing to decide -- 2.27 legal cards
+    against a leader's 4.11 -- and this levels it to 4.11 across the board.
+
+    The parity modes keep mandatory follow: there the trick's value is known
+    before anyone chooses, so free discard lets every unwanted trick fall to
+    whoever led it. Both halves are asserted, because the whole point is that
+    the rule is per-mode."""
+    assert E.follows_suit("dummy") is False
+    for m in ("classic", "skat", "minor"):
+        assert E.follows_suit(m) is True, m
+
+    could_have_been_forced = 0
     for seed in range(12):
         g = _to_play(seed)
         while g["phase"] == "play":
             seat, pos = E.playing_seat(g), E.to_play(g)
             legal = E.legal_moves(g, seat)
+            assert set(legal) == set(E.playable(g, pos)), \
+                "every card a seat can reach is legal"
             if g["led"] is not None:
                 ls = E.esuit(g["led"], g["trump"])
                 follow = [c for c in E.playable(g, pos)
                           if E.esuit(c, g["trump"]) == ls]
-                assert set(legal) == set(follow or E.playable(g, pos))
-            else:
-                assert set(legal) == set(E.playable(g, pos))
+                if follow and len(follow) < len(legal):
+                    could_have_been_forced += 1
             E.apply_play(g, seat, legal[0])
+    assert could_have_been_forced > 0, \
+        "no seat was ever holding the led suit -- the rule proved nothing"
+
+
+def test_a_parity_mode_still_makes_you_follow():
+    """The guard on the other side: classic must be untouched by dummy's rule."""
+    import random as _r
+    bound = 0
+    for seed in range(20):
+        g = E.new_game(["a", "b"], _r.Random(seed), 0, mode="classic")
+        E.apply_bid(g, 0, 1, 2)
+        E.apply_pass(g, 1)
+        E.apply_swap(g, 0, None, None)
+        E.apply_double(g, 1, False)
+        while g["phase"] == "play":
+            seat = E.to_play(g)
+            legal = E.legal_moves(g, seat)
+            if g["led"] is not None:
+                ls = E.esuit(g["led"], g["trump"])
+                follow = [c for c in E.playable(g, seat)
+                          if E.esuit(c, g["trump"]) == ls]
+                assert set(legal) == set(follow or E.playable(g, seat))
+                bound += bool(follow) and len(follow) < len(E.playable(g, seat))
+            E.apply_play(g, seat, legal[0])
+    assert bound > 0, "follow-suit never bound in classic -- vacuous"
 
 
 def test_the_view_opens_the_dummys_hand_but_not_its_outer_piles():

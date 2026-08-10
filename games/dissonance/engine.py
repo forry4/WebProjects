@@ -455,6 +455,41 @@ def uses_card_points(mode: str) -> bool:
 #: drops back a rung -- so flipping it is genuinely the only edit.
 MUST_HEAD = {"classic": False, "skat": False, "minor": False, "dummy": False}
 
+#: MUST YOU FOLLOW SUIT? True everywhere by default.
+#:
+#: THE REPO'S PRIOR, which this flag exists to re-test rather than repeat:
+#: optional follow was rejected for CLASSIC because under parity scoring it
+#: makes every -1 trick fall deterministically to whoever leads it -- nobody
+#: ever has to take a trick they do not want, so 7 of 13 tricks lose all
+#: decision content. That argument is about a currency where the trick's value
+#: is known BEFORE the cards are chosen. Under card scoring the value is the
+#: cards, so the same rule may read completely differently, and with three
+#: seats the last player is choosing against two cards already on the table.
+#: Measured per mode rather than assumed -- see `tools/agency_probe.py`.
+#: DUMMY IS FREE DISCARD since 2026-08-10, and it is MEASURED -- the prior
+#: above is real but belongs to the parity modes, so it stays True there.
+#: With three seats and card scoring the rule reads the opposite way:
+#:
+#:   choices at a decision   2.88 -> 4.11   (classic's own figure is 4.07)
+#:   plies with no choice    33%  -> 13%
+#:   by seat in the trick    4.11/2.27/2.26 -> 4.11/4.11/4.10
+#:   hand predicts points    +0.11 -> +0.21
+#:
+#: The followers were the ones with nothing to decide -- 2.27 legal cards
+#: against the leader's 4.11 -- and free discard levels that exactly. The
+#: collapse the classic prior warns about does NOT happen here: the leader
+#: keeps the lead on 55% of tricks under follow-suit and 50% without it, so
+#: unwanted tricks do not simply fall to whoever led. Ducking out does not
+#: become free either (Null 3% -> 1%), because the value of a trick is its
+#: CARDS and the other two seats choose those. What does move is trump: ruffs
+#: run 0.37 -> 0.57 a trick, so which suit you name matters more, which is
+#: the auction's side of the same brief.
+FOLLOW_SUIT = {"classic": True, "skat": True, "minor": True, "dummy": False}
+
+
+def follows_suit(mode: str) -> bool:
+    return FOLLOW_SUIT.get(mode, True)
+
 
 def must_head_mode(mode: str) -> bool:
     return bool(MUST_HEAD.get(mode, False))
@@ -1424,8 +1459,10 @@ def legal_moves(g: dict, seat: int) -> list[int]:
         ls = esuit(g["led"], trump)
         follow = [c for c in cands if esuit(c, trump) == ls]
         # Follow-suit is MANDATORY and a pile's exposed top counts as a card
-        # you hold, so the piles can constrain you.
-        if follow:
+        # you hold, so the piles can constrain you -- unless the mode says
+        # otherwise (`FOLLOW_SUIT`), in which case every playable card is
+        # legal and a seat can always refuse a trick.
+        if follow and follows_suit(mode_of(g)):
             # MUST HEAD THE TRICK (see `MUST_HEAD`): if any card you could
             # follow with beats the lead, you must play one of them. Only the
             # FOLLOW set is filtered -- a void seat may still play anything and
