@@ -403,16 +403,19 @@ def test_a_two_seat_history_is_still_packed():
     assert persist.expand_state(packed)["game"]["history"] == g["history"]
 
 
-def test_a_round_dealt_before_the_wide_deck_is_voided_rather_than_jammed():
+def test_a_round_dealt_before_the_wide_deck_is_deleted_rather_than_jammed():
     """A dummy round in progress plays from the hands it was DEALT, so a
     ten-card round resumed under the thirteen-card layout runs fine until trick
-    11 and then jams with no legal move — a hung room, not an error. The load
-    path voids it instead (`engine.deal_is_current`), the same call the pre-v2
-    guard already makes.
+    11 and then jams with no legal move — a hung room, not an error.
+
+    It is DELETED, not voided. Voiding it in place left the row saying
+    `playing`, so the game sat in the player's Active list forever and the
+    lobby's cancel (open rooms only) could not remove it. Nothing about the
+    round is recoverable, so the row served nobody.
 
     Driven through `load_game_to_memory` rather than asserting the predicate
-    alone, because the guard is only worth anything at the seam -- the
-    predicate passing says nothing about whether anything calls it.
+    alone, because the guard is only worth anything at the seam — the predicate
+    passing says nothing about whether anything calls it.
     """
     from games.dissonance import main as M
 
@@ -435,23 +438,71 @@ def test_a_round_dealt_before_the_wide_deck_is_voided_rather_than_jammed():
     rid = "WIDEDK"
     row = {"players": {"p": "alice"}, "host": "p", "status": "playing",
            "game": old, "meta": {}, "mode": "dummy"}
-    real = M.load_game_state
+    deleted = []
+    real_load, real_del = M.load_game_state, M.delete_game
     M.load_game_state = lambda _rid: row
+    M.delete_game = lambda gid: deleted.append(gid)
     M.ROOMS.pop(rid, None)
     try:
-        assert M.load_game_to_memory(rid)
-        loaded = M.ROOMS[rid]
-        assert loaded["game"]["phase"] == "over", "a stale deal must not resume"
-        assert loaded["status"] == "over"
-        # THE SHAPE THE BOARD HAS TO SURVIVE: a round closed without ever being
-        # scored has NO result row. The result panel reads `res.made` as the
-        # first thing it touches, so this combination blanked the board with
-        # `TypeError: null is not an object (evaluating 'r.made')` until the
-        # panel grew its own branch for it. Pinned here because the crash is on
-        # the OTHER side of the wire from the code that creates the shape.
-        assert loaded["game"].get("result") is None, (
-            "a voided round has no result; Dissonance.jsx renders a dedicated "
-            "'Round ended' panel for exactly this and must keep doing so")
+        assert M.load_game_to_memory(rid) is False, "an unplayable save is gone"
+        assert deleted == [rid], "...and the ROW is deleted, not just the memory"
+        assert rid not in M.ROOMS
     finally:
-        M.load_game_state = real
+        M.load_game_state, M.delete_game = real_load, real_del
+        M.ROOMS.pop(rid, None)
+
+
+def test_a_playable_save_is_never_deleted_by_the_unplayable_guard():
+    """The guard drives an IRREVERSIBLE delete, so its false-positive rate is
+    the whole safety argument. Every card sits in exactly one of hands / piles /
+    out / played at every moment — `expand_state` rebuilds `played` from
+    `history`, so it is never merely absent — which makes `deal_is_current`
+    exact arithmetic rather than a heuristic.
+
+    Asserted over whole rounds in EVERY mode, at every ply, because a predicate
+    that is right at the deal and wrong at trick 9 would delete live games.
+    """
+    from games.dissonance import main as M
+
+    for mode in E.MODES:
+        g = E.new_game(["a", "b"], random.Random(21), opener=0, mode=mode)
+        seen = 0
+        while g["phase"] != "over" and seen < 300:
+            assert E.deal_is_current(g), f"{mode} ply {seen}: a live game read as stale"
+            seat = E.turn_seat(g)
+            if seat is None:
+                break
+            kind, mv = B.act(g, seat, random.Random(seen))
+            # `bot.act`'s answer -> an `apply_move` dict, the same mapping
+            # main.py does. Every kind, because this walks all four modes and
+            # an unhandled one would end the loop early and check nothing.
+            if kind == "move":
+                move = mv
+            elif kind == "play":
+                move = {"kind": "play", "card": mv}
+            elif kind == "swap":
+                move = {"kind": "swap", "take": mv.get("take"), "give": mv.get("give")}
+            elif mv.get("pass"):
+                move = {"kind": "pass"}
+            else:
+                move = {"kind": "bid", **mv}
+            E.apply_move(g, g["seats"][seat], move)
+            seen += 1
+        assert seen > 20, f"{mode}: the round barely advanced, so little was checked"
+
+    # ...and the seam agrees: a healthy save loads, and nothing is deleted.
+    healthy = E.new_game(["a", "b"], random.Random(5), mode="dummy")
+    rid = "HEALTHY"
+    row = {"players": {"p": "alice"}, "host": "p", "status": "playing",
+           "game": healthy, "meta": {}, "mode": "dummy"}
+    deleted = []
+    real_load, real_del = M.load_game_state, M.delete_game
+    M.load_game_state = lambda _rid: row
+    M.delete_game = lambda gid: deleted.append(gid)
+    M.ROOMS.pop(rid, None)
+    try:
+        assert M.load_game_to_memory(rid) is True
+        assert deleted == [], "a playable save must never be deleted"
+    finally:
+        M.load_game_state, M.delete_game = real_load, real_del
         M.ROOMS.pop(rid, None)

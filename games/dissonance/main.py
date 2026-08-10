@@ -291,23 +291,37 @@ def load_game_to_memory(room_id: str) -> bool:
     state = load_game_state(room_id)
     if not state:
         return False
-    # A save from before the v2 rules release (32-card deck) holds card indices
-    # this engine would misread as different cards entirely, so it cannot be
-    # resumed -- void it rather than corrupt it. The prod table was verified
-    # EMPTY when v2 shipped, so this guard exists for completeness, not for a
-    # population.
+    # AN UNPLAYABLE SAVE IS DELETED, not resurrected as a corpse. Two kinds
+    # cannot be resumed by this engine:
+    #   * a save from before the v2 rules release, whose card indices mean
+    #     different cards under the current deck;
+    #   * a round dealt before its mode's current LAYOUT -- a dummy round dealt
+    #     at ten cards a seat against today's thirteen. That one plays fine to
+    #     trick 10 and then jams with no legal move: a hung room with nothing
+    #     red anywhere.
     #
-    # ...and the SECOND arm is for a live population: a dummy round dealt before
-    # the wide deck holds ten cards a seat, and this engine's layout says
-    # thirteen. A round in progress plays from its own hands, so nothing catches
-    # the mismatch until trick 11, where the room simply jams with no legal move
-    # and nothing red anywhere. Same treatment: void it, do not migrate it.
+    # These used to be VOIDED in place (phase="over", no result), which was
+    # worse than it sounds. The row still said `playing`, so the game sat in the
+    # player's Active list forever, re-voiding on every open; the lobby's cancel
+    # only removes `status='open'` rows, so there was no way to be rid of it;
+    # and a closed round with no result row blanked the board outright until the
+    # panel grew a branch for it. Nothing about the game is recoverable -- it
+    # cannot be played, continued or scored -- so keeping the row served nobody.
+    #
+    # DELETING IS SAFE BECAUSE THE PREDICATE IS EXACT, which is the only reason
+    # this is a delete and not a flag: every card sits in exactly one of hands /
+    # piles / out / played at every moment of a round (`expand_state` rebuilds
+    # `played` from `history`, so it is never merely absent), so the union IS
+    # the deck and `deal_is_current` is arithmetic rather than a heuristic. A
+    # predicate that could be WRONG must never drive an irreversible delete.
     g = state.get("game")
     if isinstance(g, dict) and g.get("phase") != "over" and (
             g.get("v", 1) < engine.VERSION or not engine.deal_is_current(g)):
-        g["phase"] = "over"
-        g.setdefault("result", None)
-        state["status"] = "over"
+        LOG.info("dropping unplayable save %s (v=%s, mode=%s)",
+                 room_id, g.get("v"), g.get("mode"))
+        delete_game(room_id)
+        ROOMS.pop(room_id, None)
+        return False
     ROOMS[room_id] = {
         "players": state.get("players", {}),
         "host": state.get("host"),
@@ -445,6 +459,23 @@ def list_user_history(user_id: str) -> list[dict]:
             "updated_at": r["updated_at"],
         })
     return out
+
+
+def delete_game(game_id: str) -> None:
+    """Delete a row outright, whatever its status and whoever owns it.
+
+    NOT the lobby's cancel -- that one is `delete_open_game`, which is scoped to
+    an OPEN room the asking user hosts because it is a user action. This is the
+    server disposing of a save it has proved unplayable, so there is no owner to
+    check and no status to respect: a `playing` row is exactly the case that
+    needs it.
+    """
+    conn = _db()
+    try:
+        conn.execute(f"DELETE FROM {TABLE} WHERE id=?", (game_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def delete_open_game(game_id: str, user_id: str) -> bool:

@@ -1890,19 +1890,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
               )}
             </div>
           ) : (game.phase === "over" && !heldTrick && !res) ? (
-            /* A ROUND THAT ENDED WITHOUT A RESULT, which is a real state and
-               not a corrupt one: `load_game_to_memory` VOIDS a save it cannot
-               resume (a pre-v2 deck, or a dummy round dealt before the wide
-               deck) by closing the round in place, and a closed round that was
-               never scored has no result row to narrate.
+            /* A ROUND THAT ENDED WITHOUT A RESULT. Everything below reads
+               `res` unguarded and `res.made` is the first thing it touches, so
+               without this branch a missing result blanks the whole board with
+               `TypeError: null is not an object (evaluating 'r.made')`.
 
-               Everything below reads `res` unguarded, and `res.made` is the
-               first thing it touches — so this branch is the whole of the fix
-               for `TypeError: null is not an object (evaluating 'r.made')`,
-               which blanked the board on exactly those saves. The pre-v2 guard
-               had produced this shape since v2 shipped; its population was
-               verified empty, so nothing ever hit it until the wide deck gave
-               it live rows. */
+               A NET, not the primary handler, and deliberately kept as one.
+               The state was reachable because `load_game_to_memory` used to
+               VOID a save it could not resume (a pre-v2 deck, or a dummy round
+               dealt before the wide deck) by closing the round in place with no
+               result; it DELETES those rows now, so nothing should arrive here.
+               "Should" is the reason this stays: the cost is a dozen lines and
+               the failure it prevents is the entire screen. */
             <div className="dis-result">
               <div className="dis-big set">Round ended</div>
               <div className="muted">
