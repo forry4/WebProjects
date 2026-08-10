@@ -1044,3 +1044,95 @@ def test_a_round_abandoned_mid_play_banks_no_deal_to_review():
     row = g["match"]["rounds"][-1]
     assert row.get("abandoned") is True
     assert "deal" not in row, "there is nothing to review in a round nobody finished"
+
+
+def _row_reproduces_its_score(res) -> bool:
+    """Re-add the result row's own terms and see if they reach its score.
+
+    This is the RESULT PANEL's arithmetic, written out the way the panel writes
+    it: the row is the only thing the panel has, so if these terms cannot
+    reconstruct the score, the panel is printing a sum that does not reach its
+    own total.
+    """
+    decl = res["declarer"]
+    if res["null"]:
+        printed, winner = res["null_value"], decl
+    elif res["made"]:
+        # (N x N [x2]) + rate x over
+        base = res["level"] * res["level"] * (2 if res.get("doubled") else 1)
+        if res["mode"] == "skat":
+            base = res["stake"]
+        printed = base + res.get("over_bonus", 0) * res["over"]
+        winner = decl
+    else:
+        base = (res["stake"] if res["mode"] == "skat"
+                else res["level"] * (2 if res.get("doubled") else 1))
+        ramp, flat, s = res.get("ramp", 0), res["short_rate"], res["short"]
+        tail = (sum(flat + ramp * (i + 1) for i in range(s)) if ramp
+                else flat * s)
+        printed, winner = base + tail, 1 - decl
+    return printed == res["scores"][winner]
+
+
+def _play_out_any(g, rng, force_double=False):
+    """Drive ANY mode to its result. `_play_out` above speaks classic's bid
+    shape only; this one goes through `bot.act` + `apply_move`, which is the
+    same mapping the room server uses, so skat's number ladder and its
+    declaration work unchanged."""
+    guard = 0
+    while g["phase"] != "over":
+        guard += 1
+        assert guard < 300, "game failed to terminate"
+        seat = E.turn_seat(g)
+        pid = g["seats"][seat]
+        # The server bot never Doubles (measured), so the ramped set branch --
+        # the one whose arithmetic is spelled term by term -- is unreachable
+        # from self-play alone and has to be asked for.
+        if force_double and g["phase"] == "double":
+            E.apply_double(g, seat, True)
+            continue
+        kind, mv = bot.act(g, seat, rng)
+        if kind == "bid":
+            mv = ({"kind": "pass"} if mv.get("pass")
+                  else {"kind": "bid", "level": mv["level"], "denom": mv["denom"]})
+        elif kind == "play":
+            mv = {"kind": "play", "card": mv}
+        elif kind == "swap":
+            mv = {"kind": "swap", "take": mv.get("take"), "give": mv.get("give")}
+        E.apply_move(g, pid, mv)
+    return g
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "skat"])
+def test_the_result_row_carries_every_term_its_own_score_needs(mode):
+    """THE PANEL PRINTS THE ARITHMETIC, AND THE ARITHMETIC HAS ONE OWNER.
+
+    Twice now the result panel has hardcoded a rate that the engine later
+    moved -- "+ 4 x short" survived the 4 -> 5 change in both the skat line and
+    the side panel -- and each time it printed a sum that did not add up to the
+    score displayed beside it. Nothing caught it, because the score itself was
+    right and only the story about it was wrong.
+
+    So every rate the panel needs must be ON the row, off the same terms
+    `_finish` scored with, and this walks real played-out rounds asserting the
+    row can rebuild its own number. It fails if a term is dropped from the row
+    OR if the payoff arithmetic changes shape without the row following.
+    """
+    seen = set()
+    for seed in range(60):
+        for dbl in ((False, True) if mode != "skat" else (False,)):
+            rng = random.Random(seed)
+            g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+            res = _play_out_any(g, rng, force_double=dbl)["result"]
+            assert _row_reproduces_its_score(res), (
+                "seed %d (doubled=%s): the row's terms do not reach its score -- %r"
+                % (seed, dbl, res))
+            outcome = "null" if res["null"] else "made" if res["made"] else "set"
+            seen.add(outcome)
+            if dbl and outcome == "set":
+                seen.add("ramped set")
+    # Non-vacuity: a sweep that only ever produced made contracts would pass
+    # while the set branch -- the one that has broken twice -- went unchecked.
+    assert {"made", "set"} <= seen, "only reached %s" % sorted(seen)
+    if mode != "skat":
+        assert "ramped set" in seen, "the Double's ramp branch was never reached"

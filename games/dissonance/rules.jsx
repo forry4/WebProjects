@@ -123,8 +123,8 @@ export default function DissonanceRules() {
 					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × N × N instead
 						of N × N, overtricks included.</li>
 					<li>Declarer <b>falls short</b>: you score <b>2N</b>, and every point they
-						finish below N costs them <b>more than the last</b> — 5, then 6, then
-						7, then 8 — instead of a flat 4 each.</li>
+						finish below N costs them <b>more than the last</b> — 6, then 7, then
+						8, then 9 — instead of a flat 5 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 12, doubled or not.</li>
 				</ul>
@@ -346,13 +346,13 @@ export default function DissonanceRules() {
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
 						declarer scores <b>N × N</b>, plus <b>1 for every trick point past N</b>.
 						The defender scores nothing.</li>
-					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 4 for every
+					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 5 for every
 						point the declarer finished below N</b>.</li>
 				</ul>
 				<p>
 					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
 					making it scores 9; bidding 3 and finishing on 7 scores 13; bidding 3 and
-					finishing on 1 gives your opponent 11.
+					finishing on 1 gives your opponent 13.
 				</p>
 				<RulesTip>
 					<p>

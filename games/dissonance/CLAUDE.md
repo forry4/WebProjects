@@ -755,6 +755,42 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
 
+## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
+
+The round has two quantities that are both "how much", and the panel used one
+verb for both. They are now fixed vocabulary, in the classic/minor result
+panel and in `rules.jsx`:
+
+* **points** = TRICK points, the currency the contract is measured in;
+* **score** = what the round pays onto the scoreboard.
+
+So a made round reads *"Alice bid 4♠ and took 3 extra points"* over
+`(4 × 4) + 3 = 19 to Alice`, and a set one *"…finished 2 points short"* over
+`4 + (5 × 2) = 14 to Bob`.
+
+* **The formula is COLOUR-KEYED to the sentence and deliberately NOT
+  simplified.** The contract level is plain full-strength text, trick points
+  are blue, the score is the panel's green (`.dis-n-lvl` / `.dis-n-pts` /
+  `.dis-n-score`), so the `3` in "took 3 extra points" and the `+ 3` it turns
+  into are visibly one number. The old line reduced through an intermediate
+  (`4 × 4 = 16 + 3 = 19`); the shape is now constant — `+ 0` on a contract
+  brought home exactly included, because a formula whose SHAPE moves with its
+  values has to be re-parsed every round.
+* **A DOUBLE MULTIPLIES THE OVERTRICK RATE TOO, and the old line dropped it**:
+  it printed `4 × 4 × 2 = 32 + 3 = 38`, which does not add up, because the tail
+  only ever showed the raw points while the payoff charged `over_bonus × over`.
+  Doubling now rides inside the term it multiplies.
+* **Twice a hardcoded rate has outlived the number it copied.** `+ 4 × short`
+  survived the 4 → 5 move in BOTH the skat maths line and the side panel, each
+  printing a sum that did not reach the score displayed beside it — the score
+  was right, only the story about it was wrong, so nothing failed.
+  `_finish_skat` now puts `short_rate` on its row (classic already did) and
+  both lines read it. **`test_the_result_row_carries_every_term_its_own_score_
+  needs` is the gate**: it plays real rounds in all three modes, forces the
+  Double so the ramped branch is reached, and re-adds the row's own terms to
+  demand they reproduce its score. Verified non-vacuous by putting the stale 4
+  back — it fails.
+
 ## Double — classic's defender bet, priced for the SACRIFICE (2026-08-07)
 
 A `double` phase between the classic swap and trick 1, the DEFENDER to act.

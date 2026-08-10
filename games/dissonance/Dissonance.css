@@ -442,6 +442,17 @@
 .dis-result .set { color: #ff9a9a; }
 .dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
+/* THE ROUND'S TWO CURRENCIES, colour-keyed between the sentence and the
+   formula under it: the same number is the same colour in both, so "took 3
+   extra points" and the `+ 3` it becomes read as one quantity rather than two
+   coincidences. The contract is the plain full-strength text (the dark
+   theme's stand-in for black), trick POINTS are blue, and the SCORE — the
+   only number that reaches the scoreboard — is the green this panel already
+   uses for a made contract. */
+.dis-n-lvl { color: var(--text); font-weight: 700; }
+.dis-n-pts { color: #7fb8ff; font-weight: 700; }
+.dis-n-score { color: #6fe0a0; font-weight: 700; }
+
 /* The match standing under the round's own result: separated by a rule, since
    the two score rows are the same shape and read as one list otherwise. */
 .dis-match {
