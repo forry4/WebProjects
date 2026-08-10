@@ -1122,6 +1122,8 @@ async def catalog():
     """Static rules data the client renders — kept server-side so the two can
     never disagree about what a trick is worth."""
     return {
+        # Ten names: the base deck's eight plus the wide deck's 5 and 6, in
+        # STRENGTH order, which is the order `engine.rank` indexes them in.
         "ranks": engine.RANK_NAMES,
         "suits": engine.SUIT_NAMES,
         "denoms": engine.DENOM_NAMES,
@@ -1160,8 +1162,15 @@ async def catalog():
         # client renders the values off the wire instead of hardcoding the
         # table. Its `pools` entry is None -- a card-scored round's pool is a
         # property of the deal (`engine.played_pool`), not the mode.
+        # The FULL ten-rank table, matching `ranks` above. The per-room wire
+        # slices it to the deck that room deals (`engine.wire_card_values`);
+        # this is the catalog, so it describes the whole game.
         "card_values": list(engine.CARD_VALUES),
         "card_modes": [m for m in engine.MODES if engine.uses_card_points(m)],
+        # THE WIDE DECK (2026-08-10): dummy deals 40 cards -- the same 32 plus a
+        # 5 and a 6 in each suit -- because three seats of thirteen do not come
+        # out of 32. Per mode, so nothing has to infer it from a seat count.
+        "deck_size": {m: engine.deck_size(m) for m in engine.MODES},
         # DUMMY mode (2026-08-10): a third hand, played by the declarer. The
         # client reads the shape from here rather than hardcoding a seat count
         # -- and `searchable_modes` is what stops the create modal offering

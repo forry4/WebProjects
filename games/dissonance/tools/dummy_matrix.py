@@ -31,25 +31,28 @@ from math import gcd
 
 from games.dissonance import bot, engine as E
 
-#: Candidate value tables, indexed by rank (7 8 9 10 J Q K A).
+#: Candidate value tables, indexed by `E.rank` -- STRENGTH order, and the wide
+#: deck's 5 and 6 lead every row. They are 0 in the shipped table (a safe
+#: discard, and what breaks the mod-3 granularity); a candidate that wants them
+#: to carry worth says so in its own first two entries.
 TABLES = {
     # The shipped table: two values, sixteen cards each.
-    "shipped  -1/+2": [-1, -1, 2, 2, 2, 2, -1, -1],
+    "shipped  0/-1/+2": [0, 0, -1, -1, 2, 2, 2, 2, -1, -1],
     # A zero in the middle of the low end -- the cheapest possible break of the
     # mod-3 granularity, and it gives the game a genuinely SAFE discard.
-    "zeros    0/-1/+2": [0, 0, 2, 2, 2, 2, -1, -1],
+    "low-sting -1 all": [-1, -1, -1, -1, 2, 2, 2, 2, -1, -1],
     # Spread, still anti-aligned with rank (the winners are the liabilities).
-    "spread   anti": [-2, -1, 1, 2, 3, 4, -3, -4],
+    "spread   anti": [0, -1, -2, -1, 1, 2, 3, 4, -3, -4],
     # Real Skat's shape: value ALIGNED with trick-winning power, so taking a
     # trick with your ace is what captures the points.
-    "skatlike aligned": [0, 0, 0, 10, 2, 3, 4, 11],
+    "skatlike aligned": [0, 0, 0, 0, 0, 10, 2, 3, 4, 11],
     # Aligned but gentler, and signed so ducking still matters.
-    "aligned  gentle": [-1, -1, 0, 3, 1, 2, 4, 5],
+    "aligned  gentle": [-2, -1, -1, -1, 0, 3, 1, 2, 4, 5],
     # MONOTONIC and signed: worth rises with rank, and the two lowest cards are
     # still small liabilities, so dumping a 7 on someone's trick keeps stinging
     # and a low card is still a tool. No Skat quirk (a ten worth more than a
     # queen), which is one fewer thing a player has to be told.
-    "aligned  monotonic": [-1, -1, 0, 1, 2, 3, 4, 5],
+    "aligned  monotonic": [-3, -2, -1, -1, 0, 1, 2, 3, 4, 5],
 }
 
 
@@ -74,13 +77,14 @@ def visible(g, q):
 
 def run(rounds: int, table, command: str, seed: int = 61):
     """Play `rounds` under a value table and a dummy-command rule."""
-    # `CARD_POOL` is a module CONSTANT computed from the table at import, and
-    # `played_pool` reads it -- so patching the values without it reports the
-    # share of a pool the deck no longer has. (It read 12.88 for a table whose
-    # real pool is ~110.) Patch both, restore both.
-    old_vals, old_cmd, old_pool = list(E.CARD_VALUES), E.DUMMY_COMMAND, E.CARD_POOL
+    # The deck total used to be a module CONSTANT computed from the table at
+    # import, so patching the values without it reported the share of a pool the
+    # deck no longer had (it read 12.88 for a table whose real pool is ~110).
+    # `E.card_pool_for` computes it from `CARD_VALUES` on every call now, so
+    # patching the table is enough -- the trap is documented rather than
+    # deleted, because it is the reason that function is not a constant.
+    old_vals, old_cmd = list(E.CARD_VALUES), E.DUMMY_COMMAND
     E.CARD_VALUES[:] = table
-    E.CARD_POOL = E.NSUIT * sum(table)
     E.DUMMY_COMMAND = command
     try:
         rng = random.Random(seed)
@@ -110,10 +114,9 @@ def run(rounds: int, table, command: str, seed: int = 61):
                 / len(pts) / (sx * sy)
         return {"corr": r, "sd": sy, "share": statistics.mean(shares),
                 "mean": my, "levels": len(set(pts)),
-                "pool": E.NSUIT * sum(table)}
+                "pool": E.card_pool_for("dummy")}
     finally:
         E.CARD_VALUES[:] = old_vals
-        E.CARD_POOL = old_pool
         E.DUMMY_COMMAND = old_cmd
 
 

@@ -1,9 +1,14 @@
 """Dummy mode — the fourth mode, and the first with a THIRD HAND.
 
-Three seats of ten (4 in hand + three 2-card piles), two cards out, ten tricks
-of three cards, card scoring, classic's auction. The dummy plays SECOND in
-every trick and never leads, and WHOEVER LEADS THE TRICK PLAYS IT -- so
-command changes hands with the lead (`DUMMY_COMMAND`).
+Three seats of THIRTEEN (7 in hand + three 2-card piles, the same holding
+every other mode deals), one card out, thirteen tricks of three cards, card
+scoring, classic's auction. The dummy plays SECOND in every trick and never
+leads, and WHOEVER LEADS THE TRICK PLAYS IT -- so command changes hands with
+the lead (`DUMMY_COMMAND`).
+
+Three thirteens is 39 cards, so this is the one mode that deals the WIDE deck:
+the base 32 plus a 5 and a 6 in each suit, as ids 32..39 (see `engine.rank`).
+Its deck partition is asserted below against `deck_size`, not a literal.
 
 The Rust core is two-seat, so NONE of this is covered by the parity fixtures --
 these tests are the only thing standing behind the mode's card play.
@@ -30,20 +35,72 @@ def _to_play(seed: int = 1, level: int = 3, denom: int = 2) -> dict:
     return g
 
 
-def test_the_deal_is_three_hands_of_ten_with_two_out():
+def test_the_deal_is_three_hands_of_thirteen_off_the_wide_deck():
     g = _dummy()
     assert E.n_hands(g) == 3
-    assert [len(h) for h in g["hands"]] == [4, 4, 4]
+    assert [len(h) for h in g["hands"]] == [7, 7, 7]
     assert all(len(p) == 3 and all(len(x) == 2 for x in p) for p in g["piles"])
-    assert len(g["out"]) == 2
-    assert E.ntricks_in(g) == 10
-    # Every card exactly once, and nothing dealt twice.
+    assert len(g["out"]) == 1
+    assert E.ntricks_in(g) == 13
+    # Every card exactly once, and nothing dealt twice. THE WIDE DECK: 40 cards
+    # rather than 32, because three seats of thirteen is 39.
+    assert E.deck_size("dummy") == 40 and E.deck_size("classic") == 32
     seen = list(g["out"])
     for q in range(3):
         seen += g["hands"][q] + [c for p in g["piles"][q] for c in p]
-    assert sorted(seen) == list(range(E.NCARD))
-    assert all(len(g["hands"][q]) + sum(len(p) for p in g["piles"][q]) == 10
+    assert sorted(seen) == list(range(E.deck_size("dummy")))
+    assert all(len(g["hands"][q]) + sum(len(p) for p in g["piles"][q]) == 13
                for q in range(3))
+
+
+def test_the_wide_decks_extra_cards_are_the_low_ranks_and_move_no_existing_id():
+    """The whole reason the extra cards sit at ids 32..39 rather than the deck
+    being renumbered `suit * 10 + rank`: every base card keeps its id, so the
+    committed Rust fixtures, the committed wasm and every saved classic / skat /
+    minor game go on meaning what they meant. Asserted rather than trusted --
+    a renumbering is exactly the kind of change that looks harmless."""
+    for c in range(E.NCARD):
+        assert E.suit(c) == c // E.NRANK
+        assert E.rank(c) == c % E.NRANK + E.NEXTRA
+    # ...and the eight new ones are a 5 and a 6 in each suit, below every 7.
+    extra = list(range(E.NCARD, E.NCARD_WIDE))
+    assert sorted(E.suit(c) for c in extra) == [0, 0, 1, 1, 2, 2, 3, 3]
+    assert sorted(set(E.rank(c) for c in extra)) == [0, 1]
+    assert {E.RANK_NAMES[E.rank(c)] for c in extra} == {"5", "6"}
+    for c in extra:
+        for b in range(E.NCARD):
+            if E.suit(b) == E.suit(c):
+                assert E.beats(c, b, E.NOTRUMP), "every base card beats a 5 or 6"
+                assert not E.beats(b, c, E.NOTRUMP)
+
+
+def test_the_extra_ranks_are_worth_nothing_and_the_deck_total_does_not_move():
+    """Two properties the value table was chosen for, both load-bearing:
+    the wide deck adds EIGHT cards and no points (so the ladder is not silently
+    re-scaled), and a trick's worth stops being a multiple of 3 (so the contract
+    rungs stop being duplicates of each other)."""
+    assert all(E.card_points(c) == 0 for c in range(E.NCARD, E.NCARD_WIDE))
+    assert E.card_pool_for("dummy") == E.card_pool_for("classic") == 16
+    from math import gcd
+    sums = {a + b + c
+            for a in E.CARD_VALUES for b in E.CARD_VALUES for c in E.CARD_VALUES}
+    g = 0
+    for s in sums:
+        g = gcd(g, abs(s))
+    assert g == 1, "a three-card trick can be worth any integer, not a multiple of 3"
+
+
+def test_a_thirty_two_card_room_still_ships_the_wire_table_it_always_did():
+    """WIRE COMPATIBILITY. `card_values` is sliced to the deck the room deals,
+    so a bundle cached from before the wide deck goes on indexing skat's eight
+    entries with `c % 8` and labelling every corner chip correctly. A dummy room
+    ships all ten and the client takes its offset from the LENGTH."""
+    assert E.wire_card_values("skat") == [-1, -1, 2, 2, 2, 2, -1, -1]
+    assert len(E.wire_card_values("dummy")) == E.NRANKS
+    for c in range(E.NCARD):
+        assert E.wire_card_values("skat")[c % E.NRANK] == E.card_points(c)
+    for c in range(E.NCARD_WIDE):
+        assert E.wire_card_values("dummy")[E.rank(c)] == E.card_points(c)
 
 
 def test_there_is_no_talon_and_the_auction_runs_straight_into_the_double():
@@ -69,7 +126,7 @@ def test_the_dummy_plays_second_every_trick_and_never_leads():
             for _ in range(3):
                 seat = E.playing_seat(g)
                 E.apply_play(g, seat, E.legal_moves(g, seat)[0])
-        assert g["trick"] == 10
+        assert g["trick"] == 13
 
 
 def test_the_leader_acts_for_the_dummy_and_nobody_else_can():
@@ -91,7 +148,7 @@ def test_the_leader_acts_for_the_dummy_and_nobody_else_can():
                 assert E.turn_pid(g) == g["seats"][lead]
                 both.add(lead)
             E.apply_play(g, seat, E.legal_moves(g, seat)[0])
-        assert saw == 10, "the dummy plays once a trick"
+        assert saw == 13, "the dummy plays once a trick"
     assert both == {0, 1}, "command never actually changed hands"
 
 
@@ -135,8 +192,8 @@ def test_a_completed_round_conserves_the_deal_pool():
         while g["phase"] == "play":
             seat = E.playing_seat(g)
             E.apply_play(g, seat, E.legal_moves(g, seat)[0])
-        assert g["trick"] == 10
-        assert len(g["played"]) == 30, "thirty cards are dealt in and all played"
+        assert g["trick"] == 13
+        assert len(g["played"]) == 39, "thirty-nine cards are dealt in and all played"
         assert sum(g["pts"]) == E.played_pool(g)
         assert not set(g["played"]) & set(g["out"])
 
@@ -239,7 +296,7 @@ def test_the_view_names_the_position_and_the_player_separately():
     assert v["to_play"] == E.DUMMY_POS, "the POSITION on turn"
     assert v["turn_seat"] == decl, "...and the PLAYER who acts for it"
     assert len(v["plays"]) == 1 and v["plays"][0][0] != E.DUMMY_POS
-    assert v["tricks"] == 10
+    assert v["tricks"] == 13
 
 
 def test_the_bot_plays_every_hand_and_finishes_a_round():
@@ -259,7 +316,7 @@ def test_the_bot_plays_every_hand_and_finishes_a_round():
             E.apply_move(g, g["seats"][seat], move)
             guard += 1
             assert guard < 200
-        assert g["result"] is not None and g["trick"] == 10
+        assert g["result"] is not None and g["trick"] == 13
 
 
 def test_the_bot_does_not_overtake_its_own_dummy():

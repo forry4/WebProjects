@@ -45,8 +45,10 @@ def _packable_hist(hist) -> bool:
 
 def _pack_hist(entry) -> int:
     seat, card, source = entry
-    # seat 0..1, card 0..31 (32-card deck), source 0..3. card<<1 tops out at
-    # 62, safely below the source field at bit 7.
+    # seat 0..1, card 0..39 (the wide deck), source 0..3. The card field is six
+    # bits (`_unpack_hist` masks 0x3F), so card<<1 tops out at 78, safely below
+    # the source field at bit 7 -- the wide deck fitted with room to spare and
+    # this encoding needed no version.
     return (seat & 1) | (card << 1) | (source << 7)
 
 

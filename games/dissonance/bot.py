@@ -62,7 +62,11 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
     """
     if seat is None:
         seat = E.to_play(g)
-    r = E.rank(c) / (E.NRANK - 1.0)
+    # "How high is this card", 0..1 -- normalised over the ranks THIS MODE
+    # deals, so the wide deck's two extra low ranks do not silently compress
+    # the term against everything else in the sum for the 32-card modes.
+    _lo, _hi = E.rank_bounds(E.mode_of(g))
+    r = (E.rank(c) - _lo) / float(_hi - _lo)
     led = g["led"]
     trump = g["trump"]
     if E.uses_card_points(E.mode_of(g)):
@@ -106,7 +110,7 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
         # king specifically, not enough to make the bot lead high generally.
         if E.must_head_mode(E.mode_of(g)) and E.card_points(c) < 0:
             cls, seen = E.esuit(c, trump), set(g["played"]) | set(E.playable(g, seat))
-            out = [x for x in range(E.NCARD)
+            out = [x for x in range(E.deck_size(E.mode_of(g)))
                    if x not in seen and E.esuit(x, trump) == cls
                    and E.beats(c, x, trump)]
             if out and all(E.card_points(x) < 0 for x in out):
@@ -137,10 +141,15 @@ def choose_card(g: dict, seat: int) -> int:
 
 # --- bidding ---------------------------------------------------------------
 
-#: Rough worth of each rank as a trick-winner (8 entries, rank 0 = the 7). The
-#: game needs LOW cards too (to force the -1 tricks onto the opponent), so the
-#: curve is deliberately shallower than a normal high-card-point count.
-_RANK_VALUE = [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
+#: Rough worth of each rank as a trick-winner. The game needs LOW cards too (to
+#: force the -1 tricks onto the opponent), so the curve is deliberately
+#: shallower than a normal high-card-point count.
+#:
+#: TEN ENTRIES, INDEXED BY `E.rank` -- i.e. by STRENGTH, the 5 first. The two
+#: leading entries only ever get read in a mode that deals the wide deck, and
+#: the base deck's eight are byte-identical to what they were before it
+#: existed, so classic and minor bid exactly as they did.
+_RANK_VALUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 
 
 #: What a card the seat cannot identify is worth: the mean of `_RANK_VALUE`.
@@ -152,7 +161,17 @@ _RANK_VALUE = [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 #: keeps the scale where it was. It is the unconditional deck mean rather than
 #: one conditioned on what the seat can see, which is the right refinement for a
 #: tier that has any lookahead at all -- this one has none.
-_UNKNOWN_RANK_VALUE = sum(_RANK_VALUE) / len(_RANK_VALUE)
+#:
+#: OVER THE RANKS THE MODE ACTUALLY DEALS. Averaging the whole ten-entry curve
+#: in a 32-card room would fold in two ranks that room has never seen and move
+#: every threshold in `_level_for` by the width of the change -- exactly the
+#: silent re-tune the paragraph above exists to prevent.
+def _unknown_rank_value(curve, mode: str) -> float:
+    lo = E.rank_bounds(mode)[0]
+    return sum(curve[lo:]) / len(curve[lo:])
+
+
+_UNKNOWN_RANK_VALUE = _unknown_rank_value(_RANK_VALUE, E.DEFAULT_MODE)
 
 
 #: CARD-SCORING rank worth (skat mode since 2026-09 -- the mode scores captured
@@ -164,9 +183,17 @@ _UNKNOWN_RANK_VALUE = sum(_RANK_VALUE) / len(_RANK_VALUE)
 #: into) despite being -1 themselves; the 7/8 are the ducking material that
 #: refuses the -2 tricks. Shallow on purpose, like `_RANK_VALUE` -- the LEVEL
 #: MAP below is what was calibrated, so only the curve's shape matters here.
-_SKAT_RANK_VALUE = [0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
+#:
+#: The wide deck's 5 and 6 lead it (see `_RANK_VALUE` for the indexing). They
+#: are worth ZERO points, which makes them the curve's weakest cards in a way
+#: no other rank is: a 7 at least DUCKS a trick you want to lose and costs the
+#: taker a point, while a 5 neither wins nor stings. It is still a safe
+#: discard, which is worth something under free discard, hence 0.45 rather
+#: than 0 -- a guess whose only job is to sit below the 8, with the LEVEL MAP
+#: doing the calibrated work as always.
+_SKAT_RANK_VALUE = [0.45, 0.45, 0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
 
-_SKAT_UNKNOWN_RANK_VALUE = sum(_SKAT_RANK_VALUE) / len(_SKAT_RANK_VALUE)
+_SKAT_UNKNOWN_RANK_VALUE = _unknown_rank_value(_SKAT_RANK_VALUE, E.DEFAULT_MODE)
 
 
 def hand_strength(g: dict, seat: int, denom: int) -> float:
@@ -200,10 +227,9 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
         cards = cards + visible(E.DUMMY_POS)
         unknown += sum(1 for i, p in enumerate(g["piles"][E.DUMMY_POS])
                        if len(p) == 2 and i != 1)
-    if E.uses_card_points(E.mode_of(g)):
-        curve, mean = _SKAT_RANK_VALUE, _SKAT_UNKNOWN_RANK_VALUE
-    else:
-        curve, mean = _RANK_VALUE, _UNKNOWN_RANK_VALUE
+    mode = E.mode_of(g)
+    curve = _SKAT_RANK_VALUE if E.uses_card_points(mode) else _RANK_VALUE
+    mean = _unknown_rank_value(curve, mode)
     total = sum(curve[E.rank(c)] for c in cards)
     total += unknown * mean
     if denom == E.GRAND:
@@ -254,14 +280,25 @@ _SKAT_LEVEL_NEEDS = ((9, 18.6), (8, 17.2), (7, 16.2), (6, 15.5), (5, 14.9),
 
 
 #: DUMMY mode's strength -> level map, CALIBRATED BY SELF-PLAY
-#: (tools/dummy_calibration.py). Its scale is unlike any other mode's for two
-#: compounding reasons: `hand_strength` counts the DUMMY's cards too (so the
-#: numbers run far higher than skat's), and the declarer commands two of the
-#: three hands, so they take most of a ~15-point pool rather than half of it.
-#: Placed against the measured distribution, not scaled from skat by feel.
-_DUMMY_LEVEL_NEEDS = ((12, 23.9), (11, 23.3), (10, 22.8), (9, 22.2),
-                      (8, 21.7), (7, 21.1), (6, 20.6), (5, 20.0),
-                      (4, 19.5), (3, 18.9), (2, 18.4))
+#: (tools/dummy_calibration.py). Its scale is unlike any other mode's because
+#: `hand_strength` counts the DUMMY's cards too, and since the wide deck a seat
+#: holds 13 rather than 10 -- so the numbers run about 27-31 where skat's run
+#: 13-19. Placed against the measured distribution, not scaled by feel.
+#:
+#: RE-ANCHORED for the thirteen-card deal, and the first map is the reason this
+#: says so: at ten cards a seat the thresholds ran 18.4-23.9, and against the
+#: wider hands EVERY hand cleared the top one -- 100% of contracts settled at
+#: level 12 and 13% of them were made. A level map is a set of quantiles on a
+#: distribution, so it does not survive the distribution moving.
+#:
+#: What it produces now (400 self-play rounds): settled levels 2-10 spread
+#: 2/5/15/21/28/19/6/3/2% with the mode at SIX -- which is where the forced-
+#: level EV curve peaks (`tools/dummy_auction_design.py`: +21.4 at level 6,
+#: falling to -8.0 at 12, so there is such a thing as bidding too high now) --
+#: and 74% made against classic's 82% and skat's 85%.
+_DUMMY_LEVEL_NEEDS = ((10, 30.6), (9, 29.8), (8, 29.0), (7, 28.1),
+                      (6, 27.2), (5, 26.4), (4, 25.5), (3, 24.5),
+                      (2, 23.0))
 
 
 def _level_for(strength: float, mode: str = "classic") -> int:
@@ -452,12 +489,19 @@ def swap_denom(g: dict, seat: int) -> int:
 #: value depends on who plays the cards afterwards (the old policy was +1.6 vs
 #: pat under exact play and -0.48 under greedy).
 #:
-#: Indexed by rank (7 8 9 10 J Q K A). `_SWAP_GIVE_W`'s Ace entry is a bare
-#: 0.0 because an Ace was never the best discard anywhere in the 6600
+#: Indexed by `E.rank` (5 6 7 8 9 10 J Q K A). `_SWAP_GIVE_W`'s Ace entry is a
+#: bare 0.0 because an Ace was never the best discard anywhere in the 6600
 #: labelled candidates -- the weight is unlearnable there; the entry only
 #: keeps the row indexable.
-_SWAP_TAKE_W = (0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
-_SWAP_GIVE_W = (0.32, 0.10, 1.51, 0.88, 0.95, -0.10, -1.04, 0.0)
+#:
+#: THE WIDE DECK'S TWO LEADING ENTRIES ARE UNREACHABLE and are 0.0 for that
+#: reason: only dummy mode deals a 5 or a 6, and dummy mode has no talon at
+#: all. They exist so the row is indexable by rank like every other curve here.
+#: `swap_policy_terms` ships the BASE-DECK SLICE over the wire, because Rust's
+#: `SwapPolicy` indexes by its own 0..7 rank -- shipping ten entries would
+#: silently price a 7 as a 5 on the client side.
+_SWAP_TAKE_W = (0.0, 0.0, 0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
+_SWAP_GIVE_W = (0.0, 0.0, 0.32, 0.10, 1.51, 0.88, 0.95, -0.10, -1.04, 0.0)
 _SWAP_TAKE_TRUMP = 1.57
 _SWAP_GIVE_TRUMP = -1.24
 #: Discarding a suit's LAST card (a void beats a singleton, but both help --
@@ -484,8 +528,14 @@ def swap_policy_terms() -> dict:
     the wire from here so a re-fit moves the leaf with no Rust change and no
     wasm rebuild; only the feature arithmetic lives twice, and
     `tests/fixtures/swap_policy.jsonl` holds the two copies to one answer.
+
+    The rank rows go over SLICED TO THE BASE DECK: Rust indexes them by its own
+    0..7 rank, and the wide deck's two extra entries only exist here to keep
+    the rows indexable by `E.rank`. A talon is a classic/skat thing anyway --
+    dummy, the one mode that deals the wide deck, has none.
     """
-    return {"take_w": list(_SWAP_TAKE_W), "give_w": list(_SWAP_GIVE_W),
+    return {"take_w": list(_SWAP_TAKE_W[E.NEXTRA:]),
+            "give_w": list(_SWAP_GIVE_W[E.NEXTRA:]),
             "take_trump": _SWAP_TAKE_TRUMP, "give_trump": _SWAP_GIVE_TRUMP,
             "void": _SWAP_VOID, "singleton": _SWAP_SINGLETON,
             "length": _SWAP_LENGTH}

@@ -279,10 +279,15 @@ export default function DissonanceRules() {
 
 			<RulesSection title="Dummy mode — a third hand on the table">
 				<p>
-					A <b>three-seat</b> game between two players. The deck deals{" "}
-					<b>three</b> hands of ten (4 in hand plus three 2-card piles), two
-					cards sit out, and there are <b>ten tricks of three cards</b>. Card
-					scoring, and the classic auction — no talon.
+					A <b>three-seat</b> game between two players, off a <b>40-card
+					deck</b> — the usual 32 plus a <b>5</b> and a <b>6</b> in each suit,
+					because three hands of thirteen do not come out of 32. Everyone gets
+					the same thirteen cards as any other mode (7 in hand plus three
+					2-card piles), one card sits out, and there are <b>thirteen tricks
+					of three cards</b>. Card scoring, and the classic auction — no
+					talon. The 5s and 6s are worth <b>nothing</b>: the only cards in the
+					game that neither pay you nor cost you, so they are what you throw
+					when you want no part of a trick.
 				</p>
 				<p>
 					The third hand is the <b>dummy</b>, and it is <b>face up from the

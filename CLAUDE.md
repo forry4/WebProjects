@@ -86,13 +86,13 @@ games/
                        #   migration gate. EXPANSIONS.md is the phase roadmap + debt ledger
   dissonance/          # Dissonance — 2p parity trick-taking. engine.py is a PORT of
                        #   rust-cores/dissonance-core (the solver-validated reference);
-                       #   tests/test_rust_parity.py is the drift gate. THREE modes
+                       #   tests/test_rust_parity.py is the drift gate. FOUR modes
                        #   over the shared card play, picked per room
                        #   (`mode: classic|skat|minor|dummy` — minor re-prices
                        #   even tricks to +1; skat scores the CARDS captured,
                        #   9/10/J/Q +2 and 7/8/K/A −1; dummy deals a THIRD hand
-                       #   the declarer plays, 3 seats x 10 cards, 10 tricks of
-                       #   three) — see its CLAUDE.md
+                       #   whoever leads plays, 3 seats x 13 cards off a WIDE
+                       #   40-card deck, 13 tricks of three) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the

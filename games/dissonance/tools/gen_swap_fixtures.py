@@ -52,10 +52,13 @@ def main() -> None:
     pats = 0
     for i in range(4000):
         suits = [rng.randrange(4) for _ in range(7)]
+        # `suit * NRANK + k` is the base deck's ID layout, where k runs 0..7 for
+        # 7..A -- so 5/6/7 here are Q/K/A. IDs, not `E.rank` values: those are
+        # strength indices over the wide deck's ten ranks and sit two higher.
         hand = sorted({s_ * E.NRANK + r for s_, r in zip(suits, [5, 6, 7, 6, 7, 5, 6])})
         if len(hand) != 7:
             continue
-        pool = [c for c in range(E.NCARD) if c not in hand and E.rank(c) in (1, 2, 3)]
+        pool = [c for c in range(E.NCARD) if c not in hand and E.rank(c) in (3, 4, 5)]
         rng.shuffle(pool)
         shown = sorted(pool[:3])
         denom = rng.randrange(E.NOTRUMP + 1)

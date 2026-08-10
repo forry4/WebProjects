@@ -12,9 +12,15 @@ Two design goals want measuring before anything is built:
 
 THE SUSPECT this exists to test: a Dissonance seat keeps most of its holding
 in PILES, of which only the top is playable. Classic deals 7 in hand + 6 in
-piles (46% on rails); dummy mode deals 4 + 6 (60% on rails) because three
-seats had to come out of one deck. If agency is what is missing, no value
-table or ladder fixes it.
+piles (46% on rails); dummy mode ONCE dealt 4 + 6 (60% on rails) because three
+seats had to come out of one 32-card deck, and it measured 2.89 legal cards at
+a decision against classic's 4.07, with a third of all plies forced outright.
+
+That is what the wide deck fixed: 40 cards deal three seats of thirteen on the
+same 7 + 6 split as everyone else, and this probe now reads 5.59 choices and 9%
+forced -- ABOVE classic, because dummy has no follow-suit either. All three
+positions read the same (5.60 / 5.61 / 5.57), so the third seat is not carrying
+the average.
 
     PYTHONPATH=. python -m games.dissonance.tools.agency_probe [rounds]
 """

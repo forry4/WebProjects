@@ -27,6 +27,7 @@ import random
 import statistics
 import sys
 from collections import Counter
+from math import gcd
 
 from games.dissonance import engine as E
 from games.dissonance.tools.dummy_auction_probe import forced_round
@@ -89,15 +90,24 @@ def main(n: int) -> None:
     print(f"the declarer banks {100 * share:.0f}% of the pool on average "
           f"-- before deciding anything, just for holding the dummy")
 
-    # THE GRANULARITY, which is what decides how fine a ladder can be. Every
-    # card is -1 or +2, and both are 2 mod 3, so THREE of them always sum to a
-    # multiple of 3 -- a two-card trick has no such property (-2/+1/+4). So in
-    # dummy mode every trick, and therefore every total, is a multiple of 3,
-    # and any ladder finer than that is mostly duplicate rungs.
-    step = 3
+    # THE GRANULARITY, which is what decides how fine a ladder can be, and it
+    # is COMPUTED rather than asserted -- it was 3 and is 1 now, and a hardcoded
+    # step would have gone on printing the old claim under the new deck.
+    #
+    # The old table made every card -1 or +2, both 2 mod 3, so THREE of them
+    # always summed to a multiple of 3 (a two-card trick has no such property:
+    # -2/+1/+4). Every dummy total was a multiple of 3, so contracts of 7, 8
+    # and 9 were literally the same contract and two thirds of the ladder was
+    # duplicate rungs. The wide deck's zero-worth 5 and 6 break it.
+    step = 0
+    for a in E.CARD_VALUES:
+        for b in E.CARD_VALUES:
+            for c in E.CARD_VALUES:
+                step = gcd(step, abs(a + b + c))
+    step = step or 1
     print(f"\nreachable totals: {sorted(set(pts))}")
-    print(f"every one a multiple of {step} -- so a ladder finer than {step} "
-          f"is mostly duplicate rungs")
+    print(f"a three-card trick is always a multiple of {step} -- so a ladder "
+          f"finer than {step} is mostly duplicate rungs")
 
     print("\n== candidate ladders ==")
     show("SHIPPED: target = level, 1..12",

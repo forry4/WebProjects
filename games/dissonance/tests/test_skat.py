@@ -144,7 +144,18 @@ def test_the_price_table_is_two_tiers_by_COLOUR_plus_no_trump():
 
 
 def _card(s: int, r: int) -> int:
-    return s * E.NRANK + r
+    # `E.card_of`, not `s * NRANK + r`: `r` here is a rank as `E.rank` reports
+    # it (strength-ordered over the wide deck's ten), and the base deck's two
+    # lowest ranks live at the END of the id space. Writing the arithmetic out
+    # by hand is how `TEN_RANK` silently became a queen.
+    return E.card_of(s, r)
+
+
+#: Ranks BY NAME. A bare index is what broke when the wide deck put two more
+#: ranks under the 7 -- `_card(1, 0)` silently stopped being the seven of
+#: diamonds -- and a name cannot drift the same way.
+def _R(name: str) -> int:
+    return E.RANK_NAMES.index(name)
 
 
 _TENS = [_card(s, E.TEN_RANK) for s in range(4)]
@@ -194,7 +205,7 @@ def test_the_second_ten_played_wins_whichever_two_they_are():
 
 
 def test_a_ten_ruffs_but_a_ten_lead_is_never_ruffed():
-    ace_of_spades, king_of_spades = _card(3, 7), _card(3, 6)
+    ace_of_spades, king_of_spades = _card(3, _R("A")), _card(3, _R("K"))
     assert E.beats(ace_of_spades, _TENS[0], E.GRAND), "a ten ruffs from any suit"
     assert not E.beats(_TENS[0], ace_of_spades, E.GRAND), "nothing over-ruffs a ten"
     assert E.beats(ace_of_spades, king_of_spades, E.GRAND) is False
@@ -205,7 +216,7 @@ def test_a_ten_is_not_a_card_of_its_own_suit_under_grand():
     """The rule with all the consequences. The ten of diamonds does not answer
     a diamond lead, does not beat a lower diamond as a diamond, and its absence
     from the suit is what makes a hand VOID."""
-    ten_d, nine_d, seven_d = _TENS[1], _card(1, 2), _card(1, 0)
+    ten_d, nine_d, seven_d = _TENS[1], _card(1, _R("9")), _card(1, _R("7"))
     assert E.beats(nine_d, ten_d, E.GRAND), "it takes the trick as a TRUMP"
     assert not E.beats(ten_d, nine_d, E.GRAND), "a diamond cannot beat a trump"
     assert E.esuit(ten_d, E.GRAND) == E.TRUMP_CLASS
@@ -222,8 +233,8 @@ def _grand_at(hand: list[int], led: int) -> dict:
 
 
 def test_follow_suit_reads_the_grand_trump_as_a_fifth_suit():
-    ten_d, seven_d, queen_h = _TENS[1], _card(1, 0), _card(2, 5)
-    ace_d = _card(1, 7)
+    ten_d, seven_d, queen_h = _TENS[1], _card(1, _R("7")), _card(2, _R("Q"))
+    ace_d = _card(1, _R("A"))
 
     # Holding the ten of diamonds does NOT discharge a diamond lead.
     g = _grand_at([ten_d, seven_d, queen_h], ace_d)
@@ -1099,8 +1110,10 @@ def test_null_gets_no_early_exit_of_its_own(mode):
 def test_card_values_price_the_middle_ranks_up_and_the_ends_down():
     """9/10/J/Q are +2, 7/8/K/A are -1 -- and the whole deck sums to +16, so
     the dealt-in pool is 16 minus whatever the six out-cards are worth."""
-    assert E.CARD_VALUES == [-1, -1, 2, 2, 2, 2, -1, -1]
-    assert E.CARD_POOL == 16
+    # The table is ten entries in STRENGTH order since the wide deck (dummy
+    # mode); skat deals the base 32, whose ranks are its last eight.
+    assert E.CARD_VALUES[E.NEXTRA:] == [-1, -1, 2, 2, 2, 2, -1, -1]
+    assert E.card_pool_for("skat") == 16
     for c in range(E.NCARD):
         want = 2 if E.RANK_NAMES[E.rank(c)] in ("9", "10", "J", "Q") else -1
         assert E.card_points(c) == want, E.card_name(c)
@@ -1156,7 +1169,10 @@ def test_the_view_flags_card_scoring_and_ships_the_values():
     skat = _declared()
     v = E.view_for(skat, 0)
     assert v["card_pts"] is True
-    assert v["card_values"] == E.CARD_VALUES
+    # SLICED TO THE DECK THIS ROOM DEALS -- a 32-card room ships the same
+    # eight entries it shipped before the wide deck existed, so a bundle
+    # cached from before it still labels every corner chip correctly.
+    assert v["card_values"] == E.CARD_VALUES[E.NEXTRA:]
     # A card-scored trick has no value until both cards are down, so the
     # per-trick label is 0 and the client renders off the cards instead.
     assert v["trick_value"] == 0

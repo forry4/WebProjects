@@ -23,8 +23,16 @@ const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRo
   + rulesModalCss + _cssText;
 
 const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
-// 32-card deck: 7 low, ace high, eight ranks per suit.
-const RANKS = ["7", "8", "9", "10", "J", "Q", "K", "A"];
+// 32-card deck: 7 low, ace high, eight ranks per suit — ids 0..31, `suit*8 +
+// rank`. DUMMY mode deals a FORTY-card deck (three seats of thirteen do not
+// come out of 32): the same 32 plus a 5 and a 6 in each suit, bolted on as ids
+// 32..39 so no existing card id moves. See `engine.rank` for the whole
+// argument; the consequence here is that `rankOf` returns a STRENGTH index
+// 0..9 (0 = the 5) rather than the id's low bits, so this list is in strength
+// order and comparisons stay a plain `>`.
+const RANKS = ["5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const NEXTRA = 2;   // extra ranks per suit in the wide deck
+const NCARD = 32;   // the base deck; ids at or above this are the new lows
 // Denominations are RANKED left to right: a same-level overtake must name one
 // further right. Null is the top rung and exists only at level 6.
 // Indexed by DENOMINATION, so index 5 is the legacy Null marker and Grand
@@ -113,8 +121,9 @@ function overTail(res) {
   return ` + ${res.over} = ${res.scores[res.declarer]}`;
 }
 
-const suitOf = (c) => Math.floor(c / 8);
-const rankOf = (c) => c % 8;
+const suitOf = (c) => (c < NCARD ? Math.floor(c / 8)
+  : Math.floor((c - NCARD) / NEXTRA));
+const rankOf = (c) => (c < NCARD ? (c % 8) + NEXTRA : (c - NCARD) % NEXTRA);
 const isRed = (c) => suitOf(c) === 1 || suitOf(c) === 2;
 const cardName = (c) => RANKS[rankOf(c)] + SUIT_GLYPH[suitOf(c)];
 // Trick NUMBER t (1-based): even ones pay `even` (+2 classic, +1 in minor
@@ -129,9 +138,24 @@ const evenVal = (game) => game?.even_val ?? 2;
 // local table below is the render fallback for the corner chips and mirrors
 // `engine.CARD_VALUES` (also served as `catalog.card_values`) — a mismatch
 // could mislabel a chip, never score a point.
-const CARD_VALS = [-1, -1, 2, 2, 2, 2, -1, -1];
+// Ten entries, in `rankOf` order. The wide deck's 5 and 6 are worth ZERO —
+// a genuinely safe discard, and the thing that breaks the mod-3 granularity
+// the old all-±(1,2) table gave dummy's contract ladder.
+const CARD_VALS = [0, 0, -1, -1, 2, 2, 2, 2, -1, -1];
 const cardPts = (game) => game?.card_pts === true;
-const cardVal = (game, c) => (game?.card_values || CARD_VALS)[rankOf(c)];
+// The VIEW's table is sliced to the deck that room deals — eight entries in a
+// 32-card room (so a bundle cached from before the wide deck still reads it
+// correctly), ten in a dummy room. Take the offset from the LENGTH rather than
+// a version field: `RANKS.length - t.length` is 2 for the base deck and 0 for
+// the wide one, which is exactly how far its first entry sits up the ladder.
+const cardVal = (game, c) => {
+  const t = game?.card_values || CARD_VALS;
+  return t[rankOf(c) - (RANKS.length - t.length)];
+};
+// The render fallback for a card's corner chip, off the local table — the chip
+// is cosmetic (a mismatch mislabels it, never scores a point), and a Card has
+// no idea which room it is in.
+const cardWorth = (c) => CARD_VALS[rankOf(c)];
 // The Null consolation's condition, in this room's own words: no positive
 // trick under card scoring, no +even trick under the parities.
 const nullCond = (game) =>
@@ -211,8 +235,9 @@ function Card({ c, onClick, sel, small, ghost }) {
           the markup so the board class alone decides — a Card has no idea
           which room it is in, and threading the game through every call site
           for a cosmetic chip is how props rot. */}
-      <span className={`dis-pts ${CARD_VALS[rankOf(c)] > 0 ? "pos" : "neg"}`}>
-        {CARD_VALS[rankOf(c)] > 0 ? `+${CARD_VALS[rankOf(c)]}` : CARD_VALS[rankOf(c)]}
+      <span className={`dis-pts ${cardWorth(c) > 0 ? "pos"
+        : cardWorth(c) < 0 ? "neg" : "nil"}`}>
+        {cardWorth(c) > 0 ? `+${cardWorth(c)}` : cardWorth(c)}
       </span>
     </div>
   );

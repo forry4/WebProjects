@@ -5,10 +5,11 @@ even-numbered tricks score **+2** to whoever wins them, odd-numbered ones
 **−1**. Six positive against seven negative, so both players' totals always sum
 to exactly **+5** — sweeping all thirteen tricks scores 5, while taking exactly
 the six even ones scores 12. The game is about *which* tricks you win.
-(THREE modes since 2026-08-09: classic, skat — a second auction, and since
-the same day a second CURRENCY: skat scores the CARDS captured, not the trick
-parity — and **minor**, where even tricks pay **+1** and the pool is **−1**;
-each has its own section below.)
+(FOUR modes: classic, skat — a second auction, and since 2026-08-09 a second
+CURRENCY, since skat scores the CARDS captured rather than the trick parity —
+**minor**, where even tricks pay **+1** and the pool is **−1**, and since
+2026-08-10 **dummy**, a three-seat game between two players off a 40-card deck.
+Each has its own section below.)
 
 **Renamed from Oddtrick (2026-08-07)** — the working name is gone from the route
 (`/dissonance`), the `MODES` entry, the home card, the package, the Rust crate,
@@ -240,9 +241,10 @@ with an ace, they slide a 7 under it, and the trick pays −2. Commanding a
 SECOND HAND is the direct fix, because it makes you the author of two of a
 trick's three cards.
 
-**The shape.** THREE seats of ten (4 in hand + three 2-card piles), TWO cards
-out, TEN tricks of three cards, card scoring, CLASSIC's auction. Seats 0 and 1
-are the players; **seat 2 is the dummy**.
+**The shape.** THREE seats of THIRTEEN (7 in hand + three 2-card piles, the
+same holding every other mode deals), ONE card out, THIRTEEN tricks of three
+cards, card scoring, CLASSIC's auction. Seats 0 and 1 are the players; **seat 2
+is the dummy**.
 * **Its hand is face up from the deal, to both players.** Shared information
   advantages neither bidder and turns the auction into a judgement about "my
   hand plus that one" against "theirs plus that one".
@@ -282,6 +284,88 @@ are the players; **seat 2 is the dummy**.
   prize is the dummy. That also removes skat's Hand/Sharp/Open, which are all
   announcements ABOUT the talon.
 
+**THE WIDE DECK — 40 cards, and the eight new ones are ids 32..39 (2026-08-10).**
+Three seats of thirteen is 39 cards and the deck holds 32, so dummy deals the
+base 32 plus a **5 and a 6 in each suit**. It went to thirteen because ten was
+the mode's biggest remaining problem: at 4 in hand + 6 in piles a seat was 60%
+ON RAILS with 2.89 legal cards at a decision and a third of all plies forced
+outright, against classic's 46% and 4.07 (`tools/agency_probe.py`). It now
+reads **5.59 choices and 9% forced, above classic**, and all three positions
+read the same (5.60 / 5.61 / 5.57) — the third seat is not carrying the mean.
+
+* **The layout is the id space, not `suit * 10 + rank`, and that is the whole
+  decision.** Renumbering is the obvious way to widen a deck and it would have
+  voided every saved classic/skat/minor game, every committed Rust parity
+  fixture and the committed wasm artifact, since a card id means a card. Bolting
+  the new ranks onto the END keeps every existing id and — the bigger win —
+  keeps `suit(c)` and `rank(c)` TOTAL functions of the id. A per-mode
+  `suit * nrank + rank` would make a card id mean different cards in different
+  modes, and all ~30 call sites across `engine.py`, `bot.py` and the JSX would
+  need a mode threaded through them to stay correct.
+* **The cost, and it is real: `rank()` no longer returns the id's low bits.** It
+  returns a STRENGTH index 0..9 (0 = the 5, 9 = the ace) in every mode, so
+  `RANK_NAMES`, `CARD_VALUES` and every rank curve are indexed by strength,
+  `beats` is still a plain `>`, and the base deck simply never produces a 0 or
+  1. **`E.card_of(suit, rank)` is the inverse and the only correct way to write
+  a card down** — `s * NRANK + r` is wrong for the wide deck and wrong for the
+  base deck too if `r` came out of `rank()` or `TEN_RANK`. That is not
+  hypothetical: it silently turned `TEN_RANK` into a queen and broke five Grand
+  tests on the first run.
+* **The two new ranks are worth ZERO, and each of the three reasons was
+  measured before it was chosen** (`tools/dummy_matrix.py`):
+  - the deck total stays **+16** — 4 × (0+0−1−1+2+2+2+2−1−1) — so a wider deck
+    does not silently re-scale the ladder the level map keys on;
+  - **it breaks the mod-3 granularity.** Every value used to be 2 mod 3, so
+    three of them always summed to a multiple of 3: every dummy total was a
+    multiple of 3, contracts of 7, 8 and 9 were literally the same contract and
+    two thirds of the ladder was duplicate rungs. Reachable totals now run
+    every integer from −7 to 18 and the gcd is 1. `dummy_auction_design.py`
+    COMPUTES that gcd rather than printing a hardcoded 3, which is how the old
+    claim would have survived the fix;
+  - it gives the mode a genuinely **safe discard**, which is what free discard
+    wants to feed on — a card that neither wins a trick you want to lose nor
+    costs the taker anything.
+* **`card_values` on the wire is SLICED to the deck the room deals** — eight
+  entries in a 32-card room, ten in a dummy room — so a bundle cached from
+  before the wide deck goes on indexing skat's table with `c % 8` and labelling
+  every corner chip correctly. The client takes its offset from the LENGTH
+  (`RANKS.length - t.length`), which needed no new field and no version bump.
+  `bot.swap_policy_terms` slices the same way for the opposite reason: Rust's
+  `SwapPolicy` indexes by its own 0..7 rank, so ten entries would price a 7 as
+  a 5 client-side. (Dummy has no talon, so the rows are unreachable there.)
+* **Rust is untouched and stays that way.** `client_searchable("dummy")` is
+  False, so the core never sees a wide-deck game; the parity fixtures, the
+  `views.jsonl` wire fixtures and the committed wasm all describe the 32-card
+  game and are still exactly right about it. `persist._pack_hist`'s card field
+  is six bits, so ids up to 63 fit — the wide deck needed no format version.
+
+**THE AUCTION IS A DECISION NOW, and the fix was the deal, not the ladder.**
+Everything the old measurements said about it has moved:
+
+| | ten cards a seat | thirteen |
+|---|---|---|
+| declarer's share of the pool | 0.69 → 0.57 (leader command) | **0.48** |
+| corr(visible hand → points taken) | +0.06 → +0.15 | **+0.145** |
+| forced-level EV at level 1 → the top | +10.4 → **+58.2 at 9** (bid the top) | **+7.2 → peak +21.4 at 6 → −8.0 at 12** |
+| granularity of a trick | 3 | **1** |
+| choices at a decision / plies forced | 2.89 / 33% (2.27 following) | **5.59 / 9%** |
+
+The shipped 1..12 ladder therefore needs no re-pricing at all: it has a real
+interior peak and a real punishment at the top, which is what
+`dummy_auction_design.py` was written to look for and never found before.
+
+**`_DUMMY_LEVEL_NEEDS` and `MATCH_TARGET["dummy"]` were BOTH re-anchored, and
+the first attempt at each is the lesson.** A level map is a set of quantiles on
+a distribution and does not survive the distribution moving: against thirteen-
+card hands every one of the old 18.4–23.9 thresholds was cleared, so **100% of
+contracts settled at level 12 and 13% were made**. Re-placed at 23.0–30.6
+against the measured spread (p50 27.2, p90 29.0), self-play now settles
+**2–10, mode 6 (2/5/15/21/28/19/6/3/2%), 74% made** — against classic's 82% and
+skat's 85%, and with the mode sitting exactly on the EV peak. `MATCH_TARGET`
+fell **400 → 200**: the declarer's collapse from ~12 of a 15-point pool to 7.7
+of 15.6 took the mean winning round from ~61 to ~34, and 400 would now buy
+nearly twelve rounds where classic's 100 buys ~6.2. 200 buys ~5.9.
+
 **A NEW MODE rather than a change to skat, deliberately.** Skat keeps its
 solver, its parity fixtures and its DD review column, and the two can be
 judged side by side. The cost is that the modes now differ in SEAT COUNT,
@@ -298,37 +382,35 @@ replay and the board need), and the frontend compares against `turn_seat` —
 comparing `to_play` told the declarer it was not their move on a third of the
 plies they actually have to make.
 
-**THE AUCTION IS STILL A LOTTERY, AND THE FIX IS NOT IN THE LADDER.** Measured
-in `tools/dummy_auction_design.py` and `tools/dummy_matrix.py`:
-* the points a declarer takes correlate **+0.07** with the hand they can see —
-  and **+0.06** with a CHEATING count of the cards really in their two hands,
-  so no honest estimator can do better and no pricing of the rungs helps;
-* every card is −1 or +2 and both are 2 mod 3, so **three** of them always sum
-  to a multiple of 3 (two do not: −2/+1/+4). Every total is a multiple of 3,
-  so contracts of 7, 8 and 9 are **literally the same contract** and two
-  thirds of the ladder is duplicate rungs;
-* make pays N² against a set's N + 5×short, so at levels 9–12 the reward is
-  quadratic against linear risk — forced-level EV runs +10.4 at level 1 to
-  **+58.2 at level 9**, i.e. there is no such thing as bidding too high.
+**THE AUCTION WAS A LOTTERY AT TEN CARDS A SEAT, and the record is kept
+because it is what the wide deck was bought to fix** (measured in
+`tools/dummy_auction_design.py` and `tools/dummy_matrix.py`; the current
+figures are in the wide-deck section above):
+* the points a declarer took correlated **+0.07** with the hand they could see
+  — and **+0.06** with a CHEATING count of the cards really in their two hands,
+  so no honest estimator could do better and no pricing of the rungs helped;
+* every card was −1 or +2 and both are 2 mod 3, so **three** of them always
+  summed to a multiple of 3 (two do not: −2/+1/+4). Every total was a multiple
+  of 3, so contracts of 7, 8 and 9 were **literally the same contract** and two
+  thirds of the ladder was duplicate rungs;
+* make pays N² against a set's N + 5×short, so at levels 9–12 the reward was
+  quadratic against linear risk — forced-level EV ran +10.4 at level 1 to
+  **+58.2 at level 9**, i.e. there was no such thing as bidding too high.
 
-`DUMMY_COMMAND = "leader"` fixes the SHARE and is orthogonal to all of that
-(it moves the correlation only +0.07 → +0.15). **What moves predictability is
-whether card VALUE is aligned with trick-winning POWER**, measured over five
-tables: the shipped anti-aligned one reads +0.07, a monotonic aligned one
-(−1,−1,0,1,2,3,4,5) reads **+0.39**, and a table spread WIDE but still
-anti-aligned reads **−0.18** — so it is alignment, not spread. Until that is
-decided the level map below is not worth re-tuning; it would be calibrated
-against a coin flip.
+`DUMMY_COMMAND = "leader"` fixed the SHARE and was orthogonal to all of that
+(it moved the correlation only +0.07 → +0.15). **The measured lever on
+predictability was whether card VALUE is aligned with trick-winning POWER**,
+over five tables: the shipped anti-aligned one read +0.07, a monotonic aligned
+one (−1,−1,0,1,2,3,4,5) read **+0.39**, and a table spread WIDE but still
+anti-aligned read **−0.18** — so it is alignment, not spread.
 
-**Measured** (`tools/dummy_calibration.py`, 300 self-play rounds): pool mean
-15.1, declarer takes a mean of 10.4 (p50 12) — so contracts settle at **levels
-3–12, median 9**, where classic settles at 3–5, and **73% are made**. That
-makes the mean winning round ~61 against classic's ~16, so **`MATCH_TARGET`
-is 400**: at 100 a match would be over in 1.6 rounds, and 400 buys ~6.6, the
-same match classic's 100 buys. `_DUMMY_LEVEL_NEEDS` is spaced ~0.55 apart
-because `hand_strength` counts the dummy too and the resulting distribution is
-narrow (p50 22.2, p90 23.8) — the first map, spaced 1.5 like skat's, put 82%
-of contracts on two rungs.
+**That lever was NOT the one pulled, and the reason is worth keeping.** The
+anti-alignment is the mode's whole premise — the cards that win tricks are the
+ones that cost points — so an aligned table buys predictability by deleting the
+game. What the wide deck did instead was give the players more CARDS (13, so
+46% on rails instead of 60%) and one genuinely inert rank, and the correlation
+came up to **+0.145** on its own with the premise intact. A design lever
+measured strong is not thereby the right lever.
 
 **THE BOT'S FIRST TRAP IS OVERTAKING ITS OWN DUMMY**, and the policy is
 written against sides rather than positions to avoid it: if the declarer's
@@ -357,16 +439,20 @@ Versioning the format instead would have risked every stored row to save bytes
 on a mode that has none.
 
 **Coverage is Python-only and that is the whole risk.** The parity fixtures
-are two-seat, so `tests/test_dummy.py` (16 tests) is the only thing standing
-behind this card play: the deal partition, dummy-second/never-leads over whole
-rounds, the declarer acting for it and the defender never being able to, a
-dummy trick scoring for the declarer and handing it the lead, the pool
-conserved, follow-suit binding all three hands, the redaction (its hand open,
-its outer bottoms shut, the opponent's hand still hidden), and the persistence
-round trip. `screens.mjs` drives the create modal to a dealt dummy room and
-asserts the third seat renders face-up with its own piles AND that a trick
-really reaches three cards — a rendered-but-not-dealt dummy is exactly what a
-half-wired third seat looks like.
+are two-seat, so `tests/test_dummy.py` (20 tests) is the only thing standing
+behind this card play AND behind the wide deck: the deal partition (asserted
+against `deck_size`, never a literal), every base id proving it did not move,
+the eight new cards being a 5 and a 6 per suit that every 7 beats, their zero
+worth and the deck total not moving, the trick gcd being 1, the sliced wire
+table, dummy-second/never-leads over whole rounds, the declarer acting for it
+and the defender never being able to, a dummy trick scoring for the declarer
+and handing it the lead, the pool conserved, free discard, the redaction (its
+hand open, its outer bottoms shut, the opponent's hand still hidden), and the
+persistence round trip. `screens.mjs` drives the create modal to a dealt dummy
+room and asserts the third seat renders face-up with its own piles, that a
+trick really reaches three cards, and that **a 5 or a 6 renders as itself** —
+a client still decoding ids as `suit*8 + rank` would draw the eight new cards
+with a blank glyph and an undefined rank rather than throwing.
 
 ## Must head the trick — MEASURED, THEN SHELVED THE SAME DAY (2026-08-10)
 
@@ -587,6 +673,12 @@ Only a pile's top is playable; the card under it becomes playable *and public*
 when uncovered. The **middle** pile's bottom is dealt face-up to both; the
 outer two are hidden from everyone **including the owner**. **Six** cards sit
 out, revealed at the end.
+
+(**Dummy mode deals 40** — the same 32 plus a 5 and a 6 in each suit, at ids
+32..39 — because three seats of thirteen do not come out of 32. Same 7 + three
+piles per seat, one card out. `deck_size(mode)` is the only place that varies;
+see the wide-deck section under DUMMY mode above for why the ids were appended
+rather than the deck renumbered.)
 
 **Auction.** Denominations are **ranked C < D < H < S < NT**. Opener
 names level 1–12 and a denomination, committing to score at least that many

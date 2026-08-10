@@ -61,15 +61,42 @@ import random
 # card you cannot see is your opponent's unless it is out of play), and the
 # 2026-08-07 sweep measured it saturating hard past 6 -- see
 # rust-cores/dissonance-core/CAMPAIGN.md.
+#
+# THE WIDE DECK (2026-08-10, dummy mode): three seats of thirteen is 39 cards
+# and the deck holds 32, so dummy deals a FORTY-card deck -- the same 32 plus a
+# 5 and a 6 in each suit. The eight new cards are ids 32..39 and NOT a
+# renumbering, which is the whole of why this shape was chosen over the obvious
+# `suit * 10 + rank`:
+#
+#   * every existing card id means exactly what it always did, so classic /
+#     skat / minor saves, the committed Rust parity fixtures and the committed
+#     wasm artifact are all untouched (the Rust core never sees a dummy game --
+#     `client_searchable` says so -- so it never has to learn the wide deck);
+#   * `suit(c)` and `rank(c)` stay TOTAL functions of the id. A per-mode
+#     `suit * nrank + rank` would make a card id mean different cards in
+#     different modes, and every one of the ~30 call sites would have to be
+#     handed a mode to stay correct. Bolting the new ranks on the end costs one
+#     branch in each of two functions instead.
+#
+# The cost, stated: the id's low bits are no longer the rank. `rank()` returns
+# a STRENGTH-ordered index 0..9 (0 = the 5, 9 = the ace) in every mode, so
+# `RANK_NAMES`, `CARD_VALUES` and every rank curve are indexed by strength and
+# `beats` is still a plain `>`; the base deck simply never produces a 0 or 1.
 
 VERSION = 2  # bumped by the 32-card / ranked / Null / swap release
 
-NRANK = 8
+NRANK = 8    # ranks per suit in the BASE deck
 NSUIT = 4
-NCARD = 32
+NCARD = 32   # the base deck: ids 0..31, and they never move
 NOTRUMP = 4
 
-RANK_NAMES = ["7", "8", "9", "10", "J", "Q", "K", "A"]
+#: The wide deck's extra ranks per suit (the 5 and the 6), laid out as
+#: `NCARD + suit * NEXTRA + k` so the base ids keep their meaning.
+NEXTRA = 2
+NCARD_WIDE = NCARD + NSUIT * NEXTRA   # 40
+NRANKS = NRANK + NEXTRA               # rank slots, strength-ordered
+
+RANK_NAMES = ["5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 SUIT_NAMES = ["clubs", "diamonds", "hearts", "spades"]
 SUIT_CHARS = ["c", "d", "h", "s"]
 
@@ -297,9 +324,15 @@ DUMMY_POS = 2
 #: player gets: only a pile's top is playable, so every card in a pile is a
 #: card the deal chose for you. Measured (`tools/agency_probe.py`): classic's
 #: 7 + three piles is 46% of a holding on rails and 4.07 legal cards at a
-#: decision; dummy's 4 + three piles is 60% on rails and 2.89, with a third of
-#: all plies forced outright.
-_LAYOUT = {DUMMY: (3, 4, 2, 10, 3)}
+#: decision; dummy's FIRST layout (4 + three piles, out of the 32-card deck)
+#: was 60% on rails and 2.89, with a third of all plies forced outright.
+#:
+#: DUMMY IS THIRTEEN A SEAT NOW (2026-08-10) -- the same 7 + three 2-card piles
+#: every other mode deals, and therefore the same 13 tricks and the same 46% on
+#: rails. Three thirteens is 39 cards, which is what the wide deck is for; ONE
+#: card sits out (dummy has no talon, so the out-pile is only the round-end
+#: reveal and its size is free).
+_LAYOUT = {DUMMY: (3, 7, 1, 13, 3)}
 _LAYOUT_DEFAULT = (2, 7, N_OUT, NTRICKS, 3)
 
 
@@ -380,15 +413,45 @@ def even_value(mode: str) -> int:
 #: 16 cards at +2 against 16 at -1 puts the whole deck at +16; six cards sit
 #: out, so a round's REAL pool is `played_pool` and varies with the deal
 #: (4..22, mean 13).
-CARD_VALUES = [-1, -1, 2, 2, 2, 2, -1, -1]
-
-#: What all 32 cards add up to. The dealt-in pool is this minus the out-cards.
-CARD_POOL = NSUIT * sum(CARD_VALUES)
+#:
+#: INDEXED BY `rank`, i.e. by STRENGTH, 5 first and ace last. The wide deck's
+#: two extra ranks are worth ZERO, which is three things at once and all three
+#: were measured before they were chosen (`tools/dummy_matrix.py`):
+#:   * the deck total stays +16 -- 4 suits x (0 + 0 - 1 - 1 + 2 + 2 + 2 + 2
+#:     - 1 - 1) -- so a wider deck does not silently re-scale the ladder;
+#:   * it breaks the mod-3 granularity. Every value used to be 2 mod 3, so
+#:     three of them always summed to a multiple of 3 and two thirds of dummy's
+#:     contract ladder were literally duplicate rungs. With a 0 in the table
+#:     the gcd of reachable trick sums is 1 and every rung is a real contract;
+#:   * it gives the mode a genuinely SAFE discard, which is what free discard
+#:     (no follow-suit, 2026-08-10) wants to feed on: a card that neither wins
+#:     a trick you want to lose nor costs points when someone else takes it.
+CARD_VALUES = [0, 0, -1, -1, 2, 2, 2, 2, -1, -1]
 
 
 def card_points(c: int) -> int:
-    """What capturing this card is worth, in skat mode."""
-    return CARD_VALUES[c % NRANK]
+    """What capturing this card is worth, under card scoring."""
+    return CARD_VALUES[rank(c)]
+
+
+def wire_card_values(mode: str) -> list:
+    """`CARD_VALUES` sliced to the ranks this mode's deck actually holds.
+
+    A WIRE-COMPATIBILITY decision, not tidiness. A 32-card room still ships the
+    same eight entries it always did, indexed 7..A, so a bundle cached from
+    before the wide deck goes on labelling skat's corner chips correctly; a
+    dummy room ships all ten. The client takes its offset from the LENGTH
+    (`NRANKS - len`), which needs no new field and no version bump.
+    """
+    return list(CARD_VALUES) if wide_deck(mode) else list(CARD_VALUES[NEXTRA:])
+
+
+def card_pool_for(mode: str) -> int:
+    """What this mode's whole deck adds up to. The dealt-in pool is this minus
+    the out-cards (`played_pool`). Computed rather than stored so a change to
+    `CARD_VALUES` -- including a tool patching it to measure a candidate table
+    -- cannot leave a stale constant behind it."""
+    return sum(card_points(c) for c in range(deck_size(mode)))
 
 
 def uses_card_points(mode: str) -> bool:
@@ -499,7 +562,7 @@ def played_pool(g: dict) -> int:
     """Both players' totals over a COMPLETED skat round: the worth of the 26
     dealt-in cards. Deal-dependent -- `out` is the six cards nobody plays (the
     swap keeps it current), so the pool is everything minus those."""
-    return CARD_POOL - sum(card_points(c) for c in g["out"])
+    return card_pool_for(mode_of(g)) - sum(card_points(c) for c in g["out"])
 
 
 def pool_for(mode: str):
@@ -539,15 +602,19 @@ def max_level_for(mode: str) -> int:
 #: length classic's 100 does. Measured in tools/minor_calibration.py, ~7
 #: bot-self-play rounds against classic's ~6 under the identical harness.)
 #:
-#: DUMMY's 400 is the same arithmetic in the other direction, and it is NOT a
-#: round number chosen by feel: with a third hand the declarer takes ~12 of a
-#: ~15-point pool, so contracts settle at levels 9-12 where classic settles at
-#: 3-5, and N^2 makes the mean winning round ~61 against classic's ~16. At 100
-#: a match would be over in 1.6 rounds -- one deal and a bit, which is exactly
-#: the "one bad deal decides it" problem matches exist to remove. 400 buys
-#: ~6.6 rounds, the same match classic's 100 buys. Measured in
+#: DUMMY's is the same arithmetic in the other direction, and it is NOT a round
+#: number chosen by feel. IT MOVED 400 -> 200 when the mode went to thirteen
+#: cards a seat, which is the whole reason this note keeps its history: at ten
+#: cards the declarer commanded so much of the table that they took ~12 of a
+#: ~15-point pool, contracts settled at levels 9-12, and N^2 made the mean
+#: winning round ~61 -- 100 would have ended a match in 1.6 rounds. The wide
+#: deck put every seat on 13 and the declarer's share fell to 48% (they now
+#: take a mean of 7.7 against a pool of 15.6), so contracts settle at 2-10 with
+#: a peak at 6 and the mean winning round is ~34. 200 buys ~5.9 rounds against
+#: classic's ~6.2 at 100; 400 would now buy nearly twelve, which is a different
+#: and much longer game than the other three modes offer. Measured in
 #: tools/dummy_calibration.py.
-MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25, "dummy": 400}
+MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25, "dummy": 200}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:
@@ -664,11 +731,54 @@ def skat_multiplier(hand: bool, sharp: bool, open_: bool) -> int:
 
 
 def suit(c: int) -> int:
-    return c // NRANK
+    if c < NCARD:
+        return c // NRANK
+    return (c - NCARD) // NEXTRA
 
 
 def rank(c: int) -> int:
-    return c % NRANK
+    """The card's STRENGTH, 0 (the 5) to 9 (the ace) -- not its id's low bits.
+
+    The base deck's ids are `suit * 8 + rank`, so a base card's own rank runs
+    0..7 for 7..A and has to be lifted by `NEXTRA` to sit above the wide deck's
+    two extra low ranks. Ordering is then a plain `>` everywhere, and every
+    rank-indexed table (`RANK_NAMES`, `CARD_VALUES`, the bot's curves) reads in
+    the order a player would say them.
+    """
+    if c < NCARD:
+        return c % NRANK + NEXTRA
+    return (c - NCARD) % NEXTRA
+
+
+def card_of(s: int, r: int) -> int:
+    """The card id for suit `s` at rank `r` -- `r` STRENGTH-ordered, i.e. the
+    number `rank` returns, not the id's low bits.
+
+    The inverse of (`suit`, `rank`), and the only correct way to write a card
+    down from its name now that the wide deck's two ranks live at the end of
+    the id space. `suit * NRANK + rank` is right for the base deck alone, and
+    is wrong for it too if the rank came out of `rank()` or `TEN_RANK`.
+    """
+    if r < NEXTRA:
+        return NCARD + s * NEXTRA + r
+    return s * NRANK + (r - NEXTRA)
+
+
+def wide_deck(mode: str) -> bool:
+    """Does this mode deal the 40-card deck? Dummy alone -- three seats of
+    thirteen do not come out of 32 cards."""
+    return has_dummy(mode)
+
+
+def deck_size(mode: str) -> int:
+    return NCARD_WIDE if wide_deck(mode) else NCARD
+
+
+def rank_bounds(mode: str) -> tuple:
+    """(lowest, highest) rank this mode's deck actually contains. What a
+    heuristic needs to normalise "how high is this card" without the base deck
+    silently re-scaling when the wide one arrived."""
+    return (0 if wide_deck(mode) else NEXTRA, NRANKS - 1)
 
 
 def card_name(c: int) -> str:
@@ -701,7 +811,7 @@ def esuit(c: int, trump: int) -> int:
     """
     if trump == GRAND and rank(c) == TEN_RANK:
         return TRUMP_CLASS
-    return c // NRANK
+    return suit(c)
 
 
 def trump_class(trump: int) -> int:
@@ -747,12 +857,13 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
     """
     rng = rng or random.Random()
     mode = mode if mode in MODES else DEFAULT_MODE
-    deck = list(range(NCARD))
+    deck = list(range(deck_size(mode)))
     rng.shuffle(deck)
 
     # THREE hands in dummy mode, and the third is the dummy -- same shape as a
     # player's (some in hand, three 2-card piles), because the piles are what
-    # keep even a face-up seat from being fully solved.
+    # keep even a face-up seat from being fully solved. Dummy also deals the
+    # WIDE deck: 3 x 13 is 39 cards and the base deck holds 32.
     nhands, in_hand, n_out, _, npiles = layout_for(mode)
     hands, piles = [], []
     k = 0
@@ -779,7 +890,7 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
         # THIS TRACKS WHAT IS CURRENTLY OUT OF PLAY, and a swap rewrites it --
         # see the note in `apply_swap`, which explains why the wire depends on
         # that and cannot be given the historical record instead.
-        # DUMMY MODE HAS NO TALON: only two cards sit out, and the declarer's
+        # DUMMY MODE HAS NO TALON: one card sits out, and the declarer's
         # prize is the third hand rather than a look at the out-pile. Empty
         # rather than absent, so every reader (`view_for`, the reveal, the
         # wire) keeps working without a mode test.
@@ -2426,7 +2537,13 @@ def view_for(g: dict, seat: int) -> dict:
         # refuses to arm a skat room for an older client
         # (`_handle_client_ai_ready`) and the worker refuses the payload.
         "card_pts": uses_card_points(mode_of(g)),
-        "card_values": (list(CARD_VALUES)
+        # SLICED TO THE DECK THIS MODE DEALS, and that is a wire-compatibility
+        # decision rather than tidiness. A 32-card room still ships the same
+        # eight entries it always did, indexed 7..A, so a bundle cached from
+        # before the wide deck goes on labelling skat's corner chips correctly;
+        # a dummy room ships all ten. The client picks its offset off the LENGTH
+        # (`10 - card_values.length`), which needs no new field and no version.
+        "card_values": (wire_card_values(mode_of(g))
                         if uses_card_points(mode_of(g)) else None),
         # MUST HEAD THE TRICK. The flag is the ROOM's rule (so the board can
         # say so before a card is led); `must_head_now` is whether it is

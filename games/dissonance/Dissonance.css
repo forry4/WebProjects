@@ -168,6 +168,11 @@
 .dis-cardpts .dis-pts { display: block; }
 .dis-pts.pos { color: #1d6b2f; background: rgba(29, 107, 47, 0.12); }
 .dis-pts.neg { color: #9c3540; background: rgba(156, 53, 64, 0.10); }
+/* The wide deck's 5 and 6 are worth NOTHING, which is a third state and not a
+   small negative: they are the mode's safe discard. Neutral ink, no tinted
+   plate, so a zero reads as "this card is inert" at a glance rather than as a
+   faint liability. */
+.dis-pts.nil { color: rgba(23, 23, 26, 0.55); background: rgba(23, 23, 26, 0.07); }
 .dis-card.red { color: #c0233a; }
 .dis-card.black { color: #17171a; }
 .dis-card.play { cursor: pointer; }

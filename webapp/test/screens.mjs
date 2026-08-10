@@ -2262,7 +2262,7 @@ try {
 			};
 		});
 		check("the dummy is on the board, face up, with its own piles",
-			!!dseat && dseat.visible && dseat.faceUp === 4 && dseat.backs === 0
+			!!dseat && dseat.visible && dseat.faceUp === 7 && dseat.backs === 0
 			&& dseat.piles === 3 && dseat.seats === 3, JSON.stringify(dseat));
 		check("...and it says whose hand it is", /dummy/i.test(dseat?.name || ""),
 			JSON.stringify(dseat?.name));
@@ -2297,10 +2297,28 @@ try {
 		}
 		check("a trick in a dummy room is three cards wide", widest >= 3,
 			`widest trick seen: ${widest}`);
-		check("the trick line counts to the mode's own length, not 13",
-			/of 10\b/.test(await dpage.locator(".dis-trickinfo").first()
+		check("the trick line counts to the mode's own length",
+			/of 13\b/.test(await dpage.locator(".dis-trickinfo").first()
 				.textContent().catch(() => "")),
 			await dpage.locator(".dis-trickinfo").first().textContent().catch(() => ""));
+		// THE WIDE DECK REACHED THE BROWSER. Dummy deals 40 cards -- the base 32
+		// plus a 5 and a 6 in each suit, at ids 32..39 -- and a client that
+		// still decoded ids as `suit*8 + rank` would render those eight as suit
+		// 4 and 5, i.e. a blank glyph and an undefined rank, not an error. 39 of
+		// the 40 are dealt, so a board mid-round holds at least seven of the
+		// eight; asserting one is enough to catch a decoder that cannot see
+		// them at all.
+		const lows = await dpage.evaluate(() => {
+			const seen = new Set();
+			for (const el of document.querySelectorAll(".dis-card .dis-r"))
+				seen.add(el.textContent.trim());
+			return [...seen];
+		});
+		check("the wide deck's 5s and 6s render as themselves",
+			lows.includes("5") || lows.includes("6"), JSON.stringify(lows));
+		check("...and no card renders with an unknown rank or suit",
+			lows.every((r) => ["5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+				.includes(r)), JSON.stringify(lows));
 		// A DUMMY ROOM HAS NO TALON, and `shown` is an empty array there --
 		// which is TRUTHY, so the panel rendered under a heading promising
 		// cards with nothing beneath it.
