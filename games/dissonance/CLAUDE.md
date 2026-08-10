@@ -333,16 +333,37 @@ read the same (5.60 / 5.61 / 5.57) — the third seat is not carrying the mean.
   `bot.swap_policy_terms` slices the same way for the opposite reason: Rust's
   `SwapPolicy` indexes by its own 0..7 rank, so ten entries would price a 7 as
   a 5 client-side. (Dummy has no talon, so the rows are unreachable there.)
-* **A dummy round dealt BEFORE this is voided on load, not migrated.** A round
-  in progress plays from its own hands, so a ten-card round resumed under the
-  thirteen-card layout runs fine to trick 10 and then jams with no legal move —
-  a hung room with nothing red anywhere, not an error. `engine.deal_is_current`
-  counts the union of hands / piles / out / played against `deck_size` (every
-  card is in exactly one of them at every moment, so the union IS the deck) and
-  `load_game_to_memory` closes any round that fails it, the same call it
-  already makes for pre-v2 saves. Unlike that one this had a live population:
-  dummy shipped the same day. The test drives the SEAM, not the predicate — a
-  predicate that passes says nothing about whether anything calls it.
+* **A dummy round dealt BEFORE this is DELETED on load, not migrated and not
+  voided.** A round in progress plays from its own hands, so a ten-card round
+  resumed under the thirteen-card layout runs fine to trick 10 and then jams
+  with no legal move — a hung room with nothing red anywhere, not an error.
+  `engine.deal_is_current` counts the union of hands / piles / out / played
+  against `deck_size` and `load_game_to_memory` drops any row that fails it.
+  Unlike the pre-v2 guard beside it, this had a live population: dummy shipped
+  the same day.
+  - **VOIDING IT IN PLACE WAS THE FIRST ATTEMPT AND WAS WORSE THAN IT SOUNDS.**
+    It closed the round in memory (`phase="over"`, no result) and left the row
+    saying `playing`, so the game sat in the player's Active list forever,
+    re-voiding on every open — and the lobby's cancel is scoped to
+    `status='open'` rows, so there was no way to be rid of it. It also blanked
+    the BOARD: the result panel reads `res.made` as the first property it
+    touches, so a closed round with no result threw
+    `TypeError: null is not an object`. Nothing about such a round is
+    recoverable — it cannot be played, continued or scored — so the row served
+    nobody.
+  - **The delete is safe because the predicate is EXACT, and that is the whole
+    argument for making it a delete.** Every card sits in exactly one of hands
+    / piles / out / played at every moment (`expand_state` rebuilds `played`
+    from `history`, so it is never merely absent), so the union IS the deck and
+    `deal_is_current` is arithmetic rather than a heuristic. A predicate that
+    could be WRONG must never drive an irreversible delete —
+    `test_a_playable_save_is_never_deleted_by_the_unplayable_guard` walks whole
+    rounds in all four modes asserting it at every ply, because one that is
+    right at the deal and wrong at trick 9 would destroy live games.
+  - The tests drive the SEAM, not the predicate: a predicate that passes says
+    nothing about whether anything calls it. The result panel keeps its
+    no-result branch as a NET, since the cost is a dozen lines and the failure
+    it prevents is the entire screen.
 * **Rust is untouched and stays that way.** `client_searchable("dummy")` is
   False, so the core never sees a wide-deck game; the parity fixtures, the
   `views.jsonl` wire fixtures and the committed wasm all describe the 32-card
