@@ -236,6 +236,135 @@ fn the_null_and_trick_searches_read_card_scoring_tricks() {
 }
 
 #[test]
+fn beats_mask_agrees_with_beats_over_the_whole_card_space() {
+    // The mask form drives must-head's filter and sits on the solver's hottest
+    // path, so it is swept exhaustively rather than sampled: within the led
+    // card's own class, membership must equal `beats` exactly, and nothing
+    // outside the class may ever appear (a ruff is not must-head's business).
+    use dissonance::state::beats_mask;
+    for trump in DENOMS {
+        for led in 0..NCARD {
+            let m = beats_mask(led, trump);
+            let cls = esuit(led, trump);
+            for follow in 0..NCARD {
+                let in_mask = m & (1 << follow) != 0;
+                if esuit(follow, trump) != cls {
+                    assert!(!in_mask, "off-class card {follow} in the mask");
+                } else {
+                    assert_eq!(in_mask, beats(led, follow, trump),
+                        "led {led} follow {follow} trump {trump}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn must_head_forces_a_winner_when_one_can_follow() {
+    // The rule, stated three ways over real deals: (1) with `head` off the
+    // legal set is unchanged; (2) with it on, if any follow card beats then
+    // EVERY legal card beats; (3) a seat that cannot follow is untouched --
+    // ruffing stays optional, which is the half of the rule most easily lost.
+    let mut touched = 0;
+    let mut ruffs = 0;
+    for seed in 0..60u64 {
+        let mut g = Game::deal(&mut Rng::new(seed + 500), (seed % 5) as u8, (seed % 2) as u8);
+        g.s.head = true;
+        let mut r = Rng::new(seed ^ 0x5EED);
+        while !g.over() {
+            let mut plain = g.s;
+            plain.head = false;
+            let (mut a, mut b) = ([0u8; 16], [0u8; 16]);
+            let na = plain.legal(&mut a);
+            let nb = g.s.legal(&mut b);
+            if g.s.led < 0 {
+                assert_eq!(&a[..na], &b[..nb], "a lead is never constrained");
+            } else {
+                let led = g.s.led as u8;
+                let cls = esuit(led, g.s.trump);
+                let follows: Vec<u8> =
+                    a[..na].iter().copied().filter(|&c| esuit(c, g.s.trump) == cls).collect();
+                if follows.is_empty() {
+                    assert_eq!(&a[..na], &b[..nb], "a void seat may still play anything");
+                    ruffs += 1;
+                } else if follows.iter().any(|&c| beats(led, c, g.s.trump)) {
+                    assert!(b[..nb].iter().all(|&c| beats(led, c, g.s.trump)),
+                        "seed {seed}: a non-beating card survived must-head");
+                    if nb < follows.len() {
+                        touched += 1;
+                    }
+                } else {
+                    assert_eq!(follows.len(), nb, "nothing beats: the follow set stands");
+                }
+            }
+            g.apply(b[r.below(nb)]);
+        }
+    }
+    assert!(touched > 0, "must-head never removed an option -- the gate is vacuous");
+    assert!(ruffs > 0, "no void seat arose -- the ruff half is untested");
+}
+
+#[test]
+fn a_must_head_ceiling_is_inferred_and_respected_by_the_determinizer() {
+    // The inference must-head buys: following without beating proves no higher
+    // card of that suit is in hand. Same shape as the void gate next door, and
+    // it matters for the same reason -- an unenforced ceiling has the
+    // determinizer dealing back a card the opponent has already disproved.
+    let mut rng = Rng::new(0xCA97);
+    let mut checked = 0;
+    for seed in 0..40u64 {
+        let mut g = Game::deal(&mut Rng::new(seed + 800), (seed % 4) as u8, 0);
+        g.s.head = true;
+        let mut kn = Knowledge::default();
+        let mut r = Rng::new(seed ^ 0x1CE);
+        let mut capped: Option<(usize, usize, u8)> = None;
+        while !g.over() && capped.is_none() {
+            let p = g.s.to_play() as usize;
+            let mut m = [0u8; 16];
+            let n = g.s.legal(&mut m);
+            let c = m[r.below(n)];
+            kn.observe(&g.s, p, c);
+            g.apply(c);
+            for cls in 0..NFOLLOW {
+                if kn.hand_cap[p][cls] < NRANK - 1 && !kn.hand_void[p][cls] {
+                    capped = Some((p, cls, kn.hand_cap[p][cls]));
+                }
+            }
+        }
+        let (seat, cls, cap) = match capped {
+            Some(x) => x,
+            None => continue,
+        };
+        // The ceiling has to be TRUE of the real hand, or the inference is
+        // simply wrong and every world built on it is a lie.
+        let mut truth = g.s.hand[seat];
+        while truth != 0 {
+            let c = truth.trailing_zeros() as u8;
+            truth &= truth - 1;
+            if esuit(c, g.s.trump) as usize == cls {
+                assert!(rank(c) <= cap,
+                    "seed {seed}: inferred a ceiling the real hand breaks");
+            }
+        }
+        let mut v = View::of(&g, 1 - seat);
+        v.kn = kn;
+        let mut buf = Vec::new();
+        for _ in 0..16 {
+            let d = v.determinize(&mut rng, &mut buf);
+            let mut h = d.hand[seat];
+            while h != 0 {
+                let c = h.trailing_zeros() as u8;
+                h &= h - 1;
+                assert!(esuit(c, d.trump) as usize != cls || rank(c) <= cap,
+                    "dealt a card above a ceiling the seat had proved");
+            }
+        }
+        checked += 1;
+    }
+    assert!(checked > 0, "no ceiling was ever inferred -- the gate is vacuous");
+}
+
+#[test]
 fn the_solver_agrees_with_itself_across_parities() {
     // The same deal solved under both parities: the minor value must equal a
     // brute recount of the minor-scored line, and the TT must not hand one
@@ -474,7 +603,11 @@ fn solver_matches_brute_force() {
             g.s.even = 1;
             minor_seeds += 1;
         } else if seed % 3 == 1 {
+            // The SHIPPED skat combination: card scoring AND must-head, since
+            // the legality rule changes which lines exist and `naive` reads
+            // `State::legal` too, so the brute-force gate covers both at once.
             g.s.cards = true;
+            g.s.head = true;
             card_seeds += 1;
         }
         let mut r = Rng::new(seed ^ 0xABCD);

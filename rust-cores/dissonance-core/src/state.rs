@@ -106,6 +106,18 @@ pub struct State {
     /// cards rather than the index), and rank-adjacent equivalence (two
     /// adjacent cards of DIFFERENT worth play differently).
     pub cards: bool,
+    /// MUST HEAD THE TRICK (the server's skat mode since 2026-08-10): when you
+    /// can follow suit you must play a card that BEATS the lead if you hold
+    /// one. A LEGALITY rule, so it is the deepest thing in here -- `legal` is
+    /// its only reader, but everything downstream (the solver, the
+    /// determinizer's inference, every bot) is defined over what `legal`
+    /// returns. Runtime state, and a SEPARATE flag from `cards` on purpose:
+    /// the two are different rules, this one is an experiment, and the server
+    /// can turn it off in one line (`engine.MUST_HEAD`) with the scoring
+    /// staying put. Read off the wire (`must_head`), default false, and gated
+    /// by `odd_wire() >= 4` -- an artifact without it proposes cards the room
+    /// refuses, which `_validated_bot_move` then throws away silently.
+    pub head: bool,
 }
 
 /// What capturing a card is worth under card scoring: +2 for the four middle
@@ -203,6 +215,27 @@ pub fn beats(led: u8, follow: u8, trump: u8) -> bool {
     // trump. At no-trump `t` is 255, which no class equals, so nothing ruffs.
     let t = trump_class(trump);
     fs == t && ls != t
+}
+
+/// Every card that would BEAT `led`, as a mask -- the set form of `beats`,
+/// restricted to the led card's own follow class (nothing outside it can beat
+/// except a ruff, which must-head deliberately never touches).
+///
+/// Under Grand a led TEN is beaten by every other ten: they cannot be ranked
+/// against each other and the second played wins, so the whole trump class is
+/// returned and must-head forbids nothing there. Everywhere else a card index
+/// is `suit * NRANK + rank`, so within one class "higher index" IS "higher
+/// rank" and the filter is one shift. `beats_mask_agrees_with_beats` walks the
+/// entire card space rather than sampling it -- this sits on the solver's
+/// hottest path and a disagreement is a different game, not a worse bot.
+#[inline]
+pub fn beats_mask(led: u8, trump: u8) -> Mask {
+    let cls = esuit(led, trump);
+    let class = follow_mask(cls, trump);
+    if cls == TRUMP_CLASS {
+        return class;
+    }
+    class & !(((1 as Mask) << (led + 1)) - 1)
 }
 
 impl State {
@@ -308,6 +341,14 @@ impl State {
             let f = m & follow_mask(esuit(self.led as u8, self.trump), self.trump);
             if f != 0 {
                 m = f;
+                // MUST HEAD THE TRICK. Only the FOLLOW set narrows: a void
+                // player may still play anything and is never forced to ruff.
+                if self.head {
+                    let h = f & beats_mask(self.led as u8, self.trump);
+                    if h != 0 {
+                        m = h;
+                    }
+                }
             }
         }
         let mut n = 0;

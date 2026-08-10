@@ -324,24 +324,30 @@ def test_a_minor_room_only_arms_a_client_that_speaks_even_val(_isolated_rooms):
     assert m.ROOMS["r1"].get("client_ai")
 
 
-def test_classic_rooms_accept_any_client_vintage_and_skat_needs_wire_3(_isolated_rooms):
+def test_classic_rooms_accept_any_client_vintage_and_skat_needs_the_top_rung(_isolated_rooms):
     """Classic never changed shape, so any bundle may search it. Skat scores
-    CARDS since 2026-08-09, and an older wasm would search the parity game --
-    legal moves, wrong game -- so a skat room arms only a `wire: 3` client,
-    the same fail-closed gate minor mode runs at `wire: 2`."""
+    CARDS (wire 3, 2026-08-09) and MUST-HEADS the trick (wire 4, 2026-08-10),
+    and an older wasm would search the wrong game -- at rung 4 it answers with
+    cards this room calls illegal -- so a skat room arms only the top rung,
+    the same fail-closed gate minor mode runs at `wire: 2`.
+
+    The requirement is DERIVED from the room's rules, so this asserts against
+    what `MUST_HEAD` currently says rather than pinning a literal: turning the
+    rule off must put skat back to rung 3 with no edit here."""
     run = asyncio.get_event_loop().run_until_complete
     m.ROOMS["r0"] = _room("classic")
     run(m._handle_client_ai_ready(_FakeWS(), "r0", "alice", {"ready": True}))
     assert m.ROOMS["r0"].get("client_ai"), "classic accepts any vintage"
 
+    need = 4 if E.must_head_mode("skat") else 3
     m.ROOMS["r1"] = _room("skat")
     run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice", {"ready": True}))
     assert not m.ROOMS["r1"].get("client_ai"), "no wire field: refused"
     run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice",
-                                  {"ready": True, "wire": 2}))
-    assert not m.ROOMS["r1"].get("client_ai"), "wire 2 predates card scoring"
+                                  {"ready": True, "wire": need - 1}))
+    assert not m.ROOMS["r1"].get("client_ai"), "one rung short is refused"
     run(m._handle_client_ai_ready(_FakeWS(), "r1", "alice",
-                                  {"ready": True, "wire": 3}))
+                                  {"ready": True, "wire": need}))
     assert m.ROOMS["r1"].get("client_ai"), "the current bundle is armed"
 
 

@@ -1179,3 +1179,95 @@ def test_the_deal_snapshot_says_it_was_card_scored():
     E.apply_swap(classic, 0, None, None)
     E.apply_double(classic, 1, False)
     assert classic["deal"]["cards"] is False
+
+
+# --- must head the trick (2026-08-10) ----------------------------------------
+
+
+def test_must_head_forces_a_beating_card_when_one_can_follow():
+    """The rule, and the two halves it must NOT touch: a lead is never
+    constrained, and a void seat may still play anything (ruffing stays
+    optional). Driven over real deals rather than a hand-built position, so it
+    covers the pile tops counting as followable cards."""
+    import random as _r
+    bound = voids = 0
+    for seed in range(40):
+        g = _drive_to_play(seed)
+        while g["phase"] == "play":
+            seat = E.to_play(g)
+            legal = E.legal_moves(g, seat)
+            if g["led"] is None:
+                assert set(legal) == set(E.playable(g, seat)), "a lead is free"
+            else:
+                ls = E.esuit(g["led"], g["trump"])
+                follow = [c for c in E.playable(g, seat)
+                          if E.esuit(c, g["trump"]) == ls]
+                if not follow:
+                    assert set(legal) == set(E.playable(g, seat)), \
+                        "a void seat is never forced to ruff"
+                    voids += 1
+                elif any(E.beats(g["led"], c, g["trump"]) for c in follow):
+                    assert all(E.beats(g["led"], c, g["trump"]) for c in legal), \
+                        f"seed {seed}: a duck survived must-head"
+                    if len(legal) < len(follow):
+                        bound += 1
+                else:
+                    assert set(legal) == set(follow), "nothing beats: follow stands"
+            E.apply_play(g, seat, legal[_r.Random(seed * 97 + g["trick"]).randrange(len(legal))])
+    assert bound > 0, "must-head never bound -- the test proves nothing"
+    assert voids > 0, "no void seat arose -- the ruff half is untested"
+
+
+def test_must_head_is_skat_only_and_one_dict_turns_it_off():
+    assert E.must_head_mode("skat") is True
+    assert E.must_head_mode("classic") is False
+    assert E.must_head_mode("minor") is False
+    assert E.must_head_mode("nonsense") is False
+    assert E.MUST_HEAD["skat"] is True
+
+
+def test_a_classic_room_may_still_duck_under_a_winner():
+    """The parity modes are UNTOUCHED, and this is the case that proves it:
+    a follower holding a winner and a loser keeps both options."""
+    import random as _r
+    ducked = False
+    for seed in range(60):
+        g = E.new_game(["a", "b"], _r.Random(seed), 0, mode="classic")
+        E.apply_bid(g, 0, 1, 2)
+        E.apply_pass(g, 1)
+        E.apply_swap(g, 0, None, None)
+        E.apply_double(g, 1, False)
+        while g["phase"] == "play" and not ducked:
+            seat = E.to_play(g)
+            legal = E.legal_moves(g, seat)
+            if g["led"] is not None:
+                w = [c for c in legal if E.beats(g["led"], c, g["trump"])]
+                if w and len(w) < len(legal):
+                    ducked = True     # a winner AND a loser both offered
+            E.apply_play(g, seat, legal[0])
+        if ducked:
+            break
+    assert ducked, "classic never offered a duck under a winner"
+
+
+def test_the_view_says_when_must_head_is_binding():
+    """The board's hint is the ENGINE's answer, not a client mirror -- the
+    client's `beats` is label-only and does not know Grand."""
+    g = _declared()
+    v = E.view_for(g, E.to_play(g))
+    assert v["must_head"] is True, "the room's rule is public from the start"
+    assert v["must_head_now"] is False, "nothing is led yet"
+    classic = E.new_game(["a", "b"], None)
+    assert E.view_for(classic, 0)["must_head"] is False
+
+
+def _drive_to_play(seed: int) -> dict:
+    """A skat game driven to the opening lead on a fixed contract."""
+    import random as _r
+    g = E.new_game(["alice", "bob"], _r.Random(seed), 0, mode="skat")
+    E.apply_skat_bid(g, 0, E.SKAT_BASE[2] * 3)
+    E.apply_pass(g, 1)
+    E.apply_hand(g, 0)
+    E.apply_declare(g, 0, 2, 3)
+    E.apply_kontra(g, 1, False)
+    return g

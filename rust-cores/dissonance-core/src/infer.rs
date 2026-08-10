@@ -59,6 +59,7 @@ fn rewind(v: &View, now: &State) -> State {
         // The scoring travels with the position -- a replay accumulates points.
         even: now.even,
         cards: now.cards,
+        head: now.head,
     }
 }
 

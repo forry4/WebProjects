@@ -282,6 +282,7 @@ impl OracleBot {
                 escored: 0,
                 even: 2,
                 cards: false,
+                head: false,
             },
         }
     }

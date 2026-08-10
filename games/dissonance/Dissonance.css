@@ -425,6 +425,13 @@
    A second auction over the same table, so everything here reuses the bid-grid
    vocabulary above rather than inventing a parallel one. */
 
+/* Why the hand narrowed: must-head is in force and this seat holds a winner.
+   Beside "Your turn", quiet enough not to compete with it. */
+.dis-mhead {
+  margin-left: 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em;
+  color: var(--accent-hi); opacity: 0.9;
+}
+
 /* Lobby-card badges breathe: the shared `.lby-badge` carries no margin of its
    own (JSX adjacency gives it none), so on a row with no mode badge "Your
    turn" sat flush against the opponent's name. Scoped to this game — other

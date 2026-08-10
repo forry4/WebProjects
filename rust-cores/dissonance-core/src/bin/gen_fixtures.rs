@@ -37,10 +37,17 @@ fn main() {
         // all. On the index rather than the RNG so the split cannot drift
         // with an unrelated draw.
         let even: i8 = if i % 4 == 3 { 1 } else { 2 };
+        // Card scoring and must-head are separate flags, but the SHIPPED
+        // combination is both-or-neither (skat mode), so the fixtures carry
+        // them together and `test_rust_parity` asserts that agreement rather
+        // than assuming it -- the port derives both from one mode string, so a
+        // fixture that split them would fail as a mystery illegal move.
         let cards = i % 4 == 1;
+        let head = cards;
         let mut g = Game::deal(&mut Rng::new(i + 1), trump, leader);
         g.s.even = even;
         g.s.cards = cards;
+        g.s.head = head;
 
         // The dealt layout, before a card is played.
         let mut hands = String::new();
@@ -93,7 +100,7 @@ fn main() {
         }
         println!(
             "{{\"hands\":[{}],\"piles\":[{}],\"out\":[{}],\"trump\":{},\"leader\":{},\
-             \"even\":{},\"cards\":{},\"moves\":[{}],\"pts\":[{},{}]}}",
+             \"even\":{},\"cards\":{},\"head\":{},\"moves\":[{}],\"pts\":[{},{}]}}",
             hands,
             piles,
             out.join(","),
@@ -104,6 +111,7 @@ fn main() {
             leader,
             even,
             cards,
+            head,
             moves.join(","),
             g.s.pts[0],
             g.s.pts[1]

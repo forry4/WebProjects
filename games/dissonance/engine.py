@@ -306,6 +306,42 @@ def uses_card_points(mode: str) -> bool:
     return mode == "skat"
 
 
+#: MUST HEAD THE TRICK (skat, 2026-08-10) -- when you CAN follow suit, you must
+#: play a card that BEATS the led card if you hold one. Ducking under a winner
+#: is only legal when you cannot beat it at all.
+#:
+#: WHY, and it is a fix for a specific complaint: under card scoring the FOLLOWER
+#: set the trick's value. You led an ace, they slid a 7 under it, and the trick
+#: you won paid -2 -- the player not taking the trick decided what it was worth,
+#: which is what made the mode feel random. Must-head hands that decision back:
+#: if they can beat you they must, so the lead now CHOOSES who takes the trick
+#: against a read of their holding, and the follower's remaining choice is
+#: WHICH winner to spend -- i.e. how much the trick they are taking is worth.
+#: That choice only exists because the cards carry the points; under a parity
+#: mode the same rule would collapse the follower to "cheapest winner" and
+#: delete the duck, which is the whole parity game. Hence skat only.
+#:
+#: WHAT IT DOES NOT TOUCH: ruffing. Void in the led suit you may still play
+#: anything, trump included, and are never forced to ruff -- must-head is a
+#: filter on the FOLLOW set alone. Making the ruff compulsory too is a separate,
+#: bigger change and is deliberately not in this one.
+#:
+#: TWO CONSEQUENCES worth knowing. High cards become a liability you can be
+#: FORCED to spend: lead a K and the ace must answer it, eating a -2 trick. And
+#: a pile TOP that beats forces itself out, uncovering the card beneath -- the
+#: piles constrain you harder than they did.
+#:
+#: A PER-MODE DICT, like `OVER_BONUS` and `EVEN_TRICK_VALUE`, and deliberately
+#: NOT folded into `uses_card_points`: a legality rule and a scoring rule are
+#: different things, this one is an experiment, and one line here turns it off
+#: without touching a rule anywhere else.
+MUST_HEAD = {"classic": False, "skat": True, "minor": False}
+
+
+def must_head_mode(mode: str) -> bool:
+    return bool(MUST_HEAD.get(mode, False))
+
+
 def played_pool(g: dict) -> int:
     """Both players' totals over a COMPLETED skat round: the worth of the 26
     dealt-in cards. Deal-dependent -- `out` is the six cards nobody plays (the
@@ -1119,6 +1155,10 @@ def _deal_snapshot(g: dict) -> dict:
         # BEFORE the change was played under the parity and must be reviewed
         # under it, which the absent key preserves for free.
         "cards": uses_card_points(mode_of(g)),
+        # ...and the same for must-head (2026-08-10), which is a LEGALITY rule:
+        # replaying an older round under it would explore lines that round's
+        # players were allowed to take and this one is not. Absent = off.
+        "head": must_head_mode(mode_of(g)),
         "terms": payoff_terms(g),
     }
 
@@ -1146,8 +1186,35 @@ def legal_moves(g: dict, seat: int) -> list[int]:
         # Follow-suit is MANDATORY and a pile's exposed top counts as a card
         # you hold, so the piles can constrain you.
         if follow:
+            # MUST HEAD THE TRICK (see `MUST_HEAD`): if any card you could
+            # follow with beats the lead, you must play one of them. Only the
+            # FOLLOW set is filtered -- a void seat may still play anything and
+            # is never forced to ruff.
+            if must_head_mode(mode_of(g)):
+                higher = [c for c in follow if beats(g["led"], c, trump)]
+                if higher:
+                    return higher
             return follow
     return cands
+
+
+def must_head_binds(g: dict, seat: int) -> bool:
+    """Is must-head REMOVING an option from this seat right now?
+
+    For the board's hint, and derived by comparing the legal set against the
+    plain follow set rather than by restating the rule -- a second copy of
+    "which cards beat the lead" is exactly the drift `legal_moves` owns.
+    False when the rule is not in play, when the seat is void (it never
+    touches a ruff), and when every follow card beats anyway, since then it
+    forbids nothing and a hint would be noise.
+    """
+    if g["phase"] != "play" or g["led"] is None or seat != to_play(g):
+        return False
+    if not must_head_mode(mode_of(g)):
+        return False
+    ls = esuit(g["led"], g["trump"])
+    follow = [c for c in playable(g, seat) if esuit(c, g["trump"]) == ls]
+    return bool(follow) and len(legal_moves(g, seat)) < len(follow)
 
 
 def to_play(g: dict) -> int:
@@ -2046,6 +2113,16 @@ def view_for(g: dict, seat: int) -> dict:
         "card_pts": uses_card_points(mode_of(g)),
         "card_values": (list(CARD_VALUES)
                         if uses_card_points(mode_of(g)) else None),
+        # MUST HEAD THE TRICK. The flag is the ROOM's rule (so the board can
+        # say so before a card is led); `must_head_now` is whether it is
+        # actually taking an option off this seat this instant, which is what
+        # the turn bar reads. Both are the engine's answers, not the client's
+        # -- it holds no copy of what beats what (its `beats` is label-only and
+        # does not know Grand). The searcher reads the room flag into
+        # `State.head`; a wasm too old for it (`wire < 4`) would propose cards
+        # this room refuses, so the server will not arm a skat room for one.
+        "must_head": must_head_mode(mode_of(g)),
+        "must_head_now": must_head_binds(g, seat),
         "leader": g["leader"],
         "led": g["led"],
         "pts": list(g["pts"]),

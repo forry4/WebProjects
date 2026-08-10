@@ -1913,7 +1913,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <div className="dis-turnbar">
                 {game.phase === "over" ? <span className="muted">Last trick</span>
                   : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
-                    : myTurn ? <span className="dis-yourturn">Your turn</span>
+                    : myTurn ? <>
+                      <span className="dis-yourturn">Your turn</span>
+                      {/* WHY the hand has stopped offering most of itself.
+                          Cards are never dimmed here (see the stylesheet), so
+                          without a word the narrowed set reads as a bug. The
+                          server decides it -- `must_head_now` off the view --
+                          because the client's `beats` is label-only and does
+                          not know Grand. */}
+                      {game.must_head_now && (
+                        <span className="dis-mhead">must beat it</span>
+                      )}
+                    </>
                       : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
               </div>
             </>

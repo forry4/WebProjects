@@ -204,6 +204,23 @@ export default function DissonanceRules() {
 						your cards and nothing else.
 					</p>
 				</RulesTip>
+				<RulesTip>
+					<p>
+						<b>You must head the trick.</b> If you can follow suit and you
+						hold a card that beats the one led, you have to play one — no
+						sliding a 7 under a winner. (Void in the suit you are still
+						free to do anything, and never have to trump.)
+					</p>
+					<p>
+						It sounds like a restriction and it is really a weapon, because
+						of what the card values are: <b>lead a king and the ace has to
+						answer it</b>, so your opponent takes a trick worth −2 with the
+						two worst cards in the deck. Without the rule they simply duck a
+						9 under your king and <i>you</i> eat it. So the cards nobody
+						wants become the way you attack, and holding a bare ace is a
+						real exposure.
+					</p>
+				</RulesTip>
 				<RulesDefs items={[
 					{ t: "The auction", d: "Ascending numbers, taking turns. Either player may pass — including the opener, because here passing hands the opponent the talon and the lead at THEIR price, rather than being an escape from a forced bad contract. Both passing throws the hand in and redeals." },
 					{ t: "Talon or Hand", d: "Win it and you choose: look at the three talon cards and maybe swap one in, or decline to look at all and play HAND for ×2. Looking and then standing pat is not Hand — you saw them." },
@@ -268,6 +285,9 @@ export default function DissonanceRules() {
 						never compulsory.</li>
 					<li>The highest trump wins the trick; if no trump was played, the highest card of the
 						suit led wins. The winner leads the next trick.</li>
+					<li><b>Skat mode only:</b> if you can follow suit and can beat the
+						led card, you must — see that section. Classic and Minor let you
+						duck freely, which is most of what those modes are about.</li>
 					<li>Trick 1 is odd (−1), trick 2 is even (+2), and so on alternating to trick 13.</li>
 				</ul>
 			</RulesSection>

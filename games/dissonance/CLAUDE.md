@@ -231,6 +231,87 @@ run on it. `skatlab` itself deals `cards = true` and converts through
 pays a flat stake (no overtrick term) — the lab lags the engine there, as it
 already did.
 
+## Must head the trick (skat, 2026-08-10) — and what it measured
+
+When you CAN follow suit and hold a card that BEATS the lead, you must play
+one. Ducking under a winner is legal only when you cannot beat it at all.
+Ruffing is untouched: void in the suit you may still play anything and are
+never forced to trump — must-head filters the FOLLOW set alone.
+
+**Its own per-mode dict (`MUST_HEAD`), deliberately NOT folded into
+`uses_card_points`.** A legality rule and a scoring rule are different things,
+this one is an experiment, and one line turns it off — including the wire
+requirement below, which is derived rather than pinned.
+
+**WHAT IT IS WORTH IS ONE TRICK SHAPE, and that is measured, not asserted.**
+Enumerating every shape, the rule changes the outcome of exactly one:
+
+| lead | they hold | without | with |
+|---|---|---|---|
+| **K** | 9, A | 9 → **+1 to the leader** | A → **−2 to them** |
+| K | 7, A | 7 → −2 to leader | A → −2 to them |
+| 9 | 8, K | K → +1 to them | K → +1 to them (unchanged) |
+| 7 | 8, K | K → −2 to them | unchanged |
+| A | 7, Q | 7 → −2 to leader | unchanged |
+
+So the whole mechanic is **lead a king, force the ace** — a three-point swing
+that turns the deck's two dead cards (K and A, both −1) into a duel, and makes
+a bare ace a real exposure. It does NOT fix the complaint that prompted it
+("you win with an ace and they slide a 7 under it"): nothing beats an ace, so
+must-head never fires there. Know that before spending more on this direction.
+
+**HOW OFTEN IT BINDS — and the gap that matters:**
+* random play: 7.4% of plies · **the shipped greedy policy: 6.2% of follows**
+* **a leader who CHOSE to could bind on 34.4% of tricks** (counterfactual over
+  real rounds: at each lead, does any legal lead narrow the follower?).
+
+The 5.5x gap is the whole story: it is a lever the bot was not pulling, not an
+inert rule. Leading LOW — the card policy's default — is precisely the lead
+that can never bind, since every follow beats it. The searching tiers get the
+lever for free (an exact solver over the real legality); the greedy tier had
+to be taught, so `policy_score`'s card-lead branch now scores the EXTRACTION
+LEAD: a liability card whose every unplayed beater is also a liability, read
+off `played` plus this seat's own holding (honest counting, decays to nothing
+once the ace is gone, weight 1.6). That took binding 6.2% → **9.7%**, and both
+seats wield it, so the declarer's make rate lands back on **85%** — the same
+figure card scoring measured without the rule, so `_SKAT_LEVEL_NEEDS` needed
+no re-anchoring. Mean winning payoff 20.1 → 20.6.
+
+**Caveat worth keeping:** of the follows it binds, ~85% leave the follower no
+choice at all, so what the rule mostly does is move a decision from the
+FOLLOW to the LEAD. That is the intended direction (the lead is where control
+was missing) but it is a transfer, not an addition.
+
+**The inference it buys, and why it is not optional.** Following without
+beating proves the seat could reach no higher card of that suit — so none is
+in hand, and hands only shrink, so the ceiling is permanent.
+`Knowledge::hand_cap` records it (hand-written `Default`: `NRANK - 1` is "no
+constraint", and a derived zero would assert both players hold nothing above
+the deck's lowest rank), `determinize` keeps capped cards out of the hand and
+lets them fall into the covered pile slots — the same "piles launder voids"
+property the module note already describes — and `wire.rs` mirrors it from
+history. Without it the searcher spends its worlds on deals the opponent has
+already disproved, silently.
+
+**Rung 4 on the wire, and it is a HARDER rung than 2 and 3.** Those carried
+scoring fields, so an artifact missing them returned legal-but-misvalued
+moves. This one carries LEGALITY: an artifact without it answers with cards
+the room refuses, `_validated_bot_move` drops them, and the room plays the
+server bot at full speed while still saying Hard. `odd_wire()` is 4, the
+worker refuses any payload whose `must_head`/`head` it cannot honour, and
+`_handle_client_ai_ready` computes what a room NEEDS from its own rules
+(`must_head_mode` → 4, else card scoring → 3) rather than pinning a literal.
+The artifact was rebuilt and committed with the change.
+
+Gates: `must_head_forces_a_winner_when_one_can_follow` and
+`a_must_head_ceiling_is_inferred_and_respected_by_the_determinizer` (Rust),
+`beats_mask_agrees_with_beats_over_the_whole_card_space` (the mask form drives
+the filter and sits on the hot path, so it is swept exhaustively), the
+brute-force solver's card arm now runs the shipped cards+head combination, and
+`play.jsonl` carries `head` on its card fixtures with a NON-VACUITY test —
+must-head bound on 192 of 2600 fixture plies, so a legality break really would
+surface as an illegal move rather than passing unnoticed.
+
 ## Two auctions, one game (skat mode, 2026-08-07)
 
 **`mode` is a ROOM FLAG, not a second game** — one `dissonance_games` table, one

@@ -39,13 +39,23 @@ def _move_of(kind, mv):
     return {"kind": "bid", "level": mv["level"], "denom": mv["denom"]}
 
 
-def play_round(rng: random.Random) -> dict:
+def play_round(rng: random.Random, tally: dict | None = None) -> dict:
     g = E.new_game(["a", "b"], rng, opener=rng.randrange(2), mode="skat")
     guard = 0
     while g["phase"] != "over":
         seat = E.turn_seat(g)
         if seat is None:
             break
+        # MUST-HEAD's bite, counted where it happens: how often the rule takes
+        # an option off a real decision, and how often it leaves the follower
+        # no choice at all. Both under the shipped policy rather than under
+        # random play, which is a different (and much quieter) distribution.
+        if tally is not None and g["phase"] == "play" and g["led"] is not None:
+            tally["plies"] += 1
+            if E.must_head_binds(g, seat):
+                tally["bound"] += 1
+                if len(E.legal_moves(g, seat)) == 1:
+                    tally["forced"] += 1
         kind, mv = bot.act(g, seat, rng)
         E.apply_move(g, g["seats"][seat], _move_of(kind, mv))
         guard += 1
@@ -66,8 +76,9 @@ def sweep(n: int, seed: int = 7) -> None:
     overs = []
     made = null = 0
     pay = []
+    tally = {"plies": 0, "bound": 0, "forced": 0}
     for _ in range(n):
-        g = play_round(rng)
+        g = play_round(rng, tally)
         res = g["result"]
         levels[res["level"]] += 1
         bids[res["bid"]] += 1
@@ -111,6 +122,10 @@ def sweep(n: int, seed: int = 7) -> None:
           f"median shortfall {med_short}   median overtricks {med_over}")
     print(f"mean winning payoff {mean_pay:.1f}   "
           f"~rounds to {target}: {target / mean_pay:.1f}")
+    if tally["plies"]:
+        print(f"must-head bound on {100 * tally['bound'] / tally['plies']:.1f}% "
+              f"of follows ({100 * tally['forced'] / tally['plies']:.1f}% left "
+              f"no choice at all)")
 
 
 if __name__ == "__main__":

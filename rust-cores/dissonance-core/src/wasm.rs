@@ -289,7 +289,14 @@ pub fn odd_pool() -> i32 {
 
 /// The wire vintage this artifact speaks. 2 = understands `even_val` /
 /// `even` (minor mode's runtime trick value, 2026-08-09); 3 = understands
-/// `card_pts` / `cards` (skat mode's card scoring, same day).
+/// `card_pts` / `cards` (skat mode's card scoring, same day); 4 = understands
+/// `must_head` / `head` (skat's must-head-the-trick rule, 2026-08-10).
+///
+/// RUNG 4 IS A LEGALITY RUNG, and that is a harder failure than 2 and 3 were.
+/// An artifact that misses a SCORING field returns legal-but-misvalued moves;
+/// one that misses this returns moves the room simply refuses, which
+/// `_validated_bot_move` drops on the floor -- so the tier answers nothing and
+/// the room plays the server bot at full speed while still saying Hard.
 ///
 /// THE WORKER PROBES THIS EXPORT before searching a minor or card-scored
 /// payload: an older wasm would silently read the view WITHOUT the field and
@@ -299,5 +306,5 @@ pub fn odd_pool() -> i32 {
 /// in that room" into the ordinary per-decision fallback to the server bot.
 #[wasm_bindgen]
 pub fn odd_wire() -> i32 {
-    3
+    4
 }

@@ -45,12 +45,20 @@ def _game_from(fx):
     way Grand's trump is. Absent on a fixture file from before the mode,
     which is classic. `cards` marks a CARD-SCORED fixture (skat mode's
     currency since 2026-08-09), also one in four, gating `card_points` the
-    same way; absent means parity.
+    same way; absent means parity. `head` marks MUST-HEAD (2026-08-10) and
+    rides with `cards` because the shipped skat room has both -- the port
+    derives both from one mode string, so a fixture that split them would
+    replay a different game and fail as a mystery illegal move rather than as
+    the disagreement it is. Asserted, not assumed.
     """
     if fx.get("cards"):
         mode = "skat"
     else:
         mode = "minor" if fx.get("even", 2) == 1 else "classic"
+    assert bool(fx.get("head", False)) == E.must_head_mode(mode), (
+        "fixture's must-head flag (%s) disagrees with what mode %r implies "
+        "(%s) -- regenerate play.jsonl, or the two engines are running "
+        "different rules" % (fx.get("head"), mode, E.must_head_mode(mode)))
     g = E.new_game(["a", "b"], mode=mode)
     g["hands"] = [sorted(fx["hands"][0]), sorted(fx["hands"][1])]
     g["piles"] = [[list(p) for p in fx["piles"][0]], [list(p) for p in fx["piles"][1]]]
@@ -174,3 +182,24 @@ def test_the_fixtures_cover_card_scoring():
     # the parity constant, or the whole distinction proved nothing.
     pools = {E.played_pool(_game_from(f)) for f in cards}
     assert pools - {5}, "every card fixture's pool read the parity constant"
+
+
+def test_the_fixtures_really_exercise_must_head():
+    """The card fixtures replay must-head, so a legality break shows up as an
+    illegal move above -- but only if the rule actually BINDS somewhere in
+    them. Count the plies where it removed an option; a file where it never
+    fired would pass every gate here while testing nothing about the rule."""
+    fx = _load()
+    cards = [f for f in fx if f.get("head")]
+    assert cards, "no must-head fixtures at all"
+    bound = plies = 0
+    for f in cards:
+        g = _game_from(f)
+        for c in f["moves"]:
+            seat = E.to_play(g)
+            if E.must_head_binds(g, seat):
+                bound += 1
+            plies += 1
+            E.apply_play(g, seat, c)
+    assert bound >= plies // 20, (
+        "must-head bound on only %d of %d card-fixture plies" % (bound, plies))

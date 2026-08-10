@@ -71,7 +71,27 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
             w = E.beats(led, c, trump)
             return 2.0 + 0.5 * (tv if w else -tv) - 0.05 * r
         trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
-        return 1.0 + (1.0 - r) - 0.4 * max(0, E.card_points(c)) - trumpish
+        s = 1.0 + (1.0 - r) - 0.4 * max(0, E.card_points(c)) - trumpish
+        # THE EXTRACTION LEAD, and it is the whole of what must-head buys the
+        # leader (measured: it is the ONLY trick shape whose outcome the rule
+        # changes). Lead a card that is itself a liability and whose every
+        # surviving beater is ALSO a liability -- in the shipped table that is
+        # a king against an unplayed ace -- and the opponent cannot duck it:
+        # they must take the trick and eat both. Without must-head they slide
+        # a 9 under it and the leader eats it instead, a three-point swing.
+        #
+        # Read off `played` plus this seat's own holding, so it is honest
+        # counting rather than a peek, and it decays to nothing once the ace
+        # is gone. Weight 1.6: enough to outrank the lead-low default for a
+        # king specifically, not enough to make the bot lead high generally.
+        if E.must_head_mode(E.mode_of(g)) and E.card_points(c) < 0:
+            cls, seen = E.esuit(c, trump), set(g["played"]) | set(E.playable(g, seat))
+            out = [x for x in range(E.NCARD)
+                   if x not in seen and E.esuit(x, trump) == cls
+                   and E.beats(c, x, trump)]
+            if out and all(E.card_points(x) < 0 for x in out):
+                s += 1.6
+        return s
     want_win = _want_win(g, seat)
     if led is not None:
         w = E.beats(led, c, trump)

@@ -82,6 +82,13 @@ pub fn view_from_json(v: &Value) -> Option<View> {
         // card-scored view on an artifact whose `odd_wire()` is below 3, and
         // the server refuses to arm a skat room for such a client at all.
         cards: v.get("card_pts").and_then(|x| x.as_bool()).unwrap_or(false),
+        // MUST HEAD THE TRICK -- a LEGALITY rule, so an artifact that misses
+        // it does not merely misprice, it proposes cards the room refuses and
+        // the server plays that decision itself. Optional and false by
+        // default (every payload before it is a room without the rule); the
+        // `odd_wire() >= 4` gate is what keeps a stale artifact out of a room
+        // that has it.
+        head: v.get("must_head").and_then(|x| x.as_bool()).unwrap_or(false),
     };
     // Which seats have already won a +2 trick. Not derivable from `pts` -- a
     // total of -1 is one +2 trick and three -1s just as easily as one -1 alone
@@ -159,6 +166,17 @@ pub fn view_from_json(v: &Value) -> Option<View> {
                     let ls = esuit(l, s.trump);
                     if esuit(card, s.trump) != ls {
                         kn.hand_void[seat][ls as usize] = true;
+                    } else if s.head && ls != TRUMP_CLASS
+                        && !crate::state::beats(l, card, s.trump)
+                    {
+                        // The must-head ceiling, mirrored from
+                        // `Knowledge::observe` -- they followed without
+                        // beating, so nothing higher of that suit is in hand.
+                        let cap = rank(l);
+                        let slot = &mut kn.hand_cap[seat][ls as usize];
+                        if cap < *slot {
+                            *slot = cap;
+                        }
                     }
                     led_now = None;
                 }
@@ -339,6 +357,11 @@ pub fn deal_from_json(v: &Value) -> Option<State> {
         // values shipped was played under the parity, and the absent key
         // reviews it that way for free.
         cards: v.get("cards").and_then(|x| x.as_bool()).unwrap_or(false),
+        // ...and must-head, which matters MORE here than the scoring does: it
+        // is a legality rule, so replaying an older round under it would let
+        // the review explore lines that round's players were allowed and this
+        // one is not. Absent = the rule was not in force.
+        head: v.get("head").and_then(|x| x.as_bool()).unwrap_or(false),
     };
     if s.leader > 1 {
         return None;
@@ -957,6 +980,15 @@ mod fixture_replay {
                 v.s.cards,
                 f["card_pts"].as_bool().unwrap_or(false),
                 "fixture {i}: card_pts did not reach State.cards"
+            );
+            // ...and must-head, which is the one of the three that changes
+            // LEGALITY: a reader that dropped it would hand the searcher a
+            // larger move list than the room allows, and every answer built
+            // on the extra moves would be refused on arrival.
+            assert_eq!(
+                v.s.head,
+                f["must_head"].as_bool().unwrap_or(false),
+                "fixture {i}: must_head did not reach State.head"
             );
 
             // My own hand, exactly. The opponent's is a COUNT and a hole.

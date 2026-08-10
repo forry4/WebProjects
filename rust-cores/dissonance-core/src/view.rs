@@ -17,7 +17,7 @@ use crate::game::Game;
 use crate::rng::Rng;
 use crate::state::*;
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Knowledge {
     /// `hand_void[p][cls]` — player p is known to hold no card of follow-suit
     /// class `cls` IN HAND.
@@ -30,15 +30,57 @@ pub struct Knowledge {
     /// none, and the search would spend its worlds on impossible deals with
     /// nothing red anywhere.
     pub hand_void: [[bool; NFOLLOW]; 2],
+    /// The highest rank player p may still hold IN HAND of each follow class.
+    /// `NRANK - 1` is "no constraint", which is why this needs a hand-written
+    /// `Default` -- a derived one would zero it and assert that both players
+    /// hold nothing above the lowest rank in the deck.
+    ///
+    /// MUST-HEAD BUYS THIS (2026-08-10). Under that rule a player who follows
+    /// suit WITHOUT beating the lead has proved they could reach no higher
+    /// card of the suit -- so none is in their hand, and hands only shrink, so
+    /// the ceiling is permanent. It is the same shape of fact as a void (which
+    /// is just a ceiling of "nothing") and it matters for the same reason: the
+    /// determinizer would otherwise keep dealing them a card they have already
+    /// proved they do not hold, and the search would spend its worlds on
+    /// deals that cannot exist -- silently, as ever.
+    ///
+    /// HAND ONLY, exactly like `hand_void`: a COVERED pile bottom was not
+    /// playable when the inference was made, so must-head said nothing about
+    /// it. `determinize` keeps capped cards out of the hand and lets them fall
+    /// into the pile slots, which is precisely the "piles launder voids"
+    /// property the module note describes.
+    pub hand_cap: [[u8; NFOLLOW]; 2],
+}
+
+impl Default for Knowledge {
+    fn default() -> Self {
+        Knowledge {
+            hand_void: [[false; NFOLLOW]; 2],
+            hand_cap: [[NRANK - 1; NFOLLOW]; 2],
+        }
+    }
 }
 
 impl Knowledge {
     /// Call after every card is played, before the state advances.
     pub fn observe(&mut self, s: &State, mover: usize, played_card: u8) {
-        if s.led >= 0 {
-            let ls = esuit(s.led as u8, s.trump);
-            if esuit(played_card, s.trump) != ls {
-                self.hand_void[mover][ls as usize] = true;
+        if s.led < 0 {
+            return;
+        }
+        let ls = esuit(s.led as u8, s.trump);
+        if esuit(played_card, s.trump) != ls {
+            self.hand_void[mover][ls as usize] = true;
+            return;
+        }
+        // Followed, and under must-head did not beat: nothing they could reach
+        // beat the lead, so nothing in hand did. Skipped for Grand's trump
+        // class, where every ten beats every ten and the branch cannot fire
+        // anyway.
+        if s.head && ls != TRUMP_CLASS && !beats(s.led as u8, played_card, s.trump) {
+            let cap = rank(s.led as u8);
+            let slot = &mut self.hand_cap[mover][ls as usize];
+            if cap < *slot {
+                *slot = cap;
             }
         }
     }
@@ -142,15 +184,21 @@ impl View {
             "pool must be exactly the unplaceable cards"
         );
 
-        // Partition the pool by whether a card may sit in the opponent's hand.
+        // Partition the pool by whether a card may sit in the opponent's hand:
+        // not a suit they showed out of, and not above a ceiling must-head
+        // made them prove (see `Knowledge::hand_cap`). Everything excluded
+        // still gets dealt -- into the covered pile slots, which neither fact
+        // says anything about.
         let voids = self.kn.hand_void[opp];
+        let caps = self.kn.hand_cap[opp];
         buf.clear();
         let mut m = self.pool;
         let mut n_allowed = 0;
         while m != 0 {
             let c = m.trailing_zeros() as u8;
             m &= m - 1;
-            if !voids[esuit(c, self.s.trump) as usize] {
+            let cls = esuit(c, self.s.trump) as usize;
+            if !voids[cls] && rank(c) <= caps[cls] {
                 buf.insert(n_allowed, c);
                 n_allowed += 1;
             } else {

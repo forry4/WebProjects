@@ -51,12 +51,16 @@ const { default: init, odd_pick_card, odd_best_card, odd_pick_bid, odd_review } 
 // 1 = pre-minor, 2 = even_val, 3 = card_pts (skat's card scoring).
 let WIRE = 1;
 
-// The vintage a request needs: 3 for card scoring, 2 for a non-classic
-// parity, 1 for everything else.
+// The vintage a request needs: 4 for must-head (a LEGALITY rule -- an older
+// artifact answers with cards the room refuses), 3 for card scoring, 2 for a
+// non-classic parity, 1 for everything else. Highest wins, since a skat
+// payload carries several of these at once.
 function neededWire(req) {
   const v = req && (req.view || req.deal || req);
-  if (v && (v.card_pts === true || v.cards === true)) return 3;
-  const e = v && (v.even_val ?? v.even);
+  if (!v) return 1;
+  if (v.must_head === true || v.head === true) return 4;
+  if (v.card_pts === true || v.cards === true) return 3;
+  const e = v.even_val ?? v.even;
   if (typeof e === "number" && e !== 2) return 2;
   return 1;
 }

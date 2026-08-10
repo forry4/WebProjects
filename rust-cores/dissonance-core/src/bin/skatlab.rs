@@ -34,7 +34,6 @@ use dissonance::dd::Dd;
 use dissonance::game::Game;
 use dissonance::rng::Rng;
 use dissonance::skat::*;
-use dissonance::state::POOL;
 
 fn flag(a: &[String], n: &str) -> Option<String> {
     a.iter().position(|x| x == n).and_then(|i| a.get(i + 1)).cloned()
@@ -294,9 +293,11 @@ fn main() {
                     }
                     let seed = idx as u64 + 1;
                     let mut g = Game::deal_shown(&mut Rng::new(seed), 4, 0, 3);
-                    // Skat scores CARDS since 2026-08-09 -- the lab measures
-                    // the game the server actually plays.
+                    // Skat scores CARDS since 2026-08-09 and MUST-HEADS the
+                    // trick since 2026-08-10 -- the lab measures the game the
+                    // server actually plays.
                     g.s.cards = true;
+                    g.s.head = true;
                     let evs: Vec<HandEval> = (0..2)
                         .map(|p| {
                             let v = g.view(p);

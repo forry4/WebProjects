@@ -88,6 +88,7 @@ impl Game {
             // is scoring-independent).
             even: 2,
             cards: false,
+            head: false,
         };
         let mut k = 0;
         for p in 0..2 {
