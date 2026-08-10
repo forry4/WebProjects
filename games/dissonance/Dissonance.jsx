@@ -315,7 +315,11 @@ function poolNote(game) {
   const n = game?.tricks ?? 13;
   const evens = Math.floor(n / 2);        // tricks 2, 4, … pay
   const pool = evens * evenVal(game) - (n - evens);
-  return `Always adds up to ${pool > 0 ? "+" : ""}${pool}.`;
+  // "by the end of the round" is the whole point of the sentence: mid-round the
+  // two totals say nothing (they are behind by the tricks not yet played), so
+  // without it the line reads as a claim about the numbers directly above it
+  // and is simply wrong most of the time you are looking at it.
+  return `Always adds up to ${pool > 0 ? "+" : ""}${pool} by the end of the round.`;
 }
 
 /** Does `follow` beat `led`? A mirror of `engine.beats` — kept in step with it
