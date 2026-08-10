@@ -93,6 +93,19 @@
      overflows the page on a short phone or wastes space on a tall one.
      Measured before this: the page ran 68px past the viewport and the grid
      showed 35 of 36 rungs, i.e. it was not scrolling at all. */
+  /* A SEAT NEVER SHRINKS BELOW ITS CARDS. The table is a fixed-height flex
+     column on a phone, so a seat that was allowed to shrink simply overflowed
+     its own box and drew on top of whatever came next -- which is what a
+     three-seat board did to the auction panel. Cards have a fixed height and
+     cannot compress, so the honest thing is to refuse the shrink and let the
+     rules below decide where the extra height comes from. */
+  .dis .dis-seat { flex: 0 0 auto; }
+  /* THREE SEATS DO NOT FIT A PHONE, so a dummy board sizes to its content and
+     the PAGE scrolls, rather than being pinned to the viewport and spilling.
+     Both the base `min-height` and the auction pin have to go, or the taller
+     of them wins and the overflow comes back. */
+  .dis .dis-table.dis-3seat,
+  .dis .dis-table.dis-3seat.ph-auction { height: auto; min-height: 0; }
   .dis .dis-table.ph-auction { height: calc(100dvh - 72px); }
   .dis .dis-table.ph-auction .dis-auction {
     min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
@@ -246,10 +259,29 @@
 .dis-seat, .dis-trick {
   --dis-slots: 7;
   --dis-gap: 0.25rem;
+  /* CARD ROWS ON THE BOARD, which is what the height budget below divides by:
+     two seats show four (a hand and a pile row each), a DUMMY table shows six.
+     It was a literal 4, and that is precisely how dummy mode broke on a phone
+     -- every card came out half again too tall, the seats overflowed their
+     boxes and the hands drew straight over the auction panel. Derived from the
+     seat count instead, so a third hand costs no second magic number.
+     `--dis-reserve` is the non-card furniture the same budget has to leave
+     room for; a third seat adds another name row to it. */
+  --dis-rows: 4;
+  --dis-reserve: 27rem;
   --dis-cw: min(
     calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
-    calc((100dvh - 27rem) / 4 / 1.4)
+    calc((100dvh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
   );
+}
+/* A DUMMY TABLE IS SIX CARD ROWS, not four. Set on the seats themselves (where
+   `--dis-cw` reads it) rather than on the table, and at a higher specificity
+   than the rule above, which is what lets one variable resize the whole board.
+   The dummy's own hand is four cards where a player's is four too, so only the
+   HEIGHT term needed to move. */
+.dis-3seat .dis-seat, .dis-3seat .dis-trick {
+  --dis-rows: 6;
+  --dis-reserve: 29rem;
 }
 .dis-seat .dis-hand {
   width: 100%; gap: var(--dis-gap);

@@ -2297,6 +2297,56 @@ try {
 		}
 		check("a trick in a dummy room is three cards wide", widest >= 3,
 			`widest trick seen: ${widest}`);
+		check("the trick line counts to the mode's own length, not 13",
+			/of 10\b/.test(await dpage.locator(".dis-trickinfo").first()
+				.textContent().catch(() => "")),
+			await dpage.locator(".dis-trickinfo").first().textContent().catch(() => ""));
+		// A DUMMY ROOM HAS NO TALON, and `shown` is an empty array there --
+		// which is TRUTHY, so the panel rendered under a heading promising
+		// cards with nothing beneath it.
+		check("no talon panel in a room that has no talon",
+			await dpage.locator(".dis-p-talon").count() === 0);
+		// THE PHONE LAYOUT, measured rather than eyeballed. Three seats plus
+		// the auction panel do not fit a pinned viewport, and the card size
+		// budget divided by a hardcoded FOUR card rows -- so every card came
+		// out half again too tall and the seats drew straight over the
+		// auction. The assertion is geometric: no two sections of the table
+		// may overlap, and no card may escape its own seat.
+		await dpage.setViewportSize({ width: 390, height: 844 });
+		await sleep(400);
+		const phone = await dpage.evaluate(() => {
+			const kids = [...(document.querySelector(".dis-table")?.children || [])]
+				.map((el) => {
+					const r = el.getBoundingClientRect();
+					return { cls: String(el.className).slice(0, 20), top: r.top, bot: r.bottom };
+				})
+				.filter((k) => k.bot > k.top);
+			const overlaps = [];
+			for (let i = 1; i < kids.length; i++) {
+				if (kids[i].top < kids[i - 1].bot - 1) {
+					overlaps.push(`${kids[i - 1].cls}/${kids[i].cls}`);
+				}
+			}
+			let escaped = 0;
+			for (const seat of document.querySelectorAll(".dis-seat")) {
+				const sr = seat.getBoundingClientRect();
+				for (const c of seat.querySelectorAll(".dis-card")) {
+					const cr = c.getBoundingClientRect();
+					if (cr.bottom > sr.bottom + 1 || cr.top < sr.top - 1) escaped++;
+				}
+			}
+			return {
+				overlaps, escaped, sections: kids.length,
+				sideways: document.documentElement.scrollWidth
+					> document.documentElement.clientWidth + 1,
+			};
+		});
+		check("the three-seat board does not overlap itself on a phone",
+			phone.overlaps.length === 0 && phone.sections >= 4, JSON.stringify(phone));
+		check("...and no card escapes its own seat", phone.escaped === 0,
+			JSON.stringify(phone));
+		check("...and the phone board does not scroll sideways",
+			phone.sideways === false, JSON.stringify(phone));
 		check("no page errors creating and playing a dummy room", derrors.length === 0,
 			derrors[0]?.slice(0, 160) || "");
 		await dctx.close();

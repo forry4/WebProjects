@@ -1358,7 +1358,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
       {reconnecting && <div className="banner">Reconnecting…</div>}
 
       <div className="dis-main">
-        <div className={`dis-table ph-${game.phase}`}>
+        {/* `dis-3seat` is what re-derives the card size: the height budget
+            divides by the number of CARD ROWS, and a dummy table has six
+            where two seats have four. */}
+        <div className={`dis-table ph-${game.phase}${game.dummy ? " dis-3seat" : ""}`}>
           {/* opponent */}
           <div className="dis-seat">
             <div className="dis-seatname">
@@ -1954,7 +1957,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     reading it here labelled the two cards you are looking at
                     with the next trick's number and the next trick's value. */}
                 <div className="dis-trickinfo">
-                  Trick {heldTrick ? heldTrick.number : game.trick + 1} of 13
+                  Trick {heldTrick ? heldTrick.number : game.trick + 1} of{" "}
+                  {game.tricks ?? 13}
                   {(() => {
                     // Parity rooms label the trick with its fixed value. A
                     // card-scored room cannot until both cards are down, so
@@ -2038,7 +2042,11 @@ export default function Dissonance({ myId, authUser, onExit }) {
               you are still playing, and it is also the shape the client-side
               searcher reads off the wire. The round-end reveal is where "what
               you were SHOWN" gets answered, from `shown_at_deal`. */}
-          {game.shown && game.phase !== "over" && (
+          {/* `?.length`, not truthiness: a DUMMY room has no talon and ships
+              an empty array, which is truthy in JS -- so the panel rendered
+              with nothing in it under a heading promising cards. A defender
+              gets `null` and is excluded either way. */}
+          {game.shown?.length > 0 && game.phase !== "over" && (
             <div className="dis-panel dis-p-talon">
               <h4>The talon · you saw these</h4>
               <div className="dis-outrow">
