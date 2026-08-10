@@ -160,7 +160,15 @@ def _cellar_discard(game, pid, frame, choice):
     # All chosen cards are discarded at once, THEN the draw — so a mid-draw
     # shuffle includes the just-discarded cards (rulebook clarification).
     E.discard(game, pid, picked)
-    E.add_cards(game, len(picked), pid)
+    # `draw`, NOT `add_cards`: Base 2E reads "discard any number of cards, THEN
+    # DRAW THAT MANY", with no printed plus — the 1E card was "+1 Card per card
+    # discarded" and we shipped that wording until ph. 10. The difference was
+    # unobservable for nine phases and Way of the Chameleon makes it real: the
+    # compendium names Cellar in exactly that list ("Cellar, Oracle, Storeroom
+    # and Storyteller are functionally different with Way of the Chameleon
+    # depending on which edition you're using"). Storeroom and Storyteller were
+    # already on the current wording; Cellar was the one that slipped.
+    E.draw(game, pid, len(picked))
 
 
 def _chapel(game, pid):

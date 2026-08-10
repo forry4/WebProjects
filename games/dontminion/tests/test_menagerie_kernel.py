@@ -815,17 +815,27 @@ def test_last_turn_trashes_records_the_count_at_the_end_of_the_turn():
     assert g["turn_ctx"]["trashes"] == 0             # the new turn starts fresh
 
 
-def test_last_turn_trashes_counts_the_turn_not_the_trasher():
-    """Counted for the TURN PLAYER's turn regardless of who trashed — that is
-    whose turn it was (a Swindler trashes off the victim's deck on YOUR turn)."""
+def test_last_turn_trashes_counts_THE_TRASHER_not_the_turn():
+    """"+1 Card per card the player to your right TRASHED on their last turn",
+    and ch. VII Goatherd 2: "Goatherd counts how many times your right-hand
+    player trashed a card."
+
+    So an attack THEY play that makes YOU trash pays nothing: Bandit, Swindler,
+    Knight and Old Witch are all worded "each other player … trashes", so the
+    trasher is the victim. This shipped counting the TURN instead of the
+    trasher, with a confident comment and no citation — the audit asked for the
+    source and there wasn't one."""
     g = fresh()
     g["turn"] = A
-    g["seats"][B]["hand"] = ["Copper"]
-    engine.trash(g, B, ["Copper"])
+    give_hand(g, A, ["Copper"])
+    g["seats"][B]["hand"] = ["Estate", "Silver"]
+    engine.trash(g, A, ["Copper"])            # the turn player's own trash
+    engine.trash(g, B, ["Estate"])            # a victim's, on A's turn
     engine._drive(g)
+    assert g["turn_ctx"]["trashes"] == 1
     engine._end_turn(g, A)
     engine._drive(g)
-    assert g["last_turn_trashes"][A] == 1
+    assert g["last_turn_trashes"][A] == 1, "the victim's trash is not A's"
 
 
 # ── MASTERMIND: link_duration ─────────────────────────────────────────────────

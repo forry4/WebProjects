@@ -708,6 +708,160 @@ all **30 real prod saves** replayed v1/v2/v5/v7/v8/v10/v11/v12 → 13, `npm run 
 text, and no cube on a fresh board). Bots: `bmplus` beats plain money **0.708** on Renaissance
 boards with the mirror reading exactly **0.5000**.
 
+## Phase 10 — MENAGERIE: SHIPPED 2026-08-06
+
+**30 kingdom piles, the Horse pile, 20 Events and the game's first 20 WAYS.** 368 cards, 12
+sets, 114 landscapes (53 Events, 21 Landmarks, 20 Projects, 20 Ways). No second edition,
+nothing trimmed, every kingdom pile 10.
+
+**The debt ledger predicted this set correctly, three phases early.** The "card identity /
+play-as" row was closed at ph. 5H with the note that *"Ways (ph. 10) is a DIFFERENT and
+smaller mechanism — substitute a card's play ability, not change what it is — and should be
+designed then, not now."* That is exactly what shipped: a Way is one `TRIGGERS` entry on
+ph. 8's `would_resolve` window, and **the move surface did not grow at all**. Ph. 8 had
+already built that window for Enchantress and written down that it was the Ways kernel
+arriving early. Both predictions paid.
+
+**Twelve kernel items — full list in `CLAUDE.md` "Kernel v10". What generalises:**
+
+- **THE `+CARDS` PRIMITIVE IS THE MOST DANGEROUS KIND OF CHANGE THERE IS: one that is
+  INVISIBLE until a single card makes it visible.** Card code had always called `draw()` for
+  three different printed things — "+3 Cards", "draw 2 cards", and "draw until you have 6" —
+  and Way of the Chameleon changes exactly one of them. Nothing at the call site could tell
+  them apart, and **no test of behaviour can**: with no Chameleon on the table `add_cards`
+  and `draw` are the same function, so a card that picks the wrong one is silent until
+  someone plays a Way at it, and then it is silent in the other direction (a Smithy just
+  quietly stops swapping). 145 call sites were migrated and the line is held at AST level by
+  `test_every_plus_cards_grant_uses_add_cards`, whose allowlist carries each genuine
+  non-plus draw's PRINTED WORDING — a record of a human reading the card, not a derivation
+  from the code it checks (the `bot_traits.REVIEWED` lesson).
+- **...and it found a nine-phase-old DATA bug, which is the real argument for the sweep.**
+  Cellar shipped the **1E** text ("+1 Card per card discarded") where Base 2E reads "discard
+  any number of cards, **then draw that many**". Unobservable for nine phases; the compendium
+  names Cellar in exactly the list of cards "functionally different with Way of the Chameleon
+  depending on which edition you're using". Storeroom and Storyteller were already correct —
+  Cellar was the one that slipped.
+- **A SEAM AND ITS NEIGHBOUR CAN BE INDEPENDENT, AND `final=` IS THE PROOF.** Ph. 9's Star
+  Chart pick and ph. 10's Chameleon swap both key on a draw, and the naive reading is that a
+  card must choose between them. It does not: `add_cards(..., final=True)` composes both, and
+  the ORDER is what makes it work — a swapped +Cards draws nothing at all, so it can cause no
+  shuffle and needs no pick. Way of the Owl is the card that shows they are genuinely
+  separate: it is a final draw (so it owes the Star Chart pick) and NOT a printed plus (so
+  the Chameleon must leave it alone), and the two can sit on the same board.
+- **EXILE IS THE FIRST ZONE THAT IS OWNED BUT ASYMMETRIC.** Exiled cards score, so the mat
+  joins `owned_cards` and both conservation censuses — but coming IN is not a gain ("Exiling
+  cards from the Supply is not considered gaining cards", the `exchange` discipline) while
+  going OUT to the discard IS a discard for triggers. Getting one direction right and the
+  other wrong is undetectable from the zone's own tests; it shows up as every when-gain
+  watcher in the game firing for a card nobody gained.
+- **A MAT IS NOT A CARD, so its own ability arrives through the POOL** — the ph.-7 token
+  shape a second time. It is a yes/no rather than a `choose_cards` because "you can't choose
+  to just discard some of them", and it is "OTHER copies", which falls out of counting what
+  is on the mat when the pool is collected.
+- **WAYFARER IS WHY `DYN_COSTS` WAS NOT ENOUGH.** That seam is a REDUCTION subtracted inside
+  `cost()`, which serves Destrier and Fisherman exactly — but "if Wayfarer is copying the
+  cost of another card, only cost reduction ON THAT CARD applies, not cost reduction on
+  Wayfarer itself". So `COST_OVERRIDE` is absolute, vector-valued and recursion-guarded.
+- **"IF ANY CARDS REFERRING TO HORSES ARE USED" MEANS EVERY CARD IN THE GAME.** Four Events
+  gain Horses with no kingdom producer needed, and Sleigh ($2) and Scrap ($3) are both
+  eligible **Way of the Mouse cards** — so reading the Supply alone left three separate
+  shapes gaining from a pile that was never built. The Mouse pick had to move ABOVE the Horse
+  clause in `new_game`.
+- **WAY OF THE MOUSE IS THE SET'S STRUCTURAL BLIND SPOT**, and both cross-set bugs were in
+  it. Its card is drawn from the kingdom cards the game did **not** deal, so no
+  "is it in the kingdom?" code path can see it: it skipped the reaction window (a Swindler
+  Mouse card trashed a Moat holder's Copper with no window, no reveal and no immunity) and it
+  never ran its own special setup (a Border Guard Mouse card kept no Lantern and no Horn, and
+  then silently did nothing when played). Ch. I's setup paragraph ends "*if this Action card
+  has a special setup rule, do that setup*" — the same clause the Bane/Ferryman blocks four
+  lines above already honoured.
+
+**THE ERRATA: four objects, three of them 2025** — the newest pass, which no card-list site
+necessarily carries. **Gamble** now always discards the top card FIRST and plays it out of
+the discard pile (so a discarded Village Green / Trail / Weaver / Faithful Hound reacts to it
+first); **Reap** gains its Gold directly to the set-aside area; **Way of the Mouse**'s card
+may no longer be a Duration — a SETUP restriction that **ch. I was never updated for**, so
+the card and ch. VII win over the setup section of the same document. Plus the 2020 **Village
+Green**, where the compendium contradicts itself about whether the added reveal stuck
+(ambiguity **A9**: ch. V lists it as changed, ch. VII says it was reverted in 2025, and ch.
+VIII's timing model in the same document still shows the reveal — we ship the reveal).
+
+**Every review step found what only it could, and all of it was invisible to the suite that
+was green at the time:**
+
+- **The KERNEL CONTRACT TESTS found three before a single card existed** — including a bare
+  `NameError` in `play_mouse_card` (a `count` copied from a sibling's signature) that would
+  have raised the first time anyone played a Mouse card, and the Exile mat missing from the
+  soak's conservation census, which would have reported cards vanishing on every Menagerie
+  board.
+- **The two CARD BATCHES each escalated a kernel gap instead of working around it**, which is
+  the contract, and both were real. `add_watcher` minted a duration entry for a LANDSCAPE
+  owner (Invest) — and an entry carrying watchers is promoted at Clean-up into
+  `seat["duration"]`, where `owned_cards` counts its `card` as a card you own, so the next
+  scoring pass did `CARDS["Invest"]` and raised. Travelling Fair (ph. 7) escaped it for three
+  phases purely by being `until="turn_end"`. And `link_duration` left the linking card's own
+  spent entry in place, so `_cleanup_durations` discarded the physical Mastermind while it
+  was ALSO riding the new host — with the twist that simply removing the entry is wrong in
+  the OTHER direction (the card is then counted in no zone at all), so the fix has to do both
+  and put the card back into `in_play`, which is where a rider physically sits.
+- **THE MERGE ITSELF CAUGHT A CLOBBER, and this is a new lesson.** Half B declared
+  `MANUAL_TREASURES = {"Stockpile"}` — a REBIND, which in one file silently drops half A's
+  Supplies and hands the autoplay button a Treasure that gains a card mid-bulk-play. Both
+  halves also defined `_hand` and `_supply_piles`; those turned out behaviourally identical
+  (only the docstrings differed), but that was CHECKED rather than assumed. **Any future
+  merge owes both checks** — every registry write must be `.update()`/`.add()`, and every
+  top-level name defined by both halves must be compared BODY-first. Written into the
+  module header.
+- **The CROSS-SET batch found the two Way of the Mouse bugs above**, plus an infinite loop its
+  own first fix opened (the Mouse card's play is an Action play, so Way of the Mouse offered
+  itself again, forever, for free — ch. VII: "you may use **the other** Way when playing the
+  Mouse card").
+- **The AUDIT found five more card bugs and corrected the PLAN.** Kiln could gain a copy from
+  a NON-Supply pile (a played Horse offered "gain a copy of Horse" and minted one from the
+  30-card pile) and ignored the same-name clause on ordered piles (playing a Dame Anna offered
+  "gain a copy of Dame Anna" and handed over a **Dame Josephine**); Way of the Rat could mint
+  a Horse; Groom and Demand resolved their second gain before the first gain's abilities —
+  the exact trap `_seq_gain`'s docstring describes, because two straight-line `gain()` calls
+  park two pools that come off the stack in REVERSE; and Scrap read the trashed card's cost
+  BEFORE the trash, which Menagerie made observable for the first time.
+
+**THE AUDIT ALSO OVERTURNED A ROADMAP READING, and that is the entry worth remembering.**
+Deviation **B9** (the 2025 "a played Duration's future effects stop if the card leaves play"
+rule) was expected to come due here, and the ph.-10 planning read said it did not: Ways
+REPLACE a card's ability, so nothing is registered to stop. **That is right for a single play
+and wrong for a throne-room** — play a Duration normally first, registering its fx, then use
+the Way on a LATER play, which physically moves the card out of play. Way of the Butterfly 5
+spells out that exact sequence and ch. VII's REMOVED FROM PLAY list names **Way of the
+Butterfly / Horse / Turtle** among the six things in the whole game that can remove a
+Duration. B9's reachability is now DOCUMENTED rather than hypothetical, and its row is
+rewritten as the one to pay at ph. 11. **Generalise this: "the new mechanic can't reach the
+old deviation" is a claim about a COMBINATION, and combinations are what the throne-rooms
+manufacture.**
+
+Two more standing rows moved. **B3**'s premise ("nothing in the pool changes costs
+mid-resolution") is now false — Destrier, Fisherman and Wayfarer all cost what the game state
+says, so any on-trash ability that GAINS changes what the trashed card cost; Scrap was moved
+off the row, Develop/Farmland/Trader were not and are now genuinely observable. And
+**`last_turn_trashes` counted the wrong thing**: Goatherd reads "+1 Card per card the player
+to your right TRASHED", and Bandit/Swindler/Knight/Old Witch are all worded "each other
+player … trashes", so the trasher is the VICTIM and an attack that makes you trash was paying
+the attacker's Goatherd. It shipped with a confident comment and **no citation**, and the
+audit caught it by asking for the source — the ph.-9 lesson (a code comment quoting a Fleet
+ruling that was not in ch. VII) in its other form: not an invented sentence but an unsourced
+one.
+
+**Bots:** a Way policy was needed for the same reason ph. 8's Debt payoff was — without one
+`bmplus` plays roughly half its Actions as Way of the Sheep, a silent cripple with no error
+and no stall. `BM_TERMINALS` gained **Black Cat (0.8667)** and **Barge (0.6292)**, both
+confirmed at n=60 after n=25 (the `deck>=12` discipline). Black Cat's number is recorded as an
+UPPER BOUND, not a rating: the sweep's standing caution is that it overrates attacks, and
+Black Cat is unusually well-matched to this harness — it curses only off-turn and reacts to
+Victory-card gains, which is what the no-terminal opponent spends the back half of the game
+doing. Five rejections recorded (Wayfarer 0.56, Gatekeeper 0.54, Sheepdog 0.50, Cardinal 0.46,
+Cavalry 0.39), all failing the way this tier always fails a card — Cavalry's whole payload is
+Horses and a return to the Action phase, and a deck holding ONE terminal has no second Action
+to spend.
+
 ## Structural-debt ledger (pay these ON TIME — kernel work first, stop-the-line)
 
 | Debt | First bitten by | Pay when |

@@ -44,6 +44,12 @@ DRAW_NOT_PLUS = {
         (1, 'Lost City on-gain: "each other player draws a card" — theirs, no plus.'),
     ("effects_adventures.py", "_storyteller_pay"):
         (1, 'Storyteller: "draw a card per $1 you paid" — no plus.'),
+    ("effects_base.py", "_cellar_discard"):
+        (1, 'Cellar (Base 2E): "Discard any number of cards, THEN DRAW THAT '
+            'MANY" — no plus. The 1E card was "+1 Card per card discarded" and '
+            "we shipped that wording until ph. 10; the compendium names Cellar "
+            "as one of the cards whose EDITION is observable under Way of the "
+            "Chameleon, which is what caught it."),
     ("effects_base.py", "_council_room"):
         (1, 'Council Room: "Each other player draws a card" — theirs, no plus. '
             "(The card's own +4 Cards in the same function IS add_cards.)"),
@@ -91,6 +97,12 @@ FINAL_DRAW_LEDGER = {
     ("effects_renaissance.py", "_silos_draw"):
         (1, 'Silos: "discard any number of Coppers … and draw that many cards" — '
             "no plus, correct as a plain draw."),
+    ("effects_menagerie.py", "_w_owl"):
+        (1, 'Way of the Owl: "Draw until you have 6 cards in hand" — draw-to-X, '
+            "no plus, so Way of the Chameleon must NOT change it (ch. VII Way "
+            "of the Chameleon 4). Watchtower is the same wording, and it is a "
+            "pleasing proof that the distinction is real: the Chameleon and "
+            "the Owl can sit on the same board."),
 }
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent

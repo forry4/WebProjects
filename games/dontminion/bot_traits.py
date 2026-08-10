@@ -420,6 +420,29 @@ BM_TERMINALS = {
     "Swashbuckler": 63,
     "Lackeys": 57,
     "Silk Merchant": 56,
+    # Menagerie, 7 candidates at n=25 and the two survivors CONFIRMED at n=60
+    # (the deck>=12 discipline: a promising arm gets re-run before it ships).
+    # Both went the right way on the second sample — Black Cat 0.79 -> 0.8667
+    # and Barge 0.63 -> 0.6292 — which is what regression to the mean does NOT
+    # look like.
+    #
+    # **BLACK CAT IS SHAPED FOR EXACTLY THIS MATCH-UP, and that is the caveat
+    # as much as the result.** It curses only OFF-turn, and its Reaction fires
+    # when another player gains a VICTORY card — which is what a money deck
+    # spends the back half of the game doing, so the trigger is nearly free
+    # here. Add the standing caution that this sweep OVERRATES attacks (the
+    # opponent has no terminal to defend with and there is no Moat in the
+    # filler), and 0.87 should be read as an upper bound, not a rating. It is
+    # still comfortably the best $2 in the table either way.
+    #
+    # The five rejections: Wayfarer (0.56), Gatekeeper (0.54), Sheepdog
+    # (0.50), Cardinal (0.46) and Cavalry (0.39) — all washes or worse, and
+    # all failing the way this tier always fails a card. Cavalry's whole
+    # payload is Horses and a return to the Action phase, and a deck holding
+    # ONE terminal has no second Action to spend; Sheepdog and Gatekeeper both
+    # want a board that gains often; Cardinal Exiles from a deck of Coppers.
+    "Black Cat": 87,
+    "Barge": 63,
     "Wharf": 87,
     "Vault": 82,
     "Charlatan": 81,

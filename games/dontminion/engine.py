@@ -1336,10 +1336,22 @@ def trash(game, pid, cards, zone="hand", **extra):
     if cards:
         _log(game, pid, "trash", cards=list(cards))
         # ph. 10: the live per-turn count Goatherd reads back as
-        # `last_turn_trashes` ("cards the player to your right trashed on
-        # their last turn"). Counted for the TURN PLAYER's turn regardless of
-        # who trashed — that is whose turn it was.
-        game["turn_ctx"]["trashes"] = game["turn_ctx"].get("trashes", 0) + len(cards)
+        # `last_turn_trashes` — "+1 Card per card THE PLAYER TO YOUR RIGHT
+        # TRASHED on their last turn", and ch. VII Goatherd 2 repeats it:
+        # "Goatherd counts how many times your right-hand player trashed a
+        # card."
+        #
+        # So it counts trashes BY that player, not trashes during their turn.
+        # The distinction is real and it runs the wrong way: when they play a
+        # Bandit, Swindler, Knight or Old Witch, the card is trashed by the
+        # VICTIM (that is how those cards are worded — "each other player …
+        # trashes"), so an attack that makes YOU trash must not pay THEIR
+        # Goatherd. Counting the turn instead of the trasher shipped in the
+        # ph.-10 kernel with a confident comment and no citation; the audit
+        # asked for the source and there wasn't one.
+        if pid == game["turn"]:
+            game["turn_ctx"]["trashes"] = \
+                game["turn_ctx"].get("trashes", 0) + len(cards)
         # same simultaneity rule as discard (the Steward ruling: "both cards
         # must be trashed simultaneously, and on-trash effects resolved
         # afterwards") — one pool per player across the batch. Dark Ages' seam.
@@ -2385,17 +2397,30 @@ def add_watcher(game, pid, card, event, stage=None, data=None, until="owner_turn
     (Collection's +1 VP) — the ability pool auto-runs it instead of offering
     it in the what-resolves-first prompt. Declare it only when resolving the
     stage can never change what any other pending ability does."""
-    entry = _dur_entry_for(game, pid, card)
-    if until == "forever":
-        # a REST-OF-THE-GAME ability (Champion). The entry must never be marked
-        # done, or the next clean-up discards the card out from under it.
-        entry["forever"] = True
-    if until != "turn_end":
-        # only CROSS-TURN watchers keep the card on the table; a this-turn
-        # watcher (Collection/Hoard/Tiara's 2022 "this turn, when..." class)
-        # dies with the turn — the card discards at its own clean-up, and may
-        # even be trashed from play mid-turn without stranding the entry
-        entry["watchers"] += 1
+    # A LANDSCAPE OWNER GETS NO DURATION ENTRY (ph. 10, Invest). The entry
+    # exists for exactly one job — keep the PLAYED CARD on the table while its
+    # watcher lives — and a landscape has no physical card to keep. Minting one
+    # anyway CONJURES A CARD: an entry carrying watchers is promoted at
+    # Clean-up into `seat["duration"]`, where `owned_cards` counts its `card`
+    # as a card the player owns, so the very next scoring pass does
+    # `CARDS["Invest"]` and raises. Travelling Fair (ph. 7) is the only earlier
+    # landscape watcher and escaped this purely by being `until="turn_end"`,
+    # which never increments `watchers` and so is never promoted — a
+    # rest-of-the-game one cannot. Found by the ph.-10 card batch.
+    entry = _dur_entry_for(game, pid, card) if card in CARDS else None
+    if entry is not None:
+        if until == "forever":
+            # a REST-OF-THE-GAME ability (Champion). The entry must never be
+            # marked done, or the next clean-up discards the card out from
+            # under it.
+            entry["forever"] = True
+        if until != "turn_end":
+            # only CROSS-TURN watchers keep the card on the table; a this-turn
+            # watcher (Collection/Hoard/Tiara's 2022 "this turn, when..."
+            # class) dies with the turn — the card discards at its own
+            # clean-up, and may even be trashed from play mid-turn without
+            # stranding the entry
+            entry["watchers"] += 1
     # A watcher registered during an Attack's play ability carries that play's
     # immunity set: a player who Moat-revealed (or was Lighthouse-protected)
     # when Corsair/Blockade was PLAYED is immune to its delayed effects too —
@@ -2618,6 +2643,11 @@ def request_extra_turn(game, pid, source="Outpost", no_buy=False):
     untouched matters because a save caught mid-turn can be holding it."""
     if source == "Outpost":
         game["_outpost"] = pid
+    elif source == "Seize the Day":
+        # ph. 10: its own slot, because it is the ONE source that can stack
+        # with another (see `_end_turn`) — sharing `_extra_turn_req` with
+        # Mission would let one silently overwrite the other.
+        game["_seize"] = pid
     else:
         game["_extra_turn_req"] = {"pid": pid, "no_buy": bool(no_buy)}
 
@@ -3565,7 +3595,7 @@ def _would_resolve_gate(game, pid, card, immune=None, replay=False):
     return True
 
 
-def push_way_offer(game, pid, way, card, stage):
+def push_way_offer(game, pid, way, card, stage, cancels=True):
     """THE WAY OFFER (ph. 10) — "when you play an Action card, you may choose
     to resolve the Way INSTEAD of resolving the play ability of the Action
     card".
@@ -3582,12 +3612,21 @@ def push_way_offer(game, pid, way, card, stage):
     `__play/resolve` continuation runs the real ability.
 
     **A DECISION ON EVERY ACTION PLAY IS THIS SET'S PRODUCT COST, and it is
-    the rule.** With a Way dealt, every Action play stops to ask."""
+    the rule.** With a Way dealt, every Action play stops to ask.
+
+    `cancels=False` is **WAY OF THE CHAMELEON, the one Way that does not
+    replace the play**: "you resolve the effects of the card you played, but
+    all +Cards you get this turn are +$ instead", and the 2023 ruling is
+    explicit that "unlike with the other Ways, with Way of the Chameleon
+    you're FOLLOWING THE ACTION CARD'S play ability". So its pick must not
+    call `cancel_pending_play`. It is a flag here rather than a second prompt
+    in card code because the two prompts are otherwise identical, and two
+    copies of one prompt shape are somewhere for them to drift apart."""
     push_choose_option(
         game, pid, way, "__way_offer",
         options=[{"id": "normal", "label": f"Play {card} normally"},
                  {"id": "way", "label": f"Play {card} using {way}"}],
-        data={"card": card, "stage": stage})
+        data={"card": card, "stage": stage, "cancels": bool(cancels)})
 
 
 def _k_way_offer(game, pid, frame, choice):
@@ -3598,9 +3637,11 @@ def _k_way_offer(game, pid, frame, choice):
     way = frame["card"]
     # "You just resolve the Way instead" — the card still counts as PLAYED, is
     # in play, bumped actions_played, and its after-play abilities still fire.
-    cancel_pending_play(game)
+    # Way of the Chameleon is the exception (`cancels=False`): it MODIFIES the
+    # play rather than replacing it, so the parked ability must still run.
+    if frame["data"].get("cancels", True):
+        cancel_pending_play(game)
     _log(game, pid, "way", name=way, card=frame["data"]["card"])
-    fn = _stage_fn(way, frame["data"]["stage"])
     _run_stage(game, way, frame["data"]["stage"], pid,
                {"kind": "auto", "pid": pid, "card": way,
                 "stage": frame["data"]["stage"],
@@ -3772,6 +3813,19 @@ def play_mouse_card(game, pid):
     _log(game, pid, "play_mouse", card=card)
     if has_type(game, card, "action") and pid == game["turn"]:
         game["turn_ctx"]["actions_played"] += 1
+    # AN ATTACK MOUSE CARD IS STILL AN ATTACK BEING PLAYED, so it owes the
+    # reaction window — the two siblings in this family (`play_from_supply`,
+    # `play_set_aside`) both branch here and this one did not, which let a Way
+    # of the Mouse whose card is a Swindler/Urchin/Ambassador/Black Cat hit a
+    # Moat holder with no window at all (found by the ph.-10 cross-set batch).
+    # ch. VII Way of the Mouse names Swindler itself: "when it's not your turn,
+    # if you play a card that affects the other players (like Swindler or
+    # Catapult), start with the current player." `_open_attack_window` parks
+    # the play ability under the windows, so no continuation is needed here.
+    if has_type(game, card, "attack"):
+        _open_attack_window(game, pid, card)
+        _emit_before_play(game, pid, card)
+        return True
     _run_supply_ability(game, pid, card)
     return True
 
@@ -3816,6 +3870,29 @@ def link_duration(game, pid, card, handle):
             if r != card and r not in riders:
                 riders.append(r)
             other["riders"].remove(r)
+    # ...AND THE LINKING CARD'S OWN ENTRY IS NOW SPENT. Leaving it is a
+    # conservation break in one direction and removing it is one in the other,
+    # so both halves have to happen together:
+    #
+    #   * its entry is marked `done` by this turn's `_start_of_turn` (the fx
+    #     that did the linking was its last), and `_cleanup_durations` discards
+    #     a done entry's `card` — so the physical Mastermind would be named
+    #     TWICE, once by its dying entry and once as a rider on the new host;
+    #   * but the card left `in_play` when that entry was promoted, so simply
+    #     dropping the entry leaves it counted in NO zone at all.
+    #
+    # Putting it back into `in_play` is not bookkeeping, it is the physical
+    # truth: a rider sits on the TABLE (exactly where a Throne Room riding a
+    # Duration sits), and `_cleanup_durations` takes riders OUT of `in_play`
+    # as it promotes the host. Exactly one entry is retired per link, because
+    # one link is one physical card — a second, still-live Mastermind is
+    # `done`-less and correctly untouched. Found by the ph.-10 card batch.
+    seat = game["seats"][pid]
+    for i, other in enumerate(seat["duration"]):
+        if other is not entry and other.get("card") == card and other.get("done"):
+            seat["duration"].pop(i)
+            seat["in_play"].append(card)
+            break
     return True
 
 
@@ -4843,6 +4920,26 @@ def _k_cleanup_sweep(game, pid, frame, choice):
     # applies rather than being swallowed (recorded as ambiguity A6).
     extra = (outpost_played or requested) and prev != pid
     extra_no_buy = extra and requested and req.get("no_buy", False)
+    # SEIZE THE DAY (ph. 10) IS THE STATED EXCEPTION TO THAT RULE, and it is
+    # an exception rather than an ambiguity: "if you trigger Seize the Day and
+    # (for instance) Outpost on the same turn, you will get BOTH extra turns
+    # as long as you take the Seize the Day turn last. This would give you
+    # three turns in a row."
+    #
+    # So its slot is not popped when it is set — it SURVIVES until a turn end
+    # that has no other extra turn to grant, which is precisely "taken last".
+    # That falls out rather than needing an ordering prompt: taking it first
+    # would strand the Outpost turn (a third in a row, denied), so the order
+    # that gives you both is the only one a player would ever choose. Same
+    # reasoning as deviation B8 — the branch we resolve is always available
+    # and always the wanted one.
+    #
+    # It is a NORMAL turn (Mission's no-buy restriction does not travel to
+    # it), and it is once per game per player, so this can grant at most one
+    # extra turn beyond the ordinary gate.
+    if not extra and game.get("_seize") == pid:
+        game.pop("_seize", None)
+        extra, extra_no_buy = True, False
     if outpost_played and not extra:
         # the extra-turn ability resolved (denied) BETWEEN turns: the Outpost
         # is spent now — mark done (dropping its parked no-op fx) so the next
@@ -5810,6 +5907,35 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
             each = 1 if n == 2 else 2
             add_pile(game, name, supply=True, members=CASTLES,
                      contents=[c for c in CASTLES for _ in range(each)])
+    # WAY OF THE MOUSE (ph. 10): "set aside an unused Action Kingdom card
+    # costing $2 or $3. Players may play that card using this Way." The 2025
+    # errata adds NON-DURATION, which ch. I's setup section was never updated
+    # for — the card and ch. VII win. Drawn from the kingdom cards this game
+    # did not deal (the Bane/Ferryman shape), and it brings its own setup rule
+    # with it, which is why it is chosen before LANDSCAPE_SETUP runs.
+    #
+    # ⚠ IT IS ALSO WHY THE PICK SITS ABOVE THE SETUP BLOCKS BELOW rather than
+    # under them. Ch. I ends the Menagerie setup paragraph with "*if this
+    # Action card has a special setup rule, do that setup*", and the Mouse card
+    # is BY DEFINITION not in the kingdom, so `in_play_cards` cannot see it: a
+    # Border Guard Mouse card kept no Lantern or Horn (its play ability then
+    # silently took nothing), and an Urchin/Hermit/Page/Peasant one built no
+    # Mercenary/Madman/Traveller pile — the Bane/Ferryman clause four lines up
+    # says exactly this for its own extra piles. Found by the ph.-10 cross-set
+    # batch. Nothing between here and the old site consumes the rng, so every
+    # existing seed still deals the same board.
+    if "Way of the Mouse" in game["landscapes"]:
+        pick = [c for c in unused
+                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)
+                and "action" in CARDS[c]["types"]
+                and "duration" not in CARDS[c]["types"]]
+        if pick:
+            game["mouse_card"] = rng.choice(pick)
+            _save_rng(game, rng)
+            in_play_cards = in_play_cards + [game["mouse_card"]]
+            # the artifacts index was built from the kingdom alone, above
+            for _art in cards_artifacts_for([game["mouse_card"]]):
+                game["artifacts"].setdefault(_art, None)
     # Adventures: "if Page is in the Supply, add the Treasure Hunter, Warrior,
     # Hero and Champion piles (5 each)" — the Traveller chain, outside the
     # Supply, so a Workshop can never reach one and only an exchange can.
@@ -5823,20 +5949,6 @@ def new_game(player_ids, expansions, seed=None, names=None, kingdom=None,
         add_pile(game, "Mercenary", count=10)
     if any(c in in_play_cards for c in ("Bandit Camp", "Marauder", "Pillage")):
         add_pile(game, "Spoils", count=15)
-    # WAY OF THE MOUSE (ph. 10): "set aside an unused Action Kingdom card
-    # costing $2 or $3. Players may play that card using this Way." The 2025
-    # errata adds NON-DURATION, which ch. I's setup section was never updated
-    # for — the card and ch. VII win. Drawn from the kingdom cards this game
-    # did not deal (the Bane/Ferryman shape), and it brings its own setup rule
-    # with it, which is why it is chosen before LANDSCAPE_SETUP runs.
-    if "Way of the Mouse" in game["landscapes"]:
-        pick = [c for c in unused
-                if cards_printed_cost(c) in (2, 3) and not cards_potion(c)
-                and "action" in CARDS[c]["types"]
-                and "duration" not in CARDS[c]["types"]]
-        if pick:
-            game["mouse_card"] = rng.choice(pick)
-            _save_rng(game, rng)
     # MENAGERIE (ph. 10): "if any cards referring to Horses are used, include
     # the Horse pile (30 cards) OUTSIDE the Supply" — so it is never buyable
     # and never counts toward the three-empty-piles end, both free from ph.
