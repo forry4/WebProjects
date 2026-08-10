@@ -84,8 +84,12 @@ const MODES = [
   { id: "classic", label: "Classic", title: "Bid a level and a denomination — the shipped auction" },
   { id: "skat", label: "Skat", title: "Bid a number, then declare the game that satisfies it" },
   { id: "minor", label: "Minor", title: "Even tricks pay only +1 — a harsher, quieter game to 25" },
+  { id: "dummy", label: "Dummy", title: "A third hand, face up — the declarer plays it, and it plays second in every trick" },
 ];
-const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor" };
+const MODE_LABEL = { classic: "Classic", skat: "Skat", minor: "Minor", dummy: "Dummy" };
+//: The dummy's index into the seat arrays. Positions are not seats: 0 and 1
+//: are the players, 2 is the hand the declarer also plays.
+const DUMMY_POS = 2;
 
 /** The announcement stack, spelled out for the result and side panels. */
 function multParts(ct) {
@@ -149,16 +153,25 @@ const beats = (led, follow, trump) => {
  *  so a trailing odd entry is the card currently face up on the table. */
 function lastTrick(game) {
   const h = game.history || [];
-  const done = Math.floor(h.length / 2);
+  // THREE cards to a trick once there is a dummy. Off the wire (`tricks` is
+  // the round length, `seats` the width) rather than assumed, so the one
+  // renderer serves both shapes.
+  const w = game.dummy ? 3 : 2;
+  const done = Math.floor(h.length / w);
   if (done === 0) return null;
-  const [a, b] = [h[2 * (done - 1)], h[2 * done - 1]];
-  const winner = beats(a[1], b[1], game.trump) ? b[0] : a[0];
+  const plays = h.slice(w * (done - 1), w * done);
+  // The winner, folded exactly as the engine folds it: carry the best card
+  // forward and ask whether the next one beats it.
+  let winner = plays[0];
+  for (const p of plays.slice(1)) {
+    if (beats(winner[1], p[1], game.trump)) winner = p;
+  }
   // Trick index `done - 1` is 0-based, matching `trickValue`. Under card
-  // scoring the trick is worth its two CARDS, whichever number it was.
+  // scoring the trick is worth the CARDS in it, whichever number it was.
   const value = cardPts(game)
-    ? cardVal(game, a[1]) + cardVal(game, b[1])
+    ? plays.reduce((t, p) => t + cardVal(game, p[1]), 0)
     : trickValue(done - 1, evenVal(game));
-  return { plays: [a, b], winner, value, number: done };
+  return { plays, winner: winner[0], value, number: done };
 }
 
 function uid() { return Math.random().toString(36).slice(2, 10); }
@@ -657,8 +670,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const players = roomData?.players || {};
   const seats = game?.seats || [];
   const mySeat = game ? game.you : null;
+  // `turn_seat`, not `to_play`. They are the same number in every two-seat
+  // mode, but `to_play` is a POSITION and the dummy's is 2 -- comparing that
+  // against your seat tells the declarer it is not their move on a third of
+  // the plies they actually have to make. `??` so a cached bundle talking to
+  // an older server still reads the old field.
+  const turnSeat = game?.turn_seat ?? game?.to_play;
   const myTurn = !!game && game.phase !== "over"
-    && (game.phase === "auction" ? game.auction.to_act === mySeat : game.to_play === mySeat);
+    && (game.phase === "auction" ? game.auction.to_act === mySeat : turnSeat === mySeat);
+  // The dummy is on turn AND it is mine to play -- the two halves of "click
+  // its cards", kept apart because the defender watches the same seat move.
+  const dummyIsMine = !!game?.dummy && game.dummy_seat === mySeat;
+  const dummyToPlay = !!game?.dummy && game.to_play === DUMMY_POS && myTurn;
   const isSkat = game?.mode === "skat";
   const declSeat = game?.auction?.declarer;
   const iDeclare = game != null && mySeat != null && declSeat === mySeat;
@@ -1262,7 +1285,16 @@ export default function Dissonance({ myId, authUser, onExit }) {
 
   // ── game ─────────────────────────────────────────────────────────────────
   const oppSeat = 1 - mySeat;
-  const nameOf = (seat) => players[seats[seat]] || (seat === mySeat ? "You" : "Opponent");
+  // POSITIONS, not just seats: 2 is the dummy, which belongs to no pid at all.
+  // Naming it after its owner is what makes the board readable -- "Dummy
+  // (Alice's)" says who is choosing its cards, which is the whole mechanic.
+  const nameOf = (seat) => {
+    if (seat === DUMMY_POS && game?.dummy) {
+      const owner = players[seats[game.dummy_seat]];
+      return owner ? `Dummy (${owner}'s)` : "Dummy";
+    }
+    return players[seats[seat]] || (seat === mySeat ? "You" : "Opponent");
+  };
   const opt = game.options || { bids: [], may_pass: false };
   const bids = opt.bids || [];
   // Skat's price table, straight off /catalog — absent until it lands, which
@@ -1303,6 +1335,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
       return heldTrick.plays.map((p) => ({ seat: p[0], c: p[1], won: p[0] === heldTrick.winner }));
     }
     if (game.phase !== "play") return [];
+    // Straight off the wire: the engine keeps the in-progress trick as
+    // [position, card] in play order, so a three-card trick needs no
+    // reconstruction here and the two shapes share one path.
+    if (game.plays?.length) {
+      return game.plays.map((p) => ({ seat: p[0], c: p[1] }));
+    }
     if (game.led === null || game.led === undefined) return [];
     return [{ seat: game.leader, c: game.led }];
   })();
@@ -1341,6 +1379,35 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {game.piles[oppSeat].map((p, i) => <Pile key={i} pile={p} />)}
             </div>
           </div>
+
+          {/* THE DUMMY — a third hand, face up, played by the declarer. It
+              sits between the opponent and the trick because that is where it
+              plays from: second, every trick, whoever led. Its cards get the
+              same `play` affordance as your own when it is your turn to move
+              for it, so commanding two hands is one uninterrupted gesture
+              rather than a mode switch. Its PILES are dealt like anyone's, so
+              its outer bottoms are face down here too — the dummy is open,
+              not solved. */}
+          {game.dummy && (
+            <div className={`dis-seat dis-dummy${dummyIsMine ? " mine" : ""}`}>
+              <div className="dis-seatname">
+                <b>{nameOf(DUMMY_POS)}</b>
+                {dummyToPlay && <span className="dis-yourturn">to play</span>}
+              </div>
+              <div className="dis-hand">
+                {game.dummy.map((c) => (
+                  <Card key={c} c={c}
+                    onClick={canPlay && dummyToPlay && legal.has(c) ? () => doPlay(c) : null} />
+                ))}
+              </div>
+              <div className="dis-piles">
+                {game.piles[DUMMY_POS].map((p, i) => (
+                  <Pile key={i} pile={p}
+                    onPlay={canPlay && dummyToPlay && legal.has(p?.top) ? () => doPlay(p.top) : null} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* middle */}
           {game.phase === "auction" && isSkat ? (

@@ -2216,6 +2216,90 @@ try {
 		check("no page errors creating a minor room", merrors.length === 0,
 			merrors[0]?.slice(0, 160) || "");
 		await mctx.close();
+
+		// ── DUMMY mode, the same Renaissance lesson a third time, and with more
+		// to prove than the others: this room flag does not just re-price the
+		// game, it deals a THIRD HAND and makes the trick three cards wide. A
+		// mounted board says nothing about whether that shape survives the
+		// create modal, the deal, the wire and the renderer -- and none of it is
+		// covered by the Rust parity fixtures, which are two-seat.
+		const dctx = await browser.newContext();
+		await dctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "dummy-harness", name: "Dummy", guest: true })));
+		const dpage = await dctx.newPage();
+		const derrors = [];
+		dpage.on("pageerror", (e) => derrors.push(String(e)));
+		await dpage.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await dpage.waitForSelector(".dis", { timeout: 25_000 }).catch(() => {});
+		await dpage.getByRole("button", { name: /new game|create/i }).first()
+			.click({ timeout: 15_000 }).catch(() => {});
+		await dpage.waitForSelector(".cm-seg", { timeout: 15_000 }).catch(() => {});
+		for (const label of [/^VS AI$/, /^Easy$/, /^Dummy$/]) {
+			await dpage.locator(".cm-seg .cm-seg-btn", { hasText: label }).first()
+				.click({ timeout: 10_000 }).catch(() => {});
+		}
+		const dpicked = await dpage.evaluate(() =>
+			[...document.querySelectorAll(".cm-seg .cm-seg-btn.sel")].map((b) => b.textContent.trim()));
+		check("the create modal offers Dummy as a fourth mode",
+			dpicked.includes("Dummy"), JSON.stringify(dpicked));
+		await dpage.locator(".cm-create").first().click({ timeout: 15_000 }).catch(() => {});
+		const dealt = await dpage.waitForSelector(".dis-bidgrid button, .dis-dummy", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("a dummy room deals", dealt);
+		// THE THIRD SEAT IS THE MARKER, and it has to be on screen: the whole
+		// mechanic is that you can read and play a hand that is not yours.
+		const dseat = await dpage.evaluate(() => {
+			const el = document.querySelector(".dis-dummy");
+			if (!el) return null;
+			const r = el.getBoundingClientRect();
+			return {
+				visible: getComputedStyle(el).display !== "none" && r.height > 0,
+				name: el.querySelector(".dis-seatname")?.textContent || "",
+				faceUp: el.querySelectorAll(".dis-hand .dis-card:not(.back)").length,
+				backs: el.querySelectorAll(".dis-hand .dis-card.back").length,
+				piles: el.querySelectorAll(".dis-pile").length,
+				seats: document.querySelectorAll(".dis-seat").length,
+			};
+		});
+		check("the dummy is on the board, face up, with its own piles",
+			!!dseat && dseat.visible && dseat.faceUp === 4 && dseat.backs === 0
+			&& dseat.piles === 3 && dseat.seats === 3, JSON.stringify(dseat));
+		check("...and it says whose hand it is", /dummy/i.test(dseat?.name || ""),
+			JSON.stringify(dseat?.name));
+		// Play a few tricks out and watch the trick grow to THREE cards. Two
+		// would mean the dummy is decorative -- rendered but not dealt into the
+		// trick, which is exactly what a half-wired third seat looks like.
+		let widest = 0;
+		for (let i = 0; i < 120; i++) {
+			widest = Math.max(widest, await dpage.evaluate(() =>
+				document.querySelectorAll(".dis-trick .dis-tp").length));
+			if (widest >= 3) break;
+			const card = dpage.locator(".dis-card.play").first();
+			if (await card.count() > 0) {
+				await card.click({ timeout: 5_000 }).catch(() => {});
+				await sleep(120);
+				continue;
+			}
+			// Still bidding — dummy mode runs CLASSIC's auction (level, then
+			// denomination, then Bid), so the shared helper drives it rather
+			// than a hand-rolled click that only looked like it worked.
+			if (await dpage.locator(".dis-bidgrid button").count() > 0) {
+				await disBidCheaply(dpage);
+				await sleep(200);
+				continue;
+			}
+			// The defender's Double sits between the auction and trick 1.
+			const stand = dpage.getByRole("button", { name: /^Let it stand$/ }).first();
+			if (await stand.count() > 0) {
+				await stand.click({ timeout: 5_000 }).catch(() => {});
+			}
+			await sleep(150);
+		}
+		check("a trick in a dummy room is three cards wide", widest >= 3,
+			`widest trick seen: ${widest}`);
+		check("no page errors creating and playing a dummy room", derrors.length === 0,
+			derrors[0]?.slice(0, 160) || "");
+		await dctx.close();
 	}
 
 	// ── Dissonance's client-searched tiers, in the browser ──────────────────────

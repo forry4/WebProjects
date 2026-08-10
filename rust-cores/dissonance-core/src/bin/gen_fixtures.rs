@@ -37,13 +37,15 @@ fn main() {
         // all. On the index rather than the RNG so the split cannot drift
         // with an unrelated draw.
         let even: i8 = if i % 4 == 3 { 1 } else { 2 };
-        // Card scoring and must-head are separate flags, but the SHIPPED
-        // combination is both-or-neither (skat mode), so the fixtures carry
-        // them together and `test_rust_parity` asserts that agreement rather
-        // than assuming it -- the port derives both from one mode string, so a
-        // fixture that split them would fail as a mystery illegal move.
         let cards = i % 4 == 1;
-        let head = cards;
+        // MUST-HEAD IS SHELVED SERVER-SIDE (see `engine.MUST_HEAD`), so the
+        // fixtures play without it -- they mirror the SHIPPED rules or they
+        // gate nothing, and `test_rust_parity` asserts that agreement rather
+        // than assuming it (the port derives the flag from one mode string, so
+        // a fixture that disagreed would fail as a mystery illegal move).
+        // The rule's own coverage is `must_head_forces_a_winner_when_one_can_
+        // follow` in tests/engine.rs, which drives the flag directly.
+        let head = false;
         let mut g = Game::deal(&mut Rng::new(i + 1), trump, leader);
         g.s.even = even;
         g.s.cards = cards;

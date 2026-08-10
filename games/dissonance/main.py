@@ -1033,13 +1033,22 @@ async def _handle_client_ai_ready(ws, room_id, pid, msg):
         # The skat requirement is DERIVED from the room's own rules rather than
         # pinned at 4, so turning `MUST_HEAD` off puts skat back to rung 3 and
         # re-admits every cached bundle with no second edit here.
+        mode = room.get("mode") or ""
+        # A MODE THE SEARCH CORE CANNOT PLAY IS NEVER ARMED. Dummy mode deals
+        # a third hand and the Rust core is two-seat to its bones, so an armed
+        # client would answer with a card for the wrong hand, the engine would
+        # refuse it, and the room would run on the server bot at full speed
+        # while still calling itself Hard. The create modal does not offer the
+        # searching tiers there either (`/catalog`'s `searchable_modes`), so
+        # this is the second of two locks rather than the only one.
+        if not engine.client_searchable(mode):
+            return
         wire = int(msg.get("wire") or 1)
-        mode = room.get("mode")
         need = 1
         if mode == "minor":
             need = 2
-        elif engine.uses_card_points(mode or ""):
-            need = 4 if engine.must_head_mode(mode or "") else 3
+        elif engine.uses_card_points(mode):
+            need = 4 if engine.must_head_mode(mode) else 3
         if wire < need:
             return
         room["client_ai"] = bool(msg.get("ready", True))
@@ -1153,6 +1162,17 @@ async def catalog():
         # property of the deal (`engine.played_pool`), not the mode.
         "card_values": list(engine.CARD_VALUES),
         "card_modes": [m for m in engine.MODES if engine.uses_card_points(m)],
+        # DUMMY mode (2026-08-10): a third hand, played by the declarer. The
+        # client reads the shape from here rather than hardcoding a seat count
+        # -- and `searchable_modes` is what stops the create modal offering
+        # Hard/Expert in a room whose game the search core cannot play at all.
+        "seats": {m: engine.layout_for(m)[0] for m in engine.MODES},
+        # `tricks_by_mode`, NOT `tricks` -- that key is already a scalar above
+        # and a duplicate in this literal would silently shadow it, handing
+        # every existing reader a dict where it expects 13.
+        "tricks_by_mode": {m: engine.layout_for(m)[3] for m in engine.MODES},
+        "searchable_modes": [m for m in engine.MODES
+                             if engine.client_searchable(m)],
         "pools": {m: engine.pool_for(m) for m in engine.MODES},
         "max_levels": {m: engine.max_level_for(m) for m in engine.MODES},
         "minor_null_make": engine.MINOR_NULL_MAKE,

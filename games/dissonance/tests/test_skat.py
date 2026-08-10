@@ -1184,12 +1184,15 @@ def test_the_deal_snapshot_says_it_was_card_scored():
 # --- must head the trick (2026-08-10) ----------------------------------------
 
 
-def test_must_head_forces_a_beating_card_when_one_can_follow():
+def test_must_head_forces_a_beating_card_when_one_can_follow(monkeypatch):
     """The rule, and the two halves it must NOT touch: a lead is never
     constrained, and a void seat may still play anything (ruffing stays
     optional). Driven over real deals rather than a hand-built position, so it
     covers the pile tops counting as followable cards."""
     import random as _r
+    # SHELVED but kept live: drive it through the flag, the same way the
+    # overtrick shelf drives `_score_is_settled`.
+    monkeypatch.setitem(E.MUST_HEAD, "skat", True)
     bound = voids = 0
     for seed in range(40):
         g = _drive_to_play(seed)
@@ -1218,12 +1221,14 @@ def test_must_head_forces_a_beating_card_when_one_can_follow():
     assert voids > 0, "no void seat arose -- the ruff half is untested"
 
 
-def test_must_head_is_skat_only_and_one_dict_turns_it_off():
-    assert E.must_head_mode("skat") is True
-    assert E.must_head_mode("classic") is False
-    assert E.must_head_mode("minor") is False
+def test_must_head_is_shelved_off_in_every_shipped_mode():
+    """SHELVED the day it shipped -- see `MUST_HEAD` for the measurement. The
+    rule is off everywhere; the tests around it drive it through the flag so
+    the branch stays live rather than rotting into something that no longer
+    compiles against the state around it."""
+    for mode in E.MODES:
+        assert E.must_head_mode(mode) is False, mode
     assert E.must_head_mode("nonsense") is False
-    assert E.MUST_HEAD["skat"] is True
 
 
 def test_a_classic_room_may_still_duck_under_a_winner():
@@ -1250,9 +1255,11 @@ def test_a_classic_room_may_still_duck_under_a_winner():
     assert ducked, "classic never offered a duck under a winner"
 
 
-def test_the_view_says_when_must_head_is_binding():
+def test_the_view_says_when_must_head_is_binding(monkeypatch):
     """The board's hint is the ENGINE's answer, not a client mirror -- the
     client's `beats` is label-only and does not know Grand."""
+    assert E.view_for(_declared(), 0)["must_head"] is False, "shelved by default"
+    monkeypatch.setitem(E.MUST_HEAD, "skat", True)
     g = _declared()
     v = E.view_for(g, E.to_play(g))
     assert v["must_head"] is True, "the room's rule is public from the start"

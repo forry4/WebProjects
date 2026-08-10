@@ -194,7 +194,7 @@ DOUBLE_RAMP = 1
 #:    12 against Null's flat 12, and a skat stake of 6 from 6 to 15 against 20.
 #:    The cliff is narrowed, not removed, and the measurement behind it was taken
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
-OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1}
+OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
@@ -242,8 +242,91 @@ N_SHOWN = 3
 # Nothing below touches the deck, the piles, the talon, follow-suit or the
 # parity. Only the phase machine between the deal and trick 1 changes.
 
-MODES = ("classic", "skat", "minor")
+MODES = ("classic", "skat", "minor", "dummy")
 DEFAULT_MODE = "classic"
+
+# --- dummy mode ------------------------------------------------------------
+#
+# THE FOURTH MODE (2026-08-10), and the first with a THIRD HAND on the table.
+#
+# WHY. Card scoring (skat) put the trick's value in the cards, which was the
+# point -- and then measured as "random, no control", for a reason the shelved
+# must-head experiment made precise: the player NOT taking a trick chooses its
+# payload. You win with an ace, they slide a 7 under it, and the trick you
+# fought for pays -2. Commanding a SECOND HAND is the direct answer, because
+# it makes you the author of two of a trick's three cards.
+#
+# THE SHAPE:
+#  * THREE seats of ten -- 4 in hand + three 2-card piles -- so 30 dealt, TWO
+#    out, TEN tricks of three cards. Seats 0 and 1 are the players; seat 2 is
+#    the dummy.
+#  * The dummy's HAND IS FACE UP FROM THE DEAL, to both players. Shared
+#    information advantages neither bidder, and it turns the auction into a
+#    judgement about "my hand plus that one" against "theirs plus that one",
+#    which is a better question than either hand alone. Its outer pile bottoms
+#    stay hidden from EVERYONE, exactly like a player's -- a fully open dummy
+#    would make the endgame a double-dummy problem for both seats.
+#  * THE DECLARER PLAYS THE DUMMY. Winning the auction already bought the
+#    lead; now it buys the control that was missing. The defender is
+#    compensated by seeing the whole dummy.
+#  * THE DUMMY PLAYS SECOND, ALWAYS -- and never leads: a trick the dummy
+#    takes passes the lead to the DECLARER. Three reasons, in order: its card
+#    is information in the middle of the trick that both players react to; the
+#    third seat is therefore always the real player who did not lead, so the
+#    duck-or-take decision stays a human one every single trick; and it gives
+#    the declarer a genuinely new move -- lead low from hand, drop the dummy's
+#    +2 on it, and dare the defender to take a fat trick they do not want.
+#  * NO TALON. There are only two out-cards to hide behind, and the declarer's
+#    prize is the dummy itself. That also removes skat's Hand/Sharp/Open, all
+#    of which are announcements ABOUT the talon.
+#
+# So the mode is CLASSIC's auction (level + denomination, ranked, the opener
+# must bid, the defender's Double) over CARD scoring, with a third hand. It is
+# deliberately a new mode rather than a change to skat: skat keeps its solver,
+# its fixtures and its round review, and this can be judged beside it.
+DUMMY = "dummy"
+
+#: The dummy's index into `hands` / `piles`. Seats 0 and 1 are the players, so
+#: it is 2 -- and a POSITION is not a SEAT: `to_play` returns a position, while
+#: `turn_seat` maps the dummy's back to the declarer, who actually acts.
+DUMMY_POS = 2
+
+#: (hands dealt, cards in hand, cards out of play, tricks) per mode.
+_LAYOUT = {DUMMY: (3, 4, 2, 10)}
+_LAYOUT_DEFAULT = (2, 7, N_OUT, NTRICKS)
+
+
+def layout_for(mode: str):
+    return _LAYOUT.get(mode, _LAYOUT_DEFAULT)
+
+
+def has_dummy(mode: str) -> bool:
+    return mode == DUMMY
+
+
+def n_hands(g: dict) -> int:
+    return layout_for(mode_of(g))[0]
+
+
+def ntricks_in(g: dict) -> int:
+    return layout_for(mode_of(g))[3]
+
+
+def client_searchable(mode: str) -> bool:
+    """Can `rust-cores/dissonance-core` search this mode at all?
+
+    FALSE FOR DUMMY, and it is the honest half of shipping a third hand: the
+    Rust core is two-seat to its bones -- `State.hand` is `[Mask; 2]`, the
+    solver's minimax alternates between two players, the wire reader partitions
+    a two-hand pool. A three-seat search is its own project, so until it exists
+    a dummy room must never ARM the browser: an armed client would answer with
+    a card for the wrong hand, the engine would refuse it, and the room would
+    play the server bot at full speed while the label said Hard. `main.py`
+    reads this to refuse arming, and the create modal reads it (via
+    `/catalog`) to stop offering the tiers at all -- a tier that cannot run is
+    worse than one that is not on the menu.
+    """
+    return not has_dummy(mode)
 
 #: What an EVEN-numbered trick pays its winner, per mode. Odd tricks are -1
 #: in the parity modes.
@@ -269,7 +352,7 @@ DEFAULT_MODE = "classic"
 #: read the field is refused per-decision by the worker (and the ready
 #: handshake), so a minor room degrades to the server bot rather than being
 #: searched under classic values.
-EVEN_TRICK_VALUE = {"classic": 2, "skat": 2, "minor": 1}
+EVEN_TRICK_VALUE = {"classic": 2, "skat": 2, "minor": 1, "dummy": 2}
 
 
 def even_value(mode: str) -> int:
@@ -302,8 +385,13 @@ def card_points(c: int) -> int:
 
 
 def uses_card_points(mode: str) -> bool:
-    """Does this mode score captured cards rather than the trick parity?"""
-    return mode == "skat"
+    """Does this mode score captured cards rather than the trick parity?
+
+    Skat since 2026-08-09, and DUMMY from the day it shipped -- the third hand
+    exists to give a player control over what a trick is WORTH, which is only
+    a decision at all while the cards carry the points.
+    """
+    return mode in ("skat", DUMMY)
 
 
 #: MUST HEAD THE TRICK (skat, 2026-08-10) -- when you CAN follow suit, you must
@@ -331,11 +419,34 @@ def uses_card_points(mode: str) -> bool:
 #: a pile TOP that beats forces itself out, uncovering the card beneath -- the
 #: piles constrain you harder than they did.
 #:
+#: SHELVED 2026-08-10, THE DAY IT SHIPPED -- measured, and the measurement is
+#: why. Kept whole and behind this flag rather than deleted, exactly as
+#: `_score_is_settled` is: the rule works, the gates still drive it, and
+#: turning it back on is this one line. What the measurement said:
+#:
+#:  * It changes the outcome of EXACTLY ONE trick shape -- lead a king into an
+#:    unplayed ace and they must eat a -2 trick, where otherwise they duck a 9
+#:    under it and the LEADER eats +1. Every other shape is unmoved.
+#:  * It therefore does NOT fix the complaint it was built for ("you win with
+#:    an ace and they slide a 7 under it"): nothing beats an ace, so the rule
+#:    never fires in that position at all.
+#:  * It bound on 6.2% of follows under the shipped policy, against 34.4% if
+#:    the leader chose leads to force it -- a real lever, but a narrow one, and
+#:    ~85% of the follows it bound left the follower no choice at all. So it
+#:    mostly MOVES a decision from the follow to the lead rather than adding
+#:    one.
+#:
+#: The verdict was that a narrow lever is not what the mode needs; the DUMMY
+#: (see its own section) is the answer being tried instead. Do not re-measure
+#: this from scratch -- the numbers above are from `tools/skat_calibration.py`
+#: and a counterfactual sweep over real rounds.
+#:
 #: A PER-MODE DICT, like `OVER_BONUS` and `EVEN_TRICK_VALUE`, and deliberately
 #: NOT folded into `uses_card_points`: a legality rule and a scoring rule are
-#: different things, this one is an experiment, and one line here turns it off
-#: without touching a rule anywhere else.
-MUST_HEAD = {"classic": False, "skat": True, "minor": False}
+#: different things, and everything downstream DERIVES from this dict -- the
+#: bot's extraction lead self-disables, and the client-AI wire requirement
+#: drops back a rung -- so flipping it is genuinely the only edit.
+MUST_HEAD = {"classic": False, "skat": False, "minor": False, "dummy": False}
 
 
 def must_head_mode(mode: str) -> bool:
@@ -385,7 +496,16 @@ def max_level_for(mode: str) -> int:
 #: round ~3.6 vs ~16 in the calibration sweep -- so 25 buys the same match
 #: length classic's 100 does. Measured in tools/minor_calibration.py, ~7
 #: bot-self-play rounds against classic's ~6 under the identical harness.)
-MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25}
+#:
+#: DUMMY's 400 is the same arithmetic in the other direction, and it is NOT a
+#: round number chosen by feel: with a third hand the declarer takes ~12 of a
+#: ~15-point pool, so contracts settle at levels 9-12 where classic settles at
+#: 3-5, and N^2 makes the mean winning round ~61 against classic's ~16. At 100
+#: a match would be over in 1.6 rounds -- one deal and a bit, which is exactly
+#: the "one bad deal decides it" problem matches exist to remove. 400 buys
+#: ~6.6 rounds, the same match classic's 100 buys. Measured in
+#: tools/dummy_calibration.py.
+MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25, "dummy": 400}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:
@@ -588,15 +708,19 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
     deck = list(range(NCARD))
     rng.shuffle(deck)
 
+    # THREE hands in dummy mode, and the third is the dummy -- same shape as a
+    # player's (some in hand, three 2-card piles), because the piles are what
+    # keep even a face-up seat from being fully solved.
+    nhands, in_hand, n_out, _ = layout_for(mode)
     hands, piles = [], []
     k = 0
-    for _ in range(2):
-        hands.append(sorted(deck[k:k + 7]))
-        k += 7
+    for _ in range(nhands):
+        hands.append(sorted(deck[k:k + in_hand]))
+        k += in_hand
         # Each pile is [bottom, top]; only the last element is playable.
         piles.append([[deck[k + 2 * i], deck[k + 2 * i + 1]] for i in range(3)])
         k += 6
-    out = deck[26:26 + N_OUT]
+    out = deck[k:k + n_out]
 
     g = {
         "v": VERSION,
@@ -612,11 +736,15 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
         # THIS TRACKS WHAT IS CURRENTLY OUT OF PLAY, and a swap rewrites it --
         # see the note in `apply_swap`, which explains why the wire depends on
         # that and cannot be given the historical record instead.
-        "shown": out[:N_SHOWN],
+        # DUMMY MODE HAS NO TALON: only two cards sit out, and the declarer's
+        # prize is the third hand rather than a look at the out-pile. Empty
+        # rather than absent, so every reader (`view_for`, the reveal, the
+        # wire) keeps working without a mode test.
+        "shown": [] if has_dummy(mode) else out[:N_SHOWN],
         # ...and this is the historical record: the three cards the declarer was
         # actually shown, never rewritten. Only the round-end reveal reads it,
         # and it exists because `shown` cannot answer that question after a swap.
-        "shown_at_deal": list(out[:N_SHOWN]),
+        "shown_at_deal": [] if has_dummy(mode) else list(out[:N_SHOWN]),
         # None until the swap phase resolves; then True/False. WHICH cards
         # moved stays hidden -- the defender learns only that a swap happened.
         "swapped": None,
@@ -650,6 +778,14 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
         "trick": 0,
         "leader": opener,
         "led": None,
+        # THE CARDS ALREADY DOWN IN THE TRICK BEING PLAYED, as [position,
+        # card] in play order. Two-seat modes get by on `led` alone; a
+        # three-card trick needs the list, and every mode maintains it so the
+        # board, the winner fold and the history all read one shape. `led`
+        # stays beside it as the FIRST card played -- what follow-suit is
+        # measured against -- because the wire and the frontend already speak
+        # it and it is what a follower actually needs.
+        "plays": [],
         "pts": [0, 0],
         # +2 tricks won by each seat -- the Null contract's condition.
         "etricks": [0, 0],
@@ -815,8 +951,11 @@ def apply_pass(g: dict, seat: int) -> None:
     if a["level"] == 0:
         raise ValueError("the opener must bid")
     a["log"].append({"seat": seat, "pass": True})
-    # The declarer now sees `shown` and decides on the swap before play.
-    g["phase"] = "swap"
+    # The declarer now sees `shown` and decides on the swap before play --
+    # except in a dummy room, which has no talon at all (two out-cards, and
+    # the prize is the third hand), so the defender's Double comes straight
+    # after the auction.
+    g["phase"] = "double" if has_dummy(mode_of(g)) else "swap"
 
 
 def _redeal(g: dict) -> None:
@@ -1112,10 +1251,18 @@ def _start_play(g: dict) -> None:
     g["trump"] = NOTRUMP if a["denom"] == NULL_DENOM else a["denom"]
     g["trick"] = 0
     g["led"] = None
+    g["plays"] = []
     # The DECLARER leads to trick 1. Measured worth +0.93 pts under the
-    # original parity, so this is a real part of the contract's value.
+    # original parity, so this is a real part of the contract's value -- and
+    # in a dummy room they lead into their OWN second hand, which is the whole
+    # shape of the tier: lead low, drop the dummy's +2 on it, and dare the
+    # defender to take a trick they do not want.
     g["leader"] = a["declarer"]
-    g["deal"] = _deal_snapshot(g)
+    # NO ROUND REVIEW WITH A DUMMY. The DD column is an exact solve, and the
+    # solver is two-seat (`client_searchable`) -- a snapshot nothing can price
+    # would be dead weight in every saved row and a column that never fills.
+    if client_searchable(mode_of(g)):
+        g["deal"] = _deal_snapshot(g)
 
 
 def _deal_snapshot(g: dict) -> dict:
@@ -1175,10 +1322,62 @@ def playable(g: dict, seat: int) -> list[int]:
     return sorted(g["hands"][seat] + pile_tops(g, seat))
 
 
+def trick_size(g: dict) -> int:
+    """Cards in a completed trick: three once there is a dummy."""
+    return 3 if has_dummy(mode_of(g)) else 2
+
+
+def trick_order(g: dict) -> list[int]:
+    """The POSITIONS that play this trick, in order.
+
+    THE DUMMY IS ALWAYS SECOND AND NEVER LEADS -- a trick it takes passes the
+    lead to the declarer (see `apply_play`). So the third card is always the
+    real player who did not lead, which is what keeps the duck-or-take
+    decision a human one on every trick.
+    """
+    lead = g["leader"]
+    if has_dummy(mode_of(g)):
+        return [lead, DUMMY_POS, 1 - lead]
+    return [lead, 1 - lead]
+
+
+def to_play(g: dict) -> int:
+    """The POSITION whose card comes next -- 0, 1, or the dummy's 2.
+
+    NOT necessarily a player: `playing_seat` is who actually acts.
+    """
+    if has_dummy(mode_of(g)):
+        order = trick_order(g)
+        return order[min(len(g.get("plays") or []), len(order) - 1)]
+    return g["leader"] if g["led"] is None else 1 - g["leader"]
+
+
+def side_of(g: dict, pos: int) -> int:
+    """Which PLAYER a position scores for. The dummy's tricks are the
+    declarer's -- they played them."""
+    if pos == DUMMY_POS and has_dummy(mode_of(g)):
+        return g["auction"]["declarer"]
+    return pos
+
+
+def playing_seat(g: dict) -> int:
+    """The PLAYER who must choose the next card. Identical to `to_play` in
+    every two-seat mode; the dummy's turn belongs to the declarer."""
+    return side_of(g, to_play(g))
+
+
 def legal_moves(g: dict, seat: int) -> list[int]:
-    if g["phase"] != "play" or seat != to_play(g):
+    """The cards `seat` may play right now.
+
+    Takes the PLAYER's seat, not a position -- so a dummy room asks the
+    declarer the same question for both hands they command, and every existing
+    caller (`main.py`, the bots, `view_for`) is unchanged. Handing it a bare
+    position in a dummy room returns [] rather than a wrong answer.
+    """
+    if g["phase"] != "play" or seat != playing_seat(g):
         return []
-    cands = playable(g, seat)
+    pos = to_play(g)
+    cands = playable(g, pos)
     if g["led"] is not None:
         trump = g["trump"]
         ls = esuit(g["led"], trump)
@@ -1208,17 +1407,13 @@ def must_head_binds(g: dict, seat: int) -> bool:
     touches a ruff), and when every follow card beats anyway, since then it
     forbids nothing and a hint would be noise.
     """
-    if g["phase"] != "play" or g["led"] is None or seat != to_play(g):
+    if g["phase"] != "play" or g["led"] is None or seat != playing_seat(g):
         return False
     if not must_head_mode(mode_of(g)):
         return False
     ls = esuit(g["led"], g["trump"])
-    follow = [c for c in playable(g, seat) if esuit(c, g["trump"]) == ls]
+    follow = [c for c in playable(g, to_play(g)) if esuit(c, g["trump"]) == ls]
     return bool(follow) and len(legal_moves(g, seat)) < len(follow)
-
-
-def to_play(g: dict) -> int:
-    return g["leader"] if g["led"] is None else 1 - g["leader"]
 
 
 def _remove(g: dict, seat: int, c: int) -> int:
@@ -1236,31 +1431,50 @@ def _remove(g: dict, seat: int, c: int) -> int:
 def apply_play(g: dict, seat: int, c: int) -> None:
     if c not in legal_moves(g, seat):
         raise ValueError("illegal card")
-    source = _remove(g, seat, c)
-    g["history"].append([seat, c, source])
+    pos = to_play(g)
+    source = _remove(g, pos, c)
+    # THE HISTORY RECORDS A POSITION, not a player -- in a dummy room the
+    # declarer plays two of the three hands, and which HAND a card came from
+    # is the thing a replay, the board and the void inference all need. The
+    # two are the same number in every two-seat mode, so nothing else moved.
+    g["history"].append([pos, c, source])
     g["played"].append(c)
-
+    plays = g.setdefault("plays", [])
+    plays.append([pos, c])
     if g["led"] is None:
         g["led"] = c
+    if len(plays) < trick_size(g):
         return
 
-    winner = seat if beats(g["led"], c, g["trump"]) else g["leader"]
-    # SKAT MODE SCORES THE CARDS (2026-08-09): a trick is worth the sum of the
-    # two cards in it (-2, +1 or +4), whichever trick number it is. The parity
-    # modes read the trick index as always. `etricks` below generalises for
-    # free: a "scoring trick" is one with positive value in either currency,
-    # which is exactly what the Null consolation needs it to mean.
+    # THE WINNER, folded over however many cards the trick holds. `beats` asks
+    # "does this card beat that one", so carrying the best card forward is
+    # exactly right for three: a plain card cannot beat a ruff (different
+    # class, not trump), and a second ruff is compared on rank.
+    win_pos, win_card = plays[0]
+    for p, card in plays[1:]:
+        if beats(win_card, card, g["trump"]):
+            win_pos, win_card = p, card
+    # CARD SCORING (2026-08-09): a trick is worth the sum of the cards in it,
+    # whichever trick number it is -- two of them normally, three with a
+    # dummy. The parity modes read the trick index as always. `etricks`
+    # generalises for free: a "scoring trick" is one with positive value in
+    # either currency, which is exactly what the Null consolation means.
     if uses_card_points(mode_of(g)):
-        v = card_points(g["led"]) + card_points(c)
+        v = sum(card_points(card) for _, card in plays)
     else:
         v = trick_value_in(g, g["trick"])
+    winner = side_of(g, win_pos)
     g["pts"][winner] += v
     if v > 0:
         g["etricks"][winner] += 1
     g["trick"] += 1
-    g["leader"] = winner
+    # THE DUMMY NEVER LEADS: a trick it takes hands the lead to the declarer,
+    # which is what keeps it second in every trick and the third card always a
+    # real player's. `side_of` is that mapping and already knows it.
+    g["leader"] = winner if win_pos == DUMMY_POS else win_pos
     g["led"] = None
-    if g["trick"] >= NTRICKS or _score_is_settled(g):
+    g["plays"] = []
+    if g["trick"] >= ntricks_in(g) or _score_is_settled(g):
         _finish(g)
 
 
@@ -1826,7 +2040,7 @@ def _finish_skat(g: dict) -> None:
     res = {
         # A settled round can stop short of thirteen tricks; the UI says so
         # rather than leaving a half-played board looking like a bug.
-        "ended_early": g["trick"] < NTRICKS,
+        "ended_early": g["trick"] < ntricks_in(g),
         "mode": "skat",
         "declarer": decl,
         "bid": a["value"],
@@ -1889,7 +2103,7 @@ def _finish(g: dict) -> None:
         # rather than leaving a half-played board looking like a bug. Always
         # False while overtricks pay -- see `_score_is_settled`, which is
         # shelved rather than removed, so the key and its reader stay.
-        "ended_early": g["trick"] < NTRICKS,
+        "ended_early": g["trick"] < ntricks_in(g),
         # The room's real mode ("classic" or "minor" -- skat has its own
         # finisher), so the history row and the result panel narrate the game
         # that was played rather than the shape it borrowed.
@@ -2065,7 +2279,20 @@ def view_for(g: dict, seat: int) -> dict:
         "you": seat,
         "hand": sorted(g["hands"][seat]),
         "opp_hand_n": len(g["hands"][opp]),
-        "piles": [_pile_view(g, 0, seat), _pile_view(g, 1, seat)],
+        "piles": [_pile_view(g, q, seat) for q in range(n_hands(g))],
+        # THE DUMMY, wholly public from the deal -- its hand to both players,
+        # since shared information advantages neither bidder and turns the
+        # auction into a judgement about "my hand plus that one". Its PILES go
+        # through the same redaction as anyone's (above), so its outer bottoms
+        # are hidden from everyone including the declarer: a fully open dummy
+        # would make the endgame a double-dummy problem for both seats.
+        # None outside dummy mode, which is how the board knows to render two
+        # seats rather than three.
+        "dummy": (sorted(g["hands"][DUMMY_POS]) if has_dummy(mode_of(g))
+                  else None),
+        # Who is playing it. The declarer commands two of the three hands,
+        # which is the whole mechanic, so the board says so out loud.
+        "dummy_seat": decl if has_dummy(mode_of(g)) else None,
         "auction": {
             "level": g["auction"]["level"],
             "denom": g["auction"]["denom"],
@@ -2143,7 +2370,17 @@ def view_for(g: dict, seat: int) -> dict:
         "swapped": g["swapped"],
         "swap_take": g.get("swap_take") if over else None,
         "swap_give": g.get("swap_give") if over else None,
+        # The POSITION on turn (the dummy's is 2) and the PLAYER who acts for
+        # it. Both, because the board points at a seat while the turn belongs
+        # to a person, and conflating them is how a dummy room would tell the
+        # defender it is their move.
         "to_play": to_play(g) if g["phase"] == "play" else None,
+        "turn_seat": playing_seat(g) if g["phase"] == "play" else None,
+        # The cards already down in this trick, [position, card] in play
+        # order, so the board can lay out a three-card trick without
+        # reconstructing it from `history`.
+        "plays": [list(p) for p in (g.get("plays") or [])],
+        "tricks": ntricks_in(g),
         "legal": legal_moves(g, seat) if g["phase"] == "play" else [],
         "options": auction_options(g) if g["phase"] == "auction" else None,
         "swap": swap_options(g) if g["phase"] == "swap" and seat == decl else None,
@@ -2202,7 +2439,10 @@ def turn_seat(g) -> int | None:
     # are the same decision under two names.
     if g["phase"] in ("kontra", "double"):
         return 1 - g["auction"]["declarer"]
-    return to_play(g)
+    # `playing_seat`, not `to_play`: the two are the same number in every
+    # two-seat mode, but the dummy's turn belongs to the declarer and the room
+    # server reads THIS to decide whose move it is waiting for.
+    return playing_seat(g)
 
 
 def turn_pid(g):

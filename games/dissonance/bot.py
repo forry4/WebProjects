@@ -67,9 +67,29 @@ def policy_score(g: dict, c: int, seat: int | None = None) -> float:
     trump = g["trump"]
     if E.uses_card_points(E.mode_of(g)):
         if led is not None:
-            tv = E.card_points(led) + E.card_points(c)
-            w = E.beats(led, c, trump)
-            return 2.0 + 0.5 * (tv if w else -tv) - 0.05 * r
+            # THE TRICK SO FAR, folded the same way the engine folds it, so a
+            # three-card trick (dummy mode) and a two-card one take one path.
+            plays = g.get("plays") or [[g["leader"], led]]
+            running = sum(E.card_points(card) for _, card in plays)
+            best_pos, best_card = plays[0]
+            for p, card in plays[1:]:
+                if E.beats(best_card, card, trump):
+                    best_pos, best_card = p, card
+            my_pos = E.to_play(g)
+            win_pos = my_pos if E.beats(best_card, c, trump) else best_pos
+            # SIDES, not positions -- and this is what stops the bot
+            # OVERTAKING ITS OWN DUMMY. If the declarer's first card is
+            # already winning the trick, a dummy card that beats it wins
+            # nothing new; what the choice is really about is how much the
+            # trick ends up worth.
+            mine = E.side_of(g, win_pos) == E.side_of(g, my_pos)
+            total = running + E.card_points(c)
+            # A card played BEFORE the last one can still be taken off you, so
+            # the same total is worth backing less confidently -- which is
+            # exactly the dummy's dilemma at position two, with the defender
+            # still to answer.
+            w = 0.5 if len(plays) + 1 >= E.trick_size(g) else 0.3
+            return 2.0 + w * (total if mine else -total) - 0.05 * r
         trumpish = 1.0 if E.esuit(c, trump) == E.trump_class(trump) else 0.0
         s = 1.0 + (1.0 - r) - 0.4 * max(0, E.card_points(c)) - trumpish
         # THE EXTRACTION LEAD, and it is the whole of what must-head buys the
@@ -164,9 +184,22 @@ def hand_strength(g: dict, seat: int, denom: int) -> float:
     home (`_SKAT_RANK_VALUE`). Same shape, same unknown-card treatment, and
     `_level_for`'s per-mode maps absorb the different scales.
     """
-    cards = E.playable(g, seat) + [
-        p[0] for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i == 1]
+    def visible(q):
+        return (E.playable(g, q)
+                + [p[0] for i, p in enumerate(g["piles"][q])
+                   if len(p) == 2 and i == 1])
+
+    cards = visible(seat)
     unknown = sum(1 for i, p in enumerate(g["piles"][seat]) if len(p) == 2 and i != 1)
+    if E.has_dummy(E.mode_of(g)):
+        # THE DUMMY COUNTS TOWARDS WHOEVER WINS THE AUCTION, so both bidders
+        # rate their hand WITH it -- that is the judgement the mode is asking
+        # for, and the dummy is face up, so this is reading the table rather
+        # than peeking. Its outer bottoms are hidden from everyone, so they
+        # come in at the deck mean exactly like a player's own do.
+        cards = cards + visible(E.DUMMY_POS)
+        unknown += sum(1 for i, p in enumerate(g["piles"][E.DUMMY_POS])
+                       if len(p) == 2 and i != 1)
     if E.uses_card_points(E.mode_of(g)):
         curve, mean = _SKAT_RANK_VALUE, _SKAT_UNKNOWN_RANK_VALUE
     else:
@@ -220,6 +253,17 @@ _SKAT_LEVEL_NEEDS = ((9, 18.6), (8, 17.2), (7, 16.2), (6, 15.5), (5, 14.9),
                      (4, 14.3), (3, 13.7), (2, 13.0))
 
 
+#: DUMMY mode's strength -> level map, CALIBRATED BY SELF-PLAY
+#: (tools/dummy_calibration.py). Its scale is unlike any other mode's for two
+#: compounding reasons: `hand_strength` counts the DUMMY's cards too (so the
+#: numbers run far higher than skat's), and the declarer commands two of the
+#: three hands, so they take most of a ~15-point pool rather than half of it.
+#: Placed against the measured distribution, not scaled from skat by feel.
+_DUMMY_LEVEL_NEEDS = ((12, 23.9), (11, 23.3), (10, 22.8), (9, 22.2),
+                      (8, 21.7), (7, 21.1), (6, 20.6), (5, 20.0),
+                      (4, 19.5), (3, 18.9), (2, 18.4))
+
+
 def _level_for(strength: float, mode: str = "classic") -> int:
     """Map a strength estimate onto a contract level.
 
@@ -227,7 +271,9 @@ def _level_for(strength: float, mode: str = "classic") -> int:
     even tricks pay half, and skat's run on the card-scoring currency (pool
     ~13, so the whole map sits higher and reaches deeper into the ladder).
     """
-    if mode == "skat":
+    if mode == E.DUMMY:
+        needs = _DUMMY_LEVEL_NEEDS
+    elif mode == "skat":
         needs = _SKAT_LEVEL_NEEDS
     elif mode == "minor":
         needs = _MINOR_LEVEL_NEEDS

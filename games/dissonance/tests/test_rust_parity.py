@@ -182,24 +182,3 @@ def test_the_fixtures_cover_card_scoring():
     # the parity constant, or the whole distinction proved nothing.
     pools = {E.played_pool(_game_from(f)) for f in cards}
     assert pools - {5}, "every card fixture's pool read the parity constant"
-
-
-def test_the_fixtures_really_exercise_must_head():
-    """The card fixtures replay must-head, so a legality break shows up as an
-    illegal move above -- but only if the rule actually BINDS somewhere in
-    them. Count the plies where it removed an option; a file where it never
-    fired would pass every gate here while testing nothing about the rule."""
-    fx = _load()
-    cards = [f for f in fx if f.get("head")]
-    assert cards, "no must-head fixtures at all"
-    bound = plies = 0
-    for f in cards:
-        g = _game_from(f)
-        for c in f["moves"]:
-            seat = E.to_play(g)
-            if E.must_head_binds(g, seat):
-                bound += 1
-            plies += 1
-            E.apply_play(g, seat, c)
-    assert bound >= plies // 20, (
-        "must-head bound on only %d of %d card-fixture plies" % (bound, plies))

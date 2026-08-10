@@ -231,10 +231,107 @@ run on it. `skatlab` itself deals `cards = true` and converts through
 pays a flat stake (no overtrick term) — the lab lags the engine there, as it
 already did.
 
-## Must head the trick (skat, 2026-08-10) — and what it measured
+## DUMMY mode — a third hand, played by the declarer (2026-08-10)
 
-When you CAN follow suit and hold a card that BEATS the lead, you must play
-one. Ducking under a winner is legal only when you cannot beat it at all.
+The fourth mode, and the answer to card scoring measuring as "random, no
+control". The diagnosis, which the shelved must-head experiment sharpened: in
+a two-hand trick the player NOT taking the trick chooses its payload — you win
+with an ace, they slide a 7 under it, and the trick pays −2. Commanding a
+SECOND HAND is the direct fix, because it makes you the author of two of a
+trick's three cards.
+
+**The shape.** THREE seats of ten (4 in hand + three 2-card piles), TWO cards
+out, TEN tricks of three cards, card scoring, CLASSIC's auction. Seats 0 and 1
+are the players; **seat 2 is the dummy**.
+* **Its hand is face up from the deal, to both players.** Shared information
+  advantages neither bidder and turns the auction into a judgement about "my
+  hand plus that one" against "theirs plus that one".
+* **Its outer pile bottoms are hidden from everyone, the declarer included** —
+  a fully open dummy makes the endgame a double-dummy problem for both seats.
+  The dummy is OPEN, not SOLVED.
+* **The declarer plays it.** Winning the auction already bought the lead; now
+  it buys the control that was missing.
+* **It plays SECOND, always, and never leads** — a trick it takes passes the
+  lead to the declarer. Three reasons in order: its card is information in the
+  middle of the trick both players react to; the third seat is therefore
+  always the real player who did not lead, so the duck-or-take decision stays
+  a human one every trick; and it gives the declarer a new move — lead low,
+  drop the dummy's +2 on it, and dare the defender to take a fat trick.
+* **No talon.** Two out-cards cannot support showing three, and the declarer's
+  prize is the dummy. That also removes skat's Hand/Sharp/Open, which are all
+  announcements ABOUT the talon.
+
+**A NEW MODE rather than a change to skat, deliberately.** Skat keeps its
+solver, its parity fixtures and its DD review column, and the two can be
+judged side by side. The cost is that the modes now differ in SEAT COUNT,
+which is why `layout_for` exists rather than the numbers being spread around.
+
+**POSITION IS NOT SEAT, and conflating them is the mode's central trap.**
+`to_play` returns a POSITION (0, 1, or the dummy's 2); `playing_seat` /
+`turn_seat` return the PLAYER who acts for it, which for the dummy is the
+declarer. `side_of` maps a position to the player it scores for. Everything
+downstream reads the right one: `legal_moves` takes a SEAT (so every existing
+caller is unchanged and a bare position returns [] rather than a wrong
+answer), `history` records a POSITION (which hand a card came from is what a
+replay and the board need), and the frontend compares against `turn_seat` —
+comparing `to_play` told the declarer it was not their move on a third of the
+plies they actually have to make.
+
+**Measured** (`tools/dummy_calibration.py`, 300 self-play rounds): pool mean
+15.1, declarer takes a mean of 10.4 (p50 12) — so contracts settle at **levels
+3–12, median 9**, where classic settles at 3–5, and **73% are made**. That
+makes the mean winning round ~61 against classic's ~16, so **`MATCH_TARGET`
+is 400**: at 100 a match would be over in 1.6 rounds, and 400 buys ~6.6, the
+same match classic's 100 buys. `_DUMMY_LEVEL_NEEDS` is spaced ~0.55 apart
+because `hand_strength` counts the dummy too and the resulting distribution is
+narrow (p50 22.2, p90 23.8) — the first map, spaced 1.5 like skat's, put 82%
+of contracts on two rungs.
+
+**THE BOT'S FIRST TRAP IS OVERTAKING ITS OWN DUMMY**, and the policy is
+written against sides rather than positions to avoid it: if the declarer's
+card is already winning, a dummy card that beats it wins nothing and only
+spends a better card. `policy_score`'s card branch folds the trick so far,
+asks whether the current winner is on ITS OWN side, and weights a
+not-yet-final card lower (0.3 against 0.5) because the defender can still take
+it off you — which is exactly the dummy's dilemma at position two.
+
+**HARD AND EXPERT DO NOT RUN HERE, and that is enforced twice.** The Rust core
+is two-seat to its bones (`State.hand` is `[Mask; 2]`, the solver alternates
+between two players, the wire reader partitions a two-hand pool), so a
+three-seat search is its own project. `engine.client_searchable` says so;
+`_handle_client_ai_ready` refuses to arm a dummy room at all, and `/catalog`
+ships `searchable_modes` so the create modal need not offer a tier that cannot
+run. Without both, an armed client would answer with a card for the wrong hand,
+the engine would refuse it, and the room would play the server bot at full
+speed while the label said Hard — the failure this repo has paid for twice.
+
+**Two consequences worth knowing:** a dummy round banks **no review snapshot**
+(the DD column is an exact solve, and nothing can price three hands), and its
+**history stays verbose at rest** — the packer has one bit of seat and a
+position needs two, so `persist._packable_hist` asks the DATA and leaves
+3-seat histories alone, which `expand_state` already discriminates by shape.
+Versioning the format instead would have risked every stored row to save bytes
+on a mode that has none.
+
+**Coverage is Python-only and that is the whole risk.** The parity fixtures
+are two-seat, so `tests/test_dummy.py` (16 tests) is the only thing standing
+behind this card play: the deal partition, dummy-second/never-leads over whole
+rounds, the declarer acting for it and the defender never being able to, a
+dummy trick scoring for the declarer and handing it the lead, the pool
+conserved, follow-suit binding all three hands, the redaction (its hand open,
+its outer bottoms shut, the opponent's hand still hidden), and the persistence
+round trip. `screens.mjs` drives the create modal to a dealt dummy room and
+asserts the third seat renders face-up with its own piles AND that a trick
+really reaches three cards — a rendered-but-not-dealt dummy is exactly what a
+half-wired third seat looks like.
+
+## Must head the trick — MEASURED, THEN SHELVED THE SAME DAY (2026-08-10)
+
+**`MUST_HEAD` is off in every mode.** The implementation is kept whole and the
+gates still drive it through the flag (the `_score_is_settled` idiom), because
+the rule works and the measurement below is the only reason it is not on. The
+dummy above is what was tried instead. When it was on: when you CAN follow
+suit and hold a card that BEATS the lead, you must play one. Ducking under a winner is legal only when you cannot beat it at all.
 Ruffing is untouched: void in the suit you may still play anything and are
 never forced to trump — must-head filters the FOLLOW set alone.
 

@@ -562,3 +562,18 @@
 .dis-tp { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 .dis-tp.won .dis-card { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+
+/* THE DUMMY SEAT (dummy mode, 2026-08-10). A third hand between the opponent
+   and the trick -- where it plays from, since it is second in every trick.
+   Marked out by a dashed edge rather than a colour: the board's accent is
+   already the turn signal and a second solid block would compete with it.
+   `.mine` (the declarer's own view) warms it slightly, because for that
+   player it is a hand they command rather than one they merely watch. */
+.dis-dummy {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 0.25rem 0.4rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+.dis-dummy.mine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
+.dis-dummy .dis-seatname { opacity: 0.85; }

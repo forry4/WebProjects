@@ -27,6 +27,22 @@ MARKER = "_c"
 VERSION = 1
 
 
+def _packable_hist(hist) -> bool:
+    """Can this history go through `_pack_hist` without losing a bit?
+
+    ONE BIT OF SEAT is all the packing has, and DUMMY mode's history records a
+    POSITION (0, 1 or the dummy's 2), which does not fit. Rather than version
+    the format -- which would put every already-stored row at risk to save
+    bytes on a mode that has none -- a 3-seat history is simply left verbose:
+    `expand_state` already discriminates on SHAPE (a list of ints is packed, a
+    list of lists is not), so both forms round-trip with no marker at all.
+
+    Asked of the DATA, not of the mode, so this file goes on knowing nothing
+    about the rules -- the same discipline that keeps `_pack_deal` generic.
+    """
+    return all(len(h) == 3 and 0 <= h[0] <= 1 for h in hist)
+
+
 def _pack_hist(entry) -> int:
     seat, card, source = entry
     # seat 0..1, card 0..31 (32-card deck), source 0..3. card<<1 tops out at
@@ -147,7 +163,7 @@ def compact_state(state: dict) -> dict:
     if isinstance(g, dict):
         cg = dict(g)
         hist = cg.get("history") or []
-        if hist and isinstance(hist[0], (list, tuple)):
+        if hist and isinstance(hist[0], (list, tuple)) and _packable_hist(hist):
             cg["history"] = [_pack_hist(h) for h in hist]
         # Derivable from history; storing it twice is pure waste.
         cg.pop("played", None)

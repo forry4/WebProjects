@@ -88,9 +88,11 @@ games/
                        #   rust-cores/dissonance-core (the solver-validated reference);
                        #   tests/test_rust_parity.py is the drift gate. THREE modes
                        #   over the shared card play, picked per room
-                       #   (`mode: classic|skat|minor` — minor re-prices even
-                       #   tricks to +1; skat scores the CARDS captured,
-                       #   9/10/J/Q +2 and 7/8/K/A −1) — see its CLAUDE.md
+                       #   (`mode: classic|skat|minor|dummy` — minor re-prices
+                       #   even tricks to +1; skat scores the CARDS captured,
+                       #   9/10/J/Q +2 and 7/8/K/A −1; dummy deals a THIRD hand
+                       #   the declarer plays, 3 seats x 10 cards, 10 tricks of
+                       #   three) — see its CLAUDE.md
 books/                 # Books feature (wired into the app, not a sub-app)
 shared/                # theme.js (baseCss), lobby.jsx, splendor.jsx, router.js — cross-game frontend kits
                        #   + AuthScreen.jsx / HomeScreen.jsx — site-SHELL screens, here for the
