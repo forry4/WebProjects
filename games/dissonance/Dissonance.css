@@ -423,6 +423,15 @@
 .dis-mrow-ct.mine { color: var(--text); }
 .dis-mrow-ct b { color: var(--text); }
 .dis-mrow-ct b.red { color: #ff8a9c; }
+/* THE DEFENDER'S BET on the round it doubled. Gold rather than the good/bad
+   pair the Score column uses: a Double is not itself good or bad news — it
+   doubles whichever way the round fell — and it must not read as a third
+   suit colour beside the contract it follows. */
+.dis-mrow-dbl {
+  margin-left: 0.25rem; padding: 0 0.22rem; border-radius: 3px;
+  font-size: 0.72em; font-weight: 800; letter-spacing: 0.02em;
+  color: var(--gold-light, #e8c96a); background: rgba(201, 168, 76, 0.16);
+}
 .dis-mrow-pts { color: var(--text-dim); }
 .dis-mrow-sc { font-weight: 700; }
 .dis-mrow-sc.good { color: var(--accent); }

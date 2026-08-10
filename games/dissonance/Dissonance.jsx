@@ -472,6 +472,19 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
                     <b className={RED_DENOM(r.denom) ? "red" : ""}>
                       {r.level}{DENOM_LABEL[r.denom] || ""}
                     </b>
+                    {/* The defender's bet, on the line it doubled. A doubled
+                        round otherwise looked ordinary with a surprising
+                        number beside it — which is the row a reader most wants
+                        explained. Absent on a round banked before the field
+                        shipped, which reads as undoubled, correctly. */}
+                    {r.doubling > 1
+                      ? <span className="dis-mrow-dbl"
+                          title={r.doubling === 4
+                            ? "Doubled and redoubled — this round was played for 4×"
+                            : "Doubled — this round was played for 2×"}>
+                          ×{r.doubling}
+                        </span>
+                      : ""}
                     {r.null ? " Null" : ""}</>}
             </span>
             {/* The declarer's trick points against what they promised — the
@@ -499,7 +512,8 @@ function roundTitle(r, nameOf) {
   const who = nameOf(r.declarer);
   const what = `${r.level}${DENOM_LABEL[r.denom] || ""}`;
   const took = `took ${r.pts?.[r.declarer] ?? 0} of ${r.target}`;
-  return `Round ${r.round}: ${who} declared ${what}, ${took} — `
+  const bet = r.doubling > 1 ? ` (doubled, ×${r.doubling})` : "";
+  return `Round ${r.round}: ${who} declared ${what}${bet}, ${took} — `
     + (r.null ? "Null" : r.made ? "made" : "set");
 }
 
@@ -1800,15 +1814,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     score <b>{2 * game.auction.level}</b> plus a RISING amount per
                     point — <b>{[1, 2, 3].map((i) => shortRate + i).join(", then ")}</b>{" "}
                     — instead of {game.auction.level} plus a flat {shortRate}.
-                  </div>
-                  <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    So it barely touches a near miss and bites hard on a collapse:
-                    one short costs them {2 * game.auction.level + shortRate + 1},
-                    four short {2 * game.auction.level + 4 * shortRate + 10}.
-                  </div>
-                  <div className="muted" style={{ fontSize: "0.72rem" }}>
-                    Null is untouched — a declarer who wins {nullCond(game)} still
-                    scores {nullMake}, doubled or not.
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"

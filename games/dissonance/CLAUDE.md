@@ -1019,6 +1019,17 @@ the bidding judgement, which is the part worth playing.
     the panel that narrates the same round — re-reading made/null/target off the
     board would have been a second copy of the scoring, which is what
     `payoff_terms` exists to prevent.
+  - **A DOUBLED ROUND SAYS SO ON ITS LINE (2026-08-09)** — `doubling` on the
+    row, rendered as a gold `×2` / `×4` chip after the contract. Without it a
+    doubled round sat in the box as an ordinary line with a surprising number
+    beside it, which is precisely the row a reader wants explained. It carries
+    the MULTIPLIER rather than either mode's word for the bet, so classic's
+    Double and skat's Kontra-then-Re land in one field and the box needs no
+    idea which auction the room ran; it is read off `res` (skat already had
+    `doubling`, classic has `doubled`), so no rule is re-derived here. Absent
+    on a round banked before it shipped, which reads as undoubled — correctly.
+    Gated by `test_the_scorecard_line_says_a_round_was_doubled` and the skat
+    Kontra/Re case beside it, both verified non-vacuous.
   - **`rounds` is `setdefault`ed, never created in `new_game`** — same reason
     `match_of` exists. A match already in progress when this shipped has no
     scorecard and must go on banking rounds rather than KeyError; its earlier

@@ -1136,3 +1136,49 @@ def test_the_result_row_carries_every_term_its_own_score_needs(mode):
     assert {"made", "set"} <= seen, "only reached %s" % sorted(seen)
     if mode != "skat":
         assert "ramped set" in seen, "the Double's ramp branch was never reached"
+
+
+@pytest.mark.parametrize("mode", ["classic", "minor", "dummy"])
+def test_the_scorecard_line_says_a_round_was_doubled(mode):
+    """A DOUBLED ROUND MUST BE VISIBLE IN THE MATCH BOX.
+
+    Otherwise it sits there as an ordinary line with a surprising number
+    beside it -- the one row a reader actually wants explained. The row
+    carries the MULTIPLIER rather than either mode's word for the bet, so
+    classic's Double and skat's Kontra/Re land in one field.
+    """
+    for seed in range(12):
+        rng = random.Random(seed)
+        g = E.new_game(["a", "b"], rng, opener=seed % 2, mode=mode)
+        _play_out_any(g, rng, force_double=True)
+        row = g["match"]["rounds"][-1]
+        assert row["doubling"] == 2, "a doubled round must say so on its line"
+        # ...and the line agrees with the result the panel prints from.
+        assert row["scores"] == g["result"]["scores"]
+
+    # The undoubled control: the field is present and reads 1, so the frontend
+    # can test `> 1` rather than distinguishing absent from false.
+    rng = random.Random(99)
+    g = E.new_game(["a", "b"], rng, opener=0, mode=mode)
+    _play_out_any(g, rng, force_double=False)
+    assert g["match"]["rounds"][-1]["doubling"] == 1
+
+
+def test_a_skat_kontra_shows_on_the_scorecard_as_the_multiplier_it_is():
+    """Kontra doubles and Re doubles again -- the same field, so the match box
+    needs no idea which auction the room ran."""
+    for kontra, re_, want in ((False, False, 1), (True, False, 2), (True, True, 4)):
+        g = E.new_game(["a", "b"], random.Random(5), opener=0, mode="skat")
+        E.apply_skat_bid(g, 0, E.SKAT_VALUES[0])
+        E.apply_pass(g, 1)
+        E.apply_look(g, 0)
+        E.apply_swap(g, 0, None, None)
+        d = E.skat_declarable(g["auction"]["value"])[0]
+        E.apply_declare(g, 0, d["denom"], d["min_level"])
+        E.apply_kontra(g, 1, kontra)
+        if kontra:
+            E.apply_re(g, 0, re_)
+        rng = random.Random(5)
+        while g["phase"] == "play":
+            E.apply_play(g, E.to_play(g), bot.choose_card(g, E.to_play(g)))
+        assert g["match"]["rounds"][-1]["doubling"] == want, (kontra, re_)

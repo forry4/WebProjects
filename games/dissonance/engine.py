@@ -2159,6 +2159,16 @@ def _round_summary(g: dict, m: dict, res: dict) -> dict:
         "target": res.get("target", res.get("level", 0)),
         "made": bool(res.get("made")),
         "null": bool(res.get("null")),
+        # THE DEFENDER'S BET, as the MULTIPLIER rather than either mode's word
+        # for it: classic Doubles, skat Kontras and the declarer may Re on top,
+        # and all three do the one thing the scorecard has to show -- this
+        # round was played for 2x or 4x. Without it a doubled round sat in the
+        # match box as an ordinary line with a surprising number beside it,
+        # which is exactly the round a reader most wants explained.
+        #
+        # Read off `res`, which already carries skat's `doubling` (1/2/4) and
+        # classic's `doubled` (a bool), so nothing re-derives the rule here.
+        "doubling": int(res.get("doubling") or (2 if res.get("doubled") else 1)),
         "scores": [int(res["scores"][0]), int(res["scores"][1])],
     }
     if res.get("abandoned_by") is not None:
