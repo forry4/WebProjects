@@ -261,7 +261,14 @@
    it visibly shrink as it crossed the table. Both selectors are children of the
    container, which is what lets them read `100cqw` — the container itself
    cannot, since query units resolve against an ANCESTOR. */
-.dis-seat, .dis-trick {
+/* THE BOARD'S SIZING TOKENS LIVE ON THE TABLE, and the seats inherit them.
+   They used to sit on `.dis-seat`, which was fine while only the seats read
+   them -- but the table has to derive its own WIDTH from the same numbers
+   (see the desktop block), and a custom property inherits DOWN, so a seat
+   cannot lend one to its parent. `--dis-cw` itself stays on the seats: it is
+   built from container-query units, and those resolve against an ANCESTOR, so
+   the table cannot measure itself with them. */
+.dis-table {
   --dis-slots: 7;
   --dis-gap: 0.25rem;
   /* CARD ROWS ON THE BOARD, which is what the height budget below divides by:
@@ -274,19 +281,27 @@
      room for; a third seat adds another name row to it. */
   --dis-rows: 4;
   --dis-reserve: 27rem;
+  /* ...and the same budget measured from the TABLE's own height rather than
+     the window's, for the desktop layout below. It excludes the header (which
+     is outside the table) and counts only what is inside it: the padding, the
+     row gaps, each seat's name row and pile peek, and the tallest MIDDLE a
+     phase can produce -- the auction panel, measured at 309px, against play's
+     222px. Sized for that worst case so one number fits every phase. */
+  --dis-reserve-in: 30rem;
+}
+.dis-seat, .dis-trick {
   --dis-cw: min(
     calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
     calc((100dvh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
   );
 }
-/* A DUMMY TABLE IS SIX CARD ROWS, not four. Set on the seats themselves (where
-   `--dis-cw` reads it) rather than on the table, and at a higher specificity
-   than the rule above, which is what lets one variable resize the whole board.
-   The dummy's own hand is four cards where a player's is four too, so only the
-   HEIGHT term needed to move. */
-.dis-3seat .dis-seat, .dis-3seat .dis-trick {
+/* A DUMMY TABLE IS SIX CARD ROWS, not four -- one variable resizes the board.
+   On the TABLE now (the tokens moved there), so the table's own width budget
+   sees the third seat too. */
+.dis-table.dis-3seat {
   --dis-rows: 6;
   --dis-reserve: 29rem;
+  --dis-reserve-in: 33rem;
 }
 .dis-seat .dis-hand {
   width: 100%; gap: var(--dis-gap);
@@ -304,6 +319,108 @@
 .dis-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: 15px; }
 .dis-buried { position: absolute; top: 0; right: 0; z-index: 0; }
 .dis-pilewrap .dis-card { position: relative; z-index: 1; }
+
+/* ── DESKTOP: the whole board on screen, and nothing to scroll ──────────────
+   The board used to grow until it fitted its cards, and the page grew with it:
+   at 1920x1080 the document ran 1110px against a 1080 viewport and YOUR OWN
+   HAND sat below the fold -- worse during the auction, whose panel is 87px
+   taller than a mid-play middle. The card size was already viewport-aware, but
+   its budget was `100dvh - 27rem`: a guess that could not know the header
+   above the table, and could not tell an auction board from a playing one.
+
+   So the screen is pinned to the viewport and the sizing is inverted -- the
+   space decides the cards, rather than the cards deciding the page:
+
+   * `.dis-game` is exactly 100dvh, a flex column, `overflow: hidden`. There is
+     no page scrollbar to have.
+   * the table takes what the header leaves and becomes a SIZE container, so
+     the card budget reads the table's real height (`100cqh`) instead of
+     guessing from the window.
+   * seats keep their card-derived height; the MIDDLE takes the slack and
+     scrolls inside itself if a phase's panel is taller than the budget
+     allowed. A miscalculation therefore shows up as a scrollbar on one panel,
+     never as a hand clipped off the bottom of the screen.
+
+   Mobile is deliberately untouched: below 761px the page scrolls, which is
+   right on a phone, and that block sets its own heights. */
+/* Gated on HEIGHT as well as width: below 600px tall there is not enough room
+   for a board plus an auction panel at any card size, and pinning the viewport
+   there would clip rather than fit. A very short window therefore falls back
+   to the scrolling layout, which is the honest answer for it. */
+@media (min-width: 761px) and (min-height: 600px) {
+  .dis-game { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  /* `align-items: stretch`, overriding the base `start`, is what gives the
+     table a DEFINITE height -- and a size container with no definite height
+     reports `100cqh: 0`, which drove the card budget negative and collapsed
+     the whole board to a 31px sliver. It is the load-bearing line here. */
+  .dis-game .dis-main { flex: 1 1 auto; min-height: 0; padding: 0 16px 12px; align-items: stretch; }
+  .dis-game .dis-table {
+    height: 100%; min-height: 0; overflow: hidden;
+    container-type: size;
+    /* Hug the cards instead of stretching. The board can only be as wide as
+       seven cards, and the cards are capped by HEIGHT on any normal desktop --
+       so a full-width table left half its felt empty (1648px of green around
+       836px of content at 1080p). The same budget, run forward: the 71px is
+       the header plus this grid's bottom padding, and being a little off only
+       makes the felt a little wider than the hand, which is why the exact
+       figure lives in `--dis-reserve-in` and this one does not have to. */
+    --dis-cw-approx: calc((100dvh - 71px - var(--dis-reserve-in)) / var(--dis-rows) / 1.4);
+    /* An EXPLICIT width with `justify-self`, not `max-width` with an auto
+       margin: an auto inline margin beats `justify-self: stretch`, so the
+       table fell back to sizing from its contents -- and a SIZE container has
+       no contents to size from, which is how a 1616px column produced a 31px
+       board. A definite width is also what the container query needs. */
+    width: max(34rem, min(100%, calc(var(--dis-cw-approx) * var(--dis-slots)
+           + var(--dis-gap) * (var(--dis-slots) - 1) + 1.8rem + 2px)));
+    justify-self: center;
+  }
+  /* The card budget, measured off the table itself rather than the window.
+     The FLOOR is what stops a short screen from starving the cards: the
+     auction panel is a fixed ~309px whatever the window does, so on a 720-tall
+     display the worst-case reserve left 24px cards -- smaller than the phone's
+     42px, on a desktop. Below the floor the panel gives way instead, scrolling
+     inside itself (see the safety valve above); the SEATS always fit, which is
+     what keeps the cards on screen. Measured at 1280x720: play fits whole with
+     20px to spare, and only the auction panel scrolls. */
+  .dis-game .dis-seat, .dis-game .dis-trick {
+    --dis-cw: max(3.4rem, min(
+      calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
+    ));
+  }
+  .dis-game .dis-table > .dis-seat { flex: 0 0 auto; }
+  /* The safety valve: the variable-height PANELS shrink and scroll in place.
+     Scoped to those two -- a blanket `min-height: 0` on every non-seat child
+     also hit `.dis-trick`, whose min-height is what RESERVES the trick's card
+     row, and "Your lead" then drew straight over "Trick 2 of 13". */
+  .dis-game .dis-auction, .dis-game .dis-result {
+    min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* ...and the panel's CONTENTS must not shrink with it. Both are flex
+     columns, so a squeezed panel shrank its children instead of scrolling:
+     at 1280x720 skat's value ladder collapsed to ZERO height -- still in the
+     DOM, still "visible" to a query, and impossible to click, which is
+     exactly how the render gate caught it. Refusing the shrink is what makes
+     the panel's own scrollbar the thing that gives. */
+  .dis-game .dis-auction > *, .dis-game .dis-result > * { flex-shrink: 0; }
+  /* PLAY has a shorter middle than the auction (222px against 309), and its
+     trick is a fifth CARD ROW rather than furniture. Budgeting it separately
+     is what turns ~300px of dead felt into bigger cards; the phase class was
+     already on the table for the mobile rules. */
+  .dis-game .dis-table.ph-play { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
+  /* Spread whatever slack is left the way a table does — opponent at the far
+     side, your hand nearest you — instead of packing everything to the top. */
+  .dis-game .dis-table { justify-content: space-between; }
+  /* The side column is its own scroller — a long match scorecard must not be
+     able to push the board off the screen. */
+  .dis-game .dis-side { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* THE LOBBY'S GUTTER. `.dis` cannot carry it the way `.duel` does: this game
+     uses the shared LobbyHeader, which is full-bleed by design (its background
+     and border-bottom span the window), so padding on the root would inset the
+     header too. The columns ran flush to both screen edges — "OPEN GAMES"
+     touching the left, History the right — where Duel insets 14px and CoC 22. */
+  .dis .lby-cols { padding-inline: 16px; }
+}
 
 /* ── table ──────────────────────────────────────────────────────────────── */
 .dis-main { display: grid; grid-template-columns: 1fr 260px; gap: 0.75rem; align-items: start; }

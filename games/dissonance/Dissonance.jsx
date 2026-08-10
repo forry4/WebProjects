@@ -1533,7 +1533,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
     // `dis-cardpts` is what turns the per-card worth chips on: skat scores
     // captured cards (2026-08-09), and a board that did not say which cards
     // are the +2s would be a memory quiz, not a card game.
-    <div className={`dis${cardPts(game) ? " dis-cardpts" : ""}`}>
+    /* `dis-game` marks the GAME screen specifically -- `.dis` is also the
+       lobby's root, and the desktop rules below lock this screen to the
+       viewport so the board never scrolls. */
+    <div className={`dis dis-game${cardPts(game) ? " dis-cardpts" : ""}`}>
       <style>{styles}</style>
       <LobbyHeader title="Dissonance" menu={<OddMenu onLeave={leaveToLobby}
         onRules={() => setShowRules(true)}
