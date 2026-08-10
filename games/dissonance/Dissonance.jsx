@@ -1802,6 +1802,29 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 </div>
               )}
             </div>
+          ) : (game.phase === "over" && !heldTrick && !res) ? (
+            /* A ROUND THAT ENDED WITHOUT A RESULT, which is a real state and
+               not a corrupt one: `load_game_to_memory` VOIDS a save it cannot
+               resume (a pre-v2 deck, or a dummy round dealt before the wide
+               deck) by closing the round in place, and a closed round that was
+               never scored has no result row to narrate.
+
+               Everything below reads `res` unguarded, and `res.made` is the
+               first thing it touches — so this branch is the whole of the fix
+               for `TypeError: null is not an object (evaluating 'r.made')`,
+               which blanked the board on exactly those saves. The pre-v2 guard
+               had produced this shape since v2 shipped; its population was
+               verified empty, so nothing ever hit it until the wide deck gave
+               it live rows. */
+            <div className="dis-result">
+              <div className="dis-big set">Round ended</div>
+              <div className="muted">
+                A rules update means this round can no longer be played out, so
+                it was closed where it stood. Nothing was scored. Start a new
+                game from the lobby.
+              </div>
+              <button className="btn dis-gobtn" onClick={leaveToLobby}>Back to lobby</button>
+            </div>
           ) : (game.phase === "over" && !heldTrick) ? (
             <div className="dis-result">
               <div className={`dis-big ${res.made ? "made" : "set"}`}>

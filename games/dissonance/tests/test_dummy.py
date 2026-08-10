@@ -449,6 +449,15 @@ def test_a_round_dealt_before_the_wide_deck_is_voided_rather_than_jammed():
         loaded = M.ROOMS[rid]
         assert loaded["game"]["phase"] == "over", "a stale deal must not resume"
         assert loaded["status"] == "over"
+        # THE SHAPE THE BOARD HAS TO SURVIVE: a round closed without ever being
+        # scored has NO result row. The result panel reads `res.made` as the
+        # first thing it touches, so this combination blanked the board with
+        # `TypeError: null is not an object (evaluating 'r.made')` until the
+        # panel grew its own branch for it. Pinned here because the crash is on
+        # the OTHER side of the wire from the code that creates the shape.
+        assert loaded["game"].get("result") is None, (
+            "a voided round has no result; Dissonance.jsx renders a dedicated "
+            "'Round ended' panel for exactly this and must keep doing so")
     finally:
         M.load_game_state = real
         M.ROOMS.pop(rid, None)
