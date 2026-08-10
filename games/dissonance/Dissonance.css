@@ -370,6 +370,24 @@
 .dis-bidgrid button:disabled, .dis-denoms button:disabled { opacity: 0.3; cursor: not-allowed; }
 .dis-denoms { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
 .dis-denoms button { min-width: 56px; font-size: 1.1rem; }
+
+/* THE SUIT SYMBOL, coloured like a playing card — ♦ and ♥ red, ♣ and ♠ left
+   to the surrounding ink. Only the GLYPH is dyed; the level beside it stays
+   the colour of the text it sits in. `Den` in the JSX is the only thing that
+   emits this class, so every mention of a contract is coloured identically by
+   construction rather than by remembering.
+
+   #ff8a9c, not the card face's #c0233a: this lands on the board's own dark
+   surfaces (#0f0e0c–#242018), where the deeper red goes muddy. There is
+   exactly one LIGHT surface a suit reaches — a selected picker button, filled
+   with the accent — and there the true card red is right and the light one
+   would glare, so it swaps below. That is the whole of the context handling:
+   a "black" suit needs no rule at either place because it is simply the ink
+   already in force. */
+.dis-suit-r { color: #ff8a9c; }
+.dis-bidgrid button.on .dis-suit-r,
+.dis-denoms button.on .dis-suit-r,
+.dis-gobtn .dis-suit-r { color: #c0233a; }
 .dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
 .dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
 

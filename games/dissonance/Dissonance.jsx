@@ -41,17 +41,55 @@ const NCARD = 32;   // the base deck; ids at or above this are the new lows
 const DENOM_LABEL = ["♣", "♦", "♥", "♠", "NT", "Null", "Grand"];
 const DENOM_NAME = ["Clubs", "Diamonds", "Hearts", "Spades", "No-trump",
   "Null — win no +2 trick", "Grand (the four 10s are trump)"];
-// A DENOMINATION LABEL CARRIES NO COLOUR (2026-08-09). ♦ and ♥ used to be
-// tinted red wherever a contract was written out, on the playing-card
-// convention -- but it was applied to only some of the places a contract
-// appears (the chip, the scorecard, the pickers; never the bid log, the
-// result panel or the History row), so the colour looked like it MEANT
-// something and did not. In the match box it read worst of all, sitting one
-// column from a Score that is red when you lost the round.
+// THE SUIT SYMBOL IS COLOURED, AND NOTHING ELSE IS (2026-08-09). ♦ and ♥ are
+// red, ♣ and ♠ take the surrounding ink -- the playing-card convention, scoped
+// to the GLYPH rather than to the whole contract. The level beside it stays
+// the colour of the text it sits in, so "3♥" reads as a number and a red heart
+// rather than as a red contract.
 //
-// Actual CARDS keep their suit colours (`isRed` / `.dis-card.red`): a card is
-// a card, and that convention is universal and consistently applied.
+// Two things this gets right that the old whole-label tint did not. It went on
+// only SOME of the places a contract appears (the chip, the scorecard, the
+// pickers; never the bid log, the result panel or the History row), so a
+// colour that meant nothing looked like it meant something -- `Den` is now the
+// single renderer, so every mention is coloured the same way by construction.
+// And it dyed the LEVEL too, which put a red "3" one column from a Score that
+// is red when you lost the round.
+//
+// "Black" is the surrounding ink, not #000: this board is #0f0e0c, so a
+// literal black suit would be invisible. On the one LIGHT surface a suit ever
+// lands on -- a selected picker button, filled with the accent -- the CSS
+// swaps in the true card red against that button's near-black ink.
 const NOTRUMP = 4;
+
+/** A denomination label — THE ONE PLACE one is written out.
+ *
+ *  Every mention of a contract goes through this, which is what makes the
+ *  suit colour a rule rather than a habit: the previous tint was applied by
+ *  hand at five sites and forgotten at six others.
+ *
+ *  Only the four real suits are SYMBOLS. "NT", "Null" and "Grand" are words
+ *  and take the surrounding ink, exactly as ♣ and ♠ do — a black suit is not
+ *  given a colour of its own, it simply is not red, which is also what keeps
+ *  it legible in dim text (the scorecard) and on the accent (a selected
+ *  picker button) without a rule per context. */
+function Den({ d }) {
+  const label = DENOM_LABEL[d] || "";
+  if (!label) return null;
+  return d === 1 || d === 2
+    ? <span className="dis-suit-r">{label}</span>
+    : <>{label}</>;
+}
+
+/** A card named in TEXT — the talon reveal, the swap buttons — with the same
+ *  suit colouring `Den` gives a contract. A card FACE is a different renderer
+ *  (`Card`, which paints the whole face) and keeps its own deeper red against
+ *  the light card stock; this one is a glyph inside a sentence. */
+function CardName({ c }) {
+  if (c === null || c === undefined) return null;
+  return <>{RANKS[rankOf(c)]}<span className={isRed(c) ? "dis-suit-r" : ""}>
+    {SUIT_GLYPH[suitOf(c)]}</span></>;
+}
+
 // Null is a CONSOLATION, not a contract: take no +2 trick as declarer and you
 // score this instead of being set, whatever you actually declared. There is no
 // denomination and no level to render -- `NULL_DENOM` survives only so a game
@@ -399,7 +437,7 @@ function ContractChip({ game, nameOf, sharpBonus }) {
   return (
     <div className="dis-chip">
       <span className="dis-chip-den">
-        {a.level}{DENOM_LABEL[a.denom]}
+        {a.level}<Den d={a.denom} />
       </span>
       <span className="dis-chip-who">
         {nameOf(a.declarer)} must score{" "}
@@ -435,11 +473,16 @@ function histLine(g) {
   if (g.rounds > 1) return `${g.rounds} rounds${g.target ? ` to ${g.target}` : ""}`;
   const c = g.contract;
   if (!c || !c.level) return "";
-  return `${c.you_declared ? "declared" : "defended"} `
-    + `${c.level}${DENOM_LABEL[c.denom] || ""}`
-    + (g.mode === "skat" && c.value
-      ? ` for ${c.value}${c.mult > 1 ? `×${c.mult}` : ""}` : "")
-    + `${c.made ? " (made)" : " (set)"}`;
+  // JSX rather than a string, so the suit here is coloured like every other
+  // mention of a contract. It is rendered as a child, so a fragment drops
+  // straight into the same slot the string used to fill.
+  return <>
+    {c.you_declared ? "declared" : "defended"}{" "}
+    {c.level}<Den d={c.denom} />
+    {g.mode === "skat" && c.value
+      ? ` for ${c.value}${c.mult > 1 ? `×${c.mult}` : ""}` : ""}
+    {c.made ? " (made)" : " (set)"}
+  </>;
 }
 
 /** The match's scorecard: one line per round played, under the running total.
@@ -503,7 +546,7 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
               {r.abandoned ? "forfeit"
                 : r.declarer < 0 ? "—"
                   : <>{nameOf(r.declarer)}{" "}
-                    <b>{r.level}{DENOM_LABEL[r.denom] || ""}</b>
+                    <b>{r.level}<Den d={r.denom} /></b>
                     {/* The defender's bet, on the line it doubled. A doubled
                         round otherwise looked ordinary with a surprising
                         number beside it — which is the row a reader most wants
@@ -692,7 +735,7 @@ function NeedsRow({ value, prefix, bases, maxLevel }) {
       <span className="muted">{prefix}</span>
       {levelsFor(value, bases, maxLevel).map((x) => (
         <span key={x.denom} className="dis-clear">
-          {x.level}{DENOM_LABEL[x.denom]}
+          {x.level}<Den d={x.denom} />
         </span>
       ))}
     </div>
@@ -718,7 +761,7 @@ function ContractLine({ game }) {
   return (
     <span className="dis-contract">
       <b>{a.level}</b>
-      <span>{DENOM_LABEL[a.denom]}</span>
+      <Den d={a.denom} />
     </span>
   );
 }
@@ -1632,13 +1675,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                           title={ok ? DENOM_NAME[d]
                             : bidLevel === null ? "pick a level first"
                               : "not available at that level"}
-                          onClick={() => setBidDenom(d)}>{DENOM_LABEL[d]}</button>
+                          onClick={() => setBidDenom(d)}><Den d={d} /></button>
                       );
                     })}
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
                     <button className="btn dis-gobtn" disabled={!bidReady} onClick={doBid}>
-                      Bid {bidLevel ?? ""}{bidDenom !== null ? DENOM_LABEL[bidDenom] : ""}
+                      Bid {bidLevel ?? ""}{bidDenom !== null ? <Den d={bidDenom} /> : ""}
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
                   </div>
@@ -1651,7 +1694,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 {(game.auction.log || []).map((e, i) => (
                   <div key={i}>
                     <span>{nameOf(e.seat)}</span>
-                    <span>{e.pass ? "pass" : `${e.level}${DENOM_LABEL[e.denom]}`}</span>
+                    <span>{e.pass ? "pass" : <>{e.level}<Den d={e.denom} /></>}</span>
                   </div>
                 ))}
               </div>
@@ -1680,7 +1723,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                       onClick={() => doSwap(swapTake, swapGive)}>
-                      Swap {swapTake !== null ? cardName(swapTake) : ""}{swapGive !== null ? ` for ${cardName(swapGive)}` : ""}
+                      Swap {swapTake !== null ? <CardName c={swapTake} /> : ""}
+                      {swapGive !== null ? <> for <CardName c={swapGive} /></> : ""}
                     </button>
                     <button className="btn btn-ghost" onClick={() => doSwap(null, null)}>
                       Stand pat
@@ -1737,8 +1781,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     <div style={{ display: "flex", gap: "0.5rem" }}>
                       <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                         onClick={() => doSwap(swapTake, swapGive)}>
-                        Swap{swapTake !== null ? ` ${cardName(swapTake)}` : ""}
-                        {swapGive !== null ? ` for ${cardName(swapGive)}` : ""}
+                        Swap{swapTake !== null ? <> <CardName c={swapTake} /></> : ""}
+                        {swapGive !== null ? <> for <CardName c={swapGive} /></> : ""}
                       </button>
                       <button className="btn btn-ghost" onClick={() => doSwap(null, null)}>
                         Stand pat
@@ -1779,7 +1823,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                             setDeclDenom(x.denom); setDeclLevel(x.min_level);
                             setDeclSharp(false); setDeclOpen(false);
                           }}>
-                          {DENOM_LABEL[x.denom]}<small>×{x.base}</small>
+                          <Den d={x.denom} /><small>×{x.base}</small>
                         </button>
                       ))}
                     </div>
@@ -1934,13 +1978,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   {nameOf(1 - res.abandoned_by)} takes{" "}
                   {res.scores[1 - res.abandoned_by]}
                   {res.level ? <>
-                    {" "}for the standing {res.level}{DENOM_LABEL[res.denom]} contract.
+                    {" "}for the standing {res.level}<Den d={res.denom} /> contract.
                   </> : "."}
                 </div>
               ) : res.mode === "skat" ? <>
                 <div className="muted">
                   {`${nameOf(res.declarer)} bought it at ${res.bid}, declared `}
-                  {`${res.level}${DENOM_LABEL[res.denom]}`}
+                  {res.level}<Den d={res.denom} />
                   {multParts(res).length ? ` ${multParts(res).join(" + ")}` : ""}
                   {res.kontra ? (res.re ? " · Kontra + Re" : " · Kontra") : ""}
                   {` and scored ${scored(res.declarer_pts)} of the ${res.target} promised`}
@@ -1952,7 +1996,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     classic prints "3 × 3 = 9". */}
                 <div className="dis-maths">
                   {res.null ? `flat ${res.null_value} to ${nameOf(res.declarer)}` : <>
-                    {`${res.base} (${DENOM_LABEL[res.denom]}) × ${res.level} = ${res.value}`}
+                    {res.base} (<Den d={res.denom} />) × {res.level} = {res.value}
                     {res.mult > 1 ? ` × ${res.mult}` : ""}
                     {res.doubling > 1 ? ` × ${res.doubling}` : ""}
                     {res.mult > 1 || res.doubling > 1 ? ` = ${res.stake}` : ""}
@@ -1976,7 +2020,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     and the `+ 3` in the formula are visibly one number. */}
                 <div className="muted">
                   {nameOf(res.declarer)} bid <Lvl>{res.level}</Lvl>
-                  {DENOM_LABEL[res.denom]}
+                  <Den d={res.denom} />
                   {res.doubled ? <>, doubled by {nameOf(1 - res.declarer)},</> : ""}
                   {res.null
                     // `nullCond`, so the condition is stated in the room's own
@@ -2072,9 +2116,17 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       from what happened. */}
                   {game.shown_at_deal && (sawTalon ? (
                     <div className="muted" style={{ fontSize: "0.72rem" }}>
-                      {nameOf(res.declarer)} was shown {game.shown_at_deal.map(cardName).join(" ")}
+                      {nameOf(res.declarer)} was shown{" "}
+                      {/* A span, not React.Fragment: this file uses the modern
+                          JSX transform and never imports React, so the
+                          namespace does not exist at runtime — and a build
+                          would not have told me. */}
+                      {game.shown_at_deal.map((c, i) => (
+                        <span key={c}>{i ? " " : ""}<CardName c={c} /></span>
+                      ))}
                       {game.swap_take != null && game.swap_give != null
-                        ? `, and swapped ${cardName(game.swap_take)} with ${cardName(game.swap_give)}`
+                        ? <>, and swapped <CardName c={game.swap_take} /> with{" "}
+                          <CardName c={game.swap_give} /></>
                         : game.swapped
                           // A save written before the engine recorded which
                           // cards moved. Say that one did, not which.
@@ -2232,7 +2284,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {game.auction.level > 0 && <>
                 <div className="dis-scorerow">
                   <span>Declared</span>
-                  <b>{game.auction.level}{DENOM_LABEL[game.auction.denom]}</b>
+                  <b>{game.auction.level}<Den d={game.auction.denom} /></b>
                 </div>
                 <div className="dis-scorerow">
                   <span>Must score</span>
