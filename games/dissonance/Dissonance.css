@@ -384,21 +384,35 @@
    would glare, so it swaps below. That is the whole of the context handling:
    a "black" suit needs no rule at either place because it is simply the ink
    already in force. */
-/* Each suit gets its own scrap of card stock, so ♦♥ are truly RED and ♣♠ truly
-   BLACK -- the same two inks the card faces use, against the same near-white.
-   Painting the glyph alone cannot do it: the board composites to rgb(23,40,31)
-   and the panels to rgb(25,24,22), so a black glyph on either sits at ~1.3:1
-   and simply disappears (measured -- the picker's ♣/♠ vanished and a scorecard
-   line read "Bot 2" with no suit at all). Anything visible on those surfaces
-   has to be LIGHTER than they are, which is the one thing a black suit cannot
-   be. The backing moves the glyph onto a light surface instead, which is how
-   every real card solves it. */
+/* THE TRUE CARD INKS on the dark board, made readable by a LIGHT RIM rather
+   than by lightening anything.
+
+   Raw contrast says this cannot work: the board composites to rgb(23,40,31)
+   and the panels to rgb(25,24,22), so #17171a lands near 1.2:1 and vanishes
+   outright — measured, with the picker's ♣/♠ gone and a scorecard line
+   rendering as "Bot 2" with no suit at all. But contrast against the
+   BACKGROUND is the wrong question for a glyph carrying its own edge, and
+   SPENDER already ships this exact problem's answer: its near-black onyx gem
+   (#15151a) stays legible on dark panels because `TokenPill` draws it with
+   `border: 1px solid rgba(255,255,255,.4)` — "light rim so the near-black
+   onyx stays visible". The rim is what the eye catches; the fill stays black.
+
+   So both suits keep the two inks the card FACES use, #c0233a and #17171a,
+   and the rim does the work. No chips, and no repainting the table. */
 .dis-suit-r, .dis-suit-b {
-  display: inline-block; background: #fdfdfa; border-radius: 2px;
-  padding: 0 0.14em; margin: 0 0.04em; line-height: 1.15;
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.95),
+    0 0 2px rgba(255, 255, 255, 0.75),
+    0 0 3px rgba(255, 255, 255, 0.45);
 }
 .dis-suit-r { color: #c0233a; }
 .dis-suit-b { color: #17171a; }
+/* On a LIGHT surface the rim would be a smudge and the ink already reads: a
+   card face, and the accent-filled buttons. */
+.dis-card .dis-suit-r, .dis-card .dis-suit-b,
+.dis-bidgrid button.on .dis-suit-r, .dis-bidgrid button.on .dis-suit-b,
+.dis-denoms button.on .dis-suit-r, .dis-denoms button.on .dis-suit-b,
+.dis-gobtn .dis-suit-r, .dis-gobtn .dis-suit-b { text-shadow: none; }
 .dis-bidlog { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; width: 100%; max-width: 420px; }
 .dis-bidlog div { display: flex; justify-content: space-between; padding: 0.15rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04); }
 
