@@ -277,6 +277,44 @@ export default function DissonanceRules() {
 				</RulesTip>
 			</RulesSection>
 
+			<RulesSection title="Dummy mode — a third hand on the table">
+				<p>
+					A <b>three-seat</b> game between two players. The deck deals{" "}
+					<b>three</b> hands of ten (4 in hand plus three 2-card piles), two
+					cards sit out, and there are <b>ten tricks of three cards</b>. Card
+					scoring, and the classic auction — no talon.
+				</p>
+				<p>
+					The third hand is the <b>dummy</b>, and it is <b>face up from the
+					deal</b>: both of you can read every card in it. Its outer pile
+					bottoms stay hidden from <i>everyone</i>, so it is open, not solved.
+				</p>
+				<RulesDefs items={[
+					{ t: "Whoever leads plays it", d: "The dummy belongs to the player who leads the trick — so you are choosing two of the three cards, and the opponent answers last." },
+					{ t: "It always plays second", d: "Leader, then the dummy, then the other player. The dummy never leads: a trick it wins leaves the lead where it was." },
+					{ t: "Command follows the lead", d: "Win a trick and you take the dummy with it. Lose the lead and you hand it over." },
+				]} />
+				<RulesTip>
+					<p>
+						<b>The dummy is a prize, not a gift.</b> Because command follows
+						the lead, winning a trick buys you the third hand for the next
+						one — and in a game where taking tricks costs points, that is a
+						real trade: eat a bad trick now to control two of three cards
+						next time.
+					</p>
+					<p>
+						The move to look for: lead low from your own hand, drop one of
+						the dummy's big cards on it, and dare your opponent to take a
+						trick they do not want.
+					</p>
+				</RulesTip>
+				<p className="rl-note">
+					The searching tiers (Hard, Expert) do not play this mode — their
+					solver only understands two hands — so a Dummy game against the
+					computer is Easy or Normal.
+				</p>
+			</RulesSection>
+
 			<RulesSection title="Playing the cards">
 				<ul>
 					<li>You <b>must follow the suit that was led</b> if you can — and a face-up card on

@@ -1352,10 +1352,43 @@ def to_play(g: dict) -> int:
     return g["leader"] if g["led"] is None else 1 - g["leader"]
 
 
+#: WHO COMMANDS THE DUMMY -- "declarer" or "leader".
+#:
+#: `declarer` was the first shipped rule and it OVERSHOT, measured: holding two
+#: of three hands banks the declarer **69% of the pool** before they decide
+#: anything, and the outcome is then so nearly predetermined that the points
+#: they take correlate **+0.06** with the hand they can see -- and +0.06 with a
+#: CHEATING count of the cards actually in their two hands. An auction has
+#: nothing left to be about.
+#:
+#: `leader` hands the dummy to whoever won the last trick instead, so the third
+#: hand is a prize fought over rather than a gift. It also puts this game's own
+#: tension on it: winning a trick can cost you points and still be worth it for
+#: the command it buys. Stated as one rule -- WHOEVER LEADS THE TRICK PLAYS THE
+#: DUMMY -- which is why it lives entirely in this function.
+#:
+#: SHIPPED AS `leader` since 2026-08-10, MEASURED (`tools/dummy_matrix.py`,
+#: 300 rounds a cell): the declarer's slice of the pool falls **0.69 -> 0.57**,
+#: i.e. the dummy stops being a gift and starts being contested. It roughly
+#: doubles how well a hand predicts its result on the shipped value table
+#: (+0.07 -> +0.15) -- but that is NOT the lever for predictability, and the
+#: auction is still a lottery at 0.15. What fixes that is the CARD VALUES being
+#: aligned with trick-winning power (+0.39); the two are orthogonal and this
+#: one owns the share.
+DUMMY_COMMAND = "leader"
+
+
 def side_of(g: dict, pos: int) -> int:
-    """Which PLAYER a position scores for. The dummy's tricks are the
-    declarer's -- they played them."""
+    """Which PLAYER a position acts and scores for.
+
+    The dummy's are whoever commands it, and that is the ONE place the two
+    rules differ -- `playing_seat` (whose turn it is), the trick's winner and
+    who leads next are all derived from this, so flipping `DUMMY_COMMAND`
+    moves all three together and nothing else in the engine mentions it.
+    """
     if pos == DUMMY_POS and has_dummy(mode_of(g)):
+        if DUMMY_COMMAND == "leader":
+            return g["leader"]
         return g["auction"]["declarer"]
     return pos
 
@@ -2292,7 +2325,17 @@ def view_for(g: dict, seat: int) -> dict:
                   else None),
         # Who is playing it. The declarer commands two of the three hands,
         # which is the whole mechanic, so the board says so out loud.
-        "dummy_seat": decl if has_dummy(mode_of(g)) else None,
+        # WHOEVER COMMANDS IT NOW, not the declarer: under `DUMMY_COMMAND =
+        # "leader"` that changes hands with every trick, and the board's
+        # "Dummy (X's)" label plus whether its cards are clickable both read
+        # this one field.
+        # ...and NOBODY commands it before the cards are out. During the
+        # auction `leader` still holds the opener, which is meaningless there,
+        # so a label built on it would claim an owner the rules have not
+        # chosen yet. None until play starts.
+        "dummy_seat": (side_of(g, DUMMY_POS)
+                       if has_dummy(mode_of(g)) and g["phase"] == "play"
+                       else None),
         "auction": {
             "level": g["auction"]["level"],
             "denom": g["auction"]["denom"],

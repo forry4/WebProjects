@@ -1,8 +1,9 @@
 """Dummy mode — the fourth mode, and the first with a THIRD HAND.
 
 Three seats of ten (4 in hand + three 2-card piles), two cards out, ten tricks
-of three cards, card scoring, classic's auction. The declarer plays the dummy;
-the dummy plays SECOND in every trick and never leads.
+of three cards, card scoring, classic's auction. The dummy plays SECOND in
+every trick and never leads, and WHOEVER LEADS THE TRICK PLAYS IT -- so
+command changes hands with the lead (`DUMMY_COMMAND`).
 
 The Rust core is two-seat, so NONE of this is covered by the parity fixtures --
 these tests are the only thing standing behind the mode's card play.
@@ -71,27 +72,37 @@ def test_the_dummy_plays_second_every_trick_and_never_leads():
         assert g["trick"] == 10
 
 
-def test_the_declarer_acts_for_the_dummy_and_the_defender_never_does():
-    g = _to_play(4)
-    saw = 0
-    while g["phase"] == "play":
-        pos, seat = E.to_play(g), E.playing_seat(g)
-        if pos == E.DUMMY_POS:
-            saw += 1
-            decl = g["auction"]["declarer"]
-            assert seat == decl, "the dummy's turn belongs to the declarer"
-            assert E.legal_moves(g, 1 - decl) == [], "the defender cannot play it"
-            assert E.turn_pid(g) == g["seats"][decl]
-        E.apply_play(g, seat, E.legal_moves(g, seat)[0])
-    assert saw == 10, "the dummy plays once a trick"
+def test_the_leader_acts_for_the_dummy_and_nobody_else_can():
+    """`DUMMY_COMMAND = "leader"`: the third hand belongs to whoever leads the
+    trick, so it changes hands with the lead. Measured reason -- under the
+    first rule (always the declarer) the declarer banked 69% of the pool
+    before deciding anything; contesting it drops that to 57%."""
+    both = set()
+    for seed in (4, 5, 6):
+        g = _to_play(seed)
+        saw = 0
+        while g["phase"] == "play":
+            pos, seat = E.to_play(g), E.playing_seat(g)
+            if pos == E.DUMMY_POS:
+                saw += 1
+                lead = g["leader"]
+                assert seat == lead, "the dummy's turn belongs to the leader"
+                assert E.legal_moves(g, 1 - lead) == [], "nobody else may play it"
+                assert E.turn_pid(g) == g["seats"][lead]
+                both.add(lead)
+            E.apply_play(g, seat, E.legal_moves(g, seat)[0])
+        assert saw == 10, "the dummy plays once a trick"
+    assert both == {0, 1}, "command never actually changed hands"
 
 
-def test_a_trick_the_dummy_takes_scores_for_the_declarer_and_it_leads_next():
+def test_a_trick_the_dummy_takes_scores_for_whoever_commanded_it():
+    """A dummy trick pays the seat that played it -- the trick's LEADER -- and
+    leaves the lead with them, so command persists until someone takes it."""
     took = 0
     for seed in range(25):
         g = _to_play(seed)
-        decl = g["auction"]["declarer"]
         while g["phase"] == "play":
+            lead = g["leader"]
             before = list(g["pts"])
             plays = []
             for _ in range(3):
@@ -104,15 +115,15 @@ def test_a_trick_the_dummy_takes_scores_for_the_declarer_and_it_leads_next():
                 if E.beats(win[1], p[1], g["trump"]):
                     win = p
             v = sum(E.card_points(c) for _, c in plays)
-            side = decl if win[0] == E.DUMMY_POS else win[0]
+            side = lead if win[0] == E.DUMMY_POS else win[0]
             assert g["pts"][side] - before[side] == v, "the trick paid its cards"
             assert sum(g["pts"]) - sum(before) == v, "nobody else was paid"
             if g["phase"] == "play":
                 assert g["leader"] != E.DUMMY_POS
                 if win[0] == E.DUMMY_POS:
                     took += 1
-                    assert g["leader"] == decl, \
-                        "a dummy trick hands the lead to the declarer"
+                    assert g["leader"] == lead, \
+                        "a dummy trick leaves the lead where it was"
                 else:
                     assert g["leader"] == win[0]
     assert took > 0, "the dummy never won a trick -- the rule is untested"
@@ -154,7 +165,8 @@ def test_the_view_opens_the_dummys_hand_but_not_its_outer_piles():
         v = E.view_for(g, seat)
         assert v["dummy"] == sorted(g["hands"][E.DUMMY_POS]), \
             "both players see the dummy's hand"
-        assert v["dummy_seat"] == g["auction"]["declarer"]
+        assert v["dummy_seat"] == E.side_of(g, E.DUMMY_POS), \
+            "the view names whoever commands the dummy right now"
         assert len(v["piles"]) == 3
         row = v["piles"][E.DUMMY_POS]
         assert row[0]["under"] is None and row[2]["under"] is None, \
@@ -219,10 +231,9 @@ def test_the_bot_does_not_overtake_its_own_dummy():
     checked = 0
     for seed in range(30):
         g = _to_play(seed, level=3, denom=E.NOTRUMP)
-        decl = g["auction"]["declarer"]
         while g["phase"] == "play":
             pos, seat = E.to_play(g), E.playing_seat(g)
-            if pos == E.DUMMY_POS and g["plays"] and g["plays"][0][0] == decl:
+            if pos == E.DUMMY_POS and g["plays"] and g["plays"][0][0] == g["leader"]:
                 led = g["plays"][0][1]
                 legal = E.legal_moves(g, seat)
                 wins = [c for c in legal if E.beats(led, c, g["trump"])]
