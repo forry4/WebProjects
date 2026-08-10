@@ -506,3 +506,69 @@ def test_a_playable_save_is_never_deleted_by_the_unplayable_guard():
     finally:
         M.load_game_state, M.delete_game = real_load, real_del
         M.ROOMS.pop(rid, None)
+
+
+def test_an_unplayable_save_is_dropped_from_the_lobby_without_being_opened():
+    """THE LOBBY is where this actually has to happen. The load path deletes an
+    unplayable save too, but a room is only loaded when someone OPENS it — so a
+    game nobody clicks sat in Active forever, which was the whole complaint and
+    what the first fix missed.
+
+    Driven through `list_user_games` against a real temp DB, because the point
+    is the seam: the predicate agreeing says nothing about the list calling it.
+    """
+    from games.dissonance import main as M
+
+    stale = E.new_game(["a", "b"], random.Random(9), mode="dummy")
+    deck = list(range(E.NCARD))
+    stale["hands"] = [sorted(deck[i * 4:i * 4 + 4]) for i in range(3)]
+    stale["piles"] = [[[deck[12 + i * 6 + 2 * j], deck[12 + i * 6 + 2 * j + 1]]
+                       for j in range(3)] for i in range(3)]
+    stale["out"] = deck[30:32]
+    stale["played"] = []
+    healthy = E.new_game(["a", "b"], random.Random(5), mode="dummy")
+
+    rows = [{"id": "STALE1", "status": "playing", "player1_id": "u1",
+             "player1_name": "alice", "player2_id": "u2", "player2_name": "bob",
+             "state_json": M._encode_state({"game": stale}),
+             "created_at": 1, "updated_at": 2},
+            {"id": "GOOD1", "status": "playing", "player1_id": "u1",
+             "player1_name": "alice", "player2_id": "u2", "player2_name": "bob",
+             "state_json": M._encode_state({"game": healthy}),
+             "created_at": 1, "updated_at": 3},
+            # A row whose blob will NOT decode. `list_user_games` turns that
+            # into `{}`, and treating "I cannot tell" as unplayable would make
+            # one transient decode error destroy games — so it must SURVIVE.
+            {"id": "JUNK1", "status": "playing", "player1_id": "u1",
+             "player1_name": "alice", "player2_id": "u2", "player2_name": "bob",
+             "state_json": "{not json", "created_at": 1, "updated_at": 4}]
+
+    class _Cur:
+        def execute(self, *_a, **_k):
+            return self
+
+        def fetchall(self):
+            return rows
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+
+        def close(self):
+            pass
+
+    deleted = []
+    real_db, real_del = M._db, M.delete_game
+    M._db = lambda: _Conn()
+    M.delete_game = lambda gid: deleted.append(gid)
+    try:
+        listed = [row["id"] for row in M.list_user_games("u1")]
+    finally:
+        M._db, M.delete_game = real_db, real_del
+
+    assert "STALE1" not in listed, "an unplayable game must leave Active"
+    assert deleted == ["STALE1"], "...and its ROW must go, not just the listing"
+    assert "GOOD1" in listed, "a playable game is untouched"
+    assert "JUNK1" in listed, (
+        "an undecodable row must SURVIVE — absence of evidence is not evidence "
+        "that a game is unplayable, and the answer drives a delete")
