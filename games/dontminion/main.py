@@ -176,7 +176,7 @@ def dontminion_init_db() -> None:
 
 
 dontminion_init_db()
-# Retention: same policy as the other games (guest 24h / registered 30d).
+# Retention: same policy as the other games (guest 24h / registered 30d / open lobbies 48h).
 cleanup_stale_games("dontminion_games")
 
 

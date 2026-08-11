@@ -108,7 +108,13 @@
    concatenation — CoC appends the shared sheet AFTER its own, so an ordinary
    same-specificity override would lose there. */
 @media(min-width:1041px){
-	.lby-cols .lby-list{max-height:var(--lby-list-max,calc(100vh - 230px));overflow-y:auto;scrollbar-gutter:stable}
+	/* padding-top + the cancelling margin move the CLIP EDGE 2px above the first
+	   card without moving the card: overflow clips at the padding box, and the
+	   hover raise (translateY(-1px)) otherwise lifts the first card's accent top
+	   border past it — a hovered/selected top row read as missing its top edge.
+	   Only this tier clips (the stacked tiers scroll the page), which is why the
+	   fix lives inside the media block. */
+	.lby-cols .lby-list{max-height:var(--lby-list-max,calc(100vh - 230px));overflow-y:auto;scrollbar-gutter:stable;padding-top:2px;margin-top:-2px}
 	.lby-cols .lby-list::-webkit-scrollbar{width:6px}
 	.lby-cols .lby-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 }

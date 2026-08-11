@@ -183,7 +183,7 @@ def coc_init_db() -> None:
 
 
 coc_init_db()
-# Retention: same policy as Spender (guest 24h / registered 30d, by last activity).
+# Retention: same policy as Spender (guest 24h / registered 30d / open lobbies 48h, by last activity).
 cleanup_stale_games("coc_games")
 
 

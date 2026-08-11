@@ -130,7 +130,9 @@ per `render.yaml`).
   round-trips a row and **falls back to local sqlite on any failure** (site stays up, just
   non-persistent). `init_core_schema(conn)` creates `users`/`admins`/`reconnect_tokens`.
   `cleanup_stale_games(table)` / `maybe_cleanup_games(table)` handle retention (all-guest game 24h,
-  any-registered-player 30d).
+  any-registered-player 30d, and a never-started `status='open'` lobby 48h regardless of who hosts
+  it — a waiting room nobody joined has nothing to resume and otherwise outlives the game version
+  it was created under).
 - **`core/auth.py`** — sessions/passwords (PBKDF2 + legacy), `create_user`/`authenticate_user`/
   `get_user_by_session`, `validate_credentials` (register: name 1–16 `[A-Za-z0-9]`, password 1–16),
   SITE_OWNER/admin helpers, reconnect-token create/validate/mark-used + throttled cleanup.

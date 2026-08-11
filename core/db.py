@@ -210,11 +210,19 @@ def init_core_schema(conn) -> None:
 
 
 # ── Game retention / cleanup ──────────────────────────────────────────────────
-# Shared by both game tables (`games`, `coc_games`), which share the same shape:
-# player1_id / player2_id (a registered user's id is a row in `users`; a guest's
-# is a random id that isn't) + updated_at (epoch seconds, last activity).
+# Shared by every game table (`games`, `coc_games`, …), which share the same
+# shape: player1_id / player2_id (a registered user's id is a row in `users`; a
+# guest's is a random id that isn't) + status + updated_at (epoch seconds, last
+# activity).
 DEFAULT_GUEST_RETENTION = 24 * 3600        # guest games: 24 hours
 DEFAULT_USER_RETENTION = 30 * 24 * 3600    # registered-user games: 30 days
+# A row still `status='open'` is a waiting room nobody ever started. Unlike a
+# finished game it is not history worth keeping, and unlike a `playing` one it
+# has no state anyone can resume — it just sits in every player's Open list,
+# outliving the game version it was created under (a real 4-day-old lobby
+# prompted this: created before a release, join-able forever after it).
+# So open rooms age out on their own, registered host or not.
+DEFAULT_OPEN_RETENTION = 48 * 3600         # never-started open lobbies: 48 hours
 
 # Throttle: this runs opportunistically off lobby browsing, so cap it to once per
 # hour per table per process (races are harmless — the DELETE is idempotent).
@@ -223,8 +231,12 @@ _last_cleanup: dict[str, int] = {}
 
 
 def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION,
-                        user_seconds: int = DEFAULT_USER_RETENTION) -> int:
+                        user_seconds: int = DEFAULT_USER_RETENTION,
+                        open_seconds: int = DEFAULT_OPEN_RETENTION) -> int:
     """Delete stale rows from a games table by LAST ACTIVITY (`updated_at`):
+      * a never-started open lobby (`status='open'`) once it's older than
+        `open_seconds` (default 48h) — registered host or not, since a waiting
+        room nobody joined has no state to resume and no history to keep,
       * an all-guest game (no player id present in `users`) once it's older than
         `guest_seconds` (default 24h),
       * a game with ANY registered player once it's older than `user_seconds`
@@ -234,6 +246,7 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
     Returns the number of rows deleted (counted first, since the driver-agnostic
     cursor has no reliable rowcount on libsql)."""
     now = int(time.time())
+    open_where = "updated_at < ? AND status = 'open'"
     guest_where = ("updated_at < ? "
                    "AND (player1_id IS NULL OR player1_id NOT IN (SELECT id FROM users)) "
                    "AND (player2_id IS NULL OR player2_id NOT IN (SELECT id FROM users))")
@@ -243,7 +256,11 @@ def cleanup_stale_games(table: str, guest_seconds: int = DEFAULT_GUEST_RETENTION
     try:
         cur = conn.cursor()
         deleted = 0
-        for where, cutoff in ((guest_where, now - guest_seconds), (user_where, now - user_seconds)):
+        # The open clause runs FIRST so a row that is both stale-open and
+        # stale-by-players is counted once, under the reason it goes.
+        for where, cutoff in ((open_where, now - open_seconds),
+                              (guest_where, now - guest_seconds),
+                              (user_where, now - user_seconds)):
             cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", (cutoff,))
             n = cur.fetchone()[0]
             if n:

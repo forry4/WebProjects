@@ -189,7 +189,8 @@ def dissonance_init_db() -> None:
 
 dissonance_init_db()
 try:
-    # Retention: guest 24h / registered 30d, by last activity. Guarded because
+    # Retention: guest 24h / registered 30d / open lobbies 48h, by last
+    # activity. Guarded because
     # this runs at IMPORT time and joins `users` — in a fresh checkout that
     # table may not exist yet, and a retention sweep must never stop the module
     # (or every test that imports it) from loading.

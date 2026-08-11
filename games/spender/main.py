@@ -426,9 +426,10 @@ def delete_open_game(game_id: str, user_id: str) -> bool:
 
 
 init_db()
-# Retention: drop stale games on boot (guest 24h / registered 30d, by last
-# activity). Also runs throttled off lobby browsing (list_open_games) so it
-# happens during long-awake periods too, not only on cold-start.
+# Retention: drop stale games on boot (guest 24h / registered 30d / open
+# lobbies 48h, by last activity). Also runs throttled off lobby browsing
+# (list_open_games) so it happens during long-awake periods too, not only
+# on cold-start.
 cleanup_stale_games("games")
 
 
