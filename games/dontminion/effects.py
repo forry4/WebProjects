@@ -19,16 +19,18 @@ _MODULES = (effects_base, effects_intrigue, effects_seaside, effects_prosperity,
 EFFECTS = {}
 STAGES = {}
 # The trigger-bus registries (see engine.py "THE TRIGGER BUS" for the spec
-# shapes): TRIGGERS = {card: [{"on": event, "from": source, ...}, ...]};
-# COST_MODS = {card: fn(game, priced_name) -> reduction per in-play copy}.
+# shapes): TRIGGERS = {card: [{"on": event, "from": source, ...}, ...]}.
 TRIGGERS = {}
-COST_MODS = {}
+# NB there is deliberately no COST_MODS (while-in-play, per-copy) registry —
+# it shipped empty for twelve expansions and was deleted post-ph. 10; the 2022
+# errata made every cost reducer in the game turn-scoped instead. See
+# engine.cost's docstring before adding one back.
 DYN_COSTS = {}          # card -> fn(game) -> reduction on the card's OWN cost (Peddler)
 # ph. 10: card -> fn(game) -> {"coins","potions","debt"} | None. An ABSOLUTE
 # cost replacing the whole calculation (Wayfarer copies another card's cost
 # vector), as opposed to DYN_COSTS' reduction — "cost reduction only affects
 # Wayfarer's default cost of $6", so this bypasses bridges/Canal/Quarry/the
-# -$2 token and every COST_MODS entry. None means "use the normal path".
+# -$2 token and every other reduction. None means "use the normal path".
 COST_OVERRIDE = {}
 # ph. 10: card -> {"avail": fn(game,pid)->bool, "label": str, "stage": str}.
 # An ALTERNATIVE PAYMENT inside the affordability check itself (Animal Fair:
@@ -78,10 +80,6 @@ for _m in _MODULES:
         if _name in TRIGGERS:
             raise RuntimeError(f"dontminion: duplicate TRIGGERS entry {_name!r}")
         TRIGGERS[_name] = _specs
-    for _name, _fn in getattr(_m, "COST_MODS", {}).items():
-        if _name in COST_MODS:
-            raise RuntimeError(f"dontminion: duplicate COST_MODS entry {_name!r}")
-        COST_MODS[_name] = _fn
     for _name, _fn in getattr(_m, "DYN_COSTS", {}).items():
         if _name in DYN_COSTS:
             raise RuntimeError(f"dontminion: duplicate DYN_COSTS entry {_name!r}")

@@ -107,6 +107,12 @@ contents. **26 = 17 kept + 9 new.**
   cumulative per play, exactly Quarry's 2022 shape (`turn_ctx` counter + `engine.cost`) —
   it survives the Highway leaving play. The old roadmap row calling it "the first real
   COST_MODS consumer" described the 1E card.
+  **↳ POSTSCRIPT (post-ph. 10): this was the FIRST of three cards to decline that seam, and
+  the seam has now been deleted having never had a single consumer.** Ph. 4's Renown note
+  even says "same decision, and the same reasoning, as Highway in ph. 3". The lesson is not
+  about cost reduction — it is that three phases each recorded a local "not this card" note
+  and none of them asked the global question. When you write "X is not a Y card" for the
+  second time, go and check whether anything is a Y card.
 - **Vault's opponent offer** (paid): the compendium's Capital City ruling under the same
   DISCARD-THEN-GET-FROM-DECK heading — "if you choose to discard 2 cards with only 1 card
   in your hand, you discard that card but do not get any +".
@@ -866,7 +872,7 @@ to spend.
 
 | Debt | First bitten by | Pay when |
 |---|---|---|
-| ~~Replacement effects (would-gain)~~ **PAID ph. 2** — park/window/cancel_pending_gain, contract-tested | Trader (ph. 3) | done |
+| **Replacement effects (would-gain)** — BUILT ph. 2 (park/window/`cancel_pending_gain`), **but NOT paid, and the row said "done" for eight phases while naming a consumer that never used it.** Trader routes through `exchange` on a COMPLETED gain and says so in a comment; Watchtower is a plain `on:"gain"` reaction. **Zero `on:"would_gain"` specs in twelve expansions**, and the only `cancel_pending_gain` caller is a test. Code KEPT (unlike COST_MODS the mechanic is real and a later set will print one) but four baked-in assumptions are unverified — see the ⚠ block in CLAUDE.md, headlined by "only ONE reactor is ever offered, and the window never reaches `park_abilities`". **This row is what a PAID row looks like when the thing that would have falsified it was a card that quietly chose a different seam** — the strikethrough is earned by a consumer, not by the code existing | still nothing (Trader was mis-named) | at the FIRST real `would_gain` card: verify the four assumptions before writing the card |
 | ~~Cost comparison helpers~~ **PAID ph. 2** — cost_le/cost_eq everywhere; **BOTH vector dimensions have now landed inside them** (Potion ph. 5, Debt ph. 7H) with zero call-site changes across nine effects modules, which is the return on banning raw `cost() <= n` three phases before either was needed | Alchemy/Empires | done |
 | ~~Client-side price math~~ **PAID post-ph. 2** — `player_view` ships `costs`; the client never re-derives | Peddler bug (found live) | done |
 | ~~Undo/save bloat~~ **PAID (pre-ph. 3)** — snapshots store `_log_len` and undo truncates; measured 487 KB → 150 KB on a late-game blob, per save-write | was live | done |
@@ -956,6 +962,14 @@ insurance in the pipeline — do not skip it to save a run.
 plus the `would_gain` interception — consumed by dynamic watchers (`add_watcher`,
 per-play instances, immunity-aware) and the static `TRIGGERS` registry (sources:
 hand-reaction window w/ reveal|play modes + actor scoping, in-play prompt, self-trigger),
-plus `COST_MODS` / `DYN_COSTS` / `BUY_GATES` / `MANUAL_TREASURES`. A future set should
+plus `DYN_COSTS` / `BUY_GATES` / `MANUAL_TREASURES`. A future set should
 need at most a NEW EVENT NAME and registry entries — if a set seems to need a new
 bespoke kernel mechanism, STOP and extend the bus instead.
+
+**…and the converse, which cost nine phases to notice: a seam that never gets a consumer
+must be DELETED, not left described.** `COST_MODS` was on this list from ph. 3 and shipped
+empty through twelve expansions (deleted post-ph. 10 — see `engine.cost`). Extending the bus
+speculatively is cheap; leaving the speculation in the documentation is not, because the next
+batch agent reads this file as a description of what works. `tests/test_seam_consumers.py` is
+the mechanical check — every registry, event and trigger source is counted against the MERGED
+registries, and a zero-consumer seam must be declared in its `UNCONSUMED` map with a reason.

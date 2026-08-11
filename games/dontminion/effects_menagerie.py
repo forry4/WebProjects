@@ -39,7 +39,6 @@ from . import engine as E
 EFFECTS = {}
 STAGES = {}
 TRIGGERS = {}
-COST_MODS = {}
 DYN_COSTS = {}
 COST_OVERRIDE = {}
 BUY_PAY_ALT = {}

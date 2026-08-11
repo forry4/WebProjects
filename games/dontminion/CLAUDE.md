@@ -157,6 +157,14 @@ data during on_play and pass it back via `immune=`) · `_log(game,pid,event,
 private_to=None,**kw)`. Turn counters (`game["turn_ctx"]["bridges"/"merchants"]`) are incremented
 directly by the owning card's effect.
 
+**Six helpers on this list have no card-code caller today** — `on_tavern`, `seat_token`,
+`pile_attach`, `supply_piles`, `pile_cards` and `cancel_pending_gain`. That is not
+automatically wrong (`pile_cards` IS the conservation census and the tests are its right
+caller; `cancel_pending_gain` belongs to the unconsumed would-gain protocol below), but the
+heading says "for card code", so treat an entry here as an OFFER rather than as evidence the
+shape is right — the seam census that found this also found four registries and one event
+that had never had a real consumer at all.
+
 **THE PILE MODEL (phase 3H) — read before touching the Supply.** `supply = {name: count}` could
 only ever say "N copies of the card this pile is named after". A pile is a real object now, but
 its COUNT deliberately stays in a flat `{name: count}` index, because that is the shape ~60 read
@@ -268,7 +276,7 @@ sites across five effects modules, both bots, the client and ~110 test fixtures 
   Destrier and Fisherman exactly — but "if Wayfarer is copying the cost of another card, only
   cost reduction ON THAT CARD applies (which Wayfarer would copy), not cost reduction on
   Wayfarer itself", so it bypasses `bridges`, Canal, Quarry, the −$2 Ferry token and every
-  `COST_MODS` entry. It is a **VECTOR** ("Wayfarer can have a cost with Potion or Debt in
+  other reduction. It is a **VECTOR** ("Wayfarer can have a cost with Potion or Debt in
   it"), consulted at the top of all three readers, and **recursion-guarded**: Wayfarer copying
   a Destrier asks `cost()` again, and the re-entry flag makes an override that asks about
   itself fall through to the printed path rather than loop.
@@ -382,8 +390,8 @@ eight items were still needed, each with a consumer in this set:
   the shuffle is uniform and **logs `star_chart_skip`** — deviation **B9**, the lose-track
   discipline: a skipped ability must never be silent. The pick moves its card AFTER
   `rng.shuffle`, so entropy spend is identical picked, declined or skipped.
-- **CANAL is a `cost()` clause, NOT a `COST_MODS` entry** — that seam is per-COPY while in
-  play, and a Project is never in play and has no copies. Flat −$1 keyed on the TURN player
+- **CANAL is a `cost()` clause, not a per-copy while-in-play modifier** — a Project is never
+  in play and has no copies. Flat −$1 keyed on the TURN player
   owning the cube (the Ferry-token/Inheritance signature trick: "during your opponent's turn,
   costs are reduced if your OPPONENT has a cube on Canal, but not if only you have one").
 - **CAPITALISM — a `types_of` injection, a play-surface routing, and the ledger's
@@ -945,9 +953,11 @@ against what ships. Deleting a row is how you hand the work back in.
   `would_gain`, `before_play` (attack/replay — ph. 6H, was `play_attack`), `action_resolved`
   (replay — ph. 6H). Sources: `"self"`, `"in_play"`, `"hand"`, `"game"`, `"tavern"` (ph. 6H),
   `"landscape"` (ph. 7H — a LANDMARK, keyed on being dealt).
-  ⚠ **`cleanup_discard` fires but `_end_turn` is NOT interruptible** — `emit` parks an auto frame
-  and the sweep doesn't drive frames, so a consumer cannot yet MOVE the card. Scheme needs that
-  built; do not assume it works.
+  (This list's old warning that "`cleanup_discard` fires but `_end_turn` is NOT interruptible
+  — Scheme needs that built" was **paid in ph. 5H** and is deleted: Clean-up is a parked
+  continuation now and a consumer CAN move a card. It sat here contradicting the Kernel v5H
+  section of this same file for five phases, and a grep for `cleanup_discard` hit the stale
+  warning first.)
 
 **Kernel v2 — DURATIONS (Seaside; the contract for later expansions too):**
 `add_duration_fx(game,pid,card,stage,data=None,forever=False)` — register a start-of-NEXT-turn
@@ -988,8 +998,10 @@ reading; cross-set corner).
 **CONCURRENT-ABILITY ORDERING (p23 §2 — the ability POOL):** when ONE occurrence hands a player
 several abilities, the player chooses what resolves first — `park_abilities(game, pid,
 [{card, stage, data}, ...])`. It parks a `("__abilities", "pool")` auto frame; the pool groups
-interchangeable copies (same card+stage — two Tide Pools never prompt; a per-pair `ORDER_MATTERS`
-opt-out exists for a future card whose copies differ), runs a single group directly in the
+interchangeable copies (same card+stage — two Tide Pools never prompt; `engine.ORDER_MATTERS`
+is a per-pair opt-out for a future card whose copies differ, and it is an **engine-side set,
+empty today** — adding a pair is a KERNEL edit, not something a card batch can export), runs
+a single group directly in the
 historical order, and otherwise pushes a plain `choose_option` (card `"__abilities"`, mapped to a
 display string client-side like `"__attack"`). Picking resolves ONE instance fully on top of the
 stack (atomicity for free), then the remainder pool re-surfaces and RE-OFFERS — sequential choice,
@@ -1025,7 +1037,11 @@ player's ordering choice, and pools park current-player-first (p23 §3). **The p
 `.claude-plans/concurrent-ability-ordering.md` is the history; rows A2/A3/B4 are retired.
 
 **THE TRIGGER BUS (the extension contract for every future set):** the kernel `emit()`s a
-single event vocabulary — today `"gain"`, `"buy"`, `"play_treasure"`, `"trash"`,
+single event vocabulary — today `"gain"`, `"buy"` (⚠ **zero consumers**: every on-buy card in
+the game reads `via_buy` off the `gain` event instead, because the 2022 errata retimed
+when-buy to when-gain — `emit("buy")` also fires AFTER `gain()` has already parked its whole
+ability pool, so a `buy` consumer could never be ordered against them anyway),
+`"play_treasure"`, `"trash"`,
 `"buy_phase_end"` (all fired AFTER the change applies) — consumed by (1) dynamic WATCHERS
 (`add_watcher`, per-play instances) and (2) the static `TRIGGERS` registry. Adding a new set's
 timing = at most one new `emit()` call site plus registry entries; NEVER a new bespoke kernel
@@ -1034,8 +1050,45 @@ mechanism. `TRIGGERS[card] = [{"on": event, "from": source, ...}]` with sources:
 needs `stage`, optional `when(game,pid,ctx)`), `"in_play"` (runs `push(game, actor)` once if
 the actor has a copy in play — Treasury; Hoard/Goons-class later), `"self"` (fires when the
 event's SUBJECT is this card — the whole Hinterlands when-gain theme and Dark Ages on-trash;
-needs `stage`). `COST_MODS[card] = fn(game, priced_name) -> reduction` is the while-in-play
-cost-modifier seam (Quarry-class), summed per copy on ANY table inside `cost()`.
+needs `stage`).
+
+⚠ **THERE IS NO WHILE-IN-PLAY COST-MODIFIER SEAM, and its deletion is the cautionary tale
+this section owes you.** `COST_MODS[card] = fn(game, priced_name) -> reduction`, summed per
+copy on any table, was described HERE as "the Quarry-class seam" for nine phases and shipped
+**zero entries in twelve expansions** — the 2022 errata pass had converted every while-in-play
+cost reduction in the game to turn-scoped, so the mechanic it modelled no longer exists.
+Deleted post-ph. 10; `engine.cost`'s docstring records where each real reducer goes instead.
+Three separate phases each wrote a LOCAL note explaining why their card declined the seam
+("Highway is not a COST_MODS card", "Renown is Bridge, not a while-in-play modifier", and
+EXPANSIONS.md's "the old roadmap row calling it the first real COST_MODS consumer described
+the 1E card") and none of them asked whether the seam should still exist. **A contract test
+kept it green the whole time**, which is why `tests/test_seam_consumers.py` now derives every
+seam's consumer count from the MERGED registries: an unconsumed seam has to be declared
+unconsumed, in `UNCONSUMED`, with a reason.
+
+⚠ **THE WOULD-GAIN REPLACEMENT PROTOCOL HAS NEVER RUN IN A REAL GAME — do not build against
+it without reading this.** The ledger recorded it **PAID in ph. 2** naming Trader as the
+consumer, and Trader does not use it: `effects_hinterlands.py` says so in a comment
+("Watchtower's exact shape — an EXCHANGE on a completed gain, **never** the would-gain
+replacement protocol"). Watchtower is a plain `on:"gain"` reaction too. There are **zero
+`on:"would_gain"` specs in twelve expansions**, and `cancel_pending_gain` has exactly one
+caller: a test. The code is KEPT — unlike COST_MODS the mechanic genuinely exists in Dominion
+and a later set will print one — but its design has only ever met synthetic consumers, and
+four assumptions are baked in that no card has pressure-tested. **The first real consumer owes
+verifying all four:**
+1. **Only ONE reactor is ever offered** — `gain()` `return`s after the first matching spec
+   (`engine.py`, the `for rcard, spec in would` loop), in TRIGGERS iteration order, i.e.
+   module load order. Two would-gain cards in one hand silently drop the second, **and the
+   window never reaches `park_abilities`** — so this one seam contradicts the concurrent-
+   ability doctrine the rest of the kernel is built on (p23 §2: the player chooses).
+2. **The reactor must be in the GAINER's own hand** — `from:"hand"` is hardcoded and there is
+   no `who` scoping, unlike every other hand reaction.
+3. **`cancel_pending_gain` cancels the TOPMOST uncancelled `__gain/resolve` frame** with no
+   pid or card check. A when-gain ability that itself gains nests two, and the inner
+   replacement cancels whichever is on top.
+4. **The parked frame stores the PILE, and `_k_gain_resolve` re-reads `pile_top` later** — so
+   on an ordered pile (Knights, a split pile) the card named in the reaction prompt is not
+   guaranteed to be the card actually gained.
 
 ⚠ **`from:"in_play"` ASKS ONLY "is the card on the table" — it is SUBJECT-BLIND.** That is right
 for Treasury/Hoard ("while this is in play, when you gain a card…") and wrong for anything whose
@@ -1059,9 +1112,10 @@ Charlatan's rule, set at new_game from the kingdom) · `turn_ctx["quarries"]` (t
 Action discount, applied inside cost()) · `buy_gate()` consults `BUY_GATES` in _h_buy AND
 legal_moves (gaining bypasses) · Peddler-class self-costs via `DYN_COSTS` · `MANUAL_TREASURES`
 are skipped by play_all_treasures (interactive treasures stay in hand for individual plays) ·
-the WOULD-GAIN protocol: `gain()` parks as __gain/resolve + reaction window when a
-`TRIGGERS on="would_gain"/from="hand"` matches the gainer; replacement stages call
-`cancel_pending_gain(game)`; gain events carry `via_buy` + `dest` (Hoard vs Mint) ·
+the WOULD-GAIN protocol (⚠ **ZERO CONSUMERS — see the warning below**): `gain()` parks as
+__gain/resolve + reaction window when a `TRIGGERS on="would_gain"/from="hand"` matches the
+gainer; replacement stages call `cancel_pending_gain(game)`; gain events carry `via_buy` +
+`dest` (Hoard vs Mint) ·
 Platinum/Colony: probabilistic setup per the official randomizer-proportion rule
 (`game["colony"]`), Colony-empty ends the game · `_start_of_turn` emits `"turn_start"`
 (Clerk-class hand reactions) · hand-reaction specs take `mode:"reveal"` and `who:"actor"`.
@@ -1071,7 +1125,6 @@ Platinum/Colony: probabilistic setup per the official randomizer-proportion rule
 EFFECTS: {card_name: on_play(game, pid)}
 STAGES:  {(card_name, stage): fn(game, pid, frame, choice)}   # choice None for auto frames
 TRIGGERS: {card: [spec, ...]}      # optional — trigger-bus entries (shape above)
-COST_MODS: {card: fn(game, name)}  # optional — while-in-play cost modifiers
 DYN_COSTS: {card: fn(game)}        # optional — the card's own dynamic cost (Peddler)
 BUY_GATES: {card: fn(game, pid)}   # optional — buy restrictions (Grand Market)
 MANUAL_TREASURES: {names}          # optional — treasures play_all must skip

@@ -20,8 +20,8 @@ Guard Dog, Haggler, Highway, Inn, Margrave, Oasis, Wheelwright, Witch's Hut.
     "-$1 to everything" counter that engine.cost already subtracts and the
     frontend already renders as a "cards cost -N" banner. Being turn-scoped
     (not while-in-play) is also what makes the discount survive the Highway
-    being trashed from play, which a COST_MODS entry would not. Do NOT add a
-    second counter summed in the same place.
+    being trashed from play, which a per-copy while-in-play modifier would
+    not. Do NOT add a second counter summed in the same place.
   * HAGGLER 2022 is a per-play watcher, not a while-in-play trigger — the
     Hoard shape verbatim: add_watcher("gain", until="turn_end") reading
     via_buy. Cumulative per play, survives Haggler leaving play, and only
@@ -1090,7 +1090,7 @@ def _scheme_topdeck(game, pid, frame, choice):
 
 
 
-# No MANUAL_TREASURES / AUTOPLAY_LAST / ATTACK_REACTIONS / COST_MODS /
+# No MANUAL_TREASURES / AUTOPLAY_LAST / ATTACK_REACTIONS /
 # DYN_COSTS / BUY_GATES in this half — deliberately not declared empty, because
 # the two halves are CONCATENATED into one module at integration and a second
 # `X = set()` would silently clobber the other half's entries (batch A owns

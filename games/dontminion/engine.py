@@ -2109,7 +2109,7 @@ def _cost_override(game, card):
     cost of $6. If Wayfarer is copying the cost of another card, only cost
     reduction ON THAT CARD applies (which Wayfarer would copy), not cost
     reduction on Wayfarer itself." So it bypasses `bridges`, Canal, Quarry,
-    the -$2 Ferry token and every `COST_MODS` entry — and it is a VECTOR,
+    the -$2 Ferry token and every other reduction — and it is a VECTOR,
     since "Wayfarer can have a cost with Potion or Debt in it".
 
     `effects.COST_OVERRIDE[card] = fn(game) -> {"coins","potions","debt"} |
@@ -2134,13 +2134,29 @@ def _cost_override(game, card):
 
 
 def cost(game, card):
-    """THE single cost function — Bridge reduction applies everywhere, min 0.
-    effects.COST_MODS is the while-in-play modifier seam (Quarry-class,
-    Prosperity+): {source_card: fn(game, priced_name) -> reduction per copy},
-    summed over every copy on ANY table (cost changes are global).
+    """THE single cost function — every reduction applies here, min 0.
 
     Takes a card name or a PILE name: a pile costs what its face card costs
-    (its top card, retained when the pile empties so the board keeps a price)."""
+    (its top card, retained when the pile empties so the board keeps a price).
+
+    THERE IS NO WHILE-IN-PLAY COST-MODIFIER SEAM, and that is a finding rather
+    than an omission. `effects.COST_MODS` used to be one — {source_card: fn ->
+    reduction per copy}, summed over every copy on every table — and it was
+    deleted post-ph. 10 with ZERO entries after twelve expansions, because the
+    2022 errata pass converted while-in-play cost reduction to TURN-SCOPED
+    across the whole game. Every reducer we ship routes elsewhere: Bridge,
+    Highway, Bridge Troll, Renown and Quarry into `turn_ctx` counters
+    (turn-scoped is what makes the discount survive the card leaving play),
+    Ferry onto a pile's `attach` tokens, Canal onto a Project cube, Peddler and
+    Destrier into `DYN_COSTS` (a card's OWN cost), Wayfarer into
+    `COST_OVERRIDE` (an absolute vector). The seam outlived its mechanic by
+    three phases because each card that declined it recorded a LOCAL note
+    ("Highway is not a COST_MODS card", "Renown is Bridge, not a while-in-play
+    modifier") and nobody read them together.
+
+    If a future set does print one, rebuild it deliberately — but check the
+    errata first: the roadmap has already predicted this consumer twice and
+    both times was describing a pre-2022 card."""
     # The Adventures -$2 token (Ferry) sits on a PILE, so it is read before
     # _priced collapses a pile name into its face card. "Cards from that pile
     # cost $2 less ON YOUR TURNS" — it keys on whose turn it is, NOT on who is
@@ -2158,8 +2174,9 @@ def cost(game, card):
     card = _priced(game, card)
     c = CARDS[card]["cost"] - game["turn_ctx"]["bridges"] - discount
     # CANAL (ph. 9): "During your turns, cards cost $1 less." A Project is
-    # never in play and has no copies, so this is NOT a COST_MODS entry — it
-    # is a flat -$1 keyed on the TURN player owning the cube, the Ferry-token/
+    # never in play and has no copies, so a per-copy while-in-play modifier
+    # cannot express it — it is a flat -$1 keyed on the TURN player owning
+    # the cube, the Ferry-token/
     # Inheritance signature trick ("during your opponent's turn, costs are
     # reduced if your OPPONENT has a cube on Canal, but not if only you have
     # one"). It applies in Clean-up too (Improve): "cost reductions for this
@@ -2174,15 +2191,6 @@ def cost(game, card):
     dyn = getattr(effects, "DYN_COSTS", {}).get(card)
     if dyn is not None:
         c -= dyn(game)
-    mods = getattr(effects, "COST_MODS", {})
-    for src, fn in mods.items():
-        n = 0
-        for seat in game["seats"].values():
-            n += seat["in_play"].count(src)
-            n += sum(1 for e in seat["duration"]
-                     if e["card"] == src or src in e.get("riders", []))
-        if n:
-            c -= fn(game, card) * n
     return max(0, c)
 
 

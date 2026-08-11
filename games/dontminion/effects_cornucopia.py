@@ -24,7 +24,7 @@ the Rewards Courser, Demesne, Housecarl, Huge Turnip, Renown.
     in_play would silently under-count on any board with a Duration.
   * RENOWN IS BRIDGE, not a while-in-play modifier: "This turn, cards cost $2
     less", cumulative per play, so it increments the existing
-    turn_ctx["bridges"] by 2 rather than adding a COST_MODS entry. Same
+    turn_ctx["bridges"] by 2 rather than a while-in-play modifier. Same
     decision, and the same reasoning, as Highway in ph. 3 — being turn-scoped
     is what makes the discount survive the card leaving play.
   * ADVISOR is decided by an OPPONENT on your turn: the reveal is yours, the

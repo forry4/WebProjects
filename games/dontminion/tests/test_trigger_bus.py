@@ -1,8 +1,17 @@
 """Trigger-bus contract tests — prove the seams future sets rely on BEFORE a
 real consumer exists: the "self" source (Hinterlands when-gain / Dark Ages
-on-trash), the "buy" event, the "in_play" source, and the COST_MODS seam.
-Synthetic registrations are injected into the merged effects registries and
-removed again (the bus reads them live)."""
+on-trash), the "buy" event and the "in_play" source. Synthetic registrations
+are injected into the merged effects registries and removed again (the bus
+reads them live).
+
+⚠ A CONTRACT TEST KEEPS A SEAM ALIVE IN THE DOCS WITHOUT KEEPING IT HONEST.
+This module used to cover a fourth seam, COST_MODS, which shipped EMPTY for
+twelve expansions — the synthetic consumer here was the only one it ever had,
+and it passed all the way through, so four documents went on describing a
+mechanism no card used. Deleted post-ph. 10 (see engine.cost). When adding a
+contract test for an unconsumed seam, add its row to
+`test_seam_consumers.py::UNCONSUMED` too — that is what makes the seam's
+emptiness visible instead of merely covered."""
 
 import random
 
@@ -22,7 +31,7 @@ def g():
 @pytest.fixture
 def synthetic():
     """Register synthetic bus consumers; always clean up."""
-    added_triggers, added_stages, added_mods = [], [], []
+    added_triggers, added_stages = [], []
 
     def trigger(card, spec):
         effects.TRIGGERS.setdefault(card, []).append(spec)
@@ -32,21 +41,15 @@ def synthetic():
         effects.STAGES[key] = fn
         added_stages.append(key)
 
-    def cost_mod(card, fn):
-        effects.COST_MODS[card] = fn
-        added_mods.append(card)
-
-    yield trigger, stage, cost_mod
+    yield trigger, stage
     for c in added_triggers:
         effects.TRIGGERS.pop(c, None)
     for k in added_stages:
         effects.STAGES.pop(k, None)
-    for c in added_mods:
-        effects.COST_MODS.pop(c, None)
 
 
 def test_self_trigger_fires_when_the_subject_is_the_card(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     hits = []
     trigger("Silver", {"on": "gain", "from": "self", "stage": "on_self_gain"})
     stage(("Silver", "on_self_gain"), lambda game, pid, frame, choice:
@@ -60,7 +63,7 @@ def test_self_trigger_fires_when_the_subject_is_the_card(g, synthetic):
 
 
 def test_trash_event_reaches_self_triggers(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     hits = []
     trigger("Copper", {"on": "trash", "from": "self", "stage": "on_self_trash"})
     stage(("Copper", "on_self_trash"), lambda game, pid, frame, choice:
@@ -75,7 +78,7 @@ def test_self_triggers_receive_the_emit_context(g, synthetic):
     """A self trigger must see the emit's extra context, not just
     actor+subject — it used to be dropped, which would stop a when-BUY-this
     card (Farmland) distinguishing a buy from any other gain."""
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     seen = []
     trigger("Silver", {"on": "gain", "from": "self", "stage": "ctx"})
     stage(("Silver", "ctx"), lambda game, pid, frame, choice:
@@ -92,7 +95,7 @@ def test_self_triggers_receive_the_emit_context(g, synthetic):
 def test_discard_event_reaches_self_triggers(g, synthetic):
     """The `discard` emit point, paid as ph.3 pre-work for Tunnel/Trail/Weaver
     before any consumer exists."""
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     hits = []
     trigger("Estate", {"on": "discard", "from": "self", "stage": "on_self_discard"})
     stage(("Estate", "on_self_discard"), lambda game, pid, frame, choice:
@@ -109,7 +112,7 @@ def test_discard_event_fires_after_the_WHOLE_batch_has_moved(g, synthetic):
     holding Tunnel + Watchtower lets you reveal Tunnel, but the Watchtower has
     already left your hand by then. So when the event fires, NO discarded card
     may still be in hand."""
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     seen = []
     trigger("Estate", {"on": "discard", "from": "self", "stage": "on_batch"})
     stage(("Estate", "on_batch"), lambda game, pid, frame, choice:
@@ -125,7 +128,7 @@ def test_cleanup_discards_do_not_fire_when_discard(g, synthetic):
     _end_turn moves the cards directly rather than through discard(), so the
     event correctly never fires there. Pinned because routing Clean-up through
     discard() later (Scheme wants a Clean-up hook) would silently break it."""
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     hits = []
     trigger("Copper", {"on": "discard", "from": "self", "stage": "on_cleanup"})
     stage(("Copper", "on_cleanup"), lambda game, pid, frame, choice: hits.append(1))
@@ -161,7 +164,7 @@ def test_a_registered_reaction_that_PLAYS_itself(g, synthetic):
     played = []
     effects.ATTACK_REACTIONS["Village"] = {
         "label": "Play Village", "mode": "play", "repeatable": True}
-    trigger, stage, _ = synthetic          # only for its cleanup of STAGES
+    trigger, stage = synthetic          # only for its cleanup of STAGES
     try:
         g["seats"][A]["hand"] = ["Militia"]
         g["seats"][B]["hand"] = ["Village", "Village", "Copper", "Copper", "Copper"]
@@ -317,7 +320,7 @@ def test_cleanup_discard_is_a_SEPARATE_event_from_discard(g, synthetic):
     FRAME and `_end_turn` does not drive frames before sweeping the table, so a
     consumer cannot yet MOVE the card (Scheme topdecking it). Implementing
     Scheme needs the interruptible `_end_turn` — see the ledger."""
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     cleanup_hits, discard_hits = [], []
     trigger("Copper", [{"on": "cleanup_discard", "from": "self", "stage": "cu"}][0])
     stage(("Copper", "cu"), lambda game, pid, frame, choice:
@@ -449,7 +452,7 @@ def test_cost_lt_is_strict(g):
 
 
 def test_buy_event_reaches_in_play_triggers(g, synthetic):
-    trigger, _, _ = synthetic
+    trigger, _ = synthetic
     hits = []
     trigger("Smithy", {"on": "buy", "from": "in_play",
                        "push": lambda game, pid, ctx: hits.append((pid, ctx["subject"]))})
@@ -468,20 +471,8 @@ def test_buy_event_reaches_in_play_triggers(g, synthetic):
     assert hits == [(A, "Silver")]
 
 
-def test_cost_mods_apply_per_copy_on_any_table(g, synthetic):
-    _, _, cost_mod = synthetic
-    cost_mod("Smithy", lambda game, name: 2 if name == "Gold" else 0)
-    assert engine.cost(g, "Gold") == 6              # no copy in play yet
-    g["seats"][B]["in_play"] = ["Smithy"]           # ANY table counts
-    assert engine.cost(g, "Gold") == 4
-    g["seats"][A]["duration"] = [{"card": "Smithy", "fx": [], "riders": []}]
-    assert engine.cost(g, "Gold") == 2              # persisting copies count too
-    assert engine.cost(g, "Silver") == 3            # unmodified names untouched
-    assert engine.cost(g, "Copper") == 0            # never below zero
-
-
 def test_hand_reaction_window_shape(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     taken = []
     trigger("Moat", {"on": "gain", "from": "hand", "stage": "react",
                      "when": lambda game, pid, ctx: ctx["subject"] == "Silver"})
@@ -519,7 +510,7 @@ def _register_traderx(trigger, stage):
 
 
 def test_would_gain_replacement_path(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     _register_traderx(trigger, stage)
     g["seats"][A]["hand"] = ["Moat"]
     silver0, copper0 = g["supply"]["Silver"], g["supply"]["Copper"]
@@ -536,7 +527,7 @@ def test_would_gain_replacement_path(g, synthetic):
 
 
 def test_would_gain_decline_resolves_the_original(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     _register_traderx(trigger, stage)
     g["seats"][A]["hand"] = ["Moat"]
     silver0 = g["supply"]["Silver"]
@@ -548,7 +539,7 @@ def test_would_gain_decline_resolves_the_original(g, synthetic):
 
 
 def test_would_gain_only_intercepts_the_gainer(g, synthetic):
-    trigger, stage, _ = synthetic
+    trigger, stage = synthetic
     _register_traderx(trigger, stage)
     g["seats"][B]["hand"] = ["Moat"]             # the OTHER player holds it
     assert engine.gain(g, A, "Silver")

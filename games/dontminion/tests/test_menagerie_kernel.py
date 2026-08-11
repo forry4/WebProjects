@@ -629,7 +629,7 @@ def test_a_cost_override_replaces_the_whole_calculation(reg):
     """"Cost reduction only affects Wayfarer's default cost of $6. If Wayfarer
     is copying the cost of another card, only cost reduction ON THAT CARD
     applies (which Wayfarer would copy), not cost reduction on Wayfarer
-    itself." — so it bypasses bridges, Quarry, Canal and every COST_MODS."""
+    itself." — so it bypasses bridges, Quarry, Canal and the Ferry token."""
     reg.COST_OVERRIDE["Gardens"] = lambda game: {"coins": 5, "potions": 0, "debt": 0}
     g = fresh()
     g["turn_ctx"]["bridges"] = 2
