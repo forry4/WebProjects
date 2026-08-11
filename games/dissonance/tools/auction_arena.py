@@ -60,7 +60,17 @@ import sys
 
 from games.dissonance import engine as E, bot as B
 
-BIN = "rust-cores/dissonance-core/target/release/bidserve"
+# EXPERIMENT: a flat bonus on every made classic/minor contract, threaded
+# through `engine.FLAT_MAKE_BONUS` (terms are data end to end, so the Expert
+# search, the Double pricing and the DD resolver all see it with no further
+# plumbing). Env rather than argv because the shard windows already use the
+# positional slots, and a shard must inherit the arm it belongs to.
+E.FLAT_MAKE_BONUS = int(os.environ.get("DIS_FLAT_MAKE", "0"))
+
+# Absolute, because a relative forward-slash path never reaches CreateProcess
+# intact on Windows; harmless elsewhere.
+BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve"
+                      + (".exe" if os.name == "nt" else ""))
 MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
 #: `<k>` or `<kA>:<kB>` -- per-tier world counts, so a tier can be measured at
 #: the budget it would actually deploy with (Expert's 3s allowance buys k=8
@@ -275,6 +285,9 @@ def play(m, tier_of, qual, events):
         # took it there. `log[0]` is the opening bid; the opener may not pass in
         # classic, so it is always a bid entry.
         first = g["auction"]["log"][0] if g["auction"].get("log") else {}
+        # ...and how LONG the auction ran: bids only, so a lone opening that
+        # was passed out reads 1, however many passes surround it.
+        n_bids = sum(1 for e in g["auction"]["log"] if not e.get("pass"))
         events.append(("settled", tier_of[decl],
                        g["auction"]["level"] or g["auction"]["value"],
                        outcome, bool(g.get("doubled")),
@@ -287,7 +300,8 @@ def play(m, tier_of, qual, events):
                        # ...and HOW THE DECLARER'S OWN SEARCH PRICED the bid it
                        # is about to play. `sacrifice` means it chose a bid it
                        # had priced negative over an available pass.
-                       last_bid_kind.get(decl, "?")))
+                       last_bid_kind.get(decl, "?"),
+                       n_bids))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)
@@ -312,6 +326,7 @@ stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
              "outcome": collections.Counter(), "open_denom": collections.Counter(),
              "settled_denom": collections.Counter(),
              "by_price": collections.Counter(),
+             "auction_len": collections.Counter(),
              "traject": collections.Counter()} for t in {TIER_A, TIER_B}}
 #: deal -> {tier: opening level}. The CRN pairing puts BOTH tiers on the same
 #: opener hand (same seat, same deal, flips swap only which tier sits there),
@@ -369,6 +384,8 @@ def _absorb(deal_events):
                     stats[e[1]]["settled_denom"][f"{e[2]}:{e[7]}"] += 1
                 if len(e) > 8:
                     stats[e[1]]["by_price"][f"{e[8]}:{e[2]}:{e[3]}"] += 1
+                if len(e) > 9:
+                    stats[e[1]]["auction_len"][e[9]] += 1
                 if e[4]:
                     stats[e[1]]["doubles"]["suffered"] += 1
                 # The TRAJECTORY, attributed to the OPENER's tier: opened at
@@ -452,6 +469,8 @@ mu, se = _stat(pairs)
 print(f"\n{MODE} k={K} resolve={RESOLVE}: {TIER_A} - {TIER_B} = {mu:+.4f} +- {se:.4f} "
       f"payoff/round over {len(pairs)} paired deals"
       + (f" ({dropped} one-sided drops discarded)" if dropped else ""))
+if E.FLAT_MAKE_BONUS:
+    print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS}")
 if diff_pairs:
     dmu, dse = _stat(diff_pairs)
     print(f"  differing auctions: {len(diff_pairs)}/{len(pairs)} deals, "

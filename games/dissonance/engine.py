@@ -241,6 +241,12 @@ DOUBLE_RAMP = 1
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
 OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 
+#: EXPERIMENT KNOB -- a flat bonus on every MADE classic/minor contract's base
+#: (see `_terms_for`). 0 is the shipped rule; the auction lab sets it to probe
+#: "reward declaring at all" against the measured flat-+1 failure. Not a
+#: shipped setting, not in /catalog, not read anywhere but `_terms_for`.
+FLAT_MAKE_BONUS = 0
+
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
 #: Measured: the first change that SPREAD the settled-contract distribution
@@ -1900,13 +1906,24 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # per-point set rate (MINOR_SHORT_PENALTY).
     null = MINOR_NULL_MAKE if mode == "minor" else NULL_MAKE
     short = MINOR_SHORT_PENALTY if mode == "minor" else SHORT_PENALTY
+    # EXPERIMENT KNOB, default 0 = the shipped rule, byte-identical. A flat
+    # bonus added to every MADE contract's base (inside the Double, like the
+    # rest of the make; never on Null, which is a consolation and not a made
+    # contract; never on the set side). The terms are pure data all the way to
+    # the Rust search and the DD resolver, so setting this re-prices the
+    # Expert tier's whole auction with no other change -- which is exactly
+    # what makes it measurable. The 28-card campaign measured a flat +1
+    # RAISING the floor cluster (43.3% -> 46.4%, it is proportionally biggest
+    # on the smallest contracts); this knob exists to re-ask that under the
+    # current game and searching bidders rather than assume it still holds.
+    make = level * level + FLAT_MAKE_BONUS
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
-                "make": level * level * doubling, "over": over * doubling,
+                "make": make * doubling, "over": over * doubling,
                 "set_base": level * doubling, "short": short,
                 "ramp": DOUBLE_RAMP, "null": null}
     return {"denom": denom, "level": level, "target": level,
-            "make": level * level, "over": over, "set_base": level,
+            "make": make, "over": over, "set_base": level,
             "short": short, "ramp": 0, "null": null}
 
 
