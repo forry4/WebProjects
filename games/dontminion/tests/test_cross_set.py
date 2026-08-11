@@ -2361,7 +2361,16 @@ def test_champion_survives_the_clean_up_sweep_forever():
     from games.dontminion import effects
     g = _adv(ADV_FILL + ["Village"], expansions=("adventures", "base"))
     engine.add_pile(g, "Champion", count=5)
-    effects.EFFECTS["Champion"](g, A)
+    # PLAY it rather than invoking its on-play effect directly. The shortcut
+    # left "Champion" in no zone at all, and a `forever` entry whose card is on
+    # no table is a state no real play can produce — the 2025 Duration rule
+    # (B9) now refuses to promote one, and both paths that play a card while
+    # leaving it in place (Command, Way of the Mouse) exclude Durations for
+    # exactly that reason. Reaching the state through the real move is also
+    # what makes this test's claim about Clean-up mean anything.
+    engine.gain_from(g, A, "Champion", dest="hand")
+    ok, err = mv(g, A, {"type": "play_action", "card": "Champion"})
+    assert ok, err
     engine._drive(g)
     for _ in range(6):
         if g["over"]:

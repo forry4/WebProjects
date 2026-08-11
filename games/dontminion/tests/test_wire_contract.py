@@ -42,6 +42,33 @@ def _src(path):
         return fh.read()
 
 
+def _fn_body(src, decl):
+    """The WHOLE body of a JS function, by brace matching from its declaration.
+
+    This used to be `src[src.find(decl):][:12000]` — a fixed character window —
+    and that is the lose-track guard's own history repeating: "an earlier regex
+    version scanned a 6-line window and comments pushed two real sites out of
+    it, so it passed while checking 5 of 7". `fmtLog` grew past 12000
+    characters, so the LAST four cases (`abandon`, `game_over`, `lost_track`,
+    `undo`) fell off the end and the guard silently stopped covering them —
+    found when adding one more case pushed them over and the test reported four
+    events missing that were plainly right there in the file.
+
+    A window is never the right tool for "the whole of this function": it fails
+    OPEN, and it fails on the additions the guard exists to catch."""
+    i = src.index(decl)
+    start = src.index("{", i)
+    depth = 0
+    for j in range(start, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start:j + 1]
+    raise AssertionError(f"unbalanced braces after {decl!r}")
+
+
 def _reads(src, obj):
     """Every `obj.X` / `obj?.X` property read in the source."""
     return set(re.findall(rf"\b{obj}\??\.(\w+)", src))
@@ -110,7 +137,7 @@ def test_every_log_event_the_engine_emits_has_a_fmtLog_case():
         events |= set(re.findall(r'"event":\s*"([a-z_]+)"', src))
 
     jsx = _src(JSX)
-    body = jsx[jsx.find("function fmtLog"):][:12000]
+    body = _fn_body(jsx, "function fmtLog")
     cased = set(re.findall(r'case "([a-z_]+)"', body))
 
     assert len(events) > 20, "the emit scan found almost nothing — regex rotted"

@@ -844,6 +844,11 @@ function fmtLog(e, names) {
     case "star_chart": return `${who} puts ${art(e.card)} on top of their shuffled deck`;
     case "star_chart_skip":
       return `${who} shuffles mid-ability, so Star Chart can't pick a card`;
+    // THE 2025 DURATION RULE (B9): a played Duration that left the table stops.
+    // It has to be said out loud — from the player's seat, a Duration that
+    // simply never pays next turn is indistinguishable from a broken trigger.
+    case "duration_stopped":
+      return `${nameOf(e.card)} left play, so its future effects stop`;
     // FLEET: the extra round of turns after the game would have ended
     case "fleet_round":
       return `The game would end — Fleet gives ${listNames(e.players)} one more turn each`;

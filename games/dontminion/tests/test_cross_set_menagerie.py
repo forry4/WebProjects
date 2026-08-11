@@ -1048,3 +1048,85 @@ def test_kiln_gains_its_copy_before_the_played_card_can_watch_the_gain():
     pick(g, A, "yes")
     assert g["seats"][A]["discard"] == ["Livery"], "the copy was gained"
     assert engine.pile_count(g, "Horse") == before, "...and no Horse for it"
+
+
+# ══ B9 PAID — the 2025 Duration rule, and the conservation bug behind it ═════
+#
+# Way of the Horse / Butterfly / Turtle "return this to its pile", and ch. VII's
+# REMOVED FROM PLAY names exactly those three among the six things in the game
+# that can remove a Duration. A single Way'd play registers nothing (the Way
+# REPLACES the ability), so the reachable case needs a throne-room: play the
+# Duration NORMALLY first so its fx are registered, then use the Way on a LATER
+# play, which physically takes the card off the table.
+#
+# This was not only a rules divergence. The returned card kept a live duration
+# entry, and a promoted entry IS the card's accounting — so the census counted
+# the Caravan in its pile AND on the table: 12 Caravans on an 11-card pile.
+
+MENAG_DUR_K = ["Caravan", "Throne Room", "Village", "Smithy", "Moat",
+               "Militia", "Market", "Cellar", "Festival", "Laboratory"]
+
+
+def _throne_a_caravan(way_on_nth):
+    """Throne Room a Caravan; take Way of the Horse on the Nth Way offer.
+    Offer 1 is the Throne Room's own play, 2 and 3 are the Caravan's two."""
+    g = fresh(MENAG_DUR_K, ("base", "seaside", "menagerie"),
+              landscapes=["Way of the Horse"])
+    g["seats"][A]["hand"] = ["Throne Room", "Caravan"]
+    g["seats"][A]["deck"] = ["Gold"] * 12
+    before = _census_of(g)
+    ok, err = mv(g, A, {"type": "play_action", "card": "Throne Room"})
+    assert ok, err
+    offers = 0
+    for _ in range(25):
+        f = frame(g)
+        if not f:
+            break
+        c = f["constraint"]
+        if f["kind"] == "choose_option" and f.get("stage") == "__way_offer":
+            offers += 1
+            pick(g, f["pid"], "way" if offers == way_on_nth else "normal")
+        elif f["kind"] == "choose_cards":
+            cards_(g, f["pid"], ["Caravan"][:c.get("max", 1)])
+        elif f["kind"] == "choose_option":
+            pick(g, f["pid"], c["options"][0]["id"])
+        else:
+            break
+    assert offers == 3, f"expected 3 Way offers, saw {offers}"
+    engine._end_turn(g, A)
+    engine._drive(g)
+    return g, before
+
+
+def _census_of(game):
+    from games.dontminion.tests.test_soak import _census
+    return _census(game)
+
+
+def test_a_wayed_duration_stops_and_is_not_counted_twice():
+    g, before = _throne_a_caravan(3)          # Way on the SECOND Caravan play
+    assert _census_of(g) == before, "the returned Caravan was counted twice"
+    assert engine.pile_count(g, "Caravan") == 11
+    assert not any(e["card"] == "Caravan" for e in g["seats"][A]["duration"])
+    # ...and it is never SILENT: a Duration that simply stops paying is
+    # indistinguishable from a broken trigger.
+    assert [e for e in g["log"] if e.get("event") == "duration_stopped"]
+    # the rider discards normally — Way of the Butterfly 5: "only the Throne
+    # Room will be left in play … and will be discarded in Clean-up this turn"
+    assert "Throne Room" in g["seats"][A]["discard"]
+    mv(g, B, {"type": "end_phase"}); mv(g, B, {"type": "end_phase"})
+    engine._drive(g)
+    assert len(g["seats"][A]["hand"]) == 5, "the returned Caravan still drew"
+
+
+def test_a_duration_left_alone_still_persists_and_pays():
+    """The control. Without it, a change that stopped EVERY Duration would
+    pass the test above."""
+    g, before = _throne_a_caravan(99)         # never take the Way
+    assert _census_of(g) == before
+    assert engine.pile_count(g, "Caravan") == 10
+    assert any(e["card"] == "Caravan" for e in g["seats"][A]["duration"])
+    assert not [e for e in g["log"] if e.get("event") == "duration_stopped"]
+    mv(g, B, {"type": "end_phase"}); mv(g, B, {"type": "end_phase"})
+    engine._drive(g)
+    assert len(g["seats"][A]["hand"]) == 7, "the throne-roomed Caravan drew twice"

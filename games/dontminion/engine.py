@@ -23,6 +23,7 @@ may only touch the game through the kernel helpers exported here.
 import copy
 import itertools
 import random
+from collections import Counter
 
 from .cards import (
     CARDS, KINGDOM, PILES, REWARDS, KNIGHTS, RUINS, RUINS_EACH, SHELTERS,
@@ -3220,10 +3221,37 @@ def _cleanup_durations(game, pid):
     seat = game["seats"][pid]
     kept_out = []
     still = seat["duration"]
+    # THE 2025 DURATION RULE (deviation B9, PAID): "the future effects of a
+    # played Duration STOP if the card fails to be in play."
+    #
+    # A promoted entry IS the card's accounting — the card leaves `in_play`
+    # below and from then on only the entry says where it is. So an entry whose
+    # card is no longer on the table must never be promoted, and this one gate
+    # closes BOTH halves of the rule at once: the fx never run next turn, and
+    # the card is not counted twice.
+    #
+    # **It was a card-CONSERVATION bug, not only a rules divergence**, which is
+    # why this got paid rather than re-recorded. Way of the Horse / Butterfly /
+    # Turtle "return this to its pile" — and ch. VII's REMOVED FROM PLAY names
+    # exactly those three among the six things in the game that can remove a
+    # Duration. Play a Caravan normally under a Throne Room (registering its
+    # fx), then use the Way on the SECOND play: the Caravan goes back to its
+    # pile AND kept a live entry, so `_census` counted 12 Caravans on an
+    # 11-card pile and the returned card still drew next turn.
+    #
+    # A MULTISET, because zones hold names: two Caravans with one returned must
+    # still promote the one that is really there (the ph.-9 `_in_play_leaving`
+    # lesson). The rider is left to discard normally, which is what Way of the
+    # Butterfly 5 says happens to the Throne Room.
+    on_table = Counter(seat["in_play"])
     for entry in seat.pop("dur_setup", []):
         # fired = an off-turn play whose fx already resolved at this seat's own
         # turn start — spent, so it discards from in_play like any other card
         if (entry["fx"] or entry["watchers"]) and not entry.get("fired"):
+            if not on_table[entry["card"]]:
+                _log(game, pid, "duration_stopped", card=entry["card"])
+                continue
+            on_table[entry["card"]] -= 1
             kept_out.append(entry["card"])
             kept_out.extend(entry["riders"])
             # carry the WHOLE entry, not a hand-copied subset. The old version

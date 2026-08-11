@@ -22,6 +22,7 @@ TWO GATES, ON PURPOSE, because the tier duplicates exactly one thing.
 
 from __future__ import annotations
 
+import os
 import random
 
 import pytest
@@ -59,7 +60,12 @@ def test_expert_is_a_client_tier_that_searches_the_auction():
 def test_the_frontend_offers_exactly_the_tiers_the_server_accepts():
     """The picker is a second list of the same roster, and a tier the server
     knows about but the modal cannot select is a tier nobody ever plays."""
-    text = (E.__file__.rsplit("/", 1)[0] + "/Dissonance.jsx")
+    # `os.path`, not `rsplit("/")`: on Windows `__file__` is backslash-separated,
+    # so the split found nothing, the whole path survived as the "directory",
+    # and this opened `…\engine.py/Dissonance.jsx`. It passed on Linux CI and
+    # failed on every Windows dev box — the CoC-ratio shape again, a gate that
+    # is green where it runs and red where it is read.
+    text = os.path.join(os.path.dirname(E.__file__), "Dissonance.jsx")
     src = open(text, encoding="utf-8").read()
     for tier in m.DIFFICULTIES:
         assert f'id: "{tier}"' in src, f"{tier} is not in BOT_TIERS"
