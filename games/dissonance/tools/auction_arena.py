@@ -268,7 +268,11 @@ def play(m, tier_of, qual, events):
                        g["auction"]["level"] or g["auction"]["value"],
                        outcome, bool(g.get("doubled")),
                        first.get("level") or first.get("value") or 0,
-                       tier_of.get(first.get("seat"), "?")))
+                       tier_of.get(first.get("seat"), "?"),
+                       # ...and the DENOMINATION it settled in. `open_denom`
+                       # covered the opening only, so "the spread of final
+                       # bids" could be read by level and not by suit.
+                       g["auction"]["denom"]))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)
@@ -291,6 +295,7 @@ dropped = 0
 stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
              "doubles": collections.Counter(), "declared": collections.Counter(),
              "outcome": collections.Counter(), "open_denom": collections.Counter(),
+             "settled_denom": collections.Counter(),
              "traject": collections.Counter()} for t in {TIER_A, TIER_B}}
 #: deal -> {tier: opening level}. The CRN pairing puts BOTH tiers on the same
 #: opener hand (same seat, same deal, flips swap only which tier sits there),
@@ -317,6 +322,8 @@ for m in range(LO, HI):
             elif e[0] == "settled":
                 stats[e[1]]["declared"][e[2]] += 1
                 stats[e[1]]["outcome"][f"{e[2]}:{e[3]}"] += 1
+                if len(e) > 7:
+                    stats[e[1]]["settled_denom"][f"{e[2]}:{e[7]}"] += 1
                 if e[4]:
                     stats[e[1]]["doubles"]["suffered"] += 1
                 # The TRAJECTORY, attributed to the OPENER's tier: opened at
