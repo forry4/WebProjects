@@ -782,6 +782,33 @@ def test_walking_out_ends_the_match_not_just_the_round():
     assert E.is_over(g), "there is nobody left to play the rest of the match"
 
 
+def test_the_forfeited_match_is_LOST_by_whoever_walked_out():
+    """...at any standing, which is why the outcome is shipped rather than
+    derived. Every reader compared `match_scores`, so quitting while ahead kept
+    the win -- and one contract's forfeit does not close a match-sized gap."""
+    g = E.new_game(["a", "b"], random.Random(107), opener=0)
+    g["match"]["scores"] = [80, 10]
+    res = E.abandon_result(g, 0)                 # the seat 50+ points UP walks
+    assert res["match_winner"] == 1
+    assert res["match_scores"][0] > res["match_scores"][1], \
+        "the standing is reported as it was, not rewritten to match the outcome"
+    # ...and level is not a draw when someone left.
+    g = E.new_game(["a", "b"], random.Random(107), opener=0)
+    g["match"]["scores"] = [40, 40]
+    assert E.abandon_result(g, 1)["match_winner"] == 0
+
+
+def test_a_played_out_match_names_its_winner_from_the_standing():
+    """The other arm of the same field: with nobody walking out it is exactly
+    the score comparison, and a level match really is a draw."""
+    g = _play_out(E.new_game(["a", "b"], random.Random(109), opener=0),
+                  random.Random(109))
+    res = g["result"]
+    a, b = res["match_scores"]
+    want = -1 if a == b else (0 if a > b else 1)
+    assert res["match_winner"] == want
+
+
 def test_a_skat_pass_out_redeals_without_counting_as_a_round():
     g = E.new_game(["a", "b"], random.Random(108), mode="skat", opener=0)
     E.apply_move(g, "a", {"kind": "pass"})

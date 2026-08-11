@@ -142,13 +142,12 @@ def test_a_forfeited_match_is_marked_and_still_carries_the_standing(db):
     g["match"]["over"] = False
     E.next_round(g, 0, g["result"]["round"])
     # PIN the standing rather than inherit whatever the seed happened to produce.
-    # `abandon_result` pays the seat left standing `forfeit_value` and banks it;
-    # it does NOT hand them the match, so who the ROW calls the winner is decided
-    # by the running total. This test is about what the row says, so the total it
-    # says it from has to be fixed: seed 24 used to finish with alice ahead and,
-    # after the bot stopped valuing two cards it could not see (0cbd0c5), finishes
-    # 66-110 the other way -- at which point one forfeit payment does not close a
-    # 44-point gap and the assertion below was testing the seed, not the rule.
+    # `abandon_result` pays the seat left standing `forfeit_value` and banks it,
+    # and (2026-08-11) hands them the MATCH as well -- but this row is the easy
+    # case, where the two agree. The test below is the one that tells them apart.
+    # The total still has to be fixed rather than inherited: seed 24 used to
+    # finish with alice ahead and, after the bot stopped valuing two cards it
+    # could not see (0cbd0c5), finishes 66-110 the other way.
     alice, bob = E.seat_of(g, "alice"), E.seat_of(g, "bob")
     g["match"]["scores"][alice] = 70
     g["match"]["scores"][bob] = 66
@@ -163,6 +162,59 @@ def test_a_forfeited_match_is_marked_and_still_carries_the_standing(db):
         "the seat left standing is paid the forfeit and leads the standing"
     assert row["your_score"] > before[alice], \
         "the forfeit is banked onto the running total, not reported on its own"
+    assert row["tie"] is False
+
+
+def test_walking_out_while_AHEAD_is_still_a_loss(db):
+    """The rule the standing cannot express, and the one that matters.
+
+    Every reader used to decide the winner by comparing the two match scores, so
+    a player who quit while up kept the win -- History filed it under Won and
+    the result panel congratulated them. The forfeit payment does not always
+    close the gap (it is one contract's worth against a whole match), so this is
+    not a rounding case: at 70-20 it is not close.
+    """
+    g, _ = _play_match(24)
+    g["match"]["over"] = False
+    E.next_round(g, 0, g["result"]["round"])
+    alice, bob = E.seat_of(g, "alice"), E.seat_of(g, "bob")
+    g["match"]["scores"][alice] = 70
+    g["match"]["scores"][bob] = 20
+    # ALICE walks out, from fifty points up.
+    g["result"] = E.abandon_result(g, alice)
+    g["phase"] = "over"
+    _store(db, g)
+
+    mine = m.list_user_history("alice")[0]
+    theirs = m.list_user_history("bob")[0]
+    assert mine["you_won"] is False, "quitting while ahead is not a win"
+    assert theirs["you_won"] is True
+    assert mine["tie"] is False and theirs["tie"] is False
+    # ...and the SCORES stay honest. The forfeit is banked and nothing else is
+    # invented: the row still shows who was ahead, it just does not call them
+    # the winner.
+    assert mine["your_score"] > mine["opp_score"], \
+        "the standing is reported as it was, not rewritten to match the outcome"
+
+
+def test_a_forfeit_at_a_LEVEL_score_is_a_loss_and_not_a_tie(db):
+    """The third state has to lose the same way. A dead-level match really can
+    be drawn, so `tie` is a real answer -- but not when someone walked out of
+    it, and comparing the two numbers cannot tell those apart."""
+    g, _ = _play_match(24)
+    g["match"]["over"] = False
+    E.next_round(g, 0, g["result"]["round"])
+    alice, bob = E.seat_of(g, "alice"), E.seat_of(g, "bob")
+    g["match"]["scores"][alice] = 50
+    g["match"]["scores"][bob] = 50
+    g["result"] = E.abandon_result(g, bob)
+    g["phase"] = "over"
+    _store(db, g)
+
+    mine = m.list_user_history("alice")[0]
+    theirs = m.list_user_history("bob")[0]
+    assert (mine["tie"], theirs["tie"]) == (False, False)
+    assert mine["you_won"] is True and theirs["you_won"] is False
 
 
 def test_a_row_from_before_matches_existed_is_still_read_as_one_round(db):

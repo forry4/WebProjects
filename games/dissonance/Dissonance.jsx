@@ -1419,11 +1419,20 @@ export default function Dissonance({ myId, authUser, onExit }) {
                         round was worth and then closes the match regardless of
                         the target — so "not won" is not the same as lost. `tie`
                         is the shared kit's own class, which CoC and Dontminion
-                        already use; this game had no third state before. */}
-                    <span className={`hist-result ${g.your_score === g.opp_score
-                      ? "tie" : g.you_won ? "won" : "lost"}`}>
-                      {g.your_score === g.opp_score ? "Tie" : g.you_won ? "Won" : "Lost"}
-                    </span>
+                        already use; this game had no third state before.
+                        The OUTCOME comes off the row (`tie`/`you_won`), not
+                        from comparing the two numbers next to it: walking out
+                        is a loss at any standing, including a level one. The
+                        `??` is the fallback for a server that predates the
+                        field, where the comparison was the whole answer. */}
+                    {(() => {
+                      const tie = g.tie ?? (g.your_score === g.opp_score);
+                      return (
+                        <span className={`hist-result ${tie ? "tie" : g.you_won ? "won" : "lost"}`}>
+                          {tie ? "Tie" : g.you_won ? "Won" : "Lost"}
+                        </span>
+                      );
+                    })()}
                     <span className="hist-scores"> vs {g.opp_name}{" "}
                       <span className="hist-score-num">{g.your_score}–{g.opp_score}</span>
                     </span>
@@ -2150,16 +2159,26 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     <span>{nameOf(mySeat)} <b>{res.match_scores[mySeat]}</b></span>
                     <span>{nameOf(oppSeat)} <b>{res.match_scores[oppSeat]}</b></span>
                   </div>
-                  {res.match_over && (
-                    <div className={`dis-big ${res.match_scores[mySeat] > res.match_scores[oppSeat]
-                      ? "made" : "set"}`}>
-                      {res.match_scores[mySeat] === res.match_scores[oppSeat]
-                        ? "Match drawn"
-                        : res.match_scores[mySeat] > res.match_scores[oppSeat]
-                          ? "You win the match"
-                          : `${nameOf(oppSeat)} wins the match`}
-                    </div>
-                  )}
+                  {/* WHO WON COMES OFF THE ROW. Comparing the two numbers above
+                      it is right for a played-out match and wrong for the one
+                      case that matters most: a player who abandons while ahead
+                      keeps the higher score, and this told them "You win the
+                      match". Walking out is a loss at any standing. `??` is the
+                      fallback for a result saved before the field existed. */}
+                  {res.match_over && (() => {
+                    const w = res.match_winner ?? (
+                      res.match_scores[mySeat] === res.match_scores[oppSeat] ? -1
+                        : res.match_scores[mySeat] > res.match_scores[oppSeat] ? mySeat : oppSeat);
+                    return (
+                      <div className={`dis-big ${w === mySeat ? "made" : "set"}`}>
+                        {w === -1 ? "Match drawn"
+                          : w === mySeat ? "You win the match"
+                            : `${nameOf(oppSeat)} wins the match`}
+                        {res.abandoned_by !== null && res.abandoned_by !== undefined
+                          && ` — ${nameOf(res.abandoned_by)} forfeited`}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
               {/* THE TALON — the six nobody was dealt, revealed. Every card you
@@ -2505,8 +2524,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
       {confirmAbandon && (
         <CreateModal title="Abandon game?" onClose={() => setConfirmAbandon(false)}>
           <span className="cm-hint">
-            You forfeit the round and your opponent is paid what the contract is
-            currently worth. This cannot be undone.
+            {/* Say the part that costs the most. The forfeit payment was the
+                only consequence named here, which read as "one round" — the
+                match ends, and it ends as a LOSS however far ahead you are. */}
+            Your opponent is paid what the contract is currently worth, and the
+            match ends there — as a loss for you, whatever the score is. This
+            cannot be undone.
           </span>
           <div className="cm-footer">
             <button type="button" className="btn btn-ghost"

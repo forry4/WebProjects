@@ -1033,6 +1033,18 @@ the bidding judgement, which is the part worth playing.
 * **Walking out ends the MATCH.** `abandon_result` banks the forfeit and then
   closes the match regardless of the target: there is nobody left to play the
   rest of it.
+* **…and it LOSES it, at any standing (2026-08-11).** Every reader used to name
+  the winner by comparing the two `match_scores`, so a player who quit while
+  ahead was told "You win the match" and the lobby filed it under Won — quit
+  while up and you kept the win. One contract's forfeit does not close a
+  match-sized gap, so this was not a rounding case. The outcome is now SHIPPED,
+  not derived: `_match_result_keys(g, forfeited_by=...)` writes `match_winner`
+  (a seat, or −1 for a draw, which only a played-out match can be) and both
+  readers use it. **The scores stay honest** — the forfeit is banked and nothing
+  is invented, so the row still shows who was ahead; it just does not call them
+  the winner. Both readers keep a `??`/`is not None` fallback to the score
+  comparison, which is right for a row saved before the field existed and for a
+  one-round game with no match at all.
 * **The final standing is written onto the RESULT ROW** (`match_scores`,
   `match_target`, `match_over`, `round`), not left only in `g["match"]`. The
   lobby history reads a stored result and never the live game.

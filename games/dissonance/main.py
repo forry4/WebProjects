@@ -448,10 +448,19 @@ def list_user_history(user_id: str) -> list[dict]:
         # one round and really is the whole game.
         scores = res.get("match_scores") or res.get("scores") or [0, 0]
         rounds = int(res.get("round") or 1)
+        # WHO WON IS ON THE ROW, not inferred from the numbers beside it.
+        # A forfeit is a loss at any standing, so a player who walked out while
+        # ahead used to be filed under Won. `match_winner` is absent on a row
+        # written before it existed and on a one-round game with no match, and
+        # the score comparison is right in both of those.
+        mw = res.get("match_winner")
+        won = (mw == seat) if mw is not None else scores[seat] > scores[1 - seat]
+        tie = (mw == -1) if mw is not None else scores[seat] == scores[1 - seat]
         out.append({
             "id": r["id"], "opp_name": opp_name,
             "your_score": scores[seat], "opp_score": scores[1 - seat],
-            "you_won": scores[seat] > scores[1 - seat],
+            "you_won": won,
+            "tie": tie,
             "mode": engine.mode_of(g),
             # How many deals it took, and what it was played to -- the two
             # numbers that make the score above legible.

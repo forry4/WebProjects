@@ -2243,20 +2243,37 @@ def _bank_round(g: dict, res: dict) -> None:
     m.setdefault("rounds", []).append(_round_summary(g, m, res))
 
 
-def _match_result_keys(g: dict) -> dict:
+def _match_result_keys(g: dict, forfeited_by: int | None = None) -> dict:
     """What every result row says about the match it sits in.
 
     On the row rather than only in `g["match"]` because the lobby history reads
     a STORED result and never the live game, so the final standing has to be
     written into the row that outlives the room.
+
+    `match_winner` IS SHIPPED RATHER THAN DERIVED FROM THE SCORES, and that is
+    the whole point of it: WALKING OUT IS A LOSS whatever the standing said.
+    Every reader used to compare `match_scores`, so a player who abandoned while
+    ahead was told "You win the match" and the lobby filed it under Won -- quit
+    while up and you kept the win, which is the one thing a forfeit must not do.
+    The scores themselves stay honest (the forfeit is banked into them and shown
+    as it happened); only the OUTCOME is decided here. -1 is a draw, and only a
+    played-out match can be one.
     """
     m = match_of(g)
     if not m:
         return {}
+    scores = list(m["scores"])
+    if forfeited_by is not None:
+        winner = 1 - forfeited_by
+    elif scores[0] == scores[1]:
+        winner = -1
+    else:
+        winner = 0 if scores[0] > scores[1] else 1
     return {
-        "match_scores": list(m["scores"]),
+        "match_scores": scores,
         "match_target": m["target"],
         "match_over": bool(m["over"]),
+        "match_winner": winner,
         "round": m["round"],
     }
 
@@ -2473,7 +2490,7 @@ def abandon_result(g: dict, seat: int) -> dict:
     m = match_of(g)
     if m:
         m["over"] = True
-    res.update(_match_result_keys(g))
+    res.update(_match_result_keys(g, forfeited_by=seat))
     return res
 
 
