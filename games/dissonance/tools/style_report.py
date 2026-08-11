@@ -136,3 +136,29 @@ if mat:
     if low:
         print(f"  opened <=2: {low} ({100.0*low/tot_open:.1f}% of rounds); "
               f"of those {cap} settled at exactly 3 ({100.0*cap/low:.1f}%)")
+
+# WAS THE CONTRACT ONE THE DECLARER'S OWN SEARCH PRICED NEGATIVE? The counters
+# above say how often a tier sacrifices and how often contracts fail; only this
+# join says whether those are the same rounds. Without it "it sacrifices into
+# contracts it cannot make" and "it gets pushed into contracts it cannot make"
+# are indistinguishable, and they call for opposite fixes.
+bp = collections.defaultdict(lambda: collections.defaultdict(collections.Counter))
+for k, v in tot["by_price"].items():
+    price, lvl, res = k.split(":")
+    bp[price][int(lvl)][res] += v
+if bp:
+    print("\nHOW THE DECLARER'S SEARCH PRICED THE CONTRACT IT WON")
+    for price in sorted(bp, key=lambda p: -sum(sum(c.values()) for c in bp[p].values())):
+        rows = bp[price]
+        n = sum(sum(c.values()) for c in rows.values())
+        made = sum(c["made"] for c in rows.values())
+        nul = sum(c["null"] for c in rows.values())
+        lv = {l: sum(c.values()) for l, c in rows.items()}
+        meanl = sum(l * c for l, c in lv.items()) / n
+        print(f"\n  {price:<13} n={n:5}  ({100.0*n/sum(sum(sum(c.values()) for c in bp[p].values()) for p in bp):4.1f}% of contracts)"
+              f"   made {100.0*made/n:5.1f}%   Null {100.0*nul/n:4.1f}%   mean level {meanl:.2f}")
+        print("     lvl      n    made%")
+        for l in sorted(rows):
+            c = rows[l]
+            t = sum(c.values())
+            print(f"     {l:>3}  {t:5}   {100.0*c['made']/t:5.1f}")

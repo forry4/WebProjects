@@ -183,6 +183,14 @@ def play(m, tier_of, qual, events):
       value is positive, Null iff the consolation strictly improved on it.
     """
     g = E.new_game(["a", "b"], random.Random(600000 + m), opener=m % 2, mode=MODE)
+    # HOW EACH SEAT'S LAST BID WAS PRICED BY ITS OWN SEARCH. The seat still
+    # holding a bid at the end is the declarer, so this is what lets a settled
+    # round be attributed to the decision that produced it -- "was the contract
+    # this seat is about to play one it priced NEGATIVE" is the join the tier
+    # counters cannot make, and it is the only way to tell a deliberate
+    # sacrifice apart from a raise the search genuinely liked. Keyed by SEAT
+    # rather than tier on purpose: in a mirror both tiers are the same string.
+    last_bid_kind = {}
     guard = 0
     while g["phase"] not in ("play", "over") and guard < 40:
         guard += 1
@@ -203,6 +211,8 @@ def play(m, tier_of, qual, events):
                     else:
                         kind = "passed"
                     events.append(("decision", tier, kind))
+                    if mv.get("kind") == "bid":
+                        last_bid_kind[seat] = kind
                     if opening and mv.get("kind") == "bid":
                         events.append(("open", tier,
                                        mv.get("level") or mv.get("value"),
@@ -272,7 +282,11 @@ def play(m, tier_of, qual, events):
                        # ...and the DENOMINATION it settled in. `open_denom`
                        # covered the opening only, so "the spread of final
                        # bids" could be read by level and not by suit.
-                       g["auction"]["denom"]))
+                       g["auction"]["denom"],
+                       # ...and HOW THE DECLARER'S OWN SEARCH PRICED the bid it
+                       # is about to play. `sacrifice` means it chose a bid it
+                       # had priced negative over an available pass.
+                       last_bid_kind.get(decl, "?")))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)
@@ -296,6 +310,7 @@ stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
              "doubles": collections.Counter(), "declared": collections.Counter(),
              "outcome": collections.Counter(), "open_denom": collections.Counter(),
              "settled_denom": collections.Counter(),
+             "by_price": collections.Counter(),
              "traject": collections.Counter()} for t in {TIER_A, TIER_B}}
 #: deal -> {tier: opening level}. The CRN pairing puts BOTH tiers on the same
 #: opener hand (same seat, same deal, flips swap only which tier sits there),
@@ -324,6 +339,8 @@ for m in range(LO, HI):
                 stats[e[1]]["outcome"][f"{e[2]}:{e[3]}"] += 1
                 if len(e) > 7:
                     stats[e[1]]["settled_denom"][f"{e[2]}:{e[7]}"] += 1
+                if len(e) > 8:
+                    stats[e[1]]["by_price"][f"{e[8]}:{e[2]}:{e[3]}"] += 1
                 if e[4]:
                     stats[e[1]]["doubles"]["suffered"] += 1
                 # The TRAJECTORY, attributed to the OPENER's tier: opened at
