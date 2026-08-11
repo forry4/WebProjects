@@ -2243,6 +2243,19 @@ try {
 		}));
 		check("the bidding is still on screen after the auction has ended",
 			logs.bids >= 2, JSON.stringify(logs));
+		// LIVE PANELS FIRST. Last trick changes every trick; Contract settles once
+		// a round. Ordering is DOM order in the JSX, so it is one line to get
+		// wrong and invisible to everything else in this file.
+		const order = await page.evaluate(() => {
+			const y = (s) => { const e = document.querySelector(s); if (!e) return null;
+				return Math.round(e.getBoundingClientRect().y); };
+			return { last: y(".dis-p-last"), contract: y(".dis-p-contract"),
+				points: y(".dis-p-points") };
+		});
+		check("the last trick sits above the contract, which sits above the points",
+			order.last !== null && order.contract !== null && order.points !== null
+				&& order.last < order.contract && order.contract < order.points,
+			JSON.stringify(order));
 		check("...and every completed trick is listed with who took it and what it paid",
 			logs.tricks >= 1 && /^#\d+ .+ [+−-]?\d+$/.test(logs.firstTrick),
 			JSON.stringify(logs));

@@ -2324,8 +2324,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
 
         {/* side panel */}
         {/* THE INFO COLUMN (right on a desktop): what the round IS -- the
-            talon you bought, the contract with the bidding that produced it,
-            the last trick, and the points with the round's trick history. The
+            talon you bought, the last trick, the contract with the bidding
+            that produced it, and the points with the round's trick history.
+            Roughly live-first: the two panels that change every trick are at
+            the top, the two that settle once a round below them. The
             MATCH gets a column of its own (below, left on a desktop): it is
             about the match rather than this round, and the scorecard is the
             one panel with real content to show. DOM order is board, info,
@@ -2359,6 +2361,33 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   Includes the card you discarded.
                 </div>
               )}
+            </div>
+          )}
+          {/* The trick just gone, ABOVE the contract. It leaves the table the
+              instant the next lead arrives, and "what did they just play" is
+              the question the log answers worst — it is a flat list of cards
+              with no trick breaks. It sat under the contract until 2026-08-11,
+              which had it changing every trick halfway down a column of things
+              that change once a round; the live panel belongs at the top, next
+              to the talon, where the eye already is. */}
+          {prev && (
+            <div className="dis-panel dis-p-last">
+              <h4>Last trick</h4>
+              <div className="dis-lasttrick">
+                {prev.plays.map((p, i) => (
+                  <div key={i} className={`dis-lt-play${p[0] === prev.winner ? " won" : ""}`}>
+                    <Card c={p[1]} small />
+                    <div className="muted">{nameOf(p[0])}</div>
+                  </div>
+                ))}
+                <div className="dis-lt-note">
+                  <div>#{prev.number}</div>
+                  <div className={`dis-val ${prev.value > 0 ? "good" : "bad"}`}>
+                    {prev.value > 0 ? `+${prev.value}` : "−1"}
+                  </div>
+                  <div className="muted">{nameOf(prev.winner)} took it</div>
+                </div>
+              </div>
             </div>
           )}
           <div className="dis-panel dis-p-contract">
@@ -2426,29 +2455,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
               </div>
             )}
           </div>
-          {/* The trick just gone. It leaves the table the instant the next lead
-              arrives, and "what did they just play" is the question the log
-              answers worst — it is a flat list of cards with no trick breaks. */}
-          {prev && (
-            <div className="dis-panel dis-p-last">
-              <h4>Last trick</h4>
-              <div className="dis-lasttrick">
-                {prev.plays.map((p, i) => (
-                  <div key={i} className={`dis-lt-play${p[0] === prev.winner ? " won" : ""}`}>
-                    <Card c={p[1]} small />
-                    <div className="muted">{nameOf(p[0])}</div>
-                  </div>
-                ))}
-                <div className="dis-lt-note">
-                  <div>#{prev.number}</div>
-                  <div className={`dis-val ${prev.value > 0 ? "good" : "bad"}`}>
-                    {prev.value > 0 ? `+${prev.value}` : "−1"}
-                  </div>
-                  <div className="muted">{nameOf(prev.winner)} took it</div>
-                </div>
-              </div>
-            </div>
-          )}
           <div className="dis-panel dis-p-points">
             <h4>Points</h4>
             <div className="dis-scorerow"><span>{nameOf(mySeat)}</span><b>{game.pts[mySeat]}</b></div>
