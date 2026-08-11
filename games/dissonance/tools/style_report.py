@@ -27,6 +27,8 @@ import collections, glob, json, sys
 
 pat = sys.argv[1]
 label = sys.argv[2] if len(sys.argv) > 2 else "expert"
+#: MAX_RAISE the run was measured under -- the cap rung is opening + this.
+RAISE = int(sys.argv[3]) if len(sys.argv) > 3 else 2
 tot = collections.defaultdict(collections.Counter)
 pairs = []
 for f in sorted(glob.glob(pat)):
@@ -129,13 +131,26 @@ if mat:
         rn = sum(row.values())
         print(f"  {o:>5}|" + "".join(f"{100.0*row[c]/rn:5.0f}%" if row[c] else "     ."
                                     for c in cols) + f"  {rn:5}")
-    print("\n  ...and the CAP LINE: opened <=2 and settled at 3")
-    cap = sum(v for o in (1, 2) for s, v in mat.get(o, {}).items() if s == 3)
-    low = sum(sum(mat.get(o, {}).values()) for o in (1, 2))
+    # THE CAP LINE, and the rung it lands on is NOT a constant: it is
+    # `opening + MAX_RAISE`. Hardcoding 3 read the play as having collapsed the
+    # moment MAX_RAISE moved to 3, when in fact it had simply shifted up a rung
+    # and was as common as ever -- a reporting bug that would have inverted the
+    # conclusion of the whole experiment. Pass the raise cap in when it is not
+    # the shipped 2.
+    print(f"\n  ...and the CAP LINE: opened low, then held at open+{RAISE}")
     tot_open = sum(sum(r.values()) for r in mat.values())
-    if low:
-        print(f"  opened <=2: {low} ({100.0*low/tot_open:.1f}% of rounds); "
-              f"of those {cap} settled at exactly 3 ({100.0*cap/low:.1f}%)")
+    capped = 0
+    for o in (1, 2):
+        row = mat.get(o, {})
+        rn = sum(row.values())
+        if not rn:
+            continue
+        at_cap = row.get(o + RAISE, 0)
+        capped += at_cap
+        print(f"  opened {o}: {rn:4} ({100.0*rn/tot_open:4.1f}% of rounds), "
+              f"{at_cap:4} held at {o + RAISE} ({100.0*at_cap/rn:4.1f}% of them)")
+    print(f"  cap line overall: {capped} of {tot_open} rounds "
+          f"({100.0*capped/tot_open:.1f}%)")
 
 # WAS THE CONTRACT ONE THE DECLARER'S OWN SEARCH PRICED NEGATIVE? The counters
 # above say how often a tier sacrifices and how often contracts fail; only this
