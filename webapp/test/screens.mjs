@@ -3143,6 +3143,47 @@ try {
 				document.querySelector(".dis-mcard .dis-mrow-dd:not(.muted)")?.textContent.trim() || null);
 			check("...and the answer holds still across re-renders",
 				again === solved, `first ${solved}, later ${again}`);
+
+			// A scorecard row opens the ROUND STORY: the whole deal face up —
+			// both hands, the piles, the talon with what the declarer was
+			// shown, and the bidding. Right-click drives the same handler a
+			// long-press fires (contextmenu), so it is the path asserted.
+			await page.evaluate(() => {
+				const row = [...document.querySelectorAll(".dis-mcard .dis-mrow-open")][0];
+				row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+			});
+			const story = await page.waitForFunction(() => {
+				const panel = document.querySelector(".cm-panel .dis-story");
+				if (!panel) return null;
+				const cards = panel.querySelectorAll(".dis-card").length;
+				const secs = [...panel.querySelectorAll(".dis-story-hd")].map((h) => h.textContent);
+				return {
+					cards,
+					bids: panel.querySelectorAll(".dis-story-bid").length,
+					shown: panel.querySelectorAll(".dis-story-shown").length,
+					// A taken card sits in the declarer's hand row with its own
+					// badge, so shown+took is the full "declarer saw three".
+					took: panel.querySelectorAll(".dis-story-took").length,
+					talon: secs.some((t) => /Out of play/i.test(t)),
+					// The panel widened for the card rows; the create modal's
+					// 372px would fold a seven-card hand onto three lines.
+					wide: (document.querySelector(".cm-panel")?.getBoundingClientRect().width || 0) > 500,
+				};
+			}, null, { timeout: 8_000 }).then((h) => h.jsonValue()).catch(() => null);
+			// 32 cards face up: 2×7 hands + 2×6 piles + 6 out. The declarer was
+			// shown three of the six — outlined, and asserted by count.
+			check("right-clicking a scorecard row lays the round out face up",
+				!!story && story.cards === 32 && story.talon && story.bids >= 1 && story.wide,
+				JSON.stringify(story));
+			check("...with the three cards the declarer was shown outlined",
+				!!story && story.shown + story.took === 3, JSON.stringify(story));
+			await page.evaluate(() => {
+				document.querySelector(".cm-panel .cm-x")?.click();
+			});
+			const storyGone = await page.waitForFunction(
+				() => !document.querySelector(".cm-panel .dis-story"),
+				null, { timeout: 4_000 }).then(() => true).catch(() => false);
+			check("...and the story closes", storyGone, "");
 		}
 
 		check("no page errors playing a game out", errors.length === 0,

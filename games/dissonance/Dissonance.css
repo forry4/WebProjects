@@ -415,6 +415,20 @@
       calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
     ));
   }
+  /* DURING PLAY THE RESERVE GIVES 4.5rem BACK TO THE CARDS (2026-08-11).
+     `--dis-reserve-in` is sized for the tallest middle any phase produces —
+     the auction panel's ~309px — but play's middle measures 222px, so for the
+     phase the cards are actually PLAYED in, ~87px of every screen was
+     reserved for a panel that is not there. Handing 4.5rem of it back grows a
+     height-bound desktop's cards ~13px (~9px on a dummy table), and keeps
+     ~0.9rem of the measured 5.4rem gap as slack for the trick row's own
+     reservation. The cards resize once, at the auction→play boundary — the
+     moment the middle itself is being replaced, so the reflow rides a change
+     the eye is already tracking. Play only: `ph-over` keeps the full reserve,
+     because the result panel is auction-sized and would otherwise sit in a
+     permanent scroll. */
+  .dis-game .dis-table.ph-play { --dis-reserve-in: calc(30rem - 4.5rem); }
+  .dis-game .dis-table.ph-play.dis-3seat { --dis-reserve-in: calc(33rem - 4.5rem); }
   .dis-game .dis-table > .dis-seat { flex: 0 0 auto; }
   /* The safety valve: the variable-height PANELS shrink and scroll in place.
      Scoped to those two -- a blanket `min-height: 0` on every non-seat child
@@ -979,3 +993,68 @@
 }
 .dis-dummy.mine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
 .dis-dummy .dis-seatname { opacity: 0.85; }
+
+/* ── the doubled bet, made unmissable (2026-08-11) ─────────────────────────
+   The chip line was the only standing evidence a Double had landed, and the
+   declarer — who spent the Double phase waiting — read straight past it. Two
+   layers now: the FLASH announces the event, the gold chip is the durable
+   record for the rest of the round. Gold on purpose: it is the scorecard's
+   own ×2/×4 colour (`.dis-mrow-dbl`), so the round's live chip and its
+   banked line agree about what the bet looks like. */
+.dis-chip-mult.dbl {
+  color: #e8c35a; border-color: rgba(232, 195, 90, 0.6);
+  background: rgba(232, 195, 90, 0.12);
+  font-weight: 700;
+}
+.dis-dblflash {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.4rem; padding: 1rem; text-align: center;
+  background: rgba(8, 10, 9, 0.55);
+  cursor: pointer;
+  animation: dis-dblflash-in 0.18s ease-out, dis-dblflash-out 0.5s ease-in 4s forwards;
+}
+.dis-dblflash-x {
+  font-size: 4.2rem; font-weight: 800; line-height: 1;
+  color: #e8c35a; text-shadow: 0 4px 24px rgba(232, 195, 90, 0.45);
+  animation: dis-dblflash-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.dis-dblflash > span:last-child { font-size: 1.05rem; color: #f2ead2; max-width: 26rem; }
+@keyframes dis-dblflash-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dis-dblflash-out { to { opacity: 0; } }
+@keyframes dis-dblflash-pop { from { transform: scale(0.4); } to { transform: scale(1); } }
+
+/* ── the round story (2026-08-11) ──────────────────────────────────────────
+   A scorecard row opens the whole round face up. The rows advertise it. */
+.dis-mrow-open { cursor: pointer; }
+.dis-mrow-open:hover { background: rgba(255, 255, 255, 0.06); }
+/* The story needs more width than the create modal's 372px — two hands of
+   seven plus pile pairs. Scoped by :has so no other modal moves. */
+.dis .cm-panel:has(.dis-story) { width: min(94vw, 620px); }
+.dis-story { display: flex; flex-direction: column; gap: 0.65rem; }
+.dis-story-sum { font-size: 0.92rem; }
+.dis-story-hd {
+  font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-dim); margin-bottom: 0.25rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.dis-story-tag {
+  font-size: 0.68rem; text-transform: none; letter-spacing: 0;
+  border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 999px; padding: 0 0.45rem;
+}
+.dis-story-bids { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.85rem; }
+.dis-story-bid { display: flex; gap: 0.35rem; align-items: baseline; }
+.dis-story-bid > span:first-child { color: var(--text-dim); font-size: 0.78rem; }
+.dis-story-dbl > span:last-child { color: #e8c35a; font-weight: 700; }
+.dis-story-cards { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: flex-end; }
+/* The talon's three badges: shown to the declarer, the discard, the take.
+   Outline + title, never colour alone. */
+.dis-story-shown .dis-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dis-story-gave .dis-card { outline: 2px dashed #e8c35a; outline-offset: 1px; }
+.dis-story-took .dis-card { outline: 2px solid #e8c35a; outline-offset: 1px; }
+/* A pile renders as its pair, bottom then top, slightly fused. */
+.dis-story-piles { gap: 0.55rem; }
+.dis-story-pile { display: inline-flex; }
+.dis-story-pile .dis-card:last-child { margin-left: -10px; box-shadow: -2px 1px 4px rgba(0,0,0,0.35); }
+.dis-story-note { font-size: 0.78rem; }

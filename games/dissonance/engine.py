@@ -1464,11 +1464,13 @@ def _start_play(g: dict) -> None:
     # shape of the tier: lead low, drop the dummy's +2 on it, and dare the
     # defender to take a trick they do not want.
     g["leader"] = a["declarer"]
-    # NO ROUND REVIEW WITH A DUMMY. The DD column is an exact solve, and the
-    # solver is two-seat (`client_searchable`) -- a snapshot nothing can price
-    # would be dead weight in every saved row and a column that never fills.
-    if client_searchable(mode_of(g)):
-        g["deal"] = _deal_snapshot(g)
+    # Snapshotted in EVERY mode since the round-review modal (2026-08-11): the
+    # banked position is what lets a finished round be laid out face up. The DD
+    # column is still two-seat only -- the solver cannot price three hands --
+    # but that is the FRONTEND's gate now (it refuses to post a 3-hand deal to
+    # the worker), not a reason to bank nothing: "dead weight in every saved
+    # row" stopped being true the moment the snapshot grew a second consumer.
+    g["deal"] = _deal_snapshot(g)
 
 
 def _deal_snapshot(g: dict) -> dict:
@@ -1492,9 +1494,14 @@ def _deal_snapshot(g: dict) -> dict:
     contract the game is CURRENTLY on.
     """
     return {
-        "hands": [sorted(g["hands"][0]), sorted(g["hands"][1])],
+        # EVERY seat, so a dummy round's three hands bank too. For the 2-seat
+        # modes this is byte-identical to the old pair -- which is what keeps
+        # the committed wasm's `deal_from_json` contract untouched; the review
+        # worker is never handed a 3-hand deal (the frontend gates on the hand
+        # count before posting).
+        "hands": [sorted(h) for h in g["hands"]],
         # [bottom, top] per pile, the order the solver's own `Pile.c` uses.
-        "piles": [[list(p) for p in g["piles"][q]] for q in (0, 1)],
+        "piles": [[list(p) for p in seat_piles] for seat_piles in g["piles"]],
         "out": sorted(g["out"]),
         "trump": g["trump"],
         "leader": g["leader"],
@@ -2218,6 +2225,26 @@ def _round_summary(g: dict, m: dict, res: dict) -> dict:
     deal = g.get("deal")
     if deal:
         row["deal"] = deal
+    # THE ROUND'S STORY, for the review modal (2026-08-11): how the contract
+    # was arrived at and what the talon did. Public by the same argument as
+    # `deal` -- everything here is already revealed at the round's own end
+    # (`shown_at_deal`, the swap and the bid log are all in the over-phase
+    # view) -- but the over-phase view dies with the next deal, and this line
+    # outlives it for the life of the match.
+    ct = g.get("contract") or {}
+    row["reveal"] = {
+        "auction": [dict(e) for e in g["auction"]["log"]],
+        "shown": list(g.get("shown_at_deal") or []),
+        # [take, give] -- Nones on a decline, a Hand game, or a dummy round.
+        "swap": [g.get("swap_take"), g.get("swap_give")],
+        # Classic reads as True: its declarer always sees the talon. Only a
+        # skat Hand game declines to look, and that fact IS the announcement.
+        "looked": bool(g.get("looked", True)),
+        # Skat's announcements, so the modal can narrate the multiplier the
+        # scorecard chip abbreviates. Empty dict outside skat.
+        "announce": ({k: bool(ct.get(k)) for k in ("hand", "sharp", "open")}
+                     if mode_of(g) == "skat" else {}),
+    }
     return row
 
 

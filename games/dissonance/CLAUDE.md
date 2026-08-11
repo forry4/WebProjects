@@ -1093,6 +1093,38 @@ the bidding judgement, which is the part worth playing.
   - A pass-out redeal adds no line, because it is not a round.
   - It rides in `view_for`'s `match` (wholly public, like the totals) and
     through `persist.py` untouched. ~8 small keys x a median of ten rounds.
+* **A SCORECARD ROW OPENS THE ROUND'S STORY (2026-08-11)** — click or
+  right-click (contextmenu, which is also what a long-press fires) lays the
+  round out face up: both hands and piles as they stood at trick 1, the talon
+  with the three shown cards outlined and the swap annotated, and the bidding
+  that produced the contract. Everything renders from the line's own banked
+  data — `deal` (the snapshot, now taken in EVERY mode: dummy banks its three
+  hands too, and the DD column refuses non-2-hand deals by COUNT rather than
+  by mode) plus `reveal` (`_round_summary`: the auction log, `shown_at_deal`,
+  the swap pair, `looked`, skat's announcements). The Double/Kontra/Re lines
+  are synthesized from the row's `doubling`, the field the ×2 chip already
+  trusts. Public by the same argument as `deal`: all of it is in the
+  over-phase view already; the line just outlives that view. The redaction
+  gate is `test_round_reveal.py` — banked lines only, a mid-round view never
+  carries the current round's hands, forfeits bank neither deal nor reveal.
+  Browser-gated in `screens.mjs`: 32 cards face up, shown+took = 3, closes.
+* **THE DOUBLE FLASHES WHEN IT LANDS (2026-08-11)** — the declarer spends the
+  Double phase WAITING, the board moves straight to their lead, and the only
+  standing evidence was a small chip line; as-declarer it was routinely
+  missed. Two layers now: `.dis-dblflash` (a full-board ×2/×4 overlay for
+  4.5s, watching the effective multiplier RISE — classic Double, Kontra, Re
+  in one number) and the chip goes gold (`.dis-chip-mult.dbl`, the
+  scorecard's own ×2 colour, so the live chip and the banked line agree).
+  The watcher's ref starts at the mounted value, so reconnecting into a
+  long-doubled round announces nothing stale.
+* **PLAY GIVES 4.5rem OF RESERVE BACK TO THE CARDS on desktop (2026-08-11)**
+  — `--dis-reserve-in` is sized for the auction panel (~309px), but play's
+  middle measures 222px, so the phase the cards are played in reserved ~87px
+  for a panel that is not there. `.dis-table.ph-play` hands 4.5rem back
+  (~13px bigger cards height-bound, ~9px on a dummy table), keeping ~0.9rem
+  of the measured gap as slack. Play only: `ph-over` keeps the full reserve
+  because the result panel is auction-sized and would sit in permanent
+  scroll. Desktop block only; phones are untouched.
 * **A save with no `match` key is a single round and still ends at its own
   end.** `match_of()` is the only reader of `g["match"]` for exactly that
   reason — a game already in progress when this shipped must not crash and must

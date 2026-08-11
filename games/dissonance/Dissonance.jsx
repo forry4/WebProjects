@@ -523,7 +523,7 @@ function ContractChip({ game, nameOf, sharpBonus }) {
         {ptsLabel(a.level + (ct.sharp ? sharpBonus : 0))}
       </span>
       {(parts.length > 0 || doubling > 1) && (
-        <span className="dis-chip-mult">
+        <span className={`dis-chip-mult${doubling > 1 ? " dbl" : ""}`}>
           {parts.join(" + ")}{parts.length && doubling > 1 ? " · " : ""}
           {doubling > 1 ? (ct.re ? "Kontra + Re" : "Kontra") : ""}
           {ct.value ? ` · ${ct.value * (ct.mult || 1) * doubling}` : ""}
@@ -534,7 +534,7 @@ function ContractChip({ game, nameOf, sharpBonus }) {
           phone, and the doubled stake is the one number the rest of the round
           is played against. */}
       {game.doubled && (
-        <span className="dis-chip-mult">Double · {2 * a.level * a.level}</span>
+        <span className="dis-chip-mult dbl">Double · {2 * a.level * a.level}</span>
       )}
     </div>
   );
@@ -576,7 +576,7 @@ function histLine(g) {
  *  so a `+` is what you took and a `−` is what it cost you, which is the read
  *  the running total above is made of.
  */
-function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
+function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId, onStory }) {
   // The DD column: what the round was WORTH to perfect card play. Hook order
   // is safe — this is called unconditionally before any early return.
   const dd = useDdReviews(rounds, roomId);
@@ -588,6 +588,13 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
     if (!r.deal) {
       return <span className="dis-mrow-dd muted"
         title="No stored deal — this round predates the review, or was forfeited">—</span>;
+    }
+    // A dummy round banks its three hands for the story modal, but the DD
+    // solver is two-seat to its bones — nothing can price a third hand, so
+    // the column says so instead of posting the worker a deal it must refuse.
+    if ((r.deal.hands?.length ?? 2) !== 2) {
+      return <span className="dis-mrow-dd muted"
+        title="No DD figure for a dummy round — the exact solver prices two hands, not three">—</span>;
     }
     const v = dd[r.round];
     if (v === undefined) return <span className="dis-mrow-dd muted">…</span>;
@@ -617,11 +624,20 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId }) {
         const mine = r.scores?.[mySeat] || 0;
         const theirs = r.scores?.[oppSeat] || 0;
         const declared = r.declarer === mySeat;
+        // A row with a banked layout opens the round's story. Click and
+        // right-click both work (contextmenu is also what a phone's
+        // long-press fires); a row banked before the reveal shipped has
+        // nothing to show and stays inert.
+        const story = onStory && (r.deal || r.reveal)
+          ? (e) => { e.preventDefault(); onStory(r); } : null;
         return (
-          <div className="dis-mrow" key={r.round ?? i}>
+          <div className={`dis-mrow${story ? " dis-mrow-open" : ""}`}
+            key={r.round ?? i}
+            onClick={story} onContextMenu={story}
+            title={story ? "Show this round face up" : undefined}>
             <span className="dis-mrow-n">{r.round ?? i + 1}</span>
             <span className={`dis-mrow-ct${declared ? " mine" : ""}`}
-              title={roundTitle(r, nameOf)}>
+              title={story ? roundTitle(r, nameOf) + " — click for the full deal" : roundTitle(r, nameOf)}>
               {r.abandoned ? "forfeit"
                 : r.declarer < 0 ? "—"
                   : <>{nameOf(r.declarer)}{" "}
@@ -671,6 +687,133 @@ function roundTitle(r, nameOf) {
     + (r.null ? "Null" : r.made ? "made" : "set");
 }
 
+/** A finished round, face up: both hands as they stood at trick 1, the piles,
+ *  the talon with what the declarer was shown, and the bidding that produced
+ *  the contract. Everything here is the scorecard line's own banked data
+ *  (`r.deal` + `r.reveal`) — nothing is re-derived, and rounds banked before
+ *  the reveal shipped simply cannot open this.
+ */
+function RoundStory({ r, mySeat, nameOf, onClose }) {
+  const deal = r.deal || {};
+  const rev = r.reveal || {};
+  const hands = deal.hands || [];
+  const piles = deal.piles || [];
+  const out = deal.out || [];
+  const shown = new Set(rev.looked === false ? [] : rev.shown || []);
+  const [take, give] = rev.swap || [null, null];
+  const ann = rev.announce || {};
+  const annNames = ["hand", "sharp", "open"].filter((k) => ann[k]);
+  const seatName = (q) => (q === 2 ? "Dummy" : nameOf(q));
+
+  // One bid-log line. Classic entries carry level+denom, skat's carry value,
+  // either may be a pass — render whichever fields the entry has.
+  const bidLine = (e, i) => (
+    <div key={i} className="dis-story-bid">
+      <span>{nameOf(e.seat)}</span>
+      <span>
+        {e.pass ? "pass"
+          : e.value !== undefined ? e.value
+            : <>{e.level}<Den d={e.denom} /></>}
+      </span>
+    </div>
+  );
+
+  return (
+    <CreateModal title={`Round ${r.round} — face up`} onClose={onClose}>
+      <div className="dis-story">
+        <div className="dis-story-sum">
+          {roundTitle(r, nameOf).replace(/^Round \d+: /, "")}
+        </div>
+
+        {rev.auction && rev.auction.length > 0 && (
+          <div className="dis-story-sec">
+            <div className="dis-story-hd">Bidding</div>
+            <div className="dis-story-bids">
+              {rev.auction.map(bidLine)}
+              {/* The bets are not in the log — they are phases of their own —
+                  so the story synthesizes them from the row's own doubling,
+                  which is the field the scorecard chip already trusts. */}
+              {r.doubling > 1 && (
+                <div className="dis-story-bid dis-story-dbl">
+                  <span>{nameOf(1 - r.declarer)}</span>
+                  <span>{r.doubling === 4 ? "Kontra" : rev.announce && Object.keys(rev.announce).length ? "Kontra" : "Double"} ×2</span>
+                </div>
+              )}
+              {r.doubling === 4 && (
+                <div className="dis-story-bid dis-story-dbl">
+                  <span>{nameOf(r.declarer)}</span>
+                  <span>Re ×4</span>
+                </div>
+              )}
+              {annNames.length > 0 && (
+                <div className="dis-story-bid">
+                  <span>{nameOf(r.declarer)}</span>
+                  <span>{annNames.map((k) => k[0].toUpperCase() + k.slice(1)).join(" + ")}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {hands.map((h, q) => (
+          <div className="dis-story-sec" key={q}>
+            <div className="dis-story-hd">
+              {seatName(q)}
+              {q === r.declarer && <span className="dis-story-tag">declared</span>}
+            </div>
+            <div className="dis-story-cards">
+              {h.map((c) => (
+                <span key={c} className={c === take ? "dis-story-took" : undefined}
+                  title={c === take ? "Taken from the talon" : undefined}>
+                  <Card c={c} small />
+                </span>
+              ))}
+            </div>
+            {piles[q] && (
+              <div className="dis-story-cards dis-story-piles">
+                {piles[q].map((p, i) => (
+                  <span className="dis-story-pile" key={i}
+                    title="A pile: the right card sat on top">
+                    {p.map((c) => <Card key={c} c={c} small />)}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+
+        <div className="dis-story-sec">
+          <div className="dis-story-hd">
+            Out of play
+            {rev.looked === false && (
+              <span className="dis-story-tag">Hand — never looked</span>
+            )}
+          </div>
+          <div className="dis-story-cards">
+            {out.map((c) => (
+              <span key={c}
+                className={c === give ? "dis-story-gave"
+                  : shown.has(c) ? "dis-story-shown" : undefined}
+                title={c === give ? "Discarded into the talon by the declarer"
+                  : shown.has(c) ? "Shown to the declarer" : "Never seen during the round"}>
+                <Card c={c} small />
+              </span>
+            ))}
+          </div>
+          {(shown.size > 0 || take !== null) && (
+            <div className="dis-story-note muted">
+              {shown.size > 0 && <>Outlined: shown to {nameOf(r.declarer)}. </>}
+              {take !== null
+                ? <>Took <CardName c={take} />, discarded <CardName c={give} />.</>
+                : rev.looked === false ? null : <>Stood pat.</>}
+            </div>
+          )}
+        </div>
+      </div>
+    </CreateModal>
+  );
+}
+
 /** Solved perfect-play reviews, for the life of the tab. A banked round's deal
  *  is immutable and the solve is exact, so a result can never go stale — and a
  *  match reopened from the lobby must not pay the solver again. */
@@ -700,7 +843,7 @@ function useDdReviews(rounds, roomId) {
     for (const r of rounds) {
       const k = `${roomId}:${r.round}`;
       if (REVIEW_CACHE.has(k)) seed[r.round] = REVIEW_CACHE.get(k);
-      else if (r.deal) todo.push(r);
+      else if (r.deal && (r.deal.hands?.length ?? 2) === 2) todo.push(r);
     }
     setVals(seed);
     if (todo.length === 0 || typeof Worker === "undefined") return undefined;
@@ -889,6 +1032,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const [showRules, setShowRules] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
+  // The scorecard row someone asked to see face up, or null.
+  const [storyRound, setStoryRound] = useState(null);
+  // The doubled-stakes flash: set when the bet lands, cleared on a timer.
+  const [dblFlash, setDblFlash] = useState(null);
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
@@ -926,6 +1073,38 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const players = roomData?.players || {};
   const seats = game?.seats || [];
   const mySeat = game ? game.you : null;
+  // THE BET LANDING IS THE ONE MID-ROUND EVENT A PLAYER MUST NOT MISS — as
+  // declarer especially: the defender Doubles at the end of a phase you spent
+  // WAITING through, the board moves straight on to your own lead, and the
+  // only standing evidence was a small chip line. This watches the effective
+  // multiplier (classic's Double, skat's Kontra, the declarer's Re) and
+  // flashes a banner the moment it RISES. The ref starts at the current value
+  // on mount, so reconnecting into a long-doubled round announces nothing
+  // stale — the gold chip is the durable record; this is the event.
+  const dblNow = !game ? 0
+    : game.contract?.re ? 4
+      : game.contract?.kontra ? 2
+        : game.doubled ? 2 : 0;
+  const dblPrev = useRef(null);
+  const dblDecl = game?.auction?.declarer;
+  useEffect(() => {
+    const prev = dblPrev.current;
+    dblPrev.current = dblNow;
+    if (prev === null || dblNow <= prev) return undefined;
+    const re = dblNow === 4;
+    const bettor = re ? dblDecl : 1 - dblDecl;
+    const word = re ? "Re" : game?.contract ? "Kontra" : "Double";
+    setDblFlash({
+      mult: dblNow,
+      text: bettor === mySeat
+        ? `You said ${word} — the round now pays ×${dblNow}, whoever takes it.`
+        : `${word}! The round now pays ×${dblNow}, whoever takes it.`,
+    });
+    const t = setTimeout(() => setDblFlash(null), 4500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dblNow]);
+
   // `turn_seat`, not `to_play`. They are the same number in every two-seat
   // mode, but `to_play` is a POSITION and the dummy's is 2 -- comparing that
   // against your seat tells the declarer it is not their move on a third of
@@ -1624,6 +1803,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
         onAbandon={game.phase !== "over" ? () => setConfirmAbandon(true) : null} />}
         user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
       {reconnecting && <div className="banner">Reconnecting…</div>}
+      {dblFlash && (
+        <div className="dis-dblflash" onClick={() => setDblFlash(null)}>
+          <span className="dis-dblflash-x">×{dblFlash.mult}</span>
+          <span>{dblFlash.text}</span>
+        </div>
+      )}
 
       <div className="dis-main">
         {/* `dis-3seat` is what re-derives the card size: the height budget
@@ -2514,13 +2699,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   already in progress when the scorecard shipped — there is
                   nowhere to recover its earlier rounds from. */}
               <MatchCard rounds={game.match.rounds} mySeat={mySeat}
-                oppSeat={oppSeat} nameOf={nameOf} roomId={roomData?.room_id} />
+                oppSeat={oppSeat} nameOf={nameOf} roomId={roomData?.room_id}
+                onStory={setStoryRound} />
             </div>
           </div>
         )}
       </div>
 
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
+      {storyRound && (
+        <RoundStory r={storyRound} mySeat={mySeat} nameOf={nameOf}
+          onClose={() => setStoryRound(null)} />
+      )}
       {confirmAbandon && (
         <CreateModal title="Abandon game?" onClose={() => setConfirmAbandon(false)}>
           <span className="cm-hint">

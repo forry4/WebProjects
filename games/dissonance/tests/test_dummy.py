@@ -357,16 +357,27 @@ def test_dummy_mode_is_card_scored_and_not_client_searchable():
         assert E.layout_for(m)[0] == 2
 
 
-def test_no_round_review_is_stored_for_a_dummy_round():
-    """The DD column is an exact solve and the solver cannot see three hands,
-    so a dummy round banks no deal rather than a snapshot nothing can price."""
+def test_a_dummy_round_banks_a_three_hand_deal_the_dd_column_must_refuse():
+    """Since the round-review modal (2026-08-11) every mode banks its deal --
+    a dummy round's three hands included, so the modal can lay the round out
+    face up. The DD solver still cannot price three hands: the FRONTEND gates
+    on the hand count before posting a deal to the review worker, and the
+    count is therefore the field this test pins."""
     g = _to_play(9)
-    assert "deal" not in g
+    assert len(g["deal"]["hands"]) == 3, "the snapshot carries all three hands"
     while g["phase"] == "play":
         seat = E.playing_seat(g)
         E.apply_play(g, seat, E.legal_moves(g, seat)[0])
     row = g["match"]["rounds"][-1]
-    assert "deal" not in row
+    assert len(row["deal"]["hands"]) == 3
+    assert len(row["deal"]["piles"]) == 3
+    # The union of the banked layout is the whole wide deck: the modal renders
+    # this as fact, so it must BE the deal, not resemble one.
+    seen = sorted(sum(row["deal"]["hands"], [])
+                  + [c for sp in row["deal"]["piles"] for p in sp for c in p]
+                  + row["deal"]["out"])
+    assert seen == sorted(range(E.deck_size("dummy"))), "the layout is the deck"
+    assert row["reveal"]["swap"] == [None, None], "no talon in dummy mode"
 
 
 def test_a_dummy_round_survives_the_persistence_round_trip():
