@@ -1933,55 +1933,63 @@ classic, ~600 deals per row unless said:
 | **the shipped pairing**: expert one-tree k=8 vs hard pooled 4×2 (=k8) | +0.26 ± 0.42 at n=600, pre-talon — unresolved then, superseded by the row below |
 | **the shipped pairing, RE-MEASURED with the talon model in the leaf (n=1600)** | **+1.19 ± 0.32, CI [+0.57, +1.81]** — the tree's marginal over worlds-matched Hard, finally clear of zero. A better leaf helped the TREE more than the pricer, which is the campaign's story closing: the tree composes leaf values through max/min chains, so leaf error hurt it most and leaf accuracy pays it most |
 
-### EXPERT vs EXPERT — the full profile (2026-08-11, 400 paired deals)
+### EXPERT vs EXPERT — the full profile (2026-08-11, 800 paired deals)
 
 The tier playing ITSELF at the serving shape (classic, k=8 one tree,
-`resolve=dd`), via `auction_arena.py expert expert` pooled by
-`tools/style_report.py`. **Strength is not measurable here** — the mirror reads
-exactly `+0.0000` by construction — this is behaviour only. Recorded because the
-detail kept evaporating: the counters were always collected, the shard logs are
-gitignored, and only prose ever reached this file, so "what does Expert actually
-do" cost a fresh hour-long run every time it was asked.
+`resolve=dd`), via `auction_arena.py expert expert` over two disjoint 400-deal
+windows, pooled by `tools/style_report.py`. **Strength is not measurable here** —
+the mirror reads exactly `+0.0000` by construction — this is behaviour only.
+Recorded because the detail kept evaporating: the counters were always
+collected, the shard logs are gitignored, and only prose ever reached this file,
+so "what does Expert actually do" cost a fresh hour-long run every time.
 
 **Every raw count reads DOUBLE** (each deal is played twice with the seats
 swapped, and identical policies give identical auctions). Percentages are
-unaffected; the independent sample is 400.
+unaffected; the independent sample is 800.
 
 | opening level | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
-| share | **30.2%** | 5.8% | 12.8% | 13.5% | **18.2%** | 14.5% | 4.5% | 0.5% |
+| share | **30.1%** | 6.0% | 10.8% | 13.6% | **19.2%** | 14.5% | 5.4% | 0.4% |
 
 | settled level | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
-| share | 5.8% | 4.0% | **23.8%** | 8.2% | 19.0% | **29.2%** | 9.2% | 0.8% |
-| made | 95.7% | 87.5% | **96.8%** | 63.6% | 46.1% | 34.2% | 27.0% | 0% |
-| set | 0% | 0% | 1.1% | 30.3% | 46.1% | **59.8%** | 67.6% | 100% |
-| Null | 4.3% | 12.5% | 2.1% | 6.1% | 7.9% | 6.0% | 5.4% | 0% |
+| share | 4.8% | 3.6% | **25.0%** | 8.1% | 19.2% | **27.9%** | 10.6% | 0.8% |
+| made | 92.1% | 89.7% | **95.5%** | 61.5% | 50.0% | 30.0% | 21.2% | 0% |
+| set | 2.6% | 0% | 3.0% | 32.3% | 44.8% | **64.1%** | 75.3% | 100% |
+| Null | 5.3% | 10.3% | 1.5% | 6.2% | 5.2% | 5.8% | 3.5% | 0% |
 
-Opening mean 3.48 / median 4, settled mean 4.59 / median 5 — **and the mean is
+Opening mean 3.53 / median 4, settled mean 4.63 / median 5 — **and the mean is
 close to meaningless on the opening, which is sharply BIMODAL**: it opens at 1,
-or it opens for real at 5–6. Level 2 is nearly empty (5.8%), which is what says
+or it opens for real at 5–6. Level 2 is nearly empty (6.0%), which is what says
 the low opening is a deliberate cap play rather than general timidity. The
 settled distribution is the same shape shifted: the level-1 mass becomes a spike
 at **3**, exactly where `MAX_RAISE` puts it.
 
 Open → settled (row %, upper-triangular by construction): a level-1 opening
-settles at **3 in 65%** of rounds and stays at 1 in only 19%; a level-6 opening
-is contested just 16% of the time. **36% of rounds open ≤2 and 56% of those
+settles at **3 in 71%** of rounds and stays at 1 in only 16%; a level-6 opening
+is contested 22% of the time. **36.1% of rounds open ≤2 and 60.6% of those
 settle at exactly 3.**
 
-Decisions: forced opening 33.7%, positively-priced bid 20.5%, **sacrifice 12.2%
-of all decisions = 18.4% of FREE choices**, pass 33.7% (one forced open and one
-pass per auction, by rule). **Doubles taken 26.0% of opportunities.** Outcomes
-overall: made 58.5%, set 36.0%, Null 5.5%.
+Decisions: forced opening 33.8%, positively-priced bid 20.6%, **sacrifice 11.7%
+of all decisions = 17.7% of FREE choices**, pass 33.8% (one forced open and one
+pass per auction, by rule). **Doubles taken 27.2% of opportunities.** Outcomes
+overall: made 56.8%, set 38.8%, Null 4.5%.
 
-* **The single most common settlement is level 6 — 29% of contracts — and 60% of
+**DOUBLING THE SAMPLE MOVED ALMOST NOTHING**, which is the reason to trust the
+shape: over the first 400 vs the pooled 800, opens-at-1 30.2→30.1%, opens ≤2
+36.0→36.1%, sacrifice 18.4→17.7%, Double 26.0→27.2%, made 58.5→56.8%. The two
+that drifted both moved AWAY from the benign reading — level-6 make 34.2→30.0%
+and cap conversion 56.2→60.6% — so the overbidding below is slightly worse than
+the half-sample said, not better.
+
+* **The single most common settlement is level 6 — 28% of contracts — and 64% of
   those are SET.** Two Experts bid each other well past the making point; the
-  cliff is at 4 and level 5 is a coin flip. Whether that is correct (the payoff
-  asymmetry may reward it) or a shared blind spot is UNRESOLVED and this run
-  cannot tell them apart — it is the obvious next probe.
+  cliff is at 4 and level 5 sits on exactly 50.0% made over 308 contracts.
+  Whether that is correct (the payoff asymmetry may reward it) or a shared blind
+  spot is UNRESOLVED and this run cannot tell them apart — pricing the
+  alternative (what passing at 5 pays against this opponent) is the next probe.
 * **The level cap at 10 is confirmed irrelevant to this profile**: nothing
-  settled above 8 and only 0.5% of openings reached 8, so the 2026-08-11 cap
+  settled above 8 and only 0.4% of openings reached 8, so the 2026-08-11 cap
   removed rungs that self-play never used.
 * **The who-declares counter is unusable in a mirror and is not reported.**
   `traject` marks a round `kept` when the opener's TIER equals the declarer's,
