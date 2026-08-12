@@ -510,7 +510,7 @@
      seats' heights. */
   .dis-game .dis-table:has(> .dis-auction),
   .dis-game .dis-table:has(> .dis-result) {
-    --dis-rows: 5; --dis-reserve-in: 14rem;
+    --dis-rows: 5; --dis-reserve-in: 10.5rem;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
     grid-template-rows: repeat(2, auto);
@@ -519,6 +519,7 @@
   .dis-game .dis-table.dis-3seat:has(> .dis-auction),
   .dis-game .dis-table.dis-3seat:has(> .dis-result) {
     grid-template-rows: repeat(3, auto);
+    --dis-reserve-in: 14rem;
   }
   .dis-game .dis-table:has(> .dis-auction) > .dis-seat,
   .dis-game .dis-table:has(> .dis-result) > .dis-seat { grid-column: 1; }
@@ -528,17 +529,24 @@
      The trick counter, the contract chip and the turn bar used to stack
      BETWEEN the seats, and the card budget paid for every line of it. They
      ride the rail now, same as the auction and the report — so the middle
-     holds nothing but the trick's own cards, and the reserve drops from
-     17.5rem to 14rem FOR EVERY PHASE ABOVE TOO (the three rules share the
-     number so the cards never change size across the auction, play and the
-     report — the property the gate asserts). 14rem, not lower: the budget's
-     growth tops out at +14.7% of the old card size on the tightest screens
-     that are not already width-bound or on the 3.4rem floor, which honours
-     the "bigger, but nothing may wrap or overlap" brief this came from.
-     The playside is a grid child, so the trick row count per mode is the
-     row template: three rows for two seats + trick, four with a dummy. */
+     holds nothing but the trick's own cards. The playside is a grid child,
+     so the trick row count per mode is the row template: three rows for two
+     seats + trick, four with a dummy.
+
+     THE RESERVE IS THE FURNITURE, COUNTED — not a guess with margin. The
+     board is five CARD rows tall (two hands, two pile rows, the trick), so
+     on a 16:9 desktop the HEIGHT is what bounds the cards and every rem of
+     reserve is a rem taken straight off them. What is really left in the
+     middle column at this tier: table padding (1.8rem), the two seat-name
+     rows (~2.75rem), the trick row's name labels (1.25rem), four 0.5rem
+     gaps and two 15px pile peeks (~3.9rem) ≈ 9.7rem — the reserve is
+     10.5rem, ~0.8rem of slack. ≥1440px moves the seat names sideways into
+     the felt's spare width and drops to 9rem (below). All phases in a tier
+     share the number, so the cards never change size across the auction,
+     play and the report — the property the gate asserts. */
+  .dis-game .dis-table { gap: 0.5rem; }
   .dis-game .dis-table:has(> .dis-playside) {
-    --dis-reserve-in: 14rem;
+    --dis-reserve-in: 10.5rem;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
     grid-template-rows: repeat(3, auto);
@@ -565,6 +573,38 @@
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info .dis-trickhist {
     flex: 1 1 auto; min-height: 3rem; max-height: none;
   }
+}
+
+/* ── FULL-WIDTH DESKTOP: the seat names move SIDEWAYS, the cards take the
+   row they held (2026-08-12). At 16:9 the five stacked card rows are bound
+   by HEIGHT while the felt has hundreds of px of spare WIDTH — so the two
+   remaining non-card rows in the middle column, the seat names, move into
+   that spare width: absolutely placed at the felt's left edge, level with
+   their seat's pile row (the row nearest the trick). That plus the counted
+   furniture puts the reserve at 9rem — the honest floor; below it the
+   bottom seat starts clipping. Gated at 1440px because narrower felts are
+   width-bound anyway (no card to gain) and the name would land ON the
+   cards; the dummy seat is neither first nor last child and keeps its
+   in-flow name. */
+@media (min-width: 1440px) and (min-height: 600px) {
+  .dis-game .dis-table:has(> .dis-playside),
+  .dis-game .dis-table:has(> .dis-auction),
+  .dis-game .dis-table:has(> .dis-result) { --dis-reserve-in: 9rem; }
+  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 25rem; }
+  .dis-game .dis-table.dis-3seat:has(> .dis-auction),
+  .dis-game .dis-table.dis-3seat:has(> .dis-result) { --dis-reserve-in: 14rem; }
+  .dis-game .dis-table > .dis-seat { position: relative; }
+  .dis-game .dis-table > .dis-seat:first-child > .dis-seatname,
+  .dis-game .dis-table > .dis-seat:last-child > .dis-seatname {
+    position: absolute; left: 0.1rem; z-index: 2;
+    flex-direction: column; gap: 0.1rem; align-items: flex-start;
+    text-align: left; max-width: 8.5rem;
+  }
+  /* Anchored to the seat edge NEAREST the trick — which is where each
+     seat's pile row sits: the opponent's at its bottom, yours at your top
+     (under the 15px buried-card peek). */
+  .dis-game .dis-table > .dis-seat:first-child > .dis-seatname { bottom: 0.6rem; }
+  .dis-game .dis-table > .dis-seat:last-child > .dis-seatname { top: calc(0.6rem + 15px); }
 }
 
 /* ── table ──────────────────────────────────────────────────────────────── */
