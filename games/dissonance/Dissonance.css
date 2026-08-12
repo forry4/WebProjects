@@ -890,7 +890,7 @@
        content-height and centred, so the extra reserve costs them nothing. */
     --dis-rows: 5; --dis-reserve-in: 12rem;
     display: grid;
-    grid-template-columns: minmax(0, max-content) minmax(var(--dis-rail), 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(var(--dis-rail), max-content);
     grid-template-rows: repeat(2, auto);
     align-content: space-between;
   }
@@ -901,7 +901,7 @@
      to say it. It is also the one phase where nothing on the felt needs the
      width: every card has been played, so the seats are empty wells. */
   .dis-game .dis-table:has(> .dis-result) {
-    grid-template-columns: minmax(0, max-content) minmax(max(26rem, var(--dis-rail)), 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(max(26rem, var(--dis-rail)), max-content);
   }
   /* ...and the talon inside it stops being a row of thumbnails. */
   .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 48px; font-size: 0.87rem; }
@@ -921,7 +921,13 @@
      lesson). max-height keeps the internal-scroll safety valve. */
   .dis-game .dis-table > .dis-auction,
   .dis-game .dis-table > .dis-result {
-    align-self: center; max-height: 100%;
+    /* FILLS ITS TRACK, which is `max-content` — so the panel is exactly as
+       wide as its widest line and there is no bare felt on either side of it.
+       `justify-self: end` was worse than it sounds: an item that is not
+       `stretch` shrinks to FIT-content while the track stays sized to
+       MAX-content, and the difference (194px, measured) became a gap between
+       the cards and a panel pinned to the right. Same object, two widths. */
+    align-self: center; max-height: 100%; max-width: 40rem;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
     border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 12px;
@@ -1029,7 +1035,9 @@
   .dis-game .dis-table > .dis-playside {
     grid-column: 2; grid-row: 1 / -1;
     min-height: 0; justify-content: center;
-    align-self: center; max-height: 100%;
+    /* Same as the auction/report panels: fills its own max-content track, so
+       its width IS its content and nothing is left bare beside it. */
+    align-self: center; max-height: 100%; max-width: 28rem;
     padding: 1rem 0.9rem; gap: 1.1rem;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
     border: 1px solid rgba(255, 255, 255, 0.09);
