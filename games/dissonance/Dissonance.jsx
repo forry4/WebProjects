@@ -1846,6 +1846,26 @@ export default function Dissonance({ myId, authUser, onExit }) {
     return [{ seat: game.leader, c: game.led }];
   })();
 
+  /* WHAT THE TRICK ON THE TABLE IS WORTH — one derivation, rendered beside
+     the cards it prices. Parity rooms label a trick with its fixed value; a
+     card-scored room cannot until every card is down, so mid-trick it shows
+     the sum SO FAR (the cards already played) and the held beat shows what
+     the trick really paid. Null when there is nothing to price — a
+     card-scored lead nobody has answered yet, or no trick at all. */
+  const trickVal = (() => {
+    const fmt = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
+    if (heldTrick) return { v: heldTrick.value, label: fmt(heldTrick.value) };
+    if (game.phase !== "play") return null;
+    if (cardPts(game)) {
+      if (game.led === null || game.led === undefined) return null;
+      const v = cardVal(game, game.led);
+      return { v, label: `${fmt(v)} so far` };
+    }
+    const v = game.trick_value;
+    if (v === null || v === undefined) return null;
+    return { v, label: fmt(v) };
+  })();
+
   return (
     // `dis-cardpts` is what turns the per-card worth chips on: skat scores
     // captured cards (2026-08-09), and a board that did not say which cards
@@ -2195,17 +2215,35 @@ export default function Dissonance({ myId, authUser, onExit }) {
               <ContractLine game={game} />
               {myDouble ? (
                 <>
-                  {/* The numbers, not an adjective. The whole point of Double is
-                      that the two sides of the bet are LOPSIDED, and a player
-                      cannot weigh that from the word "doubles". */}
-                  <div className="muted dis-hint">
-                    If {nameOf(declSeat)} makes it they score{" "}
-                    <b>{2 * (game.auction.level * game.auction.level + flatMake)}</b>{" "}
-                    instead of {game.auction.level * game.auction.level + flatMake}.
-                    If they fall short you score{" "}
-                    <b>{2 * (game.auction.level + flatSet)}</b> plus a RISING amount per
-                    point — <b>{[1, 2, 3].map((i) => shortRate + i).join(", then ")}</b>{" "}
-                    — instead of {game.auction.level + flatSet} plus a flat {shortRate}.
+                  {/* THE NUMBERS, AS NUMBERS. The whole point of Double is that
+                      the two sides of the bet are LOPSIDED, and a player cannot
+                      weigh that from the word "doubles" — but the paragraph that
+                      said it in prose ran five lines in a 17rem rail and pushed
+                      the buttons under a scrollbar, which is worse than not
+                      explaining it. Two rows, each `now → doubled`, so the
+                      asymmetry is something you SEE rather than parse. */}
+                  <div className="dis-ktable">
+                    <div className="dis-scorerow">
+                      <span>They make it</span>
+                      <b>{game.auction.level * game.auction.level + flatMake}
+                        {" → "}
+                        <span className="dis-kbig">
+                          {2 * (game.auction.level * game.auction.level + flatMake)}
+                        </span></b>
+                    </div>
+                    <div className="dis-scorerow">
+                      <span>You set them</span>
+                      <b>{game.auction.level + flatSet}
+                        {" → "}
+                        <span className="dis-kbig">{2 * (game.auction.level + flatSet)}</span></b>
+                    </div>
+                    <div className="dis-scorerow">
+                      <span>…plus, per point short</span>
+                      <b>{shortRate}{" → "}
+                        <span className="dis-kbig">
+                          {[1, 2, 3].map((i) => shortRate + i).join(", ")}…
+                        </span></b>
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
@@ -2512,13 +2550,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
           ) : (
             <>
               <div className="dis-trick">
-                {/* The trick band holds ONLY the cards (and each card's
-                    "who played this" name). Every other line the middle used
-                    to carry — the trick counter, the contract chip, the turn
-                    bar — lives in `.dis-playside` below, which the wide
-                    desktop places in the rail beside the felt (the same
-                    treatment the auction and the report already get) so the
-                    height it used to cost goes back to the cards. */}
+                {/* The trick band holds the cards, each card's "who played
+                    this" name, and — since 2026-08-12 — WHAT THE TRICK IS
+                    WORTH. The rest of what the middle used to carry (the
+                    counter, the contract chip, the turn bar) lives in
+                    `.dis-playside` below, which the wide desktop places in
+                    the rail beside the felt.
+
+                    The value pill came BACK to the trick because it is the
+                    one number that is about the two cards you are looking
+                    at: in the rail it sat a column away from the thing it
+                    prices, and deciding whether to take a trick means
+                    reading both at once. */}
                 <div className="dis-trickcards">
                   {trickCards.length === 0
                     ? <div className="muted">{myTurn ? "Your lead" : "Waiting…"}</div>
@@ -2529,33 +2572,22 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       </div>
                     ))}
                 </div>
+                {trickVal && (
+                  <div className="dis-trickval">
+                    <span className={`dis-val ${trickVal.v > 0 ? "good" : "bad"}`}>
+                      {trickVal.label}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="dis-playside">
                 {/* While a finished trick is held, this line is ABOUT that
                     trick — the server's counter has already moved on, so
                     reading it here labelled the two cards you are looking at
-                    with the next trick's number and the next trick's value. */}
+                    with the next trick's number. */}
                 <div className="dis-trickinfo">
                   Trick {heldTrick ? heldTrick.number : game.trick + 1} of{" "}
                   {game.tricks ?? 13}
-                  {(() => {
-                    // Parity rooms label the trick with its fixed value. A
-                    // card-scored room cannot until both cards are down, so
-                    // mid-trick it shows the sum SO FAR (the led card's worth)
-                    // and the held beat shows what the trick really paid.
-                    const fmt = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
-                    if (heldTrick) {
-                      const v = heldTrick.value;
-                      return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)}</span></>;
-                    }
-                    if (cardPts(game)) {
-                      if (game.led === null || game.led === undefined) return null;
-                      const v = cardVal(game, game.led);
-                      return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)} so far</span></>;
-                    }
-                    const v = game.trick_value;
-                    return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)}</span></>;
-                  })()}
                 </div>
                 <ContractChip game={game} nameOf={nameOf}
                   sharpBonus={catalog?.sharp_bonus ?? 2} />
@@ -2705,19 +2737,26 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 <SkatStake game={game} nameOf={nameOf} rows />
               </>}
             </>}
+            {/* THE CLASSIC CONTRACT IS ONE HEADLINE AND ONE MONEY LINE.
+                It used to be four scorerows — needs / Trump / Makes it for /
+                Or Null — and the second of those said in a word what the
+                first already said in a glyph ("4♣" over "Trump: Clubs").
+                Now: who bought it and what they bought, big; then the target
+                and both payouts on one line, since they are the same kind of
+                fact and are read together. */}
             {isSkat ? null : game.auction.level
               ? <>
-                <div className="dis-scorerow">
-                  <span>{nameOf(game.auction.declarer)} needs</span>
-                  <b>{ptsLabel(game.auction.level)}</b>
+                <div className="dis-ctline">
+                  <b>{nameOf(game.auction.declarer)}</b>
+                  <span className="dis-ctbid">
+                    {game.auction.level}<Den d={game.auction.denom} />
+                  </span>
                 </div>
-                <div className="dis-scorerow">
-                  <span>Trump</span><b>{DENOM_NAME[game.auction.denom]}</b>
-                </div>
-                <div className="dis-scorerow">
-                  <span>Makes it for</span>
+                <div className="dis-ctsub">
+                  needs <b>{ptsLabel(game.auction.level)}</b> · makes{" "}
                   <b>{(game.doubled ? 2 : 1)
                     * (game.auction.level * game.auction.level + flatMake)}</b>
+                  {" "}· Null <b>{nullMake}</b>
                 </div>
                 {game.doubled && (
                   <div className="dis-scorerow">
@@ -2731,12 +2770,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 )}
               </>
               : <div className="muted">Being decided…</div>}
-            {/* Live under every contract, so it belongs on the panel rather than
-                in the contract line: the declarer always has this out. */}
-            {game.auction.level > 0 && (
+            {/* Skat keeps its own rows — bought-at, declared and must-score are
+                three genuinely different numbers there — so its Null line
+                stays a row of its own. */}
+            {isSkat && game.auction.level > 0 && (
               <div className="dis-scorerow">
                 <span>Or Null ({nullCond(game)})</span>
-                <b>{isSkat ? (catalog?.skat_null_value ?? "") : nullMake}</b>
+                <b>{catalog?.skat_null_value ?? ""}</b>
               </div>
             )}
             {/* HOW THE CONTRACT WAS BOUGHT, under the contract itself. */}

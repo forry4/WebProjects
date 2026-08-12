@@ -21,19 +21,7 @@
    carry a `var(--x, fallback)`; `shared/tests/test_css_tokens.py` enforces it. */
 .dis {
   min-height: 100vh; color: var(--text);
-  /* THE LOBBY STANDS ON THE GAME'S OWN GROUND. Three short lists on flat page
-     black read as content dropped into a void — nothing on screen said which
-     game this was, and the empty lower two-thirds was the only thing with any
-     size. A wide, very low green wash from the top ties the lobby to the felt
-     it opens onto, and a floor glow keeps the bottom from going dead flat.
-     Both are pinned (fixed) so the page can scroll over an unmoving ground,
-     and both sit far below the panel surfaces in value — this is atmosphere,
-     not a surface the cards have to fight. */
-  background:
-    radial-gradient(120% 60% at 50% -8%, rgba(60, 160, 110, 0.16), rgba(60, 160, 110, 0) 62%),
-    radial-gradient(90% 45% at 50% 108%, rgba(40, 120, 84, 0.10), rgba(40, 120, 84, 0) 70%),
-    var(--bg, #0f0e0c);
-  background-attachment: fixed;
+  background: var(--bg, #0f0e0c);
   --accent: #6fe0a0;
   /* Lifted accent for hover, and the near-black that goes ON the accent. Both
      were written as literals in eight places between them; naming them is what
@@ -42,6 +30,27 @@
   --accent-hi: #8bebb5;
   --ink: #08131f;
   --lby-accent: var(--accent);
+}
+
+/* THE LOBBY STANDS ON THE GAME'S OWN GROUND — a wide, very low green wash from
+   the top and a floor glow, so three short lists do not read as content dropped
+   into a void.
+
+   IT IS A PINNED LAYER, NOT `background-attachment: fixed` ON `.dis`. The
+   fixed attachment did exactly what it says — the ground stayed put while the
+   page scrolled — but it takes the element's background out of its own layer,
+   so every hover, focus and re-render on top of it repaints the whole viewport
+   against a fixed image. That is what made the lobby's Create/Resume buttons
+   and the board's Back to lobby BLINK (reported from the live site, not a
+   theory). A fixed pseudo-element composites on its own layer and costs
+   nothing to paint over. `z-index: 0` on the element is what keeps this
+   `-1` layer above the page and behind the content. */
+.dis { position: relative; z-index: 0; isolation: isolate; }
+.dis::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(60, 160, 110, 0.16), rgba(60, 160, 110, 0) 62%),
+    radial-gradient(90% 45% at 50% 108%, rgba(40, 120, 84, 0.10), rgba(40, 120, 84, 0) 70%);
 }
 
 /* THE LOBBY'S PRIMARY ACTION IS THE GREEN TOO. The shared kit's primary is
@@ -353,7 +362,33 @@
    which reads as the game having auto-selected it for you at the start of your
    turn. */
 @media (hover: hover) and (pointer: fine) {
-  .dis-card.play:hover { transform: translateY(-8px); box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45); }
+  /* THE LIFT ADDS TO THE CARD'S OWN SHADOW STACK — it used to REPLACE it, and
+     the first thing in that stack is `inset 0 0 0 1px rgba(255,255,255,.65)`,
+     the white inner ring that lights the card's rounded edge. Dropping it on
+     hover took the light off the corners at the exact moment the card is
+     raised and most looked at, so a lifted card read as flat and dark-cornered
+     against the ones still in the hand. */
+  .dis-card.play:hover {
+    transform: translateY(-8px);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+      0 2px 4px rgba(0, 0, 0, 0.32),
+      0 10px 20px rgba(0, 0, 0, 0.42);
+  }
+  /* AND THE PRESS ANSWERS INSTANTLY. A play is a server round trip — the card
+     does not leave your hand until the room broadcasts — so without a press
+     state the only feedback for ~100-300ms was nothing at all, which is what
+     "not snappy" is. The card drops toward the table under the pointer the
+     moment the button goes down, at no transition, so it cannot lag the
+     finger. */
+  .dis-card.play:active {
+    transition: none;
+    transform: translateY(-2px) scale(0.985);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 3px 7px rgba(0, 0, 0, 0.34);
+  }
 }
 /* NO DIMMING — every face-up card looks the same, playable right now or not.
    Legality is carried by the `play` affordance (cursor + hover) and enforced
@@ -366,7 +401,20 @@
    `filter: brightness()` fixed the transparency but kept the real problem —
    a hand rendered as two different kinds of card. Do not reintroduce a `dim`
    class in either form. */
-.dis-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A RING, NOT AN OUTLINE. An outline is drawn outside the border box and keeps
+   its own corner geometry, so on a card whose radius scales with its width
+   (`--cw * 0.11`) the ring's corners and the card's corners disagreed — the
+   selected card read as if it had square corners inside a rounded one. A
+   spread box-shadow follows the border-radius exactly, and it composes with
+   the card's own stack instead of sitting on top of it. */
+.dis-card.sel {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 10px rgba(111, 224, 160, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+}
 /* The back is a CARD BACK, not a stripe fill: a woven diamond lattice over a
    deep indigo, lit from above, inside a printed frame (two inset rings). The
    lattice is an inline SVG so it stays crisp at any card size; everything
@@ -697,14 +745,23 @@
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match { grid-column: 1; grid-row: 1; }
   .dis-game .dis-main:has(> .dis-side-match) > .dis-table { grid-column: 2; grid-row: 1; }
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info { grid-column: 3; grid-row: 1; }
-  /* The match panel sizes to its CONTENT. It used to stretch to fill the
-     whole column — right for an invisible surface, wrong for the lit panel
-     treatment: an early match rendered as a huge blank glowing card next to
-     a fully-populated right column. The scorecard keeps a generous scroll
-     window (taller than the base 9.2rem cap, since this column has the
-     room) and true page background shows below the panel. */
+  /* THE MATCH PANEL FILLS ITS COLUMN, and the middle ground is what makes
+     that work. It stretched originally (a huge blank glowing card beside a
+     full right column at round 1), then was capped to its content (the
+     scorecard stopped short of the bottom while the felt beside it ran the
+     full height, which is what a reader notices). It stretches again — but
+     the SCORECARD is what takes the slack and scrolls in it, so an empty
+     match shows a short list in a full-height panel rather than a tall
+     empty one, exactly the treatment the trick history gets in the other
+     flank. */
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match {
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match > .dis-panel {
+    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+  }
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-mcard {
-    max-height: min(24rem, 45vh);
+    flex: 1 1 auto; min-height: 4rem; max-height: none;
   }
   /* ── THE PANEL SITS BESIDE THE CARDS, NOT BETWEEN THEM ──────────────────
      The auction and the round-end report used to be a row IN the column, so
@@ -743,6 +800,18 @@
     grid-template-rows: repeat(2, auto);
     align-content: space-between;
   }
+  /* THE REPORT GETS A WIDER COLUMN THAN THE OTHER RAILS — 26rem — and it can
+     have it for free. The card-width term below subtracts a FIXED 17rem, not
+     this column, so the cards keep the size they held all round (the property
+     the gate asserts) while the panel that has the most to say gets the room
+     to say it. It is also the one phase where nothing on the felt needs the
+     width: every card has been played, so the seats are empty wells. */
+  .dis-game .dis-table:has(> .dis-result) {
+    grid-template-columns: minmax(0, max-content) 26rem;
+  }
+  /* ...and the talon inside it stops being a row of thumbnails. */
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 48px; font-size: 0.87rem; }
+  .dis-game .dis-table > .dis-result .dis-outrow { gap: 0.4rem; }
   .dis-game .dis-table.dis-3seat:has(> .dis-auction),
   .dis-game .dis-table.dis-3seat:has(> .dis-result) {
     grid-template-rows: repeat(3, auto);
@@ -841,10 +910,21 @@
   }
   .dis-game .dis-table:has(> .dis-playside) > .dis-seat,
   .dis-game .dis-table:has(> .dis-playside) > .dis-trick { grid-column: 1; }
+  /* THE PLAY RAIL IS A PANEL, like the auction's. Three lines of type sitting
+     straight on the felt had nothing to hold them: the counter, the contract
+     and the turn bar read as text scattered on green rather than as the
+     board's status column. Same material as the auction/report panels one
+     rule up, so every phase's rail is the same object. Content height and
+     centered, never a full-height glowing card. */
   .dis-game .dis-table > .dis-playside {
     grid-column: 2; grid-row: 1 / -1;
-    min-height: 0; justify-content: center; padding: 0.5rem 0.5rem 0.5rem 0.75rem;
-    gap: 1.2rem;
+    min-height: 0; justify-content: center;
+    align-self: center; max-height: 100%;
+    padding: 1rem 0.9rem; gap: 1.1rem;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 10px rgba(0, 0, 0, 0.25);
     /* Left-anchored beside the trick it captions, not centered in its own
        far field — cause and caption read as one unit. */
     align-items: flex-start; text-align: left;
@@ -904,6 +984,17 @@
      (under the 15px buried-card peek). */
   .dis-game .dis-table > .dis-seat:first-child > .dis-seatname { bottom: 0.6rem; }
   .dis-game .dis-table > .dis-seat:last-child > .dis-seatname { top: calc(0.6rem + 15px); }
+  /* ...BUT NOT AT THE REPORT, where the name lands ON the cards. The absolute
+     name is pinned to the SEAT's left edge, and the seat is a `max-content`
+     column: in play its widest row is the seven-card hand, so the edge sits
+     well left of the piles and the name has the felt's spare width to itself.
+     At the report every card has been played, so the widest row is the three
+     empty pile wells — the seat box shrinks to them and the same rule parks
+     the name on top of the first well. In flow for that phase only. */
+  .dis-game .dis-table:has(> .dis-result) > .dis-seat > .dis-seatname {
+    position: static; flex-direction: row; align-items: center;
+    gap: 0.5rem; max-width: none;
+  }
 }
 
 /* ── table ──────────────────────────────────────────────────────────────── */
@@ -940,8 +1031,19 @@
     0 10px 28px rgba(0, 0, 0, 0.35);
 }
 .dis-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
-.dis-seatname { font-size: 0.85rem; color: var(--text-dim); display: flex; gap: 0.5rem; align-items: center; }
-.dis-seatname b { color: var(--text); }
+/* TEXT ON THE FELT NEEDS ITS OWN DIM, and this is why: `--text-dim` (#8a7d6a)
+   is a warm beige chosen against the site's near-black panels, where it has
+   real contrast. The table is a mid-green (composites to about rgb(30,62,46)),
+   and the same beige lands close enough in value to sit ON the green rather
+   than over it — measured around 2.6:1, under the 4.5:1 a body-size label
+   wants. `--felt-dim` is a light, very slightly warm grey that reads at every
+   card size and does not compete with the ivory faces. Anything the table
+   prints (seat names, the trick line, the "who played this" caption, empty
+   states) takes it; the panels keep the site token. */
+.dis-table { --felt-dim: rgba(233, 240, 232, 0.72); }
+.dis-table .muted, .dis-table .dis-trickinfo { color: var(--felt-dim); }
+.dis-seatname { font-size: 0.85rem; color: var(--felt-dim); display: flex; gap: 0.5rem; align-items: center; }
+.dis-seatname b { color: #f2f7f1; }
 
 .dis-trick {
   /* Reserved off the SAME token as the card, not a literal. 96px had slack over
@@ -960,7 +1062,18 @@
   align-items: center; justify-content: center;
   gap: 0.15rem; position: relative;
 }
+/* THE TRICK ROW IS CARDS + WHAT THEY ARE WORTH, side by side. The pill sits
+   beside the cards rather than under them: the trick band's reserved height is
+   the card row plus one name line, and a pill stacked under it would either
+   eat that reserve or grow the band and cost the cards height. Absolute, so
+   it takes no layout at all, vertically centred on the cards it prices. */
 .dis-trickcards { display: flex; align-items: center; justify-content: center; gap: 1.2rem; }
+.dis-trickval {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(calc(var(--dis-cw) * 1.35), -50%);
+  pointer-events: none;
+}
+.dis-trickval .dis-val { font-size: 1.05rem; padding: 0.16rem 0.6rem; }
 /* The trick's value is the whole game, so the pill on the trick line is loud.
    It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
    used to sit under the board was removed as noise. */
@@ -1375,6 +1488,14 @@
 
 .dis-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
 
+/* The Double's two-sided bet, as rows: what each outcome pays now and what it
+   pays if you take it. The doubled number is the accent so the eye lands on
+   what the bet changes rather than on what it currently is. */
+.dis-ktable { align-self: stretch; display: flex; flex-direction: column; gap: 0.1rem; }
+.dis-ktable .dis-scorerow { font-size: 0.82rem; }
+.dis-ktable b { font-variant-numeric: tabular-nums; color: var(--text-dim); font-weight: 600; }
+.dis-kbig { color: var(--accent); font-weight: 800; }
+
 /* Declaration: the denomination buttons carry their base as a subscript, so
    the price table is legible without a lookup. */
 .dis-denoms button small {
@@ -1455,13 +1576,22 @@
   border: 1px solid rgba(255, 255, 255, 0.10);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 8px rgba(0, 0, 0, 0.22);
 }
+/* The contract panel's headline: who bought it, and what. The bid is the
+   biggest thing in the box because it is the fact the whole round turns on. */
+.dis-ctline {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 0.5rem; margin-bottom: 0.15rem;
+}
+.dis-ctline > b { font-size: 0.95rem; }
+.dis-ctbid { font-size: 1.45rem; font-weight: 800; letter-spacing: 0.01em; }
+.dis-ctsub { font-size: 0.82rem; color: var(--text-dim); }
+.dis-ctsub b { color: var(--text); font-variant-numeric: tabular-nums; }
 /* NO SUIT TINT on a contract label -- see the note by `DENOM_LABEL`. Only a
    real card face is suit-coloured (`.dis-card.red`). */
 .dis-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }
-.dis-chip-mult {
-  font-weight: 700; color: var(--accent);
-  padding-left: 0.5rem; border-left: 1px solid rgba(255, 255, 255, 0.12);
-}
+/* No divider rule: the ×2 is already a distinct colour and weight against the
+   contract beside it, so the pipe was one separator more than the chip needed. */
+.dis-chip-mult { font-weight: 700; color: var(--accent); }
 
 /* A completed trick stays face up for a beat before moving to the Last trick
    panel, so you actually see the two cards together — the server clears the
