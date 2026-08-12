@@ -405,11 +405,22 @@ function Card({ c, onClick, sel, small, ghost }) {
     + `${sel ? " sel" : ""}${small ? " sm" : ""}`;
   return (
     <div className={cls} onClick={onClick} title={cardName(c)}>
+      {/* A large ghosted centre pip, painted FIRST so the index and the
+          worth chip draw over it. Pure dressing — the corner index is still
+          the identity (it is what a pile's offset keeps visible). */}
+      <span className="dis-center" aria-hidden="true">{SUIT_GLYPH[suitOf(c)]}</span>
       {/* The index sits in the TOP-RIGHT corner, which is what lets a pile
           reveal its buried card by offsetting it up and to the right — the
           corner alone identifies the card, so the hint labels underneath the
           piles ("1 hidden", "over 7♥") are no longer needed. */}
       <span className="dis-ix">
+        <span className="dis-r">{RANKS[rankOf(c)]}</span>
+        <span className="dis-s">{SUIT_GLYPH[suitOf(c)]}</span>
+      </span>
+      {/* The mirrored index, bottom-left and rotated — a real card's second
+          corner, so a face reads composed (and legible upside-down) instead
+          of lopsided. The worth chip keeps the bottom-RIGHT corner. */}
+      <span className="dis-ix dis-ix-b" aria-hidden="true">
         <span className="dis-r">{RANKS[rankOf(c)]}</span>
         <span className="dis-s">{SUIT_GLYPH[suitOf(c)]}</span>
       </span>

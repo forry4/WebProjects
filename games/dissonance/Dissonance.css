@@ -146,20 +146,43 @@
   width: var(--cw);
   height: calc(var(--cw) * 1.4);
   border-radius: calc(var(--cw) * 0.11);
-  background: #fdfdfa;
+  /* A paper face, not flat white: a warm top-lit gradient with a hairline
+     inner highlight, and a two-layer drop shadow (contact + ambient) so a
+     card reads as sitting ON the felt rather than printed on it. */
+  background: linear-gradient(155deg, #fffdf5 0%, #faf7ec 55%, #f0ecdf 100%);
   color: #17171a;
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(20, 16, 8, 0.42);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   font-weight: 700; line-height: 1.05;
   user-select: none; position: relative;
+  overflow: hidden; /* the centre pip must never bleed past the corner radius */
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
+/* The ghosted centre pip — the same ink as the corner index, at watermark
+   strength, sized off the card's own token so every scale keeps the ratio. */
+.dis-center {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: calc(var(--cw) * 0.58); line-height: 1;
+  opacity: 0.16; pointer-events: none;
+}
+/* The watermark keeps the INK, dimmed — the face ink at reduced alpha washed
+   the red to pink; a deeper red at the same alpha reads as the same ink. */
+.dis-card.red .dis-center { color: #971b2f; }
 .dis-ix {
   position: absolute; top: 4%; right: 7%;
   display: flex; flex-direction: column; align-items: center;
   line-height: 1;
+}
+/* The second corner: bottom-left, rotated — the standard mirrored index. */
+.dis-ix-b {
+  top: auto; right: auto; bottom: 4%; left: 7%;
+  transform: rotate(180deg);
 }
 .dis-card .dis-r { font-size: 0.95em; }
 .dis-card .dis-s { font-size: 1.15em; }
@@ -207,11 +230,33 @@
    a hand rendered as two different kinds of card. Do not reintroduce a `dim`
    class in either form. */
 .dis-card.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The back is a CARD BACK, not a stripe fill: a woven diamond lattice over a
+   deep indigo, lit from above, inside a printed frame (two inset rings). The
+   lattice is an inline SVG so it stays crisp at any card size; everything
+   scales off the same token as the face. */
 .dis-card.back {
-  background: repeating-linear-gradient(45deg, #2b3a55 0 6px, #22304a 6px 12px);
-  border-color: rgba(255, 255, 255, 0.18); color: transparent;
+  background:
+    radial-gradient(90% 60% at 50% 28%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cpath d='M7 0 14 7 7 14 0 7Z' fill='none' stroke='rgba(255,255,255,0.13)' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='1' fill='rgba(255,255,255,0.11)'/%3E%3C/svg%3E") repeat,
+    linear-gradient(165deg, #2e4064 0%, #243352 55%, #1c2941 100%);
+  border-color: rgba(10, 14, 24, 0.75);
+  /* The frame is a PRINTED ring, kept dimmer than any highlight the board
+     uses for state — a bright rim here read as a permanent focus ring. The
+     drop shadows match the face's contact+ambient pair, one light for all. */
+  box-shadow:
+    inset 0 0 0 calc(var(--cw) * 0.055) #17233a,
+    inset 0 0 0 calc(var(--cw) * 0.055 + 1px) rgba(255, 255, 255, 0.15),
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.28);
+  color: transparent;
 }
-.dis-card.ghost { background: rgba(255, 255, 255, 0.05); border-style: dashed; color: var(--text-dim); }
+/* An empty slot is an ABSENCE: no paper, no shadow — a dashed outline lying
+   flat on the felt, so the eye reads "nothing here" instead of "grey card". */
+.dis-card.ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  box-shadow: none; color: var(--text-dim);
+}
 
 /* `.muted` IS THIS GAME'S OWN CLASS AND NOTHING DEFINED IT. The JSX reaches for
    it 48 times for every piece of de-emphasised text on the board, but the only
@@ -327,7 +372,10 @@
 .dis-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
 /* The wrap reserves the peek offset as padding so the buried card cannot
    overlap its neighbour or get clipped by the row. */
-.dis-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: 15px; }
+/* The peek scales with the card, so a buried card's revealed corner reads as
+   a DESIGNED fan at every size — a fixed 15px on a 117px card looked like a
+   z-order accident. Floor of 12px so small cards still show a legible corner. */
+.dis-pilewrap { position: relative; padding-top: var(--pk); padding-right: var(--pk); --pk: max(12px, calc(var(--dis-cw, 56px) * 0.24)); }
 .dis-buried { position: absolute; top: 0; right: 0; z-index: 0; }
 .dis-pilewrap .dis-card { position: relative; z-index: 1; }
 
@@ -548,9 +596,25 @@
   .dis-game .dis-table:has(> .dis-playside) {
     --dis-reserve-in: 10.5rem;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
+    /* max-content + justify-content:center, not 1fr: the cards and their
+       caption rail center ON THE FELT as one cluster, instead of the cards
+       hugging the left half while the text floats in a far-right field. */
+    grid-template-columns: minmax(0, max-content) 17rem;
+    justify-content: center;
     grid-template-rows: repeat(3, auto);
     align-content: space-between;
+  }
+  /* THE WIDTH TERM MUST PAY FOR THE RAIL. `100cqw` is the whole table, but a
+     railed board's cards live in column 1 = table minus the 17rem rail — so
+     the un-corrected term let the height budget size cards WIDER than their
+     column, the hand row wrapped, and the wrapped row pushed the bottom seat
+     off the felt (seen at 1366x768; latent for the auction/report rails since
+     they shipped). One rule for every railed state. */
+  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) :is(.dis-seat, .dis-trick) {
+    --dis-cw: max(3.4rem, min(
+      calc((100cqw - 17rem - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
+    ));
   }
   .dis-game .dis-table.dis-3seat:has(> .dis-playside) {
     grid-template-rows: repeat(4, auto);
@@ -560,8 +624,11 @@
   .dis-game .dis-table:has(> .dis-playside) > .dis-trick { grid-column: 1; }
   .dis-game .dis-table > .dis-playside {
     grid-column: 2; grid-row: 1 / -1;
-    min-height: 0; justify-content: center; padding: 0.5rem;
+    min-height: 0; justify-content: center; padding: 0.5rem 0.5rem 0.5rem 0.75rem;
     gap: 1.2rem;
+    /* Left-anchored beside the trick it captions, not centered in its own
+       far field — cause and caption read as one unit. */
+    align-items: flex-start; text-align: left;
   }
   /* IN THE RAIL THE TYPE SCALES UP. These three lines were sized for the
      sliver between the seats they used to occupy; alone in a full-height
@@ -637,8 +704,21 @@
 .dis-table {
   display: flex; flex-direction: column; gap: 0.9rem;
   padding: 0.9rem; border-radius: 14px;
-  background: linear-gradient(180deg, rgba(30, 62, 46, 0.55), rgba(18, 38, 28, 0.55));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* The felt is a SURFACE: a soft key light falling from the top, a vignette
+     pooling at the rim, and a grain of woven noise (SVG turbulence) so the
+     green reads as cloth rather than as a flat fill. The rail/border pair —
+     a dark edge with a 1px inner highlight — gives the table its lip. */
+  background:
+    radial-gradient(130% 90% at 50% 22%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 60%),
+    radial-gradient(140% 110% at 50% 115%, rgba(0, 0, 0, 0.30), rgba(0, 0, 0, 0) 55%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E") repeat,
+    linear-gradient(180deg, #1e4230 0%, #183827 55%, #132c1f 100%);
+  border: 1px solid rgba(8, 14, 10, 0.65);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 0 6px rgba(0, 0, 0, 0.14),
+    inset 0 0 52px rgba(0, 0, 0, 0.24),
+    0 10px 28px rgba(0, 0, 0, 0.35);
 }
 .dis-seat { display: flex; flex-direction: column; gap: 0.4rem; align-items: center; }
 .dis-seatname { font-size: 0.85rem; color: var(--text-dim); display: flex; gap: 0.5rem; align-items: center; }
