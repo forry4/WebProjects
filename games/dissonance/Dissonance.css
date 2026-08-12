@@ -124,11 +124,43 @@
   }
   .dis .dis-card { --cw: 42px; font-size: 0.78rem; }
   .dis .dis-hand { gap: 0.18rem; }
-  /* NO overlap. The fan used to tuck each card 14px under the next, which is
-     fine when the index is centred and fatal now that it lives in the TOP-RIGHT
-     corner — every card's index but the last was covered. A hand is at most 7
-     cards, and 7 x 42px plus gaps fits a 390px phone with room to spare, so the
-     overlap was buying nothing anyway. */
+  /* THE HAND FANS AGAIN (2026-08-12) — and the rule that removed the fan was
+     right at the time, which is why this says what changed rather than just
+     reversing it. The old objection: a card tucked under the next one loses
+     its index, because the index lives in the TOP-RIGHT corner. Cards now
+     carry a MIRRORED index at the bottom-LEFT as well (the second corner a
+     real playing card has), so a left-tucking fan covers the top-right index
+     of every card but the last while every card keeps a readable corner —
+     which is the arrangement a fanned hand has always relied on.
+     WHAT IT BUYS is vertical, not horizontal. The phone board is WIDTH-bound:
+     seven slots across 390px cap the card at ~52px while the height budget
+     allows ~73px, so the surplus height became a ~280px dead band in the
+     middle of the table. Fanning narrows each card's FOOTPRINT to 78% of its
+     width, so `--dis-slots` can drop to 5.35 and the card grows 52 → 66px
+     (+27%) — into the slack that was empty. The two numbers are a PAIR and
+     must be solved together: a hand is `cw + 6 x (cw x (1 - overlap) + gap)`
+     wide, so at 30% overlap the row fits a 390px phone at cw ≤ 66 and the
+     slot count is what delivers that cw. The visible strip is ~46px, above
+     the 44px touch target, and the last card is whole. */
+  .dis .dis-table { --dis-slots: 5.35; }
+  .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.3); }
+  /* THE FAN PAINTS BACKWARDS, and this is the half that makes it readable.
+     Flex paints later children on top, so each card covered the one before
+     it — hiding exactly the TOP-RIGHT index and leaving the mirrored corner,
+     i.e. every rank in the hand read upside down. Counting z-index DOWN puts
+     the earlier card on top, so each card is tucked under its LEFT neighbour
+     and the strip that stays visible is its right edge — the upright index,
+     the way a fanned hand is actually held. A hand is at most 7 cards in
+     every mode; an eighth would fall to the base `z-index: 1` and tuck the
+     wrong way, which is visible rather than silent. */
+  .dis .dis-seat .dis-hand > * { position: relative; z-index: 1; }
+  .dis .dis-seat .dis-hand > *:nth-child(1) { z-index: 8; }
+  .dis .dis-seat .dis-hand > *:nth-child(2) { z-index: 7; }
+  .dis .dis-seat .dis-hand > *:nth-child(3) { z-index: 6; }
+  .dis .dis-seat .dis-hand > *:nth-child(4) { z-index: 5; }
+  .dis .dis-seat .dis-hand > *:nth-child(5) { z-index: 4; }
+  .dis .dis-seat .dis-hand > *:nth-child(6) { z-index: 3; }
+  .dis .dis-seat .dis-hand > *:nth-child(7) { z-index: 2; }
   /* ...and the mobile card is 42px, so its reserved row is smaller. See the
      base `.dis-hand` rule for why this exists at all. This still governs the
      TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
