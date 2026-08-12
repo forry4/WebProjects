@@ -681,6 +681,15 @@
   .dis-game .dis-table > .dis-auction .btn-ghost {
     border-color: rgba(255, 255, 255, 0.22); color: var(--text);
   }
+  /* THE REPORT SCALES UP IN THE RAIL, same reason as the playside's type:
+     these lines were sized to share a row with the seats, and alone in a
+     full-height column the round's own verdict read as a footnote. The
+     verdict alone, not every .dis-big — the match verdict deeper in keeps
+     its subordinate size. */
+  .dis-game .dis-table > .dis-result > .dis-big:first-child { font-size: 1.9rem; }
+  .dis-game .dis-table > .dis-result > .muted { font-size: 0.95rem; line-height: 1.45; }
+  .dis-game .dis-table > .dis-result .dis-maths { font-size: 0.95rem; }
+  .dis-game .dis-table > .dis-result { gap: 0.65rem; padding: 1.2rem 0.9rem; }
   /* ── PLAY'S OWN TEXT SITS BESIDE THE CARDS TOO (2026-08-12) ─────────────
      The trick counter, the contract chip and the turn bar used to stack
      BETWEEN the seats, and the card budget paid for every line of it. They
@@ -1122,8 +1131,20 @@
 /* ── result ─────────────────────────────────────────────────────────────── */
 .dis-result { text-align: center; padding: 1rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: center; }
 .dis-result .dis-big { font-size: 1.6rem; font-weight: 800; }
+/* The verdict is the round's headline — give it the settling weight of a
+   hairline under it, the same sectioning the match standing already draws
+   above itself, so the panel reads verdict / narration / standing as three
+   registers instead of one centered stack. */
+.dis-result > .dis-big:first-child {
+  align-self: stretch; padding-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  letter-spacing: 0.01em;
+}
 .dis-result .made { color: #6fe0a0; }
 .dis-result .set { color: #ff9a9a; }
+/* The ghost secondary (Back to lobby) needs the same felt-visible border the
+   auction's Pass got — the theme's default hairline vanishes on the table. */
+.dis-result .btn-ghost { border-color: rgba(255, 255, 255, 0.22); color: var(--text); }
 .dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* THE ROUND'S TWO CURRENCIES, colour-keyed between the sentence and the
@@ -1280,10 +1301,20 @@
 .dis-lt-note .dis-val { font-size: 0.7rem; align-self: flex-end; }
 
 /* The talon, and the end-of-round reveal, share a row. */
-.dis-outrow { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.dis-outrow { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: center; }
 .dis-reveal {
   display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
   margin-top: 0.3rem;
+  /* Ruled off like the match standing above it — the reveal is the third
+     section of the report, not a caption floating under the second. */
+  align-self: stretch; padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+/* "The talon" and "Match to N" open their sections in the chrome's own
+   header voice — gold smallcaps, quiet size — instead of muted body type. */
+.dis-reveal > .muted:first-child, .dis-match > .muted:first-child {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
 }
 
 /* The contract, in the middle column. The side panel carries the full
