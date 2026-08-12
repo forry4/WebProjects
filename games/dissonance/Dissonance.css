@@ -890,7 +890,7 @@
        content-height and centred, so the extra reserve costs them nothing. */
     --dis-rows: 5; --dis-reserve-in: 12rem;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(var(--dis-rail), max-content);
+    grid-template-columns: minmax(0, 1fr) var(--dis-rail);
     grid-template-rows: repeat(2, auto);
     align-content: space-between;
   }
@@ -900,12 +900,17 @@
      the gate asserts) while the panel that has the most to say gets the room
      to say it. It is also the one phase where nothing on the felt needs the
      width: every card has been played, so the seats are empty wells. */
-  .dis-game .dis-table:has(> .dis-result) {
-    grid-template-columns: minmax(0, 1fr) minmax(max(26rem, var(--dis-rail)), max-content);
-  }
-  /* ...and the talon inside it stops being a row of thumbnails. */
-  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 48px; font-size: 0.87rem; }
-  .dis-game .dis-table > .dis-result .dis-outrow { gap: 0.4rem; }
+  /* THE REPORT TAKES THE SAME RAIL AS EVERY OTHER PHASE. It used to claim a
+     wider column (26rem) because it has the most to say — and that is exactly
+     what made the cards SHIFT when a round ended: the cards column is what is
+     left over, so a wider panel moves them. A card must not move because the
+     text beside it changed. Its contents scale to the rail instead. */
+  /* The talon is six cards on ONE row inside the rail, so its card size is
+     derived from the rail rather than picked: six cards plus five gaps must
+     fit `--dis-rail` minus the panel's padding. 34px at 17rem, and the bigger
+     tiers below scale with their wider rails. A wrapped talon row is the
+     failure this avoids. */
+  .dis-game .dis-table > .dis-result .dis-outrow { gap: 0.4rem; flex-wrap: nowrap; }
   .dis-game .dis-table.dis-3seat:has(> .dis-auction),
   .dis-game .dis-table.dis-3seat:has(> .dis-result) {
     grid-template-rows: repeat(3, auto);
@@ -927,7 +932,7 @@
        `stretch` shrinks to FIT-content while the track stays sized to
        MAX-content, and the difference (194px, measured) became a gap between
        the cards and a panel pinned to the right. Same object, two widths. */
-    align-self: center; max-height: 100%; max-width: 40rem;
+    align-self: center; max-height: 100%;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
     border: 1px solid rgba(255, 255, 255, 0.09);
     border-radius: 12px;
@@ -998,13 +1003,14 @@
        fixed column with the cluster centred. The centred version left slack on
        BOTH sides: measured 105px at 1700x900 and 168px at 2560x1330 sitting
        empty to the right of a 272px panel that was scrolling its own content.
-       A panel with an inch of bare board beside it is the wrong shape whatever
-       the content does, and the extra width reflows that content shorter,
-       which is the actual cure for the scrollbar.
-       ALL THREE railed phases share this template on purpose: a column that
-       differed by phase would move the cards when a phase ended, which is the
-       same fault as the reserve differing by phase. */
-    grid-template-columns: minmax(0, max-content) minmax(var(--dis-rail), 1fr);
+       ALL THREE railed phases share this template on purpose — the same
+       argument as the shared reserve: the cards take what the rail leaves, so
+       a rail that differed by phase would MOVE THE CARDS when a phase ended.
+       Which it did: this rule kept a `max-content` rail after the others went
+       fixed, and the board measured 806+449 in play against 887+368 at the
+       auction and the report — the cards sliding 40px sideways at the top of
+       every round and back at the end of it. */
+    grid-template-columns: minmax(0, 1fr) var(--dis-rail);
     grid-template-rows: repeat(3, auto);
     align-content: space-between;
   }
@@ -1035,9 +1041,7 @@
   .dis-game .dis-table > .dis-playside {
     grid-column: 2; grid-row: 1 / -1;
     min-height: 0; justify-content: center;
-    /* Same as the auction/report panels: fills its own max-content track, so
-       its width IS its content and nothing is left bare beside it. */
-    align-self: center; max-height: 100%; max-width: 28rem;
+    align-self: center; max-height: 100%;
     padding: 1rem 0.9rem; gap: 1.1rem;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
     border: 1px solid rgba(255, 255, 255, 0.09);
@@ -1115,15 +1119,15 @@
    the width term, so widening the rail moves the term that is not binding.
    `--dis-rail` feeds both the grid and that term, so even if a window ever
    made width bind, the two cannot disagree. */
-@media (min-width: 1800px) { .dis-game .dis-table { --dis-rail: 21rem; } }
-@media (min-width: 2200px) { .dis-game .dis-table { --dis-rail: 25rem; } }
+@media (min-width: 1800px) { .dis-game .dis-table { --dis-rail: 23rem; } }
+@media (min-width: 2200px) { .dis-game .dis-table { --dis-rail: 26rem; } }
 /* ...and what the panels put in that room: the cards they show scale toward
    the board's, and the type comes up with them. A talon you are choosing
    from should not be a row of thumbnails beside a hand of full-size cards. */
 @media (min-width: 1800px) {
   .dis-game .dis-table > .dis-auction .dis-card { --cw: 72px; font-size: 1rem; }
   .dis-game .dis-table > .dis-auction .dis-card.sm,
-  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 58px; font-size: 0.95rem; }
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 46px; font-size: 0.9rem; }
   .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
   .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
@@ -1142,7 +1146,7 @@
 @media (min-width: 2200px) {
   .dis-game .dis-table > .dis-auction .dis-card { --cw: 86px; font-size: 1.15rem; }
   .dis-game .dis-table > .dis-auction .dis-card.sm,
-  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 66px; font-size: 1rem; }
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 54px; font-size: 0.95rem; }
   .dis-game .dis-table > .dis-auction .btn { font-size: 1.12rem; padding: 0.8rem 1.5rem; }
   .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1.12rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 2rem; }
