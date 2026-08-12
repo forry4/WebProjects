@@ -64,6 +64,22 @@
     min-height: calc(100dvh - 72px - env(safe-area-inset-top, 0px));
     justify-content: space-between;
   }
+  /* During play the slack must not fall BETWEEN the trick and its caption
+     (counter, chip, turn bar) — space-between paid the free height into
+     every gap equally, so "Your lead" floated a whole screen-third above
+     the chip that explains it. Auto margins on the group's outer edges pay
+     the slack above the trick and below the caption instead: opponent at
+     the top, your hand at the thumb, the trick + caption one cluster in
+     the middle. */
+  .dis .dis-table.ph-play, .dis .dis-table.ph-over {
+    justify-content: flex-start;
+  }
+  .dis .dis-table.ph-play > .dis-trick, .dis .dis-table.ph-over > .dis-trick {
+    margin-top: auto;
+  }
+  .dis .dis-table.ph-play > .dis-playside, .dis .dis-table.ph-over > .dis-playside {
+    margin-bottom: auto;
+  }
   .dis .dis-card { --cw: 42px; font-size: 0.78rem; }
   .dis .dis-hand { gap: 0.18rem; }
   /* NO overlap. The fan used to tuck each card 14px under the next, which is
@@ -567,15 +583,14 @@
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match { grid-column: 1; grid-row: 1; }
   .dis-game .dis-main:has(> .dis-side-match) > .dis-table { grid-column: 2; grid-row: 1; }
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info { grid-column: 3; grid-row: 1; }
-  /* The match panel FILLS the column it has been given, and the scorecard is
-     what takes the slack — a six-row window scrolling inside a mostly empty
-     column is the shape this layout exists to stop. `min-height: 0` down the
-     chain is what keeps the LIST the scroller rather than the column. */
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-p-match {
-    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
-  }
+  /* The match panel sizes to its CONTENT. It used to stretch to fill the
+     whole column — right for an invisible surface, wrong for the lit panel
+     treatment: an early match rendered as a huge blank glowing card next to
+     a fully-populated right column. The scorecard keeps a generous scroll
+     window (taller than the base 9.2rem cap, since this column has the
+     room) and true page background shows below the panel. */
   .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-mcard {
-    flex: 1 1 auto; min-height: 4rem; max-height: none;
+    max-height: min(24rem, 45vh);
   }
   /* ── THE PANEL SITS BESIDE THE CARDS, NOT BETWEEN THEM ──────────────────
      The auction and the round-end report used to be a row IN the column, so
@@ -926,8 +941,23 @@
    list. The `order` is kept because it costs nothing and still holds the line
    if a second panel is ever added beside it. */
 .dis-p-match { order: 1; }
-.dis-panel { padding: 0.7rem; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); }
-.dis-panel h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+/* Panels share the table's material language: a softly lit surface (top
+   highlight, gentle falloff) sitting just above the page, never louder than
+   the felt they flank. Headers are the deck's gold in tracked smallcaps
+   over a hairline rule — the same brand ink as the card backs' medallion. */
+.dis-panel {
+  padding: 0.85rem 0.9rem; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.028) 55%, rgba(255, 255, 255, 0.018));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 10px rgba(0, 0, 0, 0.25);
+}
+.dis-panel h4 {
+  margin: 0 0 0.5rem; font-size: 0.74rem; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+  padding-bottom: 0.35rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
 .dis-scorerow { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 0.15rem 0; }
 .dis-scorerow b { font-variant-numeric: tabular-nums; }
 
@@ -1033,7 +1063,10 @@
 .dis-resbtns { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
 
 .dis-turnbar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; font-size: 0.9rem; min-height: 1.6rem; }
-.dis-yourturn { color: var(--accent); font-weight: 700; }
+/* "Your turn" breathes — a slow opacity swell, no layout movement, so the
+   one line that asks for action registers without flashing. */
+.dis-yourturn { color: var(--accent); font-weight: 700; animation: dis-turnbreathe 2.4s ease-in-out infinite; }
+@keyframes dis-turnbreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.62; } }
 
 /* v2: the Null bid stands apart from the number ladder */
 
@@ -1160,8 +1193,11 @@
   display: flex; align-items: center; justify-content: center;
   gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-dim);
   padding: 0.3rem 0.6rem; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* The same lit surface as the panels, so the one piece of chrome that sits
+     ON the felt belongs to the same family. */
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 /* NO SUIT TINT on a contract label -- see the note by `DENOM_LABEL`. Only a
    real card face is suit-coloured (`.dis-card.red`). */
