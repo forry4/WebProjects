@@ -112,7 +112,6 @@
      layout box (the pile row must not reflow) but draw it at ~2/3 size — a
      small impression in the felt, not a button. */
   .dis .dis-card.ghost { transform: scale(0.66); }
-  .dis .dis-bidgrid { grid-template-columns: repeat(5, 1fr); }
   .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
   /* While BIDDING the board is exactly the viewport and the ladder takes
      whatever is left, scrolling inside itself. A viewport-relative cap cannot
@@ -894,7 +893,21 @@
   font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em;
   display: flex; align-items: center; gap: 0.4rem;
 }
-.dis-bidgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.35rem; width: 100%; max-width: 420px; }
+/* Optical correction: the suit glyphs sit on the baseline a hair below the
+   numeral's optical centre at this display size. */
+.dis-contract .dis-suit-r, .dis-contract .dis-suit-b {
+  position: relative; top: -0.055em;
+}
+/* Centered FLEX at fifth-widths, not a 5-column grid: a responder's legal
+   set is often 3 levels, and grid tracks left the short row hugging the
+   left edge with two dead tracks beside it — it read as half-loaded. Flex
+   centers any count, and the fixed basis keeps a full 1..10 set forming
+   the same two clean rows of five the grid drew. */
+.dis-bidgrid {
+  display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 0.35rem; width: 100%; max-width: 420px;
+}
+.dis-bidgrid button { flex: 0 0 calc((100% - 4 * 0.35rem) / 5); }
 /* Bid keys share the panels' lit-surface material: a soft top light, a
    hairline inner highlight, and a shallow drop — keys on a table, not
    flat translucent rectangles. The selected key presses IN. */
