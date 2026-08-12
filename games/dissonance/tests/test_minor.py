@@ -127,13 +127,16 @@ def test_a_minor_round_runs_the_classic_phase_machine():
 
 def test_minor_terms_make_set_null_and_short_rate():
     t = E._terms_for("minor", 2, 3)
+    # No flat stake at this scale -- the bare N^2 / N bases, deliberately.
     assert t["make"] == 9 and t["set_base"] == 3 and t["target"] == 3
     assert t["short"] == E.MINOR_SHORT_PENALTY == 2
     assert t["null"] == E.MINOR_NULL_MAKE == 6
     assert t["over"] == 1 and t["ramp"] == 0
-    # Classic did not move.
+    # Classic keeps ITS prices (stake, short 5, Null 20) -- the two modes'
+    # terms must stay independently anchored.
     c = E._terms_for("classic", 2, 3)
-    assert c["short"] == 5 and c["null"] == 12
+    assert c["short"] == 5 and c["null"] == E.NULL_MAKE == 20
+    assert c["make"] == 9 + E.FLAT_MAKE_BONUS["classic"]
 
 
 def test_the_double_doubles_and_ramps_in_minor_too():

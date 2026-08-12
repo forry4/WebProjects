@@ -88,7 +88,8 @@ from the parity, never typed beside it).
   biggest number on the table: two-thirds of rounds ended in a set paying ~11
   against makes of 1–6, i.e. "whoever had to open loses". 2 tracks the
   ceiling ratio. The Double and its shortfall ramp apply unchanged.
-* **Null 6 (`MINOR_NULL_MAKE`)** — the same relationship classic's 12 has:
+* **Null 6 (`MINOR_NULL_MAKE`)** — the relationship classic's 12 had (before
+  the stake re-anchored classic's Null to 20; minor carries no stake):
   exactly a made level-1's CEILING under the overtrick bonus (1 + 5). The
   cliff this buys is proportionally bigger than classic's (minor makes rarely
   reach their ceiling) — a declarer who bought cheap has an even stronger
@@ -747,7 +748,9 @@ and in skat mode "trick points" means CARD points, per the section above):
 make → **N² + the flat 10 stake, + 1 per trick point past N**; set → defender
 scores **N + 10, + 5 × shortfall** (the ±10 stake — see its bullet below — is
 classic-only). **NULL OVERRIDES A SET**: a declarer who won **no +2
-trick all round** scores a flat **12** (skat: **20**) instead, whatever they
+trick all round** scores a flat **20** (both modes; classic moved 12 → 20 with
+the stake — sets got 10 fatter, so the escape was re-anchored just under the
+made level-1 ceiling of 22) instead, whatever they
 declared. **Every round runs all thirteen tricks** — see the overtrick section.
 
 ### Why these numbers, in one line each
@@ -868,7 +871,7 @@ shapes. `g["doubled"]`, `classic_doubling`, `apply_double`.
                                          since 2026-08-11)
     set      N + 10  ->  2 (N + 10), and the shortfall RAMPS: 6, 7, 8 a point
                          (`DOUBLE_RAMP`) instead of a flat 5
-    Null         12  ->  12             (untouched, as skat's Kontra leaves its own)
+    Null         20  ->  20             (untouched, as skat's Kontra leaves its own)
 
 **The ±10 stake re-priced this bet (2026-08-11), in the sacrifice's favour:**
 the doubled stake pays the defender 20 more on a set while the risk only grew
@@ -1009,23 +1012,23 @@ opponent's hand, **both** seats' OUTER pile bottoms, and the unshown talon.
 
 ## A game is a MATCH of rounds (2026-08-07)
 
-`MATCH_TARGET` — **100 in both modes**. A round is one deal; a game is rounds
+`MATCH_TARGET` — **150 in classic, 100 in skat**. A round is one deal; a game is rounds
 played onto a running total until one side reaches the target. **Re-measure if
 the bases or the payoff arithmetic move** — the target is a product decision,
 but the round count it buys is not a guess, and skat was a median of 8 to the
 same 100 before its bases were re-priced by colour.
 
 **RE-MEASURED for the ±10 stake (2026-08-11, full normal-bot self-play
-matches):** classic at 100 is now **median 6 rounds** (p10–p90 4–8) against
-the pre-stake median 10 (7–13) — a deliberate shortening, decided on the
-numbers: 150 would have preserved the old length (median 9) and 200 stretched
-it (median 13); both were measured and declined. Skat's median 11 (6–18)
-predates the overtrick bonus and is still un-re-run — the stake never touches
-its branch, but the bonus does.
+matches), and classic MOVED 100 → 150:** the measured length-preserving point
+— **median 9 rounds** (p10–p90 7–12) against the pre-stake median 10 (7–13)
+at 100. The bracketing doses were measured too: keeping 100 shortens to
+median 6 (4–8), 200 stretches to 13 (10–15). Skat's median 11 (6–18) predates
+the overtrick bonus and is still un-re-run — the stake never touches its
+branch, but the bonus does.
 
-Still a per-mode DICT though both read 100, because the modes score on different
+A per-mode DICT, because the modes score on different
 scales and nothing requires them to agree: a classic round pays level² + the
-flat 10 stake (up to 154, flat 12 for Null), a skat one base × level × the
+flat 10 stake (up to 154, flat 20 for Null), a skat one base × level × the
 announcements (up to 60, flat 20).
 
 **WHY:** one deal can simply be bad, and the auction is the only lever either

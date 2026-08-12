@@ -717,11 +717,12 @@ def test_the_match_accumulates_round_by_round_and_ends_at_the_target():
     assert g["result"]["match_over"] is True
 
 
-@pytest.mark.parametrize("mode,target", [("classic", 100), ("skat", 100)])
+@pytest.mark.parametrize("mode,target", [("classic", 150), ("skat", 100)])
 def test_a_new_game_is_dealt_at_its_modes_target(mode, target):
     # Written out per mode rather than looped over MATCH_TARGET, so the numbers
     # are PINNED here and not merely echoed back from the thing under test.
-    # They agree today; the dict exists so they need not.
+    # Classic moved 100 -> 150 with the flat stake (2026-08-11) -- the measured
+    # length-preserving point; skat carries no stake and stays.
     g = E.new_game(["a", "b"], random.Random(103), mode=mode)
     assert g["match"]["target"] == target == E.MATCH_TARGET[mode]
 

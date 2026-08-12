@@ -17,8 +17,8 @@ export default function DissonanceRules() {
 
 			<RulesFacts items={[
 				{ k: "Players", v: "2 (friend or bot)" },
-				{ k: "Length", v: "A few minutes a round; a classic match is about 6 of them" },
-				{ k: "You win by", v: "Being first to 100 points (25 in Minor mode)" },
+				{ k: "Length", v: "A few minutes a round; a match is about 9 of them" },
+				{ k: "You win by", v: "Being first to 150 points (100 in Skat mode, 25 in Minor)" },
 			]} />
 
 			<RulesSection title="If you've never played a trick-taking game">
@@ -95,7 +95,7 @@ export default function DissonanceRules() {
 					You never bid Null. It sits under <i>every</i> contract at once: if you are the
 					declarer and you finish the round having won <b>no scoring trick at all</b> — no
 					+2 trick in classic, no trick worth more than zero in Skat mode — you score
-					a flat <b>12</b> (<b>20</b> in Skat mode) instead of being set — whatever you
+					a flat <b>20</b> — in classic and Skat mode alike — instead of being set, whatever you
 					declared, and however far short of it you finished.
 				</p>
 				<p>
@@ -126,7 +126,7 @@ export default function DissonanceRules() {
 						they finish below N costs them <b>more than the last</b> — 6, then 7, then
 						8, then 9 — instead of a flat 5 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
-						the flat 12, Kontra or not.</li>
+						the flat 20, Kontra or not.</li>
 				</ul>
 				<p>
 					That rising scale is the whole point. It barely touches a declarer who
@@ -266,9 +266,10 @@ export default function DissonanceRules() {
 						because the payoffs are about a quarter the size. Classic's flat ±10
 						stake doesn't apply here — at this scale it would drown the contract.</li>
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
-						ceiling, the same relationship classic's 12 has.</li>
+						ceiling, the relationship classic's Null had before the flat stake
+						re-anchored it to 20.</li>
 					<li>The Kontra works unchanged, ramp and all. The <b>match plays to
-						25</b>, which buys about the same number of rounds as classic's 100.</li>
+						25</b>, which buys about the same number of rounds as classic's 150.</li>
 				</ul>
 				<RulesTip>
 					<p>
@@ -370,9 +371,8 @@ export default function DissonanceRules() {
 				</RulesTip>
 				<p>
 					<b>A game is a match, not a deal.</b> Rounds are scored onto a running total
-					and the first player to <b>100</b> wins, in either mode. That's usually about
-					six rounds in classic — the flat stake makes every round weighty — and about
-					ten in Skat mode. One deal can
+					and the first player past the target — <b>150</b> in classic, <b>100</b> in
+					Skat mode — wins. That's usually nine or ten rounds either way. One deal can
 					simply be bad; over a match the deals even out and what's left is your bidding.
 					Whoever opens the bidding alternates every round — opening means naming a
 					contract before you know anything about their hand, and in classic mode you
@@ -405,7 +405,7 @@ export default function DissonanceRules() {
 			</RulesSection>
 
 			<p className="rl-note">
-				Rounds are played to a running total of 100, head-to-head against a friend
+				Rounds are played to a running total, head-to-head against a friend
 				(share the room code) or the bot.
 				Suits are shown by glyph as well as color, so red/black is never the only signal.
 			</p>

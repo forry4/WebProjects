@@ -42,7 +42,7 @@ fn contract_for(level: i32, declarer: usize) -> Contract {
         over: 0,
         set_base: level + 10,
         short: 5,
-        null: Some(12),
+        null: Some(20),
     }
 }
 

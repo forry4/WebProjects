@@ -154,12 +154,12 @@ PARITY_MAX_LEVEL = 10
 #: trick-value change cannot silently strand the ladder above the game.
 MINOR_MAX_LEVEL = 6
 
-#: What the Null consolation pays in minor mode. 6, for the same reason classic
-#: pays 12: it is exactly a made level-1 contract's CEILING under the overtrick
-#: bonus (1 + (max_pts - 1) x 1 = max_pts), so ducking to Null is never worth
-#: more than the cheapest contract played out perfectly -- the relationship the
-#: classic number already has, carried to the minor scale rather than copied as
-#: a literal.
+#: What the Null consolation pays in minor mode. 6: exactly a made level-1
+#: contract's CEILING under the overtrick bonus (1 + (max_pts - 1) x 1 =
+#: max_pts), so ducking to Null is never worth more than the cheapest contract
+#: played out perfectly. Classic's Null had the same relationship at 12 until
+#: the +-10 stake re-anchored it to 20 (2026-08-11) -- minor carries no stake,
+#: so its consolation keeps the original logic.
 MINOR_NULL_MAKE = 6
 #: An overtake must raise the contract by 1 or 2. Measured: a cap of exactly 2
 #: relocates the punishment-landing pile from level 2 to level 3, which is
@@ -294,8 +294,14 @@ FLAT_SET_PENALTY = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
 #: wrong, available exactly when you are already losing, with no auction cost
 #: and nothing to announce. `NULL_DENOM` survives only as the marker on
 #: pre-change saved games; nothing can bid it.
+#:
+#: 12 -> 20 with the +-10 flat stake (2026-08-11): the stake fattened every
+#: set by 10, so at 12 the escape's edge over conceding had shrunk to a
+#: sliver on small contracts (dodging a level-1 set now worth 11+ for a 12).
+#: 20 re-anchors it -- just under the made level-1 ceiling (11 base + 11
+#: overtricks), and now equal to skat's consolation.
 NULL_DENOM = 5
-NULL_MAKE = 12
+NULL_MAKE = 20
 
 #: Out-of-play cards the declarer is shown after the auction; they may swap
 #: exactly one into hand (hand cards only -- the piles are the board, not the
@@ -663,18 +669,17 @@ def max_level_for(mode: str) -> int:
 
 #: A game is a MATCH of rounds, played until one side reaches this.
 #:
-#: STILL A DICT though classic and skat both read 100, because the two score on
-#: different scales and there is no reason they must agree: a classic round pays
-#: level^2 + the flat 10 stake (11..154, flat 12 for Null), a skat one base x
-#: level x the announcements (2..60, flat 20). CLASSIC's 100 was KEPT when the
-#: +-10 flat stake shipped (2026-08-11), as a deliberate SHORTENING: the stake
-#: adds ~10 to every settled round's transfer, so the same target buys fewer,
-#: weightier rounds -- MEASURED against the normal-tier bot in full self-play
-#: matches, median 6 rounds (p10-p90 4-8) against the old scoring's median 10
-#: (7-13). 150 would have preserved the old length (median 9) and 200 would
-#: have stretched it (median 13); both were measured and declined -- faster
-#: matches were the point. Skat is unchanged at 100 (median 11 rounds, 6-18)
-#: -- the stake never touches its branch.
+#: A DICT because the modes score on different scales and there is no reason
+#: they must agree: a classic round pays level^2 + the flat 10 stake (11..154,
+#: flat 20 for Null), a skat one base x level x the announcements (2..60, flat
+#: 20). CLASSIC MOVED 100 -> 150 with the +-10 flat stake (2026-08-11): the
+#: stake adds ~10 to every settled round's transfer, and 150 is the measured
+#: point that PRESERVES the pre-stake match length -- full normal-bot
+#: self-play matches read median 9 rounds (p10-p90 7-12) against the old
+#: scoring's median 10 (7-13) at 100. The bracketing doses were measured too:
+#: keeping 100 shortens to median 6 (4-8), 200 stretches to 13 (10-15). Skat
+#: is unchanged at 100 (median 11 rounds, 6-18) -- the stake never touches
+#: its branch.
 #:
 #: Re-measure if the bases or the payoff arithmetic move: the target is a
 #: product decision, but the round count it buys is not a guess. Skat was a
@@ -702,7 +707,7 @@ def max_level_for(mode: str) -> int:
 #: classic's ~6.2 at 100; 400 would now buy nearly twelve, which is a different
 #: and much longer game than the other three modes offer. Measured in
 #: tools/dummy_calibration.py.
-MATCH_TARGET = {"classic": 100, "skat": 100, "minor": 25, "dummy": 200}
+MATCH_TARGET = {"classic": 150, "skat": 100, "minor": 25, "dummy": 200}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:

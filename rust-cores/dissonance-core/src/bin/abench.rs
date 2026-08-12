@@ -21,7 +21,7 @@ fn main() {
     let k = 3usize;
 
     let opts: Vec<Option_> = (0..5)
-        .map(|d| Option_ { denom: d, target: 3, make: 19, over: 0, set_base: 13, short: 5, ramp: 0, null: 12,
+        .map(|d| Option_ { denom: d, target: 3, make: 19, over: 0, set_base: 13, short: 5, ramp: 0, null: 20,
                   opp: false, redeal: false })
         .collect();
 

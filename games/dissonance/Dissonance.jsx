@@ -95,7 +95,7 @@ function CardName({ c }) {
 // denomination and no level to render -- `NULL_DENOM` survives only so a game
 // SAVED while Null was still biddable still reads back.
 const NULL_DENOM = 5;
-const NULL_MAKE = 12;
+const NULL_MAKE = 20;
 
 // How long a completed trick stays face up before it moves to the Last trick
 // panel. Long enough to read two cards, short enough not to stall the bot,
@@ -545,7 +545,7 @@ function ContractChip({ game, nameOf, sharpBonus }) {
           here — over/undertricks move the real figure, so a quoted "· 92"
           was often wrong in both directions. */}
       {game.doubled && (
-        <span className="dis-chip-mult dbl">Kontra ×2</span>
+        <span className="dis-chip-mult dbl">Kontra</span>
       )}
     </div>
   );
@@ -661,9 +661,9 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId, onStory }) {
                     {r.doubling > 1
                       ? <span className="dis-mrow-dbl"
                           title={r.doubling === 4
-                            ? "Kontra and Re — this round was played for 4×"
-                            : "Kontra — this round was played for 2×"}>
-                          ×{r.doubling}
+                            ? "Kontra and Re — this round was played at higher stakes still"
+                            : "Kontra — this round was played at higher stakes"}>
+                          {r.doubling === 4 ? "Kontra · Re" : "Kontra"}
                         </span>
                       : ""}
                     {r.null ? " Null" : ""}</>}
@@ -842,13 +842,13 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
                   {r.doubling > 1 && (
                     <div className="dis-story-bid dis-story-dbl">
                       <span>{nameOf(1 - r.declarer)}</span>
-                      <span>Kontra ×2</span>
+                      <span>Kontra</span>
                     </div>
                   )}
                   {r.doubling === 4 && (
                     <div className="dis-story-bid dis-story-dbl">
                       <span>{nameOf(r.declarer)}</span>
-                      <span>Re ×4</span>
+                      <span>Re</span>
                     </div>
                   )}
                   {annNames.length > 0 && (
@@ -866,7 +866,9 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
                 <div className="dis-story-ctline">
                   <b>{r.level}<Den d={r.denom} /></b>
                   {r.doubling > 1 && (
-                    <span className="dis-mrow-dbl">×{r.doubling}</span>
+                    <span className="dis-mrow-dbl">
+                      {r.doubling === 4 ? "Kontra · Re" : "Kontra"}
+                    </span>
                   )}
                 </div>
                 <div className="dis-story-note muted">
@@ -2196,7 +2198,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
-                      onClick={() => doMove({ kind: "double", on: true })}>Kontra ×2</button>
+                      onClick={() => doMove({ kind: "double", on: true })}>Kontra</button>
                     <button className="btn btn-ghost"
                       onClick={() => doMove({ kind: "double", on: false })}>Let it stand</button>
                   </div>
@@ -2218,7 +2220,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
-                      onClick={() => doMove({ kind: "kontra", on: true })}>Kontra ×2</button>
+                      onClick={() => doMove({ kind: "kontra", on: true })}>Kontra</button>
                     <button className="btn btn-ghost"
                       onClick={() => doMove({ kind: "kontra", on: false })}>Let it stand</button>
                   </div>
@@ -2230,7 +2232,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
-                      onClick={() => doMove({ kind: "re", on: true })}>Re ×4</button>
+                      onClick={() => doMove({ kind: "re", on: true })}>Re</button>
                     <button className="btn btn-ghost"
                       onClick={() => doMove({ kind: "re", on: false })}>Accept</button>
                   </div>
@@ -2646,9 +2648,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 ×2) so the live round and its banked line agree. */}
             {(ct.re || ct.kontra || game.doubled) && (
               <div className="dis-dblrow">
-                ×{ct.re ? 4 : 2} · {ct.re ? "Kontra + Re" : "Kontra"}
-                {" — whoever takes the round, it pays "}
-                {ct.re ? "fourfold" : "double"}
+                {ct.re ? "Kontra + Re" : "Kontra"} — higher stakes
               </div>
             )}
             {isSkat && <>
