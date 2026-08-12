@@ -415,20 +415,6 @@
       calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
     ));
   }
-  /* DURING PLAY THE RESERVE GIVES 4.5rem BACK TO THE CARDS (2026-08-11).
-     `--dis-reserve-in` is sized for the tallest middle any phase produces —
-     the auction panel's ~309px — but play's middle measures 222px, so for the
-     phase the cards are actually PLAYED in, ~87px of every screen was
-     reserved for a panel that is not there. Handing 4.5rem of it back grows a
-     height-bound desktop's cards ~13px (~9px on a dummy table), and keeps
-     ~0.9rem of the measured 5.4rem gap as slack for the trick row's own
-     reservation. The cards resize once, at the auction→play boundary — the
-     moment the middle itself is being replaced, so the reflow rides a change
-     the eye is already tracking. Play only: `ph-over` keeps the full reserve,
-     because the result panel is auction-sized and would otherwise sit in a
-     permanent scroll. */
-  .dis-game .dis-table.ph-play { --dis-reserve-in: calc(30rem - 4.5rem); }
-  .dis-game .dis-table.ph-play.dis-3seat { --dis-reserve-in: calc(33rem - 4.5rem); }
   .dis-game .dis-table > .dis-seat { flex: 0 0 auto; }
   /* The safety valve: the variable-height PANELS shrink and scroll in place.
      Scoped to those two -- a blanket `min-height: 0` on every non-seat child
@@ -446,9 +432,13 @@
   .dis-game .dis-auction > *, .dis-game .dis-result > * { flex-shrink: 0; }
   /* PLAY has a shorter middle than the auction (222px against 309), and its
      trick is a fifth CARD ROW rather than furniture. Budgeting it separately
-     is what turns ~300px of dead felt into bigger cards; the phase class was
-     already on the table for the mobile rules. */
-  .dis-game .dis-table.ph-play { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
+     is what turns ~300px of dead felt into bigger cards. Keyed on the
+     PLAYSIDE being present rather than on `ph-play`: the completed-trick hold
+     keeps the board up after the phase has already flipped to `over`, and a
+     phase-keyed budget shrank the cards for exactly that beat. The same
+     :has() idiom the auction/result rail rules below already use. */
+  .dis-game .dis-table:has(> .dis-playside) { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
+  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 28.5rem; }
   /* Spread whatever slack is left the way a table does — opponent at the far
      side, your hand nearest you — instead of packing everything to the top. */
   .dis-game .dis-table { justify-content: space-between; }
@@ -520,7 +510,7 @@
      seats' heights. */
   .dis-game .dis-table:has(> .dis-auction),
   .dis-game .dis-table:has(> .dis-result) {
-    --dis-rows: 5; --dis-reserve-in: 17.5rem;
+    --dis-rows: 5; --dis-reserve-in: 14rem;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
     grid-template-rows: repeat(2, auto);
@@ -534,6 +524,36 @@
   .dis-game .dis-table:has(> .dis-result) > .dis-seat { grid-column: 1; }
   .dis-game .dis-table > .dis-auction,
   .dis-game .dis-table > .dis-result { grid-column: 2; grid-row: 1 / -1; }
+  /* ── PLAY'S OWN TEXT SITS BESIDE THE CARDS TOO (2026-08-12) ─────────────
+     The trick counter, the contract chip and the turn bar used to stack
+     BETWEEN the seats, and the card budget paid for every line of it. They
+     ride the rail now, same as the auction and the report — so the middle
+     holds nothing but the trick's own cards, and the reserve drops from
+     17.5rem to 14rem FOR EVERY PHASE ABOVE TOO (the three rules share the
+     number so the cards never change size across the auction, play and the
+     report — the property the gate asserts). 14rem, not lower: the budget's
+     growth tops out at +14.7% of the old card size on the tightest screens
+     that are not already width-bound or on the 3.4rem floor, which honours
+     the "bigger, but nothing may wrap or overlap" brief this came from.
+     The playside is a grid child, so the trick row count per mode is the
+     row template: three rows for two seats + trick, four with a dummy. */
+  .dis-game .dis-table:has(> .dis-playside) {
+    --dis-reserve-in: 14rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(17rem, 24rem);
+    grid-template-rows: repeat(3, auto);
+    align-content: space-between;
+  }
+  .dis-game .dis-table.dis-3seat:has(> .dis-playside) {
+    grid-template-rows: repeat(4, auto);
+    --dis-reserve-in: 25rem;
+  }
+  .dis-game .dis-table:has(> .dis-playside) > .dis-seat,
+  .dis-game .dis-table:has(> .dis-playside) > .dis-trick { grid-column: 1; }
+  .dis-game .dis-table > .dis-playside {
+    grid-column: 2; grid-row: 1 / -1;
+    min-height: 0; justify-content: center; padding: 0.5rem;
+  }
   /* The SAME trade on the other flank: the info panels stack from the top and
      used to leave the bottom third of the column as bare page. The trick
      history is the one list here that is never finished, so it takes the
@@ -577,15 +597,12 @@
      empty trick reserving less than the card that lands in it is the measured
      layout shift the hand row already guards against, one row up the table.
 
-     THE TRICK LINE IS STACKED UNDER THE CARDS, in flow. It used to be one row
-     with the line absolutely positioned at `bottom: -4px` — a 4px offset
-     against a ~14px name label, so it drew through the name under a card. Two
-     rounds of reserving a padding band for it did not fix that either: when
-     the board is tight (a short screen holds the cards at their 3.4rem floor,
-     so the table is deliberately over budget) this row is what shrinks, and
-     flex content overflows a shrunken box straight back through the band.
-     Stacked in flow, a squeeze cannot make two rows overlap — the whole
-     column just gets shorter. */
+     The 1.25rem past the card row covers the "who played this" name under a
+     played card, so an EMPTY trick ("Your lead") reserves what a full one
+     occupies and the board does not redistribute between tricks. The trick
+     line/chip/turn bar that used to stack here live in `.dis-playside` now —
+     in flow below on small screens, in the rail beside the felt on a wide
+     desktop — so a squeeze still cannot make two rows overlap. */
   min-height: max(96px, calc(var(--dis-cw) * 1.4 + 2px + 1.25rem));
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
@@ -599,12 +616,21 @@
 .dis-val.good { background: rgba(70, 190, 120, 0.2); color: #6fe0a0; }
 .dis-val.bad { background: rgba(220, 90, 90, 0.18); color: #ff9a9a; }
 
-/* In flow under the cards, not positioned over them (see `.dis-trick`).
+/* In flow, never positioned over the cards (see `.dis-trick`).
    `flex-shrink: 0` so a squeezed band takes it out of the CARDS' height rather
    than crushing a one-line label to nothing. */
 .dis-trickinfo {
   flex-shrink: 0;
   font-size: 0.72rem; line-height: 1.15; color: var(--text-dim);
+}
+
+/* Everything the play middle says that is not a card: the trick counter, the
+   contract chip, the turn bar. One block so the wide desktop can lift the
+   whole thing into the rail beside the felt in a single move; on small
+   screens it stacks under the trick exactly where these lines always were. */
+.dis-playside {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.55rem; text-align: center;
 }
 
 
@@ -994,45 +1020,60 @@
 .dis-dummy.mine { border-color: var(--accent); background: rgba(255, 255, 255, 0.04); }
 .dis-dummy .dis-seatname { opacity: 0.85; }
 
-/* ── the doubled bet, made unmissable (2026-08-11) ─────────────────────────
-   The chip line was the only standing evidence a Double had landed, and the
-   declarer — who spent the Double phase waiting — read straight past it. Two
-   layers now: the FLASH announces the event, the gold chip is the durable
-   record for the rest of the round. Gold on purpose: it is the scorecard's
-   own ×2/×4 colour (`.dis-mrow-dbl`), so the round's live chip and its
-   banked line agree about what the bet looks like. */
+/* ── the doubled bet (2026-08-11, re-homed 2026-08-12) ─────────────────────
+   A full-screen ×2 flash announced the bet for a beat and was removed on
+   request: it covered the board at the very moment the declarer wants to
+   read their lead. The bet now lives in the two places a player actually
+   looks — the gold chip on the felt's contract line, and `.dis-dblrow` at
+   the head of the Contract box. Gold on purpose: it is the scorecard's own
+   ×2/×4 colour (`.dis-mrow-dbl`), so the live round and its banked line
+   agree about what the bet looks like. */
 .dis-chip-mult.dbl {
   color: #e8c35a; border-color: rgba(232, 195, 90, 0.6);
   background: rgba(232, 195, 90, 0.12);
   font-weight: 700;
 }
-.dis-dblflash {
-  position: fixed; inset: 0; z-index: 60;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 0.4rem; padding: 1rem; text-align: center;
-  background: rgba(8, 10, 9, 0.55);
-  cursor: pointer;
-  animation: dis-dblflash-in 0.18s ease-out, dis-dblflash-out 0.5s ease-in 4s forwards;
+.dis-dblrow {
+  margin-bottom: 0.4rem; padding: 0.3rem 0.5rem; border-radius: 8px;
+  font-size: 0.82rem; font-weight: 700;
+  color: #e8c35a; background: rgba(232, 195, 90, 0.12);
+  border: 1px solid rgba(232, 195, 90, 0.45);
 }
-.dis-dblflash-x {
-  font-size: 4.2rem; font-weight: 800; line-height: 1;
-  color: #e8c35a; text-shadow: 0 4px 24px rgba(232, 195, 90, 0.45);
-  animation: dis-dblflash-pop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
-}
-.dis-dblflash > span:last-child { font-size: 1.05rem; color: #f2ead2; max-width: 26rem; }
-@keyframes dis-dblflash-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes dis-dblflash-out { to { opacity: 0; } }
-@keyframes dis-dblflash-pop { from { transform: scale(0.4); } to { transform: scale(1); } }
 
-/* ── the round story (2026-08-11) ──────────────────────────────────────────
-   A scorecard row opens the whole round face up. The rows advertise it. */
+/* ── the round story (2026-08-11; board-shaped 2026-08-12) ─────────────────
+   A scorecard row opens the whole round face up, laid out like the BOARD:
+   a felt on the left (opponent across the table, you nearest yourself, the
+   out-of-play cards in the middle where the trick lives), the bidding and
+   the settled contract in a column on the right — the live board's own
+   split. The rows advertise it. */
 .dis-mrow-open { cursor: pointer; }
 .dis-mrow-open:hover { background: rgba(255, 255, 255, 0.06); }
-/* The story needs more width than the create modal's 372px — two hands of
-   seven plus pile pairs. Scoped by :has so no other modal moves. */
-.dis .cm-panel:has(.dis-story) { width: min(94vw, 620px); }
+/* The story needs real width — a felt of seven-card rows plus a side column.
+   Scoped by :has so no other modal moves. */
+.dis .cm-panel:has(.dis-story) { width: min(94vw, 860px); }
 .dis-story { display: flex; flex-direction: column; gap: 0.65rem; }
 .dis-story-sum { font-size: 0.92rem; }
+.dis-story-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(11rem, 14rem);
+  gap: 0.8rem; align-items: start;
+}
+/* A narrow window stacks the two columns — the felt keeps its shape and the
+   bidding follows below it, same as the live board on a phone. */
+@media (max-width: 640px) {
+  .dis-story-grid { grid-template-columns: 1fr; }
+}
+/* The felt itself — the table's own surface, so the layout reads as the
+   board it is echoing. */
+.dis-story-felt {
+  display: flex; flex-direction: column; gap: 0.6rem; align-items: center;
+  padding: 0.7rem; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(30, 62, 46, 0.55), rgba(18, 38, 28, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.dis-story-seat { display: flex; flex-direction: column; gap: 0.35rem; align-items: center; }
+.dis-story-seatname { font-size: 0.82rem; color: var(--text-dim); display: flex; gap: 0.5rem; align-items: center; }
+.dis-story-seatname b { color: var(--text); }
+.dis-story-side { display: flex; flex-direction: column; gap: 0.7rem; }
 .dis-story-hd {
   font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--text-dim); margin-bottom: 0.25rem;
@@ -1043,18 +1084,32 @@
   border: 1px solid var(--accent); color: var(--accent);
   border-radius: 999px; padding: 0 0.45rem;
 }
-.dis-story-bids { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.85rem; }
-.dis-story-bid { display: flex; gap: 0.35rem; align-items: baseline; }
+/* The bid log reads top to bottom in its column, name against call — the
+   same two-column row the contract panel's live log uses. */
+.dis-story-bids { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+.dis-story-bid {
+  display: flex; justify-content: space-between; gap: 0.35rem; align-items: baseline;
+  padding: 0.12rem 0.4rem; border-radius: 6px; background: rgba(255, 255, 255, 0.04);
+}
 .dis-story-bid > span:first-child { color: var(--text-dim); font-size: 0.78rem; }
 .dis-story-dbl > span:last-child { color: #e8c35a; font-weight: 700; }
-.dis-story-cards { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: flex-end; }
+.dis-story-ctline {
+  font-size: 1.3rem; font-weight: 800;
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.dis-story-cards { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: flex-end; justify-content: center; }
 /* The talon's three badges: shown to the declarer, the discard, the take.
    Outline + title, never colour alone. */
 .dis-story-shown .dis-card { outline: 2px solid var(--accent); outline-offset: 1px; }
 .dis-story-gave .dis-card { outline: 2px dashed #e8c35a; outline-offset: 1px; }
 .dis-story-took .dis-card { outline: 2px solid #e8c35a; outline-offset: 1px; }
-/* A pile renders as its pair, bottom then top, slightly fused. */
+/* A pile is the BOARD's pile shape, face up: the buried card offset up and
+   to the right so its index corner clears the card that covered it — the
+   same construction as `.dis-pilewrap`, at story scale. */
 .dis-story-piles { gap: 0.55rem; }
-.dis-story-pile { display: inline-flex; }
-.dis-story-pile .dis-card:last-child { margin-left: -10px; box-shadow: -2px 1px 4px rgba(0,0,0,0.35); }
+.dis-story-pile { position: relative; display: inline-block; padding-top: 9px; padding-right: 9px; }
+.dis-story-pile .dis-story-buried { position: absolute; top: 0; right: 0; z-index: 0; }
+.dis-story-pile > .dis-card { position: relative; z-index: 1; }
+.dis-story-out { text-align: center; }
+.dis-story-out .dis-story-hd { justify-content: center; }
 .dis-story-note { font-size: 0.78rem; }

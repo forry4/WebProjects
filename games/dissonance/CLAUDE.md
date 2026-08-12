@@ -1093,11 +1093,14 @@ the bidding judgement, which is the part worth playing.
   - A pass-out redeal adds no line, because it is not a round.
   - It rides in `view_for`'s `match` (wholly public, like the totals) and
     through `persist.py` untouched. ~8 small keys x a median of ten rounds.
-* **A SCORECARD ROW OPENS THE ROUND'S STORY (2026-08-11)** — click or
-  right-click (contextmenu, which is also what a long-press fires) lays the
-  round out face up: both hands and piles as they stood at trick 1, the talon
-  with the three shown cards outlined and the swap annotated, and the bidding
-  that produced the contract. Everything renders from the line's own banked
+* **A SCORECARD ROW OPENS THE ROUND'S STORY (2026-08-11; board-shaped
+  2026-08-12)** — click or right-click (contextmenu, which is also what a
+  long-press fires) lays the round out face up, **in the board's own shape**:
+  a felt on the left (opponent's hand-then-piles across the table, your
+  piles-then-hand nearest you, the dummy between, the out-of-play cards in
+  the middle where the trick lives, piles drawn with the board's buried-card
+  peek), and a right column carrying the bidding and the settled contract —
+  the live board's own split. Everything renders from the line's own banked
   data — `deal` (the snapshot, now taken in EVERY mode: dummy banks its three
   hands too, and the DD column refuses non-2-hand deals by COUNT rather than
   by mode) plus `reveal` (`_round_summary`: the auction log, `shown_at_deal`,
@@ -1108,23 +1111,28 @@ the bidding judgement, which is the part worth playing.
   gate is `test_round_reveal.py` — banked lines only, a mid-round view never
   carries the current round's hands, forfeits bank neither deal nor reveal.
   Browser-gated in `screens.mjs`: 32 cards face up, shown+took = 3, closes.
-* **THE DOUBLE FLASHES WHEN IT LANDS (2026-08-11)** — the declarer spends the
-  Double phase WAITING, the board moves straight to their lead, and the only
-  standing evidence was a small chip line; as-declarer it was routinely
-  missed. Two layers now: `.dis-dblflash` (a full-board ×2/×4 overlay for
-  4.5s, watching the effective multiplier RISE — classic Double, Kontra, Re
-  in one number) and the chip goes gold (`.dis-chip-mult.dbl`, the
-  scorecard's own ×2 colour, so the live chip and the banked line agree).
-  The watcher's ref starts at the mounted value, so reconnecting into a
-  long-doubled round announces nothing stale.
-* **PLAY GIVES 4.5rem OF RESERVE BACK TO THE CARDS on desktop (2026-08-11)**
-  — `--dis-reserve-in` is sized for the auction panel (~309px), but play's
-  middle measures 222px, so the phase the cards are played in reserved ~87px
-  for a panel that is not there. `.dis-table.ph-play` hands 4.5rem back
-  (~13px bigger cards height-bound, ~9px on a dummy table), keeping ~0.9rem
-  of the measured gap as slack. Play only: `ph-over` keeps the full reserve
-  because the result panel is auction-sized and would sit in permanent
-  scroll. Desktop block only; phones are untouched.
+* **THE DOUBLE LIVES IN THE CONTRACT DISPLAYS, NOT ACROSS THE SCREEN
+  (2026-08-12).** The 2026-08-11 full-board ×2/×4 flash (`.dis-dblflash`) was
+  removed on request — it covered the board at the exact moment the declarer
+  wants to read their own lead. The bet's standing evidence is gold in three
+  agreeing places: the felt's contract chip (`.dis-chip-mult.dbl`), a
+  `.dis-dblrow` banner at the head of the side panel's Contract box, and the
+  scorecard's ×2 chip — the same colour in all three, so the live round and
+  its banked line agree about what the bet looks like.
+* **PLAY'S TEXT SITS BESIDE THE CARDS ON A WIDE DESKTOP (2026-08-12), and
+  the card budget follows.** The trick counter, the contract chip and the
+  turn bar — everything the play middle says that is not a card — are one
+  `.dis-playside` block: in flow under the trick on small screens, pinned to
+  the ≥1200px rail (the auction/report treatment) on a wide desktop. With
+  the middle holding nothing but the trick's own cards, `--dis-reserve-in`
+  drops to **14rem at ≥1200px for ALL phases** (auction, play, report — the
+  three rules share the number so the cards never change size, the property
+  the gate asserts; growth tops out at +14.7% against the old 17.5rem on the
+  tightest height-bound screens). 761–1199px keeps 17.5rem with the playside
+  in flow. **The budget is keyed on `:has(> .dis-playside)`, not `ph-play`**:
+  the completed-trick hold keeps the board up after the phase has flipped to
+  `over`, and a phase-keyed budget shrank the cards for exactly that beat.
+  `screens.mjs` asserts the playside sits beside the hand row's right edge.
 * **A save with no `match` key is a single round and still ends at its own
   end.** `match_of()` is the only reader of `g["match"]` for exactly that
   reason — a game already in progress when this shipped must not crash and must

@@ -687,11 +687,14 @@ function roundTitle(r, nameOf) {
     + (r.null ? "Null" : r.made ? "made" : "set");
 }
 
-/** A finished round, face up: both hands as they stood at trick 1, the piles,
- *  the talon with what the declarer was shown, and the bidding that produced
- *  the contract. Everything here is the scorecard line's own banked data
- *  (`r.deal` + `r.reveal`) — nothing is re-derived, and rounds banked before
- *  the reveal shipped simply cannot open this.
+/** A finished round, face up: the deal laid out the way the BOARD lays it out
+ *  — opponent across the table, your own seat nearest you, each seat its hand
+ *  row over (or under) its piles, the out-of-play cards in the middle where
+ *  the trick lives — with the round's bidding and the settled contract in a
+ *  column on the right, the same split the live board uses. Everything here
+ *  is the scorecard line's own banked data (`r.deal` + `r.reveal`) — nothing
+ *  is re-derived, and rounds banked before the reveal shipped cannot open
+ *  this.
  */
 function RoundStory({ r, mySeat, nameOf, onClose }) {
   const deal = r.deal || {};
@@ -704,6 +707,12 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
   const ann = rev.announce || {};
   const annNames = ["hand", "sharp", "open"].filter((k) => ann[k]);
   const seatName = (q) => (q === 2 ? "Dummy" : nameOf(q));
+  // Board order from the viewer's seat: opponent at the top, the dummy where
+  // it sits on the felt, you nearest yourself. `mySeat` can be null on a
+  // finished room opened from the lobby — fall back to seat 0's view.
+  const me = mySeat ?? 0;
+  const order = [1 - me, ...(hands.length > 2 ? [2] : []), me]
+    .filter((q) => hands[q]);
 
   // One bid-log line. Classic entries carry level+denom, skat's carry value,
   // either may be a pass — render whichever fields the entry has.
@@ -718,6 +727,38 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
     </div>
   );
 
+  const seatHd = (q) => (
+    <div className="dis-story-seatname">
+      <b>{seatName(q)}</b>
+      {q === r.declarer && <span className="dis-story-tag">declared</span>}
+    </div>
+  );
+  const handRow = (q) => (
+    <div className="dis-story-cards dis-story-hand">
+      {hands[q].map((c) => (
+        <span key={c} className={c === take ? "dis-story-took" : undefined}
+          title={c === take ? "Taken from the talon" : undefined}>
+          <Card c={c} small />
+        </span>
+      ))}
+    </div>
+  );
+  // The board's own pile shape — the buried card peeking out top-right from
+  // under the card that covered it — just face up.
+  const pileRow = (q) => piles[q] && (
+    <div className="dis-story-cards dis-story-piles">
+      {piles[q].map((p, i) => (
+        <span className="dis-story-pile" key={i}
+          title="A pile: the offset card sat underneath">
+          {p.length > 1 && (
+            <span className="dis-story-buried"><Card c={p[0]} small /></span>
+          )}
+          <Card c={p[p.length - 1]} small />
+        </span>
+      ))}
+    </div>
+  );
+
   return (
     <CreateModal title={`Round ${r.round} — face up`} onClose={onClose}>
       <div className="dis-story">
@@ -725,89 +766,107 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
           {roundTitle(r, nameOf).replace(/^Round \d+: /, "")}
         </div>
 
-        {rev.auction && rev.auction.length > 0 && (
-          <div className="dis-story-sec">
-            <div className="dis-story-hd">Bidding</div>
-            <div className="dis-story-bids">
-              {rev.auction.map(bidLine)}
-              {/* The bets are not in the log — they are phases of their own —
-                  so the story synthesizes them from the row's own doubling,
-                  which is the field the scorecard chip already trusts. */}
-              {r.doubling > 1 && (
-                <div className="dis-story-bid dis-story-dbl">
-                  <span>{nameOf(1 - r.declarer)}</span>
-                  <span>{r.doubling === 4 ? "Kontra" : rev.announce && Object.keys(rev.announce).length ? "Kontra" : "Double"} ×2</span>
-                </div>
-              )}
-              {r.doubling === 4 && (
-                <div className="dis-story-bid dis-story-dbl">
-                  <span>{nameOf(r.declarer)}</span>
-                  <span>Re ×4</span>
-                </div>
-              )}
-              {annNames.length > 0 && (
-                <div className="dis-story-bid">
-                  <span>{nameOf(r.declarer)}</span>
-                  <span>{annNames.map((k) => k[0].toUpperCase() + k.slice(1)).join(" + ")}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="dis-story-grid">
+          <div className="dis-story-felt">
+            {order.filter((q) => q !== me).map((q) => (
+              <div className="dis-story-seat" key={q}>
+                {seatHd(q)}
+                {handRow(q)}
+                {pileRow(q)}
+              </div>
+            ))}
 
-        {hands.map((h, q) => (
-          <div className="dis-story-sec" key={q}>
-            <div className="dis-story-hd">
-              {seatName(q)}
-              {q === r.declarer && <span className="dis-story-tag">declared</span>}
-            </div>
-            <div className="dis-story-cards">
-              {h.map((c) => (
-                <span key={c} className={c === take ? "dis-story-took" : undefined}
-                  title={c === take ? "Taken from the talon" : undefined}>
-                  <Card c={c} small />
-                </span>
-              ))}
-            </div>
-            {piles[q] && (
-              <div className="dis-story-cards dis-story-piles">
-                {piles[q].map((p, i) => (
-                  <span className="dis-story-pile" key={i}
-                    title="A pile: the right card sat on top">
-                    {p.map((c) => <Card key={c} c={c} small />)}
+            {/* The out-of-play cards sit in the middle of the felt, where the
+                trick lives on the live board — between the other seats above
+                and your own below. */}
+            <div className="dis-story-sec dis-story-out">
+              <div className="dis-story-hd">
+                Out of play
+                {rev.looked === false && (
+                  <span className="dis-story-tag">Hand — never looked</span>
+                )}
+              </div>
+              <div className="dis-story-cards">
+                {out.map((c) => (
+                  <span key={c}
+                    className={c === give ? "dis-story-gave"
+                      : shown.has(c) ? "dis-story-shown" : undefined}
+                    title={c === give ? "Discarded into the talon by the declarer"
+                      : shown.has(c) ? "Shown to the declarer" : "Never seen during the round"}>
+                    <Card c={c} small />
                   </span>
                 ))}
               </div>
-            )}
-          </div>
-        ))}
-
-        <div className="dis-story-sec">
-          <div className="dis-story-hd">
-            Out of play
-            {rev.looked === false && (
-              <span className="dis-story-tag">Hand — never looked</span>
-            )}
-          </div>
-          <div className="dis-story-cards">
-            {out.map((c) => (
-              <span key={c}
-                className={c === give ? "dis-story-gave"
-                  : shown.has(c) ? "dis-story-shown" : undefined}
-                title={c === give ? "Discarded into the talon by the declarer"
-                  : shown.has(c) ? "Shown to the declarer" : "Never seen during the round"}>
-                <Card c={c} small />
-              </span>
-            ))}
-          </div>
-          {(shown.size > 0 || take !== null) && (
-            <div className="dis-story-note muted">
-              {shown.size > 0 && <>Outlined: shown to {nameOf(r.declarer)}. </>}
-              {take !== null
-                ? <>Took <CardName c={take} />, discarded <CardName c={give} />.</>
-                : rev.looked === false ? null : <>Stood pat.</>}
+              {(shown.size > 0 || take !== null) && (
+                <div className="dis-story-note muted">
+                  {shown.size > 0 && <>Outlined: shown to {nameOf(r.declarer)}. </>}
+                  {take !== null
+                    ? <>Took <CardName c={take} />, discarded <CardName c={give} />.</>
+                    : rev.looked === false ? null : <>Stood pat.</>}
+                </div>
+              )}
             </div>
-          )}
+
+            {/* Your seat mirrors the board: piles above the hand, name under. */}
+            {hands[me] && (
+              <div className="dis-story-seat">
+                {pileRow(me)}
+                {handRow(me)}
+                {seatHd(me)}
+              </div>
+            )}
+          </div>
+
+          {/* The right column: how the contract was bought, then what it was —
+              the same information split the live board's rail uses. */}
+          <div className="dis-story-side">
+            {rev.auction && rev.auction.length > 0 && (
+              <div className="dis-story-sec">
+                <div className="dis-story-hd">Bidding</div>
+                <div className="dis-story-bids">
+                  {rev.auction.map(bidLine)}
+                  {/* The bets are not in the log — they are phases of their
+                      own — so the story synthesizes them from the row's own
+                      doubling, the field the scorecard chip already trusts. */}
+                  {r.doubling > 1 && (
+                    <div className="dis-story-bid dis-story-dbl">
+                      <span>{nameOf(1 - r.declarer)}</span>
+                      <span>{r.doubling === 4 ? "Kontra" : rev.announce && Object.keys(rev.announce).length ? "Kontra" : "Double"} ×2</span>
+                    </div>
+                  )}
+                  {r.doubling === 4 && (
+                    <div className="dis-story-bid dis-story-dbl">
+                      <span>{nameOf(r.declarer)}</span>
+                      <span>Re ×4</span>
+                    </div>
+                  )}
+                  {annNames.length > 0 && (
+                    <div className="dis-story-bid">
+                      <span>{nameOf(r.declarer)}</span>
+                      <span>{annNames.map((k) => k[0].toUpperCase() + k.slice(1)).join(" + ")}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {r.declarer >= 0 && !r.abandoned && (
+              <div className="dis-story-sec">
+                <div className="dis-story-hd">Contract</div>
+                <div className="dis-story-ctline">
+                  <b>{r.level}<Den d={r.denom} /></b>
+                  {r.doubling > 1 && (
+                    <span className="dis-mrow-dbl">×{r.doubling}</span>
+                  )}
+                </div>
+                <div className="dis-story-note muted">
+                  {nameOf(r.declarer)} declared
+                  {annNames.length > 0 ? ` (${annNames.join(", ")})` : ""} —{" "}
+                  {r.null ? "Null" : r.made ? "made it" : "set"},{" "}
+                  {r.pts?.[r.declarer] ?? 0} of {r.target}.
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </CreateModal>
@@ -1034,8 +1093,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // The scorecard row someone asked to see face up, or null.
   const [storyRound, setStoryRound] = useState(null);
-  // The doubled-stakes flash: set when the bet lands, cleared on a timer.
-  const [dblFlash, setDblFlash] = useState(null);
   const [bidLevel, setBidLevel] = useState(null);
   const [bidDenom, setBidDenom] = useState(null);
   const [newMode, setNewMode] = useState("classic");
@@ -1073,37 +1130,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const players = roomData?.players || {};
   const seats = game?.seats || [];
   const mySeat = game ? game.you : null;
-  // THE BET LANDING IS THE ONE MID-ROUND EVENT A PLAYER MUST NOT MISS — as
-  // declarer especially: the defender Doubles at the end of a phase you spent
-  // WAITING through, the board moves straight on to your own lead, and the
-  // only standing evidence was a small chip line. This watches the effective
-  // multiplier (classic's Double, skat's Kontra, the declarer's Re) and
-  // flashes a banner the moment it RISES. The ref starts at the current value
-  // on mount, so reconnecting into a long-doubled round announces nothing
-  // stale — the gold chip is the durable record; this is the event.
-  const dblNow = !game ? 0
-    : game.contract?.re ? 4
-      : game.contract?.kontra ? 2
-        : game.doubled ? 2 : 0;
-  const dblPrev = useRef(null);
-  const dblDecl = game?.auction?.declarer;
-  useEffect(() => {
-    const prev = dblPrev.current;
-    dblPrev.current = dblNow;
-    if (prev === null || dblNow <= prev) return undefined;
-    const re = dblNow === 4;
-    const bettor = re ? dblDecl : 1 - dblDecl;
-    const word = re ? "Re" : game?.contract ? "Kontra" : "Double";
-    setDblFlash({
-      mult: dblNow,
-      text: bettor === mySeat
-        ? `You said ${word} — the round now pays ×${dblNow}, whoever takes it.`
-        : `${word}! The round now pays ×${dblNow}, whoever takes it.`,
-    });
-    const t = setTimeout(() => setDblFlash(null), 4500);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dblNow]);
 
   // `turn_seat`, not `to_play`. They are the same number in every two-seat
   // mode, but `to_play` is a POSITION and the dummy's is 2 -- comparing that
@@ -1803,13 +1829,6 @@ export default function Dissonance({ myId, authUser, onExit }) {
         onAbandon={game.phase !== "over" ? () => setConfirmAbandon(true) : null} />}
         user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
       {reconnecting && <div className="banner">Reconnecting…</div>}
-      {dblFlash && (
-        <div className="dis-dblflash" onClick={() => setDblFlash(null)}>
-          <span className="dis-dblflash-x">×{dblFlash.mult}</span>
-          <span>{dblFlash.text}</span>
-        </div>
-      )}
-
       <div className="dis-main">
         {/* `dis-3seat` is what re-derives the card size: the height budget
             divides by the number of CARD ROWS, and a dummy table has six
@@ -2435,11 +2454,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
           ) : (
             <>
               <div className="dis-trick">
-                {/* The cards are their own ROW inside the trick band, with the
-                    trick line stacked under it. It used to be one row with the
-                    line absolutely positioned over the bottom edge, which drew
-                    it straight through the "who played this" name under a card
-                    whenever the band was squeezed — a real overlap, measured. */}
+                {/* The trick band holds ONLY the cards (and each card's
+                    "who played this" name). Every other line the middle used
+                    to carry — the trick counter, the contract chip, the turn
+                    bar — lives in `.dis-playside` below, which the wide
+                    desktop places in the rail beside the felt (the same
+                    treatment the auction and the report already get) so the
+                    height it used to cost goes back to the cards. */}
                 <div className="dis-trickcards">
                   {trickCards.length === 0
                     ? <div className="muted">{myTurn ? "Your lead" : "Waiting…"}</div>
@@ -2450,6 +2471,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       </div>
                     ))}
                 </div>
+              </div>
+              <div className="dis-playside">
                 {/* While a finished trick is held, this line is ABOUT that
                     trick — the server's counter has already moved on, so
                     reading it here labelled the two cards you are looking at
@@ -2476,25 +2499,25 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     return <> · <span className={`dis-val ${v > 0 ? "good" : "bad"}`}>{fmt(v)}</span></>;
                   })()}
                 </div>
-              </div>
-              <ContractChip game={game} nameOf={nameOf}
-                sharpBonus={catalog?.sharp_bonus ?? 2} />
-              <div className="dis-turnbar">
-                {game.phase === "over" ? <span className="muted">Last trick</span>
-                  : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
-                    : myTurn ? <>
-                      <span className="dis-yourturn">Your turn</span>
-                      {/* WHY the hand has stopped offering most of itself.
-                          Cards are never dimmed here (see the stylesheet), so
-                          without a word the narrowed set reads as a bug. The
-                          server decides it -- `must_head_now` off the view --
-                          because the client's `beats` is label-only and does
-                          not know Grand. */}
-                      {game.must_head_now && (
-                        <span className="dis-mhead">must beat it</span>
-                      )}
-                    </>
-                      : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
+                <ContractChip game={game} nameOf={nameOf}
+                  sharpBonus={catalog?.sharp_bonus ?? 2} />
+                <div className="dis-turnbar">
+                  {game.phase === "over" ? <span className="muted">Last trick</span>
+                    : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
+                      : myTurn ? <>
+                        <span className="dis-yourturn">Your turn</span>
+                        {/* WHY the hand has stopped offering most of itself.
+                            Cards are never dimmed here (see the stylesheet), so
+                            without a word the narrowed set reads as a bug. The
+                            server decides it -- `must_head_now` off the view --
+                            because the client's `beats` is label-only and does
+                            not know Grand. */}
+                        {game.must_head_now && (
+                          <span className="dis-mhead">must beat it</span>
+                        )}
+                      </>
+                        : <span className="muted">{nameOf(game.to_play)} is thinking…</span>}
+                </div>
               </div>
             </>
           )}
@@ -2596,6 +2619,19 @@ export default function Dissonance({ myId, authUser, onExit }) {
           )}
           <div className="dis-panel dis-p-contract">
             <h4>Contract</h4>
+            {/* THE BET, at the top of the box it re-prices. This row and the
+                gold chip on the felt are where a Double lives now — the
+                full-screen flash it replaced covered the board at the exact
+                moment the declarer wants to read their own lead. One gold
+                treatment in all three places (chip, this row, the scorecard's
+                ×2) so the live round and its banked line agree. */}
+            {(ct.re || ct.kontra || game.doubled) && (
+              <div className="dis-dblrow">
+                ×{ct.re ? 4 : 2} · {ct.re ? "Kontra + Re" : ct.kontra ? "Kontra" : "Doubled"}
+                {" — whoever takes the round, it pays "}
+                {ct.re ? "fourfold" : "double"}
+              </div>
+            )}
             {isSkat && <>
               <div className="dis-scorerow">
                 <span>{declSeat >= 0 ? `${nameOf(declSeat)} bought it at` : "Standing bid"}</span>

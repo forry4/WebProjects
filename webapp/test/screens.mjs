@@ -2232,6 +2232,24 @@ try {
 		check("the trick line does not draw over the name under a played card",
 			trickLine !== null && trickLine.overlaps === false,
 			JSON.stringify(trickLine));
+		// PLAY'S TEXT RIDES THE RAIL ON A WIDE DESKTOP (2026-08-12): the trick
+		// counter, the contract chip and the turn bar sit BESIDE the felt's
+		// cards, not between the seats — the same placement the auction and the
+		// report get. Geometry again: the playside's left edge must clear the
+		// hand row's right edge, or it is back in the middle paying for itself
+		// out of the card budget.
+		const rail = await page.evaluate(() => {
+			const ps = document.querySelector(".dis-playside");
+			const hand = document.querySelector(".dis-table .dis-seat .dis-hand");
+			if (!ps || !hand) return null;
+			const a = ps.getBoundingClientRect(), b = hand.getBoundingClientRect();
+			return { psX: Math.round(a.x), handRight: Math.round(b.x + b.width),
+				chip: !!ps.querySelector(".dis-chip"), info: !!ps.querySelector(".dis-trickinfo"),
+				beside: a.x >= b.x + b.width - 1 };
+		});
+		check("play's trick line, contract chip and turn bar sit beside the cards",
+			rail !== null && rail.beside === true && rail.chip && rail.info,
+			JSON.stringify(rail));
 		// THE BIDDING AND THE ROUND'S TRICKS live in the two panels, and both
 		// are the only place either can be read: the bid log used to sit inside
 		// the auction panel and vanished the moment the auction ended.
