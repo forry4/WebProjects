@@ -319,7 +319,14 @@
   align-items: center; justify-content: center;
   font-weight: 700; line-height: 1.05;
   user-select: none; position: relative;
-  overflow: hidden; /* the centre pip must never bleed past the corner radius */
+  /* NO `overflow: hidden` ON THE CARD ITSELF. With a 1px border AND a radius,
+     overflow clips children to the PADDING box — a curve 1px tighter than the
+     border's — so every corner got a hairline where the clip and the border
+     disagreed. It read worst on the BOTTOM corners, where the drop shadow
+     darkens whatever is behind the seam, and that is exactly where it was
+     reported. The clip existed for ONE child (the centre watermark, which
+     would otherwise square off past the radius), so that child does its own
+     clipping now and the card's corners are drawn by the border alone. */
   /* SNAP ON THE WAY UP, SETTLE ON THE WAY DOWN. 0.12s ease in both directions
      read as lag on the thing a pointer is doing RIGHT NOW: the lift is
      feedback and has to feel instant, while the drop is just the card
@@ -339,6 +346,10 @@
    strength, sized off the card's own token so every scale keeps the ratio. */
 .dis-center {
   position: absolute; inset: 0;
+  /* The one thing that needed the card's old `overflow: hidden` — a pip sized
+     at 0.58 of the card can reach past the corner curve. `inherit` keeps it
+     the same radius as the card at every scale. */
+  overflow: hidden; border-radius: inherit;
   display: flex; align-items: center; justify-content: center;
   font-size: calc(var(--cw) * 0.58); line-height: 1;
   opacity: 0.28; pointer-events: none;
@@ -828,7 +839,13 @@
      (below) instead of the column adapting to them. */
   .dis-game .dis-table:has(> .dis-auction),
   .dis-game .dis-table:has(> .dis-result) {
-    --dis-rows: 5; --dis-reserve-in: 10.5rem;
+    /* 12rem, THE SAME NUMBER PLAY USES — see the playside rule for where it
+       comes from. All railed phases must charge the identical reserve or the
+       board RESIZES when a phase ends: raising play's to 12 and leaving these
+       at 10.5 made the cards jump the moment a Kontra decision was answered
+       (reported from the live board). The auction and report panels are
+       content-height and centred, so the extra reserve costs them nothing. */
+    --dis-rows: 5; --dis-reserve-in: 12rem;
     display: grid;
     grid-template-columns: minmax(0, max-content) var(--dis-rail);
     justify-content: center;
@@ -1026,6 +1043,8 @@
   .dis-game .dis-table.dis-3seat:has(> .dis-auction),
   .dis-game .dis-table.dis-3seat:has(> .dis-result) { --dis-reserve-in: 14rem; }
 }
+/* The dummy's numbers are re-asserted after the big-screen block below so the
+   generic 2-seat reserve cannot claim a 3-seat table. */
 
 /* ── BIG DISPLAYS: THE RAIL GROWS WITH THE BOARD ──────────────────────────
    On a 2560x1600 screen the height budget puts the cards near 190px, and a
@@ -1053,11 +1072,32 @@
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
   .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
   .dis-game .dis-table > .dis-auction > .muted:first-child { font-size: 0.86rem; }
+  /* The CONTROLS scale too, not just the prose. A Kontra box whose rows and
+     buttons stay laptop-sized in a 1500px column reads as a dialog someone
+     forgot to finish, however well it fits. */
+  .dis-game .dis-table > .dis-auction .btn { font-size: 1rem; padding: 0.7rem 1.3rem; }
+  .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1rem; }
+  .dis-game .dis-table > .dis-auction .dis-hint { font-size: 0.92rem; }
+  .dis-game .dis-table > .dis-auction .dis-bidgrid button,
+  .dis-game .dis-table > .dis-auction .dis-valgrid button { font-size: 1rem; padding: 0.62rem 0.2rem; }
+  .dis-game .dis-table > .dis-auction .dis-denoms button { font-size: 1.25rem; min-width: 52px; }
+  .dis-game .dis-table > .dis-auction .dis-clears { font-size: 0.88rem; }
 }
 @media (min-width: 2200px) {
   .dis-game .dis-table > .dis-auction .dis-card { --cw: 86px; font-size: 1.15rem; }
   .dis-game .dis-table > .dis-auction .dis-card.sm,
   .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 66px; font-size: 1rem; }
+  .dis-game .dis-table > .dis-auction .btn { font-size: 1.12rem; padding: 0.8rem 1.5rem; }
+  .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1.12rem; }
+  .dis-game .dis-table > .dis-auction .dis-contract { font-size: 2rem; }
+  .dis-game .dis-table > .dis-auction .dis-bidgrid button,
+  .dis-game .dis-table > .dis-auction .dis-valgrid button { font-size: 1.12rem; padding: 0.72rem 0.2rem; }
+  .dis-game .dis-table > .dis-auction .dis-denoms button { font-size: 1.4rem; min-width: 60px; }
+  /* The report's own lines, same argument. */
+  .dis-game .dis-table > .dis-result > .dis-big:first-child { font-size: 2.2rem; }
+  .dis-game .dis-table > .dis-result > .muted,
+  .dis-game .dis-table > .dis-result .dis-maths { font-size: 1.08rem; }
+  .dis-game .dis-table > .dis-result .btn { font-size: 1.1rem; padding: 0.78rem 1.4rem; }
 }
 
 /* ── ...AND SO DO THE FLANKS. The side columns are rem-sized, so on a 2560px
@@ -1097,7 +1137,9 @@
   /* The type above is furniture too, so the reserve pays for it — a bigger
      seat-name row on both seats plus a bigger trick caption is ~8px, which is
      exactly what put the board back over its box at 1600px tall. */
-  .dis-game .dis-table:has(> .dis-playside) { --dis-reserve-in: 12.6rem; }
+  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) {
+    --dis-reserve-in: 12.6rem;
+  }
 }
 @media (min-width: 2200px) {
   .dis-game .dis-main:has(> .dis-side-match) {
@@ -1120,7 +1162,9 @@
   .dis-game .dis-table .dis-seatname { font-size: 1.12rem; }
   .dis-game .dis-table .dis-trickval { font-size: 1.5rem; padding: 0.24rem 0.8rem; }
   .dis-game .dis-table .dis-tp .muted { font-size: 1rem; }
-  .dis-game .dis-table:has(> .dis-playside) { --dis-reserve-in: 13rem; }
+  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) {
+    --dis-reserve-in: 13rem;
+  }
 }
 
 /* ── table ──────────────────────────────────────────────────────────────── */
@@ -1405,7 +1449,14 @@
    columns would step in and out by a character as the numbers changed and the
    header would line up with nothing. One grid, one set of column widths. */
 .dis-mcard {
-  display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto auto auto;
+  /* The round number sizes to ITSELF (`max-content`), not to a 1.6rem slot.
+     The slot was wide enough for a three-digit round nobody will ever play,
+     so every line opened with a gap between the number and the contract it
+     belongs to — the two are one label and read as one. The remaining
+     0.25rem is the space between a list marker and its item; the wider
+     0.4rem gap stays between the number COLUMNS on the right, which are
+     separate quantities. */
+  display: grid; grid-template-columns: max-content minmax(0, 1fr) auto auto auto;
   gap: 0.12rem 0.4rem; align-items: baseline;
   /* ROWS PACK TO THE TOP. The card takes the slack in its column now (so a
      long match uses the height it is given), and a grid's default
@@ -1439,6 +1490,10 @@
   text-transform: uppercase; letter-spacing: 0.05em;
 }
 .dis-mrow-n { color: var(--text-dim); }
+/* Only the number-to-contract gap tightens; the columns on the right keep the
+   grid's own 0.4rem. A negative margin would fight the track sizing, so the
+   cell that owns the gap pays for it. */
+.dis-mrow-n, .dis-mrow-hd span:first-child { margin-right: -0.15rem; }
 /* The declarer's name is the one variable-width thing in a fixed column, so it
    ellipsises rather than wrapping the row to two lines. */
 .dis-mrow-ct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
@@ -1884,5 +1939,23 @@
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025) 55%, rgba(255, 255, 255, 0.015));
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* ── THE DUMMY'S RESERVES, LAST WORD ──────────────────────────────────────
+   A three-seat table has an extra hand row and an extra name row, so it
+   cannot take the 2-seat reserve the big-screen blocks above set generically.
+   Re-asserted here, after them, because source order is what decides between
+   two equal-specificity rules. */
+@media (min-width: 1800px) {
+  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 25.6rem; }
+  .dis-game .dis-table.dis-3seat:is(:has(> .dis-auction), :has(> .dis-result)) {
+    --dis-reserve-in: 14.6rem;
+  }
+}
+@media (min-width: 2200px) {
+  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 26rem; }
+  .dis-game .dis-table.dis-3seat:is(:has(> .dis-auction), :has(> .dis-result)) {
+    --dis-reserve-in: 15rem;
   }
 }
