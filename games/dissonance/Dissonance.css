@@ -161,6 +161,27 @@
   .dis .dis-seat .dis-hand > *:nth-child(5) { z-index: 4; }
   .dis .dis-seat .dis-hand > *:nth-child(6) { z-index: 3; }
   .dis .dis-seat .dis-hand > *:nth-child(7) { z-index: 2; }
+  /* AT THE REPORT THE SEATS ARE SPENT — every card has been played, so the
+     four card rows are empty wells reserving a card's height each. On a
+     desktop they sit either side of a rail; on a phone they are two thirds
+     of the screen, above and below the one thing worth reading. The rows go
+     and the seat NAMES stay (they carry each side's points, which is the
+     line the report is about). Keyed on the report being present, so the
+     completed-trick hold — which still has cards on the table — is
+     untouched. */
+  .dis .dis-table:has(> .dis-result) > .dis-seat > .dis-hand,
+  .dis .dis-table:has(> .dis-result) > .dis-seat > .dis-piles { display: none; }
+  /* ...and the table stops reserving a board's worth of height once those
+     rows are gone, or the felt keeps a full screen of it and simply moves
+     the emptiness below the report instead of above it. The panels beneath
+     scroll up to meet it. */
+  .dis .dis-table:has(> .dis-result) { min-height: 0; }
+  /* THUMB-SIZED BID KEYS. The level pad and the denomination row measured
+     ~36px against the 44px floor the go button already cleared — the two
+     controls a phone player touches most in the auction. */
+  .dis .dis-bidgrid button, .dis .dis-denoms button, .dis .dis-valgrid button {
+    min-height: 44px;
+  }
   /* ...and the mobile card is 42px, so its reserved row is smaller. See the
      base `.dis-hand` rule for why this exists at all. This still governs the
      TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
@@ -209,6 +230,15 @@
   .dis .dis-table.ph-auction .dis-auction {
     min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
     justify-content: flex-start;
+    /* THE SAFETY VALVE THE DESKTOP RAIL ALREADY HAS. The table is a FIXED
+       height here and this panel is the flex item that gives, so once its
+       content outgrows the space it simply overflowed its box — visibly,
+       under the seat below, which paints later. Raising the bid keys to a
+       44px touch target was enough to tip it, and the symptom was the
+       opener's hint printed through a pile row. Scrolling in place is the
+       honest answer: a squeeze shows a scrollbar on one panel instead of
+       two rows of the board drawing on top of each other. */
+    overflow-y: auto; overscroll-behavior: contain;
   }
   .dis .dis-table.ph-auction .dis-valgrid {
     flex: 1 1 auto; min-height: 3.2rem; max-height: none;
