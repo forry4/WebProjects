@@ -52,6 +52,7 @@ seats thrashes it.
 """
 import collections
 import json
+import os
 import random
 import statistics
 import subprocess
@@ -316,14 +317,41 @@ stats = {t: {"opens": collections.Counter(), "decisions": collections.Counter(),
 #: opener hand (same seat, same deal, flips swap only which tier sits there),
 #: so this is a same-hand joint distribution of the two policies' openings.
 joint = {}
-for m in range(LO, HI):
-    got = []
-    for flip in (0, 1):
-        tier_of = {flip: TIER_A, 1 - flip: TIER_B}
-        events = []
-        out = play(m, tier_of, qual, events)
-        if out is None:
-            continue
+
+#: CHECKPOINT FILE, and it is why a killed run is no longer a lost run. A shard
+#: printed its `SHARD {...}` only at the very end, so being killed at minute 19
+#: of 21 cost EVERYTHING -- which is exactly what happened when the container
+#: was reclaimed mid-run. One JSON line per completed DEAL, appended and
+#: flushed, so a kill costs at most the deal in flight; on restart the finished
+#: deals are replayed from the file and skipped.
+#:
+#: Off unless `ARENA_CKPT` names a path: the default behaviour is byte-for-byte
+#: what it was, and a checkpoint that silently appeared next to the code would
+#: be its own surprise. The file is keyed by the caller, so a shard must be
+#: given its OWN path -- two shards sharing one would resume each other's deals.
+#:
+#: A RESUMED RUN IS NOT BIT-IDENTICAL to an uninterrupted one, and that is a
+#: property of `bidserve`, not of this file: it advances a seed stream per
+#: REQUEST (`bin/bidserve.rs`), so skipping already-finished deals shifts the
+#: seed of every later one and the searcher samples different worlds. The
+#: resumed deals are an equally valid sample -- the seed is independent of the
+#: cards -- so means and distributions are unbiased, but do not expect the same
+#: numbers twice. VERIFIED that this is all it is: a kill-and-resume over the
+#: same window reproduces the same TOTALS (same deal count, same number of
+#: openings) with a different split, which is what a reseed looks like and not
+#: what double-counting looks like. Making it exact means sending a per-deal
+#: seed in the request, which is a Rust change and has not been done.
+CKPT = os.environ.get("ARENA_CKPT")
+
+
+def _absorb(deal_events):
+    """Fold one deal's events into the running counters.
+
+    Called from BOTH the live loop and the checkpoint replay, so a resumed run
+    and an uninterrupted one aggregate through the same code. A second copy
+    here is how a resumed run quietly reports different numbers.
+    """
+    for events in deal_events:
         opened_this_flip = None
         for e in events:
             if e[0] == "decision":
@@ -350,7 +378,44 @@ for m in range(LO, HI):
                 if len(e) > 6 and e[6] in stats:
                     stats[e[6]]["traject"][f"{e[5]}>{e[2]}:{'kept' if e[6] == e[1] else 'lost'}:{e[3]}"] += 1
         if opened_this_flip is not None:
-            joint.setdefault(m, {})[opened_this_flip[0]] = opened_this_flip[1]
+            yield opened_this_flip
+
+
+done = set()
+if CKPT and os.path.exists(CKPT):
+    with open(CKPT, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                # A half-written last line is the normal shape of a kill, not a
+                # corrupt file. Drop it and re-play that one deal.
+                continue
+            done.add(r["m"])
+            pairs.append(r["pair"])
+            qof.append(r["q"])
+            if r["differ"]:
+                diff_pairs.append(r["pair"])
+            for tier, lvl in _absorb(r["events"]):
+                joint.setdefault(r["m"], {})[tier] = lvl
+    print(f"  resumed {len(done)} deals from {CKPT}", flush=True)
+
+ck = open(CKPT, "a", encoding="utf-8") if CKPT else None
+for m in range(LO, HI):
+    if m in done:
+        continue
+    got = []
+    deal_events = []
+    for flip in (0, 1):
+        tier_of = {flip: TIER_A, 1 - flip: TIER_B}
+        events = []
+        out = play(m, tier_of, qual, events)
+        if out is None:
+            continue
+        deal_events.append(events)
         margin, decl, fp = out
         # Signed for tier A's seat this flip.
         row = margin if decl == flip else -margin
@@ -361,16 +426,27 @@ for m in range(LO, HI):
         # asymmetry this rewrite removes.
         dropped += len(got)
         continue
+    for tier, lvl in _absorb(deal_events):
+        joint.setdefault(m, {})[tier] = lvl
     pair = (got[0][0] + got[1][0]) / 2
     pairs.append(pair)
     qof.append(qual.get(m, 0.0))
-    if got[0][1] != got[1][1]:
+    differ = got[0][1] != got[1][1]
+    if differ:
         diff_pairs.append(pair)
+    if ck:
+        # FLUSHED per deal. An OS buffer holding the last 20 deals when the
+        # process is killed is the same lost work this exists to prevent.
+        ck.write(json.dumps({"m": m, "pair": pair, "q": qual.get(m, 0.0),
+                             "differ": differ, "events": deal_events}) + "\n")
+        ck.flush()
     if (m + 1) % 20 == 0 and pairs:
         mu, se = _stat(pairs)
         print(f"  {m + 1:4} deals  {TIER_A} - {TIER_B} = {mu:+.4f} "
               f"[{mu - 1.96 * se:+.2f}, {mu + 1.96 * se:+.2f}]  "
               f"({len(diff_pairs)}/{len(pairs)} differ)", flush=True)
+if ck:
+    ck.close()
 
 mu, se = _stat(pairs)
 print(f"\n{MODE} k={K} resolve={RESOLVE}: {TIER_A} - {TIER_B} = {mu:+.4f} +- {se:.4f} "
