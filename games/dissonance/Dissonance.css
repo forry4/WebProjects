@@ -119,14 +119,18 @@
      Growing it to the viewport and spacing the rows apart puts the opponent at
      the top, the trick in the middle and your hand at the thumb — which is
      where a card table wants them anyway.
-     The subtraction is the header, not a magic number: .lby-header is 13px of
-     padding either side of a ~34px control, plus the notch inset it adds to its
-     own padding-top. `dvh` so the iOS URL bar collapsing does not leave a gap;
-     the `vh` line above it is the fallback for anything that lacks dvh. */
+     The subtraction is the header, and it is ONE token now — `--dis-hdr`,
+     MEASURED at 61px on a 390x844 phone with the fonts loaded, not the 72px
+     that was estimated from its parts. The 11px difference is real: the board
+     stopped 11px short of the bottom of the screen and the gap read as the
+     board not reaching the fold. Two places used the estimate and they must
+     agree, so they take the token. `dvh` so the iOS URL bar collapsing does
+     not leave a gap; the `vh` line is the fallback for anything without dvh. */
+  .dis { --dis-hdr: 61px; }
   .dis .dis-table {
     gap: 0.5rem; padding: 0.5rem;
-    min-height: calc(100vh - 72px);
-    min-height: calc(100dvh - 72px - env(safe-area-inset-top, 0px));
+    min-height: calc(100vh - var(--dis-hdr));
+    min-height: calc(100dvh - var(--dis-hdr) - env(safe-area-inset-top, 0px));
     justify-content: space-between;
   }
   /* During play the slack must not fall BETWEEN the trick and its caption
@@ -205,6 +209,15 @@
   .dis .dis-bidgrid button, .dis .dis-denoms button, .dis .dis-valgrid button {
     min-height: 44px;
   }
+  /* The title's rule sits closer to the words it underlines here. */
+  .dis .dis-auction > .muted:first-child { padding-bottom: 0.28rem; }
+  /* A SHORT PHONE BUYS THE PANEL'S LAST FEW PIXELS FROM THE CARDS — during
+     the AUCTION only, where the cards are being counted rather than played.
+     Under ~820px tall the panel cannot fit at full card size however tight
+     its own spacing gets; three card rows at 8px less is another ~34px. */
+  @media (max-height: 820px) {
+    .dis .dis-table.ph-auction .dis-seat { --dis-cw: 54px; }
+  }
   /* ...and the mobile card is 42px, so its reserved row is smaller. See the
      base `.dis-hand` rule for why this exists at all. This still governs the
      TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
@@ -249,8 +262,16 @@
      of them wins and the overflow comes back. */
   .dis .dis-table.dis-3seat,
   .dis .dis-table.dis-3seat.ph-auction { height: auto; min-height: 0; }
-  .dis .dis-table.ph-auction { height: calc(100dvh - 72px); }
+  .dis .dis-table.ph-auction { height: calc(100dvh - var(--dis-hdr)); }
+  /* THE BIDDING BOX FITS A PHONE WITHOUT SCROLLING, which is a budget, not a
+     preference: at 390x844 the panel ran 42px past its box. Its five 0.8rem
+     gaps were 64px of that — sized for a desktop rail where the panel floats
+     in a tall column, not for a box competing with the board. 0.42rem here,
+     tighter padding, and a tighter rule under the title: ~45px back, which
+     clears the overflow with room to spare on a 844-tall phone. The internal
+     scroll stays as the valve for the shortest screens. */
   .dis .dis-table.ph-auction .dis-auction {
+    gap: 0.42rem; padding: 0.7rem 0.6rem;
     min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
     justify-content: flex-start;
     /* THE SAFETY VALVE THE DESKTOP RAIL ALREADY HAS. The table is a FIXED
