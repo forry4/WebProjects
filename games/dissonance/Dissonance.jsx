@@ -2009,7 +2009,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       maxLevel={catalog?.max_level}
                       prefix={`yours would need`} />
                   )}
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-gobtn" disabled={bidValue === null} onClick={doValueBid}>
                       Bid {bidValue ?? ""}
                     </button>
@@ -2068,7 +2068,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       );
                     })}
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-gobtn" disabled={!bidReady} onClick={doBid}>
                       Bid {bidLevel ?? ""}{bidDenom !== null ? <Den d={bidDenom} /> : ""}
                     </button>
@@ -2101,7 +2101,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       …and discard which card from your hand?
                     </div>
                   )}
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                       onClick={() => doSwap(swapTake, swapGive)}>
                       Swap {swapTake !== null ? <CardName c={swapTake} /> : ""}
@@ -2132,7 +2132,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       hand — or decline to look at all and play <b>Hand</b>, worth
                       +1 to your multiplier.
                     </div>
-                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <div className="dis-actrow">
                       <button className="btn dis-gobtn" onClick={() => doMove({ kind: "look" })}>
                         Look at the talon
                       </button>
@@ -2159,7 +2159,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                         …and discard which card from your hand?
                       </div>
                     )}
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <div className="dis-actrow">
                       <button className="btn dis-gobtn" disabled={swapTake === null || swapGive === null}
                         onClick={() => doSwap(swapTake, swapGive)}>
                         Swap{swapTake !== null ? <> <CardName c={swapTake} /></> : ""}
@@ -2290,7 +2290,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                         </span></b>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-kontrabtn"
                       onClick={() => doMove({ kind: "double", on: true })}>Kontra</button>
                     <button className="btn btn-ghost"
@@ -2312,7 +2312,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     You know the game at last. <b>Kontra</b> doubles it whichever
                     way it falls.
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-kontrabtn"
                       onClick={() => doMove({ kind: "kontra", on: true })}>Kontra</button>
                     <button className="btn btn-ghost"
@@ -2324,7 +2324,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <div className="muted dis-hint">
                     {nameOf(1 - declSeat)} doubled you. <b>Re</b> doubles it again.
                   </div>
-                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <div className="dis-actrow">
                     <button className="btn dis-kontrabtn"
                       onClick={() => doMove({ kind: "re", on: true })}>Re</button>
                     <button className="btn btn-ghost"

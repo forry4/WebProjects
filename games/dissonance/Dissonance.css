@@ -1711,6 +1711,22 @@
    the chip, gets the size (an em, so it rides the chip's own scale). */
 .dis-clear .dis-suit-r, .dis-clear .dis-suit-b { font-size: 1.25em; }
 
+/* EVERY ACTION ROW IN AN AUCTION-FAMILY PANEL, and it WRAPS. These were eight
+   inline `display:flex; gap:.5rem` divs, three of which also set `flexWrap`
+   and five of which did not — so a row whose labels grew simply overflowed.
+   `Swap 7♣ for 8♠` beside `Stand pat` is exactly that row, and the overflow
+   was HORIZONTAL, which is the failure I kept missing: `overflow-y: auto` on
+   the panel computes `overflow-x` to `auto` as well, so a too-wide row gives
+   the panel a horizontal scrollbar and clips the second button off the right
+   edge. A wrapped row cannot do that. `white-space: normal` on the buttons is
+   the second half: a label with nowrap forces its own width however narrow
+   the panel gets. */
+.dis-actrow {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center;
+  max-width: 100%;
+}
+.dis-actrow .btn { white-space: normal; }
+
 .dis-hint { font-size: 0.8rem; max-width: 420px; text-align: center; }
 
 /* The Double's two-sided bet, as rows: what each outcome pays now and what it
