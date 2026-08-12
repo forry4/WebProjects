@@ -2571,14 +2571,16 @@ export default function Dissonance({ myId, authUser, onExit }) {
                         <div className="muted" style={{ fontSize: "0.72rem" }}>{nameOf(t.seat)}</div>
                       </div>
                     ))}
-                </div>
-                {trickVal && (
-                  <div className="dis-trickval">
-                    <span className={`dis-val ${trickVal.v > 0 ? "good" : "bad"}`}>
+                  {/* IN THE ROW, not positioned over it: the pill is the last
+                      flex child, so it sits beside the cards at any card size
+                      and with any number of them (a dummy trick is three
+                      cards wide). An absolute offset had to guess both. */}
+                  {trickVal && (
+                    <span className={`dis-val dis-trickval ${trickVal.v > 0 ? "good" : "bad"}`}>
                       {trickVal.label}
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
               <div className="dis-playside">
                 {/* While a finished trick is held, this line is ABOUT that
@@ -2752,11 +2754,18 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     {game.auction.level}<Den d={game.auction.denom} />
                   </span>
                 </div>
+                {/* The Null CONDITION stays. Condensing the box to one money
+                    line first dropped it, and it is not decoration: it is what
+                    Null means, and it differs by mode ("no +2 trick" in
+                    classic, "no +1 trick" in minor, "no positive trick" under
+                    card scoring). `nullCond` reads it off the wire, so the
+                    line is right in every mode without knowing which. */}
                 <div className="dis-ctsub">
                   needs <b>{ptsLabel(game.auction.level)}</b> · makes{" "}
                   <b>{(game.doubled ? 2 : 1)
                     * (game.auction.level * game.auction.level + flatMake)}</b>
-                  {" "}· Null <b>{nullMake}</b>
+                  {" "}· Null <b>{nullMake}</b>{" "}
+                  <span className="dis-ctcond">({nullCond(game)})</span>
                 </div>
                 {game.doubled && (
                   <div className="dis-scorerow">

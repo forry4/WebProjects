@@ -61,8 +61,20 @@
    screen. Same treatment as the board's go button, so the lobby and the table
    agree about what an action looks like. Scoped to `.dis`, and the game screen
    has no `btn-gold` at all (it uses `.dis-gobtn`). */
+/* A GRADIENT NEVER SWAPS FOR A FLAT COLOUR ON HOVER — that is the blink.
+   The shared kit puts `transition: all .15s` on `.btn`, and a
+   `linear-gradient()` and a solid colour are not interpolable: the browser
+   cannot tween them, so the first hover re-rasterizes the whole face and the
+   button flashes (reported on Next round, Create game and Resume). Every
+   green button here keeps ONE background for its whole life and brightens
+   with `filter`, which composites on the existing layer and animates
+   properly. The transition is named rather than `all`, so nothing else can
+   quietly join it later. */
+.dis .btn-gold, .dis .lby-cta, .dis-gobtn {
+  transition: filter 0.13s ease, box-shadow 0.13s ease, transform 0.08s ease;
+}
 .dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink); }
-.dis .btn-gold:hover { background: var(--accent-hi); }
+.dis .btn-gold:hover:not(:disabled) { filter: brightness(1.09); }
 /* The CREATE ROW hardcodes `var(--gold)` rather than reading `--lby-accent`
    like the rest of the kit, so Create / Join-by-code / the code field's focus
    ring stayed gold on a green screen. Overridden here rather than in the
@@ -71,7 +83,7 @@
 .dis .lby-cta {
   background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink);
 }
-.dis .lby-cta:hover { background: var(--accent-hi); }
+.dis .lby-cta:hover:not(:disabled) { filter: brightness(1.09); }
 .dis .lby-join-btn { color: var(--accent); border-color: var(--accent); }
 .dis .lby-join-btn:hover { background: var(--accent); color: var(--ink); }
 .dis .lby-code:focus { border-color: var(--accent); }
@@ -95,8 +107,10 @@
   color: var(--ink);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 8px rgba(0, 0, 0, 0.30);
 }
-.dis-gobtn:hover:not(:disabled) { background: var(--accent-hi); }
-.dis-gobtn:active:not(:disabled) { box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); }
+.dis-gobtn:hover:not(:disabled) { filter: brightness(1.09); }
+.dis-gobtn:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); transform: translateY(1px);
+}
 
 /* ── mobile overrides (must precede the base rules; see above) ───────────── */
 @media (max-width: 760px) {
@@ -306,8 +320,21 @@
   font-weight: 700; line-height: 1.05;
   user-select: none; position: relative;
   overflow: hidden; /* the centre pip must never bleed past the corner radius */
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  /* SNAP ON THE WAY UP, SETTLE ON THE WAY DOWN. 0.12s ease in both directions
+     read as lag on the thing a pointer is doing RIGHT NOW: the lift is
+     feedback and has to feel instant, while the drop is just the card
+     returning and can take its time. `ease-out` at 60ms is past half its
+     travel in the first frame. */
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
 }
+/* CORNERS UNDER TRANSFORM. `overflow: hidden` + a scaled `border-radius` +
+   an inset ring is exactly the combination Chrome re-rasterizes badly while
+   an element is mid-transform — the rounded corners come out chipped and
+   dark on the raised card. Promoting the card to its own layer makes the
+   rounding part of the composited texture instead of something re-clipped
+   per frame. Only the playable cards: a promoted layer per card costs memory,
+   and the ones that never move do not need it. */
+.dis-card.play { will-change: transform; }
 /* The ghosted centre pip — the same ink as the corner index, at watermark
    strength, sized off the card's own token so every scale keeps the ratio. */
 .dis-center {
@@ -369,6 +396,7 @@
      raised and most looked at, so a lifted card read as flat and dark-cornered
      against the ones still in the hand. */
   .dis-card.play:hover {
+    transition: transform 0.06s ease-out, box-shadow 0.06s ease-out;
     transform: translateY(-8px);
     box-shadow:
       inset 0 0 0 1px rgba(255, 255, 255, 0.65),
@@ -540,6 +568,13 @@
      `--dis-reserve` is the non-card furniture the same budget has to leave
      room for; a third seat adds another name row to it. */
   --dis-rows: 4;
+  /* THE RAIL'S WIDTH, ONE TOKEN — read by the railed grids AND by the card
+     budget, which has to subtract exactly the column the cards do not get.
+     They were two hardcoded 17rems and drifting them apart is how the hand
+     wrapped at 1366. It widens on big screens (below): a 17rem strip beside
+     190px cards on a 2560x1600 display is a different design from the same
+     strip beside 60px cards on a laptop. */
+  --dis-rail: 17rem;
   --dis-reserve: 27rem;
   /* ...and the same budget measured from the TABLE's own height rather than
      the window's, for the desktop layout below. It excludes the header (which
@@ -795,7 +830,7 @@
   .dis-game .dis-table:has(> .dis-result) {
     --dis-rows: 5; --dis-reserve-in: 10.5rem;
     display: grid;
-    grid-template-columns: minmax(0, max-content) 17rem;
+    grid-template-columns: minmax(0, max-content) var(--dis-rail);
     justify-content: center;
     grid-template-rows: repeat(2, auto);
     align-content: space-between;
@@ -807,7 +842,7 @@
      to say it. It is also the one phase where nothing on the felt needs the
      width: every card has been played, so the seats are empty wells. */
   .dis-game .dis-table:has(> .dis-result) {
-    grid-template-columns: minmax(0, max-content) 26rem;
+    grid-template-columns: minmax(0, max-content) max(26rem, var(--dis-rail));
   }
   /* ...and the talon inside it stops being a row of thumbnails. */
   .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 48px; font-size: 0.87rem; }
@@ -882,12 +917,22 @@
      play and the report — the property the gate asserts. */
   .dis-game .dis-table { gap: 0.5rem; }
   .dis-game .dis-table:has(> .dis-playside) {
-    --dis-reserve-in: 10.5rem;
+    /* 12rem, not 10.5: the counted furniture missed the trick band's own
+       caption line. `.dis-trick`'s min-height is a card row PLUS 1.25rem for
+       the "who played this" name, while the budget counts the trick as one of
+       its five CARD rows and puts only the fixed furniture in the reserve —
+       so the board ran ~24px over its box. At 1080p that landed at exactly
+       zero slack and looked fine; the overflow is proportional to card size,
+       so it only became visible on a big display, where it clipped the near
+       seat's name off the bottom of the felt (reported from a 2560x1600
+       screen). MEASURED, not padded: scrollHeight vs clientHeight at
+       2560x1600, 2560x1400 and 1920x1080. */
+    --dis-reserve-in: 12rem;
     display: grid;
     /* max-content + justify-content:center, not 1fr: the cards and their
        caption rail center ON THE FELT as one cluster, instead of the cards
        hugging the left half while the text floats in a far-right field. */
-    grid-template-columns: minmax(0, max-content) 17rem;
+    grid-template-columns: minmax(0, max-content) var(--dis-rail);
     justify-content: center;
     grid-template-rows: repeat(3, auto);
     align-content: space-between;
@@ -900,7 +945,7 @@
      they shipped). One rule for every railed state. */
   .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) :is(.dis-seat, .dis-trick) {
     --dis-cw: max(3.4rem, min(
-      calc((100cqw - 17rem - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+      calc((100cqw - var(--dis-rail) - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
       calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
     ));
   }
@@ -954,47 +999,128 @@
   }
 }
 
-/* ── FULL-WIDTH DESKTOP: the seat names move SIDEWAYS, the cards take the
-   row they held (2026-08-12). At 16:9 the five stacked card rows are bound
-   by HEIGHT while the felt has hundreds of px of spare WIDTH — so the two
-   remaining non-card rows in the middle column, the seat names, move into
-   that spare width: absolutely placed at the felt's left edge, level with
-   their seat's pile row (the row nearest the trick). That plus the counted
-   furniture puts the reserve at 9rem — the honest floor; below it the
-   bottom seat starts clipping. Gated at 1440px because narrower felts are
-   width-bound anyway (no card to gain) and the name would land ON the
-   cards; the dummy seat is neither first nor last child and keeps its
-   in-flow name. */
+/* ── FULL-WIDTH DESKTOP (2026-08-12) ──────────────────────────────────────
+   THE SEAT NAME STAYS WITH ITS OWN CARDS, ALWAYS — above the opponent's,
+   below yours, in flow, at every width and in every phase. It does not move.
+
+   It briefly did move: at 16:9 the five stacked card rows are HEIGHT-bound
+   while the felt has hundreds of px of spare WIDTH, so the two non-card rows
+   in the middle column were absolutely placed at the felt's left edge to buy
+   the cards their height back (reserve 9rem instead of 10.5rem). That trade
+   is rejected — REPORTED FROM THE LIVE BOARD, and it is two separate faults,
+   which is why the whole idea goes rather than the worse half:
+     * the anchor is the SEAT box, and the seat is a `max-content` column, so
+       its left edge is wherever the widest row happens to be. In play that
+       is the seven-card hand and the name sits clear on the felt; at the
+       report every card is spent and the widest row is three empty wells, so
+       the same rule parked the name ON the first well.
+     * even when it does not collide it MOVES — sideways at the auction, back
+       at the report, a different offset per phase — and a label that names
+       who a row of cards belongs to has to be somewhere the eye can stop
+       looking for it.
+   The ~1.5rem of card height it bought is not worth either. What stays from
+   the block is the 3-seat reserves, which are about the dummy's extra row
+   and have nothing to do with where a name sits. */
 @media (min-width: 1440px) and (min-height: 600px) {
-  .dis-game .dis-table:has(> .dis-playside),
-  .dis-game .dis-table:has(> .dis-auction),
-  .dis-game .dis-table:has(> .dis-result) { --dis-reserve-in: 9rem; }
   .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 25rem; }
   .dis-game .dis-table.dis-3seat:has(> .dis-auction),
   .dis-game .dis-table.dis-3seat:has(> .dis-result) { --dis-reserve-in: 14rem; }
-  .dis-game .dis-table > .dis-seat { position: relative; }
-  .dis-game .dis-table > .dis-seat:first-child > .dis-seatname,
-  .dis-game .dis-table > .dis-seat:last-child > .dis-seatname {
-    position: absolute; left: 0.1rem; z-index: 2;
-    flex-direction: column; gap: 0.1rem; align-items: flex-start;
-    text-align: left; max-width: 8.5rem;
+}
+
+/* ── BIG DISPLAYS: THE RAIL GROWS WITH THE BOARD ──────────────────────────
+   On a 2560x1600 screen the height budget puts the cards near 190px, and a
+   17rem rail beside them is a strip — the talon's three cards render at the
+   default ~57px next to board cards three times their size, which is what
+   makes the panel read as cramped rather than small. The rail is a fraction
+   of the screen, not a constant.
+
+   IT COSTS THE CARDS NOTHING AT THESE WIDTHS, and that is checkable rather
+   than hoped for: the card size is `min(width term, height term)` and a
+   16:10 screen this wide is HEIGHT-bound with hundreds of px of slack in
+   the width term, so widening the rail moves the term that is not binding.
+   `--dis-rail` feeds both the grid and that term, so even if a window ever
+   made width bind, the two cannot disagree. */
+@media (min-width: 1800px) { .dis-game .dis-table { --dis-rail: 21rem; } }
+@media (min-width: 2200px) { .dis-game .dis-table { --dis-rail: 25rem; } }
+/* ...and what the panels put in that room: the cards they show scale toward
+   the board's, and the type comes up with them. A talon you are choosing
+   from should not be a row of thumbnails beside a hand of full-size cards. */
+@media (min-width: 1800px) {
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 72px; font-size: 1rem; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm,
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 58px; font-size: 0.95rem; }
+  .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
+  .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
+  .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
+  .dis-game .dis-table > .dis-auction > .muted:first-child { font-size: 0.86rem; }
+}
+@media (min-width: 2200px) {
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 86px; font-size: 1.15rem; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm,
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 66px; font-size: 1rem; }
+}
+
+/* ── ...AND SO DO THE FLANKS. The side columns are rem-sized, so on a 2560px
+   screen the felt scales (its type is card-derived) while every panel beside
+   it stays laptop-sized — the board grows, the reading matter does not, and
+   the two stop looking like one screen. Each row is nudged rather than the
+   column zoomed: `zoom` would scale the column's BOX as well and overflow the
+   grid track it sits in. The tracks widen to match. */
+@media (min-width: 1800px) {
+  .dis-game .dis-main:has(> .dis-side-match) {
+    grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr) minmax(17rem, 20rem);
   }
-  /* Anchored to the seat edge NEAREST the trick — which is where each
-     seat's pile row sits: the opponent's at its bottom, yours at your top
-     (under the 15px buried-card peek). */
-  .dis-game .dis-table > .dis-seat:first-child > .dis-seatname { bottom: 0.6rem; }
-  .dis-game .dis-table > .dis-seat:last-child > .dis-seatname { top: calc(0.6rem + 15px); }
-  /* ...BUT NOT AT THE REPORT, where the name lands ON the cards. The absolute
-     name is pinned to the SEAT's left edge, and the seat is a `max-content`
-     column: in play its widest row is the seven-card hand, so the edge sits
-     well left of the piles and the name has the felt's spare width to itself.
-     At the report every card has been played, so the widest row is the three
-     empty pile wells — the seat box shrinks to them and the same rule parks
-     the name on top of the first well. In flow for that phase only. */
-  .dis-game .dis-table:has(> .dis-result) > .dis-seat > .dis-seatname {
-    position: static; flex-direction: row; align-items: center;
-    gap: 0.5rem; max-width: none;
+  .dis-game .dis-side .dis-panel h4 { font-size: 0.84rem; }
+  .dis-game .dis-side .dis-scorerow { font-size: 1.02rem; }
+  .dis-game .dis-side .dis-ctbid { font-size: 1.62rem; }
+  .dis-game .dis-side .dis-ctline > b { font-size: 1.05rem; }
+  .dis-game .dis-side .dis-ctsub { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-bidlog { font-size: 0.88rem; }
+  .dis-game .dis-side .dis-trickhist { font-size: 0.82rem; max-height: none; }
+  .dis-game .dis-side .dis-th-row .dis-val { font-size: 0.78rem; }
+  .dis-game .dis-side .dis-mcard { font-size: 1rem; }
+  .dis-game .dis-side .dis-mrow-hd { font-size: 0.86rem; }
+  .dis-game .dis-side .dis-dblrow { font-size: 0.92rem; }
+  .dis-game .dis-side .muted { font-size: 0.9rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 46px; font-size: 0.8rem; }
+  /* The bid log's cap is a rem, so bigger type showed FEWER calls and cut the
+     last one mid-row — on a screen with room to spare. It grows with them. */
+  .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 12rem; }
+  /* The felt's own type keeps pace with the cards it captions. */
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.4rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.55rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip { font-size: 1.2rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 1.8rem; }
+  .dis-game .dis-table .dis-seatname { font-size: 1rem; }
+  .dis-game .dis-table .dis-trickval { font-size: 1.3rem; padding: 0.2rem 0.7rem; }
+  .dis-game .dis-table .dis-tp .muted { font-size: 0.9rem; }
+  /* The type above is furniture too, so the reserve pays for it — a bigger
+     seat-name row on both seats plus a bigger trick caption is ~8px, which is
+     exactly what put the board back over its box at 1600px tall. */
+  .dis-game .dis-table:has(> .dis-playside) { --dis-reserve-in: 12.6rem; }
+}
+@media (min-width: 2200px) {
+  .dis-game .dis-main:has(> .dis-side-match) {
+    grid-template-columns: minmax(19rem, 23rem) minmax(0, 1fr) minmax(19rem, 23rem);
   }
+  .dis-game .dis-side .dis-panel h4 { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-scorerow { font-size: 1.14rem; }
+  .dis-game .dis-side .dis-ctbid { font-size: 1.85rem; }
+  .dis-game .dis-side .dis-ctsub { font-size: 1.02rem; }
+  .dis-game .dis-side .dis-bidlog { font-size: 0.98rem; }
+  .dis-game .dis-side .dis-trickhist { font-size: 0.92rem; }
+  .dis-game .dis-side .dis-mcard { font-size: 1.1rem; }
+  .dis-game .dis-side .muted { font-size: 1rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 54px; font-size: 0.88rem; }
+  .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 15rem; }
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.6rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.75rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip { font-size: 1.35rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 2rem; }
+  .dis-game .dis-table .dis-seatname { font-size: 1.12rem; }
+  .dis-game .dis-table .dis-trickval { font-size: 1.5rem; padding: 0.24rem 0.8rem; }
+  .dis-game .dis-table .dis-tp .muted { font-size: 1rem; }
+  .dis-game .dis-table:has(> .dis-playside) { --dis-reserve-in: 13rem; }
 }
 
 /* ── table ──────────────────────────────────────────────────────────────── */
@@ -1062,18 +1188,14 @@
   align-items: center; justify-content: center;
   gap: 0.15rem; position: relative;
 }
-/* THE TRICK ROW IS CARDS + WHAT THEY ARE WORTH, side by side. The pill sits
-   beside the cards rather than under them: the trick band's reserved height is
-   the card row plus one name line, and a pill stacked under it would either
-   eat that reserve or grow the band and cost the cards height. Absolute, so
-   it takes no layout at all, vertically centred on the cards it prices. */
+/* THE TRICK ROW IS CARDS + WHAT THEY ARE WORTH, side by side — the pill is a
+   member of the row rather than something placed over it, so it tracks the
+   cards at any size and at any count (a dummy trick is three cards wide) and
+   the cluster stays centred as a unit. Beside, not under: the band's reserved
+   height is the card row plus one name line, and stacking would either eat
+   that reserve or grow the band and cost the cards their height. */
 .dis-trickcards { display: flex; align-items: center; justify-content: center; gap: 1.2rem; }
-.dis-trickval {
-  position: absolute; left: 50%; top: 50%;
-  transform: translate(calc(var(--dis-cw) * 1.35), -50%);
-  pointer-events: none;
-}
-.dis-trickval .dis-val { font-size: 1.05rem; padding: 0.16rem 0.6rem; }
+.dis-trickval { font-size: 1.05rem; padding: 0.16rem 0.6rem; align-self: center; }
 /* The trick's value is the whole game, so the pill on the trick line is loud.
    It is now the ONLY place the parity is shown — the 13-cell +2/-1 strip that
    used to sit under the board was removed as noise. */
@@ -1586,6 +1708,9 @@
 .dis-ctbid { font-size: 1.45rem; font-weight: 800; letter-spacing: 0.01em; }
 .dis-ctsub { font-size: 0.82rem; color: var(--text-dim); }
 .dis-ctsub b { color: var(--text); font-variant-numeric: tabular-nums; }
+/* The Null condition rides at the end of the money line, a step quieter than
+   the numbers it qualifies. */
+.dis-ctcond { font-size: 0.92em; opacity: 0.85; white-space: nowrap; }
 /* NO SUIT TINT on a contract label -- see the note by `DENOM_LABEL`. Only a
    real card face is suit-coloured (`.dis-card.red`). */
 .dis-chip-den { font-size: 1.05rem; font-weight: 800; color: var(--text); }

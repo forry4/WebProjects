@@ -2398,10 +2398,15 @@ try {
 			// ladder reads exactly 1..6 where classic's reads 1..10, and once the
 			// bot's contract stands the side panel prices Null against "no +1
 			// trick" where classic says +2. Assert whichever case this deal is.
+			// The Null price is read off the CONTRACT PANEL's text, not off a
+			// `.dis-scorerow`: the classic/minor panel was condensed to a
+			// headline plus one money line (2026-08-12), so the price moved out
+			// of a row and this read "" — the gate failed on a room that was
+			// perfectly correct. The panel is the stable thing to ask; where
+			// inside it the price sits is layout.
 			const m = await mpage.evaluate(() => ({
 				levels: [...document.querySelectorAll(".dis-bidgrid button")].map((b) => +b.textContent),
-				nullRow: [...document.querySelectorAll(".dis-scorerow")]
-					.map((r) => r.textContent).find((t) => t.includes("Null")) || "",
+				nullRow: document.querySelector(".dis-p-contract")?.textContent || "",
 			}));
 			const openerCase = Math.min(...m.levels) === 1 && Math.max(...m.levels) === 6;
 			const overtakeCase = m.nullRow.includes("+1") && Math.max(...m.levels) <= 6;
