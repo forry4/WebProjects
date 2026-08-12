@@ -890,8 +890,7 @@
        content-height and centred, so the extra reserve costs them nothing. */
     --dis-rows: 5; --dis-reserve-in: 12rem;
     display: grid;
-    grid-template-columns: minmax(0, max-content) var(--dis-rail);
-    justify-content: center;
+    grid-template-columns: minmax(0, max-content) minmax(var(--dis-rail), 1fr);
     grid-template-rows: repeat(2, auto);
     align-content: space-between;
   }
@@ -902,7 +901,7 @@
      to say it. It is also the one phase where nothing on the felt needs the
      width: every card has been played, so the seats are empty wells. */
   .dis-game .dis-table:has(> .dis-result) {
-    grid-template-columns: minmax(0, max-content) max(26rem, var(--dis-rail));
+    grid-template-columns: minmax(0, max-content) minmax(max(26rem, var(--dis-rail)), 1fr);
   }
   /* ...and the talon inside it stops being a row of thumbnails. */
   .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 48px; font-size: 0.87rem; }
@@ -989,11 +988,17 @@
        2560x1600, 2560x1400 and 1920x1080. */
     --dis-reserve-in: 12rem;
     display: grid;
-    /* max-content + justify-content:center, not 1fr: the cards and their
-       caption rail center ON THE FELT as one cluster, instead of the cards
-       hugging the left half while the text floats in a far-right field. */
-    grid-template-columns: minmax(0, max-content) var(--dis-rail);
-    justify-content: center;
+    /* THE RAIL TAKES THE FELT'S SPARE WIDTH — `minmax(--dis-rail, 1fr)`, not a
+       fixed column with the cluster centred. The centred version left slack on
+       BOTH sides: measured 105px at 1700x900 and 168px at 2560x1330 sitting
+       empty to the right of a 272px panel that was scrolling its own content.
+       A panel with an inch of bare board beside it is the wrong shape whatever
+       the content does, and the extra width reflows that content shorter,
+       which is the actual cure for the scrollbar.
+       ALL THREE railed phases share this template on purpose: a column that
+       differed by phase would move the cards when a phase ended, which is the
+       same fault as the reserve differing by phase. */
+    grid-template-columns: minmax(0, max-content) minmax(var(--dis-rail), 1fr);
     grid-template-rows: repeat(3, auto);
     align-content: space-between;
   }

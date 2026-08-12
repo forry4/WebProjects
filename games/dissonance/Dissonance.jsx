@@ -1489,6 +1489,16 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const [swapTake, setSwapTake] = useState(null);
   const [swapGive, setSwapGive] = useState(null);
   useEffect(() => { setSwapTake(null); setSwapGive(null); }, [game?.phase]);
+  /* THE OPTIMISTIC CARD (see `doPlay`). Cleared by ANY authoritative change,
+     which is what keeps it honest: the server's next state is the truth
+     whether it accepted the move or refused it. `plays.length` alone is not
+     enough — the play that COMPLETES a trick clears `plays` back to empty, so
+     the history length and the trick number are in the key too. */
+  const [pendingPlay, setPendingPlay] = useState(null);
+  useEffect(() => { setPendingPlay(null); }, [
+    game?.phase, game?.trick, game?.plays?.length, game?.history?.length,
+    game?.hand?.length,
+  ]);
   // Entering the declaration: start on the cheapest denomination the bid allows.
   useEffect(() => {
     const opts = game?.declare?.denoms;
@@ -1579,7 +1589,20 @@ export default function Dissonance({ myId, authUser, onExit }) {
     send({ action: "move", move: { kind: "bid", level: bidLevel, denom: bidDenom } });
   };
   const doPass = () => send({ action: "move", move: { kind: "pass" } });
-  const doPlay = (card) => send({ action: "move", move: { kind: "play", card } });
+  /* THE CARD LEAVES YOUR HAND ON THE CLICK, not on the server's answer.
+     A play is a round trip — send, validate, broadcast — so until the room
+     came back the board did nothing at all: the card you clicked sat in the
+     hand, unmoved, for as long as the network took. That is the lag, and no
+     amount of CSS timing touches it, because nothing was animating yet.
+     The optimistic card is rendered from `pendingPlay`: dropped from the hand
+     and drawn into the trick immediately. The SERVER still decides — this
+     never sends anything different, and the very next broadcast overwrites
+     it wholesale (the effect below clears it on any state change), so a move
+     the engine refuses simply snaps back. */
+  const doPlay = (card) => {
+    setPendingPlay(card);
+    send({ action: "move", move: { kind: "play", card } });
+  };
   const doSwap = (take, give) => send({ action: "move", move: { kind: "swap", take, give } });
   const doMove = (move) => send({ action: "move", move });
   const doValueBid = () => {
@@ -1845,6 +1868,28 @@ export default function Dissonance({ myId, authUser, onExit }) {
     if (game.led === null || game.led === undefined) return [];
     return [{ seat: game.leader, c: game.led }];
   })();
+  /* THE OPTIMISM IS ONLY APPLIED WHERE THE RESULT IS KNOWN. A card from the
+     hand always is. A PILE top is not: uncovering reveals the card underneath,
+     and on an outer pile the client does not know it — rendering that pile
+     early would draw a card BACK for one frame and then the real face, which
+     is a worse artifact than the wait it removes. So a pile play is optimistic
+     only when the new top is already known (the middle pile) or there is no
+     card under it at all. */
+  const optimisticCard = (() => {
+    if (pendingPlay === null || pendingPlay === undefined) return null;
+    if ((game.hand || []).includes(pendingPlay)) return pendingPlay;
+    const p = (game.piles?.[mySeat] || []).find((x) => x?.top === pendingPlay);
+    if (!p) return null;
+    return p.n === 1 || (p.under !== null && p.under !== undefined) ? pendingPlay : null;
+  })();
+  /* ...and the card goes into the trick until the room confirms it. Appended
+     rather than merged: `trickCards` is built from the wire, so the moment the
+     server's copy arrives the pending one is cleared and this stops firing.
+     Guarded on the card not already being there, so a broadcast landing
+     mid-render cannot double it. */
+  if (optimisticCard !== null && !trickCards.some((t) => t.c === optimisticCard)) {
+    trickCards.push({ seat: mySeat, c: optimisticCard });
+  }
 
   /* WHAT THE TRICK ON THE TABLE IS WORTH — one derivation, rendered beside
      the cards it prices. Parity rooms label a trick with its fixed value; a
@@ -2618,12 +2663,21 @@ export default function Dissonance({ myId, authUser, onExit }) {
           <div className="dis-seat">
             <div className="dis-piles">
               {game.piles[mySeat].map((p, i) => (
-                <Pile key={i} pile={p}
+                <Pile key={i}
+                  // The played top is gone and what was under it is now the
+                  // top — the same shape the server sends back. Only reached
+                  // for a pile whose result is known (see `optimisticCard`).
+                  pile={p?.top === optimisticCard
+                    ? { ...p, top: p.n === 1 ? null : p.under, under: null,
+                      n: Math.max(0, (p.n ?? 1) - 1) }
+                    : p}
                   onPlay={canPlay && legal.has(p?.top) ? () => doPlay(p.top) : null} />
               ))}
             </div>
             <div className="dis-hand">
-              {(game.hand || []).map((c) => (
+              {/* `pendingPlay` is filtered out here and drawn into the trick
+                  instead — the optimistic half of a play. See `doPlay`. */}
+              {(game.hand || []).filter((c) => c !== optimisticCard).map((c) => (
                 <Card key={c} c={c}
                   sel={(game.phase === "swap" || game.phase === "talon") && swapGive === c}
                   onClick={
