@@ -81,8 +81,10 @@
      lose. The card WIDTH is deliberately not pinned here: seven fluid slots is
      the whole point, and on a 390px phone that comes out well above the 42px
      this used to hardcode. */
-  .dis .dis-seat { --dis-gap: 0.18rem; }
-  .dis .dis-piles { gap: 0.35rem; }
+  /* Enough air between phone cards that each reads as its own object — the
+     old 0.18rem shingled them edge to edge. Slightly smaller cards are the
+     honest price. The pile row inherits the same gap (one rhythm). */
+  .dis .dis-seat { --dis-gap: 0.3rem; }
   .dis .dis-pilewrap { --pk: 11px; }
   /* On a phone a full-card carved slot reads as a tappable control. Keep its
      layout box (the pile row must not reflow) but draw it at ~2/3 size — a
@@ -266,15 +268,18 @@
   color: transparent;
 }
 /* An empty slot is a CARVED IMPRESSION in the felt — an inset well where a
-   card will land — not a dashed wireframe. No stroke, no paper: darkened
-   cloth with an inner shadow lip and a barely-there glyph. */
+   card will land. No stroke glyph, no paper: the depression alone says
+   "empty" — a radial pool of shade, a darkened top lip where the light
+   falls away, and a faint bottom rim where it returns. The DOM glyph stays
+   (a slot is still findable by text) but paints transparent. */
 .dis-card.ghost {
-  background: rgba(0, 0, 0, 0.16);
-  border: 1px solid rgba(0, 0, 0, 0.30);
+  background: radial-gradient(80% 70% at 50% 45%, rgba(0, 0, 0, 0.22), rgba(0, 0, 0, 0.09) 85%);
+  border: 1px solid rgba(0, 0, 0, 0.32);
   box-shadow:
-    inset 0 2px 6px rgba(0, 0, 0, 0.38),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.10);
+    inset 0 3px 7px rgba(0, 0, 0, 0.45),
+    inset 3px 0 6px rgba(0, 0, 0, 0.18),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.07);
+  color: transparent;
 }
 
 /* `.muted` IS THIS GAME'S OWN CLASS AND NOTHING DEFINED IT. The JSX reaches for
@@ -387,7 +392,9 @@
 .dis-seat .dis-card, .dis-trick .dis-card { --cw: var(--dis-cw); font-size: calc(var(--dis-cw) * 0.28); }
 
 /* ── piles ──────────────────────────────────────────────────────────────── */
-.dis-piles { display: flex; gap: 0.6rem; justify-content: center; }
+/* The pile row shares the HAND row's gap token, so the two rows of one seat
+   keep a single spacing rhythm instead of reading as two systems. */
+.dis-piles { display: flex; gap: var(--dis-gap, 0.35rem); justify-content: center; }
 .dis-pile { position: relative; display: flex; flex-direction: column; align-items: center; }
 /* The wrap reserves the peek offset as padding so the buried card cannot
    overlap its neighbour or get clipped by the row. */
@@ -406,7 +413,7 @@
     inset 0 0 0 1px rgba(255, 255, 255, 0.65),
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 4px 10px rgba(0, 0, 0, 0.28),
-    3px -3px 6px rgba(0, 0, 0, 0.28);
+    4px -4px 7px rgba(0, 0, 0, 0.34);
 }
 
 /* ── DESKTOP: the whole board on screen, and nothing to scroll ──────────────
@@ -739,8 +746,8 @@
      green reads as cloth rather than as a flat fill. The rail/border pair —
      a dark edge with a 1px inner highlight — gives the table its lip. */
   background:
-    radial-gradient(130% 90% at 50% 22%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 60%),
-    radial-gradient(140% 110% at 50% 115%, rgba(0, 0, 0, 0.30), rgba(0, 0, 0, 0) 55%),
+    radial-gradient(130% 90% at 50% 22%, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 58%),
+    radial-gradient(140% 110% at 50% 115%, rgba(0, 0, 0, 0.36), rgba(0, 0, 0, 0) 50%),
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E") repeat,
     linear-gradient(180deg, #1e4230 0%, #183827 55%, #132c1f 100%);
   border: 1px solid rgba(8, 14, 10, 0.65);
