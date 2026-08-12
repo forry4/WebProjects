@@ -239,22 +239,28 @@
    deep indigo, lit from above, inside a printed frame (two inset rings). The
    lattice is an inline SVG so it stays crisp at any card size; everything
    scales off the same token as the face. */
+/* LONGHANDS, not the `position / size` shorthand: Vite's CSS pass silently
+   DROPPED the one layer that used `center / calc(var(--cw) * 0.5)` — the
+   bundle shipped two of these three images and the medallion never rendered.
+   Longhand background-* with var() survives the pipeline intact. */
 .dis-card.back {
-  background:
+  background-image:
     radial-gradient(90% 60% at 50% 28%, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 70%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='13' fill='none' stroke='rgba(212,175,84,0.5)' stroke-width='1.5'/%3E%3Cpath d='M20 9 28 20 20 31 12 20Z' fill='none' stroke='rgba(212,175,84,0.45)' stroke-width='1.3'/%3E%3Ccircle cx='20' cy='20' r='2' fill='rgba(212,175,84,0.4)'/%3E%3C/svg%3E") center / calc(var(--cw) * 0.5) no-repeat,
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cpath d='M7 0 14 7 7 14 0 7Z' fill='none' stroke='rgba(255,255,255,0.13)' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='1' fill='rgba(255,255,255,0.11)'/%3E%3C/svg%3E") repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' width='40' height='40'%3E%3Ccircle cx='20' cy='20' r='13' fill='none' stroke='rgba(212,175,84,0.5)' stroke-width='1.5'/%3E%3Cpath d='M20 9 28 20 20 31 12 20Z' fill='none' stroke='rgba(212,175,84,0.45)' stroke-width='1.3'/%3E%3Ccircle cx='20' cy='20' r='2' fill='rgba(212,175,84,0.4)'/%3E%3C/svg%3E"),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Cpath d='M7 0 14 7 7 14 0 7Z' fill='none' stroke='rgba(255,255,255,0.13)' stroke-width='1'/%3E%3Ccircle cx='7' cy='7' r='1' fill='rgba(255,255,255,0.11)'/%3E%3C/svg%3E"),
     linear-gradient(165deg, #2e4064 0%, #243352 55%, #1c2941 100%);
+  background-position: center, center, 0 0, 0 0;
+  background-size: auto, calc(var(--cw) * 0.5) calc(var(--cw) * 0.5), auto, auto;
+  background-repeat: no-repeat, no-repeat, repeat, no-repeat;
   border-color: rgba(14, 18, 28, 0.55);
-  /* The frame is a PRINTED ring — a navy band with a thin GOLD pinstripe
-     inside it (the deck's brand color), thinner than before so the back's
-     corner geometry reads the same as the face's. Drop shadows match the
-     face's contact+ambient pair: one light for the whole table. The gold
-     medallion (ring + diamond) sits centered over the lattice, the back's
-     focal point, echoing the faces' watermark pip. */
+  /* The frame is a PRINTED ring — a navy band with a gold pinstripe inside
+     it (the deck's brand color), thin enough that the back's corner
+     geometry reads the same as the face's. Drop shadows match the face's
+     contact+ambient pair: one light for the whole table. The gold medallion
+     (ring + diamond) is the back's focal point, echoing the faces' pip. */
   box-shadow:
     inset 0 0 0 calc(var(--cw) * 0.045) #17233a,
-    inset 0 0 0 calc(var(--cw) * 0.045 + 1px) rgba(212, 175, 84, 0.4),
+    inset 0 0 0 calc(var(--cw) * 0.045 + 2px) rgba(212, 175, 84, 0.5),
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 4px 10px rgba(0, 0, 0, 0.28);
   color: transparent;
