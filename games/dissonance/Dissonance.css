@@ -21,6 +21,19 @@
    carry a `var(--x, fallback)`; `shared/tests/test_css_tokens.py` enforces it. */
 .dis {
   min-height: 100vh; color: var(--text);
+  /* THE LOBBY STANDS ON THE GAME'S OWN GROUND. Three short lists on flat page
+     black read as content dropped into a void — nothing on screen said which
+     game this was, and the empty lower two-thirds was the only thing with any
+     size. A wide, very low green wash from the top ties the lobby to the felt
+     it opens onto, and a floor glow keeps the bottom from going dead flat.
+     Both are pinned (fixed) so the page can scroll over an unmoving ground,
+     and both sit far below the panel surfaces in value — this is atmosphere,
+     not a surface the cards have to fight. */
+  background:
+    radial-gradient(120% 60% at 50% -8%, rgba(60, 160, 110, 0.16), rgba(60, 160, 110, 0) 62%),
+    radial-gradient(90% 45% at 50% 108%, rgba(40, 120, 84, 0.10), rgba(40, 120, 84, 0) 70%),
+    var(--bg, #0f0e0c);
+  background-attachment: fixed;
   --accent: #6fe0a0;
   /* Lifted accent for hover, and the near-black that goes ON the accent. Both
      were written as literals in eight places between them; naming them is what
@@ -30,6 +43,29 @@
   --ink: #08131f;
   --lby-accent: var(--accent);
 }
+
+/* THE LOBBY'S PRIMARY ACTION IS THE GREEN TOO. The shared kit's primary is
+   `btn-gold` — Spender's colour, arriving here through the same fallback that
+   once dressed this whole lobby in the wrong accent. Dissonance already sets
+   `--lby-accent` green, so section titles, hover borders and the phone tabs
+   were green while Create / Join / Resume stayed gold: two primaries on one
+   screen. Same treatment as the board's go button, so the lobby and the table
+   agree about what an action looks like. Scoped to `.dis`, and the game screen
+   has no `btn-gold` at all (it uses `.dis-gobtn`). */
+.dis .btn-gold { background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink); }
+.dis .btn-gold:hover { background: var(--accent-hi); }
+/* The CREATE ROW hardcodes `var(--gold)` rather than reading `--lby-accent`
+   like the rest of the kit, so Create / Join-by-code / the code field's focus
+   ring stayed gold on a green screen. Overridden here rather than in the
+   shared sheet: the token fix belongs there, but it would repaint five other
+   lobbies that nobody has looked at in this pass. */
+.dis .lby-cta {
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent) 55%); color: var(--ink);
+}
+.dis .lby-cta:hover { background: var(--accent-hi); }
+.dis .lby-join-btn { color: var(--accent); border-color: var(--accent); }
+.dis .lby-join-btn:hover { background: var(--accent); color: var(--ink); }
+.dis .lby-code:focus { border-color: var(--accent); }
 
 /* THE PRIMARY ACTION, and the reason it needs a class at all.
    `.btn` in the shared kit is GEOMETRY ONLY — padding, radius, font, and
@@ -113,9 +149,10 @@
      small impression in the felt, not a button. */
   .dis .dis-card.ghost { transform: scale(0.66); }
   .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
-  /* Thumb-sized end-of-round actions — Next round / Back to lobby measured
-     ~42px, just under the 44px touch guideline. */
-  .dis .dis-result .btn { min-height: 44px; }
+  /* Thumb-sized actions — the end-of-round buttons and the lobby's Join /
+     Resume all measured ~36–42px, under the 44px touch guideline. */
+  .dis .dis-result .btn,
+  .dis .lby-card .btn, .dis .lby-cta, .dis .lby-join-btn { min-height: 44px; }
   /* While BIDDING the board is exactly the viewport and the ladder takes
      whatever is left, scrolling inside itself. A viewport-relative cap cannot
      do this: the rest of the panel (the standing bid, the collision list, the

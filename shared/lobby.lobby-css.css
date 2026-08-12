@@ -84,7 +84,13 @@
    placement wrapped Active to row 2 and it read as "pushed down below History".
    Pinning both axes makes all four games' layouts independent of the order their
    JSX happens to render in, which is one less thing to keep in sync. */
-.lby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start}
+/* CAPPED AND CENTERED (2026-08-12). Unconstrained, the three columns stretch
+   to whatever the monitor is: on a 1920 screen a two-card Open column ran
+   740px wide with a single History row stranded 1500px away, and the eye had
+   to travel the full width to read three short lists. The cap is on the GRID,
+   so every game gets it without touching its own lobby-grid class (which the
+   note below forbids setting layout on anyway). */
+.lby-cols{display:grid;grid-template-columns:2fr 2fr 1fr;gap:20px 24px;align-items:start;max-width:1500px;margin-inline:auto}
 /* a long unbreakable card title must not blow its track out — Duel's grid had no
    min-width:0 and no per-column CSS at all */
 .lby-cols>*{min-width:0}
