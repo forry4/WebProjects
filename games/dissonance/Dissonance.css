@@ -561,7 +561,20 @@
   .dis-game .dis-table > .dis-playside {
     grid-column: 2; grid-row: 1 / -1;
     min-height: 0; justify-content: center; padding: 0.5rem;
+    gap: 1.2rem;
   }
+  /* IN THE RAIL THE TYPE SCALES UP. These three lines were sized for the
+     sliver between the seats they used to occupy; alone in a full-height
+     column they read as lost. The phone keeps the compact sizes — there
+     they really are wedged between the cards. */
+  .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.2rem; }
+  .dis-game .dis-table > .dis-playside .dis-trickinfo .dis-val { font-size: 1.15rem; }
+  .dis-game .dis-table > .dis-playside .dis-chip {
+    font-size: 1.05rem; padding: 0.55rem 1rem; gap: 0.6rem;
+  }
+  .dis-game .dis-table > .dis-playside .dis-chip-den { font-size: 1.55rem; }
+  .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.35rem; }
+  .dis-game .dis-table > .dis-playside .dis-mhead { font-size: 0.95rem; }
   /* The SAME trade on the other flank: the info panels stack from the top and
      used to leave the bottom third of the column as bare page. The trick
      history is the one list here that is never finished, so it takes the
