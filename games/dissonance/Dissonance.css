@@ -1152,7 +1152,8 @@
    sentence sized for the rail wraps, and `balance` splits it evenly instead
    of leaving "short" alone under it. Progressive: a browser without it just
    keeps the old wrap. */
-.dis-result > .muted, .dis-result .dis-maths { text-wrap: balance; }
+.dis-result > .muted, .dis-result .dis-maths,
+.dis-reveal .muted { text-wrap: balance; }
 /* The suit glyph in "bid 4♠" needs air against the numeral, and the felt
    rim that earns its keep on the dark board is too loud on the panel's lit
    surface — one soft ring, not three. */
