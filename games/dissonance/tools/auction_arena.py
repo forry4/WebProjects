@@ -66,6 +66,8 @@ from games.dissonance import engine as E, bot as B
 # plumbing). Env rather than argv because the shard windows already use the
 # positional slots, and a shard must inherit the arm it belongs to.
 E.FLAT_MAKE_BONUS = int(os.environ.get("DIS_FLAT_MAKE", "0"))
+E.FLAT_MAKE_MIN_LEVEL = int(os.environ.get("DIS_FLAT_MIN", "1"))
+E.FLAT_SET_PENALTY = int(os.environ.get("DIS_FLAT_SET", "0"))
 
 # Absolute, because a relative forward-slash path never reaches CreateProcess
 # intact on Windows; harmless elsewhere.
@@ -469,8 +471,9 @@ mu, se = _stat(pairs)
 print(f"\n{MODE} k={K} resolve={RESOLVE}: {TIER_A} - {TIER_B} = {mu:+.4f} +- {se:.4f} "
       f"payoff/round over {len(pairs)} paired deals"
       + (f" ({dropped} one-sided drops discarded)" if dropped else ""))
-if E.FLAT_MAKE_BONUS:
-    print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS}")
+if E.FLAT_MAKE_BONUS or E.FLAT_SET_PENALTY:
+    print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS}, FLAT_SET_PENALTY = {E.FLAT_SET_PENALTY}"
+          + (f" from level {E.FLAT_MAKE_MIN_LEVEL}" if E.FLAT_MAKE_MIN_LEVEL > 1 else ""))
 if diff_pairs:
     dmu, dse = _stat(diff_pairs)
     print(f"  differing auctions: {len(diff_pairs)}/{len(pairs)} deals, "

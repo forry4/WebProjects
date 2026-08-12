@@ -246,6 +246,17 @@ OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 #: "reward declaring at all" against the measured flat-+1 failure. Not a
 #: shipped setting, not in /catalog, not read anywhere but `_terms_for`.
 FLAT_MAKE_BONUS = 0
+#: ...and the level it starts applying at (default 1 = every made contract).
+#: Gating it OFF the floor (min level 2) is the differentiation experiment: a
+#: weak hand today opens 1 because nothing distinguishes 1 from 2 for it, and
+#: a bonus reachable one rung up is exactly such a distinction.
+FLAT_MAKE_MIN_LEVEL = 1
+#: ...and the set-side twin: a flat addition to what the DEFENDER scores when
+#: the contract is missed (never on Null, which overrides a set). Symmetric
+#: make/set stakes change the rider on holding a contract from +F*p to
+#: F*(2p-1) -- positive only past a 50% make -- which is the difference
+#: between "grab any contract" and "hold what you believe in".
+FLAT_SET_PENALTY = 0
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
@@ -1916,14 +1927,15 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # RAISING the floor cluster (43.3% -> 46.4%, it is proportionally biggest
     # on the smallest contracts); this knob exists to re-ask that under the
     # current game and searching bidders rather than assume it still holds.
-    make = level * level + FLAT_MAKE_BONUS
+    make = level * level + (FLAT_MAKE_BONUS if level >= FLAT_MAKE_MIN_LEVEL else 0)
+    setb = level + FLAT_SET_PENALTY
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,
-                "set_base": level * doubling, "short": short,
+                "set_base": setb * doubling, "short": short,
                 "ramp": DOUBLE_RAMP, "null": null}
     return {"denom": denom, "level": level, "target": level,
-            "make": make, "over": over, "set_base": level,
+            "make": make, "over": over, "set_base": setb,
             "short": short, "ramp": 0, "null": null}
 
 
