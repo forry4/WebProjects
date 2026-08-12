@@ -2299,35 +2299,55 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </> : "."}
                 </div>
               ) : res.mode === "skat" ? <>
+                {/* COLOUR-KEYED LIKE CLASSIC's — the panel's own convention
+                    (points blue, score green, the contract plain-strong) is
+                    mode-independent, and skat shipped without it: the same
+                    screen implemented its signature scheme in one mode and
+                    not the other. */}
                 <div className="muted">
                   {`${nameOf(res.declarer)} bought it at ${res.bid}, declared `}
-                  {res.level}<Den d={res.denom} />
+                  <Lvl>{res.level}</Lvl><Den d={res.denom} />
                   {multParts(res).length ? ` ${multParts(res).join(" + ")}` : ""}
                   {res.kontra ? (res.re ? " · Kontra + Re" : " · Kontra") : ""}
-                  {` and scored ${scored(res.declarer_pts)} of the ${res.target} promised`}
+                  {" and scored "}<Pts>{scored(res.declarer_pts)}</Pts>
+                  {" of the "}<Lvl>{res.target}</Lvl>{" promised"}
                   {res.null ? ` — taking no scoring trick at all` : ""}
                 </div>
                 {/* THE WHOLE CHAIN, from the denomination's base price. Skat's
                     value is base × level and that first step used to be
                     invisible, so a made contract printed a bare number where
-                    classic prints "3 × 3 = 9". */}
+                    classic prints "3 × 3 = 9". Only the FINAL total wears the
+                    score green — whichever number that is in this round's
+                    shape — so the colour always marks what reached the
+                    scoreboard, never an intermediate. */}
                 <div className="dis-maths">
-                  {res.null ? `flat ${res.null_value} to ${nameOf(res.declarer)}` : <>
-                    {res.base} (<Den d={res.denom} />) × {res.level} = {res.value}
-                    {res.mult > 1 ? ` × ${res.mult}` : ""}
-                    {res.doubling > 1 ? ` × ${res.doubling}` : ""}
-                    {res.mult > 1 || res.doubling > 1 ? ` = ${res.stake}` : ""}
-                    {res.made
-                      ? `${overTail(res)} to ${nameOf(res.declarer)}`
-                      // `shortTail`, not a literal: the rate moved 4 -> 5 and
-                      // this line kept charging the old one, printing a sum
-                      // that did not reach the score beside it. The helper
-                      // reads `short_rate` off the row the engine scored with,
-                      // and spells a ramp out rather than faking it as a
-                      // product -- which skat has none of today, and would be
-                      // wrong here the day it does.
-                      : ` + ${shortTail(res)} = ${res.scores[1 - res.declarer]} to ${nameOf(1 - res.declarer)}`}
-                  </>}
+                  {res.null ? <>flat <Score>{res.null_value}</Score> to {nameOf(res.declarer)}</> : (() => {
+                    const hasMult = res.mult > 1 || res.doubling > 1;
+                    const headIsFinal = res.made && !res.over && !hasMult;
+                    const stakeIsFinal = res.made && !res.over && hasMult;
+                    return <>
+                      {res.base} (<Den d={res.denom} />) × <Lvl>{res.level}</Lvl>{" = "}
+                      {headIsFinal ? <Score>{res.value}</Score> : res.value}
+                      {res.mult > 1 ? ` × ${res.mult}` : ""}
+                      {res.doubling > 1 ? ` × ${res.doubling}` : ""}
+                      {hasMult ? <>{" = "}{stakeIsFinal ? <Score>{res.stake}</Score> : res.stake}</> : null}
+                      {res.made
+                        ? <>{res.over
+                          ? <>{" + "}<Pts>{res.over}</Pts>{" = "}<Score>{res.scores[res.declarer]}</Score></>
+                          : null}{" "}to {nameOf(res.declarer)}</>
+                        // `shortTail`/`short_rate` off the row, never a
+                        // literal: the rate moved 4 -> 5 and this line kept
+                        // charging the old one, printing a sum that did not
+                        // reach the score beside it. A ramp is spelled out;
+                        // the flat case colours the points missed, exactly
+                        // as classic's ResultMaths does.
+                        : <>{" + "}{res.ramp
+                          ? shortTail(res)
+                          : <>{res.short_rate ?? 4} × <Pts>{res.short || 0}</Pts></>}
+                          {" = "}<Score>{res.scores[1 - res.declarer]}</Score>{" "}
+                          to {nameOf(1 - res.declarer)}</>}
+                    </>;
+                  })()}
                 </div>
               </> : <>
                 {/* POINTS vs SCORE. The sentence says what happened in TRICK
@@ -2377,9 +2397,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   scores it instead of being set, whatever they declared.
                 </div>
               )}
-              <div className="dis-scorerow" style={{ gap: "1.5rem", fontSize: "1.1rem" }}>
-                <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
-                <span>{nameOf(oppSeat)} <b>{res.scores[oppSeat]}</b></span>
+              {/* Labelled, and smaller than the match total below: in round 1
+                  the two rows carry identical numbers, and unlabelled at
+                  near-identical sizes they read as one row printed twice. */}
+              <div className="dis-round-tally">
+                <div className="muted">This round</div>
+                <div className="dis-scorerow">
+                  <span>{nameOf(mySeat)} <b>{res.scores[mySeat]}</b></span>
+                  <span>{nameOf(oppSeat)} <b>{res.scores[oppSeat]}</b></span>
+                </div>
               </div>
               {/* ...and what that did to the match. The round's number on its
                   own is only half the story once there is a target: being set
@@ -2391,7 +2417,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       ? `Match to ${res.match_target}`
                       : `Match to ${res.match_target} · after round ${res.round}`}
                   </div>
-                  <div className="dis-scorerow" style={{ gap: "1.5rem", fontSize: "1.2rem" }}>
+                  <div className="dis-scorerow dis-match-total">
                     <span>{nameOf(mySeat)} <b>{res.match_scores[mySeat]}</b></span>
                     <span>{nameOf(oppSeat)} <b>{res.match_scores[oppSeat]}</b></span>
                   </div>

@@ -113,6 +113,9 @@
      small impression in the felt, not a button. */
   .dis .dis-card.ghost { transform: scale(0.66); }
   .dis .dis-valgrid { grid-template-columns: repeat(5, 1fr); }
+  /* Thumb-sized end-of-round actions — Next round / Back to lobby measured
+     ~42px, just under the 44px touch guideline. */
+  .dis .dis-result .btn { min-height: 44px; }
   /* While BIDDING the board is exactly the viewport and the ladder takes
      whatever is left, scrolling inside itself. A viewport-relative cap cannot
      do this: the rest of the panel (the standing bid, the collision list, the
@@ -1145,6 +1148,28 @@
 /* The ghost secondary (Back to lobby) needs the same felt-visible border the
    auction's Pass got — the theme's default hairline vanishes on the table. */
 .dis-result .btn-ghost { border-color: rgba(255, 255, 255, 0.22); color: var(--text); }
+/* The narration must not strand a single word on its own centered line — a
+   sentence sized for the rail wraps, and `balance` splits it evenly instead
+   of leaving "short" alone under it. Progressive: a browser without it just
+   keeps the old wrap. */
+.dis-result > .muted, .dis-result .dis-maths { text-wrap: balance; }
+/* The suit glyph in "bid 4♠" needs air against the numeral, and the felt
+   rim that earns its keep on the dark board is too loud on the panel's lit
+   surface — one soft ring, not three. */
+.dis-result .dis-suit-r, .dis-result .dis-suit-b {
+  margin-left: 0.09em;
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.85), 0 0 2px rgba(255, 255, 255, 0.45);
+}
+/* THIS ROUND vs the MATCH: labelled in the section-header voice and a step
+   smaller than the match total, because in round 1 the two rows carry the
+   same numbers and read as an accidental duplicate otherwise. */
+.dis-round-tally { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.dis-round-tally > .muted:first-child {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.1em; color: rgba(216, 183, 104, 0.8);
+}
+.dis-round-tally .dis-scorerow { gap: 1.5rem; font-size: 1.02rem; justify-content: center; }
+.dis-match .dis-match-total { gap: 1.5rem; font-size: 1.35rem; }
 .dis-maths { font-size: 0.85rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 /* THE ROUND'S TWO CURRENCIES, colour-keyed between the sentence and the
