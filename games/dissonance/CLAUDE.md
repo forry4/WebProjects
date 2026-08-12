@@ -1473,9 +1473,20 @@ Four things there are load-bearing and were each paid for:
   thirteen tricks instead of a five-row window.
 
 **The auction and the round-end report sit BESIDE the cards** (≥1200px), in a
-17–24rem rail inside `.dis-table` — the seats auto-place down column 1, the panel
+rail inside `.dis-table` — the seats auto-place down column 1, the panel
 is pinned to column 2 spanning the explicit grid, and `.dis-3seat` is the only
-thing that has to know the row count. They used to be a row *between* the seats,
+thing that has to know the row count. **The rail is EXACTLY 17rem in every
+railed phase (2026-08-12), the playside's width — not its original
+minmax(17rem, 24rem)**: the card-width budget subtracts one rail width, so a
+rail that could grow let the height budget size cards wider than their column
+and the hand wrapped 5+2 at 1366×768 — and a per-phase rail width would break
+the cards-identical-across-phases property below whenever width binds. The
+panel's innards adapt to the column instead (skat's ladder at five columns
+with the PANEL as the single scroller — a nested ladder scroller half-clipped
+its own last row; the "would need" caption on its own line so six chips fit
+one centered row; the level grid is centered FLEX at fifth-width keys, because
+a responder's short legal set hugged the left edge of a 5-column grid beside
+dead tracks, and `screens.mjs` asserts the fifth-width form). They used to be a row *between* the seats,
 which cost twice: the card budget paid for them (`--dis-rows: 4` against a `30rem`
 reserve, versus play's 5 against 17.5rem), so **the board visibly redrew smaller
 for the auction and again for the report** — at the one moment you want to

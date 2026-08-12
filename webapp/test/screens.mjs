@@ -2853,21 +2853,29 @@ try {
 				const r = e.getBoundingClientRect();
 				return { x: Math.round(r.x), w: Math.round(r.width) }; };
 			const grid = document.querySelector(".dis-bidgrid");
+			const btn = grid ? grid.querySelector("button") : null;
 			const card = document.querySelector(".dis-seat .dis-card");
 			return {
 				levels: [...document.querySelectorAll(".dis-bidgrid button")].map((b) => +b.textContent),
-				cols: grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : null,
+				btnW: btn ? btn.getBoundingClientRect().width : 0,
+				gridW: grid ? grid.getBoundingClientRect().width : 0,
+				gap: grid ? parseFloat(getComputedStyle(grid).columnGap) || 0 : 0,
 				seat: x(".dis-seat"), panel: x(".dis-auction"),
 				cardW: card ? Math.round(card.getBoundingClientRect().width) : 0,
 			};
 		});
 		// WHO OPENS IS RANDOM (seats shuffle at the deal), so the full 1..10 is
 		// only on screen when this seat opens; either way nothing above the cap
-		// may be offered, and the grid's width is the same in both cases.
+		// may be offered, and the keys are the same width in both cases.
 		check("no bid above the mode's cap is ever offered",
 			auc.levels.length > 0 && Math.max(...auc.levels) <= 10, JSON.stringify(auc));
-		check("...and the ladder is five wide, so ten rungs are two rows",
-			auc.cols === 5, JSON.stringify(auc));
+		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a
+		// 5-column grid — a responder's short legal set centers instead of
+		// hugging the left edge beside dead tracks. Fifth-width keys are what
+		// still make a full 1..10 ladder land as two rows of five.
+		check("...and the keys are fifth-width, so a full ladder is two rows of five",
+			auc.btnW > 0 && Math.abs(auc.btnW - (auc.gridW - 4 * auc.gap) / 5) <= 1.5,
+			JSON.stringify(auc));
 		check("the auction panel sits beside the cards, not between the seats",
 			!!auc.panel && !!auc.seat && auc.panel.x >= auc.seat.x + auc.seat.w - 1,
 			JSON.stringify(auc));
