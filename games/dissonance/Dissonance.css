@@ -157,6 +157,13 @@
   .dis .dis-main > .dis-table,
   .dis .dis-main > .dis-side-info,
   .dis .dis-main > .dis-side-match { grid-column: auto; grid-row: auto; }
+  /* The MATCH — the standing the whole game is played to — stacks right
+     under the felt on a phone, ahead of the round-detail panels. Visual
+     order only; DOM (and screen-reader) order is unchanged. */
+  .dis .dis-main > .dis-side-match { order: 1; }
+  .dis .dis-main > .dis-side-info { order: 2; }
+  /* The bidding log's suit glyphs at full phone legibility. */
+  .dis .dis-p-contract .dis-bidlog { font-size: 0.8rem; }
 }
 
 /* ── cards ──────────────────────────────────────────────────────────────── */
