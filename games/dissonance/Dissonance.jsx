@@ -215,9 +215,10 @@ function DoubleWorth({ res, nameOf }) {
 
 /** The classic/minor round's arithmetic, spelled out and never simplified.
  *
- *  Deliberately NOT reduced to an intermediate ("4 × 4 = 16 + 3 = 19"): the
- *  reader wants to see the contract they bought and the points they took as
- *  separate, recognisable terms, so the shape stays `(N × N) + P = X` — the
+ *  Deliberately NOT reduced to an intermediate ("4 × 4 + 10 = 26 + 3 = 29"):
+ *  the reader wants to see the contract they bought, the flat stake riding on
+ *  it, and the points they took as separate, recognisable terms, so the shape
+ *  stays `(N × N + 10) + P = X` — the
  *  "+ 0" of a contract brought home exactly included, because a formula that
  *  changes shape with its values is one the eye has to re-parse every round.
  *
@@ -232,24 +233,33 @@ function ResultMaths({ res, nameOf }) {
       flat <Score>{res.null_value}</Score> to {nameOf(res.declarer)}
     </div>;
   }
+  const dbl = res.doubled ? 2 : 1;
   if (res.made) {
     const rate = res.over_bonus ?? 1;
+    // The flat stake, read OFF THE ROW: `make_value` is the whole (doubled)
+    // base the engine paid, so the spelled-out terms provably reach the total
+    // whatever the stake is priced at — the client never guesses a 10.
+    const stake = (res.make_value ?? dbl * lvl * lvl) / dbl - lvl * lvl;
     return <div className="dis-maths">
-      (<Lvl>{lvl}</Lvl> × <Lvl>{lvl}</Lvl>{res.doubled ? " × 2" : ""}) +{" "}
+      (<Lvl>{lvl}</Lvl> × <Lvl>{lvl}</Lvl>{stake ? ` + ${stake}` : ""})
+      {res.doubled ? " × 2" : ""} +{" "}
       {rate > 1
         ? <>({rate} × <Pts>{res.over}</Pts>)</>
         : <Pts>{res.over}</Pts>}
       {" = "}<Score>{res.scores[res.declarer]}</Score> to {nameOf(res.declarer)}
     </div>;
   }
-  // Set: the base is the level (doubled, twice it), then the shortfall charge.
-  // Undoubled that is a flat rate times the points missed; doubled it RAMPS,
-  // so the terms are spelled out rather than faked as a product.
+  // Set: the base is the level plus the stake (doubled, twice it), then the
+  // shortfall charge. Undoubled that is a flat rate times the points missed;
+  // doubled it RAMPS, so the terms are spelled out rather than faked as a
+  // product. The stake comes off the row like the make side's.
   const ramp = res.ramp || 0;
   const flat = res.short_rate ?? 4;
   const s = res.short || 0;
+  const stakeS = (res.set_base ?? dbl * lvl) / dbl - lvl;
+  const base = stakeS ? <>(<Lvl>{lvl}</Lvl> + {stakeS})</> : <Lvl>{lvl}</Lvl>;
   return <div className="dis-maths">
-    {res.doubled ? <>(<Lvl>{lvl}</Lvl> × 2)</> : <Lvl>{lvl}</Lvl>} + (
+    {res.doubled ? <>{base} × 2</> : base} + (
     {ramp
       ? Array.from({ length: s }, (_, i) => flat + ramp * (i + 1)).join(" + ")
       : <>{flat} × <Pts>{s}</Pts></>}
@@ -504,7 +514,7 @@ function TrickHistory({ game, nameOf }) {
   );
 }
 
-function ContractChip({ game, nameOf, sharpBonus }) {
+function ContractChip({ game, nameOf, sharpBonus, flatMake = 0 }) {
   const a = game.auction || {};
   if (!a.level) return null;
   const ct = game.contract || {};
@@ -534,7 +544,9 @@ function ContractChip({ game, nameOf, sharpBonus }) {
           phone, and the doubled stake is the one number the rest of the round
           is played against. */}
       {game.doubled && (
-        <span className="dis-chip-mult dbl">Double · {2 * a.level * a.level}</span>
+        <span className="dis-chip-mult dbl">
+          Double · {2 * (a.level * a.level + flatMake)}
+        </span>
       )}
     </div>
   );
@@ -1212,6 +1224,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const nullMake = isMinorRoom
     ? (catalog?.minor_null_make ?? 6)
     : (catalog?.null_make ?? NULL_MAKE);
+  // THE FLAT STAKE (2026-08-11): ±10 riding on classic's make and set bases,
+  // read off the catalog's per-mode dicts like the rates above so a re-priced
+  // stake needs no client change. The fallback mirrors the shipped rule.
+  const flatMake = catalog?.flat_make_bonus?.[game?.mode]
+    ?? (game?.mode === "classic" ? 10 : 0);
+  const flatSet = catalog?.flat_set_penalty?.[game?.mode]
+    ?? (game?.mode === "classic" ? 10 : 0);
   useEffect(() => {
     fetch(`${OT_HTTP}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
@@ -2169,11 +2188,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       cannot weigh that from the word "doubles". */}
                   <div className="muted dis-hint">
                     If {nameOf(declSeat)} makes it they score{" "}
-                    <b>{2 * game.auction.level * game.auction.level}</b> instead of{" "}
-                    {game.auction.level * game.auction.level}. If they fall short you
-                    score <b>{2 * game.auction.level}</b> plus a RISING amount per
+                    <b>{2 * (game.auction.level * game.auction.level + flatMake)}</b>{" "}
+                    instead of {game.auction.level * game.auction.level + flatMake}.
+                    If they fall short you score{" "}
+                    <b>{2 * (game.auction.level + flatSet)}</b> plus a RISING amount per
                     point — <b>{[1, 2, 3].map((i) => shortRate + i).join(", then ")}</b>{" "}
-                    — instead of {game.auction.level} plus a flat {shortRate}.
+                    — instead of {game.auction.level + flatSet} plus a flat {shortRate}.
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
@@ -2500,7 +2520,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   })()}
                 </div>
                 <ContractChip game={game} nameOf={nameOf}
-                  sharpBonus={catalog?.sharp_bonus ?? 2} />
+                  sharpBonus={catalog?.sharp_bonus ?? 2} flatMake={flatMake} />
                 <div className="dis-turnbar">
                   {game.phase === "over" ? <span className="muted">Last trick</span>
                     : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
@@ -2660,7 +2680,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 </div>
                 <div className="dis-scorerow">
                   <span>Makes it for</span>
-                  <b>{(game.doubled ? 2 : 1) * game.auction.level * game.auction.level}</b>
+                  <b>{(game.doubled ? 2 : 1)
+                    * (game.auction.level * game.auction.level + flatMake)}</b>
                 </div>
                 {game.doubled && (
                   <div className="dis-scorerow">
@@ -2668,7 +2689,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     {/* The catalog's rate plus the rising ramp, not a literal —
                         the old "+ 4 each" here predated BOTH the 4 -> 5 move
                         and the ramp, and minor's rate is 2. */}
-                    <b>{2 * game.auction.level} + {shortRate + 1}, {shortRate + 2}…</b>
+                    <b>{2 * (game.auction.level + flatSet)} + {shortRate + 1},{" "}
+                      {shortRate + 2}…</b>
                   </div>
                 )}
               </>

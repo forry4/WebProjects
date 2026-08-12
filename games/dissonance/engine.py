@@ -241,22 +241,35 @@ DOUBLE_RAMP = 1
 #:    on flat payouts -- so it is the number most worth re-running in `skatlab`.
 OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 
-#: EXPERIMENT KNOB -- a flat bonus on every MADE classic/minor contract's base
-#: (see `_terms_for`). 0 is the shipped rule; the auction lab sets it to probe
-#: "reward declaring at all" against the measured flat-+1 failure. Not a
-#: shipped setting, not in /catalog, not read anywhere but `_terms_for`.
-FLAT_MAKE_BONUS = 0
-#: ...and the level it starts applying at (default 1 = every made contract).
-#: Gating it OFF the floor (min level 2) is the differentiation experiment: a
-#: weak hand today opens 1 because nothing distinguishes 1 from 2 for it, and
-#: a bonus reachable one rung up is exactly such a distinction.
+#: THE FLAT STAKE (shipped 2026-08-11, classic only) -- +10 on every made
+#: contract's base, +10 to the defender's base when it is missed (never on
+#: Null, which overrides a set). Symmetric make/set stakes change the rider on
+#: holding a contract from +F*p to F*(2p-1) -- positive only past a 50% make --
+#: which is the difference between "grab any contract" and "hold what you
+#: believe in", and it is why this shipped where the make-only ladder did not.
+#:
+#: MEASURED (400 paired deals per arm, Expert-vs-Expert k=8, DD-resolved):
+#: the make-only doses (+4/+6/+10, gated and not) were a pure aggression dial
+#: -- every one raised sacrifices and pushed the settled pile HIGHER (mean
+#: 4.59 -> 5.22 at +10) while the make rate bled 58.5% -> 39.2%. The
+#: symmetric +-10 held the economy still (make 59.8% vs 58.5%, mean settled
+#: 4.58 vs 4.59, Doubles flat) and moved only the SHAPE: 2-opens 5.8% ->
+#: 14.2%, the 1->3 funnel 65% -> 55%, the settled level-4 crater filled
+#: (8.2% -> 15.5%), made-at-level-6/7 up 9-12pts. Contracts are held on
+#: belief, not grabbed.
+#:
+#: Per-mode like `MATCH_TARGET`, and deliberately 0 outside classic: minor's
+#: whole economy is ~a quarter of classic's (a flat 10 would drown it -- it
+#: needs its own calibrated dose, if any), dummy's is unmeasured, and skat's
+#: branch never reads these. The auction lab overrides via DIS_FLAT_MAKE /
+#: DIS_FLAT_SET when it needs a different arm.
+FLAT_MAKE_BONUS = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
+#: ...and the level the make bonus starts applying at (1 = every made
+#: contract). Gating it off the floor was the differentiation experiment; it
+#: measured indistinguishable from ungated, because a weak hand's 1-open is a
+#: surrender, not a value bid -- no make-side price reaches it.
 FLAT_MAKE_MIN_LEVEL = 1
-#: ...and the set-side twin: a flat addition to what the DEFENDER scores when
-#: the contract is missed (never on Null, which overrides a set). Symmetric
-#: make/set stakes change the rider on holding a contract from +F*p to
-#: F*(2p-1) -- positive only past a 50% make -- which is the difference
-#: between "grab any contract" and "hold what you believe in".
-FLAT_SET_PENALTY = 0
+FLAT_SET_PENALTY = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
@@ -650,12 +663,18 @@ def max_level_for(mode: str) -> int:
 
 #: A game is a MATCH of rounds, played until one side reaches this.
 #:
-#: STILL A DICT though both modes now read 100, because the two score on
+#: STILL A DICT though classic and skat both read 100, because the two score on
 #: different scales and there is no reason they must agree: a classic round pays
-#: level^2 (1..144, flat 12 for Null), a skat one base x level x the
-#: announcements (2..60, flat 20). They happen to land on the same match length
-#: anyway -- MEASURED against the normal-tier bot on the colour-priced bases,
-#: classic is a median of 10 rounds (range 6-16) and skat 11 (6-18).
+#: level^2 + the flat 10 stake (11..154, flat 12 for Null), a skat one base x
+#: level x the announcements (2..60, flat 20). CLASSIC's 100 was KEPT when the
+#: +-10 flat stake shipped (2026-08-11), as a deliberate SHORTENING: the stake
+#: adds ~10 to every settled round's transfer, so the same target buys fewer,
+#: weightier rounds -- MEASURED against the normal-tier bot in full self-play
+#: matches, median 6 rounds (p10-p90 4-8) against the old scoring's median 10
+#: (7-13). 150 would have preserved the old length (median 9) and 200 would
+#: have stretched it (median 13); both were measured and declined -- faster
+#: matches were the point. Skat is unchanged at 100 (median 11 rounds, 6-18)
+#: -- the stake never touches its branch.
 #:
 #: Re-measure if the bases or the payoff arithmetic move: the target is a
 #: product decision, but the round count it buys is not a guess. Skat was a
@@ -1917,18 +1936,15 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # per-point set rate (MINOR_SHORT_PENALTY).
     null = MINOR_NULL_MAKE if mode == "minor" else NULL_MAKE
     short = MINOR_SHORT_PENALTY if mode == "minor" else SHORT_PENALTY
-    # EXPERIMENT KNOB, default 0 = the shipped rule, byte-identical. A flat
-    # bonus added to every MADE contract's base (inside the Double, like the
-    # rest of the make; never on Null, which is a consolation and not a made
-    # contract; never on the set side). The terms are pure data all the way to
-    # the Rust search and the DD resolver, so setting this re-prices the
-    # Expert tier's whole auction with no other change -- which is exactly
-    # what makes it measurable. The 28-card campaign measured a flat +1
-    # RAISING the floor cluster (43.3% -> 46.4%, it is proportionally biggest
-    # on the smallest contracts); this knob exists to re-ask that under the
-    # current game and searching bidders rather than assume it still holds.
-    make = level * level + (FLAT_MAKE_BONUS if level >= FLAT_MAKE_MIN_LEVEL else 0)
-    setb = level + FLAT_SET_PENALTY
+    # THE FLAT STAKE (see the constants for the measurement): +10 on the made
+    # base and +10 on the set base in classic, 0 elsewhere. Inside the Double
+    # like the rest of both bases, never on Null (a consolation, not a made
+    # contract -- and fatter sets make ducking into it a genuinely bigger
+    # escape, which is priced everywhere because these terms are pure data all
+    # the way to the Rust search and the DD resolver).
+    flat_make = FLAT_MAKE_BONUS.get(mode, 0)
+    make = level * level + (flat_make if level >= FLAT_MAKE_MIN_LEVEL else 0)
+    setb = level + FLAT_SET_PENALTY.get(mode, 0)
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,

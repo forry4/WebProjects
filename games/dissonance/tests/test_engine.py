@@ -306,27 +306,34 @@ def test_the_auction_survives_a_json_round_trip():
 # --- contract scoring ------------------------------------------------------
 
 
+# The flat +-10 stake (2026-08-11) rides on BOTH bases, so it appears on both
+# sides of this table. Written against the constants like the rates, so the
+# next re-pricing lands here as one edit rather than ten.
+_FM = E.FLAT_MAKE_BONUS["classic"]
+_FS = E.FLAT_SET_PENALTY["classic"]
+
+
 @pytest.mark.parametrize("level,dpts,expect", [
-    (5, 5, (25, 0)),
-    # Past the target, at 1 a point. Exactly on it is still the bare N^2, which
-    # is the boundary the bonus must not move.
-    (5, 9, (25 + 4, 0)),
-    (5, 6, (25 + 1, 0)),
-    # Set pays the defender N + SHORT_PENALTY a point short. Two things have
-    # moved here: the base went N-1 -> N (2026-08-07, because at the floor the
-    # old base contributed nothing, so the cheapest contract paid its breaker by
-    # the margin alone), and the rate went 4 -> 5 (2026-08-08, to price the
-    # sacrifice bidding that pricing the pass unlocked). Written against the
-    # CONSTANT so the next move lands here as one edit rather than four.
-    (5, 4, (0, 5 + E.SHORT_PENALTY * 1)),
-    (5, 3, (0, 5 + E.SHORT_PENALTY * 2)),
-    (5, 0, (0, 5 + E.SHORT_PENALTY * 5)),
-    (1, 1, (1, 0)),
-    (1, 0, (0, 1 + E.SHORT_PENALTY * 1)),
-    (8, 8, (64, 0)),
+    (5, 5, (25 + _FM, 0)),
+    # Past the target, at 1 a point. Exactly on it is still the bare base,
+    # which is the boundary the bonus must not move.
+    (5, 9, (25 + _FM + 4, 0)),
+    (5, 6, (25 + _FM + 1, 0)),
+    # Set pays the defender N + the stake + SHORT_PENALTY a point short. Three
+    # things have moved here: the base went N-1 -> N (2026-08-07, because at
+    # the floor the old base contributed nothing, so the cheapest contract paid
+    # its breaker by the margin alone), the rate went 4 -> 5 (2026-08-08, to
+    # price the sacrifice bidding that pricing the pass unlocked), and the
+    # +-10 stake landed on both bases (2026-08-11).
+    (5, 4, (0, 5 + _FS + E.SHORT_PENALTY * 1)),
+    (5, 3, (0, 5 + _FS + E.SHORT_PENALTY * 2)),
+    (5, 0, (0, 5 + _FS + E.SHORT_PENALTY * 5)),
+    (1, 1, (1 + _FM, 0)),
+    (1, 0, (0, 1 + _FS + E.SHORT_PENALTY * 1)),
+    (8, 8, (64 + _FM, 0)),
     # The declarer's ceiling is the six +2 tricks, so this is the largest
-    # overtrick bonus the game can pay -- and at level 1 it is 12x the contract.
-    (1, 12, (1 + 11, 0)),
+    # overtrick bonus the game can pay.
+    (1, 12, (1 + _FM + 11, 0)),
 ])
 def test_contract_score_table(level, dpts, expect):
     assert E.contract_score(level, dpts) == expect
@@ -1085,15 +1092,20 @@ def _row_reproduces_its_score(res) -> bool:
     if res["null"]:
         printed, winner = res["null_value"], decl
     elif res["made"]:
-        # (N x N [x2]) + rate x over
-        base = res["level"] * res["level"] * (2 if res.get("doubled") else 1)
+        # (N x N + stake) [x2] + rate x over -- the panel reads the whole
+        # (doubled) base off the row's `make_value` and derives the stake from
+        # it, so the spelled-out terms reach the total whatever the flat
+        # stake is priced at. Mirror that read, not a recomputation of it.
+        base = res.get("make_value",
+                       res["level"] * res["level"] * (2 if res.get("doubled") else 1))
         if res["mode"] == "skat":
             base = res["stake"]
         printed = base + res.get("over_bonus", 0) * res["over"]
         winner = decl
     else:
         base = (res["stake"] if res["mode"] == "skat"
-                else res["level"] * (2 if res.get("doubled") else 1))
+                else res.get("set_base",
+                             res["level"] * (2 if res.get("doubled") else 1)))
         ramp, flat, s = res.get("ramp", 0), res["short_rate"], res["short"]
         tail = (sum(flat + ramp * (i + 1) for i in range(s)) if ramp
                 else flat * s)

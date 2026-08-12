@@ -1264,6 +1264,12 @@ async def catalog():
         "minor_null_make": engine.MINOR_NULL_MAKE,
         "minor_short_penalty": engine.MINOR_SHORT_PENALTY,
         "match_targets": dict(engine.MATCH_TARGET),
+        # THE FLAT STAKE (2026-08-11): +-10 riding on classic's make and set
+        # bases. Per-mode dicts like the targets, served so the client's
+        # mid-round pricing (the Double prompt, the contract panel, the chip)
+        # is the engine's own arithmetic and not a hardcoded 10.
+        "flat_make_bonus": dict(engine.FLAT_MAKE_BONUS),
+        "flat_set_penalty": dict(engine.FLAT_SET_PENALTY),
     }
 
 

@@ -17,7 +17,7 @@ export default function DissonanceRules() {
 
 			<RulesFacts items={[
 				{ k: "Players", v: "2 (friend or bot)" },
-				{ k: "Length", v: "A few minutes a round; a match is about 10 of them" },
+				{ k: "Length", v: "A few minutes a round; a classic match is about 6 of them" },
 				{ k: "You win by", v: "Being first to 100 points (25 in Minor mode)" },
 			]} />
 
@@ -120,10 +120,10 @@ export default function DissonanceRules() {
 					It changes both ends of the bet, and deliberately not by the same amount:
 				</p>
 				<ul>
-					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × N × N instead
-						of N × N, overtricks included.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2N</b>, and every point they
-						finish below N costs them <b>more than the last</b> — 6, then 7, then
+					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × (N × N + 10)
+						instead of N × N + 10, overtricks included.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2 × (N + 10)</b>, and every point
+						they finish below N costs them <b>more than the last</b> — 6, then 7, then
 						8, then 9 — instead of a flat 5 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 12, doubled or not.</li>
@@ -132,13 +132,13 @@ export default function DissonanceRules() {
 					That rising scale is the whole point. It barely touches a declarer who
 					misses by one — which is what most failed contracts do — and it bites hard
 					on one who finishes miles short, which is what a <b>sacrifice</b> looks
-					like. A level-6 contract one short pays you 18; four short, 42.
+					like. A level-6 contract one short pays you 38; four short, 62.
 				</p>
 				<RulesTip>
 					<p>
 						<b>What it's for.</b> When you're about to make a big contract, your
 						opponent's best move is often to <b>outbid you with nothing</b> — 6♣ over
-						your 5♠ — because being set costs them less than letting you score 25.
+						your 5♠ — because being set costs them less than letting you score 35.
 						Double is how you charge them properly for that. Note the escape,
 						though: a declarer who hasn't yet won a +2 trick can duck every one of
 						them and take Null instead, and Double doesn't touch Null. So the bet
@@ -261,7 +261,8 @@ export default function DissonanceRules() {
 					<li>Scoring keeps classic's shape at the smaller scale: make{" "}
 						<b>N²</b> plus 1 per overtrick, fall short and your opponent scores{" "}
 						<b>N plus 2 per point short</b> — cheaper per point than classic's 5,
-						because the payoffs are about a quarter the size.</li>
+						because the payoffs are about a quarter the size. Classic's flat ±10
+						stake doesn't apply here — at this scale it would drown the contract.</li>
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
 						ceiling, the same relationship classic's 12 has.</li>
 					<li>The Double works unchanged, ramp and all. The <b>match plays to
@@ -344,15 +345,16 @@ export default function DissonanceRules() {
 				</p>
 				<ul>
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
-						declarer scores <b>N × N</b>, plus <b>1 for every trick point past N</b>.
-						The defender scores nothing.</li>
-					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 5 for every
-						point the declarer finished below N</b>.</li>
+						declarer scores <b>N × N, plus a flat 10</b>, plus <b>1 for every trick
+						point past N</b>. The defender scores nothing.</li>
+					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 10, plus 5 for
+						every point the declarer finished below N</b>.</li>
 				</ul>
 				<p>
-					So a high contract is worth a great deal and costs a great deal. Bidding 3 and
-					making it scores 9; bidding 3 and finishing on 7 scores 13; bidding 3 and
-					finishing on 1 gives your opponent 13.
+					The flat 10 rides on both ends — every contract carries the same stake on top
+					of its level, win or lose, so a contract is only worth holding if you believe
+					in it. Bidding 3 and making it scores 19; bidding 3 and finishing on 7 scores
+					23; bidding 3 and finishing on 1 gives your opponent 23.
 				</p>
 				<RulesTip>
 					<p>
@@ -367,7 +369,8 @@ export default function DissonanceRules() {
 				<p>
 					<b>A game is a match, not a deal.</b> Rounds are scored onto a running total
 					and the first player to <b>100</b> wins, in either mode. That's usually about
-					ten rounds. One deal can
+					six rounds in classic — the flat stake makes every round weighty — and about
+					ten in Skat mode. One deal can
 					simply be bad; over a match the deals even out and what's left is your bidding.
 					Whoever opens the bidding alternates every round — opening means naming a
 					contract before you know anything about their hand, and in classic mode you

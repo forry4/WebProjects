@@ -31,7 +31,10 @@ def _contracts():
     """Real settled contracts, not hand-written term dicts — so the fixture
     covers the levels, stakes and multiplier stacks the game can actually
     produce rather than the ones someone remembered to type."""
-    for level in range(E.MIN_LEVEL, E.MAX_LEVEL + 1):
+    # ...to the LADDER'S top, not MAX_LEVEL: classic caps at 10, and a loop to
+    # 12 dies on an unbiddable opening (found 2026-08-11, regenerating for the
+    # flat stake -- the fixture had sat committed since the cap landed).
+    for level in range(E.MIN_LEVEL, E.max_level_for("classic") + 1):
         for denom in range(E.NOTRUMP + 1):
             g = E.new_game(["a", "b"], random.Random(level * 8 + denom), opener=0)
             E.apply_bid(g, 0, level, denom)

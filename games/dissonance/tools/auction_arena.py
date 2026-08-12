@@ -60,20 +60,27 @@ import sys
 
 from games.dissonance import engine as E, bot as B
 
-# EXPERIMENT: a flat bonus on every made classic/minor contract, threaded
-# through `engine.FLAT_MAKE_BONUS` (terms are data end to end, so the Expert
-# search, the Double pricing and the DD resolver all see it with no further
-# plumbing). Env rather than argv because the shard windows already use the
-# positional slots, and a shard must inherit the arm it belongs to.
-E.FLAT_MAKE_BONUS = int(os.environ.get("DIS_FLAT_MAKE", "0"))
-E.FLAT_MAKE_MIN_LEVEL = int(os.environ.get("DIS_FLAT_MIN", "1"))
-E.FLAT_SET_PENALTY = int(os.environ.get("DIS_FLAT_SET", "0"))
-
 # Absolute, because a relative forward-slash path never reaches CreateProcess
 # intact on Windows; harmless elsewhere.
 BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve"
                       + (".exe" if os.name == "nt" else ""))
 MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
+
+# EXPERIMENT ARM: override the flat stake for THIS MODE, threaded through
+# `engine.FLAT_MAKE_BONUS`/`FLAT_SET_PENALTY` (terms are data end to end, so
+# the Expert search, the Double pricing and the DD resolver all see it with no
+# further plumbing). Env rather than argv because the shard windows already
+# use the positional slots, and a shard must inherit the arm it belongs to.
+# ONLY when the env var is present: the +-10 classic stake SHIPPED 2026-08-11,
+# so the engine default is no longer 0, and a knob that wrote unconditionally
+# would silently measure a rule the room stopped using. `DIS_FLAT_MAKE=0
+# DIS_FLAT_SET=0` is how the lab asks for the pre-ship baseline now.
+if "DIS_FLAT_MAKE" in os.environ:
+    E.FLAT_MAKE_BONUS[MODE] = int(os.environ["DIS_FLAT_MAKE"])
+if "DIS_FLAT_MIN" in os.environ:
+    E.FLAT_MAKE_MIN_LEVEL = int(os.environ["DIS_FLAT_MIN"])
+if "DIS_FLAT_SET" in os.environ:
+    E.FLAT_SET_PENALTY[MODE] = int(os.environ["DIS_FLAT_SET"])
 #: `<k>` or `<kA>:<kB>` -- per-tier world counts, so a tier can be measured at
 #: the budget it would actually deploy with (Expert's 3s allowance buys k=8
 #: where Hard's latency target picked 3). The resolver ignores k entirely.
@@ -471,9 +478,9 @@ mu, se = _stat(pairs)
 print(f"\n{MODE} k={K} resolve={RESOLVE}: {TIER_A} - {TIER_B} = {mu:+.4f} +- {se:.4f} "
       f"payoff/round over {len(pairs)} paired deals"
       + (f" ({dropped} one-sided drops discarded)" if dropped else ""))
-if E.FLAT_MAKE_BONUS or E.FLAT_SET_PENALTY:
-    print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS}, FLAT_SET_PENALTY = {E.FLAT_SET_PENALTY}"
-          + (f" from level {E.FLAT_MAKE_MIN_LEVEL}" if E.FLAT_MAKE_MIN_LEVEL > 1 else ""))
+print(f"[ARM] FLAT_MAKE_BONUS = {E.FLAT_MAKE_BONUS.get(MODE, 0)}, "
+      f"FLAT_SET_PENALTY = {E.FLAT_SET_PENALTY.get(MODE, 0)}"
+      + (f" from level {E.FLAT_MAKE_MIN_LEVEL}" if E.FLAT_MAKE_MIN_LEVEL > 1 else ""))
 if diff_pairs:
     dmu, dse = _stat(diff_pairs)
     print(f"  differing auctions: {len(diff_pairs)}/{len(pairs)} deals, "

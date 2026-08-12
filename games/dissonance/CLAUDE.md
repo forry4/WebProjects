@@ -77,7 +77,11 @@ from the parity, never typed beside it).
 
 **The re-anchored prices, and why (all measured in
 `tools/minor_calibration.py`, bot self-play, 400-600 rounds/config):**
-* **make N² + 1/overtrick, set base N** — classic's shapes, unchanged.
+* **make N² + 1/overtrick, set base N** — classic's shapes, unchanged. NOT
+  the ±10 flat stake, though (2026-08-11): `FLAT_MAKE_BONUS`/`FLAT_SET_PENALTY`
+  are per-mode dicts reading 0 here, because a flat 10 on payoffs a quarter of
+  classic's size would drown the contract; if minor wants a stake it needs its
+  own calibrated dose.
 * **set rate 2, not classic's 5 (`MINOR_SHORT_PENALTY`)** — payoffs run about
   a quarter of classic's (ceiling 36 vs 144) while shortfalls keep the same
   magnitude (median ~2 in both sweeps), so the classic rate made the set the
@@ -740,8 +744,9 @@ never forced to. Winner leads next.
 
 **Scoring** (contract only; trick points are the yardstick *and* the margin —
 and in skat mode "trick points" means CARD points, per the section above):
-make → **N² + 1 per trick point past N**; set → defender scores
-**N + 4 × shortfall**. **NULL OVERRIDES A SET**: a declarer who won **no +2
+make → **N² + the flat 10 stake, + 1 per trick point past N**; set → defender
+scores **N + 10, + 5 × shortfall** (the ±10 stake — see its bullet below — is
+classic-only). **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **12** (skat: **20**) instead, whatever they
 declared. **Every round runs all thirteen tricks** — see the overtrick section.
 
@@ -785,6 +790,23 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `cmatch.rs`, `abench.rs`), and the two places that print the arithmetic to a
   human (the result panel's maths line, `rules.jsx`). Skat is untouched: its set
   base is the STAKE, so there was no N−1 in it to add to.
+* **the ±10 flat stake (2026-08-11, classic only)** — `FLAT_MAKE_BONUS` /
+  `FLAT_SET_PENALTY`, per-mode dicts; +10 on the made base AND +10 to the
+  defender on a set, inside the Double like the bases they ride. Symmetry is
+  the design: a make-only bonus adds `F·p(make)` to holding any contract (an
+  aggression dial — the measured +4/+6/+10 ladder monotonically raised
+  sacrifices, pushed settles HIGHER and bled the make rate to 39%), where the
+  symmetric stake adds `F·(2p−1)`, positive only past a 50% make — "hold what
+  you believe in". Measured at ±10 (400 paired deals, Expert-vs-Expert k=8,
+  DD-resolved): make rate 59.8% vs 58.5% baseline, mean settled 4.58 vs 4.59
+  (the economy stands still), while the SHAPE moved — 2-opens 5.8% → 14.2%,
+  the 1→3 funnel 65% → 55%, the settled level-4 crater 8.2% → 15.5%,
+  made-at-level 6/7 up 9–12pts. The lab overrides per arm via `DIS_FLAT_MAKE`/
+  `DIS_FLAT_SET` (env, only when present — the engine default is no longer 0).
+  Second copies that moved with it: `payoff.jsonl` (regenerated), `cmatch.rs`
+  `contract_for` / `abench.rs` (the bins that claim the shipped scoring),
+  `rules.jsx`, and the result panel now reads `make_value`/`set_base` OFF THE
+  ROW rather than recomputing N².
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
@@ -841,10 +863,19 @@ A `double` phase between the classic swap and trick 1, the DEFENDER to act.
 Skat keeps Kontra; classic gets this, and the two are deliberately different
 shapes. `g["doubled"]`, `classic_doubling`, `apply_double`.
 
-    made   N^2  ->  2 N^2      (the overtrick rate doubles with it)
-    set      N  ->  2N, and the shortfall RAMPS: 5, 6, 7, 8 a point
-                    (`DOUBLE_RAMP`) instead of a flat 4
-    Null    12  ->  12         (untouched, as skat's Kontra leaves its own)
+    made   N^2 + 10  ->  2 (N^2 + 10)   (the overtrick rate doubles with it;
+                                         the flat stake rides INSIDE both bases
+                                         since 2026-08-11)
+    set      N + 10  ->  2 (N + 10), and the shortfall RAMPS: 6, 7, 8 a point
+                         (`DOUBLE_RAMP`) instead of a flat 5
+    Null         12  ->  12             (untouched, as skat's Kontra leaves its own)
+
+**The ±10 stake re-priced this bet (2026-08-11), in the sacrifice's favour:**
+the doubled stake pays the defender 20 more on a set while the risk only grew
+10, so doubling a median sacrifice (4 short at level 6) moved from knife-edge
+(−0.13 EV) to genuinely paying (+14.3), and the break-even curve's top
+compressed 0.93 → 0.85. The tables below are the PRE-STAKE measurements that
+chose the ramp; their shape argument stands, their absolute EVs do not.
 
 **Kontra is symmetric and this is not**, which is the one thing to keep hold
 of: because a made contract doubles while a set one steps by N+1, DECLINING IS
@@ -979,21 +1010,23 @@ opponent's hand, **both** seats' OUTER pile bottoms, and the unshown talon.
 ## A game is a MATCH of rounds (2026-08-07)
 
 `MATCH_TARGET` — **100 in both modes**. A round is one deal; a game is rounds
-played onto a running total until one side reaches the target. Measured against
-the normal-tier bot: classic **median 10 rounds** (6–16), skat **median 11**
-(6–18). **Re-measure if the bases or the payoff arithmetic move** — the target
-is a product decision, but the round count it buys is not a guess, and skat was
-a median of 8 to the same 100 before its bases were re-priced by colour.
+played onto a running total until one side reaches the target. **Re-measure if
+the bases or the payoff arithmetic move** — the target is a product decision,
+but the round count it buys is not a guess, and skat was a median of 8 to the
+same 100 before its bases were re-priced by colour.
 
-**THOSE MEDIANS ARE NOW STALE and have not been re-run.** The overtrick bonus
-raises every made contract, so 100 buys FEWER rounds than the numbers above —
-by how much is unmeasured. It is a `skatlab` run, not a guess, and it is the
-same run the Null-cliff question below wants.
+**RE-MEASURED for the ±10 stake (2026-08-11, full normal-bot self-play
+matches):** classic at 100 is now **median 6 rounds** (p10–p90 4–8) against
+the pre-stake median 10 (7–13) — a deliberate shortening, decided on the
+numbers: 150 would have preserved the old length (median 9) and 200 stretched
+it (median 13); both were measured and declined. Skat's median 11 (6–18)
+predates the overtrick bonus and is still un-re-run — the stake never touches
+its branch, but the bonus does.
 
 Still a per-mode DICT though both read 100, because the modes score on different
-scales and nothing requires them to agree: a classic round pays level² (up to
-144, flat 12 for Null), a skat one base × level × the announcements (up to 60,
-flat 20). They land on the same match length regardless.
+scales and nothing requires them to agree: a classic round pays level² + the
+flat 10 stake (up to 154, flat 12 for Null), a skat one base × level × the
+announcements (up to 60, flat 20).
 
 **WHY:** one deal can simply be bad, and the auction is the only lever either
 player has against it. Over a match the deals average out and what is left is

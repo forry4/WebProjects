@@ -1026,13 +1026,13 @@ def test_a_contract_that_cannot_fail_plays_on_for_the_overtricks(mode):
 def _contract_of(res: dict, mode: str) -> tuple[int, int]:
     """(what the contract itself paid, the target it promised) from a result row.
 
-    Classic rows carry neither key by that name -- the level IS the target and
-    N^2 is the payout -- which is the one place the two modes' rows differ in
-    shape rather than only in value.
+    Classic's payout is the row's own `make_value` -- N^2 plus the flat stake,
+    doubling included -- and the level IS the target, which is the one place
+    the two modes' rows differ in shape rather than only in value.
     """
     if mode == "skat":
         return res["stake"], res["target"]
-    return res["level"] ** 2, res["level"]
+    return res["make_value"], res["level"]
 
 
 @pytest.mark.parametrize("mode", ["classic", "skat"])
