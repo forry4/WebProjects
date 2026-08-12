@@ -310,9 +310,22 @@
      card reads as sitting ON the felt rather than printed on it. */
   background: linear-gradient(155deg, #fffdf5 0%, #faf7ec 55%, #f0ecdf 100%);
   color: #17171a;
-  border: 1px solid rgba(20, 16, 8, 0.42);
+  /* ONE EDGE, NOT TWO. The card used to carry a 1px `border` AND an
+     `inset 0 0 0 1px` white ring. A border is drawn on the border box; an
+     inset shadow is drawn on the PADDING box — a curve 1px tighter — so at
+     every corner two differently-curved hairlines were antialiased over each
+     other, and the corner came out thick and muddy. Removing `overflow` (the
+     previous attempt) fixed the clip but left the two rings, which is why the
+     corners were still wrong.
+     Now: the printed edge is an OUTSET spread shadow, which follows the
+     border-radius exactly, and the paper highlight is a top edge only —
+     `inset 0 1px 0`, which never reaches a corner. Real card stock is lit
+     from above anyway; the full ring was always doing the job of a bevel it
+     did not have. */
+  border: 0;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    0 0 0 1px rgba(20, 16, 8, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 4px 10px rgba(0, 0, 0, 0.28);
   display: flex; flex-direction: column;
@@ -327,12 +340,15 @@
      reported. The clip existed for ONE child (the centre watermark, which
      would otherwise square off past the radius), so that child does its own
      clipping now and the card's corners are drawn by the border alone. */
-  /* SNAP ON THE WAY UP, SETTLE ON THE WAY DOWN. 0.12s ease in both directions
-     read as lag on the thing a pointer is doing RIGHT NOW: the lift is
-     feedback and has to feel instant, while the drop is just the card
-     returning and can take its time. `ease-out` at 60ms is past half its
-     travel in the first frame. */
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  /* TRANSFORM ONLY, AND FAST. Animating `box-shadow` was the real lag: a
+     shadow is a paint property, so every frame of the lift repainted a
+     four-layer shadow around a card that can be 180px wide — on a hand of
+     seven, entering and leaving cards in a sweep, that is genuinely dropped
+     frames rather than a matter of taste. Transform is composited: the layer
+     moves, nothing repaints. The shadow still CHANGES on hover, it just
+     changes at once instead of being tweened. 90ms ease-out is past half its
+     travel in the first frame at 60Hz. */
+  transition: transform 0.09s ease-out;
 }
 /* CORNERS UNDER TRANSFORM. `overflow: hidden` + a scaled `border-radius` +
    an inset ring is exactly the combination Chrome re-rasterizes badly while
@@ -407,10 +423,11 @@
      raised and most looked at, so a lifted card read as flat and dark-cornered
      against the ones still in the hand. */
   .dis-card.play:hover {
-    transition: transform 0.06s ease-out, box-shadow 0.06s ease-out;
+    transition: transform 0.06s ease-out;
     transform: translateY(-8px);
     box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+      0 0 0 1px rgba(20, 16, 8, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
       0 2px 4px rgba(0, 0, 0, 0.32),
       0 10px 20px rgba(0, 0, 0, 0.42);
   }
@@ -424,7 +441,8 @@
     transition: none;
     transform: translateY(-2px) scale(0.985);
     box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+      0 0 0 1px rgba(20, 16, 8, 0.42),
+      inset 0 1px 0 rgba(255, 255, 255, 0.75),
       0 1px 2px rgba(0, 0, 0, 0.4),
       0 3px 7px rgba(0, 0, 0, 0.34);
   }
@@ -450,7 +468,7 @@
   box-shadow:
     0 0 0 2px var(--accent),
     0 0 10px rgba(111, 224, 160, 0.35),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 4px 10px rgba(0, 0, 0, 0.28);
 }
@@ -637,8 +655,12 @@
    light source. */
 .dis-pilewrap .dis-card { position: relative; z-index: 1; }
 .dis-pilewrap > .dis-card:not(.ghost):not(.back) {
+  /* The base stack PLUS the seam — and it has to restate the base, since a
+     box-shadow list replaces rather than extends. Kept in step with
+     `.dis-card` by hand; the edge ring is the first entry in both. */
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.65),
+    0 0 0 1px rgba(20, 16, 8, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 4px 10px rgba(0, 0, 0, 0.28),
     4px -4px 7px rgba(0, 0, 0, 0.34);
