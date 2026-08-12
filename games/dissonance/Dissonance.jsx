@@ -204,12 +204,12 @@ function DoubleWorth({ res, nameOf }) {
   // is the live case, and it has its own line) -- say so rather than
   // announcing a difference of zero as a result.
   if (!res.undoubled || got === would) {
-    return <>Doubled: it made no difference to this round.</>;
+    return <>Kontra: it made no difference to this round.</>;
   }
   return res.made
-    ? <>Doubling cost {defender} <b>{got - would}</b> — {nameOf(res.declarer)}{" "}
+    ? <>The Kontra cost {defender} <b>{got - would}</b> — {nameOf(res.declarer)}{" "}
       scored {got} instead of {would}.</>
-    : <>Doubling earned {defender} <b>{got - would}</b> — {got} instead of{" "}
+    : <>The Kontra earned {defender} <b>{got - would}</b> — {got} instead of{" "}
       {would}.</>;
 }
 
@@ -514,7 +514,7 @@ function TrickHistory({ game, nameOf }) {
   );
 }
 
-function ContractChip({ game, nameOf, sharpBonus, flatMake = 0 }) {
+function ContractChip({ game, nameOf, sharpBonus }) {
   const a = game.auction || {};
   if (!a.level) return null;
   const ct = game.contract || {};
@@ -539,14 +539,13 @@ function ContractChip({ game, nameOf, sharpBonus, flatMake = 0 }) {
           {ct.value ? ` · ${ct.value * (ct.mult || 1) * doubling}` : ""}
         </span>
       )}
-      {/* Classic's Double, in the slot skat's Kontra uses. It has to be on the
-          chip and not only in the side panel: the panel is display:none on a
-          phone, and the doubled stake is the one number the rest of the round
-          is played against. */}
+      {/* Classic's Kontra (the engine still says `doubled` on the wire), in
+          the slot skat's uses. It has to be on the chip and not only in the
+          side panel: the panel is display:none on a phone. NO payout number
+          here — over/undertricks move the real figure, so a quoted "· 92"
+          was often wrong in both directions. */}
       {game.doubled && (
-        <span className="dis-chip-mult dbl">
-          Double · {2 * (a.level * a.level + flatMake)}
-        </span>
+        <span className="dis-chip-mult dbl">Kontra ×2</span>
       )}
     </div>
   );
@@ -662,8 +661,8 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId, onStory }) {
                     {r.doubling > 1
                       ? <span className="dis-mrow-dbl"
                           title={r.doubling === 4
-                            ? "Doubled and redoubled — this round was played for 4×"
-                            : "Doubled — this round was played for 2×"}>
+                            ? "Kontra and Re — this round was played for 4×"
+                            : "Kontra — this round was played for 2×"}>
                           ×{r.doubling}
                         </span>
                       : ""}
@@ -843,7 +842,7 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
                   {r.doubling > 1 && (
                     <div className="dis-story-bid dis-story-dbl">
                       <span>{nameOf(1 - r.declarer)}</span>
-                      <span>{r.doubling === 4 ? "Kontra" : rev.announce && Object.keys(rev.announce).length ? "Kontra" : "Double"} ×2</span>
+                      <span>Kontra ×2</span>
                     </div>
                   )}
                   {r.doubling === 4 && (
@@ -2179,7 +2178,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
             </div>
           ) : game.phase === "double" ? (
             <div className="dis-auction">
-              <div className="muted">Double?</div>
+              <div className="muted">Kontra?</div>
               <ContractLine game={game} />
               {myDouble ? (
                 <>
@@ -2197,7 +2196,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   </div>
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <button className="btn dis-kontrabtn"
-                      onClick={() => doMove({ kind: "double", on: true })}>Double ×2</button>
+                      onClick={() => doMove({ kind: "double", on: true })}>Kontra ×2</button>
                     <button className="btn btn-ghost"
                       onClick={() => doMove({ kind: "double", on: false })}>Let it stand</button>
                   </div>
@@ -2353,7 +2352,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                      never a second copy of the scoring. */
                   <div className="muted" style={{ fontSize: "0.8rem" }}>
                     {res.null
-                      ? `Doubled — but Null is not: a declarer who wins ${nullCond(game)}
+                      ? `Kontra — but Null is untouched: a declarer who wins ${nullCond(game)}
                          scores the flat ${res.null_value} either way.`
                       : <DoubleWorth res={res} nameOf={nameOf} />}
                   </div>
@@ -2520,7 +2519,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   })()}
                 </div>
                 <ContractChip game={game} nameOf={nameOf}
-                  sharpBonus={catalog?.sharp_bonus ?? 2} flatMake={flatMake} />
+                  sharpBonus={catalog?.sharp_bonus ?? 2} />
                 <div className="dis-turnbar">
                   {game.phase === "over" ? <span className="muted">Last trick</span>
                     : heldTrick ? <span className="muted">{nameOf(heldTrick.winner)} takes it</span>
@@ -2647,7 +2646,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 ×2) so the live round and its banked line agree. */}
             {(ct.re || ct.kontra || game.doubled) && (
               <div className="dis-dblrow">
-                ×{ct.re ? 4 : 2} · {ct.re ? "Kontra + Re" : ct.kontra ? "Kontra" : "Doubled"}
+                ×{ct.re ? 4 : 2} · {ct.re ? "Kontra + Re" : "Kontra"}
                 {" — whoever takes the round, it pays "}
                 {ct.re ? "fourfold" : "double"}
               </div>
@@ -2685,7 +2684,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                 </div>
                 {game.doubled && (
                   <div className="dis-scorerow">
-                    <span>Doubled · set pays</span>
+                    <span>Kontra · set pays</span>
                     {/* The catalog's rate plus the rising ramp, not a literal —
                         the old "+ 4 each" here predated BOTH the 4 -> 5 move
                         and the ramp, and minor's rate is 2. */}

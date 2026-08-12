@@ -113,10 +113,10 @@ export default function DissonanceRules() {
 				</RulesTip>
 			</RulesSection>
 
-			<RulesSection title="Double — the defender raises the stakes">
+			<RulesSection title="Kontra — the defender raises the stakes">
 				<p>
 					Once the contract is settled and the declarer has taken their talon card,
-					the <b>defender</b> gets one decision: <b>Double</b>, or let it stand.
+					the <b>defender</b> gets one decision: <b>Kontra</b>, or let it stand.
 					It changes both ends of the bet, and deliberately not by the same amount:
 				</p>
 				<ul>
@@ -126,7 +126,7 @@ export default function DissonanceRules() {
 						they finish below N costs them <b>more than the last</b> — 6, then 7, then
 						8, then 9 — instead of a flat 5 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
-						the flat 12, doubled or not.</li>
+						the flat 12, Kontra or not.</li>
 				</ul>
 				<p>
 					That rising scale is the whole point. It barely touches a declarer who
@@ -139,11 +139,13 @@ export default function DissonanceRules() {
 						<b>What it's for.</b> When you're about to make a big contract, your
 						opponent's best move is often to <b>outbid you with nothing</b> — 6♣ over
 						your 5♠ — because being set costs them less than letting you score 35.
-						Double is how you charge them properly for that. Note the escape,
+						Kontra is how you charge them properly for that. Note the escape,
 						though: a declarer who hasn't yet won a +2 trick can duck every one of
-						them and take Null instead, and Double doesn't touch Null. So the bet
+						them and take Null instead, and Kontra doesn't touch Null. So the bet
 						pays best against someone who has <i>already</i> won a scoring trick and
-						can no longer get out that way.
+						can no longer get out that way. (Skat mode's Kontra is its own,
+						symmetric version — everything ×2 whichever way it falls, and the
+						declarer may answer <b>Re</b>; see its section below.)
 					</p>
 				</RulesTip>
 			</RulesSection>
@@ -265,7 +267,7 @@ export default function DissonanceRules() {
 						stake doesn't apply here — at this scale it would drown the contract.</li>
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
 						ceiling, the same relationship classic's 12 has.</li>
-					<li>The Double works unchanged, ramp and all. The <b>match plays to
+					<li>The Kontra works unchanged, ramp and all. The <b>match plays to
 						25</b>, which buys about the same number of rounds as classic's 100.</li>
 				</ul>
 				<RulesTip>
