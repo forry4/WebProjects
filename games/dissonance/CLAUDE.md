@@ -901,8 +901,22 @@ Double's odds table for jumped contracts.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
-**THE 200-ROUND EXPERT PROFILE UNDER v2 (2026-08-13; opening charged; same
-harness as v1's below):** bids/auction 1.77 → **2.15**, contested 52.8 →
+**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE STANDING-SUIT RULE (2026-08-13,
+the shipped combination; same harness):** bids/auction **2.60** (72.6%
+contested, 39.0% opener re-entry, tail to TEN bids), overtakes 1.60/auction
+with same-level overtakes the biggest class (42.2% — repeatable suit
+ping-pong at one level is the new cheap rung) and jumps ≥2 down to 21.2% of
+overtakes; openings mean 3.06 (25.6% at 1); settled mean 4.68
+(2.4/7/8.2/18.2/34.4/26.4/3.4%); made **60.6%** / set 35.2 / Null 4.2, and
+per-level make degrades smoothly (95% at 3 → 41% at 7); Doubles 22.8%
+(doubled avg −13.0, defender's doubled set avg 52.5); sacrifices **31.2%**
+of rounds (avg −15.6, a third of them doubled) — the watch item, since
+unlimited suit returns make denial wars cheap to conduct; charged final rise
+0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
+arena checkpoints, mirror exactly +0.0000.
+
+**THE 200-ROUND EXPERT PROFILE UNDER v2 ALONE (2026-08-13; opening charged,
+denomination forever-ban still on; same harness as v1's below):** bids/auction 1.77 → **2.15**, contested 52.8 →
 **65.0%**, opener re-enters 16.8 → **29.0%**; openings mean **3.04**, spread
 1–4 (19.5/21.5/22.5/17/13/5/1.5%); settled mean **4.55**, the smoothest
 distribution any variant produced (3/7.5/12.5/21/27.5/22/6/0.5%); made
