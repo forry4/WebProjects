@@ -246,7 +246,15 @@
      old 0.18rem shingled them edge to edge. Slightly smaller cards are the
      honest price. The pile row inherits the same gap (one rhythm). */
   .dis .dis-seat { --dis-gap: 0.3rem; }
-  .dis .dis-pilewrap { --pk: 11px; }
+  /* THE PEEK IS THE WHOLE POINT OF A PILE, so on a phone it is sized from the
+     card like the desktop's rather than pinned at 11px. At 11px against a
+     66px card the covering card sat almost on top of the buried one and hid
+     the corner that identifies it — the corner is the ONLY thing the offset
+     is protecting, so if it is covered the pile says nothing. */
+  .dis .dis-pilewrap { --pk: max(18px, calc(var(--dis-cw, 56px) * 0.3)); }
+  /* ...and the three piles stand apart. They inherit the hand's tight gap,
+     which is right for a fanned hand and wrong for three separate stacks. */
+  .dis .dis-piles { gap: 0.6rem; }
   /* On a phone a full-card carved slot reads as a tappable control. Keep its
      layout box (the pile row must not reflow) but draw it at ~2/3 size — a
      small impression in the felt, not a button. */
@@ -285,7 +293,10 @@
      clears the overflow with room to spare on a 844-tall phone. The internal
      scroll stays as the valve for the shortest screens. */
   .dis .dis-table.ph-auction .dis-auction {
-    gap: 0.42rem; padding: 0.7rem 0.6rem;
+    /* The last few pixels: the bigger pile peek (below) costs the board ~9px
+       a seat, and this panel is what gives. Trimmed here rather than taking
+       the peek back — an unreadable pile is worse than a tight panel. */
+    gap: 0.38rem; padding: 0.55rem 0.55rem;
     min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
     justify-content: flex-start;
     /* THE SAFETY VALVE THE DESKTOP RAIL ALREADY HAS. The table is a FIXED
@@ -439,7 +450,16 @@
   top: auto; right: auto; bottom: 4%; left: 7%;
   transform: rotate(180deg);
 }
-.dis-card .dis-r { font-size: 0.95em; }
+/* THE RANK IS TABULAR AND SPACED. "10" is the only two-glyph rank, and in
+   this serif its "1" and "0" all but touch at card size — it read as one
+   squashed mark rather than a number. Tabular figures give the "1" a full
+   digit's width instead of its narrow one, and a hair of tracking separates
+   the pair; the negative margin takes back the trailing space letter-spacing
+   adds after the last glyph, so a one-glyph rank stays optically centred. */
+.dis-card .dis-r {
+  font-size: 0.95em; font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: 0.05em; margin-right: -0.05em;
+}
 .dis-card .dis-s { font-size: 1.15em; }
 /* The card's WORTH under card scoring (skat, 2026-08-09). In the markup on
    every card, shown only inside a `.dis-cardpts` board -- the room's class,
