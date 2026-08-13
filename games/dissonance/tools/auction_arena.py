@@ -310,7 +310,18 @@ def play(m, tier_of, qual, events):
                        # is about to play. `sacrifice` means it chose a bid it
                        # had priced negative over an available pass.
                        last_bid_kind.get(decl, "?"),
-                       n_bids))
+                       n_bids,
+                       # ...and the round's exact-play PAYOFF, signed for the
+                       # declarer, so a report can average what each side was
+                       # actually paid per (level, outcome, doubled) rather
+                       # than only counting outcomes.
+                       payoff,
+                       # ...and the auction's LEVEL SEQUENCE (bids only, in
+                       # order), which is what the jump-size distribution and
+                       # the raise-by-how-much question read. Classic levels;
+                       # skat values ride the same slot.
+                       [e.get("level") or e.get("value") or 0
+                        for e in g["auction"]["log"] if not e.get("pass")]))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)

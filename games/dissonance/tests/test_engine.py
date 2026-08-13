@@ -238,18 +238,66 @@ def test_the_opener_must_bid_and_cannot_pass():
         E.apply_pass(g, 0)
 
 
-def test_an_overtake_raises_by_at_most_two_or_outranks_at_the_same_level():
+def test_an_overtake_raises_freely_or_outranks_at_the_same_level():
+    """Classic dropped the raise cap (2026-08-13): any raise up to the ceiling
+    is legal, and the JUMP_SET_BONUS prices big jumps instead of a rule
+    forbidding them."""
     g = E.new_game(["a", "b"], random.Random(4))
     E.apply_bid(g, 0, 4, 2)  # open 4 hearts
     bids = E.auction_options(g)["bids"]
-    assert not E.can_bid(g, 1, 7, 1)[0], "raising by three is illegal"
-    # Same level: only a HIGHER-ranKed denomination outranks the standing bid.
+    assert E.can_bid(g, 1, 7, 1)[0], "raising by three is legal now"
+    top = E.max_level_for("classic")
+    assert E.can_bid(g, 1, top, 0)[0], "a jump straight to the ceiling is legal"
+    assert not E.can_bid(g, 1, top + 1, 0)[0], "the ceiling still binds"
+    # Same level: only a HIGHER-ranked denomination outranks the standing bid.
     assert [4, 3] in bids and [4, 4] in bids, "spades/NT outrank hearts at 4"
     assert [4, 0] not in bids and [4, 1] not in bids and [4, 2] not in bids
     assert E.can_bid(g, 1, 4, 3)[0]
     assert not E.can_bid(g, 1, 4, 1)[0], "diamonds does not outrank hearts"
     # Raised levels: any unused denomination.
     assert E.can_bid(g, 1, 5, 0)[0] and E.can_bid(g, 1, 6, 1)[0]
+
+
+def test_minor_mode_keeps_the_raise_cap():
+    """The cap removal is classic's alone: minor's ladder was calibrated under
+    the cap and its scale carries no jump bonus."""
+    g = E.new_game(["a", "b"], random.Random(4), mode="minor")
+    E.apply_bid(g, 0, 2, 2)
+    assert E.can_bid(g, 1, 4, 1)[0], "raising by two is still legal"
+    assert not E.can_bid(g, 1, 5, 1)[0], "raising by three is still capped"
+    assert E.JUMP_SET_BONUS["minor"] == 0
+
+
+def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
+    """The rule that replaced the cap: +JUMP_SET_BONUS per level the FINAL bid
+    raised the standing level, to the defender, iff the contract is defeated.
+    An opening bid passed out carries no jump; a same-level overtake is 0."""
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 2, 2)
+    assert g["auction"]["jump"] == 0, "the opening bid carries no jump"
+    E.apply_bid(g, 1, 2, 3)
+    assert g["auction"]["jump"] == 0, "a same-level overtake is not a jump"
+    E.apply_bid(g, 0, 6, 0)
+    assert g["auction"]["jump"] == 4
+    E.apply_pass(g, 1)
+    terms = E.payoff_terms(g)
+    plain = E._terms_for("classic", 0, 6)
+    assert terms["set_base"] == plain["set_base"] + 4 * E.JUMP_SET_BONUS["classic"]
+    # The bonus is a SET price: a make and the Null consolation are untouched.
+    assert terms["make"] == plain["make"] and terms["null"] == plain["null"]
+    # ...and the Double doubles it, like the stake it rides beside.
+    doubled = E._terms_for("classic", 0, 6, doubling=2, jump=4)
+    assert doubled["set_base"] == 2 * (6 + E.FLAT_SET_PENALTY["classic"]
+                                       + 4 * E.JUMP_SET_BONUS["classic"])
+
+
+def test_a_jumpless_auction_scores_exactly_as_before():
+    """An opening bid that gets passed out changes nothing -- the whole rule
+    lives in the final bid's rise."""
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 3, 1)
+    E.apply_pass(g, 1)
+    assert E.payoff_terms(g)["set_base"] == E._terms_for("classic", 1, 3)["set_base"]
 
 
 def test_null_cannot_be_bid_at_all():
@@ -362,6 +410,10 @@ def test_result_is_internally_consistent(seed):
     else:
         assert r["made"] == (r["declarer_pts"] >= r["level"])
         ds, fs = E.contract_score(r["level"], r["declarer_pts"])
+        # `contract_score` prices a jumpless contract; a set in a round whose
+        # FINAL bid raised the level also pays the defender the jump bonus.
+        if not r["made"]:
+            fs += E.JUMP_SET_BONUS["classic"] * r.get("jump", 0)
     assert r["scores"][decl] == ds
     assert r["scores"][1 - decl] == fs
     # Exactly one side scores.

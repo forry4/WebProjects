@@ -540,6 +540,10 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         min_level: n("min_level")? as u8,
         max_level: n("max_level")? as u8,
         max_raise: n("max_raise")? as u8,
+        // OPTIONAL, default 0: a payload from a server that has never heard of
+        // the jump bonus prices sets exactly as it always did. Classic ships 3
+        // since the raise cap was dropped (2026-08-13).
+        jump_set_bonus: r.get("jump_set_bonus").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
         top_denom: n("top_denom")? as u8,
         ladder: r.get("ladder").and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())
@@ -585,6 +589,9 @@ pub fn auc_state_from_json(s: &Value) -> Option<crate::auc_search::AucState> {
         used,
         passes: n("passes").unwrap_or(0) as u8,
         to_act: n("to_act")? as u8,
+        // The STANDING bid's jump — what a pass would settle the set price on.
+        // Optional for the same back-compat reason as the rate above.
+        jump: n("jump").unwrap_or(0) as u8,
     };
     if state.to_act > 1 {
         return None;

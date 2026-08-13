@@ -161,10 +161,53 @@ MINOR_MAX_LEVEL = 6
 #: the +-10 stake re-anchored it to 20 (2026-08-11) -- minor carries no stake,
 #: so its consolation keeps the original logic.
 MINOR_NULL_MAKE = 6
-#: An overtake must raise the contract by 1 or 2. Measured: a cap of exactly 2
-#: relocates the punishment-landing pile from level 2 to level 3, which is
-#: where the distribution had a hole. A cap of 3 empties level 3 again.
+#: An overtake must raise the contract by 1 or 2 -- in the modes that still cap
+#: it. Measured: a cap of exactly 2 relocates the punishment-landing pile from
+#: level 2 to level 3, which is where the distribution had a hole. A cap of 3
+#: empties level 3 again.
 MAX_RAISE = 2
+
+#: PER-MODE RAISE CAP (2026-08-13). Classic dropped the cap: any raise up to
+#: the ceiling is legal, and the JUMP BONUS below is what now leans on big
+#: jumps -- a scoring pressure instead of a legality wall, so the auction can
+#: keep climbing in small steps without an arbitrary "no more than 2" rule.
+#: Minor and dummy keep the cap: their ladders were calibrated under it and the
+#: jump bonus is not priced for their scales. Skat's numeric auction never had
+#: a raise cap (any higher rung is legal) and does not read this.
+#:
+#: `None` means "no cap"; `raise_cap_for` turns that into the mode's own
+#: ceiling so legality arithmetic and the wire both stay plain numbers.
+RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
+
+
+def raise_cap_for(mode: str) -> int:
+    """The biggest single raise this mode allows, as a NUMBER.
+
+    An uncapped mode reports its own level ceiling: `min(top, level + cap)`
+    then never binds, which is what "no cap" means, and the wire's `max_raise`
+    field stays an integer an old wasm can read.
+    """
+    cap = RAISE_CAP.get(mode, MAX_RAISE)
+    return max_level_for(mode) if cap is None else cap
+
+
+#: THE JUMP BONUS (2026-08-13, classic only) -- what replaced the raise cap.
+#: If the FINAL bid of the auction raised the level (a jump of j levels over
+#: the bid it overtook), the defender scores an extra `3 x j` on top of a set.
+#: An opening bid that gets passed out carries no jump (there was no standing
+#: level to raise over), and a same-level overtake in a higher denomination is
+#: a jump of 0.
+#:
+#: The pressure it buys: a big jump is legal now, but it hands the defender a
+#: fatter set -- so the cheap way to a high contract is to CLIMB, one bid at a
+#: time, giving the opponent a decision at every rung. That is the auction
+#: interaction the cap used to force by fiat.
+#:
+#: It rides INSIDE `set_base`, like the flat set stake -- so the Double doubles
+#: it, every consumer (the result panel's maths line, the Hard pricing, the DD
+#: resolver) reads it with no new term, and Null still overrides a set (the
+#: bonus is a set price, and a declarer who ducks out owes none of it).
+JUMP_SET_BONUS = {"classic": 3, "skat": 0, "minor": 0, "dummy": 0}
 
 #: Set-score multiplier per point the declarer finished short.
 #:
@@ -1121,8 +1164,10 @@ def auction_options(g: dict) -> dict:
             bids.extend([lvl, d] for lvl in range(MIN_LEVEL, top + 1))
         return {"bids": bids, "may_pass": False}
     # Ranked denominations: an overtake stands at the SAME level in a
-    # higher-ranked denomination, or raises by up to MAX_RAISE in any unused one.
-    lo, hi = a["level"], min(top, a["level"] + MAX_RAISE)
+    # higher-ranked denomination, or raises -- by up to the mode's cap where one
+    # exists (minor/dummy), by any amount up to the ceiling in classic, where
+    # the JUMP_SET_BONUS prices big jumps instead of a cap forbidding them.
+    lo, hi = a["level"], min(top, a["level"] + raise_cap_for(mode_of(g)))
     for d in free:
         for lvl in range(lo, hi + 1):
             if lvl == a["level"] and d <= a["denom"]:
@@ -1149,6 +1194,13 @@ def apply_bid(g: dict, seat: int, level: int, denom: int) -> None:
     if not ok:
         raise ValueError(why)
     a = g["auction"]
+    # How far this bid RAISED the standing level -- 0 for the opening bid (no
+    # standing level to raise over) and for a same-level overtake. Real game
+    # state, not derived at settle time, because the settled contract's set
+    # price reads the FINAL bid's jump (`JUMP_SET_BONUS`) and a save must not
+    # lose it. `.get` everywhere on read: a game saved before the key existed
+    # carries no jump, which prices as the old rule exactly.
+    a["jump"] = (level - a["level"]) if a["level"] else 0
     a["level"] = level
     a["denom"] = denom
     a["declarer"] = seat
@@ -1884,7 +1936,8 @@ def payoff_terms(g: dict) -> dict:
         # `mode_of`, not a literal: minor mode runs the classic auction shape
         # in its own currency, and the terms are where the currency lives.
         terms = _terms_for(mode_of(g), a["denom"], a["level"],
-                           doubling=classic_doubling(g))
+                           doubling=classic_doubling(g),
+                           jump=a.get("jump", 0))
     return terms | {"declarer": a["declarer"]}
 
 
@@ -1898,7 +1951,7 @@ def classic_doubling(g: dict) -> int:
 
 
 def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
-               mult: int = 1, doubling: int = 1) -> dict:
+               mult: int = 1, doubling: int = 1, jump: int = 0) -> dict:
     """`payoff_terms` for a contract that has NOT been agreed yet.
 
     The auction has to price candidates, and `payoff_terms` can only read a
@@ -1949,7 +2002,13 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # the way to the Rust search and the DD resolver).
     flat_make = FLAT_MAKE_BONUS.get(mode, 0)
     make = level * level + (flat_make if level >= FLAT_MAKE_MIN_LEVEL else 0)
-    setb = level + FLAT_SET_PENALTY.get(mode, 0)
+    # THE JUMP BONUS rides inside the set base, beside the flat stake: `jump`
+    # is how far the FINAL bid raised the standing level, and each level of it
+    # pays the defender JUMP_SET_BONUS more on a set. Inside the base means the
+    # Double doubles it and every consumer of `set_base` -- the result panel's
+    # maths, the Hard pricing, the DD resolver -- follows with no new term.
+    setb = (level + FLAT_SET_PENALTY.get(mode, 0)
+            + JUMP_SET_BONUS.get(mode, 0) * jump)
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,
@@ -1991,8 +2050,12 @@ def pass_options(g: dict) -> list[dict]:
                  "set_base": 0, "short": 0, "null": 0, "redeal": True,
                  "move": mv}]
     if not skat:
+        # The standing contract keeps the jump ITS final bid arrived by --
+        # passing settles it, so the set price the pass concedes includes the
+        # bonus that jump earned the (would-be) defender.
         return [_terms_for(mode_of(g), a["denom"], a["level"],
-                           doubling=classic_doubling(g))
+                           doubling=classic_doubling(g),
+                           jump=a.get("jump", 0))
                 | {"opp": True, "move": mv}]
     # Skat: the number is a price and the winner has not named a game yet, so
     # what passing concedes is the BEST declaration that number buys them. One
@@ -2031,7 +2094,12 @@ def auction_payoff_options(g: dict) -> list[dict]:
                                | {"move": {"kind": "bid", "value": v}})
         else:
             for lvl, d in opt["bids"]:
-                out.append(_terms_for(mode_of(g), d, lvl)
+                # Priced as "this bid buys the contract" -- i.e. as the FINAL
+                # bid -- so the jump it would arrive by is this bid's own rise
+                # over the standing level. Myopic on purpose, like everything
+                # else in this list.
+                jump = (lvl - g["auction"]["level"]) if g["auction"]["level"] else 0
+                out.append(_terms_for(mode_of(g), d, lvl, jump=jump)
                            | {"move": {"kind": "bid", "level": lvl, "denom": d}})
         if opt["may_pass"]:
             out.extend(pass_options(g))
@@ -2055,7 +2123,8 @@ def auction_payoff_options(g: dict) -> list[dict]:
         a = g["auction"]
         for on in (True, False):
             out.append(_terms_for(mode_of(g), a["denom"], a["level"],
-                                  doubling=2 if on else 1)
+                                  doubling=2 if on else 1,
+                                  jump=a.get("jump", 0))
                        | {"move": {"kind": "double", "on": on}})
     elif phase in ("kontra", "re"):
         # ONE option: the contract exactly as it stands. Its value signed for
@@ -2109,9 +2178,20 @@ def auction_search_payload(g: dict) -> dict | None:
     # with its own `max_level`, so the mirror needs no third arm and an older
     # wasm reads the payload without a new string to choke on. The CURRENCY
     # difference rides in the priced rows below, as always.
+    # `max_raise` is the mode's own cap -- classic ships its ceiling since the
+    # cap was dropped (2026-08-13), so `min(top, level + max_raise)` never
+    # binds there and an old wasm still reads a plain number. `jump_set_bonus`
+    # is the rate the tree must add to a set at each terminal, PER LEVEL the
+    # settling bid jumped: the terms rows cannot carry it (a row is keyed by
+    # the settlement, and the jump is a property of the PATH to it), so the
+    # rate crosses as a rule and the tree does the one multiply. Optional on
+    # the wire: a wasm that predates it prices sets without the bonus, the
+    # usual cached-bundle degradation.
     rules = {"mode": "skat" if skat else "classic",
              "min_level": MIN_LEVEL, "max_level": max_level_for(mode_of(g)),
-             "max_raise": MAX_RAISE, "top_denom": GRAND if skat else NOTRUMP,
+             "max_raise": raise_cap_for(mode_of(g)),
+             "jump_set_bonus": JUMP_SET_BONUS.get(mode_of(g), 0),
+             "top_denom": GRAND if skat else NOTRUMP,
              "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
     # Only settlements the auction can still REACH. The bidding only ever
     # ascends, so everything below the standing bid is unreachable and would be
@@ -2141,7 +2221,11 @@ def auction_search_payload(g: dict) -> dict | None:
         # is.
         state = {"level": a["level"], "denom": max(a["denom"], 0), "value": 0,
                  "declarer": a["declarer"], "used": list(a["used"]),
-                 "passes": 0, "to_act": a["to_act"]}
+                 "passes": 0, "to_act": a["to_act"],
+                 # The STANDING bid's jump: a pass settles on this state, and
+                 # the set price at that leaf includes the bonus the standing
+                 # bid's own rise earned.
+                 "jump": a.get("jump", 0)}
         for lvl in range(max(MIN_LEVEL, a["level"]), max_level_for(mode_of(g)) + 1):
             for d in range(NOTRUMP + 1):
                 terms.append(_terms_for(mode_of(g), d, lvl)
@@ -2480,8 +2564,13 @@ def _finish(g: dict) -> None:
         # Signed for the declarer, exactly like `payoff` itself. Doubling
         # scales both ends and the ramp only adds, so it can never flip WHO
         # won -- the panel compares magnitudes against the same seat.
-        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"]),
+        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"],
+                                       jump=a.get("jump", 0)),
                             dpts, not null),
+        # How far the FINAL bid raised the standing level -- the jump the set
+        # bonus was charged for. On the row so the panel can narrate a set
+        # base that suddenly reads bigger than level + stake.
+        "jump": a.get("jump", 0),
         "make_value": payoff_terms(g)["make"],
         "set_base": payoff_terms(g)["set_base"],
         # The two rates the review needs to spell the shortfall out as the sum
@@ -2671,6 +2760,10 @@ def view_for(g: dict, seat: int) -> dict:
             # The bid ladder needs no redaction at all: a number is a price,
             # and it cannot be read backwards into a denomination.
             "value": g["auction"].get("value", 0),
+            # The standing bid's level rise, wholly public (it is a difference
+            # of two logged bids) -- what the JUMP_SET_BONUS would pay the
+            # defender on a set if the auction settled here.
+            "jump": g["auction"].get("jump", 0),
         },
         # Public from the moment it is made -- and only made after the auction.
         "contract": dict(ct) if skat else None,

@@ -83,11 +83,19 @@ pub struct AucState {
     /// hand in, which is why a skat pass is not always a leaf.
     pub passes: u8,
     pub to_act: u8,
+    /// Classic: how far the STANDING bid raised the level of the bid it
+    /// overtook (0 for an opening bid or a same-level overtake). Part of the
+    /// node's identity, not bookkeeping: a pass settles on this state, and the
+    /// settled set price pays the defender `jump_set_bonus` per level of it —
+    /// so two nodes identical but for how their standing bid arrived really
+    /// are worth different amounts, and the memo must tell them apart.
+    pub jump: u8,
 }
 
 impl AucState {
     pub fn opening(to_act: u8) -> Self {
-        AucState { level: 0, denom: 0, value: 0, declarer: -1, used: [0, 0], passes: 0, to_act }
+        AucState { level: 0, denom: 0, value: 0, declarer: -1, used: [0, 0], passes: 0, to_act,
+                   jump: 0 }
     }
 }
 
@@ -98,6 +106,13 @@ pub struct AucRules {
     pub min_level: u8,
     pub max_level: u8,
     pub max_raise: u8,
+    /// Classic's jump bonus (2026-08-13): what each level the SETTLING bid
+    /// jumped adds to the defender's set score. A rule rather than a term row,
+    /// because the rows are keyed by the settlement and the jump is a property
+    /// of the PATH to it — the tree does the one multiply at the leaf. 0 in
+    /// every mode that does not price jumps (and on any payload old enough not
+    /// to carry the field).
+    pub jump_set_bonus: i32,
     /// Highest denomination index a classic bid may name (no-trump).
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
@@ -236,6 +251,9 @@ pub fn step(s: &AucState, r: &AucRules, b: Bid) -> Step {
         Bid::Contract { level, denom } => {
             let mut n = *s;
             n.used[s.to_act as usize] |= 1 << denom;
+            // The engine's own rule (`apply_bid`): an opening bid carries no
+            // jump, a raise carries its rise over the level it overtook.
+            n.jump = if s.level > 0 { level - s.level } else { 0 };
             n.level = level;
             n.denom = denom;
             n.declarer = s.to_act as i8;
@@ -352,6 +370,11 @@ impl<'a> Search<'a> {
                 if d >= w.pts.len() || mask & (1 << o.denom) == 0 {
                     continue;
                 }
+                // The settling bid's jump fattens the set — the rows cannot
+                // carry it (they are keyed by the settlement, the jump belongs
+                // to the path), so it lands here, inside the set base exactly
+                // where the engine folds it.
+                let o = self.with_jump(o, s.jump);
                 let v = if mine {
                     o.payoff(w.pts[d], w.duck[d])
                 } else {
@@ -364,6 +387,18 @@ impl<'a> Search<'a> {
             }
         }
         total
+    }
+
+    /// A terms row adjusted for how the settling bid arrived: the jump bonus
+    /// rides inside `set_base`, exactly where `engine._terms_for` puts it, so
+    /// `payoff` needs no new arm and a doubled row would double it the same
+    /// way. Identity when the rule or the jump is zero — every mode but
+    /// classic, every payload old enough not to carry the rate.
+    #[inline]
+    fn with_jump(&self, o: &Option_, jump: u8) -> Option_ {
+        let mut o = *o;
+        o.set_base += self.rules.jump_set_bonus * jump as i32;
+        o
     }
 
     fn step_value(&mut self, s: &AucState, b: Bid) -> f64 {
@@ -399,6 +434,13 @@ impl<'a> Search<'a> {
                         Some(r) if !r.is_empty() => r,
                         _ => return f64::NEG_INFINITY, // unpriced: never chosen
                     };
+                    // A myopic bidder prices a candidate as its own FINAL bid
+                    // — the same assumption the server's Hard pricing makes —
+                    // so its jump is the rise over the level standing now.
+                    let jump = match b {
+                        Bid::Contract { level, .. } if s.level > 0 => level - s.level,
+                        _ => 0,
+                    };
                     let mask = self.worlds.covered_opp;
                     let mut total = 0.0;
                     for w in &self.worlds.worlds {
@@ -408,7 +450,8 @@ impl<'a> Search<'a> {
                             if d >= w.opp_pts.len() || mask & (1 << o.denom) == 0 {
                                 continue;
                             }
-                            let v = o.payoff(w.opp_pts[d], w.opp_duck[d]);
+                            let v = self.with_jump(o, jump)
+                                .payoff(w.opp_pts[d], w.opp_duck[d]);
                             best = Some(best.map_or(v, |x: i32| x.max(v)));
                         }
                         if let Some(v) = best {
@@ -506,12 +549,13 @@ mod tests {
 
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
-                   top_denom: 4, ladder: Vec::new(), opp: OppModel::Minimax }
+                   jump_set_bonus: 0, top_denom: 4, ladder: Vec::new(),
+                   opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
-                   top_denom: 6, ladder, opp: OppModel::Minimax }
+                   jump_set_bonus: 0, top_denom: 6, ladder, opp: OppModel::Minimax }
     }
 
     fn bids(s: &AucState, r: &AucRules) -> Vec<Bid> {
@@ -644,6 +688,43 @@ mod tests {
             other => panic!("the opener must bid, got {other:?}"),
         }
         assert!(s.nodes > 0);
+    }
+
+    #[test]
+    fn the_settling_bids_jump_fattens_the_set_and_only_the_set() {
+        // A raise carries its rise; the leaf pays the defender
+        // `jump_set_bonus` per level of it on a set, and a made contract or
+        // an opening bid owes nothing.
+        let t = classic_terms();
+        let mut r = classic_rules();
+        r.jump_set_bonus = 3;
+        // step() records the jump exactly as the engine does.
+        let open = AucState::opening(0);
+        let s1 = match step(&open, &r, Bid::Contract { level: 1, denom: 0 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(s1.jump, 0, "an opening bid carries no jump");
+        let s5 = match step(&s1, &r, Bid::Contract { level: 5, denom: 1 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(s5.jump, 4, "1 -> 5 is a jump of 4");
+        // Declarer (seat 1) can guarantee only 2 points: level 5 is 3 short.
+        // Flat: -(5 + 5*3) = -20 to the declarer. With the bonus the settling
+        // jump of 4 adds 12 to the set: -32.
+        let w = one_world(9, 2);
+        let searcher = Search::new(0, r.clone(), &t, &w);
+        assert_eq!(searcher.settled(&s5), 32.0, "us defending: the jump pays US");
+        let mut no_bonus = classic_rules();
+        no_bonus.max_raise = r.max_raise;
+        let plain = Search::new(0, no_bonus, &t, &w);
+        assert_eq!(plain.settled(&s5), 20.0, "rate 0 is the old arithmetic");
+        // A MADE contract is untouched by the rate: seat 0 declares 4 having
+        // jumped to it, guarantees 9 -> 16 + 5 over, bonus or not.
+        let made = AucState { level: 4, denom: 0, declarer: 0, to_act: 1, jump: 3,
+                              ..AucState::opening(0) };
+        assert_eq!(searcher.settled(&made), 21.0, "the bonus is a set price only");
     }
 
     #[test]

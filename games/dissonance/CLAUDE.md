@@ -732,8 +732,10 @@ rather than the deck renumbered.)
 **Auction.** Denominations are **ranked C < D < H < S < NT**. Opener
 names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
-denomination**, or **raise by +1/+2** in any denomination that player has not
-named. Per-player no-repeat. The opener may not pass.
+denomination**, or **raise by any amount** (classic since 2026-08-13 — minor
+and dummy keep the old +1/+2 cap) in any denomination that player has not
+named. Per-player no-repeat. The opener may not pass. Big raises are priced
+rather than forbidden: see the JUMP BONUS section below.
 
 **The talon.** The auction winner is shown **3 of the 6** out-cards (fixed at
 the deal) and may swap ONE into hand, discarding a hand card face-down — never
@@ -746,7 +748,8 @@ never forced to. Winner leads next.
 **Scoring** (contract only; trick points are the yardstick *and* the margin —
 and in skat mode "trick points" means CARD points, per the section above):
 make → **N² + the flat 10 stake, + 1 per trick point past N**; set → defender
-scores **N + 10, + 5 × shortfall** (the ±10 stake — see its bullet below — is
+scores **N + 10, + 5 × shortfall, + 3 × the final bid's level jump (classic
+only — see the JUMP BONUS section)** (the ±10 stake — see its bullet below — is
 classic-only). **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **20** (both modes; classic moved 12 → 20 with
 the stake — sets got 10 fatter, so the escape was re-anchored just under the
@@ -771,9 +774,13 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   "sacrifice valve" reading always wanted, at no auction cost.
 * **the swap** — makes winning the auction worth something beyond the
   contract, adds real overbid risk, and the discard is a bluffable signal.
-* **maxraise 2** — a cap of exactly 2 relocates the punishment-landing pile
-  from level 2 to level 3, which is where the distribution had a hole. A cap of
-  3 empties level 3 again; the spike *translates*, it never spreads.
+* **maxraise 2 — SUPERSEDED IN CLASSIC (2026-08-13) by the jump bonus; minor
+  and dummy still run it.** The original measurement stands for what it was: a
+  cap of exactly 2 relocates the punishment-landing pile from level 2 to level
+  3, which is where the distribution had a hole, and a cap of 3 empties level
+  3 again — the spike *translates*, it never spreads. Classic now prices big
+  raises instead of forbidding them (see the JUMP BONUS section), which was
+  the product call: the cap read as arbitrary and other games don't have one.
 * **declarer leads** — the opening lead was measured at **+0.93 pts**, the
   strongest single lever on contract height — and the reason Null is a
   DECLARER'S consolation (its make rate defending is ~0%).
@@ -813,6 +820,59 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
 * **per-player denominations** — a shared budget was measured to be a no-op:
   94% of auctions name ≤2 denominations, so a budget of five never binds.
+
+## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
+
+Classic's `MAX_RAISE` is gone: an overtake may raise by ANY amount up to the
+ceiling. What replaced it is a scoring rule, `JUMP_SET_BONUS` (3, classic
+only): **if the FINAL bid of the auction raised the level — a jump of j over
+the bid it overtook — the defender scores an extra `3 × j` on a set.** An
+opening bid that gets passed out carries no jump, and a same-level overtake in
+a higher denomination is a jump of 0, so a jumpless auction scores exactly as
+before. The intent: keep the auction climbing in small steps (every rung gives
+the opponent a decision) by making the leap legal but expensive, instead of a
+cap other games don't have.
+
+**Where each piece lives — the `payoff_terms` discipline, one rung deeper:**
+* `apply_bid` records `a["jump"]` (real game state; `.get(..., 0)` on every
+  read so an old save prices as the old rule). `_finish` puts `jump` on the
+  result row; `view_for` ships it in the auction block.
+* **The bonus rides INSIDE `set_base`** (`_terms_for(..., jump=)`), beside the
+  flat set stake — so the Double doubles it, Null still overrides it (a
+  consolation owes no set price), the result panel's maths line still sums,
+  the DD review and the arena's resolver price it with no new code, and the
+  Hard tier's option list carries it with **zero Rust changes** (each classic
+  candidate is priced as its own final bid: `jump = lvl − standing`).
+* **The Expert tree is the one place it could not ride as data.** The terms
+  rows are keyed by SETTLEMENT and a jump is a property of the PATH, so the
+  rate crosses the wire as a rule (`rules.jump_set_bonus`, optional, default
+  0), `AucState` carries `jump` (part of the memo key — two nodes differing
+  only in how their standing bid arrived are worth different amounts), and
+  `settled`/`opp_myopic` do the one add at the leaf. The payload's `state`
+  also ships the STANDING bid's jump, since a pass settles on it.
+  `rules.max_raise` now ships `raise_cap_for(mode)` — classic's own ceiling,
+  so `min(top, level + max_raise)` never binds there and an old wasm still
+  reads a plain number. Minor/dummy ship 2 and a 0 rate: unchanged games.
+* Fixtures: `auction.jsonl` regenerated (uncapped classic legality + the new
+  rules/state fields), `payoff.jsonl` regenerated with REAL jumped auctions,
+  doubled and not, so `payoff_parity` pins the fold. The wasm artifact was
+  rebuilt and committed with the change (glue byte-identical — same
+  wasm-bindgen — so the pair stayed matched). A cached older wasm prices sets
+  without the bonus and with the cap: legal moves, slightly wrong values, the
+  ordinary cached-bundle window.
+* Gates: `test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set`,
+  `test_a_jumpless_auction_scores_exactly_as_before`,
+  `test_minor_mode_keeps_the_raise_cap`, the payload-field tests in
+  `test_expert.py`, and Rust
+  `the_settling_bids_jump_fattens_the_set_and_only_the_set`.
+* The server bot needed nothing: `choose_bid` overtakes at the cheapest rung
+  in its best denomination, which never jumps. Easy/Normal don't price the
+  bonus — they are heuristics and it only fattens a set they were already
+  trying to avoid.
+* The study's instrument is `tools/jump_report.py` over `auction_arena.py`
+  checkpoints (the settled event now carries the round's dd payoff and the
+  auction's level sequence — flip 0 only, since a mirror's flips are
+  identical).
 
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
