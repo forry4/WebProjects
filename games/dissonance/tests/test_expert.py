@@ -261,7 +261,8 @@ def test_the_payload_state_carries_the_standing_bids_jump():
     know it, and it cannot be derived from the level alone."""
     g = _classic()
     E.apply_bid(g, 0, 2, 1)
-    assert E.auction_search_payload(g)["state"]["jump"] == 0
+    assert E.auction_search_payload(g)["state"]["jump"] == 2, \
+        "the opening counts, as a raise over level 0 (v2)"
     E.apply_bid(g, 1, 5, 2)
     assert E.auction_search_payload(g)["state"]["jump"] == 3
 

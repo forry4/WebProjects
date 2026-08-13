@@ -271,10 +271,11 @@ def test_minor_mode_keeps_the_raise_cap():
 def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
     """The rule that replaced the cap: +JUMP_SET_BONUS per level the FINAL bid
     raised the standing level, to the defender, iff the contract is defeated.
-    An opening bid passed out carries no jump; a same-level overtake is 0."""
+    THE OPENING COUNTS (v2): it is a raise over level 0, so opening at 2 and
+    getting passed out carries a jump of 2. A same-level overtake is 0."""
     g = E.new_game(["a", "b"], random.Random(4))
     E.apply_bid(g, 0, 2, 2)
-    assert g["auction"]["jump"] == 0, "the opening bid carries no jump"
+    assert g["auction"]["jump"] == 2, "the opening is a raise over level 0"
     E.apply_bid(g, 1, 2, 3)
     assert g["auction"]["jump"] == 0, "a same-level overtake is not a jump"
     E.apply_bid(g, 0, 6, 0)
@@ -291,13 +292,21 @@ def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
                                        + 4 * E.JUMP_SET_BONUS["classic"])
 
 
-def test_a_jumpless_auction_scores_exactly_as_before():
-    """An opening bid that gets passed out changes nothing -- the whole rule
-    lives in the final bid's rise."""
+def test_an_opening_passed_out_is_charged_its_whole_level():
+    """v2's whole point: opening at 6 and getting set hands the defender 18 on
+    top; opening at 1 costs 3. The only jump-free settlement is a same-level
+    overtake."""
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 6, 1)
+    E.apply_pass(g, 1)
+    assert (E.payoff_terms(g)["set_base"]
+            == E._terms_for("classic", 1, 6)["set_base"]
+            + 6 * E.JUMP_SET_BONUS["classic"])
     g = E.new_game(["a", "b"], random.Random(4))
     E.apply_bid(g, 0, 3, 1)
-    E.apply_pass(g, 1)
-    assert E.payoff_terms(g)["set_base"] == E._terms_for("classic", 1, 3)["set_base"]
+    E.apply_bid(g, 1, 3, 2)   # same level, higher denomination: jump 0
+    E.apply_pass(g, 0)
+    assert E.payoff_terms(g)["set_base"] == E._terms_for("classic", 2, 3)["set_base"]
 
 
 def test_null_cannot_be_bid_at_all():
@@ -1292,7 +1301,8 @@ def test_the_result_row_says_what_the_double_was_worth(mode):
             decl = res["declarer"]
             signed = (res["scores"][decl] if res["scores"][decl]
                       else -res["scores"][1 - decl])
-            want = E.payoff(E._terms_for(mode, res["denom"], res["level"]),
+            want = E.payoff(E._terms_for(mode, res["denom"], res["level"],
+                                         jump=res.get("jump", 0)),
                             res["declarer_pts"], not res["null"])
             assert res["undoubled"] == want, "not the undoubled re-score"
             if not dbl:

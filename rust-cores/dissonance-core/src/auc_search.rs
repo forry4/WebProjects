@@ -251,9 +251,10 @@ pub fn step(s: &AucState, r: &AucRules, b: Bid) -> Step {
         Bid::Contract { level, denom } => {
             let mut n = *s;
             n.used[s.to_act as usize] |= 1 << denom;
-            // The engine's own rule (`apply_bid`): an opening bid carries no
-            // jump, a raise carries its rise over the level it overtook.
-            n.jump = if s.level > 0 { level - s.level } else { 0 };
+            // The engine's own rule (`apply_bid`): every bid carries its rise
+            // over the standing level -- the OPENING included, as a raise
+            // over level 0 (v2 of the jump rule).
+            n.jump = level - s.level;
             n.level = level;
             n.denom = denom;
             n.declarer = s.to_act as i8;
@@ -436,9 +437,10 @@ impl<'a> Search<'a> {
                     };
                     // A myopic bidder prices a candidate as its own FINAL bid
                     // — the same assumption the server's Hard pricing makes —
-                    // so its jump is the rise over the level standing now.
+                    // so its jump is the rise over the level standing now
+                    // (the opening's whole level, per the v2 rule).
                     let jump = match b {
-                        Bid::Contract { level, .. } if s.level > 0 => level - s.level,
+                        Bid::Contract { level, .. } => level - s.level,
                         _ => 0,
                     };
                     let mask = self.worlds.covered_opp;
@@ -704,7 +706,7 @@ mod tests {
             Step::Node(n) => n,
             other => panic!("{other:?}"),
         };
-        assert_eq!(s1.jump, 0, "an opening bid carries no jump");
+        assert_eq!(s1.jump, 1, "the opening counts, as a raise over level 0 (v2)");
         let s5 = match step(&s1, &r, Bid::Contract { level: 5, denom: 1 }) {
             Step::Node(n) => n,
             other => panic!("{other:?}"),

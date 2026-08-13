@@ -826,12 +826,28 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 Classic's `MAX_RAISE` is gone: an overtake may raise by ANY amount up to the
 ceiling. What replaced it is a scoring rule, `JUMP_SET_BONUS` (3, classic
 only): **if the FINAL bid of the auction raised the level — a jump of j over
-the bid it overtook — the defender scores an extra `3 × j` on a set.** An
-opening bid that gets passed out carries no jump, and a same-level overtake in
-a higher denomination is a jump of 0, so a jumpless auction scores exactly as
-before. The intent: keep the auction climbing in small steps (every rung gives
-the opponent a decision) by making the leap legal but expensive, instead of a
-cap other games don't have.
+the bid it overtook — the defender scores an extra `3 × j` on a set.** THE
+OPENING BID COUNTS, as a raise over level 0 (**v2, same day**): open at 6 and
+get set and the defender collects +18 on top; open at 1 and it costs 3. A
+same-level overtake in a higher denomination is a jump of 0 — the only
+jump-free way to buy a contract. The intent: keep the auction climbing in
+small steps (every rung gives the opponent a decision) by making the leap
+legal but expensive, instead of a cap other games don't have.
+
+**v1 exempted the opening, and 500 rounds of self-play said why that fails**
+(the profile below is v1's, kept as the comparison): with no cap to hide
+under, underbidding lost its point, Expert opened AT VALUE (mean 4.31,
+unimodal at 5–6) and passed — 47% one-bid auctions, 1.77 bids/auction.
+Charging the opening its whole level is what makes starting low the cheap
+line for the OPENER too.
+
+**A v2 consequence, pinned in `test_double.py`
+(`test_a_jumped_contracts_double_out_wins_its_risk_at_low_levels`): an
+open-and-pass contract at levels 2–4 carries enough doubled jump bonus that
+doubling its NEAR-MISS out-pays the made-contract risk** — the near-miss-
+stays-cheap property now holds only for jump-free contracts. A leap does not
+just fatten the set; it invites the Double. Deliberate, but it re-prices the
+Double's odds table for jumped contracts.
 
 **Where each piece lives — the `payoff_terms` discipline, one rung deeper:**
 * `apply_bid` records `a["jump"]` (real game state; `.get(..., 0)` on every
@@ -874,10 +890,11 @@ cap other games don't have.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
-**THE 500-ROUND EXPERT PROFILE UNDER THE NEW RULE (2026-08-13; k=8 one tree,
-talon model, dd-resolved, mirror exactly +0.0000)** — recorded here because
-the 2026-08-11 profile (the comparison baseline below) taught that these
-numbers evaporate otherwise:
+**THE 500-ROUND EXPERT PROFILE UNDER v1 OF THE RULE (2026-08-13; opening
+exempt from the jump; k=8 one tree, talon model, dd-resolved, mirror exactly
++0.0000)** — v1 is superseded by v2 above, and this profile is WHY; recorded
+because the 2026-08-11 profile (the comparison baseline below) taught that
+these numbers evaporate otherwise:
 * **The cap play is gone and openings moved UP**: opens-at-1 30.1% → 12.2%,
   mean opening 3.53 → 4.31, now unimodal at 5–6 (48.8% combined). With no cap,
   a low opening no longer holds the reply down — so underbidding lost its

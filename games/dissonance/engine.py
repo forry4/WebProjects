@@ -194,9 +194,11 @@ def raise_cap_for(mode: str) -> int:
 #: THE JUMP BONUS (2026-08-13, classic only) -- what replaced the raise cap.
 #: If the FINAL bid of the auction raised the level (a jump of j levels over
 #: the bid it overtook), the defender scores an extra `3 x j` on top of a set.
-#: An opening bid that gets passed out carries no jump (there was no standing
-#: level to raise over), and a same-level overtake in a higher denomination is
-#: a jump of 0.
+#: THE OPENING BID COUNTS, as a raise over level 0 (v2, same day: v1 exempted
+#: it, and self-play answered by opening AT VALUE and passing -- 47% one-bid
+#: auctions): open at 6 and get set and the defender collects 18 on top; open
+#: at 1 and climb and each settled rung only ever carries its last rise. A
+#: same-level overtake in a higher denomination is a jump of 0.
 #:
 #: The pressure it buys: a big jump is legal now, but it hands the defender a
 #: fatter set -- so the cheap way to a high contract is to CLIMB, one bid at a
@@ -1194,13 +1196,15 @@ def apply_bid(g: dict, seat: int, level: int, denom: int) -> None:
     if not ok:
         raise ValueError(why)
     a = g["auction"]
-    # How far this bid RAISED the standing level -- 0 for the opening bid (no
-    # standing level to raise over) and for a same-level overtake. Real game
-    # state, not derived at settle time, because the settled contract's set
-    # price reads the FINAL bid's jump (`JUMP_SET_BONUS`) and a save must not
-    # lose it. `.get` everywhere on read: a game saved before the key existed
-    # carries no jump, which prices as the old rule exactly.
-    a["jump"] = (level - a["level"]) if a["level"] else 0
+    # How far this bid RAISED the standing level -- and the OPENING BID COUNTS,
+    # as a raise over level 0 (v2 of the rule, 2026-08-13): opening at 6 and
+    # getting set pays the defender 6 jumps' worth, opening at 1 only one. A
+    # same-level overtake is still 0. Real game state, not derived at settle
+    # time, because the settled contract's set price reads the FINAL bid's
+    # jump (`JUMP_SET_BONUS`) and a save must not lose it. `.get` everywhere
+    # on read: a game saved before the key existed carries no jump, which
+    # prices as the old rule exactly.
+    a["jump"] = level - a["level"]
     a["level"] = level
     a["denom"] = denom
     a["declarer"] = seat
@@ -2096,10 +2100,11 @@ def auction_payoff_options(g: dict) -> list[dict]:
             for lvl, d in opt["bids"]:
                 # Priced as "this bid buys the contract" -- i.e. as the FINAL
                 # bid -- so the jump it would arrive by is this bid's own rise
-                # over the standing level. Myopic on purpose, like everything
+                # over the standing level (the opening's rise is its whole
+                # level, per the v2 rule). Myopic on purpose, like everything
                 # else in this list.
-                jump = (lvl - g["auction"]["level"]) if g["auction"]["level"] else 0
-                out.append(_terms_for(mode_of(g), d, lvl, jump=jump)
+                out.append(_terms_for(mode_of(g), d, lvl,
+                                      jump=lvl - g["auction"]["level"])
                            | {"move": {"kind": "bid", "level": lvl, "denom": d}})
         if opt["may_pass"]:
             out.extend(pass_options(g))
