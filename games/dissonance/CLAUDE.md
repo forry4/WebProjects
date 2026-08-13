@@ -874,6 +874,30 @@ cap other games don't have.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
+**THE 500-ROUND EXPERT PROFILE UNDER THE NEW RULE (2026-08-13; k=8 one tree,
+talon model, dd-resolved, mirror exactly +0.0000)** — recorded here because
+the 2026-08-11 profile (the comparison baseline below) taught that these
+numbers evaporate otherwise:
+* **The cap play is gone and openings moved UP**: opens-at-1 30.1% → 12.2%,
+  mean opening 3.53 → 4.31, now unimodal at 5–6 (48.8% combined). With no cap,
+  a low opening no longer holds the reply down — so underbidding lost its
+  point, and the opener names value instead. Settled mean 4.63 → 5.28; the
+  old settled spike at 3 (25%, the cap line) dissolved to 2.6%.
+* **Auctions run 1.77 bids** (47.2% one-bid, 52.8% contested, 16.8% see the
+  opener re-enter). Interaction concentrates on LOW openings: opens ≤3 draw
+  1.3–1.7 overtakes/auction where opens ≥5 draw 0.3–0.5 — a low opening is
+  now an invitation, not a cap.
+* **The bonus binds**: only 15.8% of rounds settle on a final bid that jumped
+  ≥2 (the ones the bonus charges), jump share of overtakes falls 63.6% →
+  2.5% across opening levels 1→6, and 32.0% of all overtakes are jumps
+  (sizes +2:52 +3:34 +4:23 +5:13 +6:1 over 500 auctions).
+* **Outcomes**: made 45.0% / set 49.4% / Null 5.6% (was 56.8/38.8/4.5).
+  Doubles taken 19.2% (was 27.2%), and doubled rounds average −15.3 for the
+  declarer (defender's avg doubled set pays 52.4). Sacrifices 23.2% of
+  rounds, averaging −19.8. The old profile's open question stands, sharper:
+  settled 5–6 make only 43.8%/35.6%, so self-play still overbids the make
+  point — whether the payoff asymmetry rewards it is unmeasured.
+
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
 The round has two quantities that are both "how much", and the panel used one
