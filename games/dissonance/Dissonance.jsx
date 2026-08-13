@@ -1868,6 +1868,23 @@ export default function Dissonance({ myId, authUser, onExit }) {
     if (game.led === null || game.led === undefined) return [];
     return [{ seat: game.leader, c: game.led }];
   })();
+  /* WHICH MIDDLE THE BOARD IS SHOWING, as a class rather than as `:has()` on
+     the table (see the note by `.dis-main`). Derived from the SAME conditions
+     the middle's ternary chain branches on, in the same order:
+       * the round-ended net and the round report both render `.dis-result`;
+       * every auction-family phase renders `.dis-auction`;
+       * everything else — play, and the completed-trick hold, which keeps the
+         board up after the phase has already flipped to `over` — renders the
+         trick plus `.dis-playside`.
+     That last case is why this cannot key on the phase alone, and it is the
+     bug the `:has()` version was written to avoid: a phase-keyed budget
+     shrank the cards for exactly that beat. `screens.mjs` asserts the class
+     and the rendered child agree, so the two cannot drift. */
+  const AUCTION_PHASES = ["auction", "swap", "talon", "declare", "double", "kontra", "re"];
+  const railKind = (game.phase === "over" && !heldTrick) ? "result"
+    : AUCTION_PHASES.includes(game.phase) ? "auction"
+      : "play";
+
   /* THE OPTIMISM IS ONLY APPLIED WHERE THE RESULT IS KNOWN. A card from the
      hand always is. A PILE top is not: uncovering reveals the card underneath,
      and on an outer pile the client does not know it — rendering that pile
@@ -1925,11 +1942,20 @@ export default function Dissonance({ myId, authUser, onExit }) {
         onAbandon={game.phase !== "over" ? () => setConfirmAbandon(true) : null} />}
         user={authUser?.name ? <span className="lby-head-name">{authUser.name}</span> : null} />
       {reconnecting && <div className="banner">Reconnecting…</div>}
-      <div className="dis-main">
+      {/* `dis-has-match` and the table's `dis-rail-*` below are what the
+          desktop grid keys on. They used to be `:has(> .dis-side-match)` and
+          `:has(> .dis-playside)` — correct, and cheap in Chrome, but `:has()`
+          sits on the ANCESTORS of every card and Firefox re-evaluates it far
+          less cheaply, which is where "the hover is laggy in Firefox but fine
+          elsewhere" comes from: a :hover on a card can invalidate the whole
+          subtree those selectors guard. The renderer already knows both facts,
+          so it says them. */}
+      <div className={`dis-main${game.match ? " dis-has-match" : ""}`}>
         {/* `dis-3seat` is what re-derives the card size: the height budget
             divides by the number of CARD ROWS, and a dummy table has six
             where two seats have four. */}
-        <div className={`dis-table ph-${game.phase}${game.dummy ? " dis-3seat" : ""}`}>
+        <div className={`dis-table ph-${game.phase} dis-rail-${railKind}`
+          + (game.dummy ? " dis-3seat" : "")}>
           {/* opponent */}
           <div className="dis-seat">
             <div className="dis-seatname">

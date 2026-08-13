@@ -196,13 +196,13 @@
      line the report is about). Keyed on the report being present, so the
      completed-trick hold — which still has cards on the table — is
      untouched. */
-  .dis .dis-table:has(> .dis-result) > .dis-seat > .dis-hand,
-  .dis .dis-table:has(> .dis-result) > .dis-seat > .dis-piles { display: none; }
+  .dis .dis-table.dis-rail-result > .dis-seat > .dis-hand,
+  .dis .dis-table.dis-rail-result > .dis-seat > .dis-piles { display: none; }
   /* ...and the table stops reserving a board's worth of height once those
      rows are gone, or the felt keeps a full screen of it and simply moves
      the emptiness below the report instead of above it. The panels beneath
      scroll up to meet it. */
-  .dis .dis-table:has(> .dis-result) { min-height: 0; }
+  .dis .dis-table.dis-rail-result { min-height: 0; }
   /* THUMB-SIZED BID KEYS. The level pad and the denomination row measured
      ~36px against the 44px floor the go button already cleared — the two
      controls a phone player touches most in the auction. */
@@ -800,9 +800,9 @@
      PLAYSIDE being present rather than on `ph-play`: the completed-trick hold
      keeps the board up after the phase has already flipped to `over`, and a
      phase-keyed budget shrank the cards for exactly that beat. The same
-     :has() idiom the auction/result rail rules below already use. */
-  .dis-game .dis-table:has(> .dis-playside) { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
-  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 28.5rem; }
+     same `dis-rail-*` class the auction/result rail rules below use. */
+  .dis-game .dis-table.dis-rail-play { --dis-rows: 5; --dis-reserve-in: 17.5rem; }
+  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 28.5rem; }
   /* Spread whatever slack is left the way a table does — opponent at the far
      side, your hand nearest you — instead of packing everything to the top. */
   .dis-game .dis-table { justify-content: space-between; }
@@ -830,18 +830,19 @@
    flanking a 400px middle would start costing the cards, which is the wrong
    trade.
 
-   `:has()` rather than a class on the root: the match panel is CONDITIONAL (a
+   A CLASS THE RENDERER SETS (`dis-has-match`), not `:has()`: the panel is
+   CONDITIONAL (a
    game saved before matches existed has none), and reserving a third column
    for an element that is not there would re-create the empty flank this is
    here to remove. */
 @media (min-width: 1200px) and (min-height: 600px) {
-  .dis-game .dis-main:has(> .dis-side-match) {
+  .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(15rem, 17rem) minmax(0, 1fr) minmax(15rem, 17rem);
     grid-template-rows: minmax(0, 1fr);
   }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match { grid-column: 1; grid-row: 1; }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-table { grid-column: 2; grid-row: 1; }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info { grid-column: 3; grid-row: 1; }
+  .dis-game .dis-main.dis-has-match > .dis-side-match { grid-column: 1; grid-row: 1; }
+  .dis-game .dis-main.dis-has-match > .dis-table { grid-column: 2; grid-row: 1; }
+  .dis-game .dis-main.dis-has-match > .dis-side-info { grid-column: 3; grid-row: 1; }
   /* THE MATCH PANEL FILLS ITS COLUMN, and the middle ground is what makes
      that work. It stretched originally (a huge blank glowing card beside a
      full right column at round 1), then was capped to its content (the
@@ -851,13 +852,13 @@
      match shows a short list in a full-height panel rather than a tall
      empty one, exactly the treatment the trick history gets in the other
      flank. */
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match {
+  .dis-game .dis-main.dis-has-match > .dis-side-match {
     display: flex; flex-direction: column; min-height: 0;
   }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match > .dis-panel {
+  .dis-game .dis-main.dis-has-match > .dis-side-match > .dis-panel {
     flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
   }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-match .dis-mcard {
+  .dis-game .dis-main.dis-has-match > .dis-side-match .dis-mcard {
     flex: 1 1 auto; min-height: 4rem; max-height: none;
   }
   /* ── THE PANEL SITS BESIDE THE CARDS, NOT BETWEEN THEM ──────────────────
@@ -888,8 +889,8 @@
      the cards-never-change-size-across-phases property only holds if every
      phase charges the same width. The panel's innards adapt to the column
      (below) instead of the column adapting to them. */
-  .dis-game .dis-table:has(> .dis-auction),
-  .dis-game .dis-table:has(> .dis-result) {
+  .dis-game .dis-table.dis-rail-auction,
+  .dis-game .dis-table.dis-rail-result {
     /* 12rem, THE SAME NUMBER PLAY USES — see the playside rule for where it
        comes from. All railed phases must charge the identical reserve or the
        board RESIZES when a phase ends: raising play's to 12 and leaving these
@@ -919,13 +920,13 @@
      tiers below scale with their wider rails. A wrapped talon row is the
      failure this avoids. */
   .dis-game .dis-table > .dis-result .dis-outrow { gap: 0.4rem; flex-wrap: nowrap; }
-  .dis-game .dis-table.dis-3seat:has(> .dis-auction),
-  .dis-game .dis-table.dis-3seat:has(> .dis-result) {
+  .dis-game .dis-table.dis-3seat.dis-rail-auction,
+  .dis-game .dis-table.dis-3seat.dis-rail-result {
     grid-template-rows: repeat(3, auto);
     --dis-reserve-in: 14rem;
   }
-  .dis-game .dis-table:has(> .dis-auction) > .dis-seat,
-  .dis-game .dis-table:has(> .dis-result) > .dis-seat { grid-column: 1; }
+  .dis-game .dis-table.dis-rail-auction > .dis-seat,
+  .dis-game .dis-table.dis-rail-result > .dis-seat { grid-column: 1; }
   .dis-game .dis-table > .dis-auction,
   .dis-game .dis-table > .dis-result { grid-column: 2; grid-row: 1 / -1; }
   /* In the rail the auction/report sit AS PANELS — the chrome's lit surface
@@ -994,7 +995,7 @@
      share the number, so the cards never change size across the auction,
      play and the report — the property the gate asserts. */
   .dis-game .dis-table { gap: 0.5rem; }
-  .dis-game .dis-table:has(> .dis-playside) {
+  .dis-game .dis-table.dis-rail-play {
     /* 12rem, not 10.5: the counted furniture missed the trick band's own
        caption line. `.dis-trick`'s min-height is a card row PLUS 1.25rem for
        the "who played this" name, while the budget counts the trick as one of
@@ -1028,18 +1029,18 @@
      column, the hand row wrapped, and the wrapped row pushed the bottom seat
      off the felt (seen at 1366x768; latent for the auction/report rails since
      they shipped). One rule for every railed state. */
-  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) :is(.dis-seat, .dis-trick) {
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) :is(.dis-seat, .dis-trick) {
     --dis-cw: max(3.4rem, min(
       calc((100cqw - var(--dis-rail) - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
       calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
     ));
   }
-  .dis-game .dis-table.dis-3seat:has(> .dis-playside) {
+  .dis-game .dis-table.dis-3seat.dis-rail-play {
     grid-template-rows: repeat(4, auto);
     --dis-reserve-in: 25rem;
   }
-  .dis-game .dis-table:has(> .dis-playside) > .dis-seat,
-  .dis-game .dis-table:has(> .dis-playside) > .dis-trick { grid-column: 1; }
+  .dis-game .dis-table.dis-rail-play > .dis-seat,
+  .dis-game .dis-table.dis-rail-play > .dis-trick { grid-column: 1; }
   /* THE PLAY RAIL IS A PANEL, like the auction's. Three lines of type sitting
      straight on the felt had nothing to hold them: the counter, the contract
      and the turn bar read as text scattered on green rather than as the
@@ -1076,10 +1077,10 @@
      history is the one list here that is never finished, so it takes the
      slack — at 1080p that is all thirteen tricks on screen instead of a
      five-row window with black underneath it. */
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info .dis-p-points {
+  .dis-game .dis-main.dis-has-match > .dis-side-info .dis-p-points {
     flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
   }
-  .dis-game .dis-main:has(> .dis-side-match) > .dis-side-info .dis-trickhist {
+  .dis-game .dis-main.dis-has-match > .dis-side-info .dis-trickhist {
     flex: 1 1 auto; min-height: 3rem; max-height: none;
   }
 }
@@ -1107,9 +1108,9 @@
    the block is the 3-seat reserves, which are about the dummy's extra row
    and have nothing to do with where a name sits. */
 @media (min-width: 1440px) and (min-height: 600px) {
-  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 25rem; }
-  .dis-game .dis-table.dis-3seat:has(> .dis-auction),
-  .dis-game .dis-table.dis-3seat:has(> .dis-result) { --dis-reserve-in: 14rem; }
+  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 25rem; }
+  .dis-game .dis-table.dis-3seat.dis-rail-auction,
+  .dis-game .dis-table.dis-3seat.dis-rail-result { --dis-reserve-in: 14rem; }
 }
 /* The dummy's numbers are re-asserted after the big-screen block below so the
    generic 2-seat reserve cannot claim a 3-seat table. */
@@ -1175,7 +1176,7 @@
    column zoomed: `zoom` would scale the column's BOX as well and overflow the
    grid track it sits in. The tracks widen to match. */
 @media (min-width: 1800px) {
-  .dis-game .dis-main:has(> .dis-side-match) {
+  .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr) minmax(17rem, 20rem);
   }
   .dis-game .dis-side .dis-panel h4 { font-size: 0.84rem; }
@@ -1205,12 +1206,12 @@
   /* The type above is furniture too, so the reserve pays for it — a bigger
      seat-name row on both seats plus a bigger trick caption is ~8px, which is
      exactly what put the board back over its box at 1600px tall. */
-  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) {
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 12.6rem;
   }
 }
 @media (min-width: 2200px) {
-  .dis-game .dis-main:has(> .dis-side-match) {
+  .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(19rem, 23rem) minmax(0, 1fr) minmax(19rem, 23rem);
   }
   .dis-game .dis-side .dis-panel h4 { font-size: 0.92rem; }
@@ -1230,7 +1231,7 @@
   .dis-game .dis-table .dis-seatname { font-size: 1.12rem; }
   .dis-game .dis-table .dis-trickval { font-size: 1.5rem; padding: 0.24rem 0.8rem; }
   .dis-game .dis-table .dis-tp .muted { font-size: 1rem; }
-  .dis-game .dis-table:is(:has(> .dis-playside), :has(> .dis-auction), :has(> .dis-result)) {
+  .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 13rem;
   }
 }
@@ -2032,14 +2033,14 @@
    Re-asserted here, after them, because source order is what decides between
    two equal-specificity rules. */
 @media (min-width: 1800px) {
-  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 25.6rem; }
-  .dis-game .dis-table.dis-3seat:is(:has(> .dis-auction), :has(> .dis-result)) {
+  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 25.6rem; }
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 14.6rem;
   }
 }
 @media (min-width: 2200px) {
-  .dis-game .dis-table.dis-3seat:has(> .dis-playside) { --dis-reserve-in: 26rem; }
-  .dis-game .dis-table.dis-3seat:is(:has(> .dis-auction), :has(> .dis-result)) {
+  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 26rem; }
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-auction, .dis-rail-result) {
     --dis-reserve-in: 15rem;
   }
 }

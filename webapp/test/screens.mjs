@@ -2885,6 +2885,27 @@ try {
 			!!auc.panel && !!auc.seat && auc.panel.x >= auc.seat.x + auc.seat.w - 1,
 			JSON.stringify(auc));
 
+		// THE RAIL CLASS AND THE RENDERED MIDDLE MUST AGREE. The desktop grid,
+		// the card budget and the reserve all key on `dis-rail-*`, which the
+		// renderer sets from the same conditions the middle's ternary branches
+		// on -- two expressions of one fact, and the layout silently uses the
+		// WRONG budget if they ever part (the class replaced `:has()`, which
+		// could not drift because it read the DOM directly). Checked here and
+		// again after the game is played out, so both the auction and the
+		// play/report shapes are covered.
+		const railAgrees = () => page.evaluate(() => {
+			const t = document.querySelector(".dis-table");
+			if (!t) return { err: "no table" };
+			const cls = [...t.classList].find((c) => c.startsWith("dis-rail-"));
+			const child = t.querySelector(":scope > .dis-result") ? "dis-rail-result"
+				: t.querySelector(":scope > .dis-auction") ? "dis-rail-auction"
+					: t.querySelector(":scope > .dis-playside") ? "dis-rail-play" : "none";
+			return { cls, child, ok: cls === child };
+		});
+		const railAuc = await railAgrees();
+		check("the table's rail class matches the middle it is rendering",
+			railAuc.ok, JSON.stringify(railAuc));
+
 		// NO FACE-UP CARD IS DIMMED, in any form. Cards render identically whether
 		// or not they are playable; legality lives in the `play` affordance and is
 		// enforced server-side. Two earlier versions of this failed differently:
@@ -2999,6 +3020,9 @@ try {
 		}));
 		check("a whole game was played out", dwells.length >= 8,
 			`${dwells.length} finished tricks, ${trace.length} frames — ${JSON.stringify(stuck)}`);
+		const railEnd = await railAgrees();
+		check("...and the rail class still matches the middle at the report",
+			railEnd.ok, JSON.stringify(railEnd));
 		// THE CARDS ARE THE SAME SIZE AT THE END AS AT THE AUCTION. This is the
 		// point of moving the panels into a rail: the board no longer redraws at
 		// a different scale for the auction and again for the report, which it
