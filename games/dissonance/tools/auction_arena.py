@@ -81,6 +81,9 @@ MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
 if "DIS_DENOM_RULE" in os.environ:
     assert os.environ["DIS_DENOM_RULE"] in ("used", "standing", "own")
     E.DENOM_RULE[MODE] = os.environ["DIS_DENOM_RULE"]
+# ...and the jump bonus rate, for the dose sweep (2/3/4 per level).
+if "DIS_JUMP_SET" in os.environ:
+    E.JUMP_SET_BONUS[MODE] = int(os.environ["DIS_JUMP_SET"])
 if "DIS_FLAT_MAKE" in os.environ:
     E.FLAT_MAKE_BONUS[MODE] = int(os.environ["DIS_FLAT_MAKE"])
 if "DIS_FLAT_MIN" in os.environ:
