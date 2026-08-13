@@ -2906,6 +2906,24 @@ try {
 		check("the table's rail class matches the middle it is rendering",
 			railAuc.ok, JSON.stringify(railAuc));
 
+		// A GAME SURFACE, NOT A DOCUMENT: no text selection anywhere on the
+		// board, and no native tooltip on a card (hovering your own hand used
+		// to pop "King of Spades" over the table a beat later). Inputs are the
+		// deliberate exception — the lobby's room-code field is typed and
+		// pasted into, and a field you cannot select in is broken.
+		const sel = await page.evaluate(() => {
+			// A FACE-UP card: the first `.dis-card` on the board is the
+			// opponent's back, which carries no name by design.
+			const card = document.querySelector(".dis-seat:last-of-type .dis-hand .dis-card")
+				|| document.querySelector(".dis-card");
+			const st = (e) => e ? getComputedStyle(e).userSelect : null;
+			const inp = document.querySelector(".dis input");
+			return { card: st(card), title: card?.getAttribute("title") ?? null,
+				aria: !!card?.getAttribute("aria-label"), input: inp ? st(inp) : "n/a" };
+		});
+		check("nothing on the board is selectable, and a card has no tooltip",
+			sel.card === "none" && sel.title === null && sel.aria, JSON.stringify(sel));
+
 		// NO FACE-UP CARD IS DIMMED, in any form. Cards render identically whether
 		// or not they are playable; legality lives in the `play` affordance and is
 		// enforced server-side. Two earlier versions of this failed differently:

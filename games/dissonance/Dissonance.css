@@ -46,6 +46,20 @@
    nothing to paint over. `z-index: 0` on the element is what keeps this
    `-1` layer above the page and behind the content. */
 .dis { position: relative; z-index: 0; isolation: isolate; }
+/* NOTHING ON THE BOARD IS SELECTABLE. Dragging across a hand used to paint
+   half the table blue and leave a caret behind — on a phone a long-press on a
+   card raised the selection handles and the copy callout instead of playing
+   it. This is a game surface, not a document. `-webkit-` for iOS Safari,
+   which still needs the prefix, and `-webkit-touch-callout` for the long-press
+   menu specifically.
+   INPUTS ARE EXEMPT and must stay so: the lobby's room-code field is typed
+   into and pasted into, and a field you cannot select text in is broken. */
+.dis {
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.dis input, .dis textarea, .dis [contenteditable] {
+  user-select: text; -webkit-user-select: text;
+}
 .dis::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background:
@@ -919,7 +933,19 @@
      fit `--dis-rail` minus the panel's padding. 34px at 17rem, and the bigger
      tiers below scale with their wider rails. A wrapped talon row is the
      failure this avoids. */
-  .dis-game .dis-table > .dis-result .dis-outrow { gap: 0.4rem; flex-wrap: nowrap; }
+  /* THE REPORT'S SIX TALON CARDS GO TWO ROWS OF THREE. One row of six inside
+     a rail caps each card at about a sixth of it — the thumbnails the report
+     was criticised for. Three per row doubles the width each card gets, and
+     the panel is content-height, so the second row just makes it taller (it
+     may reach past the seats' rows; there is nothing beside it to collide
+     with). `max-width` on the row is what forces the wrap at three rather
+     than leaving it to chance. */
+  .dis-game .dis-table > .dis-result .dis-outrow {
+    gap: 0.4rem; flex-wrap: wrap; justify-content: center;
+    max-width: calc(3 * var(--dis-talon-cw) + 2 * 0.4rem);
+  }
+  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: var(--dis-talon-cw); }
+  .dis-game .dis-table { --dis-talon-cw: 62px; }
   .dis-game .dis-table.dis-3seat.dis-rail-auction,
   .dis-game .dis-table.dis-3seat.dis-rail-result {
     grid-template-rows: repeat(3, auto);
@@ -1134,9 +1160,13 @@
    the board's, and the type comes up with them. A talon you are choosing
    from should not be a row of thumbnails beside a hand of full-size cards. */
 @media (min-width: 1800px) {
-  .dis-game .dis-table > .dis-auction .dis-card { --cw: 72px; font-size: 1rem; }
-  .dis-game .dis-table > .dis-auction .dis-card.sm,
-  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 46px; font-size: 0.9rem; }
+  /* THE TALON IS THREE CARDS IN A COLUMN THAT HOLDS SIX at the report, so it
+     has room to be far bigger than the rail's other cards. Sized from the
+     rail: three of these plus two gaps fit inside it with the panel's padding
+     off. */
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 104px; font-size: 1.35rem; }
+  .dis-game .dis-table { --dis-talon-cw: 92px; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 92px; font-size: 1.2rem; }
   .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
   .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
@@ -1153,9 +1183,9 @@
   .dis-game .dis-table > .dis-auction .dis-clears { font-size: 0.88rem; }
 }
 @media (min-width: 2200px) {
-  .dis-game .dis-table > .dis-auction .dis-card { --cw: 86px; font-size: 1.15rem; }
-  .dis-game .dis-table > .dis-auction .dis-card.sm,
-  .dis-game .dis-table > .dis-result .dis-card.sm { --cw: 54px; font-size: 0.95rem; }
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 120px; font-size: 1.5rem; }
+  .dis-game .dis-table { --dis-talon-cw: 108px; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 108px; font-size: 1.3rem; }
   .dis-game .dis-table > .dis-auction .btn { font-size: 1.12rem; padding: 0.8rem 1.5rem; }
   .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1.12rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 2rem; }

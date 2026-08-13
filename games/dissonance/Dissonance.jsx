@@ -404,7 +404,12 @@ function Card({ c, onClick, sel, small, ghost }) {
   const cls = `dis-card ${isRed(c) ? "red" : "black"}${onClick ? " play" : ""}`
     + `${sel ? " sel" : ""}${small ? " sm" : ""}`;
   return (
-    <div className={cls} onClick={onClick} title={cardName(c)}>
+    /* NO `title`. A native tooltip on every card meant hovering your own hand
+       popped "King of Spades" over the board a half-second later — noise on a
+       card whose rank and suit are already the two biggest things on it. The
+       name stays available to assistive tech as an `aria-label`, which no
+       browser renders as a tooltip. */
+    <div className={cls} onClick={onClick} aria-label={cardName(c)}>
       {/* A large ghosted centre pip, painted FIRST so the index and the
           worth chip draw over it. Pure dressing — the corner index is still
           the identity (it is what a pile's offset keeps visible). */}
@@ -457,7 +462,7 @@ function Pile({ pile, onPlay }) {
             something is there — which is exactly what the outer piles hide,
             from their owner too. A one-card pile has nothing behind it. */}
         {twoLeft && (
-          <div className="dis-buried" title={knownUnder ? cardName(under) : "face down"}>
+          <div className="dis-buried" aria-label={knownUnder ? cardName(under) : "face down"}>
             <Card c={knownUnder ? under : null} />
           </div>
         )}
