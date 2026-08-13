@@ -901,6 +901,21 @@ Double's odds table for jumped contracts.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
+**THE 200-ROUND EXPERT PROFILE UNDER v2 (2026-08-13; opening charged; same
+harness as v1's below):** bids/auction 1.77 → **2.15**, contested 52.8 →
+**65.0%**, opener re-enters 16.8 → **29.0%**; openings mean **3.04**, spread
+1–4 (19.5/21.5/22.5/17/13/5/1.5%); settled mean **4.55**, the smoothest
+distribution any variant produced (3/7.5/12.5/21/27.5/22/6/0.5%); made
+**65.0%** / set 31.5 / Null 3.5, with per-level make degrading smoothly to
+~50% at the top (the chronic self-play overbidding largely corrected — the
+climb past the make point now costs jump bonus too); Doubles 26.5% (doubled
+avg −7.5, defender's doubled set avg 54.7); sacrifices 25.0%; +1 is the most
+common overtake (37.6% of 1.15/auction) and the charged final rise is live
+in ~85% of rounds. The residual limiter on auction length is the
+denomination forever-ban — a climb burns a suit per rung — which is what
+`DENOM_RULE` "standing" (the same-suit-never-twice-in-a-row experiment)
+addresses.
+
 **THE 500-ROUND EXPERT PROFILE UNDER v1 OF THE RULE (2026-08-13; opening
 exempt from the jump; k=8 one tree, talon model, dd-resolved, mirror exactly
 +0.0000)** — v1 is superseded by v2 above, and this profile is WHY; recorded
