@@ -75,6 +75,12 @@ MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
 # so the engine default is no longer 0, and a knob that wrote unconditionally
 # would silently measure a rule the room stopped using. `DIS_FLAT_MAKE=0
 # DIS_FLAT_SET=0` is how the lab asks for the pre-ship baseline now.
+# ...and the denomination rule, so an arm can be measured under a rule the
+# engine no longer ships (e.g. re-running the v2-alone profile -- jump bonus
+# with the original per-player forever-ban -- after "own" became the default).
+if "DIS_DENOM_RULE" in os.environ:
+    assert os.environ["DIS_DENOM_RULE"] in ("used", "standing", "own")
+    E.DENOM_RULE[MODE] = os.environ["DIS_DENOM_RULE"]
 if "DIS_FLAT_MAKE" in os.environ:
     E.FLAT_MAKE_BONUS[MODE] = int(os.environ["DIS_FLAT_MAKE"])
 if "DIS_FLAT_MIN" in os.environ:
