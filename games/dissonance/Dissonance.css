@@ -371,14 +371,34 @@
      travel in the first frame at 60Hz. */
   transition: transform 0.09s ease-out;
 }
-/* CORNERS UNDER TRANSFORM. `overflow: hidden` + a scaled `border-radius` +
-   an inset ring is exactly the combination Chrome re-rasterizes badly while
-   an element is mid-transform — the rounded corners come out chipped and
-   dark on the raised card. Promoting the card to its own layer makes the
-   rounding part of the composited texture instead of something re-clipped
-   per frame. Only the playable cards: a promoted layer per card costs memory,
-   and the ones that never move do not need it. */
+/* THE LIFT'S SHADOW IS A PSEUDO-ELEMENT THAT FADES, not a box-shadow that
+   changes. This is the third pass at "the hover feels laggy" and the first two
+   attacked the wrong cost: shortening the duration did nothing, and taking
+   box-shadow out of the TRANSITION only stopped it being tweened — the shadow
+   still CHANGED on hover, which is a repaint of a four-layer shadow with a
+   20px blur around a card that is 180px wide on a big display. That repaint
+   is main-thread work, per card, every time the pointer crosses one; sweeping
+   a hand of seven does it seven times.
+   Now the card's own shadow never changes. The extra lift shadow lives on
+   `::after` and animates OPACITY, which the compositor can do on its own
+   thread without repainting anything.
+   `will-change: transform` STAYS, and the trade is worth stating because it
+   points the other way from the shadow: without it the card's layer is
+   created and rasterized when the hover starts, and a 180px card carries a
+   gradient face, a watermark pip and three-layer text-shadows on its suits —
+   at HiDPI that raster is tens of milliseconds spent BEFORE the first frame
+   of the lift, which is precisely the "it lags going up" the shadow work does
+   not explain. Pre-promoting costs a standing layer per playable card
+   (~700KB at 2x, times ten or twenty) and buys a hover that is pure
+   compositing: nothing about the card's paint changes now, so the layer is
+   rasterized once and only moved thereafter. */
 .dis-card.play { will-change: transform; }
+.dis-card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  pointer-events: none; opacity: 0;
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.42), 0 2px 4px rgba(0, 0, 0, 0.32);
+  transition: opacity 0.09s ease-out;
+}
 /* The ghosted centre pip — the same ink as the corner index, at watermark
    strength, sized off the card's own token so every scale keeps the ratio. */
 .dis-center {
@@ -443,30 +463,18 @@
      hover took the light off the corners at the exact moment the card is
      raised and most looked at, so a lifted card read as flat and dark-cornered
      against the ones still in the hand. */
-  .dis-card.play:hover {
-    transition: transform 0.06s ease-out;
-    transform: translateY(-8px);
-    box-shadow:
-      0 0 0 1px rgba(20, 16, 8, 0.42),
-      inset 0 1px 0 rgba(255, 255, 255, 0.75),
-      0 2px 4px rgba(0, 0, 0, 0.32),
-      0 10px 20px rgba(0, 0, 0, 0.42);
-  }
+  .dis-card.play:hover { transition: transform 0.06s ease-out; transform: translateY(-8px); }
+  .dis-card.play:hover::after { transition: opacity 0.06s ease-out; opacity: 1; }
   /* AND THE PRESS ANSWERS INSTANTLY. A play is a server round trip — the card
      does not leave your hand until the room broadcasts — so without a press
      state the only feedback for ~100-300ms was nothing at all, which is what
      "not snappy" is. The card drops toward the table under the pointer the
      moment the button goes down, at no transition, so it cannot lag the
      finger. */
-  .dis-card.play:active {
-    transition: none;
-    transform: translateY(-2px) scale(0.985);
-    box-shadow:
-      0 0 0 1px rgba(20, 16, 8, 0.42),
-      inset 0 1px 0 rgba(255, 255, 255, 0.75),
-      0 1px 2px rgba(0, 0, 0, 0.4),
-      0 3px 7px rgba(0, 0, 0, 0.34);
-  }
+  /* The press is transform-only too, and drops the lift shadow by fading the
+     same pseudo-element back out. */
+  .dis-card.play:active { transition: none; transform: translateY(-2px) scale(0.985); }
+  .dis-card.play:active::after { transition: none; opacity: 0.35; }
 }
 /* NO DIMMING — every face-up card looks the same, playable right now or not.
    Legality is carried by the `play` affordance (cursor + hover) and enforced
