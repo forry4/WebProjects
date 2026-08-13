@@ -179,7 +179,9 @@ def main(paths):
             if d >= 2:
                 jumps_by_open[r["open"]] += 1
                 jump_sizes[d] += 1
-        final_jump[deltas[-1] if deltas else 0] += 1
+        # The CHARGED final rise -- v2 semantics: the opening is a raise over
+        # level 0, so a passed-out opening is charged its whole level.
+        final_jump[seq[-1] - (seq[-2] if len(seq) > 1 else 0)] += 1
     total_over = sum(all_deltas.values())
     print(f"\nOVERTAKES: {total_over} across {n} auctions "
           f"({total_over / n:.2f} per auction)")
@@ -196,8 +198,8 @@ def main(paths):
         print(f"  {o:>4}  {ro:>5}   {raises_by_open[o] / ro:>17.2f}"
               f"   {jumps_by_open[o] / ro:>13.2f}"
               f"   {pct(jumps_by_open[o], raises_by_open[o]):>18}")
-    print("\n  FINAL bid's rise (what the set bonus charges; 0 = passed-out "
-          "opening or same-level overtake):")
+    print("\n  FINAL bid's rise (what the set bonus charges; the opening "
+          "counts from level 0, so 0 = same-level overtake only):")
     print("    " + "  ".join(f"+{k}:{v} ({pct(v, n)})"
                              for k, v in sorted(final_jump.items())))
 
