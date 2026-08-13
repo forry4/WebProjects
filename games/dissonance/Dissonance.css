@@ -272,6 +272,14 @@
      read as a legend rather than as three cards you are counting. Three of
      these plus their gaps still cross a 360px phone with room to spare. */
   .dis .dis-side .dis-card.sm { --cw: 52px; font-size: calc(var(--cw) * 0.28); }
+  /* THE REPORT'S TALON, +15% (2026-08-13). The round-end reveal is six cards
+     in one row, and at the shared 34px they were the smallest thing on a
+     screen whose whole job at that moment is showing you what was out of
+     play. 39px keeps them on ONE row at the narrowest phone this file
+     supports — 6 x 39 + 5 gaps is 254px inside a ~344px panel — which is the
+     constraint that sets the ceiling here, not the height. The type follows
+     `--cw` (see `.dis-card.sm`), so this is one number. */
+  .dis .dis-table > .dis-result .dis-card.sm { --cw: 39px; }
   /* ...and the three piles stand apart. They inherit the hand's tight gap,
      which is right for a fanned hand and wrong for three separate stacks. */
   .dis .dis-piles { gap: 0.6rem; }
