@@ -931,6 +931,17 @@ unlimited suit returns make denial wars cheap to conduct; charged final rise
 0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
 arena checkpoints, mirror exactly +0.0000.
 
+**THE JUMP RATE IS A WEAK DIAL BETWEEN 2 AND 4 — measured, 2026-08-13 (500
+deals per arm via `DIS_JUMP_SET`, same cards as the 3j pooled run, v2-alone
+setup):** the structure (charging the opening at all) did the work and the
+rate barely moves it. The one clean monotonic effect is the mean opening,
+3.15 / 3.07 / 2.99 across 2/3/4 — dearer jumps push openings down exactly as
+the pricing predicts. Everything else sits within ~2σ of the 3j numbers:
+bids/auction 2.21 / 2.19 / 2.30, contested 70.0 / 68.8 / 72.2%, made 55.4 /
+60.0 / 58.6%, Doubles 23.2 / 24.2 / 24.6%, sacrifices 26.6 / 25.4 / 27.4%
+(4j's sacrifices pay −21.3 vs −17.7). 3 stays: no arm beats it on anything
+the campaign targets, and it is the mid-dose.
+
 **THE v2-ALONE PROFILE WAS RE-CONFIRMED AT 500 ROUNDS (2026-08-13; 300 fresh
 deals via the arena's `DIS_DENOM_RULE=used` arm pooled with the original
 200):** every headline held within a couple of points — bids/auction 2.15 →
