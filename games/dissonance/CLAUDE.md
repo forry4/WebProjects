@@ -931,6 +931,18 @@ unlimited suit returns make denial wars cheap to conduct; charged final rise
 0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
 arena checkpoints, mirror exactly +0.0000.
 
+**THE v2-ALONE PROFILE WAS RE-CONFIRMED AT 500 ROUNDS (2026-08-13; 300 fresh
+deals via the arena's `DIS_DENOM_RULE=used` arm pooled with the original
+200):** every headline held within a couple of points — bids/auction 2.15 →
+2.19, contested 65.0 → 68.8%, openings mean 3.04 → 3.07 (still flat:
+21.6/20.2/18.8/17.8/13.8/6.6/1.2, max share 21.6% — the flattest opening
+distribution of any variant), settled mean 4.55 → 4.63
+(2.4/7.4/11/19.6/28.8/25.6/5/0.2), sacrifice 25.0 → 25.4%, overtake mix
+static (same-level 29.7 → 29.8%, jumps ≥2 32.8 → 31.5%). The two that moved
+most, both inside 2σ of a 200-sample: made 65.0 → 60.0% and Doubles 26.5 →
+24.2% (doubled avg −7.5 → −5.5). The 200-round numbers below are kept as the
+original record; treat the pooled figures as the profile.
+
 **THE 200-ROUND EXPERT PROFILE UNDER v2 ALONE (2026-08-13; opening charged,
 denomination forever-ban still on; same harness as v1's below):** bids/auction 1.77 → **2.15**, contested 52.8 →
 **65.0%**, opener re-enters 16.8 → **29.0%**; openings mean **3.04**, spread
