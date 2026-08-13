@@ -3157,24 +3157,38 @@ try {
 				kept === 2, `header + rows = ${kept}`);
 		}
 
-		// ── the DD column ────────────────────────────────────────────────────
-		// Every banked round on the scorecard carries a fifth column: what DOUBLE
-		// DUMMY would have scored — the same deal and contract, the card play
-		// redone from trick 1 with all 32 cards visible. Two contracts, both of
-		// which fail silently outside a browser: the cell RESOLVES (the whole
-		// worker -> wasm -> odd_review chain degrades to a "…" that never fills,
-		// which is exactly what a missing export or a mis-shaped deal looks
-		// like — and this room is vs the NORMAL bot, so the wasm loads COLD
-		// here; the column must not lean on Hard's pool being armed), and the
-		// answer is STABLE — the solve is exact, so re-rendering must not move
-		// it. Waiting through a broadcast-heavy window and reading it twice is
-		// what checks the second half.
+		// ── the DOUBLE-DUMMY figure ──────────────────────────────────────────
+		// It lives in the ROUND'S STORY now (2026-08-13), not as a fifth column
+		// on the scorecard — it prices one deal in one contract, so it belongs
+		// where those hands are on screen. What is checked has not changed, and
+		// both halves fail silently outside a browser: the figure RESOLVES (the
+		// whole worker -> wasm -> odd_review chain degrades to a "Solving…" that
+		// never fills, which is exactly what a missing export or a mis-shaped
+		// deal looks like — and this room is vs the NORMAL bot, so the wasm
+		// loads COLD here; the review must not lean on Hard's pool being
+		// armed), and the answer is STABLE, since an exact solve must not move
+		// across re-renders.
 		{
+			await page.evaluate(() => {
+				const row = [...document.querySelectorAll(".dis-mcard .dis-mrow-open")][0];
+				row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+			});
+			const ddText = () => page.evaluate(() => {
+				const secs = [...document.querySelectorAll(".cm-panel .dis-story-sec")];
+				const sec = secs.find((x) => /Double dummy/i.test(x.querySelector(".dis-story-hd")?.textContent || ""));
+				const b = sec?.querySelector(".dis-story-ctline b");
+				const t = b?.textContent.trim();
+				return t && /^[+\u2212-]\d+$/.test(t) ? t : null;
+			});
 			const solved = await page.waitForFunction(() => {
-				const c = document.querySelector(".dis-mcard .dis-mrow-dd:not(.muted)");
-				return c && /^[+\u2212-]\d+$/.test(c.textContent.trim()) ? c.textContent.trim() : null;
+				const secs = [...document.querySelectorAll(".cm-panel .dis-story-sec")];
+				const sec = secs.find((x) => /Double dummy/i.test(x.querySelector(".dis-story-hd")?.textContent || ""));
+				const b = sec?.querySelector(".dis-story-ctline b");
+				const t = b?.textContent.trim();
+				return t && /^[+\u2212-]\d+$/.test(t) ? t : null;
 			}, null, { timeout: 25_000 }).then((h) => h.jsonValue()).catch(() => null);
-			check("the scorecard's DD column resolves to a signed score", !!solved, String(solved));
+			check("the round story's double-dummy figure resolves to a signed score",
+				!!solved, String(solved));
 			const cells = await page.evaluate(() => {
 				// A ROW IS ONE LINE TALL. The scorecard's type grew from 0.72rem
 				// to 0.8rem when the match got a column of its own, and the only
@@ -3209,13 +3223,25 @@ try {
 				JSON.stringify(cells));
 			check("...and its rows pack to the top rather than spreading",
 				cells.alignContent === "start", JSON.stringify(cells));
-			check("every banked round has a DD cell under a 5-column header",
-				!!cells.rows && cells.dd === cells.rows && cells.hd === 5, JSON.stringify(cells));
+			check("every banked round is a four-column row",
+				!!cells.rows && cells.dd === 0 && cells.hd === 4, JSON.stringify(cells));
 			await sleep(700);
-			const again = await page.evaluate(() =>
-				document.querySelector(".dis-mcard .dis-mrow-dd:not(.muted)")?.textContent.trim() || null);
+			const again = await ddText();
 			check("...and the answer holds still across re-renders",
 				again === solved, `first ${solved}, later ${again}`);
+			// ...and it is NOT on the scorecard any more: a stale fifth column
+			// there would mean the move half-happened.
+			const noDd = await page.evaluate(() => ({
+				cells: document.querySelectorAll(".dis-mcard .dis-mrow-dd").length,
+				hd: document.querySelector(".dis-mcard .dis-mrow-hd")?.children.length,
+			}));
+			check("...and the scorecard is back to four columns without it",
+				noDd.cells === 0 && noDd.hd === 4, JSON.stringify(noDd));
+			await page.evaluate(() => {
+				[...document.querySelectorAll(".cm-panel button, .cm-x, .cm-close")]
+					.find((b) => /close|×/i.test(b.textContent || b.getAttribute("aria-label") || ""))?.click();
+			});
+			await sleep(300);
 
 			// A scorecard row opens the ROUND STORY: the whole deal face up —
 			// both hands, the piles, the talon with what the declarer was

@@ -603,49 +603,17 @@ function histLine(g) {
  *  so a `+` is what you took and a `−` is what it cost you, which is the read
  *  the running total above is made of.
  */
-function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId, onStory }) {
-  // The DD column: what the round was WORTH to perfect card play. Hook order
-  // is safe — this is called unconditionally before any early return.
-  const dd = useDdReviews(rounds, roomId);
+function MatchCard({ rounds, mySeat, oppSeat, nameOf, onStory }) {
   if (!rounds || rounds.length === 0) return null;
-  // The review value is signed for the DECLARER, and exactly one side scores a
-  // round — so the sign says which. Rendered in the Score column's own
-  // vocabulary: `+` is what you would have taken, `−` what it would have cost.
-  const ddCell = (r) => {
-    if (!r.deal) {
-      return <span className="dis-mrow-dd muted"
-        title="No stored deal — this round predates the review, or was forfeited">—</span>;
-    }
-    // A dummy round banks its three hands for the story modal, but the DD
-    // solver is two-seat to its bones — nothing can price a third hand, so
-    // the column says so instead of posting the worker a deal it must refuse.
-    if ((r.deal.hands?.length ?? 2) !== 2) {
-      return <span className="dis-mrow-dd muted"
-        title="No DD figure for a dummy round — the exact solver prices two hands, not three">—</span>;
-    }
-    const v = dd[r.round];
-    if (v === undefined) return <span className="dis-mrow-dd muted">…</span>;
-    if (v === null) {
-      return <span className="dis-mrow-dd muted" title="Could not be solved">—</span>;
-    }
-    const dSc = Math.max(v, 0);
-    const oSc = Math.max(-v, 0);
-    const mine = r.declarer === mySeat ? dSc : oSc;
-    const theirs = r.declarer === mySeat ? oSc : dSc;
-    return (
-      <span className={`dis-mrow-dd ${mine >= theirs ? "good" : "bad"}`}>
-        {mine >= theirs ? `+${mine}` : `−${theirs}`}
-      </span>
-    );
-  };
+  /* THE DD FIGURE MOVED INTO THE ROUND'S STORY (2026-08-13). It was a fifth
+     column here, which made every line carry a number that is only meaningful
+     once you are looking at the deal — and it cost the contract column the
+     width it needed. It lives in the modal now, where the hands it prices are
+     on screen. */
   return (
     <div className="dis-mcard">
       <div className="dis-mrow dis-mrow-hd">
         <span>#</span><span>Contract</span><span>Pts</span><span>Score</span>
-        <span title={"What double dummy would have scored — the same deal and "
-          + "contract, the card play redone from trick 1 by two players who "
-          + "see all 32 cards. Beating it means the hidden cards broke your "
-          + "way; trailing it is the cost of playing honestly in the dark."}>DD</span>
       </div>
       {rounds.map((r, i) => {
         const mine = r.scores?.[mySeat] || 0;
@@ -694,7 +662,6 @@ function MatchCard({ rounds, mySeat, oppSeat, nameOf, roomId, onStory }) {
             <span className={`dis-mrow-sc ${mine >= theirs ? "good" : "bad"}`}>
               {mine >= theirs ? `+${mine}` : `−${theirs}`}
             </span>
-            {ddCell(r)}
           </div>
         );
       })}
@@ -723,7 +690,12 @@ function roundTitle(r, nameOf) {
  *  is re-derived, and rounds banked before the reveal shipped cannot open
  *  this.
  */
-function RoundStory({ r, mySeat, nameOf, onClose }) {
+function RoundStory({ r, mySeat, nameOf, roomId, onClose }) {
+  /* THE DOUBLE-DUMMY FIGURE LIVES HERE NOW, not as a fifth column on the
+     scorecard: it prices THIS deal in THIS contract, so it belongs where the
+     hands are on screen. One round, so the hook is handed a single-entry list
+     — it caches per room and round either way. */
+  const dd = useDdReviews([r], roomId);
   const deal = r.deal || {};
   const rev = r.reveal || {};
   const hands = deal.hands || [];
@@ -893,6 +865,65 @@ function RoundStory({ r, mySeat, nameOf, onClose }) {
                   {r.null ? "Null" : r.made ? "made it" : "set"},{" "}
                   {r.pts?.[r.declarer] ?? 0} of {r.target}.
                 </div>
+              </div>
+            )}
+
+            {/* WHAT PERFECT PLAY WAS WORTH — the same deal and the same
+                contract, the card play redone from trick 1 by two players who
+                see every card. Beating it means the hidden cards broke your
+                way; trailing it is the cost of playing honestly in the dark.
+                It is an exact solve, not an opinion, which is why it is stated
+                as a fact about the round rather than as a bot's view.
+                Two rounds cannot be priced and say so: one banked before the
+                deal was stored, and a DUMMY round, whose three hands the
+                two-seat solver cannot take. */}
+            {r.declarer >= 0 && !r.abandoned && (
+              <div className="dis-story-sec">
+                <div className="dis-story-hd">Double dummy</div>
+                {(() => {
+                  const seatWord = (v) => {
+                    const dScore = Math.max(v, 0), oScore = Math.max(-v, 0);
+                    const mine = r.declarer === me ? dScore : oScore;
+                    const theirs = r.declarer === me ? oScore : dScore;
+                    const got = r.scores?.[me] ?? 0;
+                    const lost = r.scores?.[1 - me] ?? 0;
+                    const real = got >= lost ? got : -lost;
+                    const ideal = mine >= theirs ? mine : -theirs;
+                    return (
+                      <>
+                        <div className="dis-story-ctline">
+                          <b className={ideal >= 0 ? "dis-story-dd-good" : "dis-story-dd-bad"}>
+                            {ideal >= 0 ? `+${ideal}` : `−${Math.abs(ideal)}`}
+                          </b>
+                        </div>
+                        <div className="dis-story-note muted">
+                          Perfect play in this contract scores{" "}
+                          {ideal >= 0 ? `${ideal} to you` : `${Math.abs(ideal)} against you`};
+                          {" "}the round actually paid{" "}
+                          {real >= 0 ? `${real} to you` : `${Math.abs(real)} against you`}.
+                        </div>
+                      </>
+                    );
+                  };
+                  if (!r.deal) {
+                    return <div className="dis-story-note muted">
+                      No stored deal — this round predates the review, or was forfeited.
+                    </div>;
+                  }
+                  if ((r.deal.hands?.length ?? 2) !== 2) {
+                    return <div className="dis-story-note muted">
+                      A dummy round has three hands; the exact solver prices two.
+                    </div>;
+                  }
+                  const v = dd[r.round];
+                  if (v === undefined) {
+                    return <div className="dis-story-note muted">Solving…</div>;
+                  }
+                  if (v === null) {
+                    return <div className="dis-story-note muted">Could not be solved.</div>;
+                  }
+                  return seatWord(v);
+                })()}
               </div>
             )}
           </div>
@@ -2570,8 +2601,30 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {game.out && (
                 <div className="dis-reveal">
                   <div className="muted">The talon</div>
+                  {/* THE THREE THE DECLARER SAW ARE GROUPED, AND ON THEIR SIDE.
+                      The six were rendered in the order the engine stores them,
+                      which mixes seen and unseen — so "which three did they get
+                      to choose from" was a question you answered by reading the
+                      caption underneath and matching card names. Now they are
+                      one group, outlined, and placed in the row nearest whoever
+                      declared: the top row if the opponent did, the bottom row
+                      if you did (the panel wraps six into two rows of three).
+                      WITHIN each group the DEALT order is kept — the talon is
+                      not a hand and sorting it by suit or rank would invent an
+                      order the round never had. */}
                   <div className="dis-outrow">
-                    {game.out.map((c) => <Card key={c} c={c} small />)}
+                    {(() => {
+                      const seen = new Set(sawTalon ? (game.shown_at_deal || []) : []);
+                      const a = game.out.filter((c) => seen.has(c));
+                      const b = game.out.filter((c) => !seen.has(c));
+                      const declaredByMe = res.declarer === mySeat;
+                      const rows = declaredByMe ? [b, a] : [a, b];
+                      return rows.flat().map((c) => (
+                        <span key={c} className={seen.has(c) ? "dis-out-seen" : undefined}>
+                          <Card c={c} small />
+                        </span>
+                      ));
+                    })()}
                   </div>
                   {/* WHAT THE DECLARER ACTUALLY SAW AND DID — and no more than
                       that. This line used to read `shown` straight off the
@@ -2927,8 +2980,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   already in progress when the scorecard shipped — there is
                   nowhere to recover its earlier rounds from. */}
               <MatchCard rounds={game.match.rounds} mySeat={mySeat}
-                oppSeat={oppSeat} nameOf={nameOf} roomId={roomData?.room_id}
-                onStory={setStoryRound} />
+                oppSeat={oppSeat} nameOf={nameOf} onStory={setStoryRound} />
             </div>
           </div>
         )}
@@ -2937,6 +2989,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
       {storyRound && (
         <RoundStory r={storyRound} mySeat={mySeat} nameOf={nameOf}
+          roomId={roomData?.room_id}
           onClose={() => setStoryRound(null)} />
       )}
       {confirmAbandon && (
