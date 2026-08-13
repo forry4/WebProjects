@@ -75,7 +75,7 @@ export default function DissonanceRules() {
 				<RulesDefs items={[
 					{ t: "The opener must bid", d: "Passing is not allowed on the first bid, however bad the hand is." },
 					{ t: "Denominations are ranked", d: "♣ < ♦ < ♥ < ♠ < NT. A bid at the same number in a higher-ranked denomination outranks the one standing." },
-					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by any amount in any denomination — except the one standing: the same suit is never bid twice in a row. Move your opponent off your suit and you may return to it. Or pass." },
+					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by any amount in any denomination — except the one YOU bid last: you personally never bid the same suit twice in a row. Bid something else in between and your suit is yours again — and raising in your opponent's suit is fair game. Or pass." },
 					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +3 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 18. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
 					{ t: "The last bid wins", d: "That player is the declarer, their denomination is trump (or no-trump), and their number is the target." },
 					{ t: "Declarer leads", d: "The declarer leads to trick 1 — which is an odd, LOSING trick. Leading first is a real disadvantage, and it's why the auction isn't a free-for-all." },

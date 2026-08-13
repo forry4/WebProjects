@@ -323,23 +323,25 @@ def test_null_cannot_be_bid_at_all():
     assert not any(d == E.NULL_DENOM for _, d in E.auction_options(g)["bids"]),         "and it is not reachable as an overtake either"
 
 
-def test_classic_bars_only_the_standing_suit_and_forgets_nothing_else():
-    """The standing rule (2026-08-13): the same suit is never bid twice in a
-    row -- a bid may not name the STANDING bid's denomination -- and that is
-    the only denomination restriction left. A seat may return to a suit it
-    named before whenever the opponent has since moved off it, which is what
-    lets two players climb a suit war one rung at a time."""
+def test_classic_bars_only_your_own_previous_suit():
+    """The "own" rule (2026-08-13): YOU personally never bid the same suit
+    twice in a row -- a bid may not name that seat's OWN previous bid's
+    denomination, and nothing else is barred. So 1C 1S 2C is illegal (the 2C
+    repeats its bidder's own 1C), raising the OPPONENT's standing suit is
+    legal, and a seat returns to its suit after bidding something else."""
     g = E.new_game(["a", "b"], random.Random(5))
-    E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
-    assert not E.can_bid(g, 1, 3, 0)[0], "clubs stand; clubs may not follow clubs"
-    E.apply_bid(g, 1, 3, 1)          # seat 1 moves to diamonds
-    assert E.can_bid(g, 0, 4, 0)[0], "seat 0 may RETURN to clubs now"
-    assert not E.can_bid(g, 0, 4, 1)[0], "diamonds stand and are barred"
-    assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [0, 2, 3, 4]
-    # ...and the climb can go on returning: 4C, 5D, 6C is a legal ladder.
+    E.apply_bid(g, 0, 1, 0)          # 1C
+    E.apply_bid(g, 1, 1, 3)          # 1S
+    assert not E.can_bid(g, 0, 2, 0)[0], "1C 1S 2C is illegal"
+    assert E.can_bid(g, 0, 2, 3)[0], "raising the opponent's spades is legal"
+    assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [1, 2, 3, 4]
+    E.apply_bid(g, 0, 2, 1)          # 2D
+    assert not E.can_bid(g, 1, 3, 3)[0], "seat 1's own spades are barred now"
+    E.apply_bid(g, 1, 3, 2)          # 3H
+    assert E.can_bid(g, 0, 4, 0)[0], "clubs come back once your last bid moved off them"
+    # ...so a two-suit climb can run indefinitely: 4C, 5S, 6D all legal on.
     E.apply_bid(g, 0, 4, 0)
-    E.apply_bid(g, 1, 5, 1)
-    assert E.can_bid(g, 0, 6, 0)[0]
+    assert E.can_bid(g, 1, 5, 3)[0]
 
 
 def test_minor_keeps_the_per_player_denomination_ban():

@@ -734,10 +734,11 @@ names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
 denomination**, or **raise by any amount** (classic since 2026-08-13 — minor
 and dummy keep the old +1/+2 cap). Denomination restriction is per-mode
-(`DENOM_RULE`): classic runs **"the same suit is never bid twice in a row"**
-(a bid may not name the standing bid's denomination, nothing else barred —
-so a seat may return to its own suit whenever the opponent has moved off
-it); minor and dummy keep the per-player no-repeat. The opener may not pass.
+(`DENOM_RULE`): classic runs **"own" — YOU personally never bid the same
+suit twice in a row** (a bid may not name that seat's own previous bid's
+denomination; 1♣ 1♠ 2♣ is illegal, raising the opponent's standing suit is
+legal, and your suit is yours again after one bid elsewhere); minor and
+dummy keep the per-player no-repeat. The opener may not pass.
 Big raises are priced rather than forbidden: see the JUMP BONUS section
 below.
 

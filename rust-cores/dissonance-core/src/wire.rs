@@ -549,6 +549,7 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         denom_rule: match r.get("denom_rule").and_then(|x| x.as_str()) {
             None | Some("used") => crate::auc_search::DenomRule::Used,
             Some("standing") => crate::auc_search::DenomRule::Standing,
+            Some("own") => crate::auc_search::DenomRule::OwnLast,
             Some(_) => return None,
         },
         top_denom: n("top_denom")? as u8,
@@ -599,6 +600,17 @@ pub fn auc_state_from_json(s: &Value) -> Option<crate::auc_search::AucState> {
         // The STANDING bid's jump — what a pass would settle the set price on.
         // Optional for the same back-compat reason as the rate above.
         jump: n("jump").unwrap_or(0) as u8,
+        // Each seat's own previous denomination; -1 (no bid yet) maps to the
+        // sentinel. Optional: absent reads as neither seat having bid, which
+        // under every rule but OwnLast is unread anyway.
+        last: s.get("last").and_then(|x| x.as_array())
+            .map(|a| {
+                let one = |i: usize| a.get(i).and_then(|x| x.as_i64())
+                    .filter(|&v| (0..=6).contains(&v))
+                    .map_or(crate::auc_search::NO_LAST, |v| v as u8);
+                [one(0), one(1)]
+            })
+            .unwrap_or([crate::auc_search::NO_LAST, crate::auc_search::NO_LAST]),
     };
     if state.to_act > 1 {
         return None;

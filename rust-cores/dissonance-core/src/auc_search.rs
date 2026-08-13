@@ -84,18 +84,26 @@ pub struct AucState {
     pub passes: u8,
     pub to_act: u8,
     /// Classic: how far the STANDING bid raised the level of the bid it
-    /// overtook (0 for an opening bid or a same-level overtake). Part of the
-    /// node's identity, not bookkeeping: a pass settles on this state, and the
-    /// settled set price pays the defender `jump_set_bonus` per level of it —
-    /// so two nodes identical but for how their standing bid arrived really
-    /// are worth different amounts, and the memo must tell them apart.
+    /// overtook (the opening counts, as a raise over level 0; a same-level
+    /// overtake is 0). Part of the node's identity, not bookkeeping: a pass
+    /// settles on this state, and the settled set price pays the defender
+    /// `jump_set_bonus` per level of it — so two nodes identical but for how
+    /// their standing bid arrived really are worth different amounts, and the
+    /// memo must tell them apart.
     pub jump: u8,
+    /// Classic: each seat's OWN previous bid's denomination, `NO_LAST` while
+    /// that seat has not bid. What `DenomRule::OwnLast` reads.
+    pub last: [u8; 2],
 }
+
+/// `AucState.last`'s "this seat has not bid" sentinel. Any value no legal
+/// denomination can take; 7 keeps the field honest under Grand's 6.
+pub const NO_LAST: u8 = 7;
 
 impl AucState {
     pub fn opening(to_act: u8) -> Self {
         AucState { level: 0, denom: 0, value: 0, declarer: -1, used: [0, 0], passes: 0, to_act,
-                   jump: 0 }
+                   jump: 0, last: [NO_LAST, NO_LAST] }
     }
 }
 
@@ -150,14 +158,17 @@ pub enum OppModel {
 ///
 /// `Used` is the original per-player forever-ban (`AucState.used` bitmasks);
 /// `Standing` bars only the STANDING bid's own denomination — the same suit is
-/// never bid twice in a row, and a seat may return to a suit it named before
-/// whenever the opponent has since moved off it. Classic ships `Standing`
-/// since the jump-bonus experiment; a payload without the field mirrors
-/// `Used`, the rule every older server ran.
+/// never bid twice in a row, by anyone; `OwnLast` bars only the denomination
+/// of THAT SEAT'S OWN previous bid (`AucState.last`) — you personally never
+/// bid the same suit twice in a row, but you may raise the opponent's
+/// standing suit and may return to yours after bidding something else.
+/// Classic ships `OwnLast`; a payload without the field mirrors `Used`, the
+/// rule every older server ran.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum DenomRule {
     Used,
     Standing,
+    OwnLast,
 }
 
 /// One thing a seat may do. The two bid shapes are separate variants rather
@@ -214,6 +225,7 @@ pub fn legal_bids(s: &AucState, r: &AucRules, out: &mut Vec<Bid>) {
     let free = |d: u8| match r.denom_rule {
         DenomRule::Used => (s.used[me] >> d) & 1 == 0,
         DenomRule::Standing => s.level == 0 || d != s.denom,
+        DenomRule::OwnLast => d != s.last[me],
     };
     if s.level == 0 {
         for d in 0..=r.top_denom {
@@ -273,6 +285,7 @@ pub fn step(s: &AucState, r: &AucRules, b: Bid) -> Step {
         Bid::Contract { level, denom } => {
             let mut n = *s;
             n.used[s.to_act as usize] |= 1 << denom;
+            n.last[s.to_act as usize] = denom;
             // The engine's own rule (`apply_bid`): every bid carries its rise
             // over the standing level -- the OPENING included, as a raise
             // over level 0 (v2 of the jump rule).
@@ -581,6 +594,41 @@ mod tests {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used, top_denom: 6,
                    ladder, opp: OppModel::Minimax }
+    }
+
+    #[test]
+    fn the_own_last_rule_bars_only_that_seats_own_previous_suit() {
+        let mut r = classic_rules();
+        r.denom_rule = DenomRule::OwnLast;
+        // 1C (seat 0), 1S (seat 1): seat 0 may not bid clubs again -- 2C
+        // repeats its own previous suit -- but may raise in SPADES, the
+        // opponent's standing suit, which Standing forbade.
+        let s0 = AucState::opening(0);
+        let s1 = match step(&s0, &r, Bid::Contract { level: 1, denom: 0 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        let s2 = match step(&s1, &r, Bid::Contract { level: 1, denom: 3 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(s2.last, [0, 3]);
+        let v = bids(&s2, &r);
+        assert!(v.iter().all(|b| !matches!(*b, Bid::Contract { denom: 0, .. })),
+                "seat 0 never bids its own clubs twice in a row: {v:?}");
+        assert!(v.contains(&Bid::Contract { level: 2, denom: 3 }),
+                "raising the opponent's standing suit is legal here");
+        // ...and after bidding something else, clubs come back.
+        let s3 = match step(&s2, &r, Bid::Contract { level: 2, denom: 1 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        let s4 = match step(&s3, &r, Bid::Contract { level: 2, denom: 2 }) {
+            Step::Node(n) => n,
+            other => panic!("{other:?}"),
+        };
+        assert!(bids(&s4, &r).contains(&Bid::Contract { level: 3, denom: 0 }),
+                "seat 0 returns to clubs once its own last bid moved off them");
     }
 
     #[test]

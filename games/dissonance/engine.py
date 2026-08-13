@@ -180,21 +180,26 @@ MAX_RAISE = 2
 RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
 
 #: WHICH DENOMINATION RULE the classic-shape auction runs (2026-08-13, the
-#: second experiment stacked on the jump bonus):
+#: experiments stacked on the jump bonus):
 #:  * "used"     -- the original per-player no-repeat: a seat may never again
 #:                  name a denomination it has itself named. Minor and dummy
 #:                  keep this (their calibrations assumed it).
-#:  * "standing" -- THE SAME SUIT IS NEVER BID TWICE IN A ROW, and that is the
-#:                  only denomination restriction left: a bid may not name the
-#:                  denomination of the STANDING bid, the opener names
-#:                  anything, and a seat may return to a suit it bid before
-#:                  whenever the opponent has since moved off it. Classic runs
-#:                  this: with the jump bonus rewarding +1 climbing, the old
-#:                  rule burned a denomination per rung and starved the climb
-#:                  after a couple of exchanges.
+#:  * "standing" -- a bid may not name the denomination of the STANDING bid
+#:                  (the same suit is never bid twice in a row, by anyone);
+#:                  everything else is free. Measured 2026-08-13: 2.60
+#:                  bids/auction, 72.6% contested -- but raising the
+#:                  opponent's suit is impossible and same-level ping-pong
+#:                  dominated the overtakes (42.2%).
+#:  * "own"      -- YOU PERSONALLY never bid the same suit twice in a row: a
+#:                  bid may not name the denomination of THAT SEAT'S OWN
+#:                  previous bid (1C 1S 2C is illegal -- the 2C repeats its
+#:                  own 1C), but you may return to a suit after bidding
+#:                  something else, and you MAY raise in the opponent's
+#:                  standing suit, which "standing" forbade. Classic runs
+#:                  this.
 #: Every bid still strictly raises (level, denomination) lexicographically, so
-#: the auction terminates at NT x the ceiling under either rule.
-DENOM_RULE = {"classic": "standing", "minor": "used", "dummy": "used"}
+#: the auction terminates at NT x the ceiling under every rule.
+DENOM_RULE = {"classic": "own", "minor": "used", "dummy": "used"}
 
 
 def denom_rule_for(mode: str) -> str:
@@ -1080,6 +1085,10 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
             "denom": -1,
             "declarer": -1,
             "used": [0, 0],
+            # Each seat's OWN previous bid's denomination (-1 = has not bid).
+            # What the "own" DENOM_RULE reads; `.get` on every read so a save
+            # from before the rule carries none and derives as -1.
+            "last": [-1, -1],
             "to_act": opener,
             "log": [],
             # skat only: the standing numeric bid, and how many times the
@@ -1179,10 +1188,14 @@ def auction_options(g: dict) -> dict:
         }
     me = a["to_act"]
     top = max_level_for(mode_of(g))
-    # Which denominations this seat may name -- see DENOM_RULE. "standing"
-    # forbids only the standing bid's own denomination (the same suit is never
-    # bid twice in a row); "used" is the per-player forever-ban.
-    if denom_rule_for(mode_of(g)) == "standing":
+    # Which denominations this seat may name -- see DENOM_RULE. "own" forbids
+    # only the seat's OWN previous bid's denomination; "standing" forbids the
+    # standing bid's; "used" is the per-player forever-ban.
+    rule = denom_rule_for(mode_of(g))
+    if rule == "own":
+        mine = a.get("last", [-1, -1])[me]
+        free = [d for d in range(NOTRUMP + 1) if d != mine]
+    elif rule == "standing":
         free = [d for d in range(NOTRUMP + 1) if d != a["denom"]]
     else:
         free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
@@ -1238,6 +1251,9 @@ def apply_bid(g: dict, seat: int, level: int, denom: int) -> None:
     a["denom"] = denom
     a["declarer"] = seat
     a["used"][seat] |= 1 << denom
+    # `setdefault`, not a bare index: a game dealt before the "own" rule has
+    # no `last` and must keep accepting bids rather than KeyError mid-auction.
+    a.setdefault("last", [-1, -1])[seat] = denom
     a["to_act"] = 1 - seat
     a["log"].append({"seat": seat, "level": level, "denom": denom})
 
@@ -2264,7 +2280,10 @@ def auction_search_payload(g: dict) -> dict | None:
                  # The STANDING bid's jump: a pass settles on this state, and
                  # the set price at that leaf includes the bonus the standing
                  # bid's own rise earned.
-                 "jump": a.get("jump", 0)}
+                 "jump": a.get("jump", 0),
+                 # Each seat's own previous denomination (-1 = none), which is
+                 # what the "own" rule's legality is a function of.
+                 "last": list(a.get("last", [-1, -1]))}
         for lvl in range(max(MIN_LEVEL, a["level"]), max_level_for(mode_of(g)) + 1):
             for d in range(NOTRUMP + 1):
                 terms.append(_terms_for(mode_of(g), d, lvl)
