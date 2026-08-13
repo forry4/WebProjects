@@ -902,8 +902,23 @@ Double's odds table for jumped contracts.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
+**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE "OWN" RULE (2026-08-13, the
+shipped combination; same harness):** bids/auction **2.10** (67.4% contested,
+28.2% opener re-entry), overtakes 1.10/auction — same-level overtakes fall to
+26.5% of them (the standing rule's ping-pong mostly gone) while jumps ≥2
+rise to 37.0%, sizes fattening (+3:69 vs the standing run's 56); openings
+mean 3.07 (23.4% at 1); settled mean 4.69 (2.2/6.4/9.8/17.6/33.8/25.8/4.4%);
+made **58.4%** / set 38.4 / Null 3.2; Doubles 26.0% (doubled avg **−18.1**,
+the most defender-favourable of the variants; defender's doubled set avg
+55.4); sacrifices 25.0% (avg −20.4). Against the standing rule it trades
+~0.5 bids/auction and 11 points of re-entry for cleaner shape: no lateral
+suit ping-pong, raising the opponent's suit legal, and the restriction is
+one a player can hold in their head ("not the suit I just bid").
+Interaction volume sits at v2-alone's level; the standing rule remains the
+most interactive variant measured.
+
 **THE 500-ROUND EXPERT PROFILE UNDER v2 + THE STANDING-SUIT RULE (2026-08-13,
-the shipped combination; same harness):** bids/auction **2.60** (72.6%
+superseded by "own" above; same harness):** bids/auction **2.60** (72.6%
 contested, 39.0% opener re-entry, tail to TEN bids), overtakes 1.60/auction
 with same-level overtakes the biggest class (42.2% — repeatable suit
 ping-pong at one level is the new cheap rung) and jumps ≥2 down to 21.2% of
