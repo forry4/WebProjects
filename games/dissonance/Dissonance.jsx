@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { baseCss } from "../../shared/theme.js";
 import {
   lobbyCss, LobbyHeader, LobbySectionHd, LobbyEmpty, TurnBadge, LobbyLoading,
@@ -690,12 +690,24 @@ function roundTitle(r, nameOf) {
  *  is re-derived, and rounds banked before the reveal shipped cannot open
  *  this.
  */
-function RoundStory({ r, mySeat, nameOf, roomId, onClose }) {
+function RoundStory({ r, mySeat, nameOf, roomId, mode, maxLevel, onClose }) {
   /* THE DOUBLE-DUMMY FIGURE LIVES HERE NOW, not as a fifth column on the
      scorecard: it prices THIS deal in THIS contract, so it belongs where the
      hands are on screen. One round, so the hook is handed a single-entry list
      — it caches per room and round either way. */
   const dd = useDdReviews([r], roomId);
+  /* PAR: the same deal solved in every denomination from BOTH sides. Skat is
+     the only mode with a sixth denomination (Grand sits at 6, above no-trump,
+     because 5 is the legacy Null marker). */
+  const parDenoms = mode === "skat" ? [0, 1, 2, 3, 4, 6] : [0, 1, 2, 3, 4];
+  const par = useParTable(r, roomId, parDenoms);
+  /* Each seat's best denomination — marked only once that seat's whole column
+     has landed, since a running maximum over a half-filled table moves as it
+     fills and would decorate the wrong row on the way. */
+  const best = [0, 1].map((seat) => {
+    const col = parDenoms.map((den) => par?.[den]?.pts?.[seat]);
+    return col.every((p) => typeof p === "number") ? Math.max(...col) : null;
+  });
   const deal = r.deal || {};
   const rev = r.reveal || {};
   const hands = deal.hands || [];
@@ -926,6 +938,72 @@ function RoundStory({ r, mySeat, nameOf, roomId, onClose }) {
                 })()}
               </div>
             )}
+
+            {/* PAR — the same deal solved in every denomination from BOTH
+                sides: how many trick points each player could have taken as
+                declarer, and whether they could have ducked to Null there.
+                The points ARE the contract: a level is a promise of that many
+                points, so the number in a cell is the highest level that
+                player could have bid in that denomination and still made.
+                Everything here is an exact solve of the real cards, which is
+                why it is stated as a fact about the deal. */}
+            {r.declarer >= 0 && !r.abandoned && r.deal
+              && (r.deal.hands?.length ?? 2) === 2 && (
+              <div className="dis-story-sec dis-story-par">
+                <div className="dis-story-hd">Par</div>
+                {par === null ? (
+                  <div className="dis-story-note muted">Could not be solved.</div>
+                ) : (
+                  <>
+                    <div className="dis-partable">
+                      <div className="dis-parhd" />
+                      <div className="dis-parhd">{nameOf(me)}</div>
+                      <div className="dis-parhd">{nameOf(1 - me)}</div>
+                      {parDenoms.map((den) => {
+                        const row = par[den] || {};
+                        const cell = (seat) => {
+                          const p = row.pts?.[seat];
+                          const duck = row.duck?.[seat];
+                          const played = den === r.denom && seat === r.declarer;
+                          // A seat's BEST denomination, marked only once every
+                          // cell in its column has landed — a running maximum
+                          // over a half-filled table moves as it fills.
+                          const top = best[seat] != null && p === best[seat];
+                          return (
+                            <div key={seat}
+                              className={`dis-parcell${played ? " dis-parcell-played" : ""}`
+                                + (top ? " dis-parcell-top" : "")}
+                              title={played ? "The contract that was actually played"
+                                : top ? `${nameOf(seat)}'s best denomination` : undefined}>
+                              {typeof p === "number"
+                                ? <b>{Math.max(p, 0)}</b>
+                                : <span className="dis-parwait">·</span>}
+                              {duck && (
+                                <span className="dis-parnull"
+                                  title="Could win no scoring trick at all — Null">N</span>
+                              )}
+                            </div>
+                          );
+                        };
+                        return (
+                          <Fragment key={den}>
+                            <div className="dis-parden"><Den d={den} /></div>
+                            {cell(me)}
+                            {cell(1 - me)}
+                          </Fragment>
+                        );
+                      })}
+                    </div>
+                    <div className="dis-story-note muted">
+                      Points each side could take as declarer with every card face
+                      up — the highest level they could have bid there and made
+                      {maxLevel ? <> (levels stop at {maxLevel})</> : null}.
+                      {" "}<b>N</b>: could duck every scoring trick for Null.
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1009,6 +1087,146 @@ function useDdReviews(rounds, roomId) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, n]);
   return vals;
+}
+
+/** Solved par tables, cached beside the reviews and for the same reason: a
+ *  banked deal is immutable and the solves are exact. */
+const PAR_CACHE = new Map();   // `${roomId}:${round}` -> {denom: {pts, duck}} | null
+
+/** THE PAR TERMS: two synthetic contracts that make `odd_review` answer the
+ *  two questions the par table asks, neither of which the wasm exports.
+ *
+ *  `odd_review` prices a CONTRACT, and the artifact is a committed build, so
+ *  each question is asked by naming a contract whose payoff IS the answer:
+ *
+ *  * **points** — target 0, make 0, over 1, set_base 0, short 1. At or above
+ *    the target that pays `0 + 1 × (pts − 0)`; below it `−(0 + 1 × (0 − pts))`
+ *    — the same number, so the payoff is the identity on the declarer's trick
+ *    points at every leaf and the minimax over it IS the points minimax. No
+ *    `null` key: a consolation is a cliff at one bit of state, not a point
+ *    count, and it would make the answer something else entirely.
+ *  * **the duck** — every ordinary leaf worth 0 and the consolation worth 1,
+ *    so the value is 1 exactly when the declarer can force taking no scoring
+ *    trick all round. That is `Dd::null_no_even_makeable`, which the browser
+ *    has no export for.
+ *
+ *  Both are held to the crate's own solvers by `wire::review::the_par_contract_
+ *  is_exactly_a_double_dummy_points_solve` and `..._the_par_null_probe_is_
+ *  exactly_the_ducking_search` — the claim is about the solver, and nothing on
+ *  this side of the wire can see it.
+ */
+const PAR_TERMS = {
+  pts: (declarer) => ({
+    declarer, target: 0, make: 0, over: 1, set_base: 0, short: 1, ramp: 0,
+  }),
+  duck: (declarer) => ({
+    declarer, target: 0, make: 0, over: 0, set_base: 0, short: 0, ramp: 0, null: 1,
+  }),
+};
+
+/** PAR — what each seat could have taken as declarer in every denomination,
+ *  with all 32 cards face up, and whether they could have ducked to Null.
+ *
+ *  Two exact solves per (denomination, seat): the deal is the round's own
+ *  snapshot with `trump` swapped and `leader` set to whoever is declaring,
+ *  because the declarer leads to trick 1 and that is worth ~0.93 points — the
+ *  two sides of a row are different POSITIONS, not one number negated.
+ *
+ *  That is 20 solves in a classic round, so they run over a SMALL POOL rather
+ *  than the review's single worker — and small is the point: the never-take-
+ *  every-core rule applies here exactly as it does to the Hard tier's pool,
+ *  and this one runs while a player is reading a modal.
+ *
+ *  Answers land one at a time and the table fills in; the set is cached only
+ *  once it is complete, so a modal closed mid-solve re-asks rather than
+ *  caching half a table. Returns `{[denom]: {pts: [p0, p1], duck: [d0, d1]}}`
+ *  with cells absent until solved, or `null` when nothing can be solved.
+ */
+function useParTable(r, roomId, denoms) {
+  const [par, setPar] = useState({});
+  const round = r?.round;
+  const key = `${roomId}:${round}`;
+  const dkey = denoms.join(",");
+  useEffect(() => {
+    if (round == null) return undefined;
+    if (PAR_CACHE.has(key)) { setPar(PAR_CACHE.get(key)); return undefined; }
+    const deal = r.deal;
+    // The two-seat solver cannot take a dummy round's three hands, and a round
+    // banked before the snapshot shipped has nothing to solve.
+    if (!deal || (deal.hands?.length ?? 2) !== 2 || typeof Worker === "undefined") {
+      setPar(null); return undefined;
+    }
+    setPar({});
+    let dead = false;
+    // POINTS FIRST, every denomination, then the Null probes: the table's
+    // numbers are what a reader is waiting for, and the markers are a detail
+    // that can arrive after them.
+    const queue = [];
+    for (const what of ["pts", "duck"]) {
+      for (const den of denoms) for (const seat of [0, 1]) queue.push([what, den, seat]);
+    }
+    const total = queue.length;
+    const table = {};
+    let done = 0;
+    const pool = [];
+    const stop = () => { for (const w of pool) { try { w.terminate(); } catch { /* gone */ } } };
+    const fail = () => { PAR_CACHE.set(key, null); if (!dead) setPar(null); stop(); };
+    const feed = (w, id) => {
+      const job = queue.shift();
+      if (!job) return false;
+      const [what, den, seat] = job;
+      w._job = job;
+      w.postMessage({ id, kind: "review", req: JSON.stringify({
+        deal: { ...deal, trump: den, leader: seat }, payoff: PAR_TERMS[what](seat),
+      }) });
+      return true;
+    };
+    const n = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 2, 2));
+    let bad = 0, issued = 0;
+    for (let i = 0; i < n; i++) {
+      let w;
+      try { w = new Worker(`${import.meta.env.BASE_URL}wasm/dissonance-worker.js`, { type: "module" }); }
+      catch { break; }
+      w.onmessage = (e) => {
+        const d = e.data || {};
+        if (d.ready !== undefined) {
+          // One worker that will not load is survivable — the others drain the
+          // queue. All of them is the wasm being unavailable, which is the
+          // review's own failure and says so.
+          if (!d.ready) { bad += 1; if (bad >= pool.length) fail(); return; }
+          feed(w, ++issued);
+          return;
+        }
+        const job = w._job;
+        if (!job) return;
+        const [what, den, seat] = job;
+        done += 1;
+        // An error is deterministic (a deal the reader refuses), so the cell
+        // simply stays empty rather than being retried.
+        if (typeof d.value === "number") {
+          const row = { ...(table[den] || {}) };
+          const col = [...(row[what] || [])];
+          col[seat] = what === "duck" ? d.value === 1 : d.value;
+          row[what] = col;
+          table[den] = row;
+          if (!dead) setPar({ ...table });
+        }
+        if (!feed(w, ++issued) && done >= total) {
+          PAR_CACHE.set(key, table);
+          stop();
+        }
+      };
+      w.onerror = fail;
+      pool.push(w);
+    }
+    if (pool.length === 0) { fail(); return undefined; }
+    return () => { dead = true; stop(); };
+    // Same argument as the review hook's: a banked round never changes, so the
+    // round — and which denominations are being asked about — is the whole
+    // dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, dkey]);
+  return par;
 }
 
 /** What the declared skat game is worth right now, and why.
@@ -2989,7 +3207,8 @@ export default function Dissonance({ myId, authUser, onExit }) {
       {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
       {storyRound && (
         <RoundStory r={storyRound} mySeat={mySeat} nameOf={nameOf}
-          roomId={roomData?.room_id}
+          roomId={roomData?.room_id} mode={game?.mode}
+          maxLevel={catalog?.max_levels?.[game?.mode] ?? catalog?.max_level}
           onClose={() => setStoryRound(null)} />
       )}
       {confirmAbandon && (

@@ -2099,6 +2099,40 @@
    and keeps the felt's own gap below — it was equidistant between the two
    and read as a label for the pile row it is not describing. */
 .dis-story-note { font-size: 0.78rem; margin-top: 0.15rem; }
+/* PAR: denominations down the side, the two players across — three columns,
+   because the names are long and the numbers are one or two digits. The
+   numeric columns are `1fr` so they sit under their own headers however wide
+   a name runs, and `tabular-nums` keeps a 12 from being wider than an 8. */
+.dis-partable {
+  display: grid; grid-template-columns: auto 1fr 1fr;
+  gap: 0.15rem 0.3rem; align-items: center;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.dis-parhd {
+  font-size: 0.72rem; color: var(--text-dim); text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-bottom: 0.15rem;
+}
+.dis-parden { font-size: 1rem; font-weight: 700; color: var(--text); padding-right: 0.15rem; }
+.dis-parcell {
+  display: flex; align-items: baseline; justify-content: center; gap: 0.25rem;
+  padding: 0.1rem 0.3rem; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); font-size: 0.98rem;
+}
+/* The cell that really happened, ringed rather than filled: the number in it
+   is the same kind of number as every other cell, and a filled chip would
+   read as a different quantity. */
+.dis-parcell-played { box-shadow: inset 0 0 0 1px var(--accent); }
+/* ...and each column's best denomination is the NUMBER lit, not the cell:
+   "where this player was strongest" is a property of the value, and a second
+   filled shape would compete with the ring above for the same meaning. */
+.dis-parcell-top b { color: var(--accent-hi, #9fd8a8); }
+.dis-parwait { color: var(--text-dim); opacity: 0.6; }
+.dis-parnull {
+  font-size: 0.62rem; font-weight: 700; line-height: 1;
+  color: #e8c35a; border: 1px solid rgba(232, 195, 90, 0.55);
+  border-radius: 4px; padding: 0.1rem 0.2rem;
+}
 /* The side column is the same PANEL the board's rail carries, and it stretches
    to the felt's height: at 1180px a short auction left the right third as bare
    modal ground and the two columns read as different layouts. The surface (not

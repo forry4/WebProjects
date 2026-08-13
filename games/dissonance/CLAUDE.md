@@ -2300,6 +2300,55 @@ into the box itself — always visible, no gesture to discover, less code.)
   entropy floor. Rows written before the string encoding still load (the
   unpacker discriminates on shape); an unrecognisable deal fails OPEN to
   verbose, since an unreadable save is worse than an unshrunk one.
+
+## THE PAR TABLE — the same deal solved in every denomination, both sides (2026-08-13)
+
+Under the DD figure in the round's story: a row per denomination, a column per
+player, each cell the **trick points that player could have taken as declarer**
+plus an **N** when they could have ducked every scoring trick. The points ARE
+the contract — a level is a promise of that many points — so a cell is the
+highest level that player could have bid there and made.
+
+* **IT NEEDED NO NEW WASM EXPORT, AND THAT IS THE WHOLE DESIGN.** The artifact
+  is a committed `wasm-pack` build and `odd_review` prices a CONTRACT, so each
+  question is asked by naming a contract whose payoff IS the answer
+  (`PAR_TERMS` in `Dissonance.jsx`):
+  - **points** — `target 0, make 0, over 1, set_base 0, short 1`. Above the
+    target that pays `0 + 1 × (pts − 0)`, below it `−(0 + 1 × (0 − pts))` — the
+    same number, so the payoff is the IDENTITY on the declarer's points at
+    every leaf and the minimax over it is the points minimax. **No `null`
+    key**: a consolation is a cliff at one bit of state, not a point count, and
+    it would make the answer something else entirely.
+  - **the duck** — every ordinary leaf worth 0 and the consolation worth 1, so
+    the value is 1 exactly when the declarer can force taking no scoring trick.
+    That is `Dd::null_no_even_makeable`, which nothing exports.
+* **Both are GATED IN RUST, because the claim is about the solver and nothing
+  on the JS side can see it**: `wire::review::the_par_contract_is_exactly_a_
+  double_dummy_points_solve` checks the synthetic contract against `Dd::solve`
+  and `State::pool` (so it holds under every mode's scoring rather than against
+  a second copy of the arithmetic), and `..._the_par_null_probe_is_exactly_the_
+  ducking_search` against `nsearch`. Both assert the wire's own
+  `contract_from_json` produces the contract they test, and both check
+  NON-VACUITY — a guaranteed duck is RARE from a fresh deal, so its cases are
+  found with the cheap boolean search first and only then priced with the
+  expensive one (a sweep hoping to stumble on one costs minutes).
+* **The row is two POSITIONS, not one number negated.** The declarer leads to
+  trick 1 — measured at +0.93 points — so each cell re-solves with `leader` set
+  to whoever is declaring and `trump` swapped to that denomination.
+* **20 solves a round, over a pool of `max(1, min(hc − 2, 2))`** — the
+  never-take-every-core rule, applied to a search that runs while a player is
+  reading a modal. Points first, then the Null probes: the numbers are what a
+  reader is waiting for. Measured 3.6s and 4.8s on two real deals; cells fill
+  as they land and the set is cached (`PAR_CACHE`) only once COMPLETE, so a
+  modal closed mid-solve re-asks rather than caching half a table.
+* **Each column's best denomination is lit only once that whole column has
+  landed** — a running maximum over a half-filled table moves as it fills and
+  would decorate the wrong row on the way.
+* Gated in `screens.mjs` beside the DD figure: every cell resolves to a number
+  (the whole chain fails by staying on its placeholder, which reads as a table
+  still thinking), the played contract is ringed exactly once in its own
+  denomination's row, and both columns light a best.
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but

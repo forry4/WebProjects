@@ -3276,6 +3276,47 @@ try {
 				JSON.stringify(story));
 			check("...with the three cards the declarer was shown outlined",
 				!!story && story.shown + story.took === 3, JSON.stringify(story));
+
+			// ── PAR ────────────────────────────────────────────────────────
+			// The same deal solved in every denomination from BOTH sides: what
+			// each player could have taken as declarer, and whether they could
+			// have ducked to Null there. Twenty exact solves over a two-worker
+			// pool, and every one of them is a synthetic contract whose payoff
+			// IS the answer (`PAR_TERMS`) — so the failure this catches is the
+			// chain going quiet: a reader that refuses the re-trumped deal, a
+			// terms shape the wire drops, or a worker that never answers all
+			// leave cells sitting on their placeholder forever, which reads as
+			// a table that is merely still thinking.
+			const par = await page.waitForFunction(() => {
+				const t = document.querySelector(".cm-panel .dis-partable");
+				if (!t) return null;
+				const cells = [...t.querySelectorAll(".dis-parcell")];
+				const nums = cells.map((c) => c.querySelector("b")?.textContent.trim());
+				if (!cells.length || nums.some((n) => !n || !/^\d+$/.test(n))) return null;
+				const rows = [...t.querySelectorAll(".dis-parden")].map((d) => d.textContent.trim());
+				const playedIdx = cells.findIndex((c) => c.classList.contains("dis-parcell-played"));
+				return {
+					rows, cells: cells.length, nums,
+					played: playedIdx >= 0 ? rows[Math.floor(playedIdx / 2)] : null,
+					playedN: cells.filter((c) => c.classList.contains("dis-parcell-played")).length,
+					// One number per column may be lit as that seat's best, and
+					// it is only lit once the whole column has landed.
+					top: cells.filter((c) => c.classList.contains("dis-parcell-top")).length,
+					contract: document.querySelector(".cm-panel .dis-story-ctline b")?.textContent.trim(),
+				};
+			}, null, { timeout: 60_000 }).then((h) => h.jsonValue()).catch(() => null);
+			check("the round story's par table solves every denomination from both sides",
+				!!par && par.rows.length === 5 && par.cells === 10,
+				JSON.stringify(par));
+			// The contract that was really played is ringed, exactly once, in
+			// its own denomination's row — the table's one anchor to the round
+			// it is describing.
+			check("...and rings the contract that was actually played",
+				!!par && par.playedN === 1 && !!par.played
+					&& (par.contract || "").includes(par.played),
+				JSON.stringify(par));
+			check("...and marks each side's best denomination",
+				!!par && par.top >= 2, JSON.stringify(par));
 			await page.evaluate(() => {
 				document.querySelector(".cm-panel .cm-x")?.click();
 			});

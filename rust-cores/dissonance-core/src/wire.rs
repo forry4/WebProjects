@@ -1580,4 +1580,132 @@ mod review {
         // defender -- so they cannot both be the same number by accident.
         assert!(a.abs() < 1000 && b.abs() < 1000, "payoff out of range: {a}, {b}");
     }
+
+    /// THE PAR TABLE'S CONTRACT IS A POINTS SOLVE, EXACTLY -- and this test is
+    /// the whole reason the round story can ask for one without a new export.
+    ///
+    /// The story modal wants "the highest level each side could bid and still
+    /// make in each denomination", which is the declarer's double-dummy TRICK
+    /// POINTS. There is no wasm export for a points solve (`odd_review` prices
+    /// a contract), so the frontend asks for one by naming a contract whose
+    /// payoff IS the points:
+    ///
+    ///   target 0, make 0, over 1, set_base 0, short 1, ramp 0, no null
+    ///
+    /// Above the target that pays `0 + 1 x (pts - 0)`; below it, `-(0 + 1 x
+    /// (0 - pts))` -- the same number, so the payoff is the identity on the
+    /// declarer's points at every leaf and the minimax is the points minimax.
+    /// A `null` term would break it (the consolation is a cliff, not a point
+    /// count), which is why the request omits the key.
+    ///
+    /// Asserted against `solve`, which is player 0's point DIFFERENTIAL, and
+    /// the pool -- so it holds under every scoring the modes have, rather than
+    /// against a second copy of the arithmetic.
+    #[test]
+    fn the_par_contract_is_exactly_a_double_dummy_points_solve() {
+        let par = |declarer: usize| crate::dd::Contract {
+            level: 0, declarer, make_base: 0, over: 1,
+            set_base: 0, short: 1, ramp: 0, null: None,
+        };
+        // The reader must accept the shape the frontend really sends, null and
+        // all -- a missing `null` key is `None`, not a defaulted consolation.
+        let read = contract_from_json(&serde_json::json!({
+            "declarer": 1, "target": 0, "make": 0, "over": 1,
+            "set_base": 0, "short": 1, "ramp": 0,
+        })).expect("the par terms must read");
+        assert!(read.null.is_none(), "a par contract must carry no consolation");
+        assert_eq!(read.key(), par(1).key(), "the wire's par contract is not the one tested");
+
+        let mut dd = Dd::new(16);
+        let mut spread = std::collections::HashSet::new();
+        // Deliberately small: each cell is TWO cleared exact solves, so the
+        // sweep is priced in minutes rather than seconds if it grows.
+        for seed in 0..2u64 {
+            for trump in [0u8, crate::cards::NOTRUMP] {
+                for leader in 0..2u8 {
+                    let g = crate::game::Game::deal(
+                        &mut crate::rng::Rng::new(seed + 900), trump, leader);
+                    let pool = g.s.pool() as i32;
+                    dd.clear();
+                    let diff0 = dd.solve(&g.s) as i32;   // player 0's differential
+                    for declarer in 0..2usize {
+                        let d = if declarer == 0 { diff0 } else { -diff0 };
+                        // pts[d] + pts[1-d] = pool and pts[d] - pts[1-d] = d.
+                        let pts = (pool + d) / 2;
+                        dd.clear();
+                        let v = dd.solve_contract(&g.s, &par(declarer));
+                        assert_eq!(v, pts,
+                            "par contract priced {v}, points solve says {pts} \
+                             (trump {trump}, leader {leader}, declarer {declarer})");
+                        spread.insert(v);
+                    }
+                }
+            }
+        }
+        // ...and it is not answering one constant for every deal, which would
+        // satisfy the equality above and mean nothing.
+        assert!(spread.len() > 3, "the par solve returned {spread:?} across 40 asks");
+    }
+
+    /// ...and the par table's OTHER question — "could this seat duck every
+    /// scoring trick in this denomination?" — is `null_no_even_makeable`.
+    ///
+    /// Same trick, one term further: a contract whose every ordinary leaf is
+    /// worth 0 and whose consolation is worth 1 pays 1 exactly when the
+    /// declarer can force taking no scoring trick, so the minimax over it is
+    /// the boolean. `nsearch` is the crate's own (much cheaper) answer to that
+    /// question and is what the two must agree on -- the browser cannot call
+    /// it, since the committed artifact exports no such entry point.
+    #[test]
+    fn the_par_null_probe_is_exactly_the_ducking_search() {
+        let probe = |declarer: usize| crate::dd::Contract {
+            level: 0, declarer, make_base: 0, over: 0,
+            set_base: 0, short: 0, ramp: 0, null: Some(1),
+        };
+        let read = contract_from_json(&serde_json::json!({
+            "declarer": 0, "target": 0, "make": 0, "over": 0,
+            "set_base": 0, "short": 0, "ramp": 0, "null": 1,
+        })).expect("the null-probe terms must read");
+        assert_eq!(read.key(), probe(0).key(), "the wire's probe is not the one tested");
+
+        // BOTH ANSWERS HAVE TO APPEAR or the agreement below is one constant
+        // meeting another -- and a guaranteed duck against double-dummy
+        // defence is RARE from a fresh deal, so the cases are found with the
+        // cheap boolean search first and only then priced with the expensive
+        // one. (Sweeping the probe itself over enough deals to stumble on a
+        // duck would cost minutes.)
+        let mut dd = Dd::new(16);
+        let (mut ducks, mut cannot) = (Vec::new(), Vec::new());
+        for seed in 0..200u64 {
+            let trump = crate::cards::DENOMS[(seed % 6) as usize];
+            let g = crate::game::Game::deal(
+                &mut crate::rng::Rng::new(seed + 700), trump, (seed % 2) as u8);
+            for declarer in 0..2usize {
+                let bucket = if dd.null_no_even_makeable(&g.s, declarer) {
+                    &mut ducks
+                } else {
+                    &mut cannot
+                };
+                if bucket.len() < 2 {
+                    bucket.push((g.s, declarer));
+                }
+            }
+            if ducks.len() >= 2 && cannot.len() >= 2 {
+                break;
+            }
+        }
+        assert!(!ducks.is_empty() && !cannot.is_empty(),
+                "{} duckable, {} not -- the sweep found only one answer",
+                ducks.len(), cannot.len());
+        for (want, cases) in [(true, &ducks), (false, &cannot)] {
+            for (s, declarer) in cases.iter() {
+                dd.clear();
+                assert_eq!(dd.null_no_even_makeable(s, *declarer), want, "bucketed wrong");
+                dd.clear();
+                let got = dd.solve_contract(s, &probe(*declarer));
+                assert_eq!(got, want as i32,
+                    "probe said {got}, the ducking search said {want} (declarer {declarer})");
+            }
+        }
+    }
 }
