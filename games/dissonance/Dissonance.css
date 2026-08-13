@@ -660,6 +660,16 @@
      `--dis-reserve` is the non-card furniture the same budget has to leave
      room for; a third seat adds another name row to it. */
   --dis-rows: 4;
+  /* WHAT ONE UNIT OF CARD WIDTH COSTS IN BOARD HEIGHT — the divisor of the
+     height budget below. `rows * 1.4` is the card rows themselves; the railed
+     2-seat phases add the PILE PEEKS to it (see that rule), because a peek is
+     `0.24 * cw` and so grows with the very number being solved for. Charging
+     it to the fixed reserve instead is what made the budget systematically
+     too pessimistic on shorter screens: the reserve has to be sized for the
+     TALLEST display in the tier, so a 1080p board paid a 1600p board's peek
+     and left 60-150px of felt unused. In the divisor it is exact at every
+     height, which is the whole point. */
+  --dis-vden: calc(var(--dis-rows) * 1.4);
   /* THE RAIL'S WIDTH, ONE TOKEN — read by the railed grids AND by the card
      budget, which has to subtract exactly the column the cards do not get.
      They were two hardcoded 17rems and drifting them apart is how the hand
@@ -810,7 +820,7 @@
   .dis-game .dis-seat, .dis-game .dis-trick {
     --dis-cw: max(3.4rem, min(
       calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
-      calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-vden))
     ));
   }
   .dis-game .dis-table > .dis-seat { flex: 0 0 auto; }
@@ -925,13 +935,14 @@
      (below) instead of the column adapting to them. */
   .dis-game .dis-table.dis-rail-auction,
   .dis-game .dis-table.dis-rail-result {
-    /* 12rem, THE SAME NUMBER PLAY USES — see the playside rule for where it
-       comes from. All railed phases must charge the identical reserve or the
-       board RESIZES when a phase ends: raising play's to 12 and leaving these
-       at 10.5 made the cards jump the moment a Kontra decision was answered
+    /* THE SAME NUMBERS PLAY USES — see the playside rule for where they come
+       from. All railed phases must charge the identical budget or the board
+       RESIZES when a phase ends: raising play's reserve and leaving these
+       behind made the cards jump the moment a Kontra decision was answered
        (reported from the live board). The auction and report panels are
-       content-height and centred, so the extra reserve costs them nothing. */
-    --dis-rows: 5; --dis-reserve-in: 12rem;
+       content-height and centred, so a reserve sized for play costs them
+       nothing — they simply run one card row short of the felt. */
+    --dis-rows: 5; --dis-vden: 7.48; --dis-reserve-in: 6.2rem;
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--dis-rail);
     grid-template-rows: repeat(2, auto);
@@ -973,7 +984,6 @@
   .dis-game .dis-table.dis-3seat.dis-rail-auction,
   .dis-game .dis-table.dis-3seat.dis-rail-result {
     grid-template-rows: repeat(3, auto);
-    --dis-reserve-in: 14rem;
   }
   .dis-game .dis-table.dis-rail-auction > .dis-seat,
   .dis-game .dis-table.dis-rail-result > .dis-seat { grid-column: 1; }
@@ -1055,8 +1065,22 @@
        so it only became visible on a big display, where it clipped the near
        seat's name off the bottom of the felt (reported from a 2560x1600
        screen). MEASURED, not padded: scrollHeight vs clientHeight at
-       2560x1600, 2560x1400 and 1920x1080. */
-    --dis-reserve-in: 12rem;
+       2560x1600, 2560x1400 and 1920x1080.
+
+       IT IS 5.4rem NOW, NOT 12, AND THE DIFFERENCE IS NOT A LOOSENING — the
+       12 was `fixed furniture + the pile peeks`, and the peeks moved into
+       `--dis-vden` where they belong (a peek is 0.24 × the card width, so it
+       grows with the answer). What is left is the genuinely fixed part,
+       MEASURED as `used height − card rows − peeks`: 97px at the base type
+       tier and ~103 at the bigger ones (two name rows and their gaps, the
+       trick's caption, and the table's own row gaps), i.e. ~6.1rem plus a
+       little air. The old
+       constant had to cover the tallest display in its tier, so a 1080p board
+       was charged a 1600p board's peeks: measured 66px of felt left unused at
+       1920x1080, 101 at 1600x900, 148 at 1366x768. Cards came out 9-12%
+       smaller than the screen could hold, which is what this fixes. */
+    --dis-vden: 7.48;              /* 5 card rows × 1.4 + 2 pile peeks × 0.24 */
+    --dis-reserve-in: 6.2rem;
     display: grid;
     /* THE RAIL TAKES THE FELT'S SPARE WIDTH — `minmax(--dis-rail, 1fr)`, not a
        fixed column with the cluster centred. The centred version left slack on
@@ -1082,12 +1106,11 @@
   .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) :is(.dis-seat, .dis-trick) {
     --dis-cw: max(3.4rem, min(
       calc((100cqw - var(--dis-rail) - 1.25rem - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
-      calc((100cqh - var(--dis-reserve-in)) / var(--dis-rows) / 1.4)
+      calc((100cqh - var(--dis-reserve-in)) / var(--dis-vden))
     ));
   }
   .dis-game .dis-table.dis-3seat.dis-rail-play {
     grid-template-rows: repeat(4, auto);
-    --dis-reserve-in: 25rem;
   }
   .dis-game .dis-table.dis-rail-play > .dis-seat,
   .dis-game .dis-table.dis-rail-play > .dis-trick { grid-column: 1; }
@@ -1154,14 +1177,10 @@
        at the report, a different offset per phase — and a label that names
        who a row of cards belongs to has to be somewhere the eye can stop
        looking for it.
-   The ~1.5rem of card height it bought is not worth either. What stays from
-   the block is the 3-seat reserves, which are about the dummy's extra row
-   and have nothing to do with where a name sits. */
-@media (min-width: 1440px) and (min-height: 600px) {
-  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 25rem; }
-  .dis-game .dis-table.dis-3seat.dis-rail-auction,
-  .dis-game .dis-table.dis-3seat.dis-rail-result { --dis-reserve-in: 14rem; }
-}
+   The ~1.5rem of card height it bought is not worth either. The 3-seat
+   reserves that used to be re-asserted here went with it: the dummy's budget
+   is one block now (see THE DUMMY'S RESERVES below), and a per-width tier of
+   its own only mattered while its divisor was wrong. */
 /* The dummy's numbers are re-asserted after the big-screen block below so the
    generic 2-seat reserve cannot claim a 3-seat table. */
 
@@ -1178,6 +1197,16 @@
    the width term, so widening the rail moves the term that is not binding.
    `--dis-rail` feeds both the grid and that term, so even if a window ever
    made width bind, the two cannot disagree. */
+/* THE CLAIM ABOVE IS TRUE ONLY BECAUSE THE FLANKS GIVE WAY FIRST, and that
+   is worth stating because it was measured false once. At 1920x1080 the width
+   term with a 23rem rail read 112.6px against a height term of 112.5 -- dead
+   even, so every rem of rail came straight off the cards. What fixed it was
+   not narrowing the rail (worth 2.4px of card and a visibly smaller panel)
+   but the FLANKS: their own widening is gated on height now, so a 1080p board
+   keeps 17rem side columns and hands the middle 96px, which puts the width
+   term back above the height term where this comment assumes it. Rail and
+   flanks are the same budget seen from two ends; if one grows on a short
+   screen the other must not. */
 @media (min-width: 1800px) { .dis-game .dis-table { --dis-rail: 23rem; } }
 @media (min-width: 2200px) { .dis-game .dis-table { --dis-rail: 26rem; } }
 /* ...and what the panels put in that room: the cards they show scale toward
@@ -1229,7 +1258,7 @@
    the two stop looking like one screen. Each row is nudged rather than the
    column zoomed: `zoom` would scale the column's BOX as well and overflow the
    grid track it sits in. The tracks widen to match. */
-@media (min-width: 1800px) {
+@media (min-width: 1800px) and (min-height: 1200px) {
   .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(17rem, 20rem) minmax(0, 1fr) minmax(17rem, 20rem);
   }
@@ -1261,10 +1290,10 @@
      seat-name row on both seats plus a bigger trick caption is ~8px, which is
      exactly what put the board back over its box at 1600px tall. */
   .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
-    --dis-reserve-in: 12.6rem;
+    --dis-reserve-in: 6.5rem;
   }
 }
-@media (min-width: 2200px) {
+@media (min-width: 2200px) and (min-height: 1400px) {
   .dis-game .dis-main.dis-has-match {
     grid-template-columns: minmax(19rem, 23rem) minmax(0, 1fr) minmax(19rem, 23rem);
   }
@@ -1286,7 +1315,7 @@
   .dis-game .dis-table .dis-trickval { font-size: 1.5rem; padding: 0.24rem 0.8rem; }
   .dis-game .dis-table .dis-tp .muted { font-size: 1rem; }
   .dis-game .dis-table:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
-    --dis-reserve-in: 13rem;
+    --dis-reserve-in: 6.8rem;
   }
 }
 
@@ -2151,15 +2180,40 @@
    cannot take the 2-seat reserve the big-screen blocks above set generically.
    Re-asserted here, after them, because source order is what decides between
    two equal-specificity rules. */
-@media (min-width: 1800px) {
-  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 25.6rem; }
-  .dis-game .dis-table.dis-3seat:is(.dis-rail-auction, .dis-rail-result) {
-    --dis-reserve-in: 14.6rem;
+/* ...AND ITS BUDGET IS THE SAME SHAPE AS THE 2-SEAT ONE NOW, because the old
+   one was WRONG AND IT SHOWED. Measured on the railed tier before this: the
+   dummy board ran 278px past its box at 2560x1600 and 118 at 1920x1080, and
+   `.dis-game` clips — so the near seat's whole hand row was simply off the
+   bottom of the screen, in every dummy round, at the resolution the mode was
+   built on. Two causes, both of them arithmetic:
+     * `--dis-rows` is 6 for a dummy table, but PLAY shows SEVEN card rows
+       (three seats of hand + piles, plus the trick), so the divisor was
+       short by a whole row;
+     * the three pile peeks were charged to a fixed reserve, which cannot
+       track a peek that is `0.24 * cw` — the same error the 2-seat budget
+       above was carrying, one seat worse.
+   `10.52` is `7 * 1.4 + 3 * 0.24`, and the reserve is the measured fixed
+   furniture: ~149px at the base type tier and ~165 at the big ones (three name rows
+   and their gaps, the dummy's own labelled box, the trick caption and the
+   table's row gaps -- MEASURED, then checked for overflow at five viewports
+   in both phases). All
+   three railed phases take it, so a dummy board no longer resizes between
+   the auction and play either — it used to run a 14rem reserve at the
+   auction against 25 in play, which is a 106px card becoming an 80px one at
+   the moment the round starts. */
+@media (min-width: 1200px) and (min-height: 600px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-vden: 10.52; --dis-reserve-in: 9.3rem;
   }
 }
-@media (min-width: 2200px) {
-  .dis-game .dis-table.dis-3seat.dis-rail-play { --dis-reserve-in: 26rem; }
-  .dis-game .dis-table.dis-3seat:is(.dis-rail-auction, .dis-rail-result) {
-    --dis-reserve-in: 15rem;
+@media (min-width: 1800px) and (min-height: 1200px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 9.9rem;
   }
 }
+@media (min-width: 2200px) and (min-height: 1400px) {
+  .dis-game .dis-table.dis-3seat:is(.dis-rail-play, .dis-rail-auction, .dis-rail-result) {
+    --dis-reserve-in: 10.3rem;
+  }
+}
+

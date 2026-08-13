@@ -1169,6 +1169,49 @@ the bidding judgement, which is the part worth playing.
   the completed-trick hold keeps the board up after the phase has flipped to
   `over`, and a phase-keyed budget shrank the cards for exactly that beat.
   `screens.mjs` asserts the playside sits beside the hand row's right edge.
+* **THE PILE PEEK BELONGS IN THE DIVISOR, NOT THE RESERVE (2026-08-13), and
+  that one line is why 1080p boards were 6-12% small.** The height budget is
+  `(table height − reserve) / divisor`, and the reserve was carrying the two
+  pile peeks — which are `0.24 × cw`, i.e. they GROW with the number being
+  solved for. A fixed rem therefore has to be sized for the TALLEST display in
+  its tier, so a 1080p board paid a 1600p board's peeks: **measured 66px of
+  felt left unused at 1920x1080, 101 at 1600x900, 148 at 1366x768**. Moving
+  them into `--dis-vden` (`5 × 1.4 + 2 × 0.24 = 7.48`) makes the budget exact
+  at every height, and the reserve keeps only the genuinely fixed furniture
+  (~97px = 6.2rem: two name rows and their gaps, the trick caption, the
+  table's own row gaps). Cards: 1920x1080 **108 → 115**, 1600x900 84 → 91,
+  2560x1440 159 → 162, 2560x1600 181 → 182. 1366x768 does not move — it is
+  WIDTH-bound, which is the honest answer there.
+  - **The rail and the flanks are the same budget seen from two ends.** The
+    ≥1800px rail comment claimed its growth "costs the cards nothing at these
+    widths"; measured at 1920x1080 the width term with a 23rem rail was 112.6px
+    against a height term of 112.5 — dead even, so the rail was eating cards.
+    The fix was NOT to narrow the rail (worth 2.4px of card and a visibly
+    smaller panel) but to gate the FLANKS' own widening on height: a 1080p
+    board keeps 17rem side columns, hands the middle 96px, and the width term
+    goes back above the height term where that comment assumes it. The felt's
+    type bump and its reserve ride the same gate, since they are what the
+    bigger reserve pays for.
+  - **A 1080p board cannot reach a 1600p board's card size and no budget can
+    change that**: five card rows at 1.4 plus ~97px of furniture in ~940px of
+    table is 115px, where 1600px of screen buys 182. The auction LOOKS like it
+    has room because it shows four card rows and reserves five — that fifth is
+    the trick, and equalising the phases is the property the gate asserts.
+  - **DUMMY WAS CLIPPING ITS NEAR HAND AND NOBODY HAD MEASURED IT.** Same
+    error one seat worse, plus a `--dis-rows` of 6 against a board that shows
+    SEVEN card rows in play (three seats of hand + piles, plus the trick):
+    measured **278px past the box at 2560x1600** and 118 at 1920x1080, with
+    `.dis-game` clipping — so the whole near hand row was off the bottom of
+    the screen in every dummy round at the resolution the mode was built on.
+    Its budget is now one block (`--dis-vden: 10.52`, reserve 9.3/9.9/10.3rem)
+    shared by all three railed phases, so a dummy board also stops resizing
+    between the auction and play — it ran a 14rem reserve at the auction
+    against 25 in play, a 106px card becoming an 80px one as the round
+    started. Cards 152 → 125 at 2560x1600, and now they all fit.
+  - **What is left over on a small window is the documented FLOOR, unchanged**:
+    at 1280x720 and 1000x700 the cards sit at `3.4rem` and the board runs past
+    its box on purpose (the panel gives way instead) — verified as pre-existing
+    rather than introduced here.
 * **A save with no `match` key is a single round and still ends at its own
   end.** `match_of()` is the only reader of `g["match"]` for exactly that
   reason — a game already in progress when this shipped must not crash and must
