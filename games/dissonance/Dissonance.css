@@ -176,15 +176,27 @@
      WHAT IT BUYS is vertical, not horizontal. The phone board is WIDTH-bound:
      seven slots across 390px cap the card at ~52px while the height budget
      allows ~73px, so the surplus height became a ~280px dead band in the
-     middle of the table. Fanning narrows each card's FOOTPRINT to 78% of its
-     width, so `--dis-slots` can drop to 5.35 and the card grows 52 → 66px
-     (+27%) — into the slack that was empty. The two numbers are a PAIR and
-     must be solved together: a hand is `cw + 6 x (cw x (1 - overlap) + gap)`
-     wide, so at 30% overlap the row fits a 390px phone at cw ≤ 66 and the
-     slot count is what delivers that cw. The visible strip is ~46px, above
-     the 44px touch target, and the last card is whole. */
-  .dis .dis-table { --dis-slots: 5.35; }
-  .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.3); }
+     middle of the table. Fanning narrows each card's FOOTPRINT, so
+     `--dis-slots` can drop with it and the card grows into slack that was
+     empty. The two numbers are a PAIR and must be solved together: a hand is
+     `cw + 6 x (cw x (1 - overlap) + gap)` wide, so `--dis-slots` is
+     `7 - 6 x overlap` and nothing else.
+
+     THE OVERLAP IS 42% (2026-08-13), up from 30%, because the ROW is what is
+     fixed and the strip is what pays: seven cards fill the phone's width
+     either way, so `row = 6 x strip + cw` — a bigger card is exactly a
+     narrower visible strip, and the only floor that matters is the 44px touch
+     target. At 30% the strip measured 51px on a 390px phone, i.e. 7px of
+     slack nobody was using; 42% spends it, taking the card 66 → 76px (+15%)
+     with the strip still ~50. The last card is whole either way. */
+  /* 7 - 6 x 0.42 = 4.48, PLUS a little: the slot term divides the TABLE's
+     width while the row is laid out inside the hand's, which is narrower by
+     the seat's padding. The old pair carried the same 0.15 of margin for the
+     same reason, and it is load-bearing -- at exactly 4.48 the row came out
+     ~10px wider than the box and the hand WRAPPED, which on a phone is three
+     cards on a second line rather than a fan. */
+  .dis .dis-table { --dis-slots: 4.7; }
+  .dis .dis-seat .dis-hand > * + * { margin-left: calc(var(--dis-cw, 42px) * -0.42); }
   /* THE FAN PAINTS BACKWARDS, and this is the half that makes it readable.
      Flex paints later children on top, so each card covered the one before
      it — hiding exactly the TOP-RIGHT index and leaving the mirrored corner,
@@ -225,13 +237,16 @@
   }
   /* The title's rule sits closer to the words it underlines here. */
   .dis .dis-auction > .muted:first-child { padding-bottom: 0.28rem; }
-  /* A SHORT PHONE BUYS THE PANEL'S LAST FEW PIXELS FROM THE CARDS — during
-     the AUCTION only, where the cards are being counted rather than played.
-     Under ~820px tall the panel cannot fit at full card size however tight
-     its own spacing gets; three card rows at 8px less is another ~34px. */
-  @media (max-height: 820px) {
-    .dis .dis-table.ph-auction .dis-seat { --dis-cw: 54px; }
-  }
+  /* THE AUCTION USED TO BUY THE PANEL'S LAST PIXELS FROM THE CARDS on a
+     phone under ~820px tall — a hard `--dis-cw: 54px`, against the 60-66 the
+     same phone showed in play. It is GONE (2026-08-13), for two reasons and
+     the second is the real one. It made a small phone's cards SMALLER at the
+     one moment a player is counting them; and it was buying a screen that was
+     never bought anyway — measured, a phone board plus its panels runs ~400px
+     past the viewport during the auction and ~580 in play, so the page
+     scrolls regardless and the cards were paying for a fit that does not
+     exist. A phone's card size is now one number in every phase, which is the
+     property the desktop budget already holds itself to. */
   /* ...and the mobile card is 42px, so its reserved row is smaller. See the
      base `.dis-hand` rule for why this exists at all. This still governs the
      TALON panels' 3-card rows; a SEAT hand is fluid and reserves its own height
@@ -252,6 +267,11 @@
      the corner that identifies it — the corner is the ONLY thing the offset
      is protecting, so if it is covered the pile says nothing. */
   .dis .dis-pilewrap { --pk: max(18px, calc(var(--dis-cw, 56px) * 0.3)); }
+  /* ...and the panels' own cards keep some pace with the board's. The talon
+     you paid the auction to see rendered at 34px beside a 75px hand, which
+     read as a legend rather than as three cards you are counting. Three of
+     these plus their gaps still cross a 360px phone with room to spare. */
+  .dis .dis-side .dis-card.sm { --cw: 52px; font-size: calc(var(--cw) * 0.28); }
   /* ...and the three piles stand apart. They inherit the hand's tight gap,
      which is right for a fanned hand and wrong for three separate stacks. */
   .dis .dis-piles { gap: 0.6rem; }
@@ -284,7 +304,16 @@
      of them wins and the overflow comes back. */
   .dis .dis-table.dis-3seat,
   .dis .dis-table.dis-3seat.ph-auction { height: auto; min-height: 0; }
-  .dis .dis-table.ph-auction { height: calc(100dvh - var(--dis-hdr)); }
+  /* THE AUCTION TABLE IS A MINIMUM, NOT A PIN (2026-08-13). It used to be a
+     hard `height: calc(100dvh - var(--dis-hdr))`, which is only safe while
+     something inside is allowed to give — and once the bidding box stopped
+     being that thing (see its rule below), the fixed height had nowhere to
+     put the extra: the near seat's fanned hand simply drew 13px past the
+     felt and over the panel beneath it, with its own z-index painting it on
+     top. The base phone rule's `min-height` is the same number and already
+     fills the screen; dropping the pin lets the table grow the ~50px a
+     bigger card asks for and pays it in page scroll, which this tier does
+     anyway. */
   /* THE BIDDING BOX FITS A PHONE WITHOUT SCROLLING, which is a budget, not a
      preference: at 390x844 the panel ran 42px past its box. Its five 0.8rem
      gaps were 64px of that — sized for a desktop rail where the panel floats
@@ -297,17 +326,23 @@
        a seat, and this panel is what gives. Trimmed here rather than taking
        the peek back — an unreadable pile is worse than a tight panel. */
     gap: 0.38rem; padding: 0.55rem 0.55rem;
-    min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column;
-    justify-content: flex-start;
-    /* THE SAFETY VALVE THE DESKTOP RAIL ALREADY HAS. The table is a FIXED
-       height here and this panel is the flex item that gives, so once its
-       content outgrows the space it simply overflowed its box — visibly,
-       under the seat below, which paints later. Raising the bid keys to a
-       44px touch target was enough to tip it, and the symptom was the
-       opener's hint printed through a pile row. Scrolling in place is the
-       honest answer: a squeeze shows a scrollbar on one panel instead of
-       two rows of the board drawing on top of each other. */
-    overflow-y: auto; overscroll-behavior: contain;
+    display: flex; flex-direction: column; justify-content: flex-start;
+    /* THE PANEL KEEPS ITS HEIGHT AND THE PAGE TAKES THE SLACK (2026-08-13).
+       It used to be `flex: 1 1 auto; min-height: 0; overflow-y: auto` — the
+       item that gives, so the board could hold one screen. Two things make
+       that the wrong trade here, and the second is decisive: the table's
+       height is a MIN, not a fixed one, so letting the panel grow costs a
+       little page scroll and nothing else — and the phone page ALREADY
+       scrolls ~345px in the auction, because the side panels stack below the
+       board. So the squeeze was not buying a one-screen board; it was buying
+       a nested scroller inside a page that scrolls anyway, which is the worst
+       of both (you cannot tell which box a phone flick will move). With the
+       cards at their new size it measured 58px of hidden bid keys.
+       The old comment's failure mode — the panel overflowing VISIBLY under
+       the seat below — needed the panel to be shrunk below its content;
+       `flex: 0 0 auto` is what makes that unreachable, so the box always
+       fits its own contents. */
+    flex: 0 0 auto;
   }
   .dis .dis-table.ph-auction .dis-valgrid {
     flex: 1 1 auto; min-height: 3.2rem; max-height: none;
@@ -677,7 +712,13 @@
      190px cards on a 2560x1600 display is a different design from the same
      strip beside 60px cards on a laptop. */
   --dis-rail: 17rem;
-  --dis-reserve: 27rem;
+  /* THE PHONE/SHORT-WINDOW BUDGET (the `100dvh` formula below). 22rem, not
+     the old 27: the board is not pinned to the viewport at this tier, the
+     page scrolls, and the extra 5rem was reserving space for a one-screen fit
+     that measurement says never happens (~400px of page scroll in the
+     auction, ~580 in play). What it did do was cap the cards below what the
+     fan's width term already allowed. */
+  --dis-reserve: 22rem;
   /* ...and the same budget measured from the TABLE's own height rather than
      the window's, for the desktop layout below. It excludes the header (which
      is outside the table) and counts only what is inside it: the padding, the
@@ -697,7 +738,10 @@
    sees the third seat too. */
 .dis-table.dis-3seat {
   --dis-rows: 6;
-  --dis-reserve: 29rem;
+  /* Same move as the 2-seat reserve above, one seat's furniture heavier. A
+     dummy phone board is HEIGHT-bound (six card rows), so this is the number
+     that decides its card size: 45px before, ~55 now. */
+  --dis-reserve: 24rem;
   --dis-reserve-in: 33rem;
 }
 .dis-seat .dis-hand {

@@ -1482,6 +1482,42 @@ wide or 600px tall the page scrolls instead — that is the honest answer for a
 phone and for a window too short to fit a board plus an auction panel at any card
 size.
 
+**THE PHONE BUDGET IS THE FAN, AND THE STRIP IS WHAT PAYS (2026-08-13).** A phone
+board is WIDTH-bound, and seven cards fill the width whatever their size, so
+`row = 6 × strip + cw` — a bigger card is exactly a narrower visible strip, and
+the only floor that matters is the 44px touch target. At 30% overlap the strip
+measured 51px, i.e. 7px of slack nobody was using; **42% (`--dis-slots: 4.7`)
+takes the card 66 → 75px with the strip still ~49.** The two numbers are a PAIR
+(`slots = 7 − 6 × overlap`, plus ~0.2 because the term divides the TABLE's width
+while the row is laid out inside the hand's, which is narrower by the seat's
+padding — at exactly `7 − 6 × 0.42` the row came out 10px wide and the hand
+WRAPPED, which on a phone is three cards on a second line rather than a fan).
+Three other things had to move with it, and each was a place the phone paid for
+its cards:
+* **the auction's hard `--dis-cw: 54px` under 820px tall is GONE.** It made a
+  small phone's cards smaller at the one moment a player is counting them, and
+  it was buying a one-screen fit that measurement says never happened — a phone
+  board plus its stacked side panels runs ~400px past the viewport in the
+  auction and ~600 in play. A phone's card size is now one number in every
+  phase, the property the desktop budget already holds itself to.
+* **the bidding box keeps its height (`flex: 0 0 auto`) instead of being the
+  item that gives.** It was `flex: 1 1 auto; min-height: 0; overflow-y: auto`,
+  so bigger cards squeezed it into a nested scroller — 58px of hidden bid keys,
+  inside a page that scrolls anyway, which is the worst of both (you cannot tell
+  which box a phone flick will move).
+* **…and then the auction table had to stop being a PIN.** It was
+  `height: calc(100dvh − var(--dis-hdr))`, which is only safe while something
+  inside is allowed to give: with the panel refusing, the fixed height had
+  nowhere to put the extra and the near seat's fanned hand drew 13px past the
+  felt and over the panel beneath it, its own z-index painting it on top. The
+  base phone rule's `min-height` is the same number and already fills the
+  screen; the table now grows the ~50px instead.
+* `--dis-reserve` (the `100dvh` formula this tier uses) came 27 → 22rem, and the
+  dummy's 29 → 24, for the same reason: it was reserving for a one-screen fit
+  that does not happen, and the only thing it actually did was cap the cards
+  below what the fan's width term already allowed. Dummy is height-bound on a
+  phone, so that is the number deciding its card size: 45px → ~55.
+
 `.dis-main` is a grid, and **every tier places all three items by hand**. The DOM
 order is board → `.dis-side-info` → `.dis-side-match`, which is what a phone
 stacks and a screen reader hears; the desktop grid overrides it:
