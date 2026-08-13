@@ -965,6 +965,10 @@
     max-width: calc(3 * var(--dis-talon-cw) + 2 * 0.4rem);
   }
   .dis-game .dis-table > .dis-result .dis-card.sm { --cw: var(--dis-talon-cw); }
+  /* Every card inside a rail panel takes the board's own ratio, so the talon
+     reads at whatever size the rail gives it. */
+  .dis-game .dis-table > .dis-auction .dis-card,
+  .dis-game .dis-table > .dis-result .dis-card { font-size: calc(var(--cw) * 0.28); }
   .dis-game .dis-table { --dis-talon-cw: 62px; }
   .dis-game .dis-table.dis-3seat.dis-rail-auction,
   .dis-game .dis-table.dis-3seat.dis-rail-result {
@@ -1184,9 +1188,9 @@
      has room to be far bigger than the rail's other cards. Sized from the
      rail: three of these plus two gaps fit inside it with the panel's padding
      off. */
-  .dis-game .dis-table > .dis-auction .dis-card { --cw: 104px; font-size: 1.35rem; }
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 104px; }
   .dis-game .dis-table { --dis-talon-cw: 92px; }
-  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 92px; font-size: 1.2rem; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 92px; }
   .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
   .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
@@ -1203,9 +1207,9 @@
   .dis-game .dis-table > .dis-auction .dis-clears { font-size: 0.88rem; }
 }
 @media (min-width: 2200px) {
-  .dis-game .dis-table > .dis-auction .dis-card { --cw: 120px; font-size: 1.5rem; }
+  .dis-game .dis-table > .dis-auction .dis-card { --cw: 120px; }
   .dis-game .dis-table { --dis-talon-cw: 108px; }
-  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 108px; font-size: 1.3rem; }
+  .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 108px; }
   .dis-game .dis-table > .dis-auction .btn { font-size: 1.12rem; padding: 0.8rem 1.5rem; }
   .dis-game .dis-table > .dis-auction .dis-ktable .dis-scorerow { font-size: 1.12rem; }
   .dis-game .dis-table > .dis-auction .dis-contract { font-size: 2rem; }
@@ -1241,7 +1245,7 @@
   .dis-game .dis-side .dis-mrow-hd { font-size: 0.86rem; }
   .dis-game .dis-side .dis-dblrow { font-size: 0.92rem; }
   .dis-game .dis-side .muted { font-size: 0.9rem; }
-  .dis-game .dis-side .dis-card.sm { --cw: 46px; font-size: 0.8rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 46px; }
   /* The bid log's cap is a rem, so bigger type showed FEWER calls and cut the
      last one mid-row — on a screen with room to spare. It grows with them. */
   .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 12rem; }
@@ -1272,7 +1276,7 @@
   .dis-game .dis-side .dis-trickhist { font-size: 0.92rem; }
   .dis-game .dis-side .dis-mcard { font-size: 1.1rem; }
   .dis-game .dis-side .muted { font-size: 1rem; }
-  .dis-game .dis-side .dis-card.sm { --cw: 54px; font-size: 0.88rem; }
+  .dis-game .dis-side .dis-card.sm { --cw: 54px; }
   .dis-game .dis-side .dis-p-contract .dis-bidlog { max-height: 15rem; }
   .dis-game .dis-table > .dis-playside .dis-trickinfo { font-size: 1.6rem; }
   .dis-game .dis-table > .dis-playside .dis-turnbar { font-size: 1.75rem; }
@@ -1857,7 +1861,13 @@
    run like "10h 7s Kd" is something you decode, and a row of cards is
    something you read. They are the same `.dis-card` object as the hand, just
    `small`. */
-.dis-card.sm { --cw: 34px; font-size: 0.62rem; }
+/* A SMALL CARD'S TYPE IS DERIVED FROM ITS WIDTH, exactly like a board card's
+   (`calc(--dis-cw * 0.28)`). It used to be a rem literal beside a `--cw`
+   literal, and the two came apart the moment anything resized the card: the
+   report's talon went to 92px while its rank and pip stayed at 0.62rem, so a
+   big card carried tiny glyphs. Deriving it means a width change can never
+   leave the type behind. */
+.dis-card.sm { --cw: 34px; font-size: calc(var(--cw) * 0.28); }
 
 /* The trick just gone, beside the board. */
 .dis-lasttrick { display: flex; align-items: center; gap: 0.4rem; }
