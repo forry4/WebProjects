@@ -733,9 +733,13 @@ rather than the deck renumbered.)
 names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
 denomination**, or **raise by any amount** (classic since 2026-08-13 — minor
-and dummy keep the old +1/+2 cap) in any denomination that player has not
-named. Per-player no-repeat. The opener may not pass. Big raises are priced
-rather than forbidden: see the JUMP BONUS section below.
+and dummy keep the old +1/+2 cap). Denomination restriction is per-mode
+(`DENOM_RULE`): classic runs **"the same suit is never bid twice in a row"**
+(a bid may not name the standing bid's denomination, nothing else barred —
+so a seat may return to its own suit whenever the opponent has moved off
+it); minor and dummy keep the per-player no-repeat. The opener may not pass.
+Big raises are priced rather than forbidden: see the JUMP BONUS section
+below.
 
 **The talon.** The auction winner is shown **3 of the 6** out-cards (fixed at
 the deal) and may swap ONE into hand, discarding a hand card face-down — never
@@ -818,8 +822,15 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `rules.jsx`, and the result panel now reads `make_value`/`set_base` OFF THE
   ROW rather than recomputing N².
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
-* **per-player denominations** — a shared budget was measured to be a no-op:
-  94% of auctions name ≤2 denominations, so a budget of five never binds.
+* **per-player denominations — SUPERSEDED IN CLASSIC (2026-08-13) by the
+  standing-suit rule; minor and dummy still run it.** The original
+  measurement ("a shared budget is a no-op: 94% of auctions name ≤2
+  denominations") described the capped game; under the jump bonus the
+  forever-ban starved the +1 climbing the bonus exists to reward — a suit
+  war burned a denomination per rung and died after two exchanges. Classic
+  now bars only the STANDING denomination (`DENOM_RULE`), so a climb can
+  return to its suits indefinitely and still terminates (every bid strictly
+  raises level-then-denomination).
 
 ## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
 

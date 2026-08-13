@@ -544,6 +544,13 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         // the jump bonus prices sets exactly as it always did. Classic ships 3
         // since the raise cap was dropped (2026-08-13).
         jump_set_bonus: r.get("jump_set_bonus").and_then(|x| x.as_i64()).unwrap_or(0) as i32,
+        // OPTIONAL, default the per-player forever-ban every older server ran.
+        // An unknown string is a malformed payload, same as opp_model.
+        denom_rule: match r.get("denom_rule").and_then(|x| x.as_str()) {
+            None | Some("used") => crate::auc_search::DenomRule::Used,
+            Some("standing") => crate::auc_search::DenomRule::Standing,
+            Some(_) => return None,
+        },
         top_denom: n("top_denom")? as u8,
         ladder: r.get("ladder").and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())

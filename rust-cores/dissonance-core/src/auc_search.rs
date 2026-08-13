@@ -113,6 +113,8 @@ pub struct AucRules {
     /// every mode that does not price jumps (and on any payload old enough not
     /// to carry the field).
     pub jump_set_bonus: i32,
+    /// Which denominations an overtake may name — see `DenomRule`.
+    pub denom_rule: DenomRule,
     /// Highest denomination index a classic bid may name (no-trump).
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
@@ -142,6 +144,20 @@ pub struct AucRules {
 pub enum OppModel {
     Minimax,
     Myopic,
+}
+
+/// The classic-shape auction's denomination restriction (2026-08-13).
+///
+/// `Used` is the original per-player forever-ban (`AucState.used` bitmasks);
+/// `Standing` bars only the STANDING bid's own denomination — the same suit is
+/// never bid twice in a row, and a seat may return to a suit it named before
+/// whenever the opponent has since moved off it. Classic ships `Standing`
+/// since the jump-bonus experiment; a payload without the field mirrors
+/// `Used`, the rule every older server ran.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DenomRule {
+    Used,
+    Standing,
 }
 
 /// One thing a seat may do. The two bid shapes are separate variants rather
@@ -192,7 +208,13 @@ pub fn legal_bids(s: &AucState, r: &AucRules, out: &mut Vec<Bid>) {
         return;
     }
     let me = s.to_act as usize;
-    let free = |d: u8| (s.used[me] >> d) & 1 == 0;
+    // `Standing` frees everything while nothing stands (the engine normalises
+    // the no-bid denom to 0 on the wire, so `d != s.denom` alone would wrongly
+    // bar clubs from the opener).
+    let free = |d: u8| match r.denom_rule {
+        DenomRule::Used => (s.used[me] >> d) & 1 == 0,
+        DenomRule::Standing => s.level == 0 || d != s.denom,
+    };
     if s.level == 0 {
         for d in 0..=r.top_denom {
             if free(d) {
@@ -551,13 +573,35 @@ mod tests {
 
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
-                   jump_set_bonus: 0, top_denom: 4, ladder: Vec::new(),
-                   opp: OppModel::Minimax }
+                   jump_set_bonus: 0, denom_rule: DenomRule::Used, top_denom: 4,
+                   ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
-                   jump_set_bonus: 0, top_denom: 6, ladder, opp: OppModel::Minimax }
+                   jump_set_bonus: 0, denom_rule: DenomRule::Used, top_denom: 6,
+                   ladder, opp: OppModel::Minimax }
+    }
+
+    #[test]
+    fn the_standing_rule_bars_only_the_standing_suit_and_forgets_nothing_else() {
+        let mut r = classic_rules();
+        r.denom_rule = DenomRule::Standing;
+        // The opener names anything -- including clubs, whose index is the
+        // normalised no-bid denom.
+        let v = bids(&AucState::opening(0), &r);
+        assert_eq!(v.len(), 5 * 12);
+        // Hearts stand; hearts may not be bid again this instant, even by a
+        // seat that never named them -- and a seat that HAS named a suit may
+        // return to it, which is the whole relaxation.
+        let s = AucState { level: 3, denom: 2, declarer: 0, to_act: 1,
+                           used: [1 << 2, 1 << 3], ..AucState::opening(1) };
+        let v = bids(&s, &r);
+        assert!(v.iter().all(|b| !matches!(*b, Bid::Contract { denom: 2, .. })),
+                "the standing suit is never bid twice in a row: {v:?}");
+        assert!(v.contains(&Bid::Contract { level: 4, denom: 3 }),
+                "a suit this seat already named is free again");
+        assert!(v.contains(&Bid::Contract { level: 4, denom: 0 }));
     }
 
     fn bids(s: &AucState, r: &AucRules) -> Vec<Bid> {

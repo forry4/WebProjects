@@ -323,13 +323,33 @@ def test_null_cannot_be_bid_at_all():
     assert not any(d == E.NULL_DENOM for _, d in E.auction_options(g)["bids"]),         "and it is not reachable as an overtake either"
 
 
-def test_a_player_may_not_repeat_their_own_denomination_but_may_take_the_opponents():
+def test_classic_bars_only_the_standing_suit_and_forgets_nothing_else():
+    """The standing rule (2026-08-13): the same suit is never bid twice in a
+    row -- a bid may not name the STANDING bid's denomination -- and that is
+    the only denomination restriction left. A seat may return to a suit it
+    named before whenever the opponent has since moved off it, which is what
+    lets two players climb a suit war one rung at a time."""
     g = E.new_game(["a", "b"], random.Random(5))
     E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
-    assert any(d == 0 for _, d in E.auction_options(g)["bids"]),         "clubs is seat 1's to take"
+    assert not E.can_bid(g, 1, 3, 0)[0], "clubs stand; clubs may not follow clubs"
+    E.apply_bid(g, 1, 3, 1)          # seat 1 moves to diamonds
+    assert E.can_bid(g, 0, 4, 0)[0], "seat 0 may RETURN to clubs now"
+    assert not E.can_bid(g, 0, 4, 1)[0], "diamonds stand and are barred"
+    assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [0, 2, 3, 4]
+    # ...and the climb can go on returning: 4C, 5D, 6C is a legal ladder.
+    E.apply_bid(g, 0, 4, 0)
+    E.apply_bid(g, 1, 5, 1)
+    assert E.can_bid(g, 0, 6, 0)[0]
+
+
+def test_minor_keeps_the_per_player_denomination_ban():
+    """The relaxation is classic's experiment; minor (and dummy) still run the
+    forever-ban the mode was calibrated under."""
+    g = E.new_game(["a", "b"], random.Random(5), mode="minor")
+    E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
+    assert any(d == 0 for _, d in E.auction_options(g)["bids"]), \
+        "clubs is seat 1's to take"
     E.apply_bid(g, 1, 3, 0)          # seat 1 takes clubs
-    # Seat 0 used clubs themselves, so it is spent FOR THEM regardless of who
-    # named it since. The budget is per-player, not shared.
     assert not E.can_bid(g, 0, 4, 0)[0], "seat 0 already named clubs"
     assert E.can_bid(g, 0, 4, 1)[0], "diamonds is untouched by seat 0"
     assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [1, 2, 3, 4]

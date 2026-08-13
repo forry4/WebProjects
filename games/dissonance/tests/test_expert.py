@@ -251,6 +251,7 @@ def test_the_rules_are_the_engines_own_knobs():
                      # jump belongs to the path.
                      "max_raise": E.raise_cap_for(mode),
                      "jump_set_bonus": E.JUMP_SET_BONUS.get(mode, 0),
+                     "denom_rule": E.denom_rule_for(mode),
                      "top_denom": top,
                      "ladder": [v for v in E.SKAT_VALUES if v > 0] if mode == "skat" else []}
 

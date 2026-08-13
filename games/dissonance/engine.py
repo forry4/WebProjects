@@ -179,6 +179,27 @@ MAX_RAISE = 2
 #: ceiling so legality arithmetic and the wire both stay plain numbers.
 RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
 
+#: WHICH DENOMINATION RULE the classic-shape auction runs (2026-08-13, the
+#: second experiment stacked on the jump bonus):
+#:  * "used"     -- the original per-player no-repeat: a seat may never again
+#:                  name a denomination it has itself named. Minor and dummy
+#:                  keep this (their calibrations assumed it).
+#:  * "standing" -- THE SAME SUIT IS NEVER BID TWICE IN A ROW, and that is the
+#:                  only denomination restriction left: a bid may not name the
+#:                  denomination of the STANDING bid, the opener names
+#:                  anything, and a seat may return to a suit it bid before
+#:                  whenever the opponent has since moved off it. Classic runs
+#:                  this: with the jump bonus rewarding +1 climbing, the old
+#:                  rule burned a denomination per rung and starved the climb
+#:                  after a couple of exchanges.
+#: Every bid still strictly raises (level, denomination) lexicographically, so
+#: the auction terminates at NT x the ceiling under either rule.
+DENOM_RULE = {"classic": "standing", "minor": "used", "dummy": "used"}
+
+
+def denom_rule_for(mode: str) -> str:
+    return DENOM_RULE.get(mode, "used")
+
 
 def raise_cap_for(mode: str) -> int:
     """The biggest single raise this mode allows, as a NUMBER.
@@ -1158,10 +1179,18 @@ def auction_options(g: dict) -> dict:
         }
     me = a["to_act"]
     top = max_level_for(mode_of(g))
-    free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
+    # Which denominations this seat may name -- see DENOM_RULE. "standing"
+    # forbids only the standing bid's own denomination (the same suit is never
+    # bid twice in a row); "used" is the per-player forever-ban.
+    if denom_rule_for(mode_of(g)) == "standing":
+        free = [d for d in range(NOTRUMP + 1) if d != a["denom"]]
+    else:
+        free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
     if a["level"] == 0:
-        # The opener must bid; passing out is not offered.
+        # The opener must bid; passing out is not offered. (`denom` is -1
+        # while nothing stands, so the standing rule frees every denomination
+        # here without a special case.)
         for d in free:
             bids.extend([lvl, d] for lvl in range(MIN_LEVEL, top + 1))
         return {"bids": bids, "may_pass": False}
@@ -2196,6 +2225,11 @@ def auction_search_payload(g: dict) -> dict | None:
              "min_level": MIN_LEVEL, "max_level": max_level_for(mode_of(g)),
              "max_raise": raise_cap_for(mode_of(g)),
              "jump_set_bonus": JUMP_SET_BONUS.get(mode_of(g), 0),
+             # Which denominations an overtake may name -- "standing" (classic:
+             # never the standing bid's own suit, nothing else barred) or
+             # "used" (minor/dummy: the per-player forever-ban). Optional on
+             # the wire; a wasm that predates it mirrors "used".
+             "denom_rule": denom_rule_for(mode_of(g)),
              "top_denom": GRAND if skat else NOTRUMP,
              "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
     # Only settlements the auction can still REACH. The bidding only ever
