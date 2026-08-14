@@ -733,12 +733,9 @@ rather than the deck renumbered.)
 names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
 denomination**, or **raise by any amount** (classic since 2026-08-13 — minor
-and dummy keep the old +1/+2 cap). Denomination restriction is per-mode
-(`DENOM_RULE`): classic runs **"own" — YOU personally never bid the same
-suit twice in a row** (a bid may not name that seat's own previous bid's
-denomination; 1♣ 1♠ 2♣ is illegal, raising the opponent's standing suit is
-legal, and your suit is yours again after one bid elsewhere); minor and
-dummy keep the per-player no-repeat. The opener may not pass.
+and dummy keep the old +1/+2 cap). Per-player no-repeat (`DENOM_RULE` is **"used"** in every mode — the two
+relaxations measured on 2026-08-13 were experiments and NEITHER SHIPPED;
+see below). The opener may not pass.
 Big raises are priced rather than forbidden: see the JUMP BONUS section
 below.
 
@@ -823,15 +820,13 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `rules.jsx`, and the result panel now reads `make_value`/`set_base` OFF THE
   ROW rather than recomputing N².
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
-* **per-player denominations — SUPERSEDED IN CLASSIC (2026-08-13) by the
-  standing-suit rule; minor and dummy still run it.** The original
-  measurement ("a shared budget is a no-op: 94% of auctions name ≤2
-  denominations") described the capped game; under the jump bonus the
-  forever-ban starved the +1 climbing the bonus exists to reward — a suit
-  war burned a denomination per rung and died after two exchanges. Classic
-  now bars only the STANDING denomination (`DENOM_RULE`), so a climb can
-  return to its suits indefinitely and still terminates (every bid strictly
-  raises level-then-denomination).
+* **per-player denominations — KEPT.** Two relaxations were measured on
+  2026-08-13 and NEITHER was adopted: "standing" (nobody bids the standing
+  suit twice in a row) and "own" (no seat repeats its OWN last suit). They
+  live in `DENOM_RULE` as measurement arms only, driven by the arena's
+  `DIS_DENOM_RULE`. Their profiles are recorded below; the shipped rule is
+  the original forever-ban, which is also what the 1000-deal-per-arm jump
+  sweep was measured under.
 
 ## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
 
@@ -902,8 +897,8 @@ Double's odds table for jumped contracts.
   auction's level sequence — flip 0 only, since a mirror's flips are
   identical).
 
-**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE "OWN" RULE (2026-08-13, the
-shipped combination; same harness):** bids/auction **2.10** (67.4% contested,
+**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE "OWN" RULE (2026-08-13,
+MEASURED, NOT SHIPPED; same harness):** bids/auction **2.10** (67.4% contested,
 28.2% opener re-entry), overtakes 1.10/auction — same-level overtakes fall to
 26.5% of them (the standing rule's ping-pong mostly gone) while jumps ≥2
 rise to 37.0%, sizes fattening (+3:69 vs the standing run's 56); openings
@@ -918,7 +913,7 @@ Interaction volume sits at v2-alone's level; the standing rule remains the
 most interactive variant measured.
 
 **THE 500-ROUND EXPERT PROFILE UNDER v2 + THE STANDING-SUIT RULE (2026-08-13,
-superseded by "own" above; same harness):** bids/auction **2.60** (72.6%
+MEASURED, NOT SHIPPED; same harness):** bids/auction **2.60** (72.6%
 contested, 39.0% opener re-entry, tail to TEN bids), overtakes 1.60/auction
 with same-level overtakes the biggest class (42.2% — repeatable suit
 ping-pong at one level is the new cheap rung) and jumps ≥2 down to 21.2% of

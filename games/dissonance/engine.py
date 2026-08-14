@@ -199,7 +199,10 @@ RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
 #:                  this.
 #: Every bid still strictly raises (level, denomination) lexicographically, so
 #: the auction terminates at NT x the ceiling under every rule.
-DENOM_RULE = {"classic": "own", "minor": "used", "dummy": "used"}
+#: SHIPPED: "used" in every mode -- the original per-player forever-ban. The
+#: other two arms are MEASUREMENT ONLY (`DIS_DENOM_RULE` in the arena); the
+#: 2026-08-13 runs are recorded below and neither was adopted.
+DENOM_RULE = {"classic": "used", "minor": "used", "dummy": "used"}
 
 
 def denom_rule_for(mode: str) -> str:

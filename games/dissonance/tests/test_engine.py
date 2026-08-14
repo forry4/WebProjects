@@ -357,12 +357,27 @@ def test_null_cannot_be_bid_at_all():
     assert not any(d == E.NULL_DENOM for _, d in E.auction_options(g)["bids"]),         "and it is not reachable as an overtake either"
 
 
-def test_classic_bars_only_your_own_previous_suit():
-    """The "own" rule (2026-08-13): YOU personally never bid the same suit
-    twice in a row -- a bid may not name that seat's OWN previous bid's
+def test_classic_ships_the_per_player_denomination_ban():
+    """The SHIPPED rule: a seat may never re-name a denomination it has itself
+    named, however the auction has moved since. The two relaxations below are
+    measurement arms (`DENOM_RULE`), not classic's behaviour."""
+    g = E.new_game(["a", "b"], random.Random(5))
+    assert E.denom_rule_for("classic") == "used"
+    E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
+    assert any(d == 0 for _, d in E.auction_options(g)["bids"]), \
+        "clubs is seat 1's to take"
+    E.apply_bid(g, 1, 3, 0)          # seat 1 takes clubs
+    assert not E.can_bid(g, 0, 4, 0)[0], "seat 0 already named clubs"
+    assert E.can_bid(g, 0, 4, 1)[0], "diamonds is untouched by seat 0"
+
+
+def test_the_own_denomination_arm_bars_only_your_own_previous_suit(monkeypatch):
+    """MEASURED, NOT SHIPPED (2026-08-13). YOU personally never bid the same
+    suit twice in a row -- a bid may not name that seat's OWN previous bid's
     denomination, and nothing else is barred. So 1C 1S 2C is illegal (the 2C
     repeats its bidder's own 1C), raising the OPPONENT's standing suit is
     legal, and a seat returns to its suit after bidding something else."""
+    monkeypatch.setitem(E.DENOM_RULE, "classic", "own")
     g = E.new_game(["a", "b"], random.Random(5))
     E.apply_bid(g, 0, 1, 0)          # 1C
     E.apply_bid(g, 1, 1, 3)          # 1S
