@@ -2903,30 +2903,64 @@ try {
 		const padOf = () => page.evaluate(() => {
 			const b = [...document.querySelectorAll(".dis-bidgrid button")];
 			const one = b[0]?.getBoundingClientRect();
+			// The panel's own children, so a failure NAMES the element that grew
+			// rather than leaving a bare pixel delta to bisect by hand.
+			const panel = document.querySelector(".dis-auction");
+			const above = panel ? [...panel.children].map((c) =>
+				`${c.className.split(" ")[0] || c.tagName}:${Math.round(c.getBoundingClientRect().height)}`
+			).join(" ") : "";
 			return {
 				n: b.length,
 				disabled: b.filter((x) => x.disabled).length,
 				labels: b.map((x) => +x.textContent).join(","),
 				x: one ? Math.round(one.x) : -1, y: one ? Math.round(one.y) : -1,
+				above,
 			};
 		});
 		const padBefore = await padOf();
 		check("the level pad draws the whole 1..10 ladder, not just the legal set",
 			padBefore.n === 10 && padBefore.labels === "1,2,3,4,5,6,7,8,9,10",
 			JSON.stringify(padBefore));
-		// Whether any rung is disabled depends on whether a bid stands yet: an
-		// opener may name all ten. Drive one bid and re-measure — after it, the
-		// seat to act cannot reach every rung, so some key MUST be disabled and
-		// the pad must not have moved a pixel.
-		await disBidCheaply(page);
-		await sleep(450);
-		const padAfter = await padOf();
-		check("...an unreachable rung is disabled rather than removed",
-			padAfter.n === 10 && padAfter.disabled > 0, JSON.stringify(padAfter));
-		check("...and the pad does not move when the legal set changes",
-			padAfter.n === padBefore.n && padAfter.labels === padBefore.labels
-			&& padAfter.x === padBefore.x && padAfter.y === padBefore.y,
-			JSON.stringify({ padBefore, padAfter }));
+		// The pad is SAMPLED THROUGH THE WHOLE GAME below rather than across one
+		// driven bid, and the first version of this check is why: it bid once and
+		// re-measured, but a single bid can END the auction (the bot passes), so
+		// it read an empty pad and failed on a board that was perfectly correct.
+		// The play loop already walks every auction state this room reaches --
+		// several standing bids, both seats, and the next round's opening -- so
+		// the samples come from there and the assertions run after it.
+		// ...and NON-VACUITY, DETERMINISTICALLY. Asking the real auction to
+		// visit two different legal sets is up to the deal: one run sampled
+		// [0,0,1,2] and the next [4,4], so the same code failed on a board that
+		// was correct — a flaky gate is worse than none. The claim is that the
+		// pad's geometry does not depend on WHICH rungs are legal, so toggle
+		// the disabled set in the DOM and re-measure: under the old
+		// render-only-the-legal-set pad this was impossible to even ask, and
+		// under this one it must be a no-op by construction.
+		const pressure = await page.evaluate(() => {
+			const g = document.querySelector(".dis-bidgrid");
+			if (!g) return null;
+			const btns = [...g.querySelectorAll("button")];
+			if (!btns.length) return null;
+			const geo = () => {
+				const r = g.getBoundingClientRect(), b = btns[0].getBoundingClientRect();
+				return [btns.length, Math.round(r.width), Math.round(r.height),
+					Math.round(b.x), Math.round(b.y)].join("/");
+			};
+			const was = btns.map((b) => b.disabled);
+			const before = geo();
+			btns.forEach((b, i) => { b.disabled = i % 2 === 0; });
+			const half = geo();
+			btns.forEach((b) => { b.disabled = true; });
+			const none = geo();
+			btns.forEach((b, i) => { b.disabled = was[i]; });
+			return { before, half, none, restored: geo() };
+		});
+		check("...and changing which rungs are legal cannot move the pad",
+			!!pressure && pressure.before === pressure.half
+			&& pressure.before === pressure.none
+			&& pressure.before === pressure.restored,
+			JSON.stringify(pressure));
+		const padSamples = [padBefore];
 
 		// EVERY BUTTON ON THIS BOARD IS VISIBLE, and `btn-ghost` was the one
 		// variant that was not: the shared kit paints it `transparent` with
@@ -2935,11 +2969,19 @@ try {
 		// file's CSS carries a note about, one variant along. Pass is the one
 		// a player meets most, so it is the one gated. Nothing but a browser
 		// can see this: the button renders, works, and reads fine in the DOM.
+		// ASSERTED ON THE CLASS, VIA A PROBE, not on whichever button happens to
+		// be on screen: at the opening there is no Pass at all (the opener must
+		// bid), so the first version of this check read `null` and failed on a
+		// perfectly good board. A probe mounted inside `.dis` measures the paint
+		// the class actually applies, which is the thing that was broken.
 		const ghost = await page.evaluate(() => {
-			const b = [...document.querySelectorAll(".dis-auction .btn-ghost, .dis .btn-ghost")]
-				.find((x) => /^(Pass|Stand pat|Decline)/.test(x.textContent.trim()))
-				|| document.querySelector(".dis .btn-ghost");
-			if (!b) return null;
+			const host = document.querySelector(".dis");
+			if (!host) return null;
+			const b = document.createElement("button");
+			b.className = "btn btn-ghost";
+			b.textContent = "Pass";
+			b.style.position = "absolute"; b.style.left = "-9999px";
+			host.appendChild(b);
 			const s = getComputedStyle(b);
 			const alpha = (c) => {
 				const m = c.match(/rgba?\(([^)]+)\)/);
@@ -2947,12 +2989,14 @@ try {
 				const p = m[1].split(",").map((v) => parseFloat(v));
 				return p.length > 3 ? p[3] : 1;
 			};
-			return {
+			const out = {
 				text: b.textContent.trim().slice(0, 12),
 				bg: s.backgroundImage !== "none" ? "gradient" : s.backgroundColor,
 				bgAlpha: s.backgroundImage !== "none" ? 1 : alpha(s.backgroundColor),
 				borderAlpha: alpha(s.borderTopColor),
 			};
+			b.remove();
+			return out;
 		});
 		check("a secondary button (Pass) is actually painted, not transparent",
 			!!ghost && (ghost.bgAlpha > 0.05 || ghost.borderAlpha > 0.18),
@@ -3080,9 +3124,22 @@ try {
 				return {};
 			});
 			if (st.over) break;
-			if (st.bidding) { await disBidCheaply(page); await sleep(250); continue; }
+			if (st.bidding) {
+				// One sample per auction state the game passes through, so the
+				// pad's invariants are asserted over real standing bids rather
+				// than over one contrived one.
+				padSamples.push(await padOf());
+				await disBidCheaply(page); await sleep(250); continue;
+			}
 			await sleep(st.acted ? 90 : 200);
 		}
+		// THE PAD IS THE SAME TEN KEYS IN THE SAME PLACE, whatever is legal.
+		const pads = padSamples.filter((p) => p.n > 0);
+		check("...every auction state draws all ten rungs, in the same place",
+			pads.length >= 2 && pads.every((p) => p.n === 10
+				&& p.labels === "1,2,3,4,5,6,7,8,9,10"
+				&& p.x === pads[0].x && p.y === pads[0].y),
+			JSON.stringify(pads.slice(0, 4)));
 
 		check("the piles were sampled with cards still on the table",
 			!!piles && piles.buried > 0, JSON.stringify(piles));

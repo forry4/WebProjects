@@ -1519,6 +1519,25 @@
    left edge with two dead tracks beside it — it read as half-loaded. Flex
    centers any count, and the fixed basis keeps a full 1..10 set forming
    the same two clean rows of five the grid drew. */
+/* THE STANDING-BID LINE RESERVES ITS ROW even before anything stands, so the
+   keypad below it does not drop 33px the moment the first bid lands. One line,
+   fixed: the text swaps, the geometry does not. */
+.dis-standing { min-height: 1.25em; line-height: 1.25; text-align: center; }
+/* The opener's hint keeps its row whether or not it has text -- see the JSX. */
+.dis-hintrow { font-size: 0.8rem; min-height: 1.2em; line-height: 1.2; text-align: center; }
+/* ...and the row above it, for the same reason one rung up: a standing
+   contract renders at 1.5rem where the placeholder is body text. Reserve the
+   taller form's height so the swap costs no layout. */
+/* 2.2rem, and the number is arithmetic rather than taste: the contract renders
+   at `font-size: 1.5rem` in a panel whose line-height is ~1.4, i.e. a 2.1rem
+   line box, where the placeholder is body text. Reserving 1.9rem left the
+   taller form 3px over its row — measured — and the keypad below inherited
+   exactly that as a jump. `line-height: 1` on the row keeps the box from
+   inheriting a second time. */
+.dis-contractrow {
+  min-height: 2.2rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
 .dis-bidgrid {
   display: flex; flex-wrap: wrap; justify-content: center;
   gap: 0.35rem; width: 100%; max-width: 420px;
@@ -1964,11 +1983,17 @@
    greens side by side read as two equal choices. This is the bid keys' own lit
    surface, so a secondary action looks like exactly what it is — a key you can
    press, subordinate to the one that acts. */
+/* THE EDGE IS AN INSET RING, NOT A BORDER, and that is layout rather than
+   taste: `.btn` is `border: none`, so a 1px border here made a ghost button
+   2px taller than the green one beside it — and with the rail centring the
+   panel, Pass appearing after the opening moved the whole keypad. An inset
+   shadow paints the same edge and occupies no space. */
 .dis .btn-ghost {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
   color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 1px 3px rgba(0, 0, 0, 0.22);
+  border: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 1px 3px rgba(0, 0, 0, 0.22);
 }
 .dis .btn-ghost:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.34);

@@ -2279,7 +2279,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
           {game.phase === "auction" && isSkat ? (
             <div className="dis-auction">
               <div className="muted">Auction</div>
-              <ContractLine game={game} />
+              <div className="dis-contractrow"><ContractLine game={game} /></div>
               {game.auction.value > 0 && (<>
                 <div className="muted">{nameOf(declSeat)} holds it at {game.auction.value}</div>
                 <NeedsRow value={game.auction.value} bases={skatBases}
@@ -2325,18 +2325,36 @@ export default function Dissonance({ myId, authUser, onExit }) {
           ) : game.phase === "auction" ? (
             <div className="dis-auction">
               <div className="muted">Auction</div>
-              <ContractLine game={game} />
+              {/* Wrapped in a RESERVED ROW for the same reason the standing
+                  line below is always rendered: `ContractLine` swaps a
+                  body-size "no contract yet" for a 1.5rem contract the moment
+                  a bid lands, and those are different heights — measured at
+                  7px, which the whole keypad underneath inherited as a jump. */}
+              <div className="dis-contractrow"><ContractLine game={game} /></div>
               {/* POINTS, not "score" — the level is a promise in TRICK points,
                   and "score" is what the round pays out. Same vocabulary the
                   result panel keeps to. (This comment sits OUTSIDE the `&&`:
                   a JSX comment is a child expression, and one inside those
                   parens is a syntax error.) */}
-              {game.auction.level > 0 && (
-                <div className="muted">
-                  {nameOf(game.auction.declarer)} to take at least{" "}
-                  {game.auction.level} {game.auction.level === 1 ? "point" : "points"}
-                </div>
-              )}
+              {/* ALWAYS RENDERED, never conditional, and that is the bid pad
+                  holding still. This line only appeared once a bid stood, so
+                  the first bid of every auction pushed the whole keypad down
+                  33px — measured — and the key under your thumb moved even
+                  though the pad itself had stopped shrinking. A reserved row
+                  costs one line of panel; a moving keypad costs a misbid. */}
+              {/* BOTH FORMS ARE ONE LINE, which is the other half of the pad
+                  holding still. The first placeholder here read "no bid yet —
+                  the opener names a contract" and WRAPPED in the 17rem rail:
+                  40px against the standing line's 20px, measured, so the
+                  keypad still moved — just for a different reason than the
+                  one that had been fixed. Short both ways, and the row keeps
+                  its reserved height regardless. */}
+              <div className="muted dis-standing">
+                {game.auction.level > 0
+                  ? <>{nameOf(game.auction.declarer)} needs {game.auction.level}{" "}
+                    {game.auction.level === 1 ? "pt" : "pts"}</>
+                  : "no bid yet"}
+              </div>
               {myTurn ? (
                 <>
                   <div className="dis-bidgrid">
@@ -2374,9 +2392,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
                   </div>
-                  {!opt.may_pass && <div className="muted" style={{ fontSize: "0.8rem" }}>
-                    The opener must bid.
-                  </div>}
+                  {/* ALWAYS RENDERED, empty when it has nothing to say. The
+                      panel is centred in the rail (`align-self: center`), so a
+                      row that appears and disappears moves EVERYTHING in the
+                      panel — including the keypad above it. Measured at 15px,
+                      and it is why the pad still shifted after the rows above
+                      it had been pinned. */}
+                  <div className="muted dis-hintrow">
+                    {opt.may_pass ? "" : "The opener must bid."}
+                  </div>
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
             </div>
