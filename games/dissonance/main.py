@@ -158,6 +158,29 @@ CLIENT_AI_AUCTION_WORLDS = 8
 #: capping/underbidding style the tier exists for.
 CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 
+#: THE DOUBLING THRESHOLD, in per-world payoff points (2026-08-14). Charged to
+#: the doubled branch before the searcher's argmax -- see `bid::price_exact` and
+#: `wire`'s double branch.
+#:
+#: WHY A BARE ARGMAX IS NOT ENOUGH: taking the better of two estimates is a
+#: SELECTION, and the branch that wins is partly the one whose noise favoured
+#: it. Measured over 500 self-play deals with the search's own numbers recorded
+#: (`tools/dblsweep.py`, so every threshold is priced off ONE run rather than a
+#: run per value), the search's confidence is well ORDERED but mis-calibrated:
+#: contracts it was barely confident about (edge 0-5/world) really made 65.4% of
+#: the time, against a break-even near 40%.
+#:
+#: 20 is the measured optimum and two independent routes agree on it -- it is
+#: where the calibration curve crosses break-even (edge 10-20 makes 50.6%, edge
+#: 20-30 makes 29.0%) AND where the swept defender gain peaks. It takes the
+#: Double from a LOSING bet to a paying one: gain/round -0.53 -> +2.25, precision
+#: 60.0% -> 72.5%, and the double rate 59.0% -> 31.7%.
+#:
+#: CLASSIC ONLY, and per-mode because the units are payoff points: minor's
+#: payoffs run about a quarter of classic's, so this dose would be enormous
+#: there. Minor's own sweep has not been run, and 0 is exactly today.
+DOUBLE_MARGIN = {"classic": 20.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
+
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
 
@@ -773,6 +796,22 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # field exists to remove. Minor's own fit is a queued swaplab run.
             if g["phase"] == "auction" and engine.mode_of(g) != "skat":
                 room["_ai_search"]["auction"]["swap"] = bot.swap_policy_terms()
+            # THE DOUBLE: a settled contract, priced exactly, against a world
+            # sample that CONDITIONS ON THE AUCTION and a threshold that stops
+            # the argmax doubling coin flips. Both are optional on the wire and
+            # both default to today's behaviour, so a cached wasm older than
+            # this simply keeps the old Double -- the ordinary degradation.
+            #
+            # CLASSIC ONLY: the tilt map was fitted on classic levels and the
+            # margin is in classic's payoff units. Minor runs the same phase and
+            # deliberately gets neither until its own sweep exists.
+            if g["phase"] == "double" and engine.mode_of(g) == "classic":
+                prior = bot.bid_prior_terms(g)
+                if prior:
+                    room["_ai_search"]["auction"]["bid_prior"] = prior
+                margin = DOUBLE_MARGIN.get(engine.mode_of(g), 0.0)
+                if margin:
+                    room["_ai_search"]["auction"]["double_margin"] = margin
             # EXPERT: the same options, valued by a tree instead of a price.
             # Optional on the wire and ignored by any wasm that predates it, so
             # the cached-bundle window degrades to Hard rather than to nothing.

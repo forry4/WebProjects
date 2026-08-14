@@ -58,7 +58,7 @@ import statistics
 import subprocess
 import sys
 
-from games.dissonance import engine as E, bot as B
+from games.dissonance import engine as E, bot as B, main as M
 
 # Absolute, because a relative forward-slash path never reaches CreateProcess
 # intact on Windows; harmless elsewhere.
@@ -163,14 +163,21 @@ def ask(g, seat, tier):
     # than a special one built for the harness.
     if os.environ.get("DIS_PROXY_DBL") and g["phase"] == "double":
         auc.pop("phase")
-    # THE AUCTION AS EVIDENCE (2026-08-14). `DIS_BID_PRIOR=1` ships the belief
-    # prior, so the searcher's worlds are drawn in proportion to how well they
-    # explain the bidding instead of uniformly. Off by default and absent from
-    # the request when off, which is byte-for-byte what every earlier run sent.
-    if os.environ.get("DIS_BID_PRIOR") and g["phase"] == "double":
-        prior = B.bid_prior_terms(g)
-        if prior:
-            auc["bid_prior"] = prior
+    # THE DOUBLE'S TWO KNOBS, MIRRORING main.py's shipped config so the arena
+    # measures the room rather than something adjacent to it. Both are ON, and
+    # both have an off switch because the control arm has to stay reachable:
+    # `DIS_BID_PRIOR=0` drops the belief prior (uniform world sampling, i.e.
+    # every run before 2026-08-14) and `DIS_DBL_MARGIN=<x>` re-doses or, at 0,
+    # removes the doubling threshold.
+    if g["phase"] == "double":
+        if os.environ.get("DIS_BID_PRIOR", "1") not in ("", "0"):
+            prior = B.bid_prior_terms(g)
+            if prior:
+                auc["bid_prior"] = prior
+        margin = float(os.environ.get("DIS_DBL_MARGIN",
+                                      M.DOUBLE_MARGIN.get(MODE, 0.0)))
+        if margin:
+            auc["double_margin"] = margin
     if tier.startswith("expert") and g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:

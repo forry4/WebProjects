@@ -502,6 +502,48 @@ def test_a_settled_contract_names_its_real_declarer_not_the_seat_being_asked():
         m.ROOMS.pop("r1", None)
 
 
+def test_the_double_ships_a_belief_prior_and_a_threshold_in_classic_only():
+    """The two knobs turned on 2026-08-14, and the scope they were measured at.
+
+    `bid_prior` conditions the searcher's world sample on the AUCTION -- the
+    declarer won it, so their hand is not a uniform draw, and measured over 400
+    real rounds their real holding sits at the 0.765 percentile of the uniform
+    resample. `double_margin` stops the argmax doubling coin flips.
+
+    CLASSIC ONLY, and that is the point of this test. The tilt map is a set of
+    quantiles on classic's level distribution and the margin is in classic's
+    payoff units; minor runs the SAME PHASE on a 1..6 ladder in a quarter-sized
+    currency, so shipping either there would be a map applied on faith -- the
+    mistake `_DUMMY_LEVEL_NEEDS` already paid for once.
+    """
+    for mode, wants in (("classic", True), ("minor", False)):
+        g = _to_double(seed=3)
+        g["mode"] = mode
+        room = {"players": {"alice": "Alice"}, "sockets": {}, "status": "playing",
+                "host": "alice", "game": g, "meta": {"alice": {"token": "tok"}},
+                "vs_ai": True, "ai_player": m.AI_PID, "ai_difficulty": "hard",
+                "mode": mode, "client_ai": True}
+        m.ROOMS["r1"] = room
+        task = _arm(room)
+        auc = room["_ai_search"]["auction"]
+        assert ("bid_prior" in auc) is wants, f"{mode}: belief prior"
+        assert ("double_margin" in auc) is wants, f"{mode}: threshold"
+        if wants:
+            assert auc["double_margin"] == m.DOUBLE_MARGIN["classic"] > 0
+            p = auc["bid_prior"]
+            # A tilt of 0 or a single try IS uniform sampling, so shipping
+            # either would be shipping nothing at all.
+            assert p["tilt"] > 0 and p["tries"] > 1
+            # Sliced to the BASE deck, like `swap_policy_terms` and
+            # `card_values`: Rust takes its offset from the length.
+            assert len(p["curve"]) == E.NRANK
+        run(m._handle_ai_move(_FakeWS(), "r1", "alice",
+                              {"decision": room["_ai_search"]["decision"],
+                               "move": auc["options"][0]["move"]}))
+        run(task)
+        m.ROOMS.pop("r1", None)
+
+
 def test_a_skat_pass_out_is_priced_at_zero_as_a_redeal():
     """Nothing stands, so passing throws the hand in -- a fresh deal neither
     seat has seen, worth 0 by symmetry. Priced rather than omitted so `pass` is

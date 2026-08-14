@@ -1191,6 +1191,72 @@ separately unmeasured; `declare` is not settled and must keep the proxy.
   declarer's 7 unseen hand cards — not leaf accuracy. Read the arena numbers
   before spending anything more here.
 
+### THE DOUBLE'S TWO KNOBS, TURNED ON 2026-08-14 (`bid_prior` + `double_margin`)
+
+Fixing the side (above) made the search DISCRIMINATE (+7.8pt → +49.2pt) and made
+it double far too much: 59% of contracts, against a set rate of 38%. Four
+500-deal arms, all `expertt` self-play, k=8, dd-resolved:
+
+| arm | | dbl% | discrimination | defender gain/round |
+|---|---|---|---|---|
+| A/B | side fixed, uniform sampling | 59.0% | +48.7 | **−0.53** |
+| C | + jump outside the ×2 | 53.8% | +50.5 | −1.38 |
+| **D** | **+ belief prior** | 54.4% | **+54.5** | **+0.68** |
+
+**1. THE AUCTION IS EVIDENCE, AND THE SAMPLER WAS THROWING IT AWAY.**
+`determinize` resamples the declarer's unseen cards UNIFORMLY — but they WON an
+auction. Measured (`tools/beliefprobe.py`, 400 rounds at the double phase, 200
+resamples each): the declarer's real holding sits at the **0.765 percentile** of
+the uniform resample, above its median in **87.5%** of rounds, and the gap GROWS
+with the bid (0.706 at level 3 → 0.850 at 6). Every world the searcher looked at
+handed the declarer a weaker hand than they held, so contracts looked likelier
+to fail than they were. This is poker's **range** problem.
+* The fix is importance sampling — draw 24 candidates, weight `exp(tilt ×
+  strength)`, keep one in proportion (`bid::BidPrior`). Tilts per level
+  (`bot._BID_TILT`, 0.25–0.55) each re-centre their level within 0.016 of 0.500.
+* **It moved the CALIBRATION, which is the claim**: the mis-calibrated middle
+  band (edge 10–20/world, 85 rounds) really made 50.6% — a coin flip against a
+  ~40% break-even — and under the prior it makes **39.1%**, i.e. break-even.
+* **A tilt of 0 or one try is uniform sampling BYTE FOR BYTE** (same RNG draws,
+  asserted) — a control that is merely similar confounds the A/B.
+* **Only the CURVE crosses the wire, not `hand_strength`.** The likelihood is a
+  modelling choice, not a rule: it must ORDER two holdings the way a bidder
+  would, not reproduce the bidder. So no second copy of the suit-length terms
+  and no parity fixture to hold two copies to one answer.
+* **CLASSIC ONLY.** The tilt map is a set of quantiles on classic's level
+  distribution, and a level map does not survive the distribution moving — the
+  lesson `_DUMMY_LEVEL_NEEDS` already paid for.
+
+**2. `DOUBLE_MARGIN = 20` (classic), charged to the doubled branch before the
+argmax.** Taking the better of two estimates is a SELECTION, and the winner is
+partly whichever one's noise favoured it. The search's confidence is well
+ORDERED but mis-calibrated: edge 0–5/world really made **65.4%**.
+* **Swept OFFLINE off ONE run**: the arena records the search's own two sums at
+  every double, and the decision is `(on − off)/k > margin`, so a recorded pair
+  prices every threshold exactly (`tools/dblsweep.py`). The `swaplab` method —
+  label the decisions once, evaluate any policy for free — instead of a
+  50-minute run per value.
+* **20 is where two independent routes agree**: it is where the calibration
+  curve crosses break-even AND where the swept gain peaks. Effect: gain/round
+  **−0.53 → +2.25**, precision 60.0% → 72.5%, rate **59.0% → 31.7%**. With the
+  prior as well, **30.1% and +3.02**.
+* Per-mode, because the units are payoff points and minor's run a quarter the
+  size. Minor's own sweep has not been run; 0 is exactly today.
+
+**AN ORACLE'S FLOOR IS NOT A REAL DEFENDER'S FLOOR** — worth stating, because the
+first reading of these numbers got it wrong. Doubling always pays more on a set,
+so a defender who KNEW the outcome would double every failing contract (38%
+here). That does not bound a real one: skipping a kill you cannot identify is
+cheaper than doubling a contract that makes, so a well-calibrated defender
+doubles LESS than the oracle rate. 20–30% was reachable all along, and by the
+THRESHOLD rather than by re-pricing.
+
+**`JUMP_DOUBLED=0` IS NOT PART OF THIS AND STAYS OFF.** It measured worse for the
+defender (−1.38 vs −0.53 at margin 0) because a doubled set pays less. Its case
+is the TAIL — median doubled set 55 → 50, worst observed 98 → 86 — and the
+declarer's EV (+9.06 vs +8.21). That is a product judgement about swing size,
+now decoupled from the rate question the threshold answers.
+
 * **The server tier declines every Double**, because it cannot TELL the two
   apart. The obvious signal is the defender's own holding and it does not
   work: the set rate is 38-43% within normal play at EVERY strength gate and

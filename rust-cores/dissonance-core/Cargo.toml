@@ -60,3 +60,19 @@ name = "dissonance"
 path = "src/lib.rs"
 # cdylib is what wasm-pack links; rlib keeps the bins and tests building.
 crate-type = ["rlib", "cdylib"]
+
+# WASM-OPT IS OFF, AND IT IS OFF BECAUSE IT SHIPPED A BROKEN ARTIFACT.
+#
+# wasm-pack runs `wasm-opt` when it finds one on PATH. Binaryen 108 -- what apt
+# installs on this box -- produces a binary that fails at `init()`, and the
+# client-AI path degrades from that SILENTLY: the workers never load, every
+# decision falls through to the server bot, and the room plays on at full speed
+# still labelled Hard. It was caught by `npm run screens` and by nothing else.
+#
+# This was previously handled by REMEMBERING to ship the plain wasm-bindgen
+# output, which is not a mechanism. Turning it off here makes the safe build the
+# default one, and the cost is ~19KB on a 157KB artifact that is fetched once
+# and cached. If a known-good binaryen is ever available, re-enable it
+# deliberately and re-run `npm run screens` before committing the result.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

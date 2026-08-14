@@ -645,9 +645,14 @@ def bid_prior_terms(g: dict) -> dict | None:
     a = g["auction"]
     if a.get("declarer", -1) < 0 or not a.get("level"):
         return None
-    mode = E.mode_of(g)
-    if E.uses_card_points(mode) or E.has_dummy(mode):
-        return None                      # a different currency; unfitted here
+    # CLASSIC ONLY. `_BID_TILT` is a set of quantiles on classic's own level
+    # distribution, and a level map does not survive the distribution moving --
+    # the lesson `_DUMMY_LEVEL_NEEDS` paid for. Minor runs the same auction
+    # shape on a 1..6 ladder in a quarter-sized currency, skat bids a number
+    # rather than a level, and dummy's hand includes a third seat's cards.
+    # Each needs its own probe run, not this map on faith.
+    if E.mode_of(g) != "classic":
+        return None
     return {
         # Sliced to the base deck, exactly like `swap_policy_terms`: Rust takes
         # its offset from the LENGTH, so the wide deck needs no flag.
