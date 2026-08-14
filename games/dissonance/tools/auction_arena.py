@@ -150,6 +150,14 @@ def ask(g, seat, tier):
     auc = {"phase": g["phase"],
            "declarer": (g["auction"]["declarer"] if g["phase"] in settled else seat),
            "options": opts}
+    # ATTRIBUTION ARM. The 2026-08-14 Double work was two changes at once -- the
+    # declarer field above, and pricing the settled contract by an exact solve
+    # instead of the points proxy. `DIS_PROXY_DBL=1` keeps the first and drops
+    # the second by OMITTING `phase`, which is exactly what a server older than
+    # the routing sends, so the searcher takes its own back-compat path rather
+    # than a special one built for the harness.
+    if os.environ.get("DIS_PROXY_DBL") and g["phase"] == "double":
+        auc.pop("phase")
     if tier.startswith("expert") and g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:
