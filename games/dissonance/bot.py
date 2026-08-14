@@ -621,8 +621,29 @@ def swap_policy_terms() -> dict:
 #: the magnitude is inflated even though the direction is not -- winning an
 #: auction selects strong hands under any bidder. Re-fit against Expert-driven
 #: auctions before treating these as final.
-_BID_TILT = {1: 0.45, 2: 0.25, 3: 0.30, 4: 0.40, 5: 0.55, 6: 0.55}
-_BID_TILT_DEFAULT = 0.40
+#: FLAT, AND THE PER-LEVEL MAP THAT PRECEDED IT WAS AN ARTIFACT OF THE BIDDER
+#: IT WAS FITTED ON (re-fitted 2026-08-14, same day, against Expert auctions).
+#:
+#: The first fit ran on auctions the SERVER bot bid, where the bias grows with
+#: the level (0.706 at 3 → 0.850 at 6) — because that bot maps hand strength
+#: onto a level monotonically, so a bigger bid really does mean a bigger hand.
+#: EXPERT DOES NOT BID THAT WAY. It searches, so it opens low to CAP an auction,
+#: sacrifices into contracts it cannot make, and picks levels off exact solves —
+#: and against it the bias is FLAT: 0.742 / 0.708 / 0.707 / 0.630 at levels
+#: 4/5/6/7 over 163 positions recorded mid-arena (`ARENA_DEALS=1`, then
+#: `beliefprobe --from-arena=`).
+#:
+#: Shipping the rising map anyway OVER-corrected exactly where contracts settle:
+#: it read 0.357 at level 5 and 0.383 at level 6 (57 and 43 positions), i.e. the
+#: sample came out biased the OTHER way and the searcher imagined the declarer
+#: holding MORE than they do — which makes a defender double too little, and
+#: compounds with `DOUBLE_MARGIN`. Pooled it read 0.421 against a target of
+#: 0.500; a flat 0.35 reads **0.496**.
+#:
+#: The lesson is the one `_DUMMY_LEVEL_NEEDS` already paid for, one level up: a
+#: map fitted against one distribution does not survive the distribution moving,
+#: and "which bot did the bidding" IS the distribution here.
+_BID_TILT = 0.35
 #: Candidate worlds drawn per world kept. Sampling is cheap next to the solve
 #: that follows it, so this buys the resampling real resolution for nothing:
 #: a tilt can only prefer among the candidates it was actually offered.
@@ -645,12 +666,11 @@ def bid_prior_terms(g: dict) -> dict | None:
     a = g["auction"]
     if a.get("declarer", -1) < 0 or not a.get("level"):
         return None
-    # CLASSIC ONLY. `_BID_TILT` is a set of quantiles on classic's own level
-    # distribution, and a level map does not survive the distribution moving --
-    # the lesson `_DUMMY_LEVEL_NEEDS` paid for. Minor runs the same auction
-    # shape on a 1..6 ladder in a quarter-sized currency, skat bids a number
-    # rather than a level, and dummy's hand includes a third seat's cards.
-    # Each needs its own probe run, not this map on faith.
+    # CLASSIC ONLY. `_BID_TILT` was fitted against classic auctions bid by the
+    # tier that plays them, and neither the curve nor the dose describes another
+    # mode: minor runs the same auction shape on a 1..6 ladder in a quarter-sized
+    # currency, skat bids a number rather than a level, and dummy's hand includes
+    # a third seat's cards. Each needs its own probe run, not this on faith.
     if E.mode_of(g) != "classic":
         return None
     return {
@@ -658,7 +678,7 @@ def bid_prior_terms(g: dict) -> dict | None:
         # its offset from the LENGTH, so the wide deck needs no flag.
         "curve": list(_RANK_VALUE[E.NEXTRA:]),
         "trump_mult": 2.0,
-        "tilt": _BID_TILT.get(int(a["level"]), _BID_TILT_DEFAULT),
+        "tilt": _BID_TILT,
         "tries": _BID_TRIES,
     }
 

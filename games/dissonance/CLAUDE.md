@@ -1212,8 +1212,19 @@ with the bid (0.706 at level 3 → 0.850 at 6). Every world the searcher looked 
 handed the declarer a weaker hand than they held, so contracts looked likelier
 to fail than they were. This is poker's **range** problem.
 * The fix is importance sampling — draw 24 candidates, weight `exp(tilt ×
-  strength)`, keep one in proportion (`bid::BidPrior`). Tilts per level
-  (`bot._BID_TILT`, 0.25–0.55) each re-centre their level within 0.016 of 0.500.
+  strength)`, keep one in proportion (`bid::BidPrior`). **`bot._BID_TILT` is a
+  FLAT 0.35**, and the per-level map it replaced is a lesson worth keeping:
+  fitted against SERVER-BOT auctions the bias rises with the level (0.706 at 3
+  → 0.850 at 6), because that bot maps strength onto a level monotonically.
+  **Expert does not bid that way** — it opens low to cap, sacrifices, and picks
+  levels off exact solves — and against it the bias is FLAT (0.742 / 0.708 /
+  0.707 at levels 4/5/6, 163 positions recorded mid-arena via `ARENA_DEALS=1`
+  and re-fitted with `beliefprobe --from-arena=`). The rising map therefore
+  OVER-corrected exactly where contracts settle, reading 0.357 at level 5 and
+  0.383 at 6 — the sample came out biased the other way, which makes a defender
+  double too LITTLE and compounds with `DOUBLE_MARGIN`. Pooled it read 0.421;
+  flat 0.35 reads **0.496**. Same shape as `_DUMMY_LEVEL_NEEDS`' lesson one
+  level up: **which bot did the bidding IS the distribution.**
 * **It moved the CALIBRATION, which is the claim**: the mis-calibrated middle
   band (edge 10–20/world, 85 rounds) really made 50.6% — a coin flip against a
   ~40% break-even — and under the prior it makes **39.1%**, i.e. break-even.
