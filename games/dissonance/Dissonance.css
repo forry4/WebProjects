@@ -1523,8 +1523,6 @@
    keypad below it does not drop 33px the moment the first bid lands. One line,
    fixed: the text swaps, the geometry does not. */
 .dis-standing { min-height: 1.25em; line-height: 1.25; text-align: center; }
-/* The opener's hint keeps its row whether or not it has text -- see the JSX. */
-.dis-hintrow { font-size: 0.8rem; min-height: 1.2em; line-height: 1.2; text-align: center; }
 /* ...and the row above it, for the same reason one rung up: a standing
    contract renders at 1.5rem where the placeholder is body text. Reserve the
    taller form's height so the swap costs no layout. */

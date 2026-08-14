@@ -2392,15 +2392,14 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
                   </div>
-                  {/* ALWAYS RENDERED, empty when it has nothing to say. The
-                      panel is centred in the rail (`align-self: center`), so a
-                      row that appears and disappears moves EVERYTHING in the
-                      panel — including the keypad above it. Measured at 15px,
-                      and it is why the pad still shifted after the rows above
-                      it had been pinned. */}
-                  <div className="muted dis-hintrow">
-                    {opt.may_pass ? "" : "The opener must bid."}
-                  </div>
+                  {/* No hint row at all. It said "The opener must bid." at the
+                      opening and nothing afterwards, and the panel is centred
+                      in the rail (`align-self: center`), so a row that comes
+                      and goes moved EVERY row in the panel — the keypad above
+                      it included, measured at 15px. Reserving the row fixed
+                      the movement; removing the text removes the row, which
+                      fixes it the same way and costs a line nobody needed —
+                      the absence of a Pass button says it already. */}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
             </div>
