@@ -169,7 +169,15 @@ def ask(g, seat, tier):
     # `DIS_BID_PRIOR=0` drops the belief prior (uniform world sampling, i.e.
     # every run before 2026-08-14) and `DIS_DBL_MARGIN=<x>` re-doses or, at 0,
     # removes the doubling threshold.
-    if g["phase"] == "double":
+    #
+    # An `o` anywhere in a tier's SUFFIX ("expertot") is the OLD DOUBLE: neither
+    # knob, i.e. the tier exactly as it stood before 2026-08-14. That is what
+    # makes a STRENGTH measurement of this work possible at all -- self-play
+    # mirrors read exactly +0.0000 by construction, so the two arms have to
+    # differ, and a global env var cannot make them. It deliberately keeps the
+    # declarer-side FIX, which is a bug fix rather than a knob.
+    old_double = "o" in tier[len("expert"):] if tier.startswith("expert") else False
+    if g["phase"] == "double" and not old_double:
         if os.environ.get("DIS_BID_PRIOR", "1") not in ("", "0"):
             prior = B.bid_prior_terms(g)
             if prior:
@@ -307,7 +315,23 @@ def play(m, tier_of, qual, events):
                     if opening and mv.get("kind") == "pass":
                         opener_passed = True
                         events.append(("openpass", tier))
-                elif phase_now == "double" and mv.get("kind") == "double":
+                elif phase_now == "double" and os.environ.get("ARENA_DEALS"):
+                    # THE POSITION AT THE DOUBLE, for re-fitting the belief
+                    # prior against EXPERT-driven auctions. The tilt map was
+                    # fitted on auctions the SERVER bot bid, and that bot scores
+                    # hands on the same rank curve the probe measures with -- so
+                    # the two share a yardstick and the magnitude is inflated
+                    # even though the direction is not. Recording the position
+                    # here re-fits it against the bidder that actually plays.
+                    #
+                    # Off unless asked for: it is the biggest thing in a
+                    # checkpoint line by far, and no other report reads it.
+                    events.append(("deal", tier_of[g["auction"]["declarer"]],
+                                   g["auction"]["declarer"],
+                                   g["auction"]["level"], g["auction"]["denom"],
+                                   [sorted(h) for h in g["hands"]],
+                                   [[list(x) for x in q] for q in g["piles"]]))
+                if phase_now == "double" and mv.get("kind") == "double":
                     # ...WITH THE SEARCH'S OWN TWO NUMBERS, so the doubling
                     # THRESHOLD can be swept offline instead of costing a run
                     # per value. The decision is `on - off > margin x k`, and

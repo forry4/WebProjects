@@ -130,17 +130,62 @@ def tilted(mine, samples, beta):
     return num / tot if tot else 0.5
 
 
+def from_arena(pats):
+    """Positions recorded at the double by `auction_arena.py ... ARENA_DEALS=1`.
+
+    THE POINT OF THIS PATH: the tilt map was first fitted against auctions the
+    SERVER bot bid, and that bot scores hands on the same rank curve the probe
+    measures with -- so the two share a yardstick and the magnitude is inflated
+    even though the direction is not. These positions come from EXPERT-driven
+    auctions, i.e. the bidder that actually plays, which is what the map has to
+    describe.
+
+    Only the five fields `percentile` reads are rebuilt; nothing here needs a
+    playable game.
+    """
+    import glob
+    import json
+    out = []
+    for p in sorted(x for pat in pats for x in glob.glob(pat)):
+        for line in open(p):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            for e in (r["events"][0] if r.get("events") else []):
+                if e[0] == "deal" and len(e) >= 7:
+                    out.append({
+                        "auction": {"declarer": e[2], "level": e[3], "denom": e[4]},
+                        "hands": e[5], "piles": e[6],
+                    })
+    return out
+
+
 def main():
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    arena = [a[len("--from-arena="):] for a in sys.argv[1:]
+             if a.startswith("--from-arena=")]
     rng = random.Random(12345)
     rows = []
-    for s in range(n):
-        g = to_double(600_000 + s)
-        if g is None:
-            continue
-        r = percentile(g, rng)
-        if r:
-            rows.append(r)
+    if arena:
+        games = from_arena(arena)
+        print(f"  positions from EXPERT-driven arena auctions: {len(games)}")
+        for g in games:
+            r = percentile(g, rng)
+            if r:
+                rows.append(r)
+    else:
+        n = int(args[0]) if args else 200
+        for s in range(n):
+            g = to_double(600_000 + s)
+            if g is None:
+                continue
+            r = percentile(g, rng)
+            if r:
+                rows.append(r)
     if not rows:
         print("no rounds reached the double phase")
         return
