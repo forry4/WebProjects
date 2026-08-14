@@ -107,7 +107,42 @@ def test_the_reveal_swap_matches_the_deal_it_sits_beside():
         assert give in row["deal"]["out"]
         assert take in row["reveal"]["shown"], "only a shown card can be taken"
         assert give not in row["deal"]["hands"][decl]
+        # THE DISCARD SITS IN THE SLOT THE TAKEN CARD LEFT, and the banked row
+        # has to carry that: the reveal lays the talon out in the order it was
+        # dealt, so "which of these six could the declarer place" is read off
+        # POSITION rather than by matching card names. `out` was `sorted()`
+        # here, which threw the slot and the order away together.
+        assert row["deal"]["out"].index(give) < E.N_SHOWN, \
+            "the discard must land among the slots the declarer was shown"
+        assert row["deal"]["out"][:E.N_SHOWN] == [
+            give if c == take else c for c in row["reveal"]["shown"]], \
+            "the shown slots, with the take swapped for the give, in dealt order"
     assert seen_swap, "40 seeds must produce at least one swap (the bot swaps often)"
+
+
+def test_the_banked_talon_keeps_the_order_it_was_dealt_in():
+    """...and it holds when nobody swaps, which is the case a sorted `out`
+    could still get right by accident."""
+    for seed in range(6):
+        rng = random.Random(seed)
+        g = E.new_game(["a", "b"], random.Random(seed), mode="classic")
+        # DRIVEN, not sampled: the shipped swap policy swaps in all 40 of the
+        # seeds the test beside this one walks, so waiting for a stand-pat
+        # round is waiting for something that does not come. The decline is
+        # one engine call.
+        guard = 0
+        while g["phase"] != "swap":
+            guard += 1
+            assert guard < 400, "never reached the swap"
+            _step(g, rng)
+        dealt = list(g["out"])
+        E.apply_swap(g, g["auction"]["declarer"], None, None)
+        _play_round_out(g, rng)
+        row = g["match"]["rounds"][-1]
+        assert row["reveal"]["swap"] == [None, None], "this round stood pat"
+        assert row["deal"]["out"] == dealt, "the talon was banked as it was dealt"
+        assert row["deal"]["out"][:E.N_SHOWN] == row["reveal"]["shown"], \
+            "with no swap the shown three are still the first three, in order"
 
 
 def test_the_mid_round_wire_never_carries_the_current_rounds_hands():
