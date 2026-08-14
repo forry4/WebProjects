@@ -216,6 +216,36 @@ def test_the_result_row_carries_the_double_and_the_numbers_it_used():
 # --- the phase -------------------------------------------------------------
 
 
+def test_the_jump_bonus_rides_inside_the_double_as_shipped(monkeypatch):
+    """`JUMP_DOUBLED` is an experiment arm and it is ON, which is the shipped
+    rule: the Double multiplies the jump bonus with the rest of the set base.
+
+    Off, the bonus is added AFTER the doubling. The property that makes it the
+    surgical candidate is that the UNDOUBLED game cannot move either way -- so
+    it can be measured without relitigating the jump-rate calibration -- and
+    that is asserted here rather than argued.
+    """
+    assert E.JUMP_DOUBLED["classic"] is True, "the shipped rule doubles it"
+    N, j = 5, 4
+    stake, bonus = N + E.FLAT_SET_PENALTY["classic"], E.JUMP_SET_BONUS["classic"] * j
+    on = E._terms_for("classic", 2, N, jump=j, doubling=2)
+    off = E._terms_for("classic", 2, N, jump=j)
+    assert on["set_base"] == (stake + bonus) * 2
+    assert off["set_base"] == stake + bonus
+
+    monkeypatch.setitem(E.JUMP_DOUBLED, "classic", False)
+    arm_on = E._terms_for("classic", 2, N, jump=j, doubling=2)
+    arm_off = E._terms_for("classic", 2, N, jump=j)
+    assert arm_on["set_base"] == stake * 2 + bonus, "the bonus is added after the x2"
+    assert arm_on["set_base"] < on["set_base"], "the arm must actually trim it"
+    # THE WHOLE POINT: the undoubled contract is untouched by the arm.
+    assert arm_off == off
+    # ...and a jumpless contract is identical under both, since there is no
+    # bonus to move -- so the arm can only ever reprice a LEAP.
+    assert (E._terms_for("classic", 2, N, jump=0, doubling=2)
+            == on | {"set_base": stake * 2})
+
+
 def test_the_swap_hands_off_to_the_defenders_double():
     g = _settled()
     assert g["phase"] == "double"

@@ -691,7 +691,35 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
             }
         }
         crate::bid::deals_into(&view, rng, k.max(1), &mut entry);
-        let sums = crate::bid::price_exact(&opts, &entry.deals, declarer, dd);
+        let mut sums = crate::bid::price_exact(&opts, &entry.deals, declarer, dd);
+        // THE DOUBLING THRESHOLD (optional, default 0 = the plain argmax, so an
+        // A/B against it cannot be confounded — the `opp_temp` discipline).
+        //
+        // WHY A BARE ARGMAX IS NOT ENOUGH. Taking the better of two noisy
+        // estimates is a selection, and conditional on the doubled branch
+        // winning, its true value is better for the declarer than the estimate
+        // said — the optimiser's curse this crate already documents for the
+        // tree. Measured over 380 self-play rounds: the search doubled 54.3% of
+        // genuinely-priced contracts, and those contracts MADE 68.2% of the
+        // time against a break-even of about 40%. Nearly all of the excess sits
+        // on real contracts; the sacrifices it doubles are right.
+        //
+        // `margin` is in per-world payoff points and is charged to the
+        // ESCALATED branch — doubling always raises the set base, so that is
+        // the option with the greater `set_base`, identified from the terms
+        // rather than from a flag the server would have to keep in step. Ties
+        // mean the two cannot be told apart, and nothing is charged.
+        let margin = auc.get("double_margin").and_then(|x| x.as_f64()).unwrap_or(0.0);
+        if margin > 0.0 && opts.len() == 2 {
+            let (a, b) = (opts[0].set_base, opts[1].set_base);
+            if a != b {
+                let esc = if a > b { 0 } else { 1 };
+                // Declarer-signed here, so ADDING makes the escalation look
+                // better for the declarer, i.e. worse for the defender who is
+                // about to negate and take the argmax.
+                sums[esc] += margin * entry.deals.len() as f64;
+            }
+        }
         *cache = Some((key, entry));
         return Ok((sums.iter().map(|x| x * sign).collect(), hit));
     }
@@ -1564,6 +1592,57 @@ mod exact_double {
                 "the exact price agreed with the points proxy on all {n} deals — \
                  either the proxy is being called for both, or the sample is too \
                  easy to separate them");
+    }
+
+    /// An armed double request, as `main.py` builds it, around a real view.
+    fn double_request(margin: Option<f64>) -> Option<Value> {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"),
+                           "/../../games/dissonance/tests/fixtures/views.jsonl");
+        let text = std::fs::read_to_string(path).ok()?;
+        let view: Value = text.lines().filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .find(|v| v["mode"].as_str() != Some("skat")
+                  && view_from_json(v).is_some())?;
+        let opts: Vec<Value> = double_options().iter().map(|o| serde_json::json!({
+            "denom": o.denom, "target": o.target, "make": o.make, "over": o.over,
+            "set_base": o.set_base, "short": o.short, "ramp": o.ramp,
+            "null": o.null, "move": {"kind": "double", "on": o.ramp > 0},
+        })).collect();
+        let mut auc = serde_json::json!({
+            "phase": "double", "declarer": 1 - view["you"].as_u64().unwrap(),
+            "options": opts,
+        });
+        if let Some(m) = margin {
+            auc["double_margin"] = serde_json::json!(m);
+        }
+        Some(serde_json::json!({"view": view, "auction": auc}))
+    }
+
+    #[test]
+    fn the_doubling_threshold_is_off_by_default_and_only_ever_taxes_the_double() {
+        // A bare argmax over two noisy estimates is a selection, and the branch
+        // that wins is the one whose noise favoured it. `double_margin` is the
+        // correction; 0 must reproduce the plain argmax EXACTLY, or every A/B
+        // against it is confounded before it starts.
+        let mut dd = Dd::new(16);
+        let run = |dd: &mut Dd, m: Option<f64>| {
+            let req = double_request(m).expect("a classic view fixture");
+            let mut rng = crate::rng::Rng::new(77);
+            let mut cache = None;
+            answer_auction(&req, 4, dd, &mut rng, &mut cache).unwrap().0
+        };
+        let plain = run(&mut dd, None);
+        let zero = run(&mut dd, Some(0.0));
+        assert_eq!(plain, zero, "margin 0 must BE the plain argmax");
+        let taxed = run(&mut dd, Some(9.0));
+        assert_eq!(plain.len(), 2);
+        // The answer is signed for the DEFENDER, who takes the argmax, so a
+        // margin must lower the doubled branch and leave the other alone.
+        let on = if double_options()[0].ramp > 0 { 0 } else { 1 };
+        assert!(taxed[on] < plain[on], "the margin must cost the DOUBLE");
+        assert_eq!(taxed[1 - on], plain[1 - on], "...and nothing else");
+        // ...by exactly `margin x worlds`, so the knob is in the units it says.
+        assert!((plain[on] - taxed[on] - 9.0 * 4.0).abs() < 1e-6);
     }
 
     #[test]

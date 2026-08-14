@@ -84,6 +84,11 @@ if "DIS_DENOM_RULE" in os.environ:
 # ...and the jump bonus rate, for the dose sweep (2/3/4 per level).
 if "DIS_JUMP_SET" in os.environ:
     E.JUMP_SET_BONUS[MODE] = int(os.environ["DIS_JUMP_SET"])
+# ...and whether the DOUBLE multiplies that bonus. `DIS_JUMP_DOUBLED=0` adds it
+# after the doubling instead, which leaves the undoubled game byte-identical and
+# only trims what a doubled set pays -- see `engine.JUMP_DOUBLED`.
+if "DIS_JUMP_DOUBLED" in os.environ:
+    E.JUMP_DOUBLED[MODE] = os.environ["DIS_JUMP_DOUBLED"] not in ("", "0")
 # ...and whether the classic opener may pass (both passing throws the hand in).
 if "DIS_OPENER_PASS" in os.environ:
     E.OPENER_MAY_PASS[MODE] = os.environ["DIS_OPENER_PASS"] not in ("", "0")
@@ -288,7 +293,21 @@ def play(m, tier_of, qual, events):
                         opener_passed = True
                         events.append(("openpass", tier))
                 elif phase_now == "double" and mv.get("kind") == "double":
-                    events.append(("double", tier, bool(mv.get("on"))))
+                    # ...WITH THE SEARCH'S OWN TWO NUMBERS, so the doubling
+                    # THRESHOLD can be swept offline instead of costing a run
+                    # per value. The decision is `on - off > margin x k`, and
+                    # neither sum depends on the margin, so a recorded pair
+                    # prices every threshold exactly -- the same "label the
+                    # decisions once, evaluate any policy for free" method
+                    # `swaplab` uses for the talon.
+                    on = next((i for i, o in enumerate(opts)
+                               if o["move"].get("on")), None)
+                    off = next((i for i, o in enumerate(opts)
+                                if not o["move"].get("on")), None)
+                    events.append(("double", tier, bool(mv.get("on")),
+                                   None if on is None else sums[on],
+                                   None if off is None else sums[off],
+                                   len(g["auction"]["log"])))
             # THE CONTROL VARIATE, captured for free. The opening node is asked
             # of Hard in exactly one of a deal's two flips (the tiers swap
             # seats), and its myopic best bid price IS the hand-quality

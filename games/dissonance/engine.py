@@ -260,6 +260,21 @@ def raise_cap_for(mode: str) -> int:
 #: bonus is a set price, and a declarer who ducks out owes none of it).
 JUMP_SET_BONUS = {"classic": 3, "skat": 0, "minor": 0, "dummy": 0}
 
+#: ...and WHETHER THE DOUBLE MULTIPLIES IT. True is the shipped rule (the bonus
+#: rides inside `set_base`, so a Double doubles it with everything else); False
+#: adds it AFTER the doubling, so a doubled set pays `2 x (N + stake) + 3j`
+#: rather than `2 x (N + stake + 3j)`.
+#:
+#: AN EXPERIMENT ARM, NOT A SHIPPED CHANGE (2026-08-14), driven by the arena's
+#: `DIS_JUMP_DOUBLED=0`. Two things make it the surgical candidate if the
+#: doubled payouts want trimming: the UNDOUBLED game is byte-identical either
+#: way, so it cannot relitigate the jump-rate calibration; and it is still one
+#: scalar out of `_terms_for`, so it ships as data with no wire field and no
+#: Rust change. Measured on 380 self-play rounds it moves the doubled set's
+#: median 55 -> 50, its p90 76 -> 66, its worst observed round 98 -> 86, and the
+#: declarer's EV +7.57 -> +9.56 a round holding every decision fixed.
+JUMP_DOUBLED = {"classic": True, "skat": True, "minor": True, "dummy": True}
+
 #: Set-score multiplier per point the declarer finished short.
 #:
 #: 5, not 4 (2026-08-08). Raised to make SACRIFICING dearer: once the Hard tier
@@ -2097,12 +2112,18 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # pays the defender JUMP_SET_BONUS more on a set. Inside the base means the
     # Double doubles it and every consumer of `set_base` -- the result panel's
     # maths, the Hard pricing, the DD resolver -- follows with no new term.
-    setb = (level + FLAT_SET_PENALTY.get(mode, 0)
-            + JUMP_SET_BONUS.get(mode, 0) * jump)
+    stake = level + FLAT_SET_PENALTY.get(mode, 0)
+    bonus = JUMP_SET_BONUS.get(mode, 0) * jump
+    setb = stake + bonus
     if doubling > 1:
+        # JUMP_DOUBLED False takes the bonus back OUT of the multiplier -- the
+        # experiment arm, off as shipped. Still one scalar either way, so every
+        # consumer of `set_base` follows with no new term.
+        setb = (setb * doubling if JUMP_DOUBLED.get(mode, True)
+                else stake * doubling + bonus)
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,
-                "set_base": setb * doubling, "short": short,
+                "set_base": setb, "short": short,
                 "ramp": DOUBLE_RAMP, "null": null}
     return {"denom": denom, "level": level, "target": level,
             "make": make, "over": over, "set_base": setb,
