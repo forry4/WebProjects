@@ -98,6 +98,61 @@ fn main() {
             Ok(v) => v,
             Err(e) => { writeln!(out, "{{\"error\":\"{e}\"}}").unwrap(); continue }
         };
+        // THE CARD SEARCH, for the per-decision regret harness. It calls
+        // `wire::answer_card` -- the same body `odd_pick_card` does -- so the
+        // thing being measured is the thing that is served.
+        if let Some(req) = v.get("pick") {
+            let view = req.get("view").and_then(dissonance::wire::view_from_json);
+            match view {
+                Some(view) => {
+                    let c = req.get("payoff").and_then(contract_from_json);
+                    let prior = c.and_then(|c| req.get("bid_prior")
+                        .and_then(|p| dissonance::wire::bid_prior_from_json(p, c.declarer)));
+                    let kk = req.get("k").and_then(|x| x.as_u64()).unwrap_or(8) as usize;
+                    seed = seed.wrapping_mul(6364136223846793005)
+                               .wrapping_add(1442695040888963407);
+                    let mut r = Rng::new(seed);
+                    let (moves, sums, _) = dissonance::wire::answer_card(
+                        &view, c, prior.as_ref(), kk, &mut dd, &mut r);
+                    let m: Vec<String> = moves.iter().map(|x| x.to_string()).collect();
+                    let s: Vec<String> = sums.iter().map(|x| x.to_string()).collect();
+                    writeln!(out, "{{\"moves\":[{}],\"sum\":[{}]}}",
+                             m.join(","), s.join(",")).unwrap();
+                }
+                None => { writeln!(out, "{{\"error\":\"unsearchable view\"}}").unwrap(); }
+            }
+            out.flush().unwrap();
+            continue;
+        }
+        // THE ORACLE: every legal move's EXACT value on the real deal. This is
+        // what a cheater would know, and the yardstick a decision's regret is
+        // measured against -- one solve, no sampling, same answer every time.
+        if let Some(req) = v.get("rootvals") {
+            let deal = deal_from_json(req);
+            let c = req.get("terms").and_then(contract_from_json);
+            match (deal, c) {
+                (Some(mut s), Some(c)) => {
+                    // Replay the plays already made, so the oracle is asked
+                    // about the position the bot was actually facing.
+                    if let Some(hist) = req.get("played").and_then(|x| x.as_array()) {
+                        for card in hist.iter().filter_map(|x| x.as_u64()) {
+                            s.play(card as u8);
+                        }
+                    }
+                    let mut moves = [0u8; 16];
+                    let n = s.legal(&mut moves);
+                    let mut vals = [0i32; 16];
+                    dd.solve_root_contract(&s, &moves[..n], &c, &mut vals);
+                    let m: Vec<String> = moves[..n].iter().map(|x| x.to_string()).collect();
+                    let vs: Vec<String> = vals[..n].iter().map(|x| x.to_string()).collect();
+                    writeln!(out, "{{\"moves\":[{}],\"vals\":[{}],\"to_play\":{}}}",
+                             m.join(","), vs.join(","), s.to_play()).unwrap();
+                }
+                _ => { writeln!(out, "{{\"error\":\"unresolvable oracle deal\"}}").unwrap(); }
+            }
+            out.flush().unwrap();
+            continue;
+        }
         if let Some(req) = v.get("resolve") {
             match resolve(&mut dd, req) {
                 Some((payoff, pts, duck)) => {

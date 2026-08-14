@@ -105,68 +105,22 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
         Some(x) => x,
         None => return err("not a searchable position"),
     };
-    let mut moves = [0u8; 16];
-    let n = v.legal(&mut moves);
-    if n == 0 {
+    // THE SEARCH ITSELF IS `wire::answer_card`, which `bin/priorlab` also
+    // calls. This entry is the wasm boundary and the JSON shape, nothing more —
+    // a harness that reproduced the body instead of calling it is a mistake
+    // this crate has already made once, with `odd_pick_bid`.
+    let mut rng = Rng::new(seed.to_bits() ^ 0x9E37_79B9_7F4A_7C15);
+    let (moves, sums, worlds) = DD.with(|dd| {
+        let mut dd = dd.borrow_mut();
+        crate::wire::answer_card(&v, contract, prior.as_ref(), k, &mut dd, &mut rng)
+    });
+    if moves.is_empty() {
         return err("no legal move");
     }
-    let list = |sums: &[f64], worlds: usize| {
-        let mut m = String::from("[");
-        let mut s = String::from("[");
-        for i in 0..n {
-            if i > 0 {
-                m.push(',');
-                s.push(',');
-            }
-            m.push_str(&moves[i].to_string());
-            s.push_str(&sums[i].to_string());
-        }
-        m.push(']');
-        s.push(']');
-        format!("{{\"moves\":{},\"sum\":{},\"worlds\":{}}}", m, s, worlds)
-    };
-    if n == 1 {
-        return list(&[0.0; 16], 0);
-    }
-
-    // THE SIGN. A contract solve is signed for the DECLARER (declarer score
-    // minus defender score) and a points solve for SEAT 0, so each has its own
-    // rule for turning the solver's number into "better for me" -- and getting
-    // it backwards is a bot that plays to lose, which no assertion about legal
-    // moves would ever catch.
-    let mut rng = Rng::new(seed.to_bits() ^ 0x9E37_79B9_7F4A_7C15);
-    let mut buf: Vec<u8> = Vec::with_capacity(16);
-    let mut sums = [0f64; 16];
-    DD.with(|dd| {
-        let mut dd = dd.borrow_mut();
-        match contract {
-            Some(c) => {
-                let sign = if v.me == c.declarer { 1i32 } else { -1i32 };
-                let mut vals = [0i32; 16];
-                for _ in 0..k.max(1) {
-                    let w = crate::bid::draw_world(&v, &mut rng, &mut buf, prior.as_ref());
-                    dd.solve_root_contract(&w, &moves[..n], &c, &mut vals);
-                    for i in 0..n {
-                        sums[i] += (sign * vals[i]) as f64;
-                    }
-                }
-            }
-            None => {
-                let sign = if v.me == 0 { 1i16 } else { -1i16 };
-                let mut vals = [0i16; 16];
-                for _ in 0..k.max(1) {
-                    // No contract means no prior (see `parse`), so this stays
-                    // uniform -- a points search has no declarer to be about.
-                    let w = crate::bid::draw_world(&v, &mut rng, &mut buf, prior.as_ref());
-                    dd.solve_root(&w, &moves[..n], &mut vals);
-                    for i in 0..n {
-                        sums[i] += (sign * vals[i]) as f64;
-                    }
-                }
-            }
-        }
-    });
-    list(&sums, k.max(1))
+    let j = |xs: &[String]| format!("[{}]", xs.join(","));
+    let m: Vec<String> = moves.iter().map(|x| x.to_string()).collect();
+    let s: Vec<String> = sums.iter().map(|x| x.to_string()).collect();
+    format!("{{\"moves\":{},\"sum\":{},\"worlds\":{}}}", j(&m), j(&s), worlds)
 }
 
 /// Price every auction option the server offered, over `k` sampled deals.

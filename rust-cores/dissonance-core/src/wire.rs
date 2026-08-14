@@ -260,6 +260,63 @@ pub fn contract_from_json(v: &Value) -> Option<Contract> {
     })
 }
 
+/// THE CARD SEARCH, as one body both entries call.
+///
+/// `wasm::odd_pick_card` is the browser's entry and `bin/priorlab` is the
+/// harness's, and this repo has already paid for a measurement harness that
+/// reproduced a serving path instead of calling it (`bidserve` used to
+/// re-implement `odd_pick_bid`). Two copies of "how a card is chosen" is one
+/// too many the moment either grows a knob — and it just grew `prior`.
+///
+/// Returns the legal moves and their summed values, SIGNED so higher is better
+/// for the seat to move. Both arrays are additive across workers, which is what
+/// lets the pool split worlds and add.
+///
+/// A position with one legal card is returned unsearched: the answer cannot
+/// depend on the search, and under mandatory follow-suit that case is common.
+pub fn answer_card(v: &View, contract: Option<crate::dd::Contract>,
+                   prior: Option<&crate::bid::BidPrior>, k: usize,
+                   dd: &mut Dd, rng: &mut crate::rng::Rng)
+    -> (Vec<u8>, Vec<f64>, usize) {
+    let mut moves = [0u8; 16];
+    let n = v.legal(&mut moves);
+    if n <= 1 {
+        return (moves[..n].to_vec(), vec![0.0; n], 0);
+    }
+    let mut buf: Vec<u8> = Vec::with_capacity(16);
+    let mut sums = vec![0f64; n];
+    match contract {
+        // THE SIGN. A contract solve is signed for the DECLARER (declarer score
+        // minus defender score) and a points solve for SEAT 0, so each has its
+        // own rule for turning the solver's number into "better for me" — and
+        // getting it backwards is a bot that plays to lose, which no assertion
+        // about legal moves would ever catch.
+        Some(c) => {
+            let sign = if v.me == c.declarer { 1i32 } else { -1i32 };
+            let mut vals = [0i32; 16];
+            for _ in 0..k.max(1) {
+                let w = crate::bid::draw_world(v, rng, &mut buf, prior);
+                dd.solve_root_contract(&w, &moves[..n], &c, &mut vals);
+                for i in 0..n {
+                    sums[i] += (sign * vals[i]) as f64;
+                }
+            }
+        }
+        None => {
+            let sign = if v.me == 0 { 1i16 } else { -1i16 };
+            let mut vals = [0i16; 16];
+            for _ in 0..k.max(1) {
+                let w = crate::bid::draw_world(v, rng, &mut buf, prior);
+                dd.solve_root(&w, &moves[..n], &mut vals);
+                for i in 0..n {
+                    sums[i] += (sign * vals[i]) as f64;
+                }
+            }
+        }
+    }
+    (moves[..n].to_vec(), sums, k.max(1))
+}
+
 /// The belief prior over the declarer's hand — see `bid::BidPrior`.
 ///
 /// Every field optional and the whole block optional, because absent must mean
