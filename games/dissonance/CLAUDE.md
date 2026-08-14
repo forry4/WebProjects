@@ -1310,6 +1310,27 @@ Two questions, two fields, and collapsing them breaks the Hard tier silently.
   is over**: the defender learns THAT a swap happened and nothing more, which is
   the entire point of the discard going face-down.
 
+**`out` IS AN ORDERED ROW, AND ITS ORDER IS A FACT ABOUT THE ROUND (2026-08-13).**
+The three the declarer is shown are its first `N_SHOWN` (`test_engine` pins it),
+and `apply_swap` replaces the taken card **in its slot**, so the discard ends up
+exactly where the card it paid for used to be. Two readers were throwing that
+away and both looked fine in isolation:
+* **`_deal_snapshot` sorted it** (`sorted(g["out"])`), so the round's story laid
+  the talon out by card id — an order the round never had. It is `list(...)` now.
+  Nothing downstream read it positionally (the DD review takes it as a set for
+  its integrity check, `persist` packs it as a sequence), so the order is free.
+* **the report's talon grouped by CARD, not by SLOT.** It put "the three the
+  declarer saw" on the declarer's side by testing membership in `shown_at_deal`
+  — but after a swap the taken card is not in the talon at all and the discard
+  is not in `shown_at_deal`, so the row came out **2 + 4** with the discard
+  adrift among the cards nobody saw. The group is `shown_at_deal` with the take
+  substituted by the give, which is precisely what the engine did to `out`. The
+  discard takes the swap's own dashed badge rather than the shown ring: it is in
+  the talon, in the right slot, and was never shown to anyone.
+`test_round_reveal` pins both (the swap case and a DRIVEN stand-pat — the
+shipped swap policy swaps in all 40 seeds the sampling test walks, so waiting
+for a stand-pat round waits forever), and both fail against the old `sorted`.
+
 **THE WIRE'S `shown` IS NOT OURS TO REDEFINE.**
 `rust-cores/dissonance-core/src/wire.rs` treats every card in `view["shown"]` as
 out of play and does exact card-count arithmetic on it — the unseen pool must

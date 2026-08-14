@@ -1543,7 +1543,15 @@ def _deal_snapshot(g: dict) -> dict:
         "hands": [sorted(h) for h in g["hands"]],
         # [bottom, top] per pile, the order the solver's own `Pile.c` uses.
         "piles": [[list(p) for p in seat_piles] for seat_piles in g["piles"]],
-        "out": sorted(g["out"]),
+        # THE DEALT ORDER, NOT SORTED. `out` is an ordered row -- the three the
+        # declarer is shown are its first `N_SHOWN`, and a swap REPLACES the
+        # taken card IN ITS SLOT (`apply_swap`), so the discard sits exactly
+        # where the card it paid for used to be. Sorting by card id threw both
+        # facts away, and the round's story then laid the talon out in an order
+        # the round never had. Nothing downstream reads it positionally (the DD
+        # review takes it as a set for its integrity check; `persist` packs it
+        # as a sequence), so the order costs nothing to keep.
+        "out": list(g["out"]),
         "trump": g["trump"],
         "leader": g["leader"],
         # The parity the round was PLAYED under. The DD review rebuilds a State

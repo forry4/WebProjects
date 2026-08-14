@@ -2833,15 +2833,36 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <div className="dis-outrow">
                     {(() => {
                       const seen = new Set(sawTalon ? (game.shown_at_deal || []) : []);
-                      const a = game.out.filter((c) => seen.has(c));
-                      const b = game.out.filter((c) => !seen.has(c));
+                      /* GROUP BY SLOT, NOT BY CARD — a swap takes one of the
+                         shown three into hand and puts the discard IN ITS
+                         PLACE (the engine rewrites `out` positionally), so a
+                         card-keyed group came out 2 + 4: the taken card is no
+                         longer in the talon at all, and the discard drifted
+                         into the unseen half. What the group means is "the
+                         three the declarer could place", which is the shown
+                         three with the take substituted by the give. */
+                      const slots = new Set([...seen].map((c) =>
+                        (c === game.swap_take && game.swap_give != null
+                          ? game.swap_give : c)));
+                      const a = game.out.filter((c) => slots.has(c));
+                      const b = game.out.filter((c) => !slots.has(c));
                       const declaredByMe = res.declarer === mySeat;
                       const rows = declaredByMe ? [b, a] : [a, b];
-                      return rows.flat().map((c) => (
-                        <span key={c} className={seen.has(c) ? "dis-out-seen" : undefined}>
-                          <Card c={c} small />
-                        </span>
-                      ));
+                      return rows.flat().map((c) => {
+                        // The discard is in the talon but was never SHOWN — it
+                        // came out of the declarer's own hand — so it takes the
+                        // swap's own dashed badge rather than the shown ring.
+                        const gave = c === game.swap_give && game.swap_take != null;
+                        return (
+                          <span key={c}
+                            className={gave ? "dis-out-gave" : seen.has(c) ? "dis-out-seen" : undefined}
+                            title={gave
+                              ? "Discarded into the talon, in the place of the card the declarer took"
+                              : seen.has(c) ? "Shown to the declarer" : undefined}>
+                            <Card c={c} small />
+                          </span>
+                        );
+                      });
                     })()}
                   </div>
                   {/* WHAT THE DECLARER ACTUALLY SAW AND DID — and no more than
