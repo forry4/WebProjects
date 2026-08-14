@@ -1596,7 +1596,14 @@ export default function Dissonance({ myId, authUser, onExit }) {
     // that only measure it — which is what lets it duck for the Null
     // consolation, and lets a defender play to force one +2 trick on a declarer
     // who is ducking. The terms come straight from `engine.payoff_terms`.
-    const view = JSON.stringify({ view: as.view, payoff: as.payoff, auction: as.auction });
+    // `bid_prior` rides at the TOP level because the card play needs it too and
+    // a play request carries no `auction` block to nest it in: the declarer won
+    // an auction, so the worlds this searches must not hand them an average
+    // hand. This list is a deliberate whitelist rather than a spread of `as` —
+    // adding a field is how a new one reaches the worker, and forgetting is a
+    // search that runs on a belief the server meant to correct.
+    const view = JSON.stringify({ view: as.view, payoff: as.payoff,
+                                  auction: as.auction, bid_prior: as.bid_prior });
     const t0 = performance.now();
     // The server's cap counts WORLDS in total, and worlds are summed across the
     // pool, so split it rather than handing every worker the whole budget.

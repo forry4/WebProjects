@@ -100,11 +100,19 @@ pub fn sample_worlds(
     k: usize,
     buf: &mut Vec<u8>,
     out: &mut Vec<State>,
+    // `prior`: THE AUCTION, AS EVIDENCE, for the whole round -- not just trick
+    // 1. The declarer won an auction, so their holding is stronger than a
+    // uniform resample of what the defender cannot place, and MEASURED
+    // (`tools/decayprobe.py`, 200 rounds) that does NOT wash out as the hand
+    // reveals itself: the percentile reads 0.769 at trick 1 and is still 0.617
+    // at trick 11, averaging 0.775 over tricks 1-4 against 0.626 over 9-13.
+    // None means uniform sampling, i.e. every caller before this.
+    prior: Option<&crate::bid::BidPrior>,
 ) {
     out.clear();
     if particles == 0 || v.history.is_empty() {
         for _ in 0..k {
-            out.push(v.determinize(rng, buf));
+            out.push(crate::bid::draw_world(v, rng, buf, prior));
         }
         return;
     }
@@ -113,7 +121,7 @@ pub fn sample_worlds(
     let mut logw: Vec<f32> = Vec::with_capacity(particles);
     let mut best = f32::NEG_INFINITY;
     for _ in 0..particles {
-        let w = v.determinize(rng, buf);
+        let w = crate::bid::draw_world(v, rng, buf, prior);
         if let Some(l) = log_likelihood(v, &w, temp) {
             if l > best {
                 best = l;
@@ -124,7 +132,7 @@ pub fn sample_worlds(
     }
     if worlds.is_empty() {
         for _ in 0..k {
-            out.push(v.determinize(rng, buf));
+            out.push(crate::bid::draw_world(v, rng, buf, prior));
         }
         return;
     }

@@ -71,11 +71,18 @@ fn err(msg: &str) -> String {
 /// The armed request: the seat's view, and the scoring rule it is playing for.
 /// The payoff half is optional so a caller that has not got it still gets a
 /// search -- just one optimising the yardstick instead of the score.
-fn parse(view_json: &str) -> Option<(View, Option<crate::dd::Contract>)> {
+fn parse(view_json: &str)
+    -> Option<(View, Option<crate::dd::Contract>, Option<crate::bid::BidPrior>)> {
     let v: serde_json::Value = serde_json::from_str(view_json).ok()?;
     let view = view_from_json(v.get("view").unwrap_or(&v))?;
     let contract = v.get("payoff").and_then(contract_from_json);
-    Some((view, contract))
+    // THE AUCTION AS EVIDENCE, for the card play too. It needs a declarer to be
+    // about, which is exactly what a settled contract carries -- so no contract
+    // means no prior, and the search samples uniformly as it always did.
+    let prior = contract.and_then(|c| {
+        v.get("bid_prior").and_then(|p| crate::wire::bid_prior_from_json(p, c.declarer))
+    });
+    Some((view, contract, prior))
 }
 
 /// Solve `k` sampled worlds and return the per-move value sums.
@@ -94,7 +101,7 @@ fn parse(view_json: &str) -> Option<(View, Option<crate::dd::Contract>)> {
 /// most wasteful thing this could do (mandatory follow-suit makes it common).
 #[wasm_bindgen]
 pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
-    let (v, contract) = match parse(view_json) {
+    let (v, contract, prior) = match parse(view_json) {
         Some(x) => x,
         None => return err("not a searchable position"),
     };
@@ -137,7 +144,7 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
                 let sign = if v.me == c.declarer { 1i32 } else { -1i32 };
                 let mut vals = [0i32; 16];
                 for _ in 0..k.max(1) {
-                    let w = v.determinize(&mut rng, &mut buf);
+                    let w = crate::bid::draw_world(&v, &mut rng, &mut buf, prior.as_ref());
                     dd.solve_root_contract(&w, &moves[..n], &c, &mut vals);
                     for i in 0..n {
                         sums[i] += (sign * vals[i]) as f64;
@@ -148,7 +155,9 @@ pub fn odd_pick_card(view_json: &str, k: usize, seed: f64) -> String {
                 let sign = if v.me == 0 { 1i16 } else { -1i16 };
                 let mut vals = [0i16; 16];
                 for _ in 0..k.max(1) {
-                    let w = v.determinize(&mut rng, &mut buf);
+                    // No contract means no prior (see `parse`), so this stays
+                    // uniform -- a points search has no declarer to be about.
+                    let w = crate::bid::draw_world(&v, &mut rng, &mut buf, prior.as_ref());
                     dd.solve_root(&w, &moves[..n], &mut vals);
                     for i in 0..n {
                         sums[i] += (sign * vals[i]) as f64;

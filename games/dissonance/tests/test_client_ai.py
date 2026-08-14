@@ -544,6 +544,49 @@ def test_the_double_ships_a_belief_prior_and_a_threshold_in_classic_only():
         m.ROOMS.pop("r1", None)
 
 
+def test_a_card_play_request_carries_the_belief_prior_too():
+    """The auction is evidence for all THIRTEEN card decisions, not just the one.
+
+    Measured (`tools/decayprobe.py`, 200 rounds): the declarer's remaining
+    holding sits at the 0.769 percentile of a uniform resample at trick 1 and is
+    STILL 0.617 at trick 11 -- 0.775 averaged over tricks 1-4 against 0.626 over
+    9-13. The bias does not wash out as the hand reveals itself, so a card
+    search that samples uniformly is wrong about the declarer all round.
+
+    It rides at the TOP level of the request, not inside `auction`: a play
+    request has no auction block. The frontend's whitelist has to carry it, and
+    that half is asserted in `screens.mjs` rather than here.
+    """
+    g = E.new_game(["alice", m.AI_PID], random.Random(3), opener=0)
+    E.apply_bid(g, 0, 3, 2)
+    E.apply_pass(g, 1)
+    E.apply_swap(g, 0, None, None)
+    E.apply_double(g, 1, False)
+    assert g["phase"] == "play"
+    # Drive to a ply the BOT has to answer, so a real request gets armed.
+    while E.turn_pid(g) != m.AI_PID:
+        seat = E.turn_seat(g)
+        E.apply_move(g, g["seats"][seat],
+                     {"kind": "play", "card": E.legal_moves(g, seat)[0]})
+    room = {"players": {"alice": "Alice"}, "sockets": {}, "status": "playing",
+            "host": "alice", "game": g, "meta": {"alice": {"token": "tok"}},
+            "vs_ai": True, "ai_player": m.AI_PID, "ai_difficulty": "hard",
+            "mode": "classic", "client_ai": True}
+    m.ROOMS["r1"] = room
+    task = _arm(room)
+    armed = room["_ai_search"]
+    assert "payoff" in armed, "a play request still ships the scoring rule"
+    p = armed.get("bid_prior")
+    assert p, "a classic play request must carry the belief prior"
+    # A tilt of 0 or a single try is uniform sampling, i.e. shipping nothing.
+    assert p["tilt"] > 0 and p["tries"] > 1
+    run(m._handle_ai_move(_FakeWS(), "r1", "alice",
+                          {"decision": armed["decision"],
+                           "card": E.legal_moves(g, E.seat_of(g, m.AI_PID))[0]}))
+    run(task)
+    m.ROOMS.pop("r1", None)
+
+
 def test_a_skat_pass_out_is_priced_at_zero_as_a_redeal():
     """Nothing stands, so passing throws the hand in -- a fresh deal neither
     seat has seen, worth 0 by symmetry. Priced rather than omitted so `pass` is

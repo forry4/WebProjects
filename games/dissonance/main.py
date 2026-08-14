@@ -741,6 +741,20 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # both seats can already see. Only meaningful once a contract EXISTS,
             # which is why it is not on an auction request.
             room["_ai_search"]["payoff"] = engine.payoff_terms(g)
+            # THE AUCTION AS EVIDENCE, for the card play as well as the Double.
+            # The declarer won an auction, so the worlds the searcher samples
+            # must not hand them an average hand -- and MEASURED
+            # (`tools/decayprobe.py`, 200 rounds) that bias does NOT wash out as
+            # the round reveals itself: the declarer's remaining holding sits at
+            # the 0.769 percentile of a uniform resample at trick 1 and is still
+            # 0.617 at trick 11 (0.775 over tricks 1-4 against 0.626 over 9-13).
+            # So it applies at all THIRTEEN decisions, not just the one.
+            # Optional on the wire; a cached wasm ignores it and samples
+            # uniformly, exactly as before.
+            if engine.mode_of(g) == "classic":
+                prior = bot.bid_prior_terms(g)
+                if prior:
+                    room["_ai_search"]["bid_prior"] = prior
         else:
             # An AUCTION decision: every legal action, priced, each carrying its
             # own move. The browser ranks them and sends back one of the moves it

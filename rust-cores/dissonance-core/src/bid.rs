@@ -456,7 +456,7 @@ impl BidPrior {
     }
 
     /// One world, drawn in proportion to how well it explains the bidding.
-    fn draw(&self, v: &View, rng: &mut Rng, buf: &mut Vec<u8>) -> State {
+    pub fn draw(&self, v: &View, rng: &mut Rng, buf: &mut Vec<u8>) -> State {
         let tries = self.tries.max(1);
         if tries == 1 || self.tilt == 0.0 {
             return v.determinize(rng, buf);
@@ -484,6 +484,23 @@ impl BidPrior {
     }
 }
 
+/// ONE WORLD, honouring an optional prior — the single definition every sampler
+/// in the crate goes through.
+///
+/// There are three of them (`deals_into` for the auction, `infer::sample_worlds`
+/// for the card play, and `wasm::odd_pick_card`), and a prior applied in some
+/// but not others is the quietest possible bug: every path still returns legal
+/// moves, just searched against a different belief. Routing them all through
+/// here means "does this sampler condition on the auction" has one answer.
+#[inline]
+pub fn draw_world(v: &View, rng: &mut Rng, buf: &mut Vec<u8>,
+                  prior: Option<&BidPrior>) -> State {
+    match prior {
+        Some(p) => p.draw(v, rng, buf),
+        None => v.determinize(rng, buf),
+    }
+}
+
 /// It samples the world's talon too, even though a settled-contract caller has
 /// no use for one: an entry filled here must be indistinguishable from an entry
 /// filled by `solve_into`, or a later solve on the same key would run against a
@@ -497,10 +514,7 @@ pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved,
     // A different world count is a different sample: start over rather than
     // mixing two of them.
     let mut buf: Vec<u8> = Vec::with_capacity(16);
-    cache.deals = (0..k).map(|_| match prior {
-        Some(p) => p.draw(v, rng, &mut buf),
-        None => v.determinize(rng, &mut buf),
-    }).collect();
+    cache.deals = (0..k).map(|_| draw_world(v, rng, &mut buf, prior)).collect();
     // The world's out-cards are whatever the determinizer did not place; three
     // of them are that world's talon. Sampled here, kept for the entry's whole
     // life (see the field's doc).

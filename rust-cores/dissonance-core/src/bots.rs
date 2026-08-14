@@ -81,6 +81,10 @@ pub struct PimcBot {
     /// shortfall is worth four, or that a declarer on no +2 trick is one ducked
     /// trick from scoring the Null consolation instead of being set.
     pub contract: Option<crate::dd::Contract>,
+    /// The auction as evidence about the declarer's hand -- see
+    /// `bid::BidPrior`. None is uniform sampling, which is every bot built
+    /// before this existed and is what `PimcBot::new`/`full` still give.
+    pub prior: Option<crate::bid::BidPrior>,
     pub dd: Dd,
     pub rng: Rng,
     buf: Vec<u8>,
@@ -125,6 +129,7 @@ impl PimcBot {
             dd: Dd::new(tt_bits),
             rng: Rng::new(seed),
             buf: Vec::with_capacity(16),
+            prior: None,
             worlds: Vec::with_capacity(64),
             label,
         }
@@ -146,6 +151,7 @@ impl Bot for PimcBot {
             self.k,
             &mut self.buf,
             &mut self.worlds,
+            self.prior.as_ref(),
         );
 
         // A contract solve is signed for the DECLARER; a points solve for seat
