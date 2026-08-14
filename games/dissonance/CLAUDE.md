@@ -931,6 +931,32 @@ unlimited suit returns make denial wars cheap to conduct; charged final rise
 0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
 arena checkpoints, mirror exactly +0.0000.
 
+**SHIPPED AT 3 (2026-08-14)** after the 1000-deal-per-arm sweep below.
+
+**THE OPENER MAY PASS — an experiment, OFF as shipped (`OPENER_MAY_PASS`,
+2026-08-14).** Classic has always forced the opening bid, and the campaign's
+reason stands on its own terms: a free pass is strictly better than a bad
+contract, so the floor cluster becomes a pass-out. The jump bonus makes that
+worth re-testing, since a cheap opening is now a PRICED commitment rather
+than a free option. With the flag on, nothing standing behaves exactly as
+skat's open pass — the first hands the deal over, the second throws the hand
+in and `_redeal`s the same opener — so no new machinery was needed beyond
+three fixes the flag exposed:
+* **`_redeal` hardcoded `mode="skat"`**, a latent bug that would have
+  re-dealt a classic room as a skat one. It reads `mode_of(g)` now.
+* **`apply_pass`/`apply_move` take an optional `rng`**, forwarded to the
+  redeal only. Production omits it (fresh entropy, unchanged); a PAIRED
+  arena must pass one, or the two flips of a deal draw different
+  replacements and the pairing silently breaks — the mirror stops reading
+  +0.0000, which is exactly how this was caught before any numbers were
+  taken.
+* **`rules.opener_may_pass` on the wire** (optional, default false), with
+  `legal_bids`/`step` mirroring it; `Step::Redeal` already priced a
+  pass-out at 0 for skat and needed no change.
+Measured via `DIS_OPENER_PASS=1`; `jump_report.py` reports opener-pass and
+pass-out rates per ATTEMPTED auction (a thrown-in hand is re-dealt and bid
+again, so attempts = rounds + pass-outs).
+
 **THE JUMP RATE IS A WEAK DIAL BETWEEN 2 AND 4 — measured at 1000 DEALS PER
 ARM, 2026-08-13** (`DIS_JUMP_SET`, v2-alone setup, deal-paired across arms,
 mirrors exactly +0.0000). The structure — charging the opening at all — did

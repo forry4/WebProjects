@@ -47,6 +47,10 @@ def main(paths):
                     decisions[e[2]] += 1
                 elif e[0] == "double":
                     doubles["on" if e[2] else "off"] += 1
+                elif e[0] == "openpass":
+                    decisions["opener_passed"] += 1
+                elif e[0] == "passout":
+                    decisions["passed_out"] += 1
                 elif e[0] == "settled":
                     if len(e) < 12:
                         raise SystemExit("checkpoint predates the payoff/levels "
@@ -55,6 +59,9 @@ def main(paths):
                         "level": e[2], "outcome": e[3], "doubled": e[4],
                         "open": e[5], "denom": e[7], "price": e[8],
                         "n_bids": e[9], "payoff": e[10], "levels": e[11],
+                        # OPENER_MAY_PASS runs only: absent on every earlier
+                        # checkpoint, which read as "the opener had to bid".
+                        "opener_passed": bool(e[12]) if len(e) > 12 else False,
                     })
     n = len(rounds)
     print(f"\n=== {n} unique Expert-vs-Expert rounds "
@@ -158,6 +165,32 @@ def main(paths):
               f"(declarer avg {mean([decl_score(r) for r in sac]):.2f}, "
               f"defender avg {mean([def_score(r) for r in sac]):.2f}); "
               f"doubled {pct(sum(r['doubled'] for r in sac), len(sac))}")
+
+    # --- the opener's pass (OPENER_MAY_PASS runs only) ------------------------
+    op, po = decisions["opener_passed"], decisions["passed_out"]
+    if op or po:
+        # An auction is ATTEMPTED once per deal plus once per pass-out (a
+        # thrown-in hand is re-dealt and bid again), so the rates below are
+        # per attempt rather than per scored round.
+        attempts = n + po
+        handed = op - po          # opener passed, opponent then opened
+        print(f"\nTHE OPENER'S PASS (OPENER_MAY_PASS):")
+        print(f"  opener passed  {op} of {attempts} auctions ({pct(op, attempts)})")
+        print(f"  passed OUT     {po} of {attempts} ({pct(po, attempts)}) "
+              f"-- both passed, hand thrown in and re-dealt")
+        print(f"  handed over    {handed} ({pct(handed, attempts)}) -- the opener "
+              f"passed and the opponent opened")
+        print(f"  ...of which the opponent's contract was set: "
+              f"{pct(sum(1 for r in rounds if r['opener_passed'] and r['outcome'] == 'set'), max(handed, 1))}")
+        passed = [r for r in rounds if r["opener_passed"]]
+        bid = [r for r in rounds if not r["opener_passed"]]
+        print(f"  rounds where the opener passed: {len(passed)} "
+              f"({pct(len(passed), n)}); settled mean "
+              f"{mean([r['level'] for r in passed]):.2f} vs "
+              f"{mean([r['level'] for r in bid]):.2f} when it opened")
+        print(f"  ...payoff to the DEALER-SIDE seat: "
+              f"{mean([r['payoff'] for r in passed]):+.2f} (opener passed) vs "
+              f"{mean([r['payoff'] for r in bid]):+.2f} (opener bid)")
 
     # --- raises and jumps ----------------------------------------------------
     # Every non-opening bid's rise over the level it overtook: 0 is a

@@ -238,6 +238,40 @@ def test_the_opener_must_bid_and_cannot_pass():
         E.apply_pass(g, 0)
 
 
+def test_the_opener_may_pass_when_the_mode_says_so(monkeypatch):
+    """OPENER_MAY_PASS (off as shipped): with it on, nothing standing behaves
+    exactly as skat's open pass -- the first hands the deal over at no price,
+    the second throws the hand in and redeals the SAME opener."""
+    monkeypatch.setitem(E.OPENER_MAY_PASS, "classic", True)
+    g = E.new_game(["a", "b"], random.Random(3), opener=0)
+    assert E.auction_options(g)["may_pass"] is True
+    E.apply_pass(g, 0)
+    assert g["phase"] == "auction" and g["auction"]["to_act"] == 1
+    assert g["auction"]["passes"] == 1
+    # The seat handed the deal may still open normally...
+    assert E.can_bid(g, 1, 4, 2)[0]
+    # ...or pass it out, which redeals in place, in the SAME mode.
+    E.apply_pass(g, 1, random.Random(99))
+    assert g["mode"] == "classic", "a redeal must not change the room's mode"
+    assert g["phase"] == "auction" and g["auction"]["log"] == []
+    assert g["redeals"] == 1 and g["match"]["round"] == 1, "a pass-out is not a round"
+    assert g["auction"]["to_act"] == 0, "the same seat opens the replacement deal"
+
+
+def test_a_redeal_is_reproducible_when_the_caller_seeds_it(monkeypatch):
+    """Production draws fresh entropy for a thrown-in hand; a paired lab needs
+    the two flips of one deal to draw the SAME replacement, so `apply_pass`
+    takes an rng. Skat's own pass-out rides the same seam."""
+    monkeypatch.setitem(E.OPENER_MAY_PASS, "classic", True)
+    hands = []
+    for _ in range(2):
+        g = E.new_game(["a", "b"], random.Random(3), opener=0)
+        E.apply_pass(g, 0)
+        E.apply_pass(g, 1, random.Random(1234))
+        hands.append([sorted(h) for h in g["hands"]])
+    assert hands[0] == hands[1], "the same seed must deal the same replacement"
+
+
 def test_an_overtake_raises_freely_or_outranks_at_the_same_level():
     """Classic dropped the raise cap (2026-08-13): any raise up to the ceiling
     is legal, and the JUMP_SET_BONUS prices big jumps instead of a rule

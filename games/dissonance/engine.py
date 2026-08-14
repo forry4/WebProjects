@@ -206,6 +206,26 @@ def denom_rule_for(mode: str) -> str:
     return DENOM_RULE.get(mode, "used")
 
 
+#: MAY THE CLASSIC-SHAPE OPENER PASS? (2026-08-14, experiment; OFF as shipped.)
+#:
+#: Classic has always FORCED the opening bid, and the campaign's reason is on
+#: the record: passing would be strictly better than a bad contract, so an
+#: opener with a free pass names nothing and the floor cluster becomes a
+#: pass-out instead. Skat allows it safely because a pass there hands the
+#: opponent the talon at THEIR price -- a real transfer, not an escape.
+#:
+#: With the jump bonus charging the opening (2026-08-13) that argument is
+#: worth re-testing: a weak hand's cheap opening is now a priced commitment
+#: rather than a free option, so the pass has real competition. Both seats
+#: passing throws the hand in and redeals, exactly as skat does -- which is
+#: why `passes` and `_redeal` already exist and need no new machinery.
+OPENER_MAY_PASS = {"classic": False, "minor": False, "dummy": False}
+
+
+def opener_may_pass(mode: str) -> bool:
+    return bool(OPENER_MAY_PASS.get(mode, False))
+
+
 def raise_cap_for(mode: str) -> int:
     """The biggest single raise this mode allows, as a NUMBER.
 
@@ -1201,12 +1221,12 @@ def auction_options(g: dict) -> dict:
         free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
     if a["level"] == 0:
-        # The opener must bid; passing out is not offered. (`denom` is -1
-        # while nothing stands, so the standing rule frees every denomination
-        # here without a special case.)
+        # The opener must bid unless this mode lets it pass (OPENER_MAY_PASS,
+        # off as shipped). (`denom` is -1 while nothing stands, so the standing
+        # rule frees every denomination here without a special case.)
         for d in free:
             bids.extend([lvl, d] for lvl in range(MIN_LEVEL, top + 1))
-        return {"bids": bids, "may_pass": False}
+        return {"bids": bids, "may_pass": opener_may_pass(mode_of(g))}
     # Ranked denominations: an overtake stands at the SAME level in a
     # higher-ranked denomination, or raises -- by up to the mode's cap where one
     # exists (minor/dummy), by any amount up to the ceiling in classic, where
@@ -1276,7 +1296,10 @@ def apply_skat_bid(g: dict, seat: int, value: int) -> None:
     a["log"].append({"seat": seat, "value": value})
 
 
-def apply_pass(g: dict, seat: int) -> None:
+def apply_pass(g: dict, seat: int, rng=None) -> None:
+    """`rng` seeds a REDEAL only, and only a lab passes one: production wants
+    fresh entropy for a thrown-in hand, while a paired arena needs the two
+    flips of one deal to draw the SAME replacement or the pairing breaks."""
     if g["phase"] != "auction":
         raise ValueError("not bidding")
     a = g["auction"]
@@ -1289,7 +1312,7 @@ def apply_pass(g: dict, seat: int) -> None:
             # declining throws the hand in.
             a["passes"] += 1
             if a["passes"] >= 2:
-                _redeal(g)
+                _redeal(g, rng)
             else:
                 a["to_act"] = 1 - seat
             return
@@ -1297,7 +1320,18 @@ def apply_pass(g: dict, seat: int) -> None:
         g["phase"] = "talon"
         return
     if a["level"] == 0:
-        raise ValueError("the opener must bid")
+        if not opener_may_pass(mode_of(g)):
+            raise ValueError("the opener must bid")
+        # OPENER_MAY_PASS: nothing stands, so this is skat's shape exactly --
+        # the first pass hands the deal over at no price, the second throws
+        # the hand in.
+        a["log"].append({"seat": seat, "pass": True})
+        a["passes"] = a.get("passes", 0) + 1
+        if a["passes"] >= 2:
+            _redeal(g, rng)
+        else:
+            a["to_act"] = 1 - seat
+        return
     a["log"].append({"seat": seat, "pass": True})
     # The declarer now sees `shown` and decides on the swap before play --
     # except in a dummy room, which has no talon at all (two out-cards, and
@@ -1306,7 +1340,7 @@ def apply_pass(g: dict, seat: int) -> None:
     g["phase"] = "double" if has_dummy(mode_of(g)) else "swap"
 
 
-def _redeal(g: dict) -> None:
+def _redeal(g: dict, rng=None) -> None:
     """Throw the hand in and deal again, in place.
 
     Mutating `g` rather than returning a fresh dict is load-bearing: the room
@@ -1322,8 +1356,12 @@ def _redeal(g: dict) -> None:
     """
     n = g.get("redeals", 0) + 1
     m = _match_for_next_deal(g, advance=False)
-    fresh = new_game(list(g["seats"]), None, opener=opener_for_round(m),
-                     mode="skat", match=m)
+    # `mode_of(g)`, not a literal "skat": skat was the only mode that could
+    # pass out until OPENER_MAY_PASS existed, and a hardcoded mode would have
+    # silently re-dealt a classic room as a skat one -- a different phase
+    # machine on the same table.
+    fresh = new_game(list(g["seats"]), rng, opener=opener_for_round(m),
+                     mode=mode_of(g), match=m)
     fresh["redeals"] = n
     g.clear()
     g.update(fresh)
@@ -2246,6 +2284,11 @@ def auction_search_payload(g: dict) -> dict | None:
              # "used" (minor/dummy: the per-player forever-ban). Optional on
              # the wire; a wasm that predates it mirrors "used".
              "denom_rule": denom_rule_for(mode_of(g)),
+             # Whether the classic-shape opener may pass (OPENER_MAY_PASS, off
+             # as shipped). Optional on the wire; a wasm that predates it
+             # mirrors "the opener must bid", which is what every older server
+             # enforced.
+             "opener_may_pass": opener_may_pass(mode_of(g)),
              "top_denom": GRAND if skat else NOTRUMP,
              "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
     # Only settlements the auction can still REACH. The bidding only ever
@@ -3009,8 +3052,11 @@ def player_view(g, pid):
     return view_for(g, s)
 
 
-def apply_move(g, pid, move: dict) -> None:
-    """Single entry point for main.py. Raises ValueError on anything illegal."""
+def apply_move(g, pid, move: dict, rng=None) -> None:
+    """Single entry point for main.py. Raises ValueError on anything illegal.
+
+    `rng` is forwarded to a REDEAL only (see `apply_pass`); production omits
+    it and a thrown-in hand draws fresh entropy, as it always has."""
     seat = seat_of(g, pid)
     if seat is None:
         raise ValueError("not a player in this game")
@@ -3021,7 +3067,7 @@ def apply_move(g, pid, move: dict) -> None:
         else:
             apply_bid(g, seat, int(move["level"]), int(move["denom"]))
     elif kind == "pass":
-        apply_pass(g, seat)
+        apply_pass(g, seat, rng)
     elif kind == "swap":
         apply_swap(g, seat, move.get("take"), move.get("give"))
     elif kind == "look":

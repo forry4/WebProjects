@@ -123,6 +123,10 @@ pub struct AucRules {
     pub jump_set_bonus: i32,
     /// Which denominations an overtake may name — see `DenomRule`.
     pub denom_rule: DenomRule,
+    /// Classic only: may the OPENER pass? False as shipped (the opener must
+    /// bid); when true, nothing standing behaves exactly as skat's open pass —
+    /// the first hands the deal over, the second throws it in.
+    pub opener_may_pass: bool,
     /// Highest denomination index a classic bid may name (no-trump).
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
@@ -235,7 +239,10 @@ pub fn legal_bids(s: &AucState, r: &AucRules, out: &mut Vec<Bid>) {
                 }
             }
         }
-        return; // the opener must bid
+        if r.opener_may_pass {
+            out.push(Bid::Pass);
+        }
+        return; // ...otherwise the opener must bid
     }
     let hi = r.max_level.min(s.level + r.max_raise);
     for d in 0..=r.top_denom {
@@ -271,7 +278,11 @@ pub enum Step {
 pub fn step(s: &AucState, r: &AucRules, b: Bid) -> Step {
     match b {
         Bid::Pass => {
-            if r.mode == AucMode::Skat && s.value == 0 {
+            // NOTHING STANDING is the pass-out shape, in either auction: skat
+            // has always allowed it, and classic does under OPENER_MAY_PASS.
+            // The first pass hands the deal over, the second throws it in.
+            let nothing_stands = if r.mode == AucMode::Skat { s.value == 0 } else { s.level == 0 };
+            if nothing_stands && (r.mode == AucMode::Skat || r.opener_may_pass) {
                 if s.passes >= 1 {
                     return Step::Redeal;
                 }
@@ -586,14 +597,38 @@ mod tests {
 
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
-                   jump_set_bonus: 0, denom_rule: DenomRule::Used, top_denom: 4,
+                   jump_set_bonus: 0, denom_rule: DenomRule::Used,
+                   opener_may_pass: false, top_denom: 4,
                    ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
-                   jump_set_bonus: 0, denom_rule: DenomRule::Used, top_denom: 6,
+                   jump_set_bonus: 0, denom_rule: DenomRule::Used,
+                   opener_may_pass: false, top_denom: 6,
                    ladder, opp: OppModel::Minimax }
+    }
+
+    #[test]
+    fn an_opener_that_may_pass_passes_the_deal_over_then_throws_it_in() {
+        let mut r = classic_rules();
+        r.opener_may_pass = true;
+        let s0 = AucState::opening(0);
+        assert!(bids(&s0, &r).contains(&Bid::Pass), "the opener may pass");
+        match step(&s0, &r, Bid::Pass) {
+            Step::Node(n) => {
+                assert_eq!((n.passes, n.to_act), (1, 1), "the deal is handed over");
+                assert!(matches!(step(&n, &r, Bid::Pass), Step::Redeal),
+                        "the second pass throws the hand in");
+                // ...and the seat handed the deal may still open normally.
+                assert!(bids(&n, &r).contains(&Bid::Contract { level: 4, denom: 2 }));
+            }
+            other => panic!("the first open pass is a node, got {other:?}"),
+        }
+        // With the flag off it is still a leaf, i.e. the shipped rule.
+        let off = classic_rules();
+        assert!(!bids(&s0, &off).contains(&Bid::Pass));
+        assert!(matches!(step(&s0, &off, Bid::Pass), Step::Settled(_)));
     }
 
     #[test]
