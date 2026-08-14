@@ -931,16 +931,22 @@ unlimited suit returns make denial wars cheap to conduct; charged final rise
 0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
 arena checkpoints, mirror exactly +0.0000.
 
-**THE JUMP RATE IS A WEAK DIAL BETWEEN 2 AND 4 — measured, 2026-08-13 (500
-deals per arm via `DIS_JUMP_SET`, same cards as the 3j pooled run, v2-alone
-setup):** the structure (charging the opening at all) did the work and the
-rate barely moves it. The one clean monotonic effect is the mean opening,
-3.15 / 3.07 / 2.99 across 2/3/4 — dearer jumps push openings down exactly as
-the pricing predicts. Everything else sits within ~2σ of the 3j numbers:
-bids/auction 2.21 / 2.19 / 2.30, contested 70.0 / 68.8 / 72.2%, made 55.4 /
-60.0 / 58.6%, Doubles 23.2 / 24.2 / 24.6%, sacrifices 26.6 / 25.4 / 27.4%
-(4j's sacrifices pay −21.3 vs −17.7). 3 stays: no arm beats it on anything
-the campaign targets, and it is the mid-dose.
+**THE JUMP RATE IS A WEAK DIAL BETWEEN 2 AND 4 — measured at 1000 DEALS PER
+ARM, 2026-08-13** (`DIS_JUMP_SET`, v2-alone setup, deal-paired across arms,
+mirrors exactly +0.0000). The structure — charging the opening at all — did
+the work; the rate only fine-tunes. Across 2 / 3 / 4:
+* **monotonic, and the reason to have a dial at all**: mean opening 3.21 /
+  3.09 / 3.05, settled mean 4.89 / 4.72 / 4.71, settled-at-6 30.9 / 27.6 /
+  25.1%, doubled-round EV −9.8 / **−4.9** / −14.6.
+* **flat inside noise**: bids/auction 2.23 / 2.22 / 2.31, contested 69.4 /
+  68.8 / 71.7%, made 54.6 / 57.5 / 57.3%, Doubles 21.8 / 22.6 / 22.6%,
+  sacrifices 26.9 / 25.4 / 27.2%, jump share of overtakes 33.3 / 31.8 /
+  30.4%.
+* **3 stays.** It has the flattest settled distribution (effective levels
+  5.36 vs 5.06/5.24), the highest make rate, the lowest sacrifice rate and
+  the only doubling EV near fair. The 500-deal read of this sweep had 3j's
+  make rate at 60.0% and 2j's settled-6 at 30.0%; doubling the sample moved
+  those to 57.5% and 30.9% while every ordering above held.
 
 **THE v2-ALONE PROFILE WAS RE-CONFIRMED AT 500 ROUNDS (2026-08-13; 300 fresh
 deals via the arena's `DIS_DENOM_RULE=used` arm pooled with the original
