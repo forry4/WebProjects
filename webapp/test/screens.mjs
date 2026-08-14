@@ -227,12 +227,18 @@ try {
 	const disBidCheaply = async (page) => {
 		// NO LEVELS LEFT IS A REAL STATE, not a broken selector. Denominations are
 		// per-player no-repeat, so once this seat has named all five it can only
-		// pass — `bidLevels` empties and the whole level grid stops rendering.
-		// Reaching for it anyway burned a 5s actionability timeout an iteration,
-		// and the CALLER's "are we bidding" test keyed on the same vanished
+		// pass. Reaching for a level anyway burned a 5s actionability timeout an
+		// iteration, and the CALLER's "are we bidding" test keyed on the same
 		// element, so the harness sat out its whole deadline in the auction and
 		// reported it as "no tricks were ever played".
-		const levels = page.locator(".dis-bidgrid button");
+		//
+		// `:not([disabled])` IS LOAD-BEARING SINCE THE PAD BECAME FIXED. The
+		// grid now always renders the whole ladder and disables the rungs that
+		// do not outrank the standing bid, so `button` alone matches keys that
+		// can never be clicked — and `.first()` is usually one of them. Playwright
+		// waits out its full actionability timeout on a disabled button, which is
+		// the exact hang described above, arrived at from the other direction.
+		const levels = page.locator(".dis-bidgrid button:not([disabled])");
 		if (await levels.count() === 0) {
 			await page.getByRole("button", { name: /^Pass$/ }).first()
 				.click({ timeout: 5_000 }).catch(() => {});
@@ -2884,6 +2890,73 @@ try {
 		check("the auction panel sits beside the cards, not between the seats",
 			!!auc.panel && !!auc.seat && auc.panel.x >= auc.seat.x + auc.seat.w - 1,
 			JSON.stringify(auc));
+
+		// THE LEVEL PAD IS THE WHOLE LADDER AND IT DOES NOT MOVE (2026-08-14).
+		// It used to render only the LEGAL levels, so the pad shrank and
+		// re-flowed after every bid and the key under your thumb became a
+		// different number — a misbid waiting to happen on a phone. Now every
+		// rung is drawn and the illegal ones are disabled, which is how the
+		// denominations were always drawn. Asserted as three facts: the pad is
+		// the full ladder, an unreachable rung is present-but-disabled, and the
+		// geometry is IDENTICAL across a bid landing (the property a shrinking
+		// pad broke, and the only one a user actually feels).
+		const padOf = () => page.evaluate(() => {
+			const b = [...document.querySelectorAll(".dis-bidgrid button")];
+			const one = b[0]?.getBoundingClientRect();
+			return {
+				n: b.length,
+				disabled: b.filter((x) => x.disabled).length,
+				labels: b.map((x) => +x.textContent).join(","),
+				x: one ? Math.round(one.x) : -1, y: one ? Math.round(one.y) : -1,
+			};
+		});
+		const padBefore = await padOf();
+		check("the level pad draws the whole 1..10 ladder, not just the legal set",
+			padBefore.n === 10 && padBefore.labels === "1,2,3,4,5,6,7,8,9,10",
+			JSON.stringify(padBefore));
+		// Whether any rung is disabled depends on whether a bid stands yet: an
+		// opener may name all ten. Drive one bid and re-measure — after it, the
+		// seat to act cannot reach every rung, so some key MUST be disabled and
+		// the pad must not have moved a pixel.
+		await disBidCheaply(page);
+		await sleep(450);
+		const padAfter = await padOf();
+		check("...an unreachable rung is disabled rather than removed",
+			padAfter.n === 10 && padAfter.disabled > 0, JSON.stringify(padAfter));
+		check("...and the pad does not move when the legal set changes",
+			padAfter.n === padBefore.n && padAfter.labels === padBefore.labels
+			&& padAfter.x === padBefore.x && padAfter.y === padBefore.y,
+			JSON.stringify({ padBefore, padAfter }));
+
+		// EVERY BUTTON ON THIS BOARD IS VISIBLE, and `btn-ghost` was the one
+		// variant that was not: the shared kit paints it `transparent` with
+		// `--text-dim` text, which on the dark green board is an almost
+		// invisible rectangle — the same failure as the nine bare `.btn`s this
+		// file's CSS carries a note about, one variant along. Pass is the one
+		// a player meets most, so it is the one gated. Nothing but a browser
+		// can see this: the button renders, works, and reads fine in the DOM.
+		const ghost = await page.evaluate(() => {
+			const b = [...document.querySelectorAll(".dis-auction .btn-ghost, .dis .btn-ghost")]
+				.find((x) => /^(Pass|Stand pat|Decline)/.test(x.textContent.trim()))
+				|| document.querySelector(".dis .btn-ghost");
+			if (!b) return null;
+			const s = getComputedStyle(b);
+			const alpha = (c) => {
+				const m = c.match(/rgba?\(([^)]+)\)/);
+				if (!m) return 1;
+				const p = m[1].split(",").map((v) => parseFloat(v));
+				return p.length > 3 ? p[3] : 1;
+			};
+			return {
+				text: b.textContent.trim().slice(0, 12),
+				bg: s.backgroundImage !== "none" ? "gradient" : s.backgroundColor,
+				bgAlpha: s.backgroundImage !== "none" ? 1 : alpha(s.backgroundColor),
+				borderAlpha: alpha(s.borderTopColor),
+			};
+		});
+		check("a secondary button (Pass) is actually painted, not transparent",
+			!!ghost && (ghost.bgAlpha > 0.05 || ghost.borderAlpha > 0.18),
+			JSON.stringify(ghost));
 
 		// THE RAIL CLASS AND THE RENDERED MIDDLE MUST AGREE. The desktop grid,
 		// the card budget and the reserve all key on `dis-rail-*`, which the

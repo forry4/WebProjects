@@ -735,10 +735,32 @@
      222px. Sized for that worst case so one number fits every phase. */
   --dis-reserve-in: 30rem;
 }
+/* `100svh`, NOT `100dvh`, AND THAT IS THE WHOLE OF "THE BOARD RESIZES ON
+   MOBILE". Below 761px the page scrolls (deliberately — a phone cannot fit a
+   board plus its panels), and scrolling is exactly what makes a phone browser
+   retract its address bar. `dvh` is defined to track that: it grows by the
+   ~60-90px of chrome the moment you flick, so this budget re-solved and EVERY
+   CARD, PILE AND PEEK ON THE BOARD CHANGED SIZE MID-SCROLL — and again when
+   the bar came back. `svh` is the same viewport with the chrome SHOWN, i.e.
+   the one value that does not move, so the board is laid out once and holds
+   still. It costs nothing but the cards being sized for the smaller (always
+   correct) viewport; the alternative is a board that breathes whenever the
+   page moves.
+   The desktop tier below measures `100cqh` off the table's own box and was
+   never affected — this is a phone-only failure, which is why it survived
+   every desktop gate. */
 .dis-seat, .dis-trick {
+  /* The `vh` line is the fallback for anything without `svh`, exactly as the
+     phone table's min-height pairs its two declarations: an unsupported unit
+     invalidates the whole declaration, and a board with no `--dis-cw` at all
+     has no card size to fall back on. */
   --dis-cw: min(
     calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
-    calc((100dvh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
+    calc((100vh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
+  );
+  --dis-cw: min(
+    calc((100cqw - (var(--dis-slots) - 1) * var(--dis-gap)) / var(--dis-slots)),
+    calc((100svh - var(--dis-reserve)) / var(--dis-rows) / 1.4)
   );
 }
 /* A DUMMY TABLE IS SIX CARD ROWS, not four -- one variable resizes the board.
@@ -1930,8 +1952,38 @@
    a blue borrowed from nothing, on a board with no other blue in it. It is an
    OUTLINE of the accent now, so it reads as the same family as the toggles
    above it while staying visibly one step down from the solid go button. */
-.dis-annbtn { border-color: var(--accent); color: var(--accent); }
-.dis-annbtn:hover:not(:disabled) { background: var(--accent); color: var(--ink); }
+/* PASS, DECLINE, SKIP AND BACK ARE REAL BUTTONS, and `btn-ghost` did not make
+   them look like any. The shared kit's ghost face is `transparent` with
+   `--text-dim` text on a hairline `--border` — designed for a light panel, and
+   on this board's dark green it measured as an almost invisible rectangle:
+   the SAME failure as the nine bare `.btn`s this file already carries a note
+   about, one variant further along. Ten call sites use it (both Passes, the
+   two stand-pats, the three declines, Back to lobby, the story close), so the
+   fix belongs on the class rather than on each of them.
+   It stays deliberately NOT green: `.dis-gobtn` is the commit, and two solid
+   greens side by side read as two equal choices. This is the bid keys' own lit
+   surface, so a secondary action looks like exactly what it is — a key you can
+   press, subordinate to the one that acts. */
+.dis .btn-ghost {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+.dis .btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.34);
+  color: var(--text);
+}
+.dis .btn-ghost:active:not(:disabled) {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25); transform: translateY(1px);
+}
+/* `.dis `-PREFIXED, and that is load-bearing rather than tidy: the rule above
+   is (0,2,0) and sets `color`, so a bare `.dis-annbtn` at (0,1,0) would lose
+   its accent no matter what order the two appear in — the announcement button
+   would come out the same grey as a Pass. Same reason the mobile block at the
+   top of this file prefixes everything. */
+.dis .dis-annbtn { border-color: var(--accent); color: var(--accent); background: none; }
+.dis .dis-annbtn:hover:not(:disabled) { background: var(--accent); color: var(--ink); }
 
 /* Kontra is the defender's one moment of leverage; it reads as a threat. */
 .dis-kontrabtn { background: #b8434f; color: #fff; }

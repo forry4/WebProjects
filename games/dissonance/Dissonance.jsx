@@ -2080,7 +2080,22 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const skatBases = catalog?.skat_bases || [];
   const ct = game.contract || {};
   const prev = lastTrick(game);
-  const bidLevels = [...new Set(bids.map((b) => b[0]))].sort((a, b) => a - b);
+  // THE LEVEL PAD IS THE WHOLE LADDER, ALWAYS, and the illegal rungs are
+  // DISABLED rather than absent. It used to render only the legal set, so the
+  // pad shrank and re-flowed after every bid: the key under your thumb was a
+  // different number a moment later, which on a phone is a misbid waiting to
+  // happen. The denominations were already drawn this way (all five, disabled
+  // when they do not apply) -- this makes the two rows one keypad in behaviour
+  // as well as in looks.
+  //
+  // Off `/catalog`'s per-mode ceiling, with the legal set as the fallback, so
+  // a room whose catalog has not landed yet still shows exactly what it can
+  // bid rather than an empty pad.
+  const ladderTop = catalog?.max_levels?.[game?.mode]
+    ?? catalog?.max_level
+    ?? Math.max(1, ...bids.map((b) => b[0]));
+  const bidLevels = Array.from({ length: ladderTop }, (_, i) => i + 1);
+  const levelOk = (l) => bids.some((b) => b[0] === l);
   const denomOkAt = (l, d) => bids.some((b) => b[0] === l && b[1] === d);
   const bidReady = bidLevel !== null && bidDenom !== null && denomOkAt(bidLevel, bidDenom);
   const legal = new Set(game.legal || []);
@@ -2325,14 +2340,19 @@ export default function Dissonance({ myId, authUser, onExit }) {
               {myTurn ? (
                 <>
                   <div className="dis-bidgrid">
-                    {bidLevels.map((l) => (
-                      <button key={l} className={bidLevel === l ? "on" : ""}
-                        onClick={() => {
-                          setBidLevel(l);
-                          // Keep the denom only if it stays legal at this level.
-                          if (bidDenom !== null && !denomOkAt(l, bidDenom)) setBidDenom(null);
-                        }}>{l}</button>
-                    ))}
+                    {bidLevels.map((l) => {
+                      const ok = levelOk(l);
+                      return (
+                        <button key={l} className={bidLevel === l ? "on" : ""}
+                          disabled={!ok}
+                          title={ok ? `level ${l}` : "does not outrank the standing bid"}
+                          onClick={() => {
+                            setBidLevel(l);
+                            // Keep the denom only if it stays legal at this level.
+                            if (bidDenom !== null && !denomOkAt(l, bidDenom)) setBidDenom(null);
+                          }}>{l}</button>
+                      );
+                    })}
                   </div>
                   <div className="dis-denoms">
                     {[0, 1, 2, 3, 4].map((d) => {
