@@ -238,18 +238,109 @@ def test_the_opener_must_bid_and_cannot_pass():
         E.apply_pass(g, 0)
 
 
-def test_an_overtake_raises_by_at_most_two_or_outranks_at_the_same_level():
+def test_the_opener_may_pass_when_the_mode_says_so(monkeypatch):
+    """OPENER_MAY_PASS (off as shipped): with it on, nothing standing behaves
+    exactly as skat's open pass -- the first hands the deal over at no price,
+    the second throws the hand in and redeals the SAME opener."""
+    monkeypatch.setitem(E.OPENER_MAY_PASS, "classic", True)
+    g = E.new_game(["a", "b"], random.Random(3), opener=0)
+    assert E.auction_options(g)["may_pass"] is True
+    E.apply_pass(g, 0)
+    assert g["phase"] == "auction" and g["auction"]["to_act"] == 1
+    assert g["auction"]["passes"] == 1
+    # The seat handed the deal may still open normally...
+    assert E.can_bid(g, 1, 4, 2)[0]
+    # ...or pass it out, which redeals in place, in the SAME mode.
+    E.apply_pass(g, 1, random.Random(99))
+    assert g["mode"] == "classic", "a redeal must not change the room's mode"
+    assert g["phase"] == "auction" and g["auction"]["log"] == []
+    assert g["redeals"] == 1 and g["match"]["round"] == 1, "a pass-out is not a round"
+    assert g["auction"]["to_act"] == 0, "the same seat opens the replacement deal"
+
+
+def test_a_redeal_is_reproducible_when_the_caller_seeds_it(monkeypatch):
+    """Production draws fresh entropy for a thrown-in hand; a paired lab needs
+    the two flips of one deal to draw the SAME replacement, so `apply_pass`
+    takes an rng. Skat's own pass-out rides the same seam."""
+    monkeypatch.setitem(E.OPENER_MAY_PASS, "classic", True)
+    hands = []
+    for _ in range(2):
+        g = E.new_game(["a", "b"], random.Random(3), opener=0)
+        E.apply_pass(g, 0)
+        E.apply_pass(g, 1, random.Random(1234))
+        hands.append([sorted(h) for h in g["hands"]])
+    assert hands[0] == hands[1], "the same seed must deal the same replacement"
+
+
+def test_an_overtake_raises_freely_or_outranks_at_the_same_level():
+    """Classic dropped the raise cap (2026-08-13): any raise up to the ceiling
+    is legal, and the JUMP_SET_BONUS prices big jumps instead of a rule
+    forbidding them."""
     g = E.new_game(["a", "b"], random.Random(4))
     E.apply_bid(g, 0, 4, 2)  # open 4 hearts
     bids = E.auction_options(g)["bids"]
-    assert not E.can_bid(g, 1, 7, 1)[0], "raising by three is illegal"
-    # Same level: only a HIGHER-ranKed denomination outranks the standing bid.
+    assert E.can_bid(g, 1, 7, 1)[0], "raising by three is legal now"
+    top = E.max_level_for("classic")
+    assert E.can_bid(g, 1, top, 0)[0], "a jump straight to the ceiling is legal"
+    assert not E.can_bid(g, 1, top + 1, 0)[0], "the ceiling still binds"
+    # Same level: only a HIGHER-ranked denomination outranks the standing bid.
     assert [4, 3] in bids and [4, 4] in bids, "spades/NT outrank hearts at 4"
     assert [4, 0] not in bids and [4, 1] not in bids and [4, 2] not in bids
     assert E.can_bid(g, 1, 4, 3)[0]
     assert not E.can_bid(g, 1, 4, 1)[0], "diamonds does not outrank hearts"
     # Raised levels: any unused denomination.
     assert E.can_bid(g, 1, 5, 0)[0] and E.can_bid(g, 1, 6, 1)[0]
+
+
+def test_minor_mode_keeps_the_raise_cap():
+    """The cap removal is classic's alone: minor's ladder was calibrated under
+    the cap and its scale carries no jump bonus."""
+    g = E.new_game(["a", "b"], random.Random(4), mode="minor")
+    E.apply_bid(g, 0, 2, 2)
+    assert E.can_bid(g, 1, 4, 1)[0], "raising by two is still legal"
+    assert not E.can_bid(g, 1, 5, 1)[0], "raising by three is still capped"
+    assert E.JUMP_SET_BONUS["minor"] == 0
+
+
+def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
+    """The rule that replaced the cap: +JUMP_SET_BONUS per level the FINAL bid
+    raised the standing level, to the defender, iff the contract is defeated.
+    THE OPENING COUNTS (v2): it is a raise over level 0, so opening at 2 and
+    getting passed out carries a jump of 2. A same-level overtake is 0."""
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 2, 2)
+    assert g["auction"]["jump"] == 2, "the opening is a raise over level 0"
+    E.apply_bid(g, 1, 2, 3)
+    assert g["auction"]["jump"] == 0, "a same-level overtake is not a jump"
+    E.apply_bid(g, 0, 6, 0)
+    assert g["auction"]["jump"] == 4
+    E.apply_pass(g, 1)
+    terms = E.payoff_terms(g)
+    plain = E._terms_for("classic", 0, 6)
+    assert terms["set_base"] == plain["set_base"] + 4 * E.JUMP_SET_BONUS["classic"]
+    # The bonus is a SET price: a make and the Null consolation are untouched.
+    assert terms["make"] == plain["make"] and terms["null"] == plain["null"]
+    # ...and the Double doubles it, like the stake it rides beside.
+    doubled = E._terms_for("classic", 0, 6, doubling=2, jump=4)
+    assert doubled["set_base"] == 2 * (6 + E.FLAT_SET_PENALTY["classic"]
+                                       + 4 * E.JUMP_SET_BONUS["classic"])
+
+
+def test_an_opening_passed_out_is_charged_its_whole_level():
+    """v2's whole point: opening at 6 and getting set hands the defender 18 on
+    top; opening at 1 costs 3. The only jump-free settlement is a same-level
+    overtake."""
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 6, 1)
+    E.apply_pass(g, 1)
+    assert (E.payoff_terms(g)["set_base"]
+            == E._terms_for("classic", 1, 6)["set_base"]
+            + 6 * E.JUMP_SET_BONUS["classic"])
+    g = E.new_game(["a", "b"], random.Random(4))
+    E.apply_bid(g, 0, 3, 1)
+    E.apply_bid(g, 1, 3, 2)   # same level, higher denomination: jump 0
+    E.apply_pass(g, 0)
+    assert E.payoff_terms(g)["set_base"] == E._terms_for("classic", 2, 3)["set_base"]
 
 
 def test_null_cannot_be_bid_at_all():
@@ -266,13 +357,50 @@ def test_null_cannot_be_bid_at_all():
     assert not any(d == E.NULL_DENOM for _, d in E.auction_options(g)["bids"]),         "and it is not reachable as an overtake either"
 
 
-def test_a_player_may_not_repeat_their_own_denomination_but_may_take_the_opponents():
+def test_classic_ships_the_per_player_denomination_ban():
+    """The SHIPPED rule: a seat may never re-name a denomination it has itself
+    named, however the auction has moved since. The two relaxations below are
+    measurement arms (`DENOM_RULE`), not classic's behaviour."""
     g = E.new_game(["a", "b"], random.Random(5))
+    assert E.denom_rule_for("classic") == "used"
     E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
-    assert any(d == 0 for _, d in E.auction_options(g)["bids"]),         "clubs is seat 1's to take"
+    assert any(d == 0 for _, d in E.auction_options(g)["bids"]), \
+        "clubs is seat 1's to take"
     E.apply_bid(g, 1, 3, 0)          # seat 1 takes clubs
-    # Seat 0 used clubs themselves, so it is spent FOR THEM regardless of who
-    # named it since. The budget is per-player, not shared.
+    assert not E.can_bid(g, 0, 4, 0)[0], "seat 0 already named clubs"
+    assert E.can_bid(g, 0, 4, 1)[0], "diamonds is untouched by seat 0"
+
+
+def test_the_own_denomination_arm_bars_only_your_own_previous_suit(monkeypatch):
+    """MEASURED, NOT SHIPPED (2026-08-13). YOU personally never bid the same
+    suit twice in a row -- a bid may not name that seat's OWN previous bid's
+    denomination, and nothing else is barred. So 1C 1S 2C is illegal (the 2C
+    repeats its bidder's own 1C), raising the OPPONENT's standing suit is
+    legal, and a seat returns to its suit after bidding something else."""
+    monkeypatch.setitem(E.DENOM_RULE, "classic", "own")
+    g = E.new_game(["a", "b"], random.Random(5))
+    E.apply_bid(g, 0, 1, 0)          # 1C
+    E.apply_bid(g, 1, 1, 3)          # 1S
+    assert not E.can_bid(g, 0, 2, 0)[0], "1C 1S 2C is illegal"
+    assert E.can_bid(g, 0, 2, 3)[0], "raising the opponent's spades is legal"
+    assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [1, 2, 3, 4]
+    E.apply_bid(g, 0, 2, 1)          # 2D
+    assert not E.can_bid(g, 1, 3, 3)[0], "seat 1's own spades are barred now"
+    E.apply_bid(g, 1, 3, 2)          # 3H
+    assert E.can_bid(g, 0, 4, 0)[0], "clubs come back once your last bid moved off them"
+    # ...so a two-suit climb can run indefinitely: 4C, 5S, 6D all legal on.
+    E.apply_bid(g, 0, 4, 0)
+    assert E.can_bid(g, 1, 5, 3)[0]
+
+
+def test_minor_keeps_the_per_player_denomination_ban():
+    """The relaxation is classic's experiment; minor (and dummy) still run the
+    forever-ban the mode was calibrated under."""
+    g = E.new_game(["a", "b"], random.Random(5), mode="minor")
+    E.apply_bid(g, 0, 2, 0)          # seat 0 names clubs
+    assert any(d == 0 for _, d in E.auction_options(g)["bids"]), \
+        "clubs is seat 1's to take"
+    E.apply_bid(g, 1, 3, 0)          # seat 1 takes clubs
     assert not E.can_bid(g, 0, 4, 0)[0], "seat 0 already named clubs"
     assert E.can_bid(g, 0, 4, 1)[0], "diamonds is untouched by seat 0"
     assert sorted({d for _, d in E.auction_options(g)["bids"]}) == [1, 2, 3, 4]
@@ -362,6 +490,10 @@ def test_result_is_internally_consistent(seed):
     else:
         assert r["made"] == (r["declarer_pts"] >= r["level"])
         ds, fs = E.contract_score(r["level"], r["declarer_pts"])
+        # `contract_score` prices a jumpless contract; a set in a round whose
+        # FINAL bid raised the level also pays the defender the jump bonus.
+        if not r["made"]:
+            fs += E.JUMP_SET_BONUS["classic"] * r.get("jump", 0)
     assert r["scores"][decl] == ds
     assert r["scores"][1 - decl] == fs
     # Exactly one side scores.
@@ -1240,7 +1372,8 @@ def test_the_result_row_says_what_the_double_was_worth(mode):
             decl = res["declarer"]
             signed = (res["scores"][decl] if res["scores"][decl]
                       else -res["scores"][1 - decl])
-            want = E.payoff(E._terms_for(mode, res["denom"], res["level"]),
+            want = E.payoff(E._terms_for(mode, res["denom"], res["level"],
+                                         jump=res.get("jump", 0)),
                             res["declarer_pts"], not res["null"])
             assert res["undoubled"] == want, "not the undoubled re-score"
             if not dbl:

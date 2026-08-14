@@ -25,7 +25,13 @@ from games.dissonance import engine as E
 
 
 def _settled(level=3, denom=2, seed=3, opener=0):
-    """A classic game with the auction won by the opener, ready for the swap."""
+    """A classic game with the auction won by the opener, ready for the swap.
+
+    NOTE (v2 jump rule, 2026-08-13): an opening bid counts as a raise over
+    level 0, so this contract carries a JUMP of `level` and its set base is
+    `level + stake + JUMP_SET_BONUS x level`. The arithmetic pins below use
+    `_settled_flat` instead, so they state the Double's own numbers without
+    the jump term riding along."""
     g = E.new_game(["a", "b"], random.Random(seed), opener=opener)
     E.apply_bid(g, opener, level, denom)
     E.apply_pass(g, 1 - opener)
@@ -33,8 +39,21 @@ def _settled(level=3, denom=2, seed=3, opener=0):
     return g
 
 
+def _settled_flat(level=3, denom=2, seed=3, opener=0):
+    """Like `_settled`, but the auction ends on a SAME-LEVEL overtake, so the
+    settled contract carries NO jump: the opener climbs 0 -> 1 -> `denom` at
+    one level and the defender passes. Needs `denom >= 2`."""
+    g = E.new_game(["a", "b"], random.Random(seed), opener=opener)
+    E.apply_bid(g, opener, level, 0)
+    E.apply_bid(g, 1 - opener, level, 1)
+    E.apply_bid(g, opener, level, denom)
+    E.apply_pass(g, 1 - opener)
+    E.apply_swap(g, opener, None, None)
+    return g
+
+
 def _terms(level, doubled):
-    g = _settled(level=level)
+    g = _settled_flat(level=level)
     E.apply_double(g, 1, doubled)
     return E.payoff_terms(g)
 
@@ -104,12 +123,34 @@ def test_the_reward_grows_with_the_SHORTFALL_not_just_the_level():
 
 def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
     """It must stay a real bet. On the COMMON failure -- 1 short, 48% of them --
-    the risk of a made contract still dwarfs the reward."""
+    the risk of a made contract still dwarfs the reward.
+
+    JUMP-FREE contracts only: the v2 jump rule deliberately breaks this for
+    jumped ones -- see the companion test below."""
     for level in range(2, _TOP + 1):
         plain, dbl = _terms(level, False), _terms(level, True)
         win = E.payoff(plain, level - 1, True) - E.payoff(dbl, level - 1, True)
         risk = dbl["make"] - plain["make"]
         assert risk > win, f"level {level}: risk {risk} <= reward {win}"
+
+
+def test_a_jumped_contracts_double_out_wins_its_risk_at_low_levels():
+    """v2's teeth, pinned as a DESIGN property rather than left to be
+    rediscovered as a surprise: an open-and-pass contract carries its whole
+    level as a jump, the Double doubles the jump bonus with the base, and at
+    levels 2-4 that makes the near-miss reward EXCEED the made-contract risk.
+    A leap is not just fatter when set -- it invites the Double."""
+    flipped = 0
+    for level in (2, 3, 4):
+        g = _settled(level=level)          # open-and-pass: jump == level
+        plain = E.payoff_terms(g)
+        E.apply_double(g, 1, True)
+        dbl = E.payoff_terms(g)
+        win = E.payoff(plain, level - 1, True) - E.payoff(dbl, level - 1, True)
+        risk = dbl["make"] - plain["make"]
+        if win > risk:
+            flipped += 1
+    assert flipped == 3, "the jump bonus should flip the near-miss bet at 2-4"
 
 
 def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
@@ -140,7 +181,7 @@ def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
 
 def test_a_doubled_round_scores_the_doubled_numbers():
     for doubled in (False, True):
-        g = _settled(level=3)
+        g = _settled_flat(level=3)
         E.apply_double(g, 1, doubled)
         assert g["doubled"] is doubled
         t = E.payoff_terms(g)
@@ -157,7 +198,7 @@ def test_a_doubled_round_scores_the_doubled_numbers():
 
 
 def test_the_result_row_carries_the_double_and_the_numbers_it_used():
-    g = _settled(level=4)
+    g = _settled_flat(level=4)
     E.apply_double(g, 1, True)
     rng = random.Random(11)
     while g["phase"] == "play":
@@ -253,7 +294,7 @@ def test_the_hard_tier_is_offered_both_branches_priced():
     because Kontra is symmetric. Classic's Double is lopsided, so declining is
     not worth zero -- it is worth the undoubled contract -- and the search has
     to be able to compare the two."""
-    g = _settled(level=3)
+    g = _settled_flat(level=3)
     opts = E.auction_payoff_options(g)
     assert len(opts) == 2
     on = next(o for o in opts if o["move"]["on"] is True)

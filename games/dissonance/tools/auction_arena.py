@@ -75,6 +75,18 @@ MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
 # so the engine default is no longer 0, and a knob that wrote unconditionally
 # would silently measure a rule the room stopped using. `DIS_FLAT_MAKE=0
 # DIS_FLAT_SET=0` is how the lab asks for the pre-ship baseline now.
+# ...and the denomination rule, so an arm can be measured under a rule the
+# engine no longer ships (e.g. re-running the v2-alone profile -- jump bonus
+# with the original per-player forever-ban -- after "own" became the default).
+if "DIS_DENOM_RULE" in os.environ:
+    assert os.environ["DIS_DENOM_RULE"] in ("used", "standing", "own")
+    E.DENOM_RULE[MODE] = os.environ["DIS_DENOM_RULE"]
+# ...and the jump bonus rate, for the dose sweep (2/3/4 per level).
+if "DIS_JUMP_SET" in os.environ:
+    E.JUMP_SET_BONUS[MODE] = int(os.environ["DIS_JUMP_SET"])
+# ...and whether the classic opener may pass (both passing throws the hand in).
+if "DIS_OPENER_PASS" in os.environ:
+    E.OPENER_MAY_PASS[MODE] = os.environ["DIS_OPENER_PASS"] not in ("", "0")
 if "DIS_FLAT_MAKE" in os.environ:
     E.FLAT_MAKE_BONUS[MODE] = int(os.environ["DIS_FLAT_MAKE"])
 if "DIS_FLAT_MIN" in os.environ:
@@ -203,6 +215,12 @@ def play(m, tier_of, qual, events):
       value is positive, Null iff the consolation strictly improved on it.
     """
     g = E.new_game(["a", "b"], random.Random(600000 + m), opener=m % 2, mode=MODE)
+    # THE REDEAL'S OWN RNG, seeded per DEAL and not per flip. A pass-out throws
+    # the hand in and deals again; with production's fresh entropy the two
+    # flips of one deal would draw DIFFERENT replacements and the pairing --
+    # the whole point of the harness -- would silently break. Seeded here, both
+    # flips replay the same replacement, and the mirror still reads +0.0000.
+    redeal_rng = random.Random(900000 + m)
     # HOW EACH SEAT'S LAST BID WAS PRICED BY ITS OWN SEARCH. The seat still
     # holding a bid at the end is the declarer, so this is what lets a settled
     # round be attributed to the decision that produced it -- "was the contract
@@ -211,6 +229,11 @@ def play(m, tier_of, qual, events):
     # sacrifice apart from a raise the search genuinely liked. Keyed by SEAT
     # rather than tier on purpose: in a mirror both tiers are the same string.
     last_bid_kind = {}
+    # Did the seat that acted FIRST in the current auction pass? Under
+    # OPENER_MAY_PASS the opening is a real choice, so this is the rate the
+    # experiment exists to measure. Reset by a redeal, since the replacement
+    # deal has its own opening decision.
+    opener_passed = False
     guard = 0
     while g["phase"] not in ("play", "over") and guard < 40:
         guard += 1
@@ -237,6 +260,11 @@ def play(m, tier_of, qual, events):
                         events.append(("open", tier,
                                        mv.get("level") or mv.get("value"),
                                        mv.get("denom", -1)))
+                    # THE OPENER'S PASS, and the pass-out it can lead to --
+                    # the two rates the OPENER_MAY_PASS experiment is for.
+                    if opening and mv.get("kind") == "pass":
+                        opener_passed = True
+                        events.append(("openpass", tier))
                 elif phase_now == "double" and mv.get("kind") == "double":
                     events.append(("double", tier, bool(mv.get("on"))))
             # THE CONTROL VARIATE, captured for free. The opening node is asked
@@ -262,7 +290,14 @@ def play(m, tier_of, qual, events):
                   else {"kind": "bid", **{a: b for a, b in p.items() if a != "pass"}}) \
                 if kind == "bid" else (p if kind == "move"
                                        else ({"kind": "swap", **p} if kind == "swap" else p))
-        E.apply_move(g, g["seats"][seat], mv)
+        redeals_before = g.get("redeals", 0)
+        E.apply_move(g, g["seats"][seat], mv, redeal_rng)
+        if g.get("redeals", 0) > redeals_before:
+            # Both seats passed it out: the hand is thrown in and re-dealt in
+            # place, so every per-auction counter starts again.
+            events.append(("passout", tier_of[seat]))
+            opener_passed = False
+            last_bid_kind = {}
     if g["phase"] != "play":
         return None
     fp = json.dumps([g["auction"]["log"], bool(g.get("doubled"))])
@@ -310,7 +345,22 @@ def play(m, tier_of, qual, events):
                        # is about to play. `sacrifice` means it chose a bid it
                        # had priced negative over an available pass.
                        last_bid_kind.get(decl, "?"),
-                       n_bids))
+                       n_bids,
+                       # ...and the round's exact-play PAYOFF, signed for the
+                       # declarer, so a report can average what each side was
+                       # actually paid per (level, outcome, doubled) rather
+                       # than only counting outcomes.
+                       payoff,
+                       # ...and the auction's LEVEL SEQUENCE (bids only, in
+                       # order), which is what the jump-size distribution and
+                       # the raise-by-how-much question read. Classic levels;
+                       # skat values ride the same slot.
+                       [e.get("level") or e.get("value") or 0
+                        for e in g["auction"]["log"] if not e.get("pass")],
+                       # ...and whether the seat on turn first PASSED the
+                       # opening (OPENER_MAY_PASS only), so the profile can be
+                       # split by it rather than only counted.
+                       opener_passed))
         return payoff, decl, fp
     while g["phase"] == "play":
         s = E.to_play(g)

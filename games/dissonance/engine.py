@@ -161,10 +161,104 @@ MINOR_MAX_LEVEL = 6
 #: the +-10 stake re-anchored it to 20 (2026-08-11) -- minor carries no stake,
 #: so its consolation keeps the original logic.
 MINOR_NULL_MAKE = 6
-#: An overtake must raise the contract by 1 or 2. Measured: a cap of exactly 2
-#: relocates the punishment-landing pile from level 2 to level 3, which is
-#: where the distribution had a hole. A cap of 3 empties level 3 again.
+#: An overtake must raise the contract by 1 or 2 -- in the modes that still cap
+#: it. Measured: a cap of exactly 2 relocates the punishment-landing pile from
+#: level 2 to level 3, which is where the distribution had a hole. A cap of 3
+#: empties level 3 again.
 MAX_RAISE = 2
+
+#: PER-MODE RAISE CAP (2026-08-13). Classic dropped the cap: any raise up to
+#: the ceiling is legal, and the JUMP BONUS below is what now leans on big
+#: jumps -- a scoring pressure instead of a legality wall, so the auction can
+#: keep climbing in small steps without an arbitrary "no more than 2" rule.
+#: Minor and dummy keep the cap: their ladders were calibrated under it and the
+#: jump bonus is not priced for their scales. Skat's numeric auction never had
+#: a raise cap (any higher rung is legal) and does not read this.
+#:
+#: `None` means "no cap"; `raise_cap_for` turns that into the mode's own
+#: ceiling so legality arithmetic and the wire both stay plain numbers.
+RAISE_CAP = {"classic": None, "minor": MAX_RAISE, "dummy": MAX_RAISE}
+
+#: WHICH DENOMINATION RULE the classic-shape auction runs (2026-08-13, the
+#: experiments stacked on the jump bonus):
+#:  * "used"     -- the original per-player no-repeat: a seat may never again
+#:                  name a denomination it has itself named. Minor and dummy
+#:                  keep this (their calibrations assumed it).
+#:  * "standing" -- a bid may not name the denomination of the STANDING bid
+#:                  (the same suit is never bid twice in a row, by anyone);
+#:                  everything else is free. Measured 2026-08-13: 2.60
+#:                  bids/auction, 72.6% contested -- but raising the
+#:                  opponent's suit is impossible and same-level ping-pong
+#:                  dominated the overtakes (42.2%).
+#:  * "own"      -- YOU PERSONALLY never bid the same suit twice in a row: a
+#:                  bid may not name the denomination of THAT SEAT'S OWN
+#:                  previous bid (1C 1S 2C is illegal -- the 2C repeats its
+#:                  own 1C), but you may return to a suit after bidding
+#:                  something else, and you MAY raise in the opponent's
+#:                  standing suit, which "standing" forbade. Classic runs
+#:                  this.
+#: Every bid still strictly raises (level, denomination) lexicographically, so
+#: the auction terminates at NT x the ceiling under every rule.
+#: SHIPPED: "used" in every mode -- the original per-player forever-ban. The
+#: other two arms are MEASUREMENT ONLY (`DIS_DENOM_RULE` in the arena); the
+#: 2026-08-13 runs are recorded below and neither was adopted.
+DENOM_RULE = {"classic": "used", "minor": "used", "dummy": "used"}
+
+
+def denom_rule_for(mode: str) -> str:
+    return DENOM_RULE.get(mode, "used")
+
+
+#: MAY THE CLASSIC-SHAPE OPENER PASS? (2026-08-14, experiment; OFF as shipped.)
+#:
+#: Classic has always FORCED the opening bid, and the campaign's reason is on
+#: the record: passing would be strictly better than a bad contract, so an
+#: opener with a free pass names nothing and the floor cluster becomes a
+#: pass-out instead. Skat allows it safely because a pass there hands the
+#: opponent the talon at THEIR price -- a real transfer, not an escape.
+#:
+#: With the jump bonus charging the opening (2026-08-13) that argument is
+#: worth re-testing: a weak hand's cheap opening is now a priced commitment
+#: rather than a free option, so the pass has real competition. Both seats
+#: passing throws the hand in and redeals, exactly as skat does -- which is
+#: why `passes` and `_redeal` already exist and need no new machinery.
+OPENER_MAY_PASS = {"classic": False, "minor": False, "dummy": False}
+
+
+def opener_may_pass(mode: str) -> bool:
+    return bool(OPENER_MAY_PASS.get(mode, False))
+
+
+def raise_cap_for(mode: str) -> int:
+    """The biggest single raise this mode allows, as a NUMBER.
+
+    An uncapped mode reports its own level ceiling: `min(top, level + cap)`
+    then never binds, which is what "no cap" means, and the wire's `max_raise`
+    field stays an integer an old wasm can read.
+    """
+    cap = RAISE_CAP.get(mode, MAX_RAISE)
+    return max_level_for(mode) if cap is None else cap
+
+
+#: THE JUMP BONUS (2026-08-13, classic only) -- what replaced the raise cap.
+#: If the FINAL bid of the auction raised the level (a jump of j levels over
+#: the bid it overtook), the defender scores an extra `3 x j` on top of a set.
+#: THE OPENING BID COUNTS, as a raise over level 0 (v2, same day: v1 exempted
+#: it, and self-play answered by opening AT VALUE and passing -- 47% one-bid
+#: auctions): open at 6 and get set and the defender collects 18 on top; open
+#: at 1 and climb and each settled rung only ever carries its last rise. A
+#: same-level overtake in a higher denomination is a jump of 0.
+#:
+#: The pressure it buys: a big jump is legal now, but it hands the defender a
+#: fatter set -- so the cheap way to a high contract is to CLIMB, one bid at a
+#: time, giving the opponent a decision at every rung. That is the auction
+#: interaction the cap used to force by fiat.
+#:
+#: It rides INSIDE `set_base`, like the flat set stake -- so the Double doubles
+#: it, every consumer (the result panel's maths line, the Hard pricing, the DD
+#: resolver) reads it with no new term, and Null still overrides a set (the
+#: bonus is a set price, and a declarer who ducks out owes none of it).
+JUMP_SET_BONUS = {"classic": 3, "skat": 0, "minor": 0, "dummy": 0}
 
 #: Set-score multiplier per point the declarer finished short.
 #:
@@ -1014,6 +1108,10 @@ def new_game(seats, rng=None, opener: int = 0, mode: str = DEFAULT_MODE,
             "denom": -1,
             "declarer": -1,
             "used": [0, 0],
+            # Each seat's OWN previous bid's denomination (-1 = has not bid).
+            # What the "own" DENOM_RULE reads; `.get` on every read so a save
+            # from before the rule carries none and derives as -1.
+            "last": [-1, -1],
             "to_act": opener,
             "log": [],
             # skat only: the standing numeric bid, and how many times the
@@ -1113,16 +1211,30 @@ def auction_options(g: dict) -> dict:
         }
     me = a["to_act"]
     top = max_level_for(mode_of(g))
-    free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
+    # Which denominations this seat may name -- see DENOM_RULE. "own" forbids
+    # only the seat's OWN previous bid's denomination; "standing" forbids the
+    # standing bid's; "used" is the per-player forever-ban.
+    rule = denom_rule_for(mode_of(g))
+    if rule == "own":
+        mine = a.get("last", [-1, -1])[me]
+        free = [d for d in range(NOTRUMP + 1) if d != mine]
+    elif rule == "standing":
+        free = [d for d in range(NOTRUMP + 1) if d != a["denom"]]
+    else:
+        free = [d for d in range(NOTRUMP + 1) if not (a["used"][me] >> d) & 1]
     bids: list[list[int]] = []
     if a["level"] == 0:
-        # The opener must bid; passing out is not offered.
+        # The opener must bid unless this mode lets it pass (OPENER_MAY_PASS,
+        # off as shipped). (`denom` is -1 while nothing stands, so the standing
+        # rule frees every denomination here without a special case.)
         for d in free:
             bids.extend([lvl, d] for lvl in range(MIN_LEVEL, top + 1))
-        return {"bids": bids, "may_pass": False}
+        return {"bids": bids, "may_pass": opener_may_pass(mode_of(g))}
     # Ranked denominations: an overtake stands at the SAME level in a
-    # higher-ranked denomination, or raises by up to MAX_RAISE in any unused one.
-    lo, hi = a["level"], min(top, a["level"] + MAX_RAISE)
+    # higher-ranked denomination, or raises -- by up to the mode's cap where one
+    # exists (minor/dummy), by any amount up to the ceiling in classic, where
+    # the JUMP_SET_BONUS prices big jumps instead of a cap forbidding them.
+    lo, hi = a["level"], min(top, a["level"] + raise_cap_for(mode_of(g)))
     for d in free:
         for lvl in range(lo, hi + 1):
             if lvl == a["level"] and d <= a["denom"]:
@@ -1149,10 +1261,22 @@ def apply_bid(g: dict, seat: int, level: int, denom: int) -> None:
     if not ok:
         raise ValueError(why)
     a = g["auction"]
+    # How far this bid RAISED the standing level -- and the OPENING BID COUNTS,
+    # as a raise over level 0 (v2 of the rule, 2026-08-13): opening at 6 and
+    # getting set pays the defender 6 jumps' worth, opening at 1 only one. A
+    # same-level overtake is still 0. Real game state, not derived at settle
+    # time, because the settled contract's set price reads the FINAL bid's
+    # jump (`JUMP_SET_BONUS`) and a save must not lose it. `.get` everywhere
+    # on read: a game saved before the key existed carries no jump, which
+    # prices as the old rule exactly.
+    a["jump"] = level - a["level"]
     a["level"] = level
     a["denom"] = denom
     a["declarer"] = seat
     a["used"][seat] |= 1 << denom
+    # `setdefault`, not a bare index: a game dealt before the "own" rule has
+    # no `last` and must keep accepting bids rather than KeyError mid-auction.
+    a.setdefault("last", [-1, -1])[seat] = denom
     a["to_act"] = 1 - seat
     a["log"].append({"seat": seat, "level": level, "denom": denom})
 
@@ -1175,7 +1299,10 @@ def apply_skat_bid(g: dict, seat: int, value: int) -> None:
     a["log"].append({"seat": seat, "value": value})
 
 
-def apply_pass(g: dict, seat: int) -> None:
+def apply_pass(g: dict, seat: int, rng=None) -> None:
+    """`rng` seeds a REDEAL only, and only a lab passes one: production wants
+    fresh entropy for a thrown-in hand, while a paired arena needs the two
+    flips of one deal to draw the SAME replacement or the pairing breaks."""
     if g["phase"] != "auction":
         raise ValueError("not bidding")
     a = g["auction"]
@@ -1188,7 +1315,7 @@ def apply_pass(g: dict, seat: int) -> None:
             # declining throws the hand in.
             a["passes"] += 1
             if a["passes"] >= 2:
-                _redeal(g)
+                _redeal(g, rng)
             else:
                 a["to_act"] = 1 - seat
             return
@@ -1196,7 +1323,18 @@ def apply_pass(g: dict, seat: int) -> None:
         g["phase"] = "talon"
         return
     if a["level"] == 0:
-        raise ValueError("the opener must bid")
+        if not opener_may_pass(mode_of(g)):
+            raise ValueError("the opener must bid")
+        # OPENER_MAY_PASS: nothing stands, so this is skat's shape exactly --
+        # the first pass hands the deal over at no price, the second throws
+        # the hand in.
+        a["log"].append({"seat": seat, "pass": True})
+        a["passes"] = a.get("passes", 0) + 1
+        if a["passes"] >= 2:
+            _redeal(g, rng)
+        else:
+            a["to_act"] = 1 - seat
+        return
     a["log"].append({"seat": seat, "pass": True})
     # The declarer now sees `shown` and decides on the swap before play --
     # except in a dummy room, which has no talon at all (two out-cards, and
@@ -1205,7 +1343,7 @@ def apply_pass(g: dict, seat: int) -> None:
     g["phase"] = "double" if has_dummy(mode_of(g)) else "swap"
 
 
-def _redeal(g: dict) -> None:
+def _redeal(g: dict, rng=None) -> None:
     """Throw the hand in and deal again, in place.
 
     Mutating `g` rather than returning a fresh dict is load-bearing: the room
@@ -1221,8 +1359,12 @@ def _redeal(g: dict) -> None:
     """
     n = g.get("redeals", 0) + 1
     m = _match_for_next_deal(g, advance=False)
-    fresh = new_game(list(g["seats"]), None, opener=opener_for_round(m),
-                     mode="skat", match=m)
+    # `mode_of(g)`, not a literal "skat": skat was the only mode that could
+    # pass out until OPENER_MAY_PASS existed, and a hardcoded mode would have
+    # silently re-dealt a classic room as a skat one -- a different phase
+    # machine on the same table.
+    fresh = new_game(list(g["seats"]), rng, opener=opener_for_round(m),
+                     mode=mode_of(g), match=m)
     fresh["redeals"] = n
     g.clear()
     g.update(fresh)
@@ -1892,7 +2034,8 @@ def payoff_terms(g: dict) -> dict:
         # `mode_of`, not a literal: minor mode runs the classic auction shape
         # in its own currency, and the terms are where the currency lives.
         terms = _terms_for(mode_of(g), a["denom"], a["level"],
-                           doubling=classic_doubling(g))
+                           doubling=classic_doubling(g),
+                           jump=a.get("jump", 0))
     return terms | {"declarer": a["declarer"]}
 
 
@@ -1906,7 +2049,7 @@ def classic_doubling(g: dict) -> int:
 
 
 def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
-               mult: int = 1, doubling: int = 1) -> dict:
+               mult: int = 1, doubling: int = 1, jump: int = 0) -> dict:
     """`payoff_terms` for a contract that has NOT been agreed yet.
 
     The auction has to price candidates, and `payoff_terms` can only read a
@@ -1957,7 +2100,13 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # the way to the Rust search and the DD resolver).
     flat_make = FLAT_MAKE_BONUS.get(mode, 0)
     make = level * level + (flat_make if level >= FLAT_MAKE_MIN_LEVEL else 0)
-    setb = level + FLAT_SET_PENALTY.get(mode, 0)
+    # THE JUMP BONUS rides inside the set base, beside the flat stake: `jump`
+    # is how far the FINAL bid raised the standing level, and each level of it
+    # pays the defender JUMP_SET_BONUS more on a set. Inside the base means the
+    # Double doubles it and every consumer of `set_base` -- the result panel's
+    # maths, the Hard pricing, the DD resolver -- follows with no new term.
+    setb = (level + FLAT_SET_PENALTY.get(mode, 0)
+            + JUMP_SET_BONUS.get(mode, 0) * jump)
     if doubling > 1:
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,
@@ -1999,8 +2148,12 @@ def pass_options(g: dict) -> list[dict]:
                  "set_base": 0, "short": 0, "null": 0, "redeal": True,
                  "move": mv}]
     if not skat:
+        # The standing contract keeps the jump ITS final bid arrived by --
+        # passing settles it, so the set price the pass concedes includes the
+        # bonus that jump earned the (would-be) defender.
         return [_terms_for(mode_of(g), a["denom"], a["level"],
-                           doubling=classic_doubling(g))
+                           doubling=classic_doubling(g),
+                           jump=a.get("jump", 0))
                 | {"opp": True, "move": mv}]
     # Skat: the number is a price and the winner has not named a game yet, so
     # what passing concedes is the BEST declaration that number buys them. One
@@ -2039,7 +2192,13 @@ def auction_payoff_options(g: dict) -> list[dict]:
                                | {"move": {"kind": "bid", "value": v}})
         else:
             for lvl, d in opt["bids"]:
-                out.append(_terms_for(mode_of(g), d, lvl)
+                # Priced as "this bid buys the contract" -- i.e. as the FINAL
+                # bid -- so the jump it would arrive by is this bid's own rise
+                # over the standing level (the opening's rise is its whole
+                # level, per the v2 rule). Myopic on purpose, like everything
+                # else in this list.
+                out.append(_terms_for(mode_of(g), d, lvl,
+                                      jump=lvl - g["auction"]["level"])
                            | {"move": {"kind": "bid", "level": lvl, "denom": d}})
         if opt["may_pass"]:
             out.extend(pass_options(g))
@@ -2063,7 +2222,8 @@ def auction_payoff_options(g: dict) -> list[dict]:
         a = g["auction"]
         for on in (True, False):
             out.append(_terms_for(mode_of(g), a["denom"], a["level"],
-                                  doubling=2 if on else 1)
+                                  doubling=2 if on else 1,
+                                  jump=a.get("jump", 0))
                        | {"move": {"kind": "double", "on": on}})
     elif phase in ("kontra", "re"):
         # ONE option: the contract exactly as it stands. Its value signed for
@@ -2117,9 +2277,30 @@ def auction_search_payload(g: dict) -> dict | None:
     # with its own `max_level`, so the mirror needs no third arm and an older
     # wasm reads the payload without a new string to choke on. The CURRENCY
     # difference rides in the priced rows below, as always.
+    # `max_raise` is the mode's own cap -- classic ships its ceiling since the
+    # cap was dropped (2026-08-13), so `min(top, level + max_raise)` never
+    # binds there and an old wasm still reads a plain number. `jump_set_bonus`
+    # is the rate the tree must add to a set at each terminal, PER LEVEL the
+    # settling bid jumped: the terms rows cannot carry it (a row is keyed by
+    # the settlement, and the jump is a property of the PATH to it), so the
+    # rate crosses as a rule and the tree does the one multiply. Optional on
+    # the wire: a wasm that predates it prices sets without the bonus, the
+    # usual cached-bundle degradation.
     rules = {"mode": "skat" if skat else "classic",
              "min_level": MIN_LEVEL, "max_level": max_level_for(mode_of(g)),
-             "max_raise": MAX_RAISE, "top_denom": GRAND if skat else NOTRUMP,
+             "max_raise": raise_cap_for(mode_of(g)),
+             "jump_set_bonus": JUMP_SET_BONUS.get(mode_of(g), 0),
+             # Which denominations an overtake may name -- "standing" (classic:
+             # never the standing bid's own suit, nothing else barred) or
+             # "used" (minor/dummy: the per-player forever-ban). Optional on
+             # the wire; a wasm that predates it mirrors "used".
+             "denom_rule": denom_rule_for(mode_of(g)),
+             # Whether the classic-shape opener may pass (OPENER_MAY_PASS, off
+             # as shipped). Optional on the wire; a wasm that predates it
+             # mirrors "the opener must bid", which is what every older server
+             # enforced.
+             "opener_may_pass": opener_may_pass(mode_of(g)),
+             "top_denom": GRAND if skat else NOTRUMP,
              "ladder": [v for v in SKAT_VALUES if v > a["value"]] if skat else []}
     # Only settlements the auction can still REACH. The bidding only ever
     # ascends, so everything below the standing bid is unreachable and would be
@@ -2149,7 +2330,14 @@ def auction_search_payload(g: dict) -> dict | None:
         # is.
         state = {"level": a["level"], "denom": max(a["denom"], 0), "value": 0,
                  "declarer": a["declarer"], "used": list(a["used"]),
-                 "passes": 0, "to_act": a["to_act"]}
+                 "passes": 0, "to_act": a["to_act"],
+                 # The STANDING bid's jump: a pass settles on this state, and
+                 # the set price at that leaf includes the bonus the standing
+                 # bid's own rise earned.
+                 "jump": a.get("jump", 0),
+                 # Each seat's own previous denomination (-1 = none), which is
+                 # what the "own" rule's legality is a function of.
+                 "last": list(a.get("last", [-1, -1]))}
         for lvl in range(max(MIN_LEVEL, a["level"]), max_level_for(mode_of(g)) + 1):
             for d in range(NOTRUMP + 1):
                 terms.append(_terms_for(mode_of(g), d, lvl)
@@ -2488,8 +2676,13 @@ def _finish(g: dict) -> None:
         # Signed for the declarer, exactly like `payoff` itself. Doubling
         # scales both ends and the ramp only adds, so it can never flip WHO
         # won -- the panel compares magnitudes against the same seat.
-        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"]),
+        "undoubled": payoff(_terms_for(mode_of(g), a["denom"], a["level"],
+                                       jump=a.get("jump", 0)),
                             dpts, not null),
+        # How far the FINAL bid raised the standing level -- the jump the set
+        # bonus was charged for. On the row so the panel can narrate a set
+        # base that suddenly reads bigger than level + stake.
+        "jump": a.get("jump", 0),
         "make_value": payoff_terms(g)["make"],
         "set_base": payoff_terms(g)["set_base"],
         # The two rates the review needs to spell the shortfall out as the sum
@@ -2679,6 +2872,10 @@ def view_for(g: dict, seat: int) -> dict:
             # The bid ladder needs no redaction at all: a number is a price,
             # and it cannot be read backwards into a denomination.
             "value": g["auction"].get("value", 0),
+            # The standing bid's level rise, wholly public (it is a difference
+            # of two logged bids) -- what the JUMP_SET_BONUS would pay the
+            # defender on a set if the auction settled here.
+            "jump": g["auction"].get("jump", 0),
         },
         # Public from the moment it is made -- and only made after the auction.
         "contract": dict(ct) if skat else None,
@@ -2866,8 +3063,11 @@ def player_view(g, pid):
     return view_for(g, s)
 
 
-def apply_move(g, pid, move: dict) -> None:
-    """Single entry point for main.py. Raises ValueError on anything illegal."""
+def apply_move(g, pid, move: dict, rng=None) -> None:
+    """Single entry point for main.py. Raises ValueError on anything illegal.
+
+    `rng` is forwarded to a REDEAL only (see `apply_pass`); production omits
+    it and a thrown-in hand draws fresh entropy, as it always has."""
     seat = seat_of(g, pid)
     if seat is None:
         raise ValueError("not a player in this game")
@@ -2878,7 +3078,7 @@ def apply_move(g, pid, move: dict) -> None:
         else:
             apply_bid(g, seat, int(move["level"]), int(move["denom"]))
     elif kind == "pass":
-        apply_pass(g, seat)
+        apply_pass(g, seat, rng)
     elif kind == "swap":
         apply_swap(g, seat, move.get("take"), move.get("give"))
     elif kind == "look":

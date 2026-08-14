@@ -41,6 +41,20 @@ def _contracts():
             E.apply_pass(g, 1)
             E.apply_swap(g, 0, None, None)
             yield g
+    # CLASSIC REACHED BY A JUMP (2026-08-13): the raise cap is gone and the
+    # FINAL bid's rise pays the defender JUMP_SET_BONUS per level on a set --
+    # folded inside `set_base`, inside the Double. Real jumped auctions, both
+    # Doubled and not, because a fixture set holding only passed-out openings
+    # would never price the fold and the solver would be held to nothing here.
+    for opening, level, denom, doubled in ((1, 4, 1, False), (2, 7, 3, True),
+                                           (1, 10, 4, False), (3, 5, 2, True)):
+        g = E.new_game(["a", "b"], random.Random(level * 32 + denom), opener=0)
+        E.apply_bid(g, 0, opening, 0)
+        E.apply_bid(g, 1, level, denom)
+        E.apply_pass(g, 0)
+        E.apply_swap(g, 1, None, None)
+        E.apply_double(g, 0, doubled)
+        yield g
     # MINOR: the same classic shape on the re-anchored prices (Null 6, set
     # rate 2, ladder 1..6), both Doubled and not -- a fixture set that never
     # priced a minor contract would leave the solver held to nothing there.

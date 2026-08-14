@@ -245,8 +245,28 @@ def test_the_rules_are_the_engines_own_knobs():
         r = E.auction_search_payload(g)["rules"]
         assert r == {"mode": mode, "min_level": E.MIN_LEVEL,
                      "max_level": E.max_level_for(mode),
-                     "max_raise": E.MAX_RAISE, "top_denom": top,
+                     # Classic's cap is its own ceiling (i.e. uncapped) since
+                     # 2026-08-13; the tree learns the jump bonus as a RULE
+                     # because the terms rows are keyed by settlement and the
+                     # jump belongs to the path.
+                     "max_raise": E.raise_cap_for(mode),
+                     "jump_set_bonus": E.JUMP_SET_BONUS.get(mode, 0),
+                     "denom_rule": E.denom_rule_for(mode),
+                     "opener_may_pass": E.opener_may_pass(mode),
+                     "top_denom": top,
                      "ladder": [v for v in E.SKAT_VALUES if v > 0] if mode == "skat" else []}
+
+
+def test_the_payload_state_carries_the_standing_bids_jump():
+    """A pass settles on the standing state, and the set price at that leaf
+    includes the bonus the standing bid's own rise earned -- so the tree must
+    know it, and it cannot be derived from the level alone."""
+    g = _classic()
+    E.apply_bid(g, 0, 2, 1)
+    assert E.auction_search_payload(g)["state"]["jump"] == 2, \
+        "the opening counts, as a raise over level 0 (v2)"
+    E.apply_bid(g, 1, 5, 2)
+    assert E.auction_search_payload(g)["state"]["jump"] == 3
 
 
 # --- the armed request -----------------------------------------------------

@@ -407,6 +407,12 @@ def test_the_catalog_matches_the_engine():
     assert cat["pool"] == E.POOL
     assert sum(cat["trick_values"]) == cat["pool"]
     assert cat["max_raise"] == E.MAX_RAISE
+    # Per-mode since classic dropped its cap: classic's entry is its own
+    # ceiling (never binds), minor/dummy keep the 2.
+    assert cat["max_raises"] == {mode: E.raise_cap_for(mode) for mode in E.MODES}
+    assert cat["max_raises"]["classic"] == E.max_level_for("classic")
+    assert cat["max_raises"]["minor"] == E.MAX_RAISE
+    assert cat["jump_set_bonus"] == E.JUMP_SET_BONUS
     assert cat["short_penalty"] == E.SHORT_PENALTY
     # Skat mode's price table is served, never copied into the client — the
     # bases and the ladder they generate must agree.

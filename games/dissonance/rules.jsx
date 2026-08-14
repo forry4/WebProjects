@@ -75,7 +75,8 @@ export default function DissonanceRules() {
 				<RulesDefs items={[
 					{ t: "The opener must bid", d: "Passing is not allowed on the first bid, however bad the hand is." },
 					{ t: "Denominations are ranked", d: "♣ < ♦ < ♥ < ♠ < NT. A bid at the same number in a higher-ranked denomination outranks the one standing." },
-					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by 1 or 2 — no bigger jumps — in any denomination YOU have not named before. Or pass." },
+					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by any amount in any denomination YOU have not named before. Or pass." },
+					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +3 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 18. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
 					{ t: "The last bid wins", d: "That player is the declarer, their denomination is trump (or no-trump), and their number is the target." },
 					{ t: "Declarer leads", d: "The declarer leads to trick 1 — which is an odd, LOSING trick. Leading first is a real disadvantage, and it's why the auction isn't a free-for-all." },
 				]} />
@@ -351,7 +352,8 @@ export default function DissonanceRules() {
 						declarer scores <b>N × N, plus a flat 10</b>, plus <b>1 for every trick
 						point past N</b>. The defender scores nothing.</li>
 					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 10, plus 5 for
-						every point the declarer finished below N</b>.</li>
+						every point the declarer finished below N</b> — plus <b>3 per level the
+						winning bid jumped</b> in the auction, if it jumped at all.</li>
 				</ul>
 				<p>
 					The flat 10 rides on both ends — every contract carries the same stake on top

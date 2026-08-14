@@ -2080,7 +2080,22 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const skatBases = catalog?.skat_bases || [];
   const ct = game.contract || {};
   const prev = lastTrick(game);
-  const bidLevels = [...new Set(bids.map((b) => b[0]))].sort((a, b) => a - b);
+  // THE LEVEL PAD IS THE WHOLE LADDER, ALWAYS, and the illegal rungs are
+  // DISABLED rather than absent. It used to render only the legal set, so the
+  // pad shrank and re-flowed after every bid: the key under your thumb was a
+  // different number a moment later, which on a phone is a misbid waiting to
+  // happen. The denominations were already drawn this way (all five, disabled
+  // when they do not apply) -- this makes the two rows one keypad in behaviour
+  // as well as in looks.
+  //
+  // Off `/catalog`'s per-mode ceiling, with the legal set as the fallback, so
+  // a room whose catalog has not landed yet still shows exactly what it can
+  // bid rather than an empty pad.
+  const ladderTop = catalog?.max_levels?.[game?.mode]
+    ?? catalog?.max_level
+    ?? Math.max(1, ...bids.map((b) => b[0]));
+  const bidLevels = Array.from({ length: ladderTop }, (_, i) => i + 1);
+  const levelOk = (l) => bids.some((b) => b[0] === l);
   const denomOkAt = (l, d) => bids.some((b) => b[0] === l && b[1] === d);
   const bidReady = bidLevel !== null && bidDenom !== null && denomOkAt(bidLevel, bidDenom);
   const legal = new Set(game.legal || []);
@@ -2264,7 +2279,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
           {game.phase === "auction" && isSkat ? (
             <div className="dis-auction">
               <div className="muted">Auction</div>
-              <ContractLine game={game} />
+              <div className="dis-contractrow"><ContractLine game={game} /></div>
               {game.auction.value > 0 && (<>
                 <div className="muted">{nameOf(declSeat)} holds it at {game.auction.value}</div>
                 <NeedsRow value={game.auction.value} bases={skatBases}
@@ -2310,29 +2325,52 @@ export default function Dissonance({ myId, authUser, onExit }) {
           ) : game.phase === "auction" ? (
             <div className="dis-auction">
               <div className="muted">Auction</div>
-              <ContractLine game={game} />
+              {/* Wrapped in a RESERVED ROW for the same reason the standing
+                  line below is always rendered: `ContractLine` swaps a
+                  body-size "no contract yet" for a 1.5rem contract the moment
+                  a bid lands, and those are different heights — measured at
+                  7px, which the whole keypad underneath inherited as a jump. */}
+              <div className="dis-contractrow"><ContractLine game={game} /></div>
               {/* POINTS, not "score" — the level is a promise in TRICK points,
                   and "score" is what the round pays out. Same vocabulary the
                   result panel keeps to. (This comment sits OUTSIDE the `&&`:
                   a JSX comment is a child expression, and one inside those
                   parens is a syntax error.) */}
-              {game.auction.level > 0 && (
-                <div className="muted">
-                  {nameOf(game.auction.declarer)} to take at least{" "}
-                  {game.auction.level} {game.auction.level === 1 ? "point" : "points"}
-                </div>
-              )}
+              {/* ALWAYS RENDERED, never conditional, and that is the bid pad
+                  holding still. This line only appeared once a bid stood, so
+                  the first bid of every auction pushed the whole keypad down
+                  33px — measured — and the key under your thumb moved even
+                  though the pad itself had stopped shrinking. A reserved row
+                  costs one line of panel; a moving keypad costs a misbid. */}
+              {/* BOTH FORMS ARE ONE LINE, which is the other half of the pad
+                  holding still. The first placeholder here read "no bid yet —
+                  the opener names a contract" and WRAPPED in the 17rem rail:
+                  40px against the standing line's 20px, measured, so the
+                  keypad still moved — just for a different reason than the
+                  one that had been fixed. Short both ways, and the row keeps
+                  its reserved height regardless. */}
+              <div className="muted dis-standing">
+                {game.auction.level > 0
+                  ? <>{nameOf(game.auction.declarer)} needs {game.auction.level}{" "}
+                    {game.auction.level === 1 ? "pt" : "pts"}</>
+                  : "no bid yet"}
+              </div>
               {myTurn ? (
                 <>
                   <div className="dis-bidgrid">
-                    {bidLevels.map((l) => (
-                      <button key={l} className={bidLevel === l ? "on" : ""}
-                        onClick={() => {
-                          setBidLevel(l);
-                          // Keep the denom only if it stays legal at this level.
-                          if (bidDenom !== null && !denomOkAt(l, bidDenom)) setBidDenom(null);
-                        }}>{l}</button>
-                    ))}
+                    {bidLevels.map((l) => {
+                      const ok = levelOk(l);
+                      return (
+                        <button key={l} className={bidLevel === l ? "on" : ""}
+                          disabled={!ok}
+                          title={ok ? `level ${l}` : "does not outrank the standing bid"}
+                          onClick={() => {
+                            setBidLevel(l);
+                            // Keep the denom only if it stays legal at this level.
+                            if (bidDenom !== null && !denomOkAt(l, bidDenom)) setBidDenom(null);
+                          }}>{l}</button>
+                      );
+                    })}
                   </div>
                   <div className="dis-denoms">
                     {[0, 1, 2, 3, 4].map((d) => {
@@ -2354,9 +2392,14 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
                   </div>
-                  {!opt.may_pass && <div className="muted" style={{ fontSize: "0.8rem" }}>
-                    The opener must bid.
-                  </div>}
+                  {/* No hint row at all. It said "The opener must bid." at the
+                      opening and nothing afterwards, and the panel is centred
+                      in the rail (`align-self: center`), so a row that comes
+                      and goes moved EVERY row in the panel — the keypad above
+                      it included, measured at 15px. Reserving the row fixed
+                      the movement; removing the text removes the row, which
+                      fixes it the same way and costs a line nobody needed —
+                      the absence of a Pass button says it already. */}
                 </>
               ) : <div className="muted">Waiting for {nameOf(game.auction.to_act)}…</div>}
             </div>

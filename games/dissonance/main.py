@@ -1209,7 +1209,16 @@ async def catalog():
         "trick_values": [engine.trick_value(t) for t in range(engine.NTRICKS)],
         "min_level": engine.MIN_LEVEL,
         "max_level": engine.MAX_LEVEL,
+        # The scalar is the CAPPED modes' number, kept for old bundles; the
+        # per-mode caps are the truth since classic dropped its cap
+        # (2026-08-13) -- classic's entry reads its own ceiling, i.e. uncapped.
         "max_raise": engine.MAX_RAISE,
+        "max_raises": {mode: engine.raise_cap_for(mode)
+                       for mode in engine.MODES},
+        # Classic's replacement for the cap: +N per level the FINAL bid jumped,
+        # to the defender, on a set. Served so the client renders the price
+        # rather than hardcoding a 3.
+        "jump_set_bonus": dict(engine.JUMP_SET_BONUS),
         "short_penalty": engine.SHORT_PENALTY,
         # v2: ranked denominations, the Null contract, and the declarer swap.
         "ranked_denoms": True,

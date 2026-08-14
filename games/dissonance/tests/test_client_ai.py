@@ -421,8 +421,9 @@ def test_a_legal_pass_is_priced_for_the_opponent_not_left_at_zero():
     # It is the STANDING contract, exactly as the opponent would play it.
     assert (p["denom"], p["level"]) == (2, 3)
     assert p["make"] == 9 + E.FLAT_MAKE_BONUS["classic"] and p["target"] == 3
-    # ...and it is the same arithmetic `_finish` would apply to that contract.
-    assert p | {"opp": True} == E._terms_for("classic", 2, 3) | {
+    # ...and it is the same arithmetic `_finish` would apply to that contract
+    # -- the standing bid's jump included (an opening at 3 carries 3, v2).
+    assert p | {"opp": True} == E._terms_for("classic", 2, 3, jump=3) | {
         "opp": True, "move": p["move"]}
 
 

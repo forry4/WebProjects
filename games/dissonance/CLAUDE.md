@@ -732,8 +732,12 @@ rather than the deck renumbered.)
 **Auction.** Denominations are **ranked C < D < H < S < NT**. Opener
 names level 1–12 and a denomination, committing to score at least that many
 points. Responses overtake at the **same level in a higher-ranked
-denomination**, or **raise by +1/+2** in any denomination that player has not
-named. Per-player no-repeat. The opener may not pass.
+denomination**, or **raise by any amount** (classic since 2026-08-13 — minor
+and dummy keep the old +1/+2 cap). Per-player no-repeat (`DENOM_RULE` is **"used"** in every mode — the two
+relaxations measured on 2026-08-13 were experiments and NEITHER SHIPPED;
+see below). The opener may not pass.
+Big raises are priced rather than forbidden: see the JUMP BONUS section
+below.
 
 **The talon.** The auction winner is shown **3 of the 6** out-cards (fixed at
 the deal) and may swap ONE into hand, discarding a hand card face-down — never
@@ -746,7 +750,8 @@ never forced to. Winner leads next.
 **Scoring** (contract only; trick points are the yardstick *and* the margin —
 and in skat mode "trick points" means CARD points, per the section above):
 make → **N² + the flat 10 stake, + 1 per trick point past N**; set → defender
-scores **N + 10, + 5 × shortfall** (the ±10 stake — see its bullet below — is
+scores **N + 10, + 5 × shortfall, + 3 × the final bid's level jump (classic
+only — see the JUMP BONUS section)** (the ±10 stake — see its bullet below — is
 classic-only). **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **20** (both modes; classic moved 12 → 20 with
 the stake — sets got 10 fatter, so the escape was re-anchored just under the
@@ -771,9 +776,13 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   "sacrifice valve" reading always wanted, at no auction cost.
 * **the swap** — makes winning the auction worth something beyond the
   contract, adds real overbid risk, and the discard is a bluffable signal.
-* **maxraise 2** — a cap of exactly 2 relocates the punishment-landing pile
-  from level 2 to level 3, which is where the distribution had a hole. A cap of
-  3 empties level 3 again; the spike *translates*, it never spreads.
+* **maxraise 2 — SUPERSEDED IN CLASSIC (2026-08-13) by the jump bonus; minor
+  and dummy still run it.** The original measurement stands for what it was: a
+  cap of exactly 2 relocates the punishment-landing pile from level 2 to level
+  3, which is where the distribution had a hole, and a cap of 3 empties level
+  3 again — the spike *translates*, it never spreads. Classic now prices big
+  raises instead of forbidding them (see the JUMP BONUS section), which was
+  the product call: the cap read as arbitrary and other games don't have one.
 * **declarer leads** — the opening lead was measured at **+0.93 pts**, the
   strongest single lever on contract height — and the reason Null is a
   DECLARER'S consolation (its make rate defending is ~0%).
@@ -811,8 +820,206 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `rules.jsx`, and the result panel now reads `make_value`/`set_base` OFF THE
   ROW rather than recomputing N².
 * **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
-* **per-player denominations** — a shared budget was measured to be a no-op:
-  94% of auctions name ≤2 denominations, so a budget of five never binds.
+* **per-player denominations — KEPT.** Two relaxations were measured on
+  2026-08-13 and NEITHER was adopted: "standing" (nobody bids the standing
+  suit twice in a row) and "own" (no seat repeats its OWN last suit). They
+  live in `DENOM_RULE` as measurement arms only, driven by the arena's
+  `DIS_DENOM_RULE`. Their profiles are recorded below; the shipped rule is
+  the original forever-ban, which is also what the 1000-deal-per-arm jump
+  sweep was measured under.
+
+## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
+
+Classic's `MAX_RAISE` is gone: an overtake may raise by ANY amount up to the
+ceiling. What replaced it is a scoring rule, `JUMP_SET_BONUS` (3, classic
+only): **if the FINAL bid of the auction raised the level — a jump of j over
+the bid it overtook — the defender scores an extra `3 × j` on a set.** THE
+OPENING BID COUNTS, as a raise over level 0 (**v2, same day**): open at 6 and
+get set and the defender collects +18 on top; open at 1 and it costs 3. A
+same-level overtake in a higher denomination is a jump of 0 — the only
+jump-free way to buy a contract. The intent: keep the auction climbing in
+small steps (every rung gives the opponent a decision) by making the leap
+legal but expensive, instead of a cap other games don't have.
+
+**v1 exempted the opening, and 500 rounds of self-play said why that fails**
+(the profile below is v1's, kept as the comparison): with no cap to hide
+under, underbidding lost its point, Expert opened AT VALUE (mean 4.31,
+unimodal at 5–6) and passed — 47% one-bid auctions, 1.77 bids/auction.
+Charging the opening its whole level is what makes starting low the cheap
+line for the OPENER too.
+
+**A v2 consequence, pinned in `test_double.py`
+(`test_a_jumped_contracts_double_out_wins_its_risk_at_low_levels`): an
+open-and-pass contract at levels 2–4 carries enough doubled jump bonus that
+doubling its NEAR-MISS out-pays the made-contract risk** — the near-miss-
+stays-cheap property now holds only for jump-free contracts. A leap does not
+just fatten the set; it invites the Double. Deliberate, but it re-prices the
+Double's odds table for jumped contracts.
+
+**Where each piece lives — the `payoff_terms` discipline, one rung deeper:**
+* `apply_bid` records `a["jump"]` (real game state; `.get(..., 0)` on every
+  read so an old save prices as the old rule). `_finish` puts `jump` on the
+  result row; `view_for` ships it in the auction block.
+* **The bonus rides INSIDE `set_base`** (`_terms_for(..., jump=)`), beside the
+  flat set stake — so the Double doubles it, Null still overrides it (a
+  consolation owes no set price), the result panel's maths line still sums,
+  the DD review and the arena's resolver price it with no new code, and the
+  Hard tier's option list carries it with **zero Rust changes** (each classic
+  candidate is priced as its own final bid: `jump = lvl − standing`).
+* **The Expert tree is the one place it could not ride as data.** The terms
+  rows are keyed by SETTLEMENT and a jump is a property of the PATH, so the
+  rate crosses the wire as a rule (`rules.jump_set_bonus`, optional, default
+  0), `AucState` carries `jump` (part of the memo key — two nodes differing
+  only in how their standing bid arrived are worth different amounts), and
+  `settled`/`opp_myopic` do the one add at the leaf. The payload's `state`
+  also ships the STANDING bid's jump, since a pass settles on it.
+  `rules.max_raise` now ships `raise_cap_for(mode)` — classic's own ceiling,
+  so `min(top, level + max_raise)` never binds there and an old wasm still
+  reads a plain number. Minor/dummy ship 2 and a 0 rate: unchanged games.
+* Fixtures: `auction.jsonl` regenerated (uncapped classic legality + the new
+  rules/state fields), `payoff.jsonl` regenerated with REAL jumped auctions,
+  doubled and not, so `payoff_parity` pins the fold. The wasm artifact was
+  rebuilt and committed with the change (glue byte-identical — same
+  wasm-bindgen — so the pair stayed matched). A cached older wasm prices sets
+  without the bonus and with the cap: legal moves, slightly wrong values, the
+  ordinary cached-bundle window.
+* Gates: `test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set`,
+  `test_a_jumpless_auction_scores_exactly_as_before`,
+  `test_minor_mode_keeps_the_raise_cap`, the payload-field tests in
+  `test_expert.py`, and Rust
+  `the_settling_bids_jump_fattens_the_set_and_only_the_set`.
+* The server bot needed nothing: `choose_bid` overtakes at the cheapest rung
+  in its best denomination, which never jumps. Easy/Normal don't price the
+  bonus — they are heuristics and it only fattens a set they were already
+  trying to avoid.
+* The study's instrument is `tools/jump_report.py` over `auction_arena.py`
+  checkpoints (the settled event now carries the round's dd payoff and the
+  auction's level sequence — flip 0 only, since a mirror's flips are
+  identical).
+
+**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE "OWN" RULE (2026-08-13,
+MEASURED, NOT SHIPPED; same harness):** bids/auction **2.10** (67.4% contested,
+28.2% opener re-entry), overtakes 1.10/auction — same-level overtakes fall to
+26.5% of them (the standing rule's ping-pong mostly gone) while jumps ≥2
+rise to 37.0%, sizes fattening (+3:69 vs the standing run's 56); openings
+mean 3.07 (23.4% at 1); settled mean 4.69 (2.2/6.4/9.8/17.6/33.8/25.8/4.4%);
+made **58.4%** / set 38.4 / Null 3.2; Doubles 26.0% (doubled avg **−18.1**,
+the most defender-favourable of the variants; defender's doubled set avg
+55.4); sacrifices 25.0% (avg −20.4). Against the standing rule it trades
+~0.5 bids/auction and 11 points of re-entry for cleaner shape: no lateral
+suit ping-pong, raising the opponent's suit legal, and the restriction is
+one a player can hold in their head ("not the suit I just bid").
+Interaction volume sits at v2-alone's level; the standing rule remains the
+most interactive variant measured.
+
+**THE 500-ROUND EXPERT PROFILE UNDER v2 + THE STANDING-SUIT RULE (2026-08-13,
+MEASURED, NOT SHIPPED; same harness):** bids/auction **2.60** (72.6%
+contested, 39.0% opener re-entry, tail to TEN bids), overtakes 1.60/auction
+with same-level overtakes the biggest class (42.2% — repeatable suit
+ping-pong at one level is the new cheap rung) and jumps ≥2 down to 21.2% of
+overtakes; openings mean 3.06 (25.6% at 1); settled mean 4.68
+(2.4/7/8.2/18.2/34.4/26.4/3.4%); made **60.6%** / set 35.2 / Null 4.2, and
+per-level make degrades smoothly (95% at 3 → 41% at 7); Doubles 22.8%
+(doubled avg −13.0, defender's doubled set avg 52.5); sacrifices **31.2%**
+of rounds (avg −15.6, a third of them doubled) — the watch item, since
+unlimited suit returns make denial wars cheap to conduct; charged final rise
+0/+1 in 53.6% of rounds. Measured by `tools/jump_report.py` over 500
+arena checkpoints, mirror exactly +0.0000.
+
+**SHIPPED AT 3 (2026-08-14)** after the 1000-deal-per-arm sweep below.
+
+**THE OPENER MAY PASS — an experiment, OFF as shipped (`OPENER_MAY_PASS`,
+2026-08-14).** Classic has always forced the opening bid, and the campaign's
+reason stands on its own terms: a free pass is strictly better than a bad
+contract, so the floor cluster becomes a pass-out. The jump bonus makes that
+worth re-testing, since a cheap opening is now a PRICED commitment rather
+than a free option. With the flag on, nothing standing behaves exactly as
+skat's open pass — the first hands the deal over, the second throws the hand
+in and `_redeal`s the same opener — so no new machinery was needed beyond
+three fixes the flag exposed:
+* **`_redeal` hardcoded `mode="skat"`**, a latent bug that would have
+  re-dealt a classic room as a skat one. It reads `mode_of(g)` now.
+* **`apply_pass`/`apply_move` take an optional `rng`**, forwarded to the
+  redeal only. Production omits it (fresh entropy, unchanged); a PAIRED
+  arena must pass one, or the two flips of a deal draw different
+  replacements and the pairing silently breaks — the mirror stops reading
+  +0.0000, which is exactly how this was caught before any numbers were
+  taken.
+* **`rules.opener_may_pass` on the wire** (optional, default false), with
+  `legal_bids`/`step` mirroring it; `Step::Redeal` already priced a
+  pass-out at 0 for skat and needed no change.
+Measured via `DIS_OPENER_PASS=1`; `jump_report.py` reports opener-pass and
+pass-out rates per ATTEMPTED auction (a thrown-in hand is re-dealt and bid
+again, so attempts = rounds + pass-outs).
+
+**THE JUMP RATE IS A WEAK DIAL BETWEEN 2 AND 4 — measured at 1000 DEALS PER
+ARM, 2026-08-13** (`DIS_JUMP_SET`, v2-alone setup, deal-paired across arms,
+mirrors exactly +0.0000). The structure — charging the opening at all — did
+the work; the rate only fine-tunes. Across 2 / 3 / 4:
+* **monotonic, and the reason to have a dial at all**: mean opening 3.21 /
+  3.09 / 3.05, settled mean 4.89 / 4.72 / 4.71, settled-at-6 30.9 / 27.6 /
+  25.1%, doubled-round EV −9.8 / **−4.9** / −14.6.
+* **flat inside noise**: bids/auction 2.23 / 2.22 / 2.31, contested 69.4 /
+  68.8 / 71.7%, made 54.6 / 57.5 / 57.3%, Doubles 21.8 / 22.6 / 22.6%,
+  sacrifices 26.9 / 25.4 / 27.2%, jump share of overtakes 33.3 / 31.8 /
+  30.4%.
+* **3 stays.** It has the flattest settled distribution (effective levels
+  5.36 vs 5.06/5.24), the highest make rate, the lowest sacrifice rate and
+  the only doubling EV near fair. The 500-deal read of this sweep had 3j's
+  make rate at 60.0% and 2j's settled-6 at 30.0%; doubling the sample moved
+  those to 57.5% and 30.9% while every ordering above held.
+
+**THE v2-ALONE PROFILE WAS RE-CONFIRMED AT 500 ROUNDS (2026-08-13; 300 fresh
+deals via the arena's `DIS_DENOM_RULE=used` arm pooled with the original
+200):** every headline held within a couple of points — bids/auction 2.15 →
+2.19, contested 65.0 → 68.8%, openings mean 3.04 → 3.07 (still flat:
+21.6/20.2/18.8/17.8/13.8/6.6/1.2, max share 21.6% — the flattest opening
+distribution of any variant), settled mean 4.55 → 4.63
+(2.4/7.4/11/19.6/28.8/25.6/5/0.2), sacrifice 25.0 → 25.4%, overtake mix
+static (same-level 29.7 → 29.8%, jumps ≥2 32.8 → 31.5%). The two that moved
+most, both inside 2σ of a 200-sample: made 65.0 → 60.0% and Doubles 26.5 →
+24.2% (doubled avg −7.5 → −5.5). The 200-round numbers below are kept as the
+original record; treat the pooled figures as the profile.
+
+**THE 200-ROUND EXPERT PROFILE UNDER v2 ALONE (2026-08-13; opening charged,
+denomination forever-ban still on; same harness as v1's below):** bids/auction 1.77 → **2.15**, contested 52.8 →
+**65.0%**, opener re-enters 16.8 → **29.0%**; openings mean **3.04**, spread
+1–4 (19.5/21.5/22.5/17/13/5/1.5%); settled mean **4.55**, the smoothest
+distribution any variant produced (3/7.5/12.5/21/27.5/22/6/0.5%); made
+**65.0%** / set 31.5 / Null 3.5, with per-level make degrading smoothly to
+~50% at the top (the chronic self-play overbidding largely corrected — the
+climb past the make point now costs jump bonus too); Doubles 26.5% (doubled
+avg −7.5, defender's doubled set avg 54.7); sacrifices 25.0%; +1 is the most
+common overtake (37.6% of 1.15/auction) and the charged final rise is live
+in ~85% of rounds. The residual limiter on auction length is the
+denomination forever-ban — a climb burns a suit per rung — which is what
+`DENOM_RULE` "standing" (the same-suit-never-twice-in-a-row experiment)
+addresses.
+
+**THE 500-ROUND EXPERT PROFILE UNDER v1 OF THE RULE (2026-08-13; opening
+exempt from the jump; k=8 one tree, talon model, dd-resolved, mirror exactly
++0.0000)** — v1 is superseded by v2 above, and this profile is WHY; recorded
+because the 2026-08-11 profile (the comparison baseline below) taught that
+these numbers evaporate otherwise:
+* **The cap play is gone and openings moved UP**: opens-at-1 30.1% → 12.2%,
+  mean opening 3.53 → 4.31, now unimodal at 5–6 (48.8% combined). With no cap,
+  a low opening no longer holds the reply down — so underbidding lost its
+  point, and the opener names value instead. Settled mean 4.63 → 5.28; the
+  old settled spike at 3 (25%, the cap line) dissolved to 2.6%.
+* **Auctions run 1.77 bids** (47.2% one-bid, 52.8% contested, 16.8% see the
+  opener re-enter). Interaction concentrates on LOW openings: opens ≤3 draw
+  1.3–1.7 overtakes/auction where opens ≥5 draw 0.3–0.5 — a low opening is
+  now an invitation, not a cap.
+* **The bonus binds**: only 15.8% of rounds settle on a final bid that jumped
+  ≥2 (the ones the bonus charges), jump share of overtakes falls 63.6% →
+  2.5% across opening levels 1→6, and 32.0% of all overtakes are jumps
+  (sizes +2:52 +3:34 +4:23 +5:13 +6:1 over 500 auctions).
+* **Outcomes**: made 45.0% / set 49.4% / Null 5.6% (was 56.8/38.8/4.5).
+  Doubles taken 19.2% (was 27.2%), and doubled rounds average −15.3 for the
+  declarer (defender's avg doubled set pays 52.4). Sacrifices 23.2% of
+  rounds, averaging −19.8. The old profile's open question stands, sharper:
+  settled 5–6 make only 43.8%/35.6%, so self-play still overbids the make
+  point — whether the payoff asymmetry rewards it is unmeasured.
 
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
