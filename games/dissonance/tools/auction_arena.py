@@ -163,6 +163,14 @@ def ask(g, seat, tier):
     # than a special one built for the harness.
     if os.environ.get("DIS_PROXY_DBL") and g["phase"] == "double":
         auc.pop("phase")
+    # THE AUCTION AS EVIDENCE (2026-08-14). `DIS_BID_PRIOR=1` ships the belief
+    # prior, so the searcher's worlds are drawn in proportion to how well they
+    # explain the bidding instead of uniformly. Off by default and absent from
+    # the request when off, which is byte-for-byte what every earlier run sent.
+    if os.environ.get("DIS_BID_PRIOR") and g["phase"] == "double":
+        prior = B.bid_prior_terms(g)
+        if prior:
+            auc["bid_prior"] = prior
     if tier.startswith("expert") and g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:

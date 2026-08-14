@@ -329,7 +329,7 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
                   wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved,
                   swap: Option<&SwapPolicy>) {
     let k = k.max(1);
-    deals_into(v, rng, k, cache);
+    deals_into(v, rng, k, cache, None);
     let todo = wanted & !cache.covered;
     let todo_opp = wanted_opp & !cache.covered_opp;
     if todo == 0 && todo_opp == 0 {
@@ -392,11 +392,104 @@ pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8) -> Vec<
 /// share one definition of what a world IS -- two samplers would drift, and the
 /// drift would be invisible (a slightly different world distribution is still a
 /// perfectly plausible-looking answer).
+/// THE AUCTION AS EVIDENCE — a belief prior over the declarer's hand (2026-08-14).
+///
+/// `determinize` samples the declarer's unseen cards UNIFORMLY from the pool.
+/// But the declarer WON AN AUCTION, and a bid is loud evidence about the hand
+/// that made it. MEASURED (`tools/beliefprobe.py`, 400 real rounds driven to the
+/// double phase, 200 resamples each): the declarer's real holding sits at the
+/// **0.765 percentile** of the uniform resample distribution, above the median
+/// in 87.5% of rounds, and the gap GROWS with the level bid — 0.706 at level 3,
+/// 0.830 at 5, 0.850 at 6. So every sampled world hands the declarer a weaker
+/// hand than they really hold, contracts look likelier to fail than they are,
+/// and a defender's search doubles too much. This is poker's "range" problem:
+/// the belief has to be conditioned on the actions taken.
+///
+/// The correction is IMPORTANCE SAMPLING with an exponential tilt: draw `tries`
+/// candidate worlds, weight each by `exp(tilt x strength)`, and keep one in
+/// proportion. `tilt = 0` reproduces uniform sampling exactly, which is what
+/// makes the A/B unconfoundable. Simulated over the same 400 rounds, a single
+/// tilt of 0.40 re-centres the sample at 0.509.
+///
+/// THE LIKELIHOOD IS A MODELLING CHOICE, NOT A RULE, and that is deliberate: it
+/// does not have to reproduce `bot.hand_strength` (whose suit-length terms would
+/// be a second copy needing its own parity fixture), only to ORDER two holdings
+/// the way a bidder would. So the curve crosses the wire as data — the
+/// `swap_policy_terms` pattern — and a re-fit server-side moves it with no Rust
+/// change and no wasm rebuild.
+#[derive(Clone, Debug, Default)]
+pub struct BidPrior {
+    /// Worth per rank, indexed by strength (0 = the deck's lowest).
+    pub curve: [f64; 10],
+    /// What holding a card in the contract's own denomination multiplies by.
+    pub trump_mult: f64,
+    /// The tilt. 0 IS uniform sampling, in Rust and end to end.
+    pub tilt: f64,
+    /// Whose hand the evidence is about — the seat that won the auction.
+    pub declarer: usize,
+    /// Candidate worlds drawn per world kept. 1 disables the resampling.
+    pub tries: usize,
+}
+
+impl BidPrior {
+    /// The declarer's whole holding in a candidate world: hand plus every card
+    /// still in their piles, which is exactly the thirteen they will play.
+    fn strength(&self, s: &State) -> f64 {
+        let tc = crate::cards::trump_class(s.trump);
+        let mut tot = 0.0;
+        let mut m = s.hand[self.declarer];
+        while m != 0 {
+            let c = m.trailing_zeros() as u8;
+            m &= m - 1;
+            tot += self.curve[rank(c) as usize]
+                * if esuit(c, s.trump) == tc { self.trump_mult } else { 1.0 };
+        }
+        for i in 0..3 {
+            let p = &s.pile[self.declarer][i];
+            for j in 0..p.n as usize {
+                let c = p.c[j];
+                tot += self.curve[rank(c) as usize]
+                    * if esuit(c, s.trump) == tc { self.trump_mult } else { 1.0 };
+            }
+        }
+        tot
+    }
+
+    /// One world, drawn in proportion to how well it explains the bidding.
+    fn draw(&self, v: &View, rng: &mut Rng, buf: &mut Vec<u8>) -> State {
+        let tries = self.tries.max(1);
+        if tries == 1 || self.tilt == 0.0 {
+            return v.determinize(rng, buf);
+        }
+        let cands: Vec<State> = (0..tries).map(|_| v.determinize(rng, buf)).collect();
+        let ss: Vec<f64> = cands.iter().map(|s| self.strength(s)).collect();
+        // Shifted by the max before exponentiating: the shift cancels out of
+        // the normalised weights and keeps `exp` off its overflow.
+        let hi = ss.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let w: Vec<f64> = ss.iter().map(|s| (self.tilt * (s - hi)).exp()).collect();
+        let tot: f64 = w.iter().sum();
+        if !(tot > 0.0) || !tot.is_finite() {
+            return cands.into_iter().next().unwrap();
+        }
+        // Fixed-point uniform: `Rng` deals in integers and a float draw here
+        // would be one more thing to keep deterministic across targets.
+        let mut r = tot * (rng.below(1 << 24) as f64) / ((1u32 << 24) as f64);
+        for (i, wi) in w.iter().enumerate() {
+            r -= wi;
+            if r <= 0.0 {
+                return cands[i];
+            }
+        }
+        cands[tries - 1]
+    }
+}
+
 /// It samples the world's talon too, even though a settled-contract caller has
 /// no use for one: an entry filled here must be indistinguishable from an entry
 /// filled by `solve_into`, or a later solve on the same key would run against a
 /// world whose talon was never drawn and would quietly price the deal as dealt.
-pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved) {
+pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved,
+                  prior: Option<&BidPrior>) {
     let k = k.max(1);
     if cache.deals.len() == k {
         return;
@@ -404,7 +497,10 @@ pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved) {
     // A different world count is a different sample: start over rather than
     // mixing two of them.
     let mut buf: Vec<u8> = Vec::with_capacity(16);
-    cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
+    cache.deals = (0..k).map(|_| match prior {
+        Some(p) => p.draw(v, rng, &mut buf),
+        None => v.determinize(rng, &mut buf),
+    }).collect();
     // The world's out-cards are whatever the determinizer did not place; three
     // of them are that world's talon. Sampled here, kept for the entry's whole
     // life (see the field's doc).

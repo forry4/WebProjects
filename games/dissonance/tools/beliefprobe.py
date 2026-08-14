@@ -18,6 +18,7 @@ confirmation is the follow-up, not the first question.
 
 Run:  PYTHONPATH=. python -m games.dissonance.tools.beliefprobe 400
 """
+import math
 import random
 import statistics
 import sys
@@ -101,12 +102,32 @@ def percentile(g, rng):
         return None
     base = strength(known_decl, trump)
     mine = strength(real, trump)
-    below = 0
-    for _ in range(DRAWS):
-        draw = rng.sample(pool, n_unknown)
-        if base + strength(draw, trump) < mine:
-            below += 1
-    return mine, below / DRAWS, g["auction"]["level"], len(pool), n_unknown
+    samples = [base + strength(rng.sample(pool, n_unknown), trump)
+               for _ in range(DRAWS)]
+    below = sum(1 for s in samples if s < mine)
+    return (mine, below / DRAWS, g["auction"]["level"], len(pool), n_unknown,
+            samples)
+
+
+def tilted(mine, samples, beta):
+    """Where the real holding sits once the sample is EXPONENTIALLY TILTED.
+
+    The fix is importance sampling: give a candidate world weight `exp(beta x
+    strength)`, so strong hands -- the ones consistent with having won the
+    auction -- are drawn more often. `beta = 0` is uniform, i.e. today.
+
+    Computed by REWEIGHTING the draws already taken rather than by resampling
+    them, which is the same quantity exactly and costs nothing, so a whole
+    grid of beta is one pass.
+    """
+    hi = max(samples)
+    num = tot = 0.0
+    for s in samples:
+        w = math.exp(beta * (s - hi))       # shifted for overflow, cancels out
+        tot += w
+        if s < mine:
+            num += w
+    return num / tot if tot else 0.5
 
 
 def main():
@@ -143,6 +164,38 @@ def main():
             continue
         bar = "#" * int(statistics.mean(sel) * 40)
         print(f"    {lv:>6} {len(sel):>5} {statistics.mean(sel):>16.3f}  {bar}")
+
+    # --- CAN A TILT ACTUALLY FIX THE CENTRING? ------------------------------
+    print(f"\n=== THE FIX, SIMULATED: exponential tilt `w = exp(beta x strength)` ===")
+    print(f"  beta = 0 is today. The target is a mean percentile of 0.500 --")
+    print(f"  a sample centred on the truth rather than under it.\n")
+    print(f"    {'beta':>6} {'mean pctile':>13} {'|error|':>9}")
+    grid = [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.7, 1.0]
+    best = None
+    for b in grid:
+        mu = statistics.mean(tilted(r[0], r[5], b) for r in rows)
+        flag = ""
+        if best is None or abs(mu - 0.5) < abs(best[1] - 0.5):
+            best, flag = (b, mu), "  <-- closest"
+        print(f"    {b:>6.2f} {mu:>12.3f} {abs(mu-0.5):>9.3f}{flag}")
+    print(f"\n  best single beta = {best[0]:.2f} -> mean percentile {best[1]:.3f}")
+
+    print(f"\n  ...and PER LEVEL, since the bias grows with the bid:")
+    print(f"    {'level':>6} {'n':>5} {'beta*':>7} {'pctile at beta*':>17}")
+    per = {}
+    for lv in sorted({r[2] for r in rows}):
+        sel = [r for r in rows if r[2] == lv]
+        if len(sel) < 8:
+            continue
+        b_best, mu_best = None, None
+        for b in [x / 100 for x in range(0, 121, 5)]:
+            mu = statistics.mean(tilted(r[0], r[5], b) for r in sel)
+            if b_best is None or abs(mu - 0.5) < abs(mu_best - 0.5):
+                b_best, mu_best = b, mu
+        per[lv] = b_best
+        print(f"    {lv:>6} {len(sel):>5} {b_best:>7.2f} {mu_best:>17.3f}")
+    if per:
+        print(f"\n  per-level tilt map: {per}")
 
 
 if __name__ == "__main__":

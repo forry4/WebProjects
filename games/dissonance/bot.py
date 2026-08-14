@@ -598,6 +598,66 @@ def swap_policy_terms() -> dict:
             "length": _SWAP_LENGTH}
 
 
+#: THE AUCTION AS EVIDENCE ABOUT THE DECLARER'S HAND (2026-08-14) -- how hard to
+#: tilt the searcher's world sample toward hands that would have bid this high.
+#:
+#: MEASURED, and the measurement is the whole reason this exists
+#: (`tools/beliefprobe.py`, 400 real rounds driven to the double phase, 200
+#: uniform resamples each): the declarer's REAL holding sits at the **0.765
+#: percentile** of the resampled distribution and above its median in 87.5% of
+#: rounds -- so every world the searcher looks at hands the declarer a weaker
+#: hand than they actually have. Contracts therefore look likelier to fail than
+#: they are, which is exactly the shape of the defender's measured over-doubling.
+#:
+#: The gap GROWS with the bid, which is why this is a map and not a constant:
+#: 0.706 at level 3, 0.770 at 4, 0.830 at 5, 0.850 at 6. The tilts below are
+#: fitted per level by the same probe, each chosen to re-centre that level's
+#: mean percentile on 0.500 -- measured 0.516 / 0.509 / 0.514 / 0.500 / 0.512
+#: at levels 2..6. A single tilt of 0.40 re-centres the pooled sample at 0.509
+#: and is what an unmapped level falls back to.
+#:
+#: STATED CAVEAT: the probe's auctions were driven by THIS bot, which bids on
+#: the same rank curve the probe measures with, so the two share a yardstick and
+#: the magnitude is inflated even though the direction is not -- winning an
+#: auction selects strong hands under any bidder. Re-fit against Expert-driven
+#: auctions before treating these as final.
+_BID_TILT = {1: 0.45, 2: 0.25, 3: 0.30, 4: 0.40, 5: 0.55, 6: 0.55}
+_BID_TILT_DEFAULT = 0.40
+#: Candidate worlds drawn per world kept. Sampling is cheap next to the solve
+#: that follows it, so this buys the resampling real resolution for nothing:
+#: a tilt can only prefer among the candidates it was actually offered.
+_BID_TRIES = 24
+
+
+def bid_prior_terms(g: dict) -> dict | None:
+    """The belief prior, AS DATA for the armed request -- see `bid::BidPrior`.
+
+    The LIKELIHOOD IS A MODELLING CHOICE, not a rule, and that is why only the
+    curve crosses the wire rather than `hand_strength` being mirrored in Rust:
+    it does not have to reproduce the bidder, only to ORDER two holdings the way
+    a bidder would. So a re-fit moves the sampler with no Rust change and no
+    wasm rebuild, and nothing needs a parity fixture holding two copies of a
+    suit-length term to one answer.
+
+    Returns None where there is no bid to condition on -- no settled contract,
+    or a mode whose currency this curve does not describe.
+    """
+    a = g["auction"]
+    if a.get("declarer", -1) < 0 or not a.get("level"):
+        return None
+    mode = E.mode_of(g)
+    if E.uses_card_points(mode) or E.has_dummy(mode):
+        return None                      # a different currency; unfitted here
+    return {
+        # Sliced to the base deck, exactly like `swap_policy_terms`: Rust takes
+        # its offset from the LENGTH, so the wide deck needs no flag.
+        "curve": list(_RANK_VALUE[E.NEXTRA:]),
+        "trump_mult": 2.0,
+        "tilt": _BID_TILT.get(int(a["level"]), _BID_TILT_DEFAULT),
+        "tries": _BID_TRIES,
+    }
+
+
 def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
     """Pick the talon exchange, or stand pat.
 

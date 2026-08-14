@@ -260,6 +260,33 @@ pub fn contract_from_json(v: &Value) -> Option<Contract> {
     })
 }
 
+/// The belief prior over the declarer's hand — see `bid::BidPrior`.
+///
+/// Every field optional and the whole block optional, because absent must mean
+/// "sample uniformly", which is what every server before this shipped and what
+/// the arm's own control needs. A `tilt` of 0 or `tries` of 1 is likewise
+/// exactly uniform, in Rust and end to end.
+pub fn bid_prior_from_json(v: &Value, declarer: usize) -> Option<crate::bid::BidPrior> {
+    let arr = v.get("curve")?.as_array()?;
+    let mut curve = [0.0f64; 10];
+    for (i, slot) in curve.iter_mut().enumerate() {
+        // SLICED TO THE DECK the room deals, exactly like `card_values`: a
+        // 32-card room ships eight entries and the wide deck ten, and the
+        // offset comes from the LENGTH rather than from a mode flag.
+        let off = 10usize.saturating_sub(arr.len());
+        *slot = if i < off { 0.0 } else {
+            arr.get(i - off).and_then(|x| x.as_f64()).unwrap_or(0.0)
+        };
+    }
+    Some(crate::bid::BidPrior {
+        curve,
+        trump_mult: v.get("trump_mult").and_then(|x| x.as_f64()).unwrap_or(1.0),
+        tilt: v.get("tilt").and_then(|x| x.as_f64()).unwrap_or(0.0),
+        declarer,
+        tries: v.get("tries").and_then(|x| x.as_u64()).unwrap_or(1) as usize,
+    })
+}
+
 /// The auction candidates the server says are legal, each already priced by
 /// `engine.payoff_terms` for the contract it would produce.
 ///
@@ -690,7 +717,10 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
                 entry = s;
             }
         }
-        crate::bid::deals_into(&view, rng, k.max(1), &mut entry);
+        // THE AUCTION AS EVIDENCE. Optional and absent = uniform sampling, so
+        // an older server (or the arm's own control) reproduces today exactly.
+        let prior = auc.get("bid_prior").and_then(|p| bid_prior_from_json(p, declarer));
+        crate::bid::deals_into(&view, rng, k.max(1), &mut entry, prior.as_ref());
         let mut sums = crate::bid::price_exact(&opts, &entry.deals, declarer, dd);
         // THE DOUBLING THRESHOLD (optional, default 0 = the plain argmax, so an
         // A/B against it cannot be confounded — the `opp_temp` discipline).
@@ -1668,6 +1698,126 @@ mod exact_double {
             }
         }
         assert_eq!(agreed, checked, "the sign flip is not an order reversal");
+    }
+}
+
+#[cfg(test)]
+mod belief_prior {
+    //! The auction, used as evidence about the declarer's hand.
+    //!
+    //! `determinize` samples uniformly, but the declarer WON an auction.
+    //! Measured over 400 real rounds (`tools/beliefprobe.py`), their real
+    //! holding sits at the 0.765 percentile of the uniform resample
+    //! distribution — so every world the searcher looks at is weaker than the
+    //! truth, and contracts look likelier to fail than they are.
+    use super::*;
+    use crate::bid::{deals_into, BidPrior, Solved};
+
+    fn a_classic_view() -> View {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"),
+                           "/../../games/dissonance/tests/fixtures/views.jsonl");
+        let text = std::fs::read_to_string(path).expect("views.jsonl");
+        text.lines().filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str::<Value>(l).unwrap())
+            .filter(|v| v["mode"].as_str() != Some("skat"))
+            .find_map(|v| view_from_json(&v))
+            .expect("a classic view fixture")
+    }
+
+    fn prior(tilt: f64, tries: usize, declarer: usize) -> BidPrior {
+        BidPrior {
+            // `bot._RANK_VALUE` sliced to the base deck, as the wire ships it.
+            curve: [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4],
+            trump_mult: 2.0, tilt, declarer, tries,
+        }
+    }
+
+    /// The declarer's holding in a world, on the prior's own scale.
+    fn strength(s: &crate::state::State, p: &BidPrior) -> f64 {
+        let tc = crate::cards::trump_class(s.trump);
+        let mut tot = 0.0;
+        let mut m = s.hand[p.declarer];
+        while m != 0 {
+            let c = m.trailing_zeros() as u8;
+            m &= m - 1;
+            tot += p.curve[crate::cards::rank(c) as usize]
+                * if crate::cards::esuit(c, s.trump) == tc { p.trump_mult } else { 1.0 };
+        }
+        for i in 0..3 {
+            let q = &s.pile[p.declarer][i];
+            for j in 0..q.n as usize {
+                let c = q.c[j];
+                tot += p.curve[crate::cards::rank(c) as usize]
+                    * if crate::cards::esuit(c, s.trump) == tc { p.trump_mult } else { 1.0 };
+            }
+        }
+        tot
+    }
+
+    fn sample(v: &View, p: Option<&BidPrior>, k: usize, seed: u64) -> Solved {
+        let mut cache = Solved::default();
+        let mut rng = crate::rng::Rng::new(seed);
+        deals_into(v, &mut rng, k, &mut cache, p);
+        cache
+    }
+
+    #[test]
+    fn a_zero_tilt_is_uniform_sampling_byte_for_byte() {
+        // The A/B is worthless if the control is not EXACTLY today. A zero tilt
+        // must not merely produce a similar distribution — it must consume the
+        // RNG identically and hand back the same worlds.
+        let v = a_classic_view();
+        let base = sample(&v, None, 8, 4242);
+        for p in [prior(0.0, 24, 0), prior(0.5, 1, 0)] {
+            let got = sample(&v, Some(&p), 8, 4242);
+            assert_eq!(got.deals.len(), base.deals.len());
+            for (a, b) in base.deals.iter().zip(&got.deals) {
+                assert_eq!(a.hand, b.hand, "a zero tilt (or one try) must be uniform");
+            }
+        }
+    }
+
+    #[test]
+    fn a_tilt_really_moves_the_sampled_hand_toward_the_strong_end() {
+        // Non-vacuity: a prior that is parsed, carried and then ignored would
+        // pass every other test in this file.
+        let v = a_classic_view();
+        let p0 = prior(0.0, 24, 1 - v.me);
+        let p1 = prior(0.6, 24, 1 - v.me);
+        let mean = |pr: &BidPrior, seed: u64| {
+            let c = sample(&v, Some(pr), 40, seed);
+            c.deals.iter().map(|d| strength(d, pr)).sum::<f64>() / c.deals.len() as f64
+        };
+        // Averaged over seeds: one sample of 40 can coincide, the direction
+        // cannot keep coinciding.
+        let (mut lo, mut hi) = (0.0, 0.0);
+        for s in 0..6u64 {
+            lo += mean(&p0, 900 + s);
+            hi += mean(&p1, 900 + s);
+        }
+        assert!(hi > lo,
+                "tilted sampling must favour stronger declarer hands ({hi:.2} vs {lo:.2})");
+    }
+
+    #[test]
+    fn the_prior_reads_off_the_wire_and_absent_means_uniform() {
+        assert!(bid_prior_from_json(&serde_json::json!({}), 0).is_none(),
+                "no curve means no prior at all, not a prior of zeroes");
+        let p = bid_prior_from_json(&serde_json::json!({
+            "curve": [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4],
+            "trump_mult": 2.0, "tilt": 0.4, "tries": 24,
+        }), 1).expect("a well-formed prior must read");
+        assert_eq!(p.declarer, 1);
+        assert_eq!(p.tries, 24);
+        assert!((p.tilt - 0.4).abs() < 1e-9);
+        // SLICED TO THE DECK, like `card_values`: eight entries land in the top
+        // eight slots so `rank()` indexes them directly under either deck.
+        assert_eq!(p.curve[9], 2.4);
+        assert_eq!(p.curve[2], 0.0);
+        // ...and the defaults are the ones that mean "do nothing".
+        let bare = bid_prior_from_json(&serde_json::json!({"curve": [1.0]}), 0).unwrap();
+        assert_eq!(bare.tilt, 0.0);
+        assert_eq!(bare.tries, 1);
     }
 }
 
