@@ -46,15 +46,19 @@ def _key(row):
 # --- the tier is wired at all ----------------------------------------------
 
 
-def test_expert_is_a_client_tier_that_searches_the_auction():
-    assert "expert" in m.DIFFICULTIES
-    # It is Hard plus an auction search, so it must be client-served: without a
-    # browser it falls through to the same server bot every tier does.
-    assert "expert" in m.CLIENT_AI_TIERS
-    assert set(m.SEARCH_AUCTION_TIERS) <= set(m.CLIENT_AI_TIERS)
-    # ...and Hard is deliberately NOT in it. If it were, the two tiers would be
-    # the same bot under two names.
-    assert "hard" not in m.SEARCH_AUCTION_TIERS
+def test_both_searching_tiers_run_the_auction_tree():
+    """THE LADDER MOVED UP A RUNG (2026-08-14). The tree measured +1.19 over
+    the myopic price list, so it became HARD; Expert is the tree with the soft
+    opponent model (+0.957 +- 0.454 over the same tree without it). Both are
+    client-served: without a browser either falls through to the server bot."""
+    assert {"hard", "expert"} <= set(m.DIFFICULTIES)
+    assert {"hard", "expert"} <= set(m.CLIENT_AI_TIERS)
+    assert set(m.SEARCH_AUCTION_TIERS) == {"hard", "expert"}
+    # ...and they must still be DIFFERENT bots, or the ladder has a rung that
+    # is a relabelling. The difference is the opponent model, and a temperature
+    # of 0 would BE the Hard tree -- the property the whole A/B rested on, so
+    # it is the thing to guard.
+    assert m.EXPERT_OPP_TEMP > 0
 
 
 def test_the_frontend_offers_exactly_the_tiers_the_server_accepts():
@@ -272,14 +276,17 @@ def test_the_payload_state_carries_the_standing_bids_jump():
 # --- the armed request -----------------------------------------------------
 
 
-def test_only_an_expert_room_gets_the_search_block(monkeypatch):
-    """Optional on the wire and ignored by any wasm that predates it, so the
-    cached-bundle window degrades to Hard rather than to nothing -- but a HARD
-    room must never carry it, or the two tiers are the same bot."""
+def test_the_two_searching_tiers_differ_by_the_opponent_model(monkeypatch):
+    """BOTH tiers carry the tree since 2026-08-14; what separates them is that
+    Expert's modelled opponent is good rather than clairvoyant. The block stays
+    optional on the wire, so a wasm that predates the soft model reads Expert's
+    payload as the Hard tree -- degrading one rung, never to nothing.
+
+    This is the test that would catch the ladder becoming a relabelling."""
     import asyncio
     import json as _json
 
-    for tier, want in (("expert", True), ("hard", False)):
+    for tier, want in (("expert", True), ("hard", True)):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         m.ROOMS.clear()
@@ -297,6 +304,16 @@ def test_only_an_expert_room_gets_the_search_block(monkeypatch):
         loop.run_until_complete(asyncio.sleep(0))
         auc = room["_ai_search"]["auction"]
         assert ("search" in auc) is want, f"{tier} carried search={'search' in auc}"
+        # THE RUNG ITSELF: Expert softens the opponent, Hard does not. A
+        # temperature of 0 would be the Hard tree exactly (pinned in Rust and
+        # by the arena's +0.0000 null control), so a soft model that arrived on
+        # Hard, or an Expert that lost it, is two tiers with one bot in them.
+        rules = auc["search"]["rules"]
+        if tier == "expert":
+            assert rules.get("opp_model") == "soft", rules
+            assert rules.get("opp_temp") == m.EXPERT_OPP_TEMP > 0, rules
+        else:
+            assert "opp_model" not in rules, rules
         # The TALON MODEL rides on every classic auction request, Hard's and
         # Expert's alike -- the leaf that prices contracts is shared, and
         # without the swap weights it under-prices every declarable contract
@@ -309,8 +326,10 @@ def test_only_an_expert_room_gets_the_search_block(monkeypatch):
         # (the measured lever -- see CLIENT_AI_AUCTION_WORLDS_EXPERT), 3 for
         # Hard's. A tier that got the search block but Hard's budget would be
         # the unmeasured configuration nobody arena'd.
-        want_k = (m.CLIENT_AI_AUCTION_WORLDS_EXPERT if want
-                  else m.CLIENT_AI_AUCTION_WORLDS)
+        # Both tree tiers get the tree's own budget: the pooling trap means a
+        # tree must be ONE tree over all its worlds, so the count is a property
+        # of the search shape rather than of the tier.
+        want_k = m.CLIENT_AI_AUCTION_WORLDS_EXPERT
         assert room["_ai_search"]["max_worlds"] == want_k, tier
         if want:
             # It has to survive the JSON boundary -- the armed request is

@@ -2184,6 +2184,52 @@ says is legal. No thresholds.
   `every_denomination_the_server_can_offer_survives_the_option_reader` walks the
   whole roster so the next denomination cannot repeat it.
 
+## THE LADDER MOVED UP A RUNG (2026-08-14): Hard is the tree, Expert softens the opponent
+
+`SEARCH_AUCTION_TIERS` is now `("hard", "expert")`. The auction tree was
+Expert's defining feature and measured **+1.19 ± 0.32** over the worlds-matched
+price list, so it became HARD. What Hard used to be — `bid::price`, the myopic
+option list — is no longer any tier's auction; it survives as the pricing for
+`declare`/`kontra`/`re`/`double` (no reply after them, so it is already exactly
+right there) and as the tie-break inside the tree.
+
+**EXPERT'S EDGE IS NOW THE OPPONENT MODEL, and it is one line of aggregation.**
+Both halves of this crate independently diagnosed the same flaw — here, "the
+modelled opponent knows our hand"; in CAMPAIGN.md, "standard PIMC is pessimistic
+in a specific way: its opponent sees our hand". The tree searches from OUR
+information set, so its sampled worlds all contain our real holding and a MIN
+node picks the reply that punishes *that* hand. A real opponent must reply
+against their own uncertainty and cannot. **This is not an information leak** —
+the bot is handed `view_for` and `test_bot_fairness.py` pins it by invariance;
+the clairvoyance is only inside the modelled opponent's choice.
+
+`OppModel::Soft(temp)` prices the consequence rather than modelling their
+information set (still "not built yet", and a much bigger program): a MIN node
+becomes a softmax over their replies at `temp` per-world payoff points, so they
+strongly prefer better answers but miss the punishing one when it is barely
+better. `EXPERT_OPP_TEMP = 5`.
+
+* **MEASURED +0.957 ± 0.454, 95% CI [+0.07, +1.85]**, 1550 CRN-paired
+  dd-resolved deals vs the same tree without it — three disjoint samples,
+  +1.07 (n=150), +1.02 (n=900), +0.82 (n=500). Comparable to the tree's own
+  gain over the price list.
+* **`temp = 0` IS the old tree**, in Rust and end to end (the arena's null
+  control reads exactly +0.0000) — which is what made the A/B unconfoundable,
+  the discipline CAMPAIGN.md's IIMC blend used (`lambda = 0` reproduces
+  `pimc:8`).
+* **It costs no solves.** A MIN node already evaluates every child to take the
+  min and `bid::Solved` is cached per hand, so the tier is the same work in the
+  same time. That is why it could ship on a ~2σ result: there is no latency
+  argument on the other side.
+* Swept 2 / 5 / 12 at n=150 (−0.36 / +1.07 / +0.99). 2 is too cold to move
+  anything; 5 and 12 are indistinguishable at that n, so read this as
+  "somewhere around 5–12", not a tuned optimum.
+* **A METHOD NOTE PAID FOR IN THIS RUN:** a running total at n=432 read −0.21
+  and was called as "heading for a wash"; the completed sample said +1.02.
+  Interim totals on a σ≈18 quantity are not evidence — only completed,
+  pre-declared samples are. This is the same trap the Expert-vs-Hard campaign
+  recorded from the other direction (+1.71 at n=300, −0.28 at n=2250).
+
 ## EXPERT — the auction as a game tree (2026-08-08)
 
 A fourth tier: `easy` / `normal` / `hard` / **`expert`**. Expert is Hard in

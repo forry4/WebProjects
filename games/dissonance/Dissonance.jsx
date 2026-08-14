@@ -109,8 +109,11 @@ const TRICK_HOLD_MS = 700;
 const BOT_TIERS = [
   { id: "easy", name: "Easy", desc: "Plays legally, blunders often" },
   { id: "normal", name: "Normal", desc: "Knows which tricks it wants" },
-  { id: "hard", name: "Hard", desc: "Solves the hand exactly, in your browser" },
-  { id: "expert", name: "Expert", desc: "Hard, and searches the auction as a game tree" },
+  // The ladder moved up a rung on 2026-08-14: the auction tree was Expert's
+  // defining feature and is now Hard's, and Expert is the tree with an opponent
+  // model that does not assume it can see your cards.
+  { id: "hard", name: "Hard", desc: "Solves the hand exactly and searches the auction, in your browser" },
+  { id: "expert", name: "Expert", desc: "Hard, and reads the bidding without assuming it can see your hand" },
 ];
 const BOT_TIER_IDS = BOT_TIERS.map((t) => t.id);   // what a remembered tier is validated against
 

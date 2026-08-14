@@ -65,15 +65,50 @@ DEFAULT_DIFFICULTY = "normal"
 CLIENT_AI_TIERS = ("hard", "expert")
 
 #: Tiers whose AUCTION is a MINIMAX over the bidding tree rather than a price
-#: list. Everything else about Expert is Hard: the same PIMC card play, the same
-#: solved worlds, the same protocol -- `engine.auction_search_payload` simply
-#: rides along on the armed request and `auc_search.rs` values each option by
-#: what the auction is worth AFTER the opponent answers it.
+#: list. `engine.auction_search_payload` rides along on the armed request and
+#: `auc_search.rs` values each option by what the auction is worth AFTER the
+#: opponent answers it.
 #:
-#: The other client-searched phases are deliberately NOT in this: `declare`,
-#: `kontra`, `re` and `double` have no reply after them, so a tree over them
-#: would be one node deep and Hard's pricing is already the whole answer.
-SEARCH_AUCTION_TIERS = ("expert",)
+#: **HARD IS IN THIS LIST SINCE 2026-08-14.** The whole ladder moved up a rung:
+#: the tree was Expert's defining feature and measured +1.19 +- 0.32 over the
+#: worlds-matched price list, so it became the Hard tier, and Expert took the
+#: soft-opponent model below. What Hard used to be -- `bid::price`, the myopic
+#: option list -- is no longer any tier's auction; it survives as the pricing
+#: for `declare`/`kontra`/`re`/`double`, which have no reply after them and so
+#: are already exactly right that way, and as the tie-break inside the tree.
+#:
+#: The other client-searched phases are deliberately NOT in this: a tree over
+#: them would be one node deep, per the paragraph above.
+SEARCH_AUCTION_TIERS = ("hard", "expert")
+
+#: EXPERT'S EDGE OVER HARD, and the whole of it (2026-08-14): the tree's
+#: modelled opponent is good rather than CLAIRVOYANT. The search runs from our
+#: information set, so at every MIN node the opponent chooses knowing our exact
+#: hand and always finds the punishing reply -- against that phantom aggression
+#: is worthless, so the tree shades our every line down. `OppModel::Soft`
+#: replaces the exact min with a softmax over their replies at this temperature
+#: (per-world payoff points), pricing "they usually find the best answer, but
+#: not when it is barely better than the others".
+#:
+#: MEASURED +0.957 +- 0.454 payoff/round, 95% CI [+0.07, +1.85], over 1550
+#: CRN-paired dd-resolved deals against the same tier without it -- three
+#: disjoint samples (+1.07 at n=150, +1.02 at n=900, +0.82 at n=500). For
+#: scale that is the size of the tree's own gain over the price list.
+#:
+#: IT COSTS NOTHING AT SERVING TIME. A MIN node already evaluates every child
+#: to take the min, and `bid::Solved` is cached per hand, so the tier is the
+#: same solves in the same time -- only the aggregation differs. That is also
+#: why it could ship on a one-sigma-ish result without a latency argument
+#: against it.
+#:
+#: 5 was picked from a 3-point sweep (2 / 5 / 12 at n=150 each: -0.36 / +1.07 /
+#: +0.99). 2 is too cold to change anything and measured negative; 12 is nearly
+#: as good as 5 and the two are indistinguishable at that n, so treat this as
+#: "somewhere around 5-12" rather than a tuned optimum.
+#:
+#: **0 IS EXACTLY THE OLD TREE**, in the Rust and end to end (the arena's null
+#: control reads +0.0000), which is what made the A/B unconfoundable.
+EXPERT_OPP_TEMP = 5.0
 
 #: Phases beyond `play` whose decision the browser searches. The talon and the
 #: swap are deliberately absent: they are choices about INFORMATION, and what
@@ -718,9 +753,18 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # EXPERT: the same options, valued by a tree instead of a price.
             # Optional on the wire and ignored by any wasm that predates it, so
             # the cached-bundle window degrades to Hard rather than to nothing.
-            if _valid_difficulty(room.get("ai_difficulty")) in SEARCH_AUCTION_TIERS:
+            tier = _valid_difficulty(room.get("ai_difficulty"))
+            if tier in SEARCH_AUCTION_TIERS:
                 search = engine.auction_search_payload(g)
                 if search:
+                    # EXPERT alone softens the modelled opponent -- see
+                    # EXPERT_OPP_TEMP. Optional on the wire and defaulted to the
+                    # exact minimax, so a wasm that predates it plays the Hard
+                    # tree: the cached-bundle window degrades one rung, never
+                    # to nothing.
+                    if tier == "expert":
+                        search["rules"]["opp_model"] = "soft"
+                        search["rules"]["opp_temp"] = EXPERT_OPP_TEMP
                     room["_ai_search"]["auction"]["search"] = search
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()
