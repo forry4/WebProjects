@@ -141,8 +141,14 @@ def ask(g, seat, tier):
     opts = E.auction_payoff_options(g)
     if not opts:
         return None, None, None
+    # `double` joins kontra/re here, per main.py: all three are the DEFENDER
+    # betting on the DECLARER's settled contract, so the solve is from the
+    # declarer's side and only the sign belongs to the asker. `DIS_OLD_DBL=1`
+    # ships the pre-2026-08-14 field (the acting seat) so the bug can be
+    # arena'd against its own fix rather than argued about.
+    settled = ("kontra", "re") if os.environ.get("DIS_OLD_DBL") else ("double", "kontra", "re")
     auc = {"phase": g["phase"],
-           "declarer": (g["auction"]["declarer"] if g["phase"] in ("kontra", "re") else seat),
+           "declarer": (g["auction"]["declarer"] if g["phase"] in settled else seat),
            "options": opts}
     if tier.startswith("expert") and g["phase"] == "auction":
         s = E.auction_search_payload(g)

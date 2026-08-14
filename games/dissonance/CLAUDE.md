@@ -1139,6 +1139,58 @@ sacrifice-overbidding it was made of gets taxed away.
 sacrifice at all until the pass was priced, so a sweep can only ever produce the
 first row.
 
+### THE SEARCHING TIERS' DOUBLE WAS PRICED FROM THE WRONG SIDE (found + fixed 2026-08-14)
+
+**`auction.declarer` names who would be DECLARING under the options, and
+`double` was missing from the list of phases that answer "the opponent".** It
+read `g["auction"]["declarer"] if phase in ("kontra", "re") else seat`, and at
+the double phase the acting seat is the DEFENDER while the options describe the
+declarer's settled contract. `wire::answer_auction` derives TWO things from that
+one field — which side the determinized worlds are solved for (the declarer
+LEADS trick 1) and the SIGN the answer comes back with — so the tier solved the
+wrong position and then returned it declarer-signed and un-negated. The
+defender's argmax picked the branch best for the DECLARER.
+
+* **It failed in this tier's signature way**: two legal options, a plausible
+  number on each, nothing red, and a room that says Hard. The only visible
+  symptom was a Double taken about as often on contracts that made as on ones
+  that failed — which reads like a hard judgement call, not a bug.
+* **MEASURED against exact ground truth** (`tools/dblprobe.py`, 150 real rounds
+  driven to the double phase, each branch resolved by an exact double-dummy
+  solve of the REAL deal): the shipped search found **2 of the 13** contracts
+  that deserved a Double and doubled **16.8% of contracts that MADE against
+  15.4% of contracts that FAILED** — no discrimination at all. Naming the real
+  declarer takes it to **9 of 13** (69.2% of failures) with false alarms
+  unchanged at 23, and agreement with truth 77.3% → 82.0%.
+* **THE FIX IS SERVER-SIDE AND REACHES A CACHED WASM**, which is why it needs no
+  expand/contract: the artifact derives both the solve's side and the sign from
+  this field, so an older bundle starts pricing the Double correctly the moment
+  the server stops lying to it.
+* Gated by `test_client_ai.test_a_settled_contract_names_its_real_declarer_not_
+  the_seat_being_asked`, written over ALL THREE settled-contract phases rather
+  than the one that broke — kontra and re were always right, and the next phase
+  of this shape should not have to rediscover the rule. Verified non-vacuous
+  against the old tuple.
+
+**...and the Double is now priced by an EXACT CONTRACT SOLVE** (`bid::price_
+exact`, routed on `auction.phase == "double"` — a field the server has shipped
+since the auction search and nothing read, so this needed no wire change). Every
+other auction decision chooses between ~50 candidate CONTRACTS and can only
+afford the points proxy; the Double chooses between two STAKES on one settled
+contract, so the exact answer costs `2 x k` solves. Scoped to `double`:
+skat's `kontra`/`re` are the identical shape and a one-word change, but skat is
+separately unmeasured; `declare` is not settled and must keep the proxy.
+
+* **The proxy and the exact solve DISAGREE on single worlds** (swept over levels
+  2-8 in `wire::exact_double`; at level 4 alone they agree on every deal, which
+  is a fact about level 4 and not about the pricers) — but summed over the 8
+  sampled worlds the two got the same SIGN on all 150 probe rounds and flipped
+  **zero decisions**. The magnitudes move a lot; the argmax does not.
+* So on the probe's distribution the declarer-side bug was the whole effect, and
+  what binds at this decision is the defender's genuine uncertainty about the
+  declarer's 7 unseen hand cards — not leaf accuracy. Read the arena numbers
+  before spending anything more here.
+
 * **The server tier declines every Double**, because it cannot TELL the two
   apart. The obvious signal is the defender's own holding and it does not
   work: the set rate is 38-43% within normal play at EVERY strength gate and

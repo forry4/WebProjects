@@ -728,7 +728,30 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                 # Whoever would be DECLARING under these options -- not always
                 # the seat being asked. A defender weighing Kontra is pricing the
                 # OPPONENT's contract; only the sign at the end is theirs.
-                "declarer": (g["auction"]["declarer"] if g["phase"] in ("kontra", "re")
+                #
+                # **DOUBLE BELONGS IN THIS LIST AND WAS MISSING** (fixed
+                # 2026-08-14). Classic's Double is the defender's bet on the
+                # DECLARER's settled contract, exactly as Kontra is -- but the
+                # phase was absent here, so the request named the acting seat,
+                # i.e. the DEFENDER, as declarer. The searcher then solved every
+                # world with the wrong seat leading trick 1 and priced the
+                # contract as one the defender was buying, and `sign` came out
+                # +1 so the pick was not even negated back.
+                #
+                # It failed SILENTLY, in the way this tier always does: two legal
+                # options, a plausible number on each, and a Double taken about
+                # as often on contracts that made as on contracts that failed.
+                # Measured against exact ground truth over 150 real rounds, the
+                # searcher found 2 of the 13 contracts that deserved a Double;
+                # with the phase in this list it finds 9 of 13.
+                #
+                # NOTE THIS FIXES A CACHED WASM TOO, which is why it needs no
+                # expand/contract: `answer_auction` derives both the solve's
+                # declarer and the answer's sign from this one field, so an
+                # older artifact starts pricing the Double correctly the moment
+                # the server stops lying to it.
+                "declarer": (g["auction"]["declarer"]
+                             if g["phase"] in ("double", "kontra", "re")
                              else seat),
                 "options": opts,
                 "pass": ({"kind": "pass"}

@@ -657,6 +657,44 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
         return Ok((Vec::new(), false));
     }
     let sign = if view.me == declarer { 1.0 } else { -1.0 };
+    // THE DOUBLE IS PRICED EXACTLY, NOT BY THE POINTS PROXY (2026-08-14).
+    //
+    // `auction.phase` has been on the armed request since the auction search
+    // shipped and nothing read it, so this needs no wire change at all and an
+    // older wasm simply goes on pricing the Double the myopic way.
+    //
+    // Every other auction decision is a choice between ~50 candidate CONTRACTS
+    // and can only afford the points proxy. The Double is a choice between two
+    // STAKES on one settled contract, so the exact answer costs 2 x k solves —
+    // and it is the decision the proxy is worst at, because "will this contract
+    // be set" is a question about the distribution, not about a point estimate
+    // of the declarer's total. See `bid::price_exact` for the measurement.
+    //
+    // Scoped to `double` deliberately. Skat's `kontra`/`re` have the identical
+    // shape and would be a one-word change, but skat is separately unmeasured
+    // and this is a behaviour change; `declare` is NOT settled (many contracts)
+    // and must keep the proxy.
+    if auc.get("phase").and_then(|x| x.as_str()) == Some("double") {
+        let mut entry = crate::bid::Solved::default();
+        // Keyed like any other entry, so a re-broadcast of the same armed
+        // decision reuses the sample instead of drawing a fresh one — XORed
+        // with a constant so an exactly-priced entry can never be mistaken for
+        // a points-solved one. `hand_key` would separate them today anyway (the
+        // talon swap moves the hand between the last bid and the Double), but
+        // "today's phase order happens to make the keys differ" is exactly the
+        // kind of reasoning the contract-table bug was built on.
+        let key = crate::bid::hand_key(&view, declarer, k.max(1)) ^ 0xD0B1;
+        let hit = matches!(cache.as_ref(), Some((k0, _)) if *k0 == key);
+        if let Some((_, s)) = cache.take() {
+            if hit {
+                entry = s;
+            }
+        }
+        crate::bid::deals_into(&view, rng, k.max(1), &mut entry);
+        let sums = crate::bid::price_exact(&opts, &entry.deals, declarer, dd);
+        *cache = Some((key, entry));
+        return Ok((sums.iter().map(|x| x * sign).collect(), hit));
+    }
     // EXPERT: a tree instead of a price list. It needs the same solved worlds,
     // just more of them — whatever either seat could still bid, on both sides —
     // so the extra denominations join the same cache request rather than being
@@ -1418,6 +1456,139 @@ mod swap_policy_parity {
         // Both BRANCHES, or the assertion above is half a test: random talons
         // essentially never produce a pat, so the generator engineers them.
         assert!(swaps > 300 && pats >= 10, "{swaps} swaps / {pats} pats");
+    }
+}
+
+#[cfg(test)]
+mod exact_double {
+    //! The Double is priced by an exact contract solve, not the points proxy.
+    //!
+    //! Both halves of this failed SILENTLY before 2026-08-14 and neither showed
+    //! up as anything but a bot that doubled at about the base rate:
+    //!
+    //! * the server named the ACTING SEAT as declarer, so the worlds were
+    //!   solved with the defender leading a contract they were not buying (that
+    //!   half is fixed in `main.py`, and these tests pin the consequence here —
+    //!   `answer_auction` derives both the solve's side and the answer's sign
+    //!   from that one field);
+    //! * and the value was `Option_::payoff(guaranteed_points, can_duck)`, a
+    //!   POINT ESTIMATE, on a decision that is entirely about whether the
+    //!   contract will be SET.
+    use super::*;
+    use crate::bid::{price, price_exact, Option_};
+    use crate::dd::Dd;
+
+    /// The two options `engine.auction_payoff_options` ships at the double
+    /// phase: one settled contract, two stakes. The shipped classic terms at
+    /// level `n`, jump 0 — `make` N^2 + 10, `set_base` N + 10, short 5, the
+    /// Double doubling both bases and adding the ramp.
+    fn double_options_at(n: i32) -> Vec<Option_> {
+        let base = Option_ {
+            denom: 2, target: n, make: n * n + 10, over: 1, set_base: n + 10,
+            short: 5, ramp: 0, null: 20, opp: false, redeal: false,
+        };
+        vec![
+            Option_ { make: base.make * 2, over: 2, set_base: base.set_base * 2,
+                      ramp: 1, ..base },
+            base,
+        ]
+    }
+
+    fn double_options() -> Vec<Option_> {
+        double_options_at(4)
+    }
+
+    #[test]
+    fn an_exact_double_price_is_the_solvers_own_contract_value() {
+        let mut dd = Dd::new(16);
+        let opts = double_options();
+        let mut differed = 0;
+        for seed in 0..8u64 {
+            let g = crate::game::Game::deal(&mut crate::rng::Rng::new(seed + 900), 2, 0);
+            let sums = price_exact(&opts, std::slice::from_ref(&g.s), 0, &mut dd);
+            // ...and the same thing asked directly of the solver.
+            for (i, o) in opts.iter().enumerate() {
+                let c = crate::dd::Contract {
+                    level: o.target, declarer: 0, make_base: o.make, over: o.over,
+                    set_base: o.set_base, short: o.short, ramp: o.ramp,
+                    null: Some(o.null),
+                };
+                let s = State { trump: o.denom, trick: 0, led: -1, leader: 0,
+                                pts: [0, 0], escored: 0, ..g.s };
+                dd.clear();
+                assert_eq!(sums[i], dd.solve_contract(&s, &c) as f64,
+                           "seed {seed}, option {i}: the exact price is not the solve");
+            }
+            if sums[0] != sums[1] {
+                differed += 1;
+            }
+        }
+        // NON-VACUITY: if the stake never moved the value, this test would pass
+        // against a pricer that ignored `ramp` and both `doubling`s alike.
+        assert!(differed >= 4,
+                "the Double changed the exact value in only {differed} of 8 deals");
+    }
+
+    #[test]
+    fn the_exact_price_and_the_points_proxy_really_are_different_answers() {
+        // The whole change rests on the proxy being wrong often enough to
+        // matter. If these agreed everywhere there would be nothing to buy.
+        // Swept over the LADDER, not pinned to one rung: at level 4 a random
+        // deal is usually clearly on one side of the contract and the two agree
+        // on all of them, which is a fact about level 4 and not about the
+        // pricers. The disagreements live where the margin is thin.
+        let mut dd = Dd::new(16);
+        let (mut disagreed, mut n) = (0, 0);
+        for level in 2..=8i32 {
+            let opts = double_options_at(level);
+            for seed in 0..12u64 {
+                let g = crate::game::Game::deal(&mut crate::rng::Rng::new(seed + 300), 2, 0);
+                dd.clear();
+                let exact = price_exact(&opts, std::slice::from_ref(&g.s), 0, &mut dd);
+                // The proxy: one world, solved for POINTS, priced by the option.
+                let mut w = crate::bid::World::default();
+                dd.clear();
+                let diff = dd.solve(&g.s) as i32;
+                let pool = g.s.pool() as i32;
+                w.pts[2] = (pool + diff) / 2;
+                w.duck[2] = dd.null_no_even_makeable(&g.s, 0);
+                let proxy = price(&opts, &[w], 1 << 2, 0);
+                // The DECISION each would take: double iff it costs the declarer.
+                n += 1;
+                if (exact[0] < exact[1]) != (proxy[0] < proxy[1]) {
+                    disagreed += 1;
+                }
+            }
+        }
+        assert!(disagreed > 0,
+                "the exact price agreed with the points proxy on all {n} deals — \
+                 either the proxy is being called for both, or the sample is too \
+                 easy to separate them");
+    }
+
+    #[test]
+    fn the_double_phase_answer_is_signed_for_the_defender_who_is_asked() {
+        // The defender picks the ARGMAX of what comes back, so a contract that
+        // is cold for the declarer must return the doubled option HIGHER. This
+        // is the property the wrong `declarer` field destroyed: it left the
+        // answer declarer-signed and un-negated, so the pick maximised the
+        // DECLARER's take.
+        let opts = double_options();
+        let mut dd = Dd::new(16);
+        let (mut checked, mut agreed) = (0, 0);
+        for seed in 0..10u64 {
+            let g = crate::game::Game::deal(&mut crate::rng::Rng::new(seed + 500), 2, 0);
+            dd.clear();
+            let decl = price_exact(&opts, std::slice::from_ref(&g.s), 0, &mut dd);
+            // Declarer-signed, so doubling is right for the DEFENDER exactly
+            // when it lowers this. Signed for the defender, that flips.
+            let defender: Vec<f64> = decl.iter().map(|x| -x).collect();
+            checked += 1;
+            if (decl[0] < decl[1]) == (defender[0] > defender[1]) {
+                agreed += 1;
+            }
+        }
+        assert_eq!(agreed, checked, "the sign flip is not an order reversal");
     }
 }
 

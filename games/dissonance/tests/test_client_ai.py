@@ -433,6 +433,75 @@ def test_the_classic_opener_gets_no_pass_because_it_may_not():
     assert not [o for o in E.auction_payoff_options(g) if o["move"]["kind"] == "pass"]
 
 
+def _to_double(seed=3):
+    """A classic room parked on the DEFENDER's Double, with the bot defending."""
+    g = E.new_game(["alice", m.AI_PID], random.Random(seed), opener=0)
+    E.apply_bid(g, 0, 3, 2)
+    E.apply_pass(g, 1)
+    E.apply_swap(g, 0, None, None)
+    assert g["phase"] == "double"
+    return g
+
+
+def _to_kontra(seed=3):
+    """A skat room parked on the DEFENDER's Kontra, with the bot defending."""
+    g = E.new_game(["alice", m.AI_PID], random.Random(seed), opener=0, mode="skat")
+    E.apply_skat_bid(g, 0, 12)
+    E.apply_pass(g, 1)
+    E.apply_look(g, 0)
+    E.apply_swap(g, 0, None, None)
+    E.apply_declare(g, 0, 3, 4, False, False)
+    assert g["phase"] == "kontra"
+    return g
+
+
+def test_a_settled_contract_names_its_real_declarer_not_the_seat_being_asked():
+    """The bug that made classic's Double a coin flip (found + fixed 2026-08-14).
+
+    `auction.declarer` is who would be DECLARING under these options, and
+    `wire::answer_auction` derives two different things from it: which side the
+    determinized worlds are solved for (the declarer LEADS trick 1), and the
+    SIGN the answer comes back with. At the double phase the acting seat is the
+    DEFENDER and the options describe the opponent's settled contract, so
+    naming the acting seat solved the wrong position AND returned it
+    declarer-signed and un-negated -- the defender then picked the branch best
+    for the declarer.
+
+    Silent in the usual way: two legal options, a plausible number on each. The
+    only visible symptom was a tier that doubled contracts that made about as
+    often as ones that failed. Measured against exact ground truth over 150 real
+    rounds, the search found 2 of the 13 contracts that deserved a Double;
+    naming the real declarer finds 9 of 13.
+
+    Kontra and Re always got this right; `double` was simply missing from the
+    tuple, which is why the test is written over ALL THREE settled-contract
+    phases rather than over the one that broke.
+    """
+    for mode, phase, g in (("classic", "double", _to_double()),
+                           ("skat", "kontra", _to_kontra())):
+        seat = E.turn_seat(g)
+        decl = g["auction"]["declarer"]
+        assert seat == 1 - decl, f"{phase}: the DEFENDER is the one who acts"
+        # ...and the BOT is that defender, so `_arm` asks about the right seat.
+        assert g["seats"][seat] == m.AI_PID
+        room = {"players": {"alice": "Alice"}, "sockets": {}, "status": "playing",
+                "host": "alice", "game": g, "meta": {"alice": {"token": "tok"}},
+                "vs_ai": True, "ai_player": m.AI_PID, "ai_difficulty": "hard",
+                "mode": mode, "client_ai": True}
+        m.ROOMS["r1"] = room
+        task = _arm(room)
+        auc = room["_ai_search"]["auction"]
+        assert auc["phase"] == phase
+        assert auc["declarer"] == decl, (
+            f"{phase}: the request must name the contract's own declarer, "
+            f"not the seat being asked")
+        run(m._handle_ai_move(_FakeWS(), "r1", "alice",
+                              {"decision": room["_ai_search"]["decision"],
+                               "move": auc["options"][0]["move"]}))
+        run(task)
+        m.ROOMS.pop("r1", None)
+
+
 def test_a_skat_pass_out_is_priced_at_zero_as_a_redeal():
     """Nothing stands, so passing throws the hand in -- a fresh deal neither
     seat has seen, worth 0 by symmetry. Priced rather than omitted so `pass` is

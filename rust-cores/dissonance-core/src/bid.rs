@@ -329,47 +329,7 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
                   wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved,
                   swap: Option<&SwapPolicy>) {
     let k = k.max(1);
-    if cache.deals.len() != k {
-        // A different world count is a different sample: start over rather than
-        // mixing two of them.
-        let mut buf: Vec<u8> = Vec::with_capacity(16);
-        cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
-        // The world's out-cards are whatever the determinizer did not place;
-        // three of them are that world's talon. Sampled here, kept for the
-        // entry's whole life (see the field's doc).
-        cache.shown = cache.deals.iter().map(|d| {
-            let mut placed: Mask = d.hand[0] | d.hand[1];
-            for q in 0..2 {
-                for i in 0..3 {
-                    let p = &d.pile[q][i];
-                    for j in 0..p.n as usize {
-                        placed |= 1 << p.c[j];
-                    }
-                }
-            }
-            let mut out = crate::cards::ALL & !placed;
-            let mut shown: Mask = 0;
-            for _ in 0..3 {
-                if out == 0 {
-                    break;
-                }
-                let n = out.count_ones();
-                let mut pick = rng.below(n as usize) as u32;
-                let mut o = out;
-                while pick > 0 {
-                    o &= o - 1;
-                    pick -= 1;
-                }
-                let c = o.trailing_zeros();
-                shown |= 1 << c;
-                out &= !(1 << c);
-            }
-            shown
-        }).collect();
-        cache.worlds = vec![World::default(); k];
-        cache.covered = 0;
-        cache.covered_opp = 0;
-    }
+    deals_into(v, rng, k, cache);
     let todo = wanted & !cache.covered;
     let todo_opp = wanted_opp & !cache.covered_opp;
     if todo == 0 && todo_opp == 0 {
@@ -419,6 +379,130 @@ pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8) -> Vec<
             } else {
                 o.payoff(w.pts[d], w.duck[d]) as f64
             };
+        }
+    }
+    sums
+}
+
+/// Sample the determinized deals WITHOUT solving anything on them.
+///
+/// `solve_into` does this as its first step and then pays for a full points
+/// solve per denomination. A decision on a SETTLED contract wants the deals and
+/// none of that work, so the sampling is factored out here and both callers
+/// share one definition of what a world IS -- two samplers would drift, and the
+/// drift would be invisible (a slightly different world distribution is still a
+/// perfectly plausible-looking answer).
+/// It samples the world's talon too, even though a settled-contract caller has
+/// no use for one: an entry filled here must be indistinguishable from an entry
+/// filled by `solve_into`, or a later solve on the same key would run against a
+/// world whose talon was never drawn and would quietly price the deal as dealt.
+pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved) {
+    let k = k.max(1);
+    if cache.deals.len() == k {
+        return;
+    }
+    // A different world count is a different sample: start over rather than
+    // mixing two of them.
+    let mut buf: Vec<u8> = Vec::with_capacity(16);
+    cache.deals = (0..k).map(|_| v.determinize(rng, &mut buf)).collect();
+    // The world's out-cards are whatever the determinizer did not place; three
+    // of them are that world's talon. Sampled here, kept for the entry's whole
+    // life (see the field's doc).
+    cache.shown = cache.deals.iter().map(|d| {
+        let mut placed: Mask = d.hand[0] | d.hand[1];
+        for q in 0..2 {
+            for i in 0..3 {
+                let p = &d.pile[q][i];
+                for j in 0..p.n as usize {
+                    placed |= 1 << p.c[j];
+                }
+            }
+        }
+        let mut out = crate::cards::ALL & !placed;
+        let mut shown: Mask = 0;
+        for _ in 0..3 {
+            if out == 0 {
+                break;
+            }
+            let n = out.count_ones();
+            let mut pick = rng.below(n as usize) as u32;
+            let mut o = out;
+            while pick > 0 {
+                o &= o - 1;
+                pick -= 1;
+            }
+            let c = o.trailing_zeros();
+            shown |= 1 << c;
+            out &= !(1 << c);
+        }
+        shown
+    }).collect();
+    cache.worlds = vec![World::default(); k];
+    cache.covered = 0;
+    cache.covered_opp = 0;
+}
+
+/// PRICE A SETTLED CONTRACT EXACTLY: one `solve_contract` per option per world.
+///
+/// WHY THIS EXISTS (2026-08-14). `price` values an option as
+/// `Option_::payoff(guaranteed_points, can_duck)` — the POINTS proxy, whose
+/// documented error is the adaptive Null threat and which is one-sided toward
+/// under-valuing declaring. That is a reasonable trade in the AUCTION, where
+/// ~50 candidates would each need their own contract solve. It is the wrong
+/// trade for the DOUBLE, where:
+///
+/// * there is exactly ONE contract and two stakes on it, so the exact answer
+///   costs `2 x k` solves rather than `options x k`;
+/// * the question being asked is precisely "will this contract be SET", which
+///   is the one question a points estimate answers worst — a point estimate of
+///   the declarer's total says nothing about the distribution the bet is on;
+/// * and the bet is settled, so there is no reply to model and no tree to run.
+///
+/// MEASURED against exact ground truth over 150 real rounds at the double
+/// phase: the shipped points pricer doubled 16.8% of contracts that MADE and
+/// 15.4% of contracts that FAILED — no discrimination at all.
+///
+/// Every number in `Option_` came off the wire from `engine.payoff_terms`, so
+/// this rebuilds the same `Contract` the DD review and the card search price,
+/// and nothing about the scoring is written twice.
+pub fn price_exact(opts: &[Option_], deals: &[State], declarer: usize,
+                   dd: &mut Dd) -> Vec<f64> {
+    let mut sums = vec![0f64; opts.len()];
+    for base in deals {
+        for (i, o) in opts.iter().enumerate() {
+            // A pass-out is a fresh deal, worth 0 by symmetry — and there is
+            // nothing to solve. Kept for shape: every caller's option list is
+            // the server's, and an entry it does not understand must price at
+            // 0 rather than at a default `World`'s plausible-looking number.
+            if o.redeal {
+                continue;
+            }
+            // `opp` prices the contract with the OTHER seat declaring — which
+            // is a different POSITION (the declarer leads), not a sign flip of
+            // this one. No settled-contract phase ships one today; handled so
+            // that a list which does cannot be silently mispriced.
+            let decl = if o.opp { 1 - declarer } else { declarer };
+            let s = State {
+                trump: o.denom,
+                trick: 0,
+                led: -1,
+                leader: decl as u8,
+                pts: [0, 0],
+                escored: 0,
+                ..*base
+            };
+            let c = crate::dd::Contract {
+                level: o.target,
+                declarer: decl,
+                make_base: o.make,
+                over: o.over,
+                set_base: o.set_base,
+                short: o.short,
+                ramp: o.ramp,
+                null: Some(o.null),
+            };
+            let v = dd.solve_contract(&s, &c) as f64;
+            sums[i] += if o.opp { -v } else { v };
         }
     }
     sums
