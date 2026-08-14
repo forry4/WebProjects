@@ -152,10 +152,42 @@ pub struct AucRules {
 /// with no lookahead past it. That is a best response to the bidder the tier
 /// actually plays against -- and only their MODEL changes; our side still
 /// searches the full tree.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// `Soft` is the 2026-08-14 answer to the diagnosis both halves of this crate
+/// arrived at independently: **the modelled opponent sees our hand.** The tree
+/// runs from OUR information set, so at every MIN node they choose knowing our
+/// exact holding and always find the punishing reply — against that phantom
+/// aggression really is worthless, so the search shades every line of ours
+/// down. (CAMPAIGN.md reaches the same conclusion about card play from the
+/// other end: "standard PIMC is pessimistic in a specific way — its opponent
+/// sees our hand".)
+///
+/// Rather than model their information set — a different program, and the one
+/// `CLAUDE.md` files under "not built yet" — `Soft` prices the CONSEQUENCE:
+/// an opponent who cannot see our cards does not reliably find the one reply
+/// that punishes us, and how often they miss it depends on how much better it
+/// is than the alternatives. So a MIN node becomes a softmax over their
+/// options at temperature `temp`, in per-world payoff points:
+///
+///   w_i  ∝  exp(-(v_i / worlds) / temp)      (v is signed for US, so lower
+///   value = Σ w_i v_i                         is better for them)
+///
+/// `temp <= 0` is EXACTLY the old `min`, which is what makes an A/B against
+/// today's Expert unconfoundable — the same discipline CAMPAIGN.md's IIMC
+/// blend used (`lambda = 0` reproduces `pimc:8` exactly). A large `temp`
+/// approaches "they reply at random", which is a strictly worse model; the
+/// useful range is the one that stops the search believing they are clairvoyant
+/// without pretending they are careless.
+///
+/// IT COSTS NOTHING. A MIN node already evaluates every child to take the min,
+/// and `bid::Solved` is cached per hand, so this adds no double-dummy solves
+/// at all — the whole change is how the children are aggregated.
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum OppModel {
     Minimax,
     Myopic,
+    /// Softmax over the opponent's replies; `temp` is in per-world payoff
+    /// points. See the type note above.
+    Soft(f64),
 }
 
 /// The classic-shape auction's denomination restriction (2026-08-13).
@@ -539,6 +571,37 @@ impl<'a> Search<'a> {
             self.memo.insert(s, best);
             return best;
         }
+        // SOFT MIN: the opponent is good, not clairvoyant. Every child is
+        // evaluated either way (the exact min needs them all), so the only
+        // difference is the aggregation — see `OppModel::Soft`.
+        if !maxing {
+            if let OppModel::Soft(temp) = self.rules.opp {
+                if temp > 0.0 {
+                    let k = self.worlds.worlds.len().max(1) as f64;
+                    let vals: Vec<f64> = moves.iter().map(|&b| self.step_value(&s, b)).collect();
+                    if !vals.is_empty() {
+                        // Their preference is DESCENDING in our value; shift by
+                        // the max exponent before exponentiating or a wide
+                        // spread overflows to inf/NaN and the node returns
+                        // garbage that propagates up the whole tree.
+                        let ex: Vec<f64> = vals.iter().map(|v| -(v / k) / temp).collect();
+                        let hi = ex.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                        let w: Vec<f64> = ex.iter().map(|e| (e - hi).exp()).collect();
+                        let z: f64 = w.iter().sum();
+                        let out = if z > 0.0 && z.is_finite() {
+                            w.iter().zip(&vals).map(|(wi, v)| wi * v).sum::<f64>() / z
+                        } else {
+                            // Degenerate weights (every term underflowed) mean
+                            // one option dominates by a mile: that is the exact
+                            // min, which is the right answer anyway.
+                            vals.iter().cloned().fold(f64::INFINITY, f64::min)
+                        };
+                        self.memo.insert(s, out);
+                        return out;
+                    }
+                }
+            }
+        }
         let mut best = if maxing { f64::NEG_INFINITY } else { f64::INFINITY };
         for b in moves {
             let v = self.step_value(&s, b);
@@ -629,6 +692,51 @@ mod tests {
         let off = classic_rules();
         assert!(!bids(&s0, &off).contains(&Bid::Pass));
         assert!(matches!(step(&s0, &off, Bid::Pass), Step::Settled(_)));
+    }
+
+    /// One world where WE can guarantee 3 and THEY can guarantee 10: the
+    /// opponent has a crushing reply to anything, which is exactly the
+    /// position the soft model exists for.
+    #[test]
+    fn a_soft_opponent_reduces_to_minimax_at_zero_and_never_shades_below_it() {
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        let exact = Search::new(0, classic_rules(), &t, &w).value(AucState::opening(0));
+        let mut zero = classic_rules();
+        zero.opp = OppModel::Soft(0.0);
+        assert_eq!(Search::new(0, zero, &t, &w).value(AucState::opening(0)), exact,
+                   "temp 0 must BE the old minimax — an A/B that moves here is confounded");
+        // Warmer opponents miss the punishing reply more often, so our lines
+        // are worth at least what the clairvoyant model said, monotonically.
+        let mut prev = exact;
+        for temp in [1.0, 4.0, 16.0] {
+            let mut r = classic_rules();
+            r.opp = OppModel::Soft(temp);
+            let v = Search::new(0, r, &t, &w).value(AucState::opening(0));
+            assert!(v.is_finite(), "temp {temp} produced {v}");
+            assert!(v >= prev - 1e-9,
+                    "temp {temp}: {v} shaded below the clairvoyant {prev}");
+            prev = v;
+        }
+        assert!(prev > exact, "no temperature changed anything: {prev} vs {exact}");
+    }
+
+    #[test]
+    fn a_soft_opponent_still_prefers_its_better_replies() {
+        // The weights must be an OPINION, not a coin flip: with one reply far
+        // better for them, a small temperature must land near the exact min
+        // rather than near the mean of their options.
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        let mut r = classic_rules();
+        r.opp = OppModel::Soft(0.5);
+        let soft = Search::new(0, r, &t, &w).value(AucState::opening(0));
+        let exact = Search::new(0, classic_rules(), &t, &w).value(AucState::opening(0));
+        let mut hot = classic_rules();
+        hot.opp = OppModel::Soft(64.0);
+        let random = Search::new(0, hot, &t, &w).value(AucState::opening(0));
+        assert!((soft - exact).abs() < (random - exact).abs(),
+                "cold {soft} should sit nearer the exact {exact} than hot {random}");
     }
 
     #[test]

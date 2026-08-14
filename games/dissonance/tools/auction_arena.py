@@ -153,6 +153,14 @@ def ask(g, seat, tier):
             # becomes the shipped default.
             if "m" in tier[len("expert"):]:
                 s["rules"]["opp_model"] = "myopic"
+            # `experts` -- the SOFT opponent model (2026-08-14). The tree runs
+            # from our information set, so its modelled opponent sees our hand
+            # and always finds the punishing reply; `soft` prices them as good
+            # rather than clairvoyant. DIS_OPP_TEMP is per-world payoff points,
+            # and 0 IS today's Expert exactly, so the A/B cannot be confounded.
+            if "s" in tier[len("expert"):]:
+                s["rules"]["opp_model"] = "soft"
+                s["rules"]["opp_temp"] = float(os.environ.get("DIS_OPP_TEMP", "4"))
             auc["search"] = s
     # A trailing `t` on either tier name adds the TALON MODEL -- the fitted
     # swap weights the server ships on classic auction requests -- so the

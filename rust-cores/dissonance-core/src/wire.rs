@@ -565,6 +565,11 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
             None => crate::auc_search::OppModel::Minimax,
             Some("minimax") => crate::auc_search::OppModel::Minimax,
             Some("myopic") => crate::auc_search::OppModel::Myopic,
+            // `opp_temp` is in per-world payoff points; absent or <= 0 is the
+            // exact minimax, so a payload that names "soft" without a
+            // temperature behaves as today rather than as something new.
+            Some("soft") => crate::auc_search::OppModel::Soft(
+                r.get("opp_temp").and_then(|x| x.as_f64()).unwrap_or(0.0)),
             Some(_) => return None,
         },
     };
