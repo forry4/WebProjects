@@ -1385,3 +1385,85 @@ def test_the_result_row_says_what_the_double_was_worth(mode):
                 "a Double must never flip WHO won the round")
             assert abs(signed) >= abs(res["undoubled"]), (
                 "a Double can only raise the stake it was placed on")
+
+
+# --- the server bot defends against the Null consolation --------------------
+
+
+def test_the_defender_forces_a_scoring_trick_on_a_declarer_ducking_for_null():
+    """REPORTED FROM REAL GAMES (2026-08-14): the bot "keeps trying to win
+    positive tricks" against an opponent ducking for Null -- which is exactly
+    how the Null gets handed over, since the declarer scores it by winning NO
+    scoring trick. One forced trick denies it, and knowing that needs no
+    lookahead: `etricks` is a fact on the board."""
+    from games.dissonance import bot as B
+    g = E.new_game(["a", "b"], random.Random(4), opener=0)
+    E.apply_bid(g, 0, 6, 2)          # seat 0 declares a level it will not reach
+    E.apply_pass(g, 1)
+    _skip_swap(g)
+    g["trick"] = 1                   # an EVEN trick: +2 to whoever wins it
+    assert E.trick_value_in(g, g["trick"]) > 0
+    # The declarer has PASSED UP two scoring tricks and taken none -- which is
+    # the evidence of ducking the rule requires (see _DUCKS_BEFORE_DENYING).
+    g["etricks"] = [0, 2]
+    g["pts"] = [0, 3]
+    # The DEFENDER must not want this trick: taking it guarantees the declarer
+    # finishes with no scoring trick and collects the flat consolation.
+    assert B._want_win(g, 1) is False
+    # ...and the DECLARER still wants it -- one scoring trick is what they are
+    # avoiding, so the rule must not leak across the table.
+    assert B._want_win(g, 0) is True
+    # Once the Null is already dead the defender goes back to taking tricks.
+    g["etricks"] = [1, 1]
+    assert B._want_win(g, 1) is True
+
+
+def test_the_defender_does_not_hand_over_a_trick_that_would_make_the_contract():
+    """The denial is guarded: forcing a scoring trick must not buy them the
+    contract. At a level this trick would reach, taking it stays right."""
+    from games.dissonance import bot as B
+    g = E.new_game(["a", "b"], random.Random(4), opener=0)
+    E.apply_bid(g, 0, 1, 2)          # a level-1 contract
+    E.apply_pass(g, 1)
+    _skip_swap(g)
+    g["trick"] = 1
+    g["etricks"] = [0, 2]
+    g["pts"] = [0, 0]
+    # +2 would put them on 2 against a target of 1 -- it MAKES the contract,
+    # so the one-trick-deep tier does not give it away.
+    assert B._want_win(g, 1) is True
+
+
+def test_an_early_round_is_not_mistaken_for_ducking():
+    """THE GUARD THAT KEEPS THIS OUT OF ORDINARY PLAY. At the start of every
+    round the declarer has no scoring trick because nothing has been played;
+    keying on that alone handed over the first scoring trick of every round and
+    measured a 3.2-point regression in self-play (-13.00 -> -16.17). Evidence
+    of ducking is scoring tricks PASSED UP, and the threshold was swept: 1 costs
+    1.3 points of ordinary play for 8 more denials, 3 gives up 22 denials for
+    nothing."""
+    from games.dissonance import bot as B
+    g = E.new_game(["a", "b"], random.Random(4), opener=0)
+    E.apply_bid(g, 0, 6, 2)
+    E.apply_pass(g, 1)
+    _skip_swap(g)
+    g["trick"] = 1
+    g["pts"] = [0, 0]
+    g["etricks"] = [0, 0]            # nothing has happened yet
+    assert B._want_win(g, 1) is True, "an unplayed round is not a duck"
+    g["etricks"] = [0, 1]            # one passed up is ordinary card play
+    assert B._want_win(g, 1) is True
+    g["etricks"] = [0, 2]            # two is a pattern
+    assert B._want_win(g, 1) is False
+    assert B._DUCKS_BEFORE_DENYING == 2
+
+
+def test_null_denial_is_off_in_the_odd_tricks_nobody_wants():
+    from games.dissonance import bot as B
+    g = E.new_game(["a", "b"], random.Random(4), opener=0)
+    E.apply_bid(g, 0, 6, 2)
+    E.apply_pass(g, 1)
+    _skip_swap(g)
+    g["trick"] = 0                   # odd trick: -1, nobody wants it
+    g["etricks"] = [0, 0]
+    assert B._want_win(g, 0) is False and B._want_win(g, 1) is False

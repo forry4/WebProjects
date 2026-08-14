@@ -25,25 +25,82 @@ from . import engine as E
 # --- card play -------------------------------------------------------------
 
 
+#: How many scoring tricks the declarer must have PASSED UP before a defender
+#: reads it as a run at the Null consolation. One ducked trick is ordinary card
+#: play (they had nothing worth spending); two is a pattern.
+#:
+#: SWEPT, because the trade-off is real in both directions -- 400 rounds of a
+#: deliberately ducking declarer against this policy, and 300 rounds of
+#: ordinary bot-vs-bot self-play (defender's margin, higher is better):
+#:
+#:   ducks | Nulls conceded | ordinary margin
+#:     0   |     18/400     |  -16.17   <- gifts the first scoring trick of
+#:     1   |     39/400     |  -14.00      EVERY round; a fix that loses more
+#:     2   |     47/400     |  -12.73      than it saves
+#:     3   |     69/400     |  -12.70
+#:
+#: 2 is the knee: the most denial that costs nothing in ordinary play (the
+#: baseline without the rule at all is -13.00). Waiting is cheap because a
+#: trick forced at trick 9 denies the consolation exactly as well as one
+#: forced at trick 2 -- the declarer needs ZERO all round.
+_DUCKS_BEFORE_DENYING = 2
+
+
 def _want_win(g: dict, seat: int) -> bool:
     """Whether the mover wants THIS trick. PARITY MODES ONLY -- in skat's card
     scoring a trick has no value until the cards are in it, so `policy_score`
     reads the cards instead of calling this.
 
-    Everyone wants the +2 tricks and nobody wants the -1s.
+    Everyone wants the +2 tricks and nobody wants the -1s -- EXCEPT that a
+    defender must sometimes force one onto the declarer. See below.
 
-    IT DOES NOT CHASE THE NULL CONSOLATION, and that is a known gap rather than
-    an oversight. Since 2026-08-07 a declarer who takes no +2 trick all round
-    scores Null instead of being set, so a declarer whose contract has already
-    gone wrong should switch to ducking EVERYTHING -- but "already gone wrong"
-    is a lookahead judgement, and this tier is one trick deep. Reading it off
-    the current total instead (duck once you are behind) would make the bot
-    throw away contracts it was still winning. The Hard tier does not chase it
-    either: its solver maximises trick POINTS, and Null is a discontinuous jump
-    the double-dummy value function cannot see. Both want the contract-aware
-    solve (`dd::solve_contract`) that already exists for the auction.
+    IT STILL DOES NOT CHASE THE CONSOLATION AS DECLARER, and that half is a
+    known gap rather than an oversight: a declarer whose contract has gone
+    wrong should switch to ducking everything, but "already gone wrong" is a
+    lookahead judgement and this tier is one trick deep. Reading it off the
+    current total (duck once you are behind) would throw away contracts it was
+    still winning. The searching tiers get it for free -- since 2026-08-07 they
+    solve the contract PAYOFF rather than trick points, so ducking for Null and
+    defending against it both fall out of the minimax. (The old wording here
+    said Hard could not see Null either; that stopped being true with the
+    payoff-aware search and is corrected.)
+
+    DEFENDING AGAINST IT IS DIFFERENT, AND IS NOW HANDLED (2026-08-14).
+    Reported from real games: the bot "keeps trying to win positive tricks"
+    against an opponent ducking for Null -- which is precisely how the Null is
+    handed over, because the declarer scores it by winning NO scoring trick and
+    a defender who takes them all guarantees exactly that. Denying it needs no
+    lookahead at all: "the declarer has won no scoring trick" is a fact on the
+    board (`etricks`), not a judgement, and one forced trick is enough.
+
+    TWO GUARDS, and the first one is the whole difference between a fix and a
+    regression -- MEASURED, both ways, before it shipped:
+
+    * **The declarer must have DUCKED, not merely not-yet-won.** At the start of
+      every round `etricks[declarer]` is 0 because nothing has been played, so
+      keying on that alone made the bot hand over the first scoring trick of
+      EVERY round: ordinary self-play went -13.00 -> -16.17 for the defender,
+      a 3.2-point regression bought in exchange for the Null case. Requiring
+      that at least `_DUCKS_BEFORE_DENYING` scoring tricks have already been
+      completed AND the declarer took none of them is the actual evidence of
+      ducking, and it costs nothing to wait: forcing a trick at trick 9 denies
+      the consolation exactly as well as forcing one at trick 2.
+    * **Giving it away must not buy them the contract**, so this only fires
+      while the declarer would still be short after taking it. That leaves the
+      genuinely balanced case (is a flat 20 worth less to them than the cheap
+      contract they would make?) to the tiers that can price it.
     """
-    return E.trick_value_in(g, g["trick"]) > 0
+    value = E.trick_value_in(g, g["trick"])
+    if value <= 0:
+        return False
+    decl = g["auction"]["declarer"]
+    if (decl >= 0 and seat != decl and g["etricks"][decl] == 0
+            # `sum` is every scoring trick COMPLETED so far, by either seat --
+            # so this reads "they have passed up this many and taken none".
+            and sum(g["etricks"]) >= _DUCKS_BEFORE_DENYING
+            and g["pts"][decl] + value < g["auction"]["level"]):
+        return False
+    return True
 
 
 def policy_score(g: dict, c: int, seat: int | None = None) -> float:
