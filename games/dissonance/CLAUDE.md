@@ -3425,6 +3425,39 @@ acceptable, that target is wrong for the question being asked and C/D are being
 marked down for hitting a spec that has since changed — re-run the search with a
 revised `TARGET_SETTLE` rather than reading their 0.68/0.76 as worse.
 
+**REVISED TARGET (2026-08-15): level 6 acceptable, NO rung above 40%.**
+`_SETTLE8` becomes `[.03 .06 .13 .20 .24 .20 .10 .04]` and `_tv` gains an
+explicit `CAP = 0.40` penalty at weight 2 — a total-variation distance alone
+trades one 50% spike against small errors spread elsewhere and can score them
+equal, so the spike has to be priced separately. The search was also constrained
+to `jump ∈ {5, 6}` and `over ≥ 1`.
+
+**Best under the revised target:** `L^2 + 1L` make, +1/overtrick, `2L + 12 + 5j`
+set, −1/pt short.
+
+```
+settled  1:6 2:3 3:3 4:14 5:40 6:35     max 40%, exactly at the cap
+opening  1:38 2:10 3:8 4:34 5:10
+bids     2.98 (26% one-bid)             made 70.1%
+```
+
+**THE JUMP RATE IS NOT WHAT DRIVES LEVEL-1 OPENINGS — measured, and it was the
+working hypothesis.** Holding the rest fixed and sweeping only the jump: 7 → 40%,
+6 → 39%, 5 → 38%. Three points, one point of movement. What DOES move it is the
+linear make term plus a flat bonus (`C=2, Fm=2` takes level-1 openings to **21%**,
+the best measured) — but that combination pushes 64% of contracts onto level 6
+and breaks the cap. **The two constraints are in tension in every arm measured:
+nothing achieves both a settled maximum under 40% and level-1 openings near 22%.**
+
+**The likely reason is structural, and it points at a RULE rather than a price.**
+The opener is FORCED to bid (`OPENER_MAY_PASS` is False in classic), so a hand
+with nothing bids the floor — that is not a value bid, it is a pass wearing a
+bid's clothing. With 8 strength buckets the bottom three are 37.5% of hands, and
+the measured level-1 opening rate is **38%**. That correspondence is suggestive
+rather than proven, but it predicts that no scoring change will fix this and that
+`OPENER_MAY_PASS = True` would — the flag already exists in the engine and is the
+next thing to test.
+
 **Two things it does NOT achieve, stated plainly.** Nothing opens above level 4
 (the target wants 17% at 6-8), and the settled hump still sits at 5-6 rather than
 3-6 (`3:8 4:16` against a target of `3:18 4:23`). And the make rate RISES, 59.4%

@@ -224,7 +224,10 @@ CURVE = {}
 #: ladder must still be CLIMBABLE to the same heights a rung at a time.
 TARGET_OPEN = [(MAXL + 1 - L) for L in range(1, MAXL + 1)]
 TARGET_OPEN = [x / sum(TARGET_OPEN) for x in TARGET_OPEN]
-_SETTLE8 = [.04, .09, .18, .23, .22, .15, .06, .03]
+#: REVISED 2026-08-15: level 6 is acceptable, but no rung may carry 40%+. The
+#: hump therefore sits at 5 and runs 3-7 with a maximum of 24%, rather than the
+#: original brief's tighter 3-6.
+_SETTLE8 = [.03, .06, .13, .20, .24, .20, .10, .04]
 #: Resampled onto whatever ladder is in play, so a FINER ladder is judged
 #: against the same SHAPE rather than a shape it cannot express. Without this
 #: the granularity experiment would be scored against an 8-rung target while
@@ -234,10 +237,20 @@ TARGET_SETTLE = ([_SETTLE8[round(i * 7 / (MAXL - 1))] for i in range(MAXL)]
 TARGET_SETTLE = [x / sum(TARGET_SETTLE) for x in TARGET_SETTLE]
 
 
+#: No rung may carry more than this share. A total-variation distance alone is
+#: too forgiving of a single tall spike -- it trades a 50% pile on one level
+#: against small errors spread over the rest and can score them equal -- so the
+#: cap is priced separately and steeply.
+CAP = 0.40
+CAP_WEIGHT = 2.0
+
+
 def _tv(got, target):
-    """Total-variation distance: half the L1 gap, so 0 is exact and 1 disjoint."""
-    return sum(abs(got.get(L, 0.0) - t)
-               for L, t in zip(range(1, MAXL + 1), target)) / 2
+    """Total-variation distance, plus an explicit penalty for a tall spike."""
+    tv = sum(abs(got.get(L, 0.0) - t)
+             for L, t in zip(range(1, MAXL + 1), target)) / 2
+    over = max((v - CAP for v in got.values()), default=0.0)
+    return tv + CAP_WEIGHT * max(0.0, over)
 
 
 def leaf(rec, level, prev, declarer, holds=0):
@@ -1035,13 +1048,19 @@ def search_main(n, shard, nshard, iters):
         cfg = {
             "p": rng.choice([1, 2, 2, 3]),
             "A": rng.choice([0.5, 1, 1, 2, 3]),
+            # `C` -- the linear make term, the only lever measured to lengthen
+            # the auction and cut the one-bid rate.
+            "C": rng.choice([0, 0, 1, 2, 3]),
             "Fm": rng.choice([0, 2, 5, 8, 10, 12, 15]),
             "q": rng.choice([1, 1, 2]),
             "B": rng.choice([0, 0, 0.5, 1, 2]),
             "Fs": rng.choice([0, 2, 5, 8, 10, 12, 15]),
             "short": rng.choice([1, 2, 2, 3, 4, 5]),
-            "jump": rng.choice([2, 3, 4, 5, 6, 7]),
-            "over": rng.choice([0, 1, 1, 2, 3]),
+            # Constrained to 5-6: 7 was measured to produce too many level-1
+            # openings, and below 5 the ladder stops punishing a big leap.
+            "jump": rng.choice([5, 6]),
+            # Never 0 -- overtricks must count for something.
+            "over": rng.choice([1, 1, 2]),
         }
         if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["Fm"] <= 34:
             continue                       # same scale anchor as the EV grid
