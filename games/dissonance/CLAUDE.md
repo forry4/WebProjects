@@ -3502,46 +3502,54 @@ next thing to test.
 a real trade against the Double's premise and would need `DOUBLE_MARGIN`
 re-swept.
 
-### THE DOUBLE IS NOT AN EQUILIBRIUM ACTION (2026-08-15)
+### THE EQUILIBRIUM DOUBLING RATE (2026-08-15) — 32% shipped, 11% candidate
 
 `cfrlab curvedbl` adds the Double to the solved auction: the seat that concedes
 then chooses whether to double, both bases doubling as they do in the engine.
-**The equilibrium takes it 0% of the time — under the shipped scoring AND under
-the candidate, both at 200k iterations.**
 
-That is not the solver failing to explore, and the check that proves it is worth
-keeping. Priced UNCONDITIONALLY, a level-5 contract is clearly doublable from the
-stronger half of the defender's buckets:
+| scoring | doubles taken | of those, set |
+|---|---|---|
+| shipped | **32%** | 49% |
+| candidate (`L^2+L+2` / `2L+12+6j` / short 1) | **11%** | 54% |
 
-| defender bucket | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
-|---|---|---|---|---|---|---|---|---|
-| declarer EV | +27.2 | +20.5 | +14.9 | +9.9 | +4.7 | **−0.1** | **−4.8** | **−12.1** |
-| would double? | no | no | no | no | no | **yes** | **yes** | **yes** |
+**The candidate cuts the correct doubling rate to a third of shipped, and out of
+the 20-30% band this campaign set as the design target.** That is a genuine cost
+of the candidate scoring and it belongs beside the settled distribution when
+judging it — a scoring that quietly retires the Double has changed the game more
+than its distribution tables show.
 
-So three of eight buckets should double — and the equilibrium still never does,
-because **those infosets are never reached**. A defender holding bucket 6 does
-not CONCEDE a level-5 contract; they outbid it. By the time somebody passes they
-have revealed they do not hold the hand that would justify doubling. The
-unconditional table and the equilibrium disagree because one is over all deals
-and the other over the deals an auction actually delivers — the same selection
-effect that makes a mirror unable to diagnose itself.
+**A RETRACTED CLAIM, and how it was caught.** This section first read "the Double
+is not an equilibrium action" on a measured 0% rate under BOTH scorings, with a
+theory attached: whoever concedes has revealed they expect the contract to stand,
+so doubling is never right. **That was wrong.** The 0% came from the counting
+block being spliced into `jump_main`'s playout while its counter and its report
+line lived in `curve_main` — so it incremented nothing and printed a clean,
+plausible zero. The solver had learned the Double correctly all along: 653
+infosets carry positive regret for doubling and the sacrifice infosets read
+`P(double) = 1.000`.
 
-**WHAT THIS MEANS FOR TUNING IT, and it is the practical point.** The Double
-earns nothing against a rational bidder; every point it has ever won came from
-the opponent BIDDING BADLY. It is a punishment device, not a strategy. So:
+It was caught by the obvious question the wrong answer invited — *"so there are
+no sacrifices? Because sacrifices should be doubled"* — and the check that
+followed found **7 reached defender infosets with a negative declarer
+expectation, carrying 5.1% of all settled contracts.** A zero that survives a
+plausible story is still a zero worth interrogating; the story is what made it
+survive.
 
-* **`DOUBLE_MARGIN` cannot be re-derived from the scoring**, and asking an
-  equilibrium what the margin should be returns "never double" for any scoring.
-* It must be re-fitted against the ACTUAL bot playing the new scoring — which is
-  exactly what the shipped method does (`dblsweep.py` over a recorded arena run,
-  pricing every threshold offline off the search's two sums).
-* That needs the candidate scoring IN THE ENGINE first, so this re-tune is
-  blocked on the shipping decision rather than on more measurement. The scoring
-  ships to Rust as DATA (`payoff_terms`), so only the Python constants move and
-  the client search follows for free.
-* And the size of the prize is known: Expert's auction measures **9.06 points of
-  exploitability**, so there is real money in doubling *Expert* specifically.
-  Fit the margin to Expert's errors, not to the game's.
+**This is the SECOND silent-zero in this file's campaign.** The other was
+`g.get("points", [0, 0])` against an engine key of `pts`, which made every played
+round score 0 and read as "real play never makes anything". Both were defaults
+standing in for a value that never arrived, and both produced a number too
+tidy to question. **When a measurement comes back exactly 0 or exactly 100%,
+verify the counter fired before believing the result.**
+
+**What still holds about tuning it.** `DOUBLE_MARGIN` is a threshold on the
+SEARCH's edge estimate, not an equilibrium quantity — the equilibrium says how
+often doubling is correct, not how much noise the margin must reject. So the
+margin still has to be re-fitted against the actual bot playing the new scoring
+(`dblsweep.py` over a recorded arena run, pricing every threshold offline), and
+that remains blocked on putting the candidate scoring in the engine. The
+equilibrium rate is the target the fitted margin should be checked against: 11%
+under the candidate, against 27.2% measured for shipped Expert.
 
 ### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
 

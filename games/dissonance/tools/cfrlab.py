@@ -945,16 +945,6 @@ def jump_main(rate, iters, seed=1234):
                 holds, to_act = holds + 1, 1 - to_act
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
-        # The Double, played out with the same average strategy.
-        dbl = False
-        if WITH_DOUBLE and holder is not None:
-            dk = ("D", rec["b"][1 - holder], level, prev, holds)
-            dbl = rng.random() <= cfr.average(dk, [0, 1])[1]
-            ndbl[0] += 1
-            if dbl:
-                ndbl[1] += 1
-                if leaf(rec, level, prev, holder, holds, dbl=True) < 0:
-                    ndbl[2] += 1       # doubled AND set: the bet came in
         settle[level] += 1
         nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
@@ -1440,6 +1430,16 @@ def curve_main(spec, iters, seed=1234):
                 holds, to_act = holds + 1, 1 - to_act
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
+        # The Double, played out with the same average strategy.
+        dbl = False
+        if WITH_DOUBLE and holder is not None:
+            dk = ("D", rec["b"][1 - holder], level, prev, holds)
+            dbl = rng.random() <= cfr.average(dk, [0, 1])[1]
+            ndbl[0] += 1
+            if dbl:
+                ndbl[1] += 1
+                if leaf(rec, level, prev, holder, holds, dbl=True) < 0:
+                    ndbl[2] += 1       # doubled AND set: the bet came in
         settle[level] += 1
         nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
