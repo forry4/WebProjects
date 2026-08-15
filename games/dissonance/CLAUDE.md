@@ -3502,6 +3502,47 @@ next thing to test.
 a real trade against the Double's premise and would need `DOUBLE_MARGIN`
 re-swept.
 
+### THE DOUBLE IS NOT AN EQUILIBRIUM ACTION (2026-08-15)
+
+`cfrlab curvedbl` adds the Double to the solved auction: the seat that concedes
+then chooses whether to double, both bases doubling as they do in the engine.
+**The equilibrium takes it 0% of the time — under the shipped scoring AND under
+the candidate, both at 200k iterations.**
+
+That is not the solver failing to explore, and the check that proves it is worth
+keeping. Priced UNCONDITIONALLY, a level-5 contract is clearly doublable from the
+stronger half of the defender's buckets:
+
+| defender bucket | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| declarer EV | +27.2 | +20.5 | +14.9 | +9.9 | +4.7 | **−0.1** | **−4.8** | **−12.1** |
+| would double? | no | no | no | no | no | **yes** | **yes** | **yes** |
+
+So three of eight buckets should double — and the equilibrium still never does,
+because **those infosets are never reached**. A defender holding bucket 6 does
+not CONCEDE a level-5 contract; they outbid it. By the time somebody passes they
+have revealed they do not hold the hand that would justify doubling. The
+unconditional table and the equilibrium disagree because one is over all deals
+and the other over the deals an auction actually delivers — the same selection
+effect that makes a mirror unable to diagnose itself.
+
+**WHAT THIS MEANS FOR TUNING IT, and it is the practical point.** The Double
+earns nothing against a rational bidder; every point it has ever won came from
+the opponent BIDDING BADLY. It is a punishment device, not a strategy. So:
+
+* **`DOUBLE_MARGIN` cannot be re-derived from the scoring**, and asking an
+  equilibrium what the margin should be returns "never double" for any scoring.
+* It must be re-fitted against the ACTUAL bot playing the new scoring — which is
+  exactly what the shipped method does (`dblsweep.py` over a recorded arena run,
+  pricing every threshold offline off the search's two sums).
+* That needs the candidate scoring IN THE ENGINE first, so this re-tune is
+  blocked on the shipping decision rather than on more measurement. The scoring
+  ships to Rust as DATA (`payoff_terms`), so only the Python constants move and
+  the client search follows for free.
+* And the size of the prize is known: Expert's auction measures **9.06 points of
+  exploitability**, so there is real money in doubling *Expert* specifically.
+  Fit the margin to Expert's errors, not to the game's.
+
 ### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
 
 `pts` is what a declarer can guarantee seeing all 40 cards. Real play is noisier,

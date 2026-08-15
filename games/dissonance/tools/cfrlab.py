@@ -214,6 +214,10 @@ def bucketise(recs):
 #: keeps the sweep out of the engine entirely.
 CURVE = {}
 
+#: Whether the solved auction includes the DOUBLE. Off for `br`, whose question
+#: is Expert's bidding and which must not have its tree changed underneath it.
+WITH_DOUBLE = False
+
 #: THE TARGET PROFILE, stated as numbers so the sweep can be SEARCHED rather
 #: than eyeballed. Both are over levels 1..MAXL.
 #:
@@ -259,7 +263,7 @@ def _tv(got, target):
     return tv + CAP_WEIGHT * max(0.0, over)
 
 
-def leaf(rec, level, prev, declarer, holds=0):
+def leaf(rec, level, prev, declarer, holds=0, dbl=False):
     """What the settled contract pays, DECLARER-SIGNED.
 
     `payoff_terms`' own arithmetic on the shipped scoring. THE JUMP IS THE FINAL
@@ -271,7 +275,8 @@ def leaf(rec, level, prev, declarer, holds=0):
     answer "the equilibrium bids lower than Expert". Under the v2 rule an
     OPENING's rise is its whole level, which `prev = 0` gives for free.
     """
-    terms = E._terms_for("classic", 0, level, jump=level - prev)
+    terms = E._terms_for("classic", 0, level, jump=level - prev,
+                         doubling=2 if dbl else 1)
     if CURVE:
         # THE LADDER'S GRANULARITY. `target` is what the contract must actually
         # TAKE, and it is the only knob that changes how much HARDER one rung is
@@ -330,6 +335,14 @@ def leaf(rec, level, prev, declarer, holds=0):
             m = 1.0 + CURVE["dmult"] * holds
             terms["make"] = round(terms["make"] * m)
             terms["set_base"] = round(terms["set_base"] * m)
+        # `_terms_for` already applied the Double, but everything above REPLACED
+        # both bases with undoubled values -- so it has to be re-applied, or a
+        # doubled contract would quietly score as an undoubled one under every
+        # experimental scoring and the Double would measure as worthless.
+        if dbl:
+            terms["make"] *= 2
+            terms["set_base"] *= 2
+            terms["ramp"] = E.DOUBLE_RAMP
     # WHICH SUIT IS ACTUALLY BEING PLAYED. With the all-denomination cache,
     # `holds` is not just a price step -- it selects the contract. The seat that
     # opens a level names its best suit; each same-level overtake must outrank
@@ -488,6 +501,8 @@ class CFR:
 
         def child(a):
             if a == -1:
+                if WITH_DOUBLE:
+                    return self.dbl_node(rec, level, prev, holds, to_act, me, rng)
                 return leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
             if a == HOLD:
                 return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng)
@@ -510,6 +525,34 @@ class CFR:
         for a in acts:
             vals[a] = child(a)
             node += sig[a] * vals[a]
+        for a in acts:
+            self.R[key][a] += vals[a] - node
+        return node
+
+    def dbl_node(self, rec, level, prev, holds, defender, me, rng):
+        """The DEFENDER's Double, priced as its own decision.
+
+        Reached the moment somebody concedes: the passer is the defender, and
+        the contract they just handed over is the one they may now double. Both
+        bases double, so the defender is betting the contract fails -- and the
+        bet's break-even moves with the scoring, which is the whole reason a
+        scoring change forces a Double re-tune rather than merely permitting one.
+        """
+        decl = 1 - defender
+        key = ("D", rec["b"][defender], level, prev, holds)
+        acts = [0, 1]                       # 0 = decline, 1 = double
+        sig = self.strategy(key, acts)
+        sign = 1 if decl == me else -1
+
+        def val(a):
+            return leaf(rec, level, prev, decl, holds, dbl=bool(a)) * sign
+
+        if defender != me:
+            for a in acts:
+                self.S[key][a] += sig[a]
+            return val(1 if rng.random() <= sig[1] else 0)
+        vals = {a: val(a) for a in acts}
+        node = sum(sig[a] * vals[a] for a in acts)
         for a in acts:
             self.R[key][a] += vals[a] - node
         return node
@@ -902,6 +945,16 @@ def jump_main(rate, iters, seed=1234):
                 holds, to_act = holds + 1, 1 - to_act
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
+        # The Double, played out with the same average strategy.
+        dbl = False
+        if WITH_DOUBLE and holder is not None:
+            dk = ("D", rec["b"][1 - holder], level, prev, holds)
+            dbl = rng.random() <= cfr.average(dk, [0, 1])[1]
+            ndbl[0] += 1
+            if dbl:
+                ndbl[1] += 1
+                if leaf(rec, level, prev, holder, holds, dbl=True) < 0:
+                    ndbl[2] += 1       # doubled AND set: the bet came in
         settle[level] += 1
         nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
@@ -1364,6 +1417,7 @@ def curve_main(spec, iters, seed=1234):
 
     settle, made, n = defaultdict(int), 0, 6000
     nbids = defaultdict(int)
+    ndbl = [0, 0, 0]
     for _ in range(n):
         rec = recs[rng.randrange(len(recs))]
         level, prev, holds, to_act, holder = 0, 0, 0, 0, None
@@ -1406,6 +1460,8 @@ def curve_main(spec, iters, seed=1234):
           + " | bids " + f"{sum(k*v for k,v in nbids.items())/n:.2f} "
           + " ".join(f"{k}:{100*v/n:.0f}" for k, v in sorted(nbids.items())
                      if v / n > .015)
+          + (f" | DBL {100*ndbl[1]/max(1,ndbl[0]):.0f}% taken, "
+             f"{100*ndbl[2]/max(1,ndbl[1]):.0f}% of those set" if WITH_DOUBLE else "")
           + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
 
 
@@ -1553,6 +1609,11 @@ def main():
                            int(sys.argv[4]), int(sys.argv[5]))
     if len(sys.argv) > 1 and sys.argv[1] == "evscan":
         return evscan_main(int(sys.argv[2]) if len(sys.argv) > 2 else 25)
+    if len(sys.argv) > 1 and sys.argv[1] == "curvedbl":
+        globals()["WITH_DOUBLE"] = True
+        return curve_main(sys.argv[2],
+                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
+                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
     if len(sys.argv) > 1 and sys.argv[1] == "curve":
         return curve_main(sys.argv[2],
                           int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
