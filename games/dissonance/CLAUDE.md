@@ -3434,10 +3434,11 @@ directly with the settled distribution, which is what actually matters.
 **THE CANDIDATE:**
 
 ```
-make   L^2 + L + 2        4  8 14 22 32 44 58 74      +1 per overtrick
-set    2L + 12 + 6 x jump climbed -20 -22 -24 -26 -28 -30 -32 -34
-                          opened  -20 -28 -36 -44 -52 -60 -68 -76
-short  1 per point        (shipped: 5)
+DECLARER scores, made      L^2 + L + 2   ->  4  8 14 22 32 44 58 74
+                                             +1 per overtrick
+DEFENDER scores, set       2L + 12 + 6j  ->  climbed 20 22 24 26 28 30 32 34
+                                             opened  20 28 36 44 52 60 68 76
+                                             +1 per point short (shipped: 5)
 
 settled  1:5 2:4 3:2 4:15 5:35 6:38      max 38%, under the cap
 opening  1:39 2:18 3:5 4:35 5:2
@@ -3452,6 +3453,14 @@ in expectation rather than robustly.
 
 Every constant is an integer, and both sides now carry the same shape --
 quadratic + linear + flat on the make, linear + flat on the set.
+
+**STATED AS WHAT EACH SIDE SCORES, not as a signed payoff.** `_split` gives the
+whole amount to exactly one seat and zero to the other, so a set is the DEFENDER
+banking `2L + 12 + 6j` plus a point per point short -- it is never a deduction
+from the declarer, and nobody's score goes negative. The solver works on
+`declarer - defender`, so the two framings are the same arithmetic, but writing
+the set side as a negative number invites reading it as a penalty the declarer
+pays out of their own total, which is not the game.
 
 **Earlier revision, kept for the reasoning:**
 `_SETTLE8` becomes `[.03 .06 .13 .20 .24 .20 .10 .04]` and `_tv` gains an
