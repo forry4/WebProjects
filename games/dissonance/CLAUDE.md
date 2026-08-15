@@ -3226,6 +3226,76 @@ point harder, and the auction raced to the top (settled 10.2 of 12, 15% making).
 That reads as "a finer ladder fails". It does not: **when the ladder is finer the
 payoff has to track the TARGET, not the rung**, and the fix is one line.
 
+### THE LOSS STATISTIC HAS A ±0.11 ERROR BAR, AND IT WAS NEVER MEASURED
+
+**The most important correction in this campaign.** The scoring search ranked
+~70 configs by a total-variation loss and reported differences of 0.05 without
+ever asking what the statistic's noise was. Measured at last, by running ONE
+scoring on four DISJOINT 500-deal subsets of the same cache:
+
+```
+loss = 0.68, 0.74, 0.74, 0.61     sd 0.054, so ±0.11 at two sigma
+```
+
+**Every ranking narrower than ~0.11 in the notes above is not a result.** That
+includes "overtricks at 0 is worse" (0.59 vs 0.54), "the denomination price
+multiplier is worse" (0.63 vs 0.54) and the jump-rate fine ordering. They are
+untested, not refuted. The `made%` column swings 46-57% across the same subsets,
+so per-config make rates are equally soft.
+
+**What survives.** Shipped against the best found, PAIRED on each of the four
+subsets: `1.08/1.19/0.99/1.16` against `0.68/0.74/0.74/0.61` — **+0.41 ± 0.11,
+same sign on all four**. The headline gap is real; the fine structure inside it
+is not.
+
+The statistic is also SAMPLE-BIASED, not just noisy: the same scoring reads 0.54
+on 2000 deals and 0.69 on 500. Compare configs only at equal deal counts, and
+only paired on the same deals.
+
+**How this surfaced, which is the reusable part.** The suit-priced ladder test
+built a new 600-deal cache and came in at 0.74 against the old cache's 0.65 for
+identical scoring. Chasing that gap ruled out, in order: solver state leaking
+across denominations (0 of 24 pairs disagreed), the two caches' marginals (pts
+mean 4.05 vs 4.04, sd 1.91 vs 1.89, P(make) curves within 1%), their joints
+(corr(strength, points) +0.689 vs +0.642; corr between seats −0.658 vs −0.669),
+the list-vs-int leaf path (**byte-identical output on the same deals**), and CFR
+seed variance (tight: ±0.03 within a cache). Nothing was wrong. **The deal
+sample was the whole effect**, and it had been invisible because every earlier
+comparison happened to reuse one cache.
+
+### THE SUIT-PRICED LADDER — INCONCLUSIVE, not refuted
+
+`cfrlab dcache` builds a cache with `pts`/`duck` for ALL FIVE denominations per
+seat, ordered by the seat's own `hand_strength` (never by the solved result,
+which would be a cheater's ladder). `leaf` then indexes by `holds`, so a
+same-level overtake selects a genuinely WORSE contract rather than merely a
+dearer one — the flaw that made the earlier `dmult` probe uninformative.
+
+600 deals were collected and it read 0.74 against 0.65 for the same scoring on
+the old cache. **That difference is inside the ±0.11 error bar and the caches are
+different sizes, so this says nothing either way.** A real answer needs the
+all-denomination cache extended to 2000 deals (~1 hour of solving) so it can be
+compared paired and at equal size.
+
+### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
+
+`pts` is what a declarer can guarantee seeing all 40 cards. Real play is noisier,
+and noise WIDENS the achieved-points distribution, which flattens P(make) per
+rung — i.e. the real ladder is looser than these numbers make it look. Quantified
+by convolving the measured distribution with noise of scale sigma:
+
+| sigma | sd(pts) | per-rung cost in P(make) |
+|---|---|---|
+| 0 (double-dummy) | 1.92 | 17.6 pts |
+| 1.0 | 2.18 | 16.0 pts |
+| 2.0 | 2.77 | 13.1 pts |
+
+So the effect is real but modest: sigma would have to approach the entire
+hand-quality spread to change the picture. **Sigma is measurable** — compare
+double-dummy `pts` against what the shipped PIMC search actually achieves on the
+same deal and contract — and it has not been measured. Until it is, read every
+"the ladder is too coarse" statement here as an upper bound on the coarseness.
+
 **What shipping a rate change would entail** (it is a scoring change, so it is
 not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy

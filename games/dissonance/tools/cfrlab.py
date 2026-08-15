@@ -67,6 +67,7 @@ from games.dissonance import engine as E
 
 BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve")
 CKPT = os.environ.get("CFR_CKPT")
+DCKPT = os.environ.get("CFR_DCKPT")
 #: The ladder the abstract game bids on. Nothing in 800 deals of Expert
 #: self-play ever settled above 8, so rungs above it are tree with no data.
 MAXL = int(os.environ.get("CFR_MAXL", "8"))
@@ -119,6 +120,55 @@ def sample_deal(seed):
         rec["pts"][seat] = r.get("pts", 0)
         rec["duck"][seat] = bool(r.get("duck"))
     return rec
+
+
+def sample_deal_alldenoms(seed):
+    """One deal, solved in EVERY denomination for both seats.
+
+    The cache the suit-priced ladder needs. `pts`/`duck` become lists of five,
+    ORDERED BY THE SEAT'S OWN `hand_strength` rather than by the solved result --
+    which matters and is not fussiness. A seat picks its suit from what it can
+    see; ordering by the true points would let the abstraction's declarer always
+    find the genuinely best suit, which is a cheater's ladder and would flatter
+    the mechanism being tested.
+    """
+    g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
+    rec = {"str": [0.0, 0.0], "pts": [[], []], "duck": [[], []]}
+    for seat in (0, 1):
+        order = sorted(range(E.NOTRUMP + 1),
+                       key=lambda d: -B.hand_strength(g, seat, d))
+        rec["str"][seat] = B.hand_strength(g, seat, order[0])
+        for d in order:
+            r = rpc({"resolve": {
+                "hands": [sorted(h) for h in g["hands"]],
+                "piles": [[list(x) for x in q] for q in g["piles"]],
+                "trump": d, "leader": seat,
+                "terms": {"declarer": seat, "target": 1, "make": 1,
+                          "set_base": 1, "short": 1, "over": 1, "null": 20},
+            }})
+            rec["pts"][seat].append(r.get("pts", 0))
+            rec["duck"][seat].append(bool(r.get("duck")))
+    return rec
+
+
+def dcache_main(n):
+    """`cfrlab dcache N` -- build the all-denomination deal cache."""
+    recs = []
+    if DCKPT and os.path.exists(DCKPT):
+        for line in open(DCKPT):
+            try:
+                recs.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        print(f"  resumed {len(recs)} deals", flush=True)
+    ck = open(DCKPT, "a")
+    while len(recs) < n:
+        recs.append(sample_deal_alldenoms(900_000 + len(recs)))
+        ck.write(json.dumps(recs[-1]) + "\n")
+        ck.flush()
+        if len(recs) % 20 == 0:
+            print(f"  {len(recs)}/{n} deals", flush=True)
+    print(f"  {len(recs)} deals cached")
 
 
 def collect(n):
@@ -254,8 +304,18 @@ def leaf(rec, level, prev, declarer, holds=0):
             m = 1.0 + CURVE["dmult"] * holds
             terms["make"] = round(terms["make"] * m)
             terms["set_base"] = round(terms["set_base"] * m)
-    scored = not rec["duck"][declarer]
-    return E.payoff(terms, rec["pts"][declarer], scored)
+    # WHICH SUIT IS ACTUALLY BEING PLAYED. With the all-denomination cache,
+    # `holds` is not just a price step -- it selects the contract. The seat that
+    # opens a level names its best suit; each same-level overtake must outrank
+    # the standing bid, so it lands the bidder in a progressively worse one.
+    # Modelling that as "rank = holds" is the abstraction, and it is the whole
+    # difference between this test and the earlier `dmult` one, which raised the
+    # PRICE of an overtake while leaving its difficulty identical.
+    pts, duck = rec["pts"][declarer], rec["duck"][declarer]
+    if isinstance(pts, list):
+        i = min(holds, len(pts) - 1)
+        pts, duck = pts[i], duck[i]
+    return E.payoff(terms, pts, not duck)
 
 
 def actions(level, holds):
@@ -1269,6 +1329,8 @@ def main():
         return jump_main(int(sys.argv[2]),
                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "dcache":
+        return dcache_main(int(sys.argv[2]) if len(sys.argv) > 2 else 600)
     if len(sys.argv) > 1 and sys.argv[1] == "denom":
         return denom_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200)
     if len(sys.argv) > 1 and sys.argv[1] == "search":
