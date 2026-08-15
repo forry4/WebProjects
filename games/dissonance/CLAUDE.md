@@ -1263,6 +1263,44 @@ declarer-side fix and the exact contract solve, so the number is the two KNOBS
 and nothing else. For scale it sits beside the auction tree's own +1.19 +- 0.32.
 * **Quote the pooled figure, never a shard.** The four read +2.42 / +0.68 /
   +0.12 / +1.93 — a spread that would have supported any story at n=125.
+**ATTRIBUTED, AND IT IS ALL THE MARGIN** (250 paired deals per arm, each against
+`expertot`; `DIS_DBL_MARGIN=0` and `DIS_BID_PRIOR=0` isolate one knob each):
+
+| arm | payoff/round | verdict |
+|---|---|---|
+| both knobs (n=500) | +1.289 +- 0.767 | clear of zero |
+| **prior ALONE** | **+0.161 +- 0.623** | **spans zero** |
+| **margin ALONE** | **+1.889 +- 1.032** | clear of zero |
+
+**AND THE MECHANISM IS WHY REFINING THE PRIOR CANNOT HELP — this is the part to
+keep.** The prior does exactly what it claims: it drags the mis-calibrated
+middle band onto break-even (contracts at edge 10-20/world really made 50.6%
+without it and 37.5% with it) and lifts discrimination +48.7 -> +56.8. **But the
+optimal margin is 20, which discards every decision below edge 20 — and above
+20 the two calibrations are identical (29.0% vs 28.6%).** The prior fixes
+precisely the rounds the margin has already decided not to double. They are two
+treatments for one disease and the margin gets there first.
+* Swept both ways offline (`SWEEP_TIER` filters the asymmetric arm to one
+  tier): both curves peak at **margin 20** with the same peak — defender gain
+  +2.25 without the prior, +2.34 with it. The prior reaches it from a lower
+  double rate (19.8% vs 31.7%) at slightly better precision, and no higher.
+* So **conditioning the prior harder (on the auction SEQUENCE, or on the tier's
+  own pricer as the likelihood) is dead**: both sharpen the estimate in the
+  0-20 edge band, and those decisions are not doubled at the shipped margin.
+* **THE BELIEF THREAD IS CLOSED, and it is worth saying loudly because the
+  mechanism is compelling enough to be retried.** The bias is real and large
+  (0.765 percentile, 0.704 against Expert, still 0.617 at trick 11); correcting
+  it genuinely centres the sample (0.704 -> 0.521); and it converts to
+  **+0.161 +- 0.623 at the Double** and **+0.617 +- 2.522 in card play**.
+  A MEASURED BIAS DID NOT IMPLY A MEASURED GAIN, by two independent
+  instruments — the third route this repo has found to CAMPAIGN.md's verdict
+  that PIMC's residual error is strategy fusion, which no better world
+  distribution can fix.
+* Caveat on the sample: the prior-on sweep is n=101 against the off-curve's
+  n=483, and its top two edge buckets hold 14 and 6 rounds. What makes the
+  reading safe is that a completely different instrument (the paired arena)
+  agrees.
+
 * **The split between the two knobs is NOT yet attributed** (`DIS_DBL_MARGIN=0`
   and `DIS_BID_PRIOR=0` each isolate one against `expertot`). Until it is, do
   not spend on refining the prior: this file already records two mechanisms
