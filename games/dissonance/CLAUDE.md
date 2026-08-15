@@ -3330,6 +3330,56 @@ because of it. The deviations were also measured with the declarer as the opener
 at a forced contract over levels 3-6 only. And the ±0.11 error bar still applies
 to every loss in the table.
 
+### THE CANDIDATE SCORING, searched against the real-play leaf, whole numbers only
+
+The re-run after the leaf was fixed. Two constraints that were not there before:
+the leaf carries the measured play deviation, and **every constant is an integer**
+(a scoring rule is read at a table; `0.5 x L^2.4` is not a rule anyone can hold
+in their head). The previous best-found arm does not survive either change, which
+is the correct outcome — it was fitted to a leaf that understates make rates by
+17 points.
+
+```
+make      L^2 + 5              6  9 14 21 30 41 54 69   (overtricks pay NOTHING)
+set base  2L + 12 + 7 x jump   climbed: -25 -27 -29 -31 at levels 3-6
+                               opened:  -39 -48 -57 -66
+short     1 per point          (shipped: 5)
+```
+
+Against shipped, PAIRED on four disjoint 500-deal real-play subsets:
+
+| | sub0 | sub1 | sub2 | sub3 | mean |
+|---|---|---|---|---|---|
+| shipped | 0.98 | 0.85 | 0.84 | 1.07 | 0.94 |
+| **candidate** | 0.56 | 0.55 | 0.57 | 0.68 | **0.59** |
+
+**+0.34 ± 0.06, same sign on all four** — comfortably outside the ±0.11 error
+bar, and this time measured the way the error-bar section says to measure.
+
+| | opening | settled | mean | made |
+|---|---|---|---|---|
+| shipped | `1:39 2:7 3:2 5:35 6:15` | `5:31 6:55 7:7` | 5.51 | 59.4% |
+| **candidate** | `1:33 2:20 3:20 4:26 5:2` | `1:5 2:4 3:8 4:16 5:39 6:27` | 4.65 | 72.8% |
+
+It fixes the problem the real-play leaf exposed: **contracts no longer pile on
+level 6** (55% → 27%) and the settled mean comes down 5.51 → 4.65. Openings
+spread across 1-4 instead of splitting between 1 and 5-6.
+
+**Three changes do the work, and each maps to a stated design intent.**
+Overtricks stop paying, so a strong hand can no longer sit on a cheap contract
+and farm extras — it has to bid what it can make. Falling short costs 1 rather
+than 5, which is what makes the upper rungs reachable at all (`short x (target −
+pts)` is quadratic-ish in the level). And **the jump penalty more than doubles,
+3 → 7**, which is the term that keeps high OPENINGS rare while leaving the ladder
+climbable a rung at a time — exactly what the jump rule was designed for.
+
+**Two things it does NOT achieve, stated plainly.** Nothing opens above level 4
+(the target wants 17% at 6-8), and the settled hump still sits at 5-6 rather than
+3-6 (`3:8 4:16` against a target of `3:18 4:23`). And the make rate RISES, 59.4%
+→ 72.8%: cheap sets and no overtrick income make the whole ladder safer, which is
+a real trade against the Double's premise and would need `DOUBLE_MARGIN`
+re-swept.
+
 ### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
 
 `pts` is what a declarer can guarantee seeing all 40 cards. Real play is noisier,

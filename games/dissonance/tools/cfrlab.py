@@ -315,6 +315,19 @@ def leaf(rec, level, prev, declarer, holds=0):
     if isinstance(pts, list):
         i = min(holds, len(pts) - 1)
         pts, duck = pts[i], duck[i]
+    # REAL-PLAY LEAF. `pts` is the double-dummy guarantee, which assumes a
+    # PERFECT DEFENDER; 794 measured rounds put real outcomes 0.95 points above
+    # it with sd 1.94. Two parts, and they are separated on purpose:
+    #
+    #   `eps`   -- a per-deal, per-seat draw from the CENTRED deviation, fixed
+    #              in the cache so the leaf stays deterministic.
+    #   shift   -- the deviation's MEAN, which falls with the level (+1.14 at 3
+    #              down to +0.77 at 6): a defender leaks less to a declarer who
+    #              is straining. Small against the sd, but it is the term that
+    #              makes high contracts relatively harder, so folding it into a
+    #              pooled constant would flatter exactly the rungs in question.
+    if rec.get("eps") is not None:
+        pts = round(pts + rec["eps"][declarer] + 1.45 - 0.11 * level)
     return E.payoff(terms, pts, not duck)
 
 
@@ -1002,16 +1015,22 @@ def search_main(n, shard, nshard, iters):
     for i in range(n):
         if i % nshard != shard:
             continue
+        # CLEAN NUMBERS ONLY -- integers, or halves at worst. A scoring rule is
+        # read by a player at the table, and `0.5 x L^2.4` is not a rule anyone
+        # can hold in their head. Exponents are whole; coefficients are integers
+        # or 0.5; everything else is an integer. This shrinks the space a long
+        # way and rules out the previous best-found arm, which is fine: that arm
+        # was fitted to the double-dummy leaf and does not survive this one.
         cfg = {
-            "p": round(rng.uniform(1.6, 2.8), 1),
-            "A": rng.choice([0.5, 1.0, 2.0]),
-            "Fm": rng.choice([0, 5, 10, 15]),
-            "q": round(rng.uniform(0.6, 1.6), 1),
-            "B": rng.choice([0.0, 0.0, 0.5, 1.0, 2.0]),
-            "Fs": rng.choice([0, 5, 10, 15]),
-            "short": rng.choice([1, 1, 2, 3, 4]),
+            "p": rng.choice([1, 2, 2, 3]),
+            "A": rng.choice([0.5, 1, 1, 2, 3]),
+            "Fm": rng.choice([0, 2, 5, 8, 10, 12, 15]),
+            "q": rng.choice([1, 1, 2]),
+            "B": rng.choice([0, 0, 0.5, 1, 2]),
+            "Fs": rng.choice([0, 2, 5, 8, 10, 12, 15]),
+            "short": rng.choice([1, 2, 2, 3, 4, 5]),
             "jump": rng.choice([2, 3, 4, 5, 6, 7]),
-            "over": rng.choice([1, 1, 2, 3]),
+            "over": rng.choice([0, 1, 1, 2, 3]),
         }
         if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["Fm"] <= 34:
             continue                       # same scale anchor as the EV grid
