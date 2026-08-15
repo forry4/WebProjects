@@ -2603,8 +2603,8 @@ the half-sample said, not better.
   those are SET.** Two Experts bid each other well past the making point; the
   cliff is at 4 and level 5 sits on exactly 50.0% made over 308 contracts.
   Whether that is correct (the payoff asymmetry may reward it) or a shared blind
-  spot is UNRESOLVED and this run cannot tell them apart — pricing the
-  alternative (what passing at 5 pays against this opponent) is the next probe.
+  spot was UNRESOLVED and that run could not tell them apart — **it is resolved
+  now: it is a blind spot, and the CFR solve below says which one.**
 * **The level cap at 10 is confirmed irrelevant to this profile**: nothing
   settled above 8 and only 0.4% of openings reached 8, so the 2026-08-11 cap
   removed rungs that self-play never used.
@@ -2910,6 +2910,88 @@ highest level that player could have bid there and made.
   (the whole chain fails by staying on its placeholder, which reads as a table
   still thinking), the played contract is ringed exactly once in its own
   denomination's row, and both columns light a best.
+
+## CFR OVER THE AUCTION — Expert's bid barely knows its own hand (2026-08-15)
+
+`tools/cfrlab.py`. **The finding: `hand_strength` predicts the outcome strongly
+and moves Expert's bid by less than one rung.** Across the eight strength
+buckets the declarer's make rate runs **35.7% → 79.7%** while the settled level
+runs **4.54 → 5.36**. The equilibrium's answer to the same deals runs 3.89 →
+5.01 — also a shallow slope, but it wins the auction with the RIGHT hands: the
+weakest bucket ends up declaring **1.2%** of contracts under equilibrium against
+**7.1%** under Expert, and the strongest **25%** against **15%**. So the error is
+not "Expert bids too high", which is where the self-play profile pointed; it is
+**who ends up holding the contract**, and that is a defender-side failure as much
+as a declarer-side one.
+
+**WHY A SOLVE AND NOT ANOTHER ARENA.** The 800-round self-play profile above
+recorded 28% of contracts settling at level 6 with 64% of those set, and could
+not say whether that was the payoff asymmetry paying off or a shared blind spot
+— **a mirror cannot diagnose itself, because both seats carry every bias.** This
+is the poker toolkit (abstraction + CFR) applied to the one part of Dissonance
+small enough to take it: the card play is far too big to abstract usefully, the
+auction is a handful of bids over a ten-rung ladder, and its leaves can be
+priced by the exact solver that already exists. That asymmetry is the whole
+reason this was tractable.
+
+**THE HEADLINE, on the same 394 deals with the same resolver and the same
+scoring, undoubled on both sides** — the only thing that varies is who bids:
+
+| | settled mean | made | declarer EV |
+|---|---|---|---|
+| Expert (shipped, k=8) | 4.70 | **59.4% ±4.8** | +6.24 |
+| Abstract equilibrium | 4.67 | **72.0%** | +15.60 |
+
+Equal aggression, 12.6pp apart on making it. Expert's per-rung selection against
+the level's UNCONDITIONAL make rate — which is the yardstick, since landing on it
+means the bidding added nothing — is **+15pp at level 3, +29 at 6, +31 at 7, and
+−2 and +4 at levels 4 and 5**. Those two rungs carry 47% of its contracts and it
+selects them at chance.
+
+**THREE ABSTRACTIONS, and two of them cut against the finding rather than for
+it.** (1) The hand is a quantile bucket of `bot.hand_strength` over the seat's
+best denomination — information-legal by construction, never the solve, which
+depends on the opponent's cards. (2) The auction is a level ladder: denomination
+is abstracted away, so neither classic's `DENOM_RULE="used"` forever-ban nor the
+same-level overtake exists, making the abstract game strictly MORE permissive —
+**this is the honest limitation, since some of Expert's dispersion may be forced
+by having burned its best suit, which the ladder cannot see.** (3) The leaf is
+the points solve plus payoff arithmetic, i.e. exactly the approximation the
+shipped tier already makes (93.3% agreement with `solve_contract`).
+
+**The control arm resolves the deal AFTER the swap and the equilibrium's leaf
+does not** — classic's swap phase upgrades one declarer card, so Expert's
+contracts are scored on a slightly better hand than the equilibrium's are. That
+biases the make rate in EXPERT's favour and it still loses by 12.6pp, so the gap
+is a floor rather than an estimate. Checked rather than assumed, because the
+opposite sign would have invalidated the whole comparison.
+
+**WHAT IS NOT ESTABLISHED, and do not let the table imply it.** These are two
+self-play regimes of a symmetric zero-sum game, so **neither "declarer EV" column
+is a score** — every seat has EV 0 by construction and the number only says how
+much winning the auction is worth in that regime. Nothing here measures a
+head-to-head margin. The decisive follow-up is the poker-standard one: log every
+Expert auction decision as `(bucket, standing level, chosen level)`, fit it as a
+policy in the abstraction, and compute a BEST RESPONSE to it — that turns "the
+shapes differ" into "Expert's auction is exploitable for X payoff points a deal",
+which is the number a shipping decision needs.
+
+**Cost shapes, for whoever runs it next.** The equilibrium arm is ~0.5s a deal
+(three double-dummy solves) and the CFR itself is free — 2000 deals and 200k
+external-sampling iterations inside one block. The control arm is **~25s a deal**
+because it runs the real k=8 search at every auction node, which is the point: a
+control on a cheaper search would be measuring the search rather than the bidder.
+It is sharded four ways over four cores to ~5.4s a deal, each shard on its own
+checkpoint, and the reporter reads every shard — **a per-shard summary is a
+quarter of the sample and reads exactly like the whole thing.**
+
+**The bug this nearly shipped a conclusion on:** the leaf originally priced every
+contract with `jump=level`. Classic's set base is `(N + 10 + 3j) × D`, so that
+charges the maximum jump penalty on a climb that earned none — it taxes exactly
+the deep auctions the harness exists to judge, in the direction that manufactures
+the answer "the equilibrium bids lower than Expert". Fixed to `level - prev`
+(and `prev = 0` gives the v2 opening rule for free); the settled mean moved
+4.47 → 4.67 and the make rate 77.1% → 72.0%.
 
 ## Not built yet
 
