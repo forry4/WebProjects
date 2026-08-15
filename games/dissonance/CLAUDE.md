@@ -1254,6 +1254,48 @@ ORDERED but mis-calibrated: edge 0–5/world really made **65.4%**.
 * Per-mode, because the units are payoff points and minor's run a quarter the
   size. Minor's own sweep has not been run; 0 is exactly today.
 
+**MEASURED AT LAST: +1.289 +- 0.767 payoff/round, CI [+0.522, +2.056]**, 500
+CRN-paired dd-resolved deals, `expertt` (both knobs) against **`expertot`** —
+the same tier with the old Double. Self-play mirrors read exactly +0.0000 by
+construction, so an asymmetric arm is the only way to ask this at all; an `o`
+in an expert tier's suffix is that arm, and it deliberately KEEPS the
+declarer-side fix and the exact contract solve, so the number is the two KNOBS
+and nothing else. For scale it sits beside the auction tree's own +1.19 +- 0.32.
+* **Quote the pooled figure, never a shard.** The four read +2.42 / +0.68 /
+  +0.12 / +1.93 — a spread that would have supported any story at n=125.
+* **The split between the two knobs is NOT yet attributed** (`DIS_DBL_MARGIN=0`
+  and `DIS_BID_PRIOR=0` each isolate one against `expertot`). Until it is, do
+  not spend on refining the prior: this file already records two mechanisms
+  that were real and did not pay.
+
+**THE CARD-PLAY PRIOR IS UNRESOLVED — do not read it as a win OR a loss.**
+Extending the belief prior to the 13 card decisions is on the branch and
+UNSHIPPED. `tools/priorlab.py` measures it per DECISION (regret against a
+double-dummy oracle, paired on the identical position, the oracle paid for only
+when the two variants disagree): over **298 disagreements, +0.617 +- 2.522**,
+better on 18.5% and worse on 20.1%. The per-trick shape is +2.42 / −2.07 /
++2.24 over tricks 1-4 / 5-8 / 9-13, which no mechanism yet explains.
+* **A METHOD NOTE, paid for twice in one night.** At n=59 this read **−1.44 +-
+  7.54** and was called as "clearly not the win" — the sign then FLIPPED at
+  n=298. An interval spanning zero is not a direction, and this is the third
+  time this file has had to record that lesson.
+* The bias it corrects is real and large all round (`tools/decayprobe.py`: the
+  declarer's remaining holding at the 0.769 percentile at trick 1, still 0.617
+  at trick 11). **A measured bias did not imply a measured gain**, which is the
+  finding worth keeping — consistent with CAMPAIGN.md's verdict that PIMC's
+  residual error is strategy fusion, which no better world distribution fixes.
+
+**THE TILT, RE-FIT ON THE FULL 500:** bias 0.704, best single tilt **0.30 →
+0.521**. Shipped 0.35 lands at 0.462 — past centre but inside the flat part of
+the curve, so it stays.
+
+**RUNNING ANYTHING LONG IN THIS CONTAINER: FOREGROUND ONLY.** Background
+processes die within ~2 minutes of a turn ending, `setsid`/`nohup`
+notwithstanding — the sandbox goes with the turn. Four separate relaunches made
+essentially no progress; five ~9-minute FOREGROUND blocks finished 250 deals and
+100 rounds. Checkpoint per unit (`ARENA_CKPT`, `PRIORLAB_CKPT`) and the kill at
+each block's end costs nothing.
+
 **AN ORACLE'S FLOOR IS NOT A REAL DEFENDER'S FLOOR** — worth stating, because the
 first reading of these numbers got it wrong. Doubling always pays more on a set,
 so a defender who KNEW the outcome would double every failing contract (38%
