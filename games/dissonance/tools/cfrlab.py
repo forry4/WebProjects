@@ -69,7 +69,7 @@ BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve")
 CKPT = os.environ.get("CFR_CKPT")
 #: The ladder the abstract game bids on. Nothing in 800 deals of Expert
 #: self-play ever settled above 8, so rungs above it are tree with no data.
-MAXL = 8
+MAXL = int(os.environ.get("CFR_MAXL", "8"))
 NBUCKET = 8
 #: Consecutive same-level overtakes. EXACT, not a truncation: an overtake must
 #: name a strictly higher-ranked denomination and there are `NOTRUMP + 1` = 5 of
@@ -164,6 +164,31 @@ def bucketise(recs):
 #: keeps the sweep out of the engine entirely.
 CURVE = {}
 
+#: THE TARGET PROFILE, stated as numbers so the sweep can be SEARCHED rather
+#: than eyeballed. Both are over levels 1..MAXL.
+#:
+#: The opening decays linearly (`MAXL + 1 - L`) -- "as even as possible, less
+#: probable at the upper end". The settled distribution is a hump over 3-6 with
+#: thin tails everywhere else. Together they encode the design intent the jump
+#: term exists to serve: opening high is for exceptional hands only, but the
+#: ladder must still be CLIMBABLE to the same heights a rung at a time.
+TARGET_OPEN = [(MAXL + 1 - L) for L in range(1, MAXL + 1)]
+TARGET_OPEN = [x / sum(TARGET_OPEN) for x in TARGET_OPEN]
+_SETTLE8 = [.04, .09, .18, .23, .22, .15, .06, .03]
+#: Resampled onto whatever ladder is in play, so a FINER ladder is judged
+#: against the same SHAPE rather than a shape it cannot express. Without this
+#: the granularity experiment would be scored against an 8-rung target while
+#: bidding on 16 rungs, and would lose for the wrong reason.
+TARGET_SETTLE = ([_SETTLE8[round(i * 7 / (MAXL - 1))] for i in range(MAXL)]
+                 if MAXL != 8 else _SETTLE8)
+TARGET_SETTLE = [x / sum(TARGET_SETTLE) for x in TARGET_SETTLE]
+
+
+def _tv(got, target):
+    """Total-variation distance: half the L1 gap, so 0 is exact and 1 disjoint."""
+    return sum(abs(got.get(L, 0.0) - t)
+               for L, t in zip(range(1, MAXL + 1), target)) / 2
+
 
 def leaf(rec, level, prev, declarer):
     """What the settled contract pays, DECLARER-SIGNED.
@@ -179,8 +204,40 @@ def leaf(rec, level, prev, declarer):
     """
     terms = E._terms_for("classic", 0, level, jump=level - prev)
     if CURVE:
+        # THE LADDER'S GRANULARITY. `target` is what the contract must actually
+        # TAKE, and it is the only knob that changes how much HARDER one rung is
+        # than the last. Achievable points measure mean 4.03 sd 1.92, so at the
+        # shipped `target = level` a single rung is 0.52 sd -- which is why no
+        # payoff curve can spread the settled distribution past two or three
+        # rungs. `tscale` shrinks the step.
+        if "tscale" in CURVE:
+            terms["target"] = max(1, round(1 + (level - 1) * CURVE["tscale"]))
+            # AND THE PAYOFF MUST TRACK THE TARGET, NOT THE RUNG. A finer ladder
+            # scored off the raw level pays level 11 more than twice what level 5
+            # pays for a contract barely one point harder, and the auction simply
+            # races to the top -- measured, settling at 10.2 of 12 with 15%
+            # making. What a contract is worth has to follow how hard it is.
+            level = terms["target"]
         terms["make"] = round(CURVE.get("A", 1.0) * level ** CURVE.get("p", 2.0)
                               + E.FLAT_MAKE_BONUS["classic"])
+        # THE SET BASE'S OWN CURVE. `short x (target - pts)` already makes a
+        # deep failure quadratic-ish in the level -- bid 7, make 3, and you are
+        # four short on a base that also grew -- which is what makes the top of
+        # the ladder unreachable however good the make side gets. `q` is the
+        # exponent on the level part of that base, so the top can be made
+        # SURVIVABLE without inflating the reward for getting there.
+        if "q" in CURVE or "B" in CURVE or "jexp" in CURVE:
+            base = CURVE.get("B", 1.0) * level ** CURVE.get("q", 1.0) \
+                + E.FLAT_SET_PENALTY["classic"]
+            # THE JUMP'S OWN EXPONENT. Linear in `j` means opening at 6 costs
+            # six times a one-rung raise, which is why no hand opens high at any
+            # rate that also punishes jumping -- the design intent ("punish
+            # opening too high with anything but extremely good hands") wants a
+            # CONCAVE penalty: steep for the first rungs, then levelling, so a
+            # big opening is expensive without being unaffordable.
+            j = level - prev
+            base += E.JUMP_SET_BONUS["classic"] * j ** CURVE.get("jexp", 1.0)
+            terms["set_base"] = round(base)
     scored = not rec["duck"][declarer]
     return E.payoff(terms, rec["pts"][declarer], scored)
 
@@ -738,6 +795,159 @@ def jump_main(rate, iters, seed=1234):
           flush=True)
 
 
+#: What the CLIMBED declarer-EV curve has to look like, levels 1..8.
+#:
+#: This is the target profile restated as a MECHANISM, and it is the whole
+#: reason a scoring search is tractable. An auction rests at level L when the
+#: contract there is worth about nothing to the marginal contested hand -- so a
+#: settled distribution spread over 3-6 needs the EV curve to cross zero near 5
+#: with a GENTLE slope, and an opening distribution that decays needs the low
+#: rungs to still be worth taking (positive at 1-2) so nobody can just sit
+#: there. The shipped curve is +13 +12 +10 +4 -9 -26 -43 -59: it crosses once,
+#: at a slope of ~15 a rung, and one steep crossing is one mode.
+TARGET_EV = [10.0, 7.0, 4.0, 2.0, 0.0, -3.0, -8.0, -16.0]
+
+
+def ev_profile(recs):
+    """Collapse the deal cache to what an EV curve needs, ONCE.
+
+    `pts` and `duck` do not depend on the scoring, so the 4000 (deal, seat)
+    pairs reduce to a duck fraction plus a histogram over `pts` -- about thirty
+    numbers. That turns one config's whole EV curve from 32k payoff evaluations
+    into a few hundred, which is what makes an exhaustive grid affordable and
+    means CFR only ever runs on survivors.
+    """
+    duck, hist = 0, defaultdict(int)
+    for r in recs:
+        for s in (0, 1):
+            if r["duck"][s]:
+                duck += 1
+            else:
+                hist[r["pts"][s]] += 1
+    n = 2 * len(recs)
+    return duck / n, [(p, c / n) for p, c in sorted(hist.items())]
+
+
+def ev_curve(prof, cfg, jump=1):
+    """The declarer-EV curve under `cfg`, climbed a rung at a time by default."""
+    duck, hist = prof
+    out = []
+    for L in range(1, MAXL + 1):
+        make = cfg["A"] * L ** cfg["p"] + cfg["Fm"]
+        setb = cfg["B"] * L ** cfg["q"] + cfg["Fs"] + cfg["jump"] * jump
+        acc = duck * 20.0
+        for pts, w in hist:
+            acc += w * (make + (pts - L) if pts >= L
+                        else -(setb + cfg["short"] * (L - pts)))
+        out.append(acc)
+    return out
+
+
+def evscan_main(top):
+    """`cfrlab evscan N` -- grid the scoring, rank by EV-curve shape.
+
+    STAGE ONE of the search, and deliberately not the answer: a curve that
+    matches `TARGET_EV` is a NECESSARY condition for the target profile, not a
+    sufficient one, because the curve is unconditional and the auction is
+    played by two hands that each know their own. Survivors go to CFR.
+    """
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    prof = ev_profile(recs)
+    grid, seen = [], set()
+    ps = [1.6 + .1 * i for i in range(16)]
+    qs = [0.6 + .2 * i for i in range(8)]
+    for p in ps:
+        for A in (0.5, 1.0, 2.0, 3.0):
+            for Fm in (0, 5, 10):
+                for q in qs:
+                    # B = 0 DROPS THE LEVEL TERM FROM THE SET BASE ENTIRELY, so
+                    # going down at 7 costs the same base as at 3 and only the
+                    # SHORTFALL separates them. It is the most direct way to
+                    # make the top of the ladder survivable.
+                    for B in (0.0, 0.5, 1.0, 2.0, 3.0):
+                        for Fs in (0, 5, 10):
+                            for short in (1, 2, 3, 5):
+                                for jump in (3, 4, 5):
+                                    grid.append(dict(
+                                        p=p, A=A, Fm=Fm, q=q, B=B, Fs=Fs,
+                                        short=short, jump=jump))
+    scored, dropped = [], 0
+    for cfg in grid:
+        # THE SCALE IS AN ANCHORED CONSTRAINT, not a free parameter. `null` is a
+        # flat 20 and does not scale with anything here, so a scoring that
+        # shrinks the made base to single digits would quietly make the Null
+        # consolation worth more than most contracts -- a perfect EV curve
+        # around a broken game. Level 4 pays 26 today; hold it in that region.
+        if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["Fm"] <= 34:
+            dropped += 1
+            continue
+        # `q` multiplies B, so every q ties when the level term is dropped. Fold
+        # them, or the top of the table is eight copies of one scoring.
+        key = (cfg["p"], cfg["A"], cfg["Fm"], cfg["B"], cfg["Fs"],
+               cfg["short"], cfg["jump"],
+               cfg["q"] if cfg["B"] else 0)
+        if key in seen:
+            continue
+        seen.add(key)
+        ev = ev_curve(prof, cfg)
+        loss = sum((a - b) ** 2 for a, b in zip(ev, TARGET_EV)) ** 0.5
+        scored.append((loss, cfg, ev))
+    scored.sort(key=lambda x: x[0])
+    print(f"  gridded {len(grid)} scorings, {dropped} dropped off-scale, "
+          f"{len(scored)} distinct; target EV "
+          + " ".join(f"{v:+.0f}" for v in TARGET_EV))
+    for loss, cfg, ev in scored[:top]:
+        spec = (f"p={cfg['p']:.1f},A={cfg['A']},Fm={cfg['Fm']},"
+                f"q={cfg['q']:.1f},B={cfg['B']},Fs={cfg['Fs']},"
+                f"short={cfg['short']},jump={cfg['jump']}")
+        mk = [cfg["A"] * L ** cfg["p"] + cfg["Fm"] for L in (1, 4, 8)]
+        st = [cfg["B"] * L ** cfg["q"] + cfg["Fs"] + cfg["jump"]
+              for L in (1, 4, 8)]
+        print(f"  {loss:>5.1f}  {spec:<50} make {mk[0]:>4.0f}/{mk[1]:>3.0f}/"
+              f"{mk[2]:>3.0f}  set {st[0]:>3.0f}/{st[1]:>3.0f}/{st[2]:>3.0f}"
+              f"  EV " + " ".join(f"{v:+.0f}" for v in ev))
+
+
+def search_main(n, shard, nshard, iters):
+    """`cfrlab search N SHARD NSHARD ITERS` -- random search over the scoring.
+
+    STAGE THREE, after the EV grid and the hand-picked probes, and the reason it
+    exists is that hand-picking stopped working: the concave-jump probes all
+    came in WORSE than the linear arm they were meant to beat, which is the
+    signal that intuition about a seven-parameter interaction has run out.
+
+    Iterations are deliberately low here. The ranking only has to be good enough
+    to pick survivors, and the survivors get re-solved at full length -- spending
+    200k on a config that loses by 0.3 buys nothing.
+    """
+    rng = random.Random(20250815 + shard)
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    for i in range(n):
+        if i % nshard != shard:
+            continue
+        cfg = {
+            "p": round(rng.uniform(1.6, 2.8), 1),
+            "A": rng.choice([0.5, 1.0, 2.0]),
+            "Fm": rng.choice([0, 5, 10, 15]),
+            "q": round(rng.uniform(0.6, 1.6), 1),
+            "B": rng.choice([0.0, 0.0, 0.5, 1.0, 2.0]),
+            "Fs": rng.choice([0, 5, 10, 15]),
+            "short": rng.choice([1, 1, 2, 3, 4]),
+            "jump": rng.choice([2, 3, 4, 5, 6, 7]),
+            "over": rng.choice([1, 1, 2, 3]),
+        }
+        if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["Fm"] <= 34:
+            continue                       # same scale anchor as the EV grid
+        spec = ",".join(f"{k}={v}" for k, v in cfg.items())
+        # Each config gets a FRESH process-level scoring state; the knobs are
+        # module constants, so a loop that mutated them in place would leak the
+        # previous config into the next one.
+        subprocess.run([sys.executable, "-m", "games.dissonance.tools.cfrlab",
+                        "curve", spec, str(iters)],
+                       env=dict(os.environ), check=False)
+
+
 def curve_main(spec, iters, seed=1234):
     """`cfrlab curve p=2,Fm=10,Fs=10,short=5,jump=3 ITERS [SEED]`.
 
@@ -770,7 +980,7 @@ def curve_main(spec, iters, seed=1234):
     """
     for kv in spec.split(","):
         k, _, v = kv.partition("=")
-        if k in ("p", "A"):
+        if k in ("p", "A", "q", "B", "jexp", "tscale"):
             CURVE[k] = float(v)
         elif k == "Fm":
             E.FLAT_MAKE_BONUS["classic"] = int(v)
@@ -780,6 +990,12 @@ def curve_main(spec, iters, seed=1234):
             E.SHORT_PENALTY = int(v)
         elif k == "jump":
             E.JUMP_SET_BONUS["classic"] = int(v)
+        elif k == "over":
+            # The ONE term that scales with HOW MUCH you make rather than
+            # whether -- so it is the only knob that can discriminate by hand
+            # strength without steepening the top of the ladder, which is what
+            # `short` does and why `short` cannot buy both at once.
+            E.OVER_BONUS["classic"] = int(v)
         else:
             raise SystemExit(f"unknown scoring knob {k!r} in {spec!r}")
     CURVE.setdefault("p", 2.0)
@@ -835,15 +1051,15 @@ def curve_main(spec, iters, seed=1234):
     # The mechanism column: unconditional declarer EV per rung, opened straight.
     ev = [statistics.mean(leaf(r, lv, 0, s) for r in recs for s in (0, 1))
           for lv in range(1, MAXL + 1)]
-    sent = -sum(p * math.log(p) for p in
-                (v / n for v in settle.values()) if p > 0) / math.log(len(acts))
-    print(f"{spec:>30}{'' if seed == 1234 else chr(96+seed)} {ent:>6.2f} "
-          f"{sent:>6.2f} {per[NBUCKET-1]-per[0]:>+7.2f} {smean:>6.2f} "
-          f"{100*made/n:>5.1f}% | open "
+    sd = {k: v / n for k, v in settle.items()}
+    lo, ls = _tv(opn, TARGET_OPEN), _tv(sd, TARGET_SETTLE)
+    print(f"{lo+ls:>5.2f} {lo:>5.2f} {ls:>5.2f} "
+          f"{spec:>40}{'' if seed == 1234 else chr(96+seed)} "
+          f"{per[NBUCKET-1]-per[0]:>+6.2f} {smean:>5.2f} {100*made/n:>5.1f}% | o "
           + " ".join(f"{a}:{100*opn[a]:.0f}" for a in acts if opn[a] > .015)
-          + " | settled "
-          + " ".join(f"{k}:{100*v/n:.0f}" for k, v in sorted(settle.items())
-                     if v / n > .015)
+          + " | s "
+          + " ".join(f"{k}:{100*v:.0f}" for k, v in sorted(sd.items())
+                     if v > .015)
           + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
 
 
@@ -976,14 +1192,27 @@ def main():
         return jump_main(int(sys.argv[2]),
                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "search":
+        return search_main(int(sys.argv[2]), int(sys.argv[3]),
+                           int(sys.argv[4]), int(sys.argv[5]))
+    if len(sys.argv) > 1 and sys.argv[1] == "evscan":
+        return evscan_main(int(sys.argv[2]) if len(sys.argv) > 2 else 25)
     if len(sys.argv) > 1 and sys.argv[1] == "curve":
         return curve_main(sys.argv[2],
                           int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                           int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
     if len(sys.argv) > 1 and sys.argv[1] == "chdr":
-        return print(f"{'scoring':>30} {'opnsp':>6} {'setsp':>6} {'discrm':>7} "
-                     f"{'mean':>6} {'made':>6} | distributions %"
-                     f" | unconditional declarer EV by level 1..8")
+        return print(f"{'loss':>5} {'open':>5} {'setl':>5} {'scoring':>40} "
+                     f"{'discr':>6} {'mean':>5} {'made':>6} | distributions % "
+                     f"| unconditional declarer EV by level 1..8\n"
+                     f"{'':>5} {'':>5} {'':>5} {'TARGET':>40} "
+                     f"{'':>6} {'':>5} {'':>6} | o "
+                     + " ".join(f"{L}:{100*t:.0f}" for L, t in
+                                zip(range(1, MAXL + 1), TARGET_OPEN))
+                     + " | s "
+                     + " ".join(f"{L}:{100*t:.0f}" for L, t in
+                                zip(range(1, MAXL + 1), TARGET_SETTLE)
+                                if t > .015))
     if len(sys.argv) > 1 and sys.argv[1] == "hdr":
         return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
                      f"{'weakest':>7} {'strong':>7} {'discrim':>8} "

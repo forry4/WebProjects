@@ -3162,6 +3162,70 @@ exactly where the equilibrium's does not. A mirror's verdict on a design knob
 inherits the mirror's blind spot. **Re-run any design arm that was judged only
 by Expert self-play before treating it as settled.**
 
+### SEARCHING THE SCORING FOR A TARGET PROFILE (2026-08-15) — and the ceiling
+
+The brief: openings spread across all levels and decaying at the top, settled
+contracts spread with a hump over 3-6. Encoded as `TARGET_OPEN` / `TARGET_SETTLE`
+in `cfrlab.py` and scored by total-variation distance, so the sweep is SEARCHED
+rather than eyeballed. Three stages — an EV-curve grid (276k scorings, free,
+since `pts`/`duck` do not depend on the scoring), hand-picked probes, and a
+random search once the probes stopped beating each other.
+
+**Best found, loss 0.96 → 0.54:**
+
+```
+p=2.4, A=0.5, Fm=5, B=0, Fs=10, short=1, jump=5
+  make = 0.5 x L^2.4 + 5      (6 / 19 / 79 at levels 1 / 4 / 8)
+  set  = 10 + 5 x jump        (NO level term at all)
+  open    1:28 2:25 3:18 4:26 5:3        target 22 19 17 14 11 8 6 3
+  settled 1:5 2:5 3:7 4:12 5:48 6:16 7:5 target  4  9 18 23 22 15 6 3
+  made 53.5%
+```
+
+Three of the four knobs that moved it are the ones the brief pointed at.
+**Dropping the level term from the set base entirely** (`B=0`) — going down at 7
+costs the same base as at 3, and only the shortfall separates them. **`short` 5
+→ 1**, which is what actually makes the top of the ladder survivable, since
+`short x (target − pts)` is quadratic-ish in the level (bid 7, make 3, and you
+are four short on a base that also grew). **`jump` 3 → 5**, which does the job it
+was designed for once the rest stops fighting it: openings decay to 3% by level
+5 while the ladder stays climbable.
+
+**THE OPENING IS ESSENTIALLY SOLVED; THE SETTLED DISTRIBUTION HAS A CEILING, AND
+IT IS NOT IN THE SCORING.** Achievable points (best denomination, exact play)
+measure **mean 4.03, sd 1.92** — so at `target = level` **one rung of the ladder
+is 0.52 standard deviations**, and the make probability falls 80% → 63% → 42% →
+23% across levels 3-6. An auction rests where the contract is worth about nothing
+to the marginal hand, so a settled distribution spread over four rungs needs
+EV ≈ 0 at all four *simultaneously* — which needs level 6 to pay ~13x level 3.
+Solving that gives a make exponent near 3.7, and **it was tested**: it does
+flatten the EV curve (`+2 +2 +4 +8 +8 -2 -20 -44`) but the crossing just RELOCATES
+to 6-7 and the mode goes with it (settled mean 6.86, **10.1% making**). Flattening
+the curve moves the mode; it does not widen it. Every one of ~60 scorings tried
+put 45-60% of contracts on a single rung.
+
+**The width is a property of the CARDS, not the payoffs** — 13 tricks and parity
+scoring give that 1.92 sd, and no payoff rule can make the ladder finer than the
+distribution it is measuring.
+
+**THE UNRESOLVED DIRECTION, and it is the only one left with a mechanism:** make
+the LADDER finer instead of the payoffs steeper — `target = 1 + (L−1) x tscale`,
+so a rung is a smaller step in difficulty. First cut at 12 rungs and `tscale=0.6`
+gave the **best opening in the whole campaign (loss 0.27-0.37 against 0.46
+shipped), spread across eight rungs**. The settled distribution could not be
+resolved: the tree is `2^MAXL`, so 12 rungs is ~16x the work of 8, 25k iterations
+time out and 2k is pure noise — the "50% settle at 12" it prints is an unconverged
+uniform policy racing up a long ladder, not a result. **Do not read the 12-rung
+settled numbers as a finding either way.** Converging it needs a cheaper CFR
+(outcome sampling) or a real compute budget.
+
+**One experiment bug worth keeping, because it looked exactly like a result.**
+The first finer-ladder run scored `make`/`set` off the raw RUNG while the target
+came from `tscale` — so level 11 paid more than twice level 5 for a contract one
+point harder, and the auction raced to the top (settled 10.2 of 12, 15% making).
+That reads as "a finer ladder fails". It does not: **when the ladder is finer the
+payoff has to track the TARGET, not the rung**, and the fix is one line.
+
 **What shipping a rate change would entail** (it is a scoring change, so it is
 not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
