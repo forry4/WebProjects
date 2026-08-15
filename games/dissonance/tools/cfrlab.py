@@ -157,6 +157,14 @@ def bucketise(recs):
     return cuts
 
 
+#: A scoring OVERRIDE for the design sweeps, empty in every other mode. `p`/`A`
+#: reshape the made base (the engine hardcodes `level * level`, so it is the one
+#: term a constant cannot reach); everything else is a module constant patched
+#: in place. `_terms_for` returns a plain dict, so overriding after the fact
+#: keeps the sweep out of the engine entirely.
+CURVE = {}
+
+
 def leaf(rec, level, prev, declarer):
     """What the settled contract pays, DECLARER-SIGNED.
 
@@ -170,6 +178,9 @@ def leaf(rec, level, prev, declarer):
     OPENING's rise is its whole level, which `prev = 0` gives for free.
     """
     terms = E._terms_for("classic", 0, level, jump=level - prev)
+    if CURVE:
+        terms["make"] = round(CURVE.get("A", 1.0) * level ** CURVE.get("p", 2.0)
+                              + E.FLAT_MAKE_BONUS["classic"])
     scored = not rec["duck"][declarer]
     return E.payoff(terms, rec["pts"][declarer], scored)
 
@@ -727,6 +738,115 @@ def jump_main(rate, iters, seed=1234):
           flush=True)
 
 
+def curve_main(spec, iters, seed=1234):
+    """`cfrlab curve p=2,Fm=10,Fs=10,short=5,jump=3 ITERS [SEED]`.
+
+    THE JUMP RATE COULD NOT SPREAD THE OPENING and the ladder table says why:
+    levels 1-3 make 95.7/90.4/80.0% and pay the declarer +12.71/+12.32/+10.39,
+    so they are near-free money and the auction can never rest there. That is
+    the MAKE/SET CURVE, not the jump term, which is what this sweeps.
+
+    The mechanism to watch is the declarer-EV-by-level curve, printed beside
+    every row. Under the shipped scoring it falls monotonically -- every hand
+    wants the lowest rung, competition bids that up to the one point where
+    taking the contract stops paying, and a single crossing point is a single
+    mode. An interior peak, or a flat stretch, is what a spread opening would
+    have to look like, and it is the only reading here that is a MECHANISM
+    rather than a summary statistic.
+
+    Arithmetic worth having before reading the rows: the make base runs 11 -> 74
+    over levels 1..8, a factor of 6.7, while the make PROBABILITY falls 95.7% ->
+    2.3%, a factor of 42. Nothing about a 6.7x reward against a 42x risk can be
+    flat, which is the whole reason the curve falls. `Fm = 0` alone takes the
+    reward ratio to 64x (1 -> 64) and `p` tunes it -- 8^p = 42 lands near 1.8.
+
+    NOTE ON PRIOR ART, because this is re-asking a settled question. The
+    symmetric +-10 flat stake shipped 2026-08-11 on 400 paired Expert-vs-Expert
+    deals per arm, and `FLAT_MAKE_MIN_LEVEL` gating measured indistinguishable
+    there. Those arms were judged by Expert against Expert -- the mirror this
+    campaign has since measured at 9.06 points of exploitability -- so the
+    equilibrium is entitled to a different answer, and a disagreement between
+    the two is information rather than a contradiction to explain away.
+    """
+    for kv in spec.split(","):
+        k, _, v = kv.partition("=")
+        if k in ("p", "A"):
+            CURVE[k] = float(v)
+        elif k == "Fm":
+            E.FLAT_MAKE_BONUS["classic"] = int(v)
+        elif k == "Fs":
+            E.FLAT_SET_PENALTY["classic"] = int(v)
+        elif k == "short":
+            E.SHORT_PENALTY = int(v)
+        elif k == "jump":
+            E.JUMP_SET_BONUS["classic"] = int(v)
+        else:
+            raise SystemExit(f"unknown scoring knob {k!r} in {spec!r}")
+    CURVE.setdefault("p", 2.0)
+
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    cfr = CFR(recs)
+    rng = random.Random(seed)
+    for _ in range(iters):
+        rec = recs[rng.randrange(len(recs))]
+        for me in (0, 1):
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+    eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
+                      for a, x in s.items()}
+                  for k, s in cfr.S.items()
+                  if sum(max(y, 0.0) for y in s.values()) > 0}, backoff=False)
+
+    acts = actions(0, 0)
+    opn = {a: 0.0 for a in acts}
+    per = {}
+    for b in range(NBUCKET):
+        s = eqp.at(b, 0, 0, 0, acts) or {a: 1 / len(acts) for a in acts}
+        per[b] = sum(a * s[a] for a in acts)
+        for a in acts:
+            opn[a] += s[a] / NBUCKET
+    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(acts))
+
+    settle, made, n = defaultdict(int), 0, 6000
+    for _ in range(n):
+        rec = recs[rng.randrange(len(recs))]
+        level, prev, holds, to_act, holder = 0, 0, 0, 0, None
+        while True:
+            a = actions(level, holds)
+            s = eqp.at(rec["b"][to_act], level, prev, holds, a) or \
+                {x: 1 / len(a) for x in a}
+            r, acc, pick = rng.random(), 0.0, a[-1]
+            for x in a:
+                acc += s[x]
+                if r <= acc:
+                    pick = x
+                    break
+            if pick == -1:
+                break
+            holder = to_act
+            if pick == HOLD:
+                holds, to_act = holds + 1, 1 - to_act
+            else:
+                level, prev, holds, to_act = pick, level, 0, 1 - to_act
+        settle[level] += 1
+        if leaf(rec, level, prev, holder) > 0:
+            made += 1
+    smean = sum(k * v for k, v in settle.items()) / n
+    # The mechanism column: unconditional declarer EV per rung, opened straight.
+    ev = [statistics.mean(leaf(r, lv, 0, s) for r in recs for s in (0, 1))
+          for lv in range(1, MAXL + 1)]
+    sent = -sum(p * math.log(p) for p in
+                (v / n for v in settle.values()) if p > 0) / math.log(len(acts))
+    print(f"{spec:>30}{'' if seed == 1234 else chr(96+seed)} {ent:>6.2f} "
+          f"{sent:>6.2f} {per[NBUCKET-1]-per[0]:>+7.2f} {smean:>6.2f} "
+          f"{100*made/n:>5.1f}% | open "
+          + " ".join(f"{a}:{100*opn[a]:.0f}" for a in acts if opn[a] > .015)
+          + " | settled "
+          + " ".join(f"{k}:{100*v/n:.0f}" for k, v in sorted(settle.items())
+                     if v / n > .015)
+          + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
+
+
 def load_expert():
     base = os.environ.get("CFR_EXPERT_CKPT")
     rows, seen = [], set()
@@ -856,6 +976,14 @@ def main():
         return jump_main(int(sys.argv[2]),
                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "curve":
+        return curve_main(sys.argv[2],
+                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
+                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "chdr":
+        return print(f"{'scoring':>30} {'opnsp':>6} {'setsp':>6} {'discrm':>7} "
+                     f"{'mean':>6} {'made':>6} | distributions %"
+                     f" | unconditional declarer EV by level 1..8")
     if len(sys.argv) > 1 and sys.argv[1] == "hdr":
         return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
                      f"{'weakest':>7} {'strong':>7} {'discrim':>8} "

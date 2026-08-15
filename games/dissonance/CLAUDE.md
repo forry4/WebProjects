@@ -3099,6 +3099,69 @@ attractive. A genuinely spread opening needs the low rungs to stop being a
 giveaway, which is the make/set curve (`N² + 10` against a near-linear set base),
 not the jump term.
 
+### THE MAKE/SET CURVE — the ±10 flat stake is what pins the opening to 4
+
+`cfrlab curve p=…,Fm=…,Fs=…,short=…,jump=…`. The jump sweep said a spread
+opening needs the low rungs to stop being a giveaway, which is the make/set
+curve. This sweeps it, and **the answer is one arm, verified over three seeds**:
+
+| scoring | open spread | discrim | settled mean | made | opening |
+|---|---|---|---|---|---|
+| **shipped** `p=2, Fm=10, Fs=10` | 0.37 | +2.02 | 4.67 | 72.8% | `1:8 2:2 4:76 5:13` |
+| **`Fm=0, Fs=0`** | **0.58 / 0.58 / 0.54** | **+3.8** | **4.63** | **73.5%** | `1:26 2:5 4:50 5:18` |
+| `p=1.9, Fm=0, Fs=10` | 0.73 | +3.50 | 4.17 | 85.3% | `1:23 2:11 3:16 4:37 5:12` |
+| `p=2.5, Fm=0, Fs=10` | 0.64 | +3.04 | 5.40 | 33.9% | `1:17 2:9 3:7 4:15 5:52` |
+
+**Deleting both flat stakes buys +55% opening spread and +88% discrimination at
+LITERALLY NO COST to the settled economy** — mean 4.67 → 4.63, make rate 72.8% →
+73.5%, settled distribution `4:33 5:66` → `4:29 5:66`. It is a pure shape change,
+and it is a *deletion of two constants* rather than a new term.
+
+**The mechanism is the unconditional declarer-EV curve**, printed beside every
+row and the only column here that is a mechanism rather than a summary:
+
+```
+shipped     EV  +13 +12 +10  +4  -9 -26 -43 -59   monotone: every hand wants
+                                                   the lowest rung, so the
+                                                   auction has ONE crossing
+Fm=0,Fs=0   EV   +4  +4  +4  +1  -7 -21 -35 -50   flat over 1-4: several rungs
+                                                   are viable openings
+```
+
+The reason is arithmetic. The made base runs 11 → 74 over levels 1..8, a factor
+of 6.7, while the make PROBABILITY falls 95.7% → 2.3%, a factor of 42 — nothing
+about a 6.7x reward against a 42x risk can be flat. **The flat +10 is what
+compresses the reward ratio**: without it the base runs 1 → 64, a factor of 64,
+which is the same order as the risk.
+
+**The frontier, because opening spread and make rate are in tension.** Pushing
+past `Fm=0,Fs=0` does buy more spread — `p=1.9` gives the sweep's prettiest
+opening at 0.73, genuinely filling in level 3 — but it drops the settled level to
+4.17 and takes the make rate to **85.3%**, i.e. contracts almost never fail and
+the play loses its tension. In the other direction `p=2.5` puts an interior peak
+in the EV curve (`+3 +5 +8 +8 -0`) and the auction climbs past it to settle at
+5.40 with only **33.9%** making. `Fm=0,Fs=0` is the one point on the frontier
+that moves the opening without moving anything else.
+
+**Even this does not make the opening EVEN**, and no arm in the sweep does at an
+acceptable make rate. `1:26 2:5 4:50 5:18` is two humps with more weight on the
+low one, not a flat distribution — levels 3 and 6+ stay near zero. What the
+change actually buys is DISCRIMINATION: the opening moves +3.8 rungs from the
+weakest bucket to the strongest, against +2.0 today. That is the opening carrying
+information about the hand, which is the thing worth having; an even distribution
+for its own sake would be randomisation.
+
+**THIS CONTRADICTS A SHIPPED CHANGE, and the disagreement is the point.** The
+symmetric ±10 flat stake shipped 2026-08-11 on 400 paired Expert-vs-Expert deals
+per arm, and was credited there with moving the SHAPE (2-opens 5.8% → 14.2%, the
+settled level-4 crater filled). The equilibrium says the same constant is what
+pins the opening at 4. **Both can be true**: that measurement judged shape by
+Expert's behaviour, and Expert is the bidder this campaign has since measured at
+9.06 points of exploitability, whose opening ramps monotonically with strength
+exactly where the equilibrium's does not. A mirror's verdict on a design knob
+inherits the mirror's blind spot. **Re-run any design arm that was judged only
+by Expert self-play before treating it as settled.**
+
 **What shipping a rate change would entail** (it is a scoring change, so it is
 not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
