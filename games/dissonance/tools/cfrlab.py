@@ -1024,6 +1024,153 @@ def search_main(n, shard, nshard, iters):
                        env=dict(os.environ), check=False)
 
 
+def play_round(seed, level, k=8):
+    """Impose a contract at `level`, then play it out with the SHIPPED search.
+
+    Returns (made, declarer_points). Both seats search -- this is real play, so
+    the defender must be real too.
+    """
+    g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
+    seat = E.turn_seat(g)
+    best = max(range(E.NOTRUMP + 1), key=lambda d: B.hand_strength(g, seat, d))
+    E.apply_move(g, g["seats"][seat], {"kind": "bid", "level": level,
+                                       "denom": best})
+    # Drive the rest of the auction to THIS contract: the opponent concedes, and
+    # any pending double is declined, so the only thing varying between arms is
+    # the card play.
+    guard = 0
+    while g["phase"] != "play" and guard < 12:
+        guard += 1
+        s = E.turn_seat(g)
+        if s is None:
+            return None
+        if g["phase"] == "auction":
+            E.apply_move(g, g["seats"][s], {"kind": "pass"})
+        elif g["phase"] == "double":
+            E.apply_move(g, g["seats"][s], {"kind": "double", "on": False})
+        elif g["phase"] == "swap":
+            p = B.choose_swap(g, s)
+            E.apply_move(g, g["seats"][s], {"kind": "swap", "take": p.get("take"),
+                                            "give": p.get("give")})
+        else:
+            return None
+    if g["phase"] != "play":
+        return None
+    decl = g["auction"]["declarer"]
+    terms = E.payoff_terms(g)
+    guard = 0
+    while g["phase"] == "play" and guard < 40:
+        guard += 1
+        s = E.turn_seat(g)
+        if s is None:
+            break
+        r = rpc({"pick": {"view": E.view_for(g, s), "payoff": terms, "k": k}})
+        moves, sums = r.get("moves"), r.get("sum")
+        if not moves:
+            break
+        card = moves[max(range(len(moves)), key=lambda j: sums[j])]
+        E.apply_move(g, g["seats"][s], {"kind": "play", "card": card})
+    # `pts`, and read it WITHOUT a default. `g.get("points", [0, 0])` was the
+    # first cut: the engine's key is `pts`, so every round silently scored zero
+    # and the harness reported a perfectly plausible "real play never makes
+    # anything". A defaulted read of a misspelled key is indistinguishable from
+    # a real result.
+    pts = g["pts"][decl]
+    return (pts >= level, pts)
+
+
+def playnoise_main(n, shard=0, nshard=1, levels=(3, 4, 5, 6)):
+    """`cfrlab playnoise N [SHARD NSHARD]` -- how much looser is the REAL ladder?
+
+    EVERYTHING ELSE IN THIS FILE IS DOUBLE-DUMMY: `pts` is what a declarer can
+    guarantee seeing all forty cards. Real play is noisier, and noise WIDENS the
+    achieved-points distribution, which flattens P(make) per rung -- so every
+    "the ladder is too coarse" conclusion here is an upper bound on the
+    coarseness until this is measured.
+
+    So: impose a contract at each level on the same deals the cache holds, play
+    it out with the shipped search on BOTH seats, and compare the realised make
+    rate against the double-dummy one. The gap between the two curves is the
+    answer, and its SLOPE is what matters -- a curve that is uniformly lower is
+    just "real play is worse than perfect play", while a curve that is FLATTER
+    is a genuinely finer ladder than the double-dummy numbers imply.
+    """
+    ck = os.environ.get("CFR_PLAY_CKPT")
+    if ck and nshard > 1:
+        ck = f"{ck}.{shard}"
+    done = set()
+    if ck and os.path.exists(ck):
+        for line in open(ck):
+            try:
+                r = json.loads(line)
+                done.add((r["seed"], r["level"]))
+            except (json.JSONDecodeError, KeyError):
+                pass
+    out = open(ck, "a") if ck else None
+    jobs = [(800_000 + i, L) for i in range(n) for L in levels]
+    for idx, (seed, L) in enumerate(jobs):
+        if idx % nshard != shard or (seed, L) in done:
+            continue
+        r = play_round(seed, L)
+        if r is None:
+            continue
+        rec = {"seed": seed, "level": L, "made": bool(r[0]), "pts": r[1]}
+        if out:
+            out.write(json.dumps(rec) + "\n")
+            out.flush()
+
+
+def playnoise_report():
+    base = os.environ.get("CFR_PLAY_CKPT")
+    rows, seen = [], set()
+    for p in [base] + [f"{base}.{i}" for i in range(8)]:
+        if not p or not os.path.exists(p):
+            continue
+        for line in open(p):
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (r["seed"], r["level"]) not in seen:
+                seen.add((r["seed"], r["level"]))
+                rows.append(r)
+    if not rows:
+        print("no played rounds yet")
+        return
+    dd = {}
+    for i, line in enumerate(open(CKPT)):
+        if line.strip():
+            dd[800_000 + i] = json.loads(line)["pts"][0]
+    by = defaultdict(list)
+    for r in rows:
+        if r["seed"] in dd:
+            by[r["level"]].append(r)
+    print(f"\n=== REAL PLAY vs DOUBLE-DUMMY ({len(rows)} played rounds) ===")
+    print(f"  {'level':>6} {'n':>5} {'DD makes':>9} {'REAL makes':>11} "
+          f"{'gap':>7} {'DD pts':>8} {'real pts':>9}")
+    prev = None
+    slopes = [[], []]
+    for L in sorted(by):
+        v = by[L]
+        ddm = 100 * sum(1 for r in v if dd[r["seed"]] >= L) / len(v)
+        rlm = 100 * sum(1 for r in v if r["made"]) / len(v)
+        ddp = statistics.mean(dd[r["seed"]] for r in v)
+        rlp = statistics.mean(r["pts"] for r in v)
+        print(f"  {L:>6} {len(v):>5} {ddm:>8.1f}% {rlm:>10.1f}% "
+              f"{rlm-ddm:>+6.1f} {ddp:>8.2f} {rlp:>9.2f}")
+        if prev:
+            slopes[0].append(prev[0] - ddm)
+            slopes[1].append(prev[1] - rlm)
+        prev = (ddm, rlm)
+    if slopes[0]:
+        d, r = statistics.mean(slopes[0]), statistics.mean(slopes[1])
+        print(f"\n  COST OF ONE RUNG:  double-dummy {d:.1f} points of make-chance"
+              f"   real play {r:.1f}")
+        print(f"  The real ladder is {100*(1-r/d):.0f}% "
+              f"{'LOOSER' if r < d else 'TIGHTER'} than the double-dummy numbers "
+              f"say.")
+
+
 def denom_main(n):
     """`cfrlab denom N` -- is a same-level overtake an INTERMEDIATE contract?
 
@@ -1329,6 +1476,12 @@ def main():
         return jump_main(int(sys.argv[2]),
                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "playnoise":
+        if len(sys.argv) > 2 and sys.argv[2] == "report":
+            return playnoise_report()
+        return playnoise_main(int(sys.argv[2]),
+                              int(sys.argv[3]) if len(sys.argv) > 3 else 0,
+                              int(sys.argv[4]) if len(sys.argv) > 4 else 1)
     if len(sys.argv) > 1 and sys.argv[1] == "dcache":
         return dcache_main(int(sys.argv[2]) if len(sys.argv) > 2 else 600)
     if len(sys.argv) > 1 and sys.argv[1] == "denom":

@@ -3277,6 +3277,59 @@ different sizes, so this says nothing either way.** A real answer needs the
 all-denomination cache extended to 2000 deals (~1 hour of solving) so it can be
 compared paired and at equal size.
 
+### MEASURED: THE REAL LADDER IS 16% LOOSER, AND THE TUNING WAS AGAINST THE WRONG GAME
+
+`cfrlab playnoise`. Impose a contract at each level on the cached deals, play it
+out with the SHIPPED search on both seats, compare to the double-dummy answer.
+794 rounds:
+
+| bid | makes (double-dummy) | makes (real play) | gap |
+|---|---|---|---|
+| 3 | 80.5% | **88.5%** | +8.0 |
+| 4 | 61.5% | **78.5%** | +17.0 |
+| 5 | 41.5% | **57.5%** | +16.0 |
+| 6 | 22.2% | **39.7%** | +17.5 |
+
+**One rung costs 19.4 points of make-chance double-dummy and 16.3 in real play —
+the ladder is 16% looser than every number above it in this file.** Two separate
+effects: contracts make ~17 points more often (double-dummy assumes a PERFECT
+DEFENDER, and a real one leaks tricks — the mean deviation is **+0.95 points**),
+and the slope is gentler. The play noise measures **sd 1.94, as large as the
+entire hand-quality spread of 1.92**, so what actually happens at the table has
+**42% wider spread** than the solver's guaranteed value.
+
+**AND THE CONCLUSION FLIPS.** Re-solving with a leaf built from the 794 measured
+deviations instead of the double-dummy value:
+
+| scoring | loss | opening | settled | made |
+|---|---|---|---|---|
+| **shipped**, real-play leaf | 0.73 (open **0.22**) | `1:32 2:20 3:17 4:3 5:23 6:5` | `5:18 6:66 7:6` | 63.8% |
+| best-found, real-play leaf | 1.26 | `3:17 4:29 5:43` | `7:47 8:41` | 31.9% |
+| shipped, double-dummy leaf | 0.96 (open 0.46) | `1:8 2:2 4:76 5:13` | `4:33 5:66` | 72.8% |
+| best-found, double-dummy leaf | 0.54 | `1:28 2:25 3:18 4:26` | `4:12 5:48 6:16` | 53.5% |
+
+**The shipped scoring already produces the best opening spread of the whole
+campaign (0.22) once the leaf is realistic** — the "openings pile on level 4"
+problem is substantially an artefact of pricing the auction with a perfect
+defender. And the scoring tuned against the double-dummy leaf is much WORSE in
+real play (1.26), settling at 7-8 with only 32% making: it was calibrated to
+compensate for a leaf that understates make rates by 17 points, so it
+over-corrects once that understatement is removed.
+
+**What the real problem turns out to be:** under real play contracts settle too
+HIGH (mean 5.47, 66% at level 6), not openings too narrow. That is a different
+target for the next round of tuning, and every scoring conclusion in the two
+sections above needs re-deriving against this leaf before being trusted.
+
+**Caveats, and the first is load-bearing.** The real-play cache applies a sampled
+deviation to EACH SEAT INDEPENDENTLY, but the two seats' outcomes are strongly
+anti-correlated (measured −0.658 on the double-dummy values) — one side's leaked
+trick is the other's gain. Independent sampling therefore overstates the joint
+variance, and the settled-level numbers above are softer than the opening ones
+because of it. The deviations were also measured with the declarer as the opener
+at a forced contract over levels 3-6 only. And the ±0.11 error bar still applies
+to every loss in the table.
+
 ### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
 
 `pts` is what a declarer can guarantee seeing all 40 cards. Real play is noisier,
