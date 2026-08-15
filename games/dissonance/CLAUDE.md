@@ -3387,6 +3387,44 @@ naming a contract and the opponent conceding at once. A mean auction length that
 does not move can hide that entirely, which is why the distribution is the thing
 to report and the mean is not.
 
+**THE LINEAR MAKE TERM FIXES THE ONE-BID REGRESSION, and buys it with level 6.**
+`C` adds `C x level` to the made base, mirroring the linear term the set base
+already carries. In EV terms it is a HIGH-contract subsidy — the opposite tilt to
+the flat bonus and the overtrick rate — so it makes climbing worth doing:
+
+| arm | make | over | jump | 1-bid | mean bids | opening | settled |
+|---|---|---|---|---|---|---|---|
+| A | `L^2 + 5` | 0 | 7 | **33%** | 2.71 | 0.23 | **0.28** |
+| B | `L^2 + 1L` | 1 | 7 | 32% | 2.97 | 0.33 | 0.29 |
+| C | `L^2 + 2L + 2` | 1 | 5 | **17%** | 3.71 | **0.17** | 0.50 |
+| D | `L^2 + 2L + 5` | 1 | 7 | **13%** | 4.03 | 0.33 | 0.53 |
+
+C's opening spread (0.17) is the best measured anywhere in this campaign, and D
+more than halves the one-bid rate. Both settle ~65% on level 6.
+
+**Three couplings worth carrying, all measured here:**
+* **Overtricks BLUR the levels.** With `over = 1` a contract that takes 7 tricks
+  pays nearly the same bid at 3 as at 5, so the rung chosen matters less and the
+  auction converges — level 4 hollows to 3-5% in every `over=1` arm at C=0.
+* **The flat make bonus and the overtrick rate are the SAME KIND of term** — both
+  are low-contract subsidies in EV (`Fm=5` is worth `0.88 x 5` at level 3 against
+  `0.40 x 5` at level 6), so they trade off directly and can be tuned as one.
+* **`C` and `B` fight each other.** Raising the set base to stop C pushing
+  contracts to 6 just undoes what C bought: bids fall back to 2.4 and level 5
+  balloons to 72-79%. They are the same axis with opposite signs, so pick one.
+
+**Scaling is the third way to keep overtricks small.** A trick is worth 1 and
+cannot be scaled, so multiplying every OTHER term makes an overtrick
+proportionally smaller: at 3x (`3L^2 + 15` make, `6L + 36 + 21j` set, short 3)
+with `over = 1` the loss is 0.57 against A's 0.51 — most of A's shape, with every
+trick still counting.
+
+**NOTE ON THE LOSS COLUMN FOR C AND D.** It penalises level 6 heavily because
+`TARGET_SETTLE` encodes the ORIGINAL brief (a hump over 3-6). If settling at 6 is
+acceptable, that target is wrong for the question being asked and C/D are being
+marked down for hitting a spec that has since changed — re-run the search with a
+revised `TARGET_SETTLE` rather than reading their 0.68/0.76 as worse.
+
 **Two things it does NOT achieve, stated plainly.** Nothing opens above level 4
 (the target wants 17% at 6-8), and the settled hump still sits at 5-6 rather than
 3-6 (`3:8 4:16` against a target of `3:18 4:23`). And the make rate RISES, 59.4%

@@ -268,7 +268,14 @@ def leaf(rec, level, prev, declarer, holds=0):
             # races to the top -- measured, settling at 10.2 of 12 with 15%
             # making. What a contract is worth has to follow how hard it is.
             level = terms["target"]
+        # `C` is a LINEAR level term on the made base, mirroring the one the set
+        # base already carries. Both sides then read the same shape --
+        # quadratic + linear + flat on the make, linear + flat on the set -- and
+        # in EV terms it is a mild HIGH-contract subsidy, which is the opposite
+        # tilt to the flat bonus and the overtrick rate. That is why it can buy
+        # back what turning overtricks on costs.
         terms["make"] = round(CURVE.get("A", 1.0) * level ** CURVE.get("p", 2.0)
+                              + CURVE.get("C", 0.0) * level
                               + E.FLAT_MAKE_BONUS["classic"])
         # THE SET BASE'S OWN CURVE. `short x (target - pts)` already makes a
         # deep failure quadratic-ish in the level -- bid 7, make 3, and you are
@@ -1287,7 +1294,7 @@ def curve_main(spec, iters, seed=1234):
     """
     for kv in spec.split(","):
         k, _, v = kv.partition("=")
-        if k in ("p", "A", "q", "B", "jexp", "tscale", "dmult"):
+        if k in ("p", "A", "C", "q", "B", "jexp", "tscale", "dmult"):
             CURVE[k] = float(v)
         elif k == "Fm":
             E.FLAT_MAKE_BONUS["classic"] = int(v)
