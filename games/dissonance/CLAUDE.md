@@ -3425,7 +3425,35 @@ acceptable, that target is wrong for the question being asked and C/D are being
 marked down for hitting a spec that has since changed — re-run the search with a
 revised `TARGET_SETTLE` rather than reading their 0.68/0.76 as worse.
 
-**REVISED TARGET (2026-08-15): level 6 acceptable, NO rung above 40%.**
+**FINAL TARGET (2026-08-15): level 6 acceptable, no rung above 40%, and a
+COMMON LEVEL-1 OPENING IS FINE.** The last of those retired `TARGET_OPEN`'s
+linear decay, which wanted 22% at the floor and was penalising the ~38% every arm
+produces -- effort spent fighting a shape nobody objected to, and it competed
+directly with the settled distribution, which is what actually matters.
+
+**THE CANDIDATE:**
+
+```
+make   L^2 + L + 2        4  8 14 22 32 44 58 74      +1 per overtrick
+set    2L + 12 + 6 x jump climbed -20 -22 -24 -26 -28 -30 -32 -34
+                          opened  -20 -28 -36 -44 -52 -60 -68 -76
+short  1 per point        (shipped: 5)
+
+settled  1:5 2:4 3:2 4:15 5:35 6:38      max 38%, under the cap
+opening  1:39 2:18 3:5 4:35 5:2
+bids     3.04 (23% one-bid)   made 69.0%   loss 0.61
+```
+
+Verified across four disjoint 500-deal real-play subsets: 0.77 / 0.67 / 0.53 /
+0.76, mean 0.68 sd 0.096 — consistent, and the usual small-sample bias against
+the 0.61 read on the full 2000-deal cache. **Caveat on the cap: the maximum is
+38% on the full cache but ranges 33-46% across the subsets**, so the cap is met
+in expectation rather than robustly.
+
+Every constant is an integer, and both sides now carry the same shape --
+quadratic + linear + flat on the make, linear + flat on the set.
+
+**Earlier revision, kept for the reasoning:**
 `_SETTLE8` becomes `[.03 .06 .13 .20 .24 .20 .10 .04]` and `_tv` gains an
 explicit `CAP = 0.40` penalty at weight 2 — a total-variation distance alone
 trades one 50% spike against small errors spread elsewhere and can score them

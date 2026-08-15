@@ -222,7 +222,13 @@ CURVE = {}
 #: thin tails everywhere else. Together they encode the design intent the jump
 #: term exists to serve: opening high is for exceptional hands only, but the
 #: ladder must still be CLIMBABLE to the same heights a rung at a time.
-TARGET_OPEN = [(MAXL + 1 - L) for L in range(1, MAXL + 1)]
+#: REVISED 2026-08-15: a common level-1 opening is FINE. The linear decay that
+#: preceded this wanted 22% at the floor and was penalising the ~38% every arm
+#: produces -- effort spent fighting a shape nobody objected to, and it competed
+#: directly with the settled distribution, which is what actually matters.
+TARGET_OPEN = [.32, .20, .15, .12, .09, .06, .04, .02]
+if MAXL != 8:
+    TARGET_OPEN = [TARGET_OPEN[round(i * 7 / (MAXL - 1))] for i in range(MAXL)]
 TARGET_OPEN = [x / sum(TARGET_OPEN) for x in TARGET_OPEN]
 #: REVISED 2026-08-15: level 6 is acceptable, but no rung may carry 40%+. The
 #: hump therefore sits at 5 and runs 3-7 with a maximum of 24%, rather than the
