@@ -190,7 +190,7 @@ def _tv(got, target):
                for L, t in zip(range(1, MAXL + 1), target)) / 2
 
 
-def leaf(rec, level, prev, declarer):
+def leaf(rec, level, prev, declarer, holds=0):
     """What the settled contract pays, DECLARER-SIGNED.
 
     `payoff_terms`' own arithmetic on the shipped scoring. THE JUMP IS THE FINAL
@@ -238,6 +238,22 @@ def leaf(rec, level, prev, declarer):
             j = level - prev
             base += E.JUMP_SET_BONUS["classic"] * j ** CURVE.get("jexp", 1.0)
             terms["set_base"] = round(base)
+        # THE DENOMINATION AS A PRICE RUNG -- the one mechanism that escapes the
+        # invariance above. Every payoff rule multiplies the per-rung fall in
+        # P(make) and the per-hand spread in it by the SAME (make + set), so the
+        # ratio that sets the settled distribution's width cannot be moved by
+        # paying more or less. What CAN move it is putting more rungs inside one
+        # step of difficulty -- and Dissonance already has them. A same-level
+        # overtake in a higher-ranked denomination is legal and is 28.6% of
+        # Expert's bids, but it carries no money: it is a free re-bid at an
+        # identical price. `dmult` gives it one, so the five denominations
+        # become five price steps per level and P(make) falls five times more
+        # slowly per RUNG. This is skat's trick (base value x multipliers), done
+        # with rules classic already has.
+        if "dmult" in CURVE:
+            m = 1.0 + CURVE["dmult"] * holds
+            terms["make"] = round(terms["make"] * m)
+            terms["set_base"] = round(terms["set_base"] * m)
     scored = not rec["duck"][declarer]
     return E.payoff(terms, rec["pts"][declarer], scored)
 
@@ -373,7 +389,7 @@ class CFR:
 
         def child(a):
             if a == -1:
-                return leaf(rec, level, prev, holder) * (1 if holder == me else -1)
+                return leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
             if a == HOLD:
                 return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng)
             return self.walk(rec, a, level, 0, 1 - to_act, me, rng)
@@ -483,7 +499,7 @@ def best_response(recs, pol, br_seat):
         level, prev, holds, actor = s
         holder = 1 - actor
         sign = 1 if holder == br_seat else -1
-        conc = [sign * leaf(rc, level, prev, holder) for rc in recs]
+        conc = [sign * leaf(rc, level, prev, holder, holds) for rc in recs]
         acts = actions(level, holds)
 
         def kid(a):
@@ -785,7 +801,7 @@ def jump_main(rate, iters, seed=1234):
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
         settle[level] += 1
-        if leaf(rec, level, prev, holder) > 0:
+        if leaf(rec, level, prev, holder, holds) > 0:
             made += 1
     smean = sum(k * v for k, v in settle.items()) / n
     print(f"{rate:>4}{'' if seed == 1234 else chr(96+seed)} {ent:>8.3f} {sd:>7.2f} {mean:>7.2f} "
@@ -948,6 +964,67 @@ def search_main(n, shard, nshard, iters):
                        env=dict(os.environ), check=False)
 
 
+def denom_main(n):
+    """`cfrlab denom N` -- is a same-level overtake an INTERMEDIATE contract?
+
+    THE QUESTION THE `dmult` TEST COULD NOT ANSWER, and the reason that test
+    only nudged the settled distribution. Scaling the payoff by the denomination
+    rank prices a same-level overtake higher at IDENTICAL difficulty, which is
+    leverage, not granularity. In the real game an overtake means playing a
+    DIFFERENT suit -- usually a worse one -- so it is genuinely harder than the
+    standing contract and genuinely easier than the next level up.
+
+    If that is true, the five ranked denominations already interleave four extra
+    difficulty rungs between every pair of levels, and the ladder is five times
+    finer than `target = level` makes it look. That is the one mechanism that
+    escapes the invariance: every payoff rule scales the per-rung fall in
+    P(make) and the per-hand spread by the same (make + set) and cannot move
+    their ratio, but putting more rungs inside one step of difficulty moves the
+    denominator directly.
+
+    Measured, not assumed: this solves EVERY denomination for both seats.
+    """
+    tot = defaultdict(list)
+    for i in range(n):
+        g = E.new_game(["a", "b"], random.Random(900_000 + i), opener=0,
+                       mode="classic")
+        for seat in (0, 1):
+            byd = []
+            for d in range(E.NOTRUMP + 1):
+                r = rpc({"resolve": {
+                    "hands": [sorted(h) for h in g["hands"]],
+                    "piles": [[list(x) for x in q] for q in g["piles"]],
+                    "trump": d, "leader": seat,
+                    "terms": {"declarer": seat, "target": 1, "make": 1,
+                              "set_base": 1, "short": 1, "over": 1, "null": 20},
+                }})
+                byd.append(r.get("pts", 0))
+            byd.sort(reverse=True)
+            for rank, v in enumerate(byd):
+                tot[rank].append(v)
+        if (i + 1) % 25 == 0:
+            print(f"  {i+1}/{n} deals", flush=True)
+    print(f"\n=== ACHIEVABLE POINTS BY DENOMINATION RANK ({n} deals) ===")
+    print(f"  {'rank':>16} {'mean pts':>9} | P(make) at level 3 / 4 / 5 / 6")
+    best = tot[0]
+    for rank in sorted(tot):
+        v = tot[rank]
+        ps = [100 * sum(1 for x in v if x >= L) / len(v) for L in (3, 4, 5, 6)]
+        lbl = "best" if rank == 0 else f"{rank+1}th best"
+        print(f"  {lbl:>16} {statistics.mean(v):>9.2f} | "
+              + "  ".join(f"{p:>4.0f}%" for p in ps))
+    # THE NUMBER THAT DECIDES IT: how far down the level ladder does dropping
+    # one denomination rank move you? If it is a fraction of a rung, the
+    # denominations interleave and the effective ladder is already finer.
+    print(f"\n  In LEVELS, how far one denomination rank costs you:")
+    for rank in sorted(tot):
+        if rank == 0:
+            continue
+        gap = statistics.mean(best) - statistics.mean(tot[rank])
+        print(f"    best -> {rank+1}th best: {gap:>5.2f} points "
+              f"= {gap:>4.2f} of a level")
+
+
 def curve_main(spec, iters, seed=1234):
     """`cfrlab curve p=2,Fm=10,Fs=10,short=5,jump=3 ITERS [SEED]`.
 
@@ -980,7 +1057,7 @@ def curve_main(spec, iters, seed=1234):
     """
     for kv in spec.split(","):
         k, _, v = kv.partition("=")
-        if k in ("p", "A", "q", "B", "jexp", "tscale"):
+        if k in ("p", "A", "q", "B", "jexp", "tscale", "dmult"):
             CURVE[k] = float(v)
         elif k == "Fm":
             E.FLAT_MAKE_BONUS["classic"] = int(v)
@@ -1045,7 +1122,7 @@ def curve_main(spec, iters, seed=1234):
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
         settle[level] += 1
-        if leaf(rec, level, prev, holder) > 0:
+        if leaf(rec, level, prev, holder, holds) > 0:
             made += 1
     smean = sum(k * v for k, v in settle.items()) / n
     # The mechanism column: unconditional declarer EV per rung, opened straight.
@@ -1192,6 +1269,8 @@ def main():
         return jump_main(int(sys.argv[2]),
                          int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
                          int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "denom":
+        return denom_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200)
     if len(sys.argv) > 1 and sys.argv[1] == "search":
         return search_main(int(sys.argv[2]), int(sys.argv[3]),
                            int(sys.argv[4]), int(sys.argv[5]))
@@ -1266,7 +1345,7 @@ def main():
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
         # The opener cannot pass, so every auction settles -- there is no
         # passed-out branch to report.
-        v = leaf(rec, level, prev, holder)
+        v = leaf(rec, level, prev, holder, holds)
         settled[level].append(v)
         opening[first] += 1
         ev.append(v)
