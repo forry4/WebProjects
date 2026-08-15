@@ -853,9 +853,11 @@ def jump_main(rate, iters, seed=1234):
     # And what the change COSTS elsewhere: a scoring knob moves the whole game,
     # so a spread bought by making every contract fail is not a win.
     settle, made, n = defaultdict(int), 0, 6000
+    nbids = defaultdict(int)
     for _ in range(n):
         rec = recs[rng.randrange(len(recs))]
         level, prev, holds, to_act, holder = 0, 0, 0, 0, None
+        bids = 0
         while True:
             a = actions(level, holds)
             s = eqp.at(rec["b"][to_act], level, prev, holds, a) or \
@@ -869,11 +871,13 @@ def jump_main(rate, iters, seed=1234):
             if pick == -1:
                 break
             holder = to_act
+            bids += 1
             if pick == HOLD:
                 holds, to_act = holds + 1, 1 - to_act
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
         settle[level] += 1
+        nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
             made += 1
     smean = sum(k * v for k, v in settle.items()) / n
@@ -1327,9 +1331,11 @@ def curve_main(spec, iters, seed=1234):
     ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(acts))
 
     settle, made, n = defaultdict(int), 0, 6000
+    nbids = defaultdict(int)
     for _ in range(n):
         rec = recs[rng.randrange(len(recs))]
         level, prev, holds, to_act, holder = 0, 0, 0, 0, None
+        bids = 0
         while True:
             a = actions(level, holds)
             s = eqp.at(rec["b"][to_act], level, prev, holds, a) or \
@@ -1343,11 +1349,13 @@ def curve_main(spec, iters, seed=1234):
             if pick == -1:
                 break
             holder = to_act
+            bids += 1
             if pick == HOLD:
                 holds, to_act = holds + 1, 1 - to_act
             else:
                 level, prev, holds, to_act = pick, level, 0, 1 - to_act
         settle[level] += 1
+        nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
             made += 1
     smean = sum(k * v for k, v in settle.items()) / n
@@ -1363,6 +1371,9 @@ def curve_main(spec, iters, seed=1234):
           + " | s "
           + " ".join(f"{k}:{100*v:.0f}" for k, v in sorted(sd.items())
                      if v > .015)
+          + " | bids " + f"{sum(k*v for k,v in nbids.items())/n:.2f} "
+          + " ".join(f"{k}:{100*v/n:.0f}" for k, v in sorted(nbids.items())
+                     if v / n > .015)
           + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
 
 

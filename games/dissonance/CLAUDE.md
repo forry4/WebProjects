@@ -3373,6 +3373,20 @@ pts)` is quadratic-ish in the level). And **the jump penalty more than doubles,
 3 → 7**, which is the term that keeps high OPENINGS rare while leaving the ladder
 climbable a rung at a time — exactly what the jump rule was designed for.
 
+**BIDS PER AUCTION — the stat that was missing, and it carries a regression.**
+Mean auction length is unchanged (2.73 shipped, 2.71 candidate) but the shape is
+not:
+
+| bids | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| shipped | 23% | 38% | 13% | 11% | 6% | 5% | 3% | — |
+| candidate | **33%** | 33% | 11% | 7% | 4% | 4% | 6% | 2% |
+
+**One-bid auctions rise 23% → 33%** — a third of auctions would be the opener
+naming a contract and the opponent conceding at once. A mean auction length that
+does not move can hide that entirely, which is why the distribution is the thing
+to report and the mean is not.
+
 **Two things it does NOT achieve, stated plainly.** Nothing opens above level 4
 (the target wants 17% at 6-8), and the settled hump still sits at 5-6 rather than
 3-6 (`3:8 4:16` against a target of `3:18 4:23`). And the make rate RISES, 59.4%
