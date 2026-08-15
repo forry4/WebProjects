@@ -23,23 +23,36 @@ the real game:
    seat's best denomination -- computed from the eleven cards a seat may name,
    never from the solve (which depends on the opponent's cards and is therefore
    not private information).
-2. **The auction becomes a LEVEL LADDER.** Denomination is abstracted away: each
-   bid is "raise to L in my best denomination", and TWO real rules go with it.
-   Classic's `DENOM_RULE` is `"used"` -- a per-player forever-ban, so each seat
-   burns a denomination per bid and a real climb runs out of suits where this
-   one does not. And a real overtake may stand at the SAME level in a
-   higher-ranked denomination, which this ladder cannot express (every action
-   strictly raises). Both make the abstract game MORE permissive than the real
-   one, so read a high settled level as an upper bound. The suits are measured
-   symmetric (evenness 0.943), which is what makes the abstraction defensible.
+2. **The auction becomes a LEVEL LADDER PLUS A HOLD.** Denomination is
+   abstracted out of the PAYOFF -- each bid is "in my best denomination" -- but
+   NOT out of the auction's shape, because a plain ladder is not a defensible
+   model of this auction. **28.6% of Expert's decisions are same-level overtakes
+   in a higher-ranked denomination**, and a first cut of this harness mapped
+   them to "+1 rung", which silently rewrote more than a quarter of the very
+   behaviour it was fitting. They are now their own action, `HOLD`, and the
+   count of consecutive holds is part of the state. The bound is EXACT rather
+   than a guess: overtaking requires a strictly higher rank out of 5
+   denominations, so at most 4 holds can follow a bid at a given level.
+   What remains abstracted is `DENOM_RULE = "used"`, classic's per-player
+   forever-ban -- each seat really burns a denomination per bid, so a real climb
+   runs out of suits where this one does not, which makes the abstract game
+   MORE permissive. The suits are measured symmetric (evenness 0.943), which is
+   what makes pricing every seat at its best denomination defensible.
 3. **The leaf is the POINTS solve plus payoff arithmetic**, i.e. exactly the
    approximation the shipped tier makes, measured at 93.3% agreement with
    `solve_contract` with the only gap being the adaptive Null threat.
 
     cargo build --release --features bridge --bin bidserve
-    PYTHONPATH=. python -m games.dissonance.tools.cfrlab 400 200000
+    cargo build --release --features bridge --bin bidserve
+    # solve the abstraction and report its shape (deals ~0.5s each)
+    PYTHONPATH=. python -m games.dissonance.tools.cfrlab 2000 200000
+    # the CONTROL arm: shipped Expert on the same seeds, ~25s a deal, shard it
+    for i in 0 1 2 3; do python -m ...cfrlab expert 440 $i 4 & done; wait
+    # PRICE the difference: exact best response against Expert's fitted policy
+    PYTHONPATH=. python -m games.dissonance.tools.cfrlab br 200000
 
-Env: `CFR_CKPT` to checkpoint the (expensive) deal sampling and resume.
+Env: `CFR_CKPT` for the deal cache, `CFR_EXPERT_CKPT` for the control arm's
+(sharded, one file per shard). Both resume.
 """
 import json
 import os
@@ -58,6 +71,11 @@ CKPT = os.environ.get("CFR_CKPT")
 #: self-play ever settled above 8, so rungs above it are tree with no data.
 MAXL = 8
 NBUCKET = 8
+#: Consecutive same-level overtakes. EXACT, not a truncation: an overtake must
+#: name a strictly higher-ranked denomination and there are `NOTRUMP + 1` = 5 of
+#: them, so at most 4 can follow the bid that set the level.
+HOLDCAP = E.NOTRUMP
+HOLD = 0          # the abstract action; -1 is pass, >=1 is "raise to that level"
 
 _P = None
 
@@ -156,13 +174,20 @@ def leaf(rec, level, prev, declarer):
     return E.payoff(terms, rec["pts"][declarer], scored)
 
 
-def actions(level, holder, to_act):
-    """Legal abstract actions: pass (never as the opener), or raise."""
-    acts = []
-    if holder is not None:
-        acts.append(-1)                      # pass = concede the standing bid
-    acts += list(range(level + 1, MAXL + 1))
-    return acts
+def actions(level, holds):
+    """Legal abstract actions from a state. `level == 0` is the forced opening.
+
+    Pass concedes the standing bid; HOLD overtakes it at the same level in a
+    higher-ranked denomination; anything else raises to that level. The opener
+    can do neither of the first two (`OPENER_MAY_PASS` is off in classic, and
+    there is nothing standing to overtake).
+    """
+    if level == 0:
+        return list(range(1, MAXL + 1))
+    acts = [-1]
+    if holds < HOLDCAP:
+        acts.append(HOLD)
+    return acts + list(range(level + 1, MAXL + 1))
 
 
 def bid(g, seat):
@@ -198,6 +223,14 @@ def expert_round(seed):
     score Expert's contract on somebody else's trump suit.
     """
     g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
+    # EVERY AUCTION DECISION, in the abstraction's own vocabulary, so the policy
+    # a best response is computed against is Expert's OWN behaviour rather than
+    # a guess at it. `flat` counts the same-level overtakes; the first cut of
+    # this harness had no HOLD action and mapped them to "+1 rung", which turned
+    # out to rewrite 28.6% of the decisions it was fitting -- so the counter
+    # stays, as the check that the abstraction still covers what Expert does.
+    dec, flat = [], 0
+    prev, holds = 0, 0
     for _ in range(40):
         if g["phase"] not in ("auction", "double", "swap"):
             break
@@ -208,9 +241,19 @@ def expert_round(seed):
             p = B.choose_swap(g, seat)
             mv = {"kind": "swap", "take": p.get("take"), "give": p.get("give")}
         else:
+            standing = g["auction"]["level"]
             mv = bid(g, seat)
             if mv is None:
                 return None
+            if g["phase"] == "auction":
+                if mv["kind"] != "bid":
+                    dec.append([seat, standing, prev, holds, -1])
+                elif mv["level"] == standing:
+                    dec.append([seat, standing, prev, holds, HOLD])
+                    flat, holds = flat + 1, holds + 1
+                else:
+                    dec.append([seat, standing, prev, holds, mv["level"]])
+                    prev, holds = standing, 0
         E.apply_move(g, g["seats"][seat], mv)
     a = g.get("auction") or {}
     decl, level = a.get("declarer"), a.get("level", 0)
@@ -225,7 +268,7 @@ def expert_round(seed):
     }})
     terms = E._terms_for("classic", 0, level, jump=a.get("jump", level))
     v = E.payoff(terms, r.get("pts", 0), not bool(r.get("duck")))
-    return {"level": level, "decl": decl, "v": v}
+    return {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat}
 
 
 class CFR:
@@ -242,31 +285,31 @@ class CFR:
             return {a: pos[a] / tot for a in acts}
         return {a: 1.0 / len(acts) for a in acts}
 
-    def walk(self, rec, level, prev, holder, to_act, me, rng, depth=0):
+    def walk(self, rec, level, prev, holds, to_act, me, rng):
         """External-sampling MCCFR. Returns the value to `me`.
 
-        The depth guard is a BACKSTOP, not an abstraction: every action strictly
-        raises off a ladder of MAXL rungs, so the longest possible auction is
-        MAXL raises and the guard cannot bind. It is here so a future edit that
-        adds a non-raising action fails loudly at the recursion limit's edge
-        rather than silently recursing.
+        THE STATE IS THE WHOLE HISTORY, and that is what makes the exact best
+        response in `best_response` possible: `(level, prev, holds, to_act)`
+        determines every legal action, every child and every leaf, so two
+        different auctions that reach it are interchangeable from here on.
+        There is also no separate `holder` -- every non-passing action hands the
+        turn over, so the standing bid always belongs to the seat NOT to act.
         """
-        if depth > MAXL:
-            return leaf(rec, level, prev, holder) * (1 if holder == me else -1) \
-                if holder is not None else 0.0
-        acts = actions(level, holder, to_act)
-        if not acts:
-            return leaf(rec, level, prev, holder) * (1 if holder == me else -1)
-        # The infoset: MY bucket, and the PUBLIC auction state. `prev` is in the
-        # key because it prices the standing contract's jump, so conceding is
-        # worth different amounts at the same level depending on how the ladder
-        # got there -- and the whole auction is public, so a player legally
-        # knows it. Bidding alternates, so "do I hold the standing bid" is
-        # always False and is deliberately NOT in the key: a component that
-        # never varies splits nothing and only makes the table look more
-        # informed than it is.
-        key = (rec["b"][to_act], level, prev)
+        holder = 1 - to_act if level else None
+        acts = actions(level, holds)
+        # `prev` is in the infoset because it prices the standing contract's
+        # jump: conceding is worth different amounts at the same level depending
+        # on how the ladder got there, and the whole auction is public.
+        key = (rec["b"][to_act], level, prev, holds)
         sig = self.strategy(key, acts)
+
+        def child(a):
+            if a == -1:
+                return leaf(rec, level, prev, holder) * (1 if holder == me else -1)
+            if a == HOLD:
+                return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng)
+            return self.walk(rec, a, level, 0, 1 - to_act, me, rng)
+
         if to_act != me:
             # SAMPLE the opponent, and accumulate their average strategy.
             for a in acts:
@@ -278,18 +321,11 @@ class CFR:
                 if r <= acc:
                     pick = a
                     break
-            if pick == -1:
-                return leaf(rec, level, prev, holder) * (1 if holder == me else -1)
-            return self.walk(rec, pick, level, to_act, 1 - to_act, me, rng,
-                             depth + 1)
+            return child(pick)
         # OUR node: evaluate every action, regret-match on the difference.
         vals, node = {}, 0.0
         for a in acts:
-            if a == -1:
-                vals[a] = leaf(rec, level, prev, holder) * (1 if holder == me else -1)
-            else:
-                vals[a] = self.walk(rec, a, level, to_act, 1 - to_act, me, rng,
-                                    depth + 1)
+            vals[a] = child(a)
             node += sig[a] * vals[a]
         for a in acts:
             self.R[key][a] += vals[a] - node
@@ -301,6 +337,196 @@ class CFR:
         if tot > 0:
             return {a: max(s[a], 0.0) / tot for a in acts}
         return {a: 1.0 / len(acts) for a in acts}
+
+
+def states():
+    """Every reachable auction state, children BEFORE parents.
+
+    `(level, prev, holds, actor)`. A raise strictly increases `level`, a HOLD
+    strictly increases `holds` at the same level, and nothing else moves -- so
+    ordering by `(-level, -holds)` puts every child ahead of its parent and one
+    linear pass suffices. Roughly 400 states, which is why the best response
+    below is EXACT rather than another sampled estimate: the earlier draft
+    enumerated HISTORIES and drowned (65k of them once HOLD existed), but the
+    history beyond this tuple changes nothing that follows it.
+    """
+    out = []
+    for level in range(MAXL, 0, -1):
+        for holds in range(HOLDCAP, -1, -1):
+            for prev in range(level):
+                for actor in (0, 1):
+                    out.append((level, prev, holds, actor))
+    return out
+
+
+def best_response(recs, pol, br_seat):
+    """EXACT best response for `br_seat` against `pol`, in payoff points a deal.
+
+    The poker-standard measure, and the reason it is worth the machinery: two
+    self-play profiles of a symmetric zero-sum game cannot be ranked against
+    each other -- every seat has EV 0 by construction -- so "the shapes differ"
+    stays an observation until somebody prices what the difference is WORTH.
+
+    Two passes. Backward for the values, and a forward reach pass folded into
+    it: the best-responder's OWN probabilities are excluded from the reach,
+    which is the standard trick that makes the maximisation separable. The
+    choice is made ONCE PER INFOSET across every deal that shares it -- choosing
+    per deal would be a cheater's response that reads the cards it cannot see.
+    """
+    N = len(recs)
+    st = states()
+
+    # FORWARD: how likely is the opponent to let us reach each state, per deal.
+    # Ordered parents-first, which is `st` reversed.
+    reach = {(0, 0, 0, 0): [1.0] * N}
+    for s in reversed(st):
+        reach.setdefault(s, [0.0] * N)
+    for level, prev, holds, actor in [(0, 0, 0, 0)] + list(reversed(st)):
+        s = (level, prev, holds, actor)
+        base = reach[s]
+        if not any(base):
+            continue
+        acts = actions(level, holds)
+        kids = {a: reach.setdefault(
+            (level, prev, holds + 1, 1 - actor) if a == HOLD
+            else (a, level, 0, 1 - actor), [0.0] * N)
+            for a in acts if a != -1}
+        if actor == br_seat:
+            for tgt in kids.values():            # BR's own choice not weighted
+                for i in range(N):
+                    tgt[i] += base[i]
+            continue
+        for i, rc in enumerate(recs):
+            if not base[i]:
+                continue
+            # ONE lookup per (state, deal): the backoff tally is reach-weighted,
+            # so asking once per ACTION would count the same miss up to nine
+            # times and make coverage look far worse than it is.
+            sig = pol.at(rc["b"][actor], level, prev, holds, acts, base[i] / N)
+            if not sig:
+                continue
+            for a, tgt in kids.items():
+                if sig.get(a):
+                    tgt[i] += base[i] * sig[a]
+
+    # BACKWARD: the value to `br_seat` of standing at each state, per deal.
+    val = {}
+    for s in st:
+        level, prev, holds, actor = s
+        holder = 1 - actor
+        sign = 1 if holder == br_seat else -1
+        conc = [sign * leaf(rc, level, prev, holder) for rc in recs]
+        acts = actions(level, holds)
+
+        def kid(a):
+            return val[(level, prev, holds + 1, 1 - actor)] if a == HOLD \
+                else val[(a, level, 0, 1 - actor)]
+
+        if actor == br_seat:
+            grp = defaultdict(list)
+            for i, rc in enumerate(recs):
+                grp[rc["b"][actor]].append(i)
+            v = [0.0] * N
+            for _, idx in grp.items():
+                opts = {a: (sum(reach[s][i] * conc[i] for i in idx) if a == -1
+                            else sum(reach[s][i] * kid(a)[i] for i in idx))
+                        for a in acts}
+                pick = max(opts, key=lambda a: opts[a])
+                src = conc if pick == -1 else kid(pick)
+                for i in idx:
+                    v[i] = src[i]
+            val[s] = v
+        else:
+            v = list(conc)
+            for i, rc in enumerate(recs):
+                sig = pol.at(rc["b"][actor], level, prev, holds, acts)
+                if not sig:
+                    continue                     # wholly unseen: concede
+                acc = sig.get(-1, 0.0) * conc[i]
+                for a in acts:
+                    if a != -1 and sig.get(a):
+                        acc += sig[a] * kid(a)[i]
+                v[i] = acc
+            val[s] = v
+
+    # The root: seat 0 opens and cannot pass.
+    if br_seat == 0:
+        grp = defaultdict(list)
+        for i, rc in enumerate(recs):
+            grp[rc["b"][0]].append(i)
+        tot = 0.0
+        for _, idx in grp.items():
+            pick = max(range(1, MAXL + 1),
+                       key=lambda a: sum(val[(a, 0, 0, 1)][i] for i in idx))
+            tot += sum(val[(pick, 0, 0, 1)][i] for i in idx)
+        return tot / N
+    acts = actions(0, 0)
+    tot = 0.0
+    for i, rc in enumerate(recs):
+        sig = pol.at(rc["b"][0], 0, 0, 0, acts)
+        if sig:
+            tot += sum(sig[a] * val[(a, 0, 0, 1)][i] for a in acts)
+    return tot / N
+
+
+class Policy:
+    """A behaviour strategy, normalised over whatever is legal AT the state.
+
+    Both callers go through this for the same reason. A raw count table has
+    holes -- infosets the sampled bidder never reached -- and the first cut of
+    this harness treated a hole as CONCEDING, which is the single most
+    exploitable thing a policy can do: a best responder then bids high purely to
+    steer into the holes, and the number it reports is mostly the sample size.
+    So misses BACK OFF along the axes in order of how much they should matter
+    (`prev`, then `holds`, then the hand bucket itself) and only the totally
+    unseen concedes. Every lookup is renormalised over the legal set, because a
+    pooled distribution can otherwise put mass on a HOLD that is illegal at the
+    cap -- mass that would silently vanish and read as extra exploitability.
+    """
+
+    def __init__(self, table, backoff=True):
+        self.t = table
+        self.backoff = backoff
+        self.hits = defaultdict(float)   # reach-weighted, by backoff tier
+        self.pool = {}
+        if not backoff:
+            return
+        for depth, drop in enumerate(((2,), (2, 3), (0, 2, 3)), start=1):
+            acc = defaultdict(lambda: defaultdict(float))
+            for k, v in table.items():
+                kk = tuple(0 if i in drop else x for i, x in enumerate(k))
+                for a, p in v.items():
+                    acc[(depth,) + kk][a] += p
+            self.pool.update(acc)
+
+    def at(self, bucket, level, prev, holds, acts, w=1.0):
+        k = (bucket, level, prev, holds)
+        src = self.t.get(k)
+        tier = 0
+        if src is None and self.backoff:
+            for depth, drop in enumerate(((2,), (2, 3), (0, 2, 3)), start=1):
+                kk = tuple(0 if i in drop else x for i, x in enumerate(k))
+                src = self.pool.get((depth,) + kk)
+                if src:
+                    tier = depth
+                    break
+        if src is None:
+            self.hits[9] += w
+            return None
+        self.hits[tier] += w
+        out = {a: src.get(a, 0.0) for a in acts}
+        tot = sum(out.values())
+        return {a: p / tot for a, p in out.items()} if tot > 0 else None
+
+
+def fit_policy(rows):
+    """Expert's auction as a table over the abstraction's own infosets."""
+    cnt = defaultdict(lambda: defaultdict(float))
+    for r in rows:
+        for seat, level, prev, holds, a in r.get("dec", []):
+            cnt[(r["bk"][seat], level, prev, holds)][a] += 1.0
+    return Policy({k: {a: c / sum(v.values()) for a, c in v.items()}
+                   for k, v in cnt.items()})
 
 
 def expert_main(n, shard=0, nshard=1):
@@ -411,7 +637,133 @@ def expert_main(n, shard=0, nshard=1):
                       f"{100*sum(1 for x in v if x['v'] > 0)/len(v):>6.1f}%")
 
 
+def load_expert():
+    base = os.environ.get("CFR_EXPERT_CKPT")
+    rows, seen = [], set()
+    for p in [base] + [f"{base}.{i}" for i in range(16)]:
+        if not p or not os.path.exists(p):
+            continue
+        for line in open(p):
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("seed") not in seen:
+                seen.add(r["seed"])
+                rows.append(r)
+    return rows
+
+
+def br_main(iters):
+    """`cfrlab br` -- price the difference, instead of describing it."""
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    rows = [r for r in load_expert() if r.get("dec")]
+    if not rows:
+        raise SystemExit("no Expert rounds carry a decision log -- re-run "
+                         "`cfrlab expert` with the instrumented build")
+    for r in rows:
+        i = r["seed"] - 800_000
+        if not (0 <= i < len(recs)):
+            raise SystemExit(f"seed {r['seed']} has no deal in {CKPT}")
+        r["bk"] = recs[i]["b"]
+    nd = sum(len(r["dec"]) for r in rows)
+    flat = sum(r.get("flat", 0) for r in rows)
+    pol = fit_policy(rows)
+    print(f"  fitted Expert over {len(rows)} rounds / {nd} decisions, "
+          f"{len(pol.t)} infosets")
+    print(f"  same-level overtakes (the HOLD action): {flat} = "
+          f"{100*flat/nd:.1f}% of decisions")
+
+    cfr = CFR(recs)
+    rng = random.Random(1234)
+    for _ in range(iters):
+        rec = recs[rng.randrange(len(recs))]
+        for me in (0, 1):
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+    eq = {}
+    for key, s in cfr.S.items():
+        tot = sum(max(x, 0.0) for x in s.values())
+        if tot > 0:
+            eq[key] = {a: max(x, 0.0) / tot for a, x in s.items()}
+
+    print(f"\n=== EXPLOITABILITY (payoff points a deal, {len(recs)} deals) ===")
+    print(f"  {'policy':>12} {'BR as seat 0':>13} {'BR as seat 1':>13} "
+          f"{'exploitability':>15}")
+    tally = {}
+    for name, p in (("CFR equilib", Policy(eq, backoff=False)),
+                    ("EXPERT", pol)):
+        b0 = best_response(recs, p, 0)
+        p.hits.clear()
+        b1 = best_response(recs, p, 1)
+        tally[name] = dict(p.hits)
+        print(f"  {name:>12} {b0:>13.2f} {b1:>13.2f} {(b0 + b1) / 2:>15.2f}")
+
+    # HOW MUCH OF THIS IS THE SAMPLE RATHER THAN THE BIDDER. A best responder
+    # steers TOWARDS whatever the fit does not cover, so the honest question is
+    # not "what fraction of infosets did Expert visit" but "what fraction of the
+    # BR's own reach lands on a backed-off one" -- the second is the number that
+    # can inflate the row above, and it is the first thing to check before
+    # believing it.
+    lbl = {0: "exact", 1: "pooled prev", 2: "+ pooled holds",
+           3: "+ pooled bucket", 9: "UNSEEN (concedes)"}
+    for name, h in tally.items():
+        tot = sum(h.values()) or 1.0
+        print(f"\n  {name} lookups along the best responder's reach: "
+              + ", ".join(f"{lbl[k]} {100*h[k]/tot:.1f}%" for k in sorted(h)))
+
+    # WHERE THE 9 POINTS ARE, which is the only part of this that turns into a
+    # code change. Two cells per bucket, both at `holds = 0`: what the seat
+    # OPENS at, and how readily it concedes a standing bid. Everything else in
+    # the auction hangs off those.
+    eqp = Policy(eq, backoff=False)
+    print(f"\n  OPENING LEVEL and CONCESSION RATE, by hand bucket "
+          f"(0 = weakest):")
+    print(f"    {'bucket':>7} | {'opens EQ':>9} {'opens EXP':>10} | "
+          f"{'pass@4 EQ':>10} {'pass@4 EXP':>11} | "
+          f"{'pass@6 EQ':>10} {'pass@6 EXP':>11}")
+    for b in range(NBUCKET):
+        row = [f"    {b:>7} |"]
+        for p in (eqp, pol):
+            s = p.at(b, 0, 0, 0, actions(0, 0))
+            row.append(f"{sum(a * q for a, q in s.items()):>9.2f}" if s
+                       else f"{'--':>9}")
+        row.append(" |")
+        for lv in (4, 6):
+            for p in (eqp, pol):
+                acts = actions(lv, 0)
+                s = p.at(b, lv, lv - 1, 0, acts)
+                row.append(f"{100*s.get(-1, 0.0):>9.0f}%" if s
+                           else f"{'--':>10}")
+            row.append(" |")
+        print(" ".join(row).rstrip(" |"))
+
+    # SPLIT-HALF, which is the check that decides whether the Expert row is a
+    # measurement or a sample size. Fitting on half the rounds roughly doubles
+    # every hole the backoff has to cover, so if the two halves land near the
+    # full fit the number is about the bidder; if they run well above it, the
+    # best responder is eating the sample and more rounds are the only fix.
+    rng2 = random.Random(99)
+    sh = list(rows)
+    rng2.shuffle(sh)
+    print(f"\n  SPLIT-HALF (fit on half the rounds, same {len(recs)} deals):")
+    for tag, half in (("first half", sh[:len(sh) // 2]),
+                      ("second half", sh[len(sh) // 2:])):
+        q = fit_policy(half)
+        e = (best_response(recs, q, 0) + best_response(recs, q, 1)) / 2
+        print(f"    {tag:>12} ({len(half)} rounds): exploitability {e:.2f}")
+    print("\n  Exploitability is (BR0 + BR1)/2 -- for a zero-sum game whose "
+          "value need\n  not be 0 by seat (the opener is FORCED to bid), that "
+          "sum cancels the\n  positional term and leaves what a best responder "
+          "gains. The CFR row is\n  the FLOOR this abstraction can reach, not "
+          "zero: it is an average strategy\n  over finite iterations against a "
+          "bucketed hand, so read the two rows as a\n  difference and never the "
+          "Expert row on its own.")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "br":
+        return br_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "expert":
         return expert_main(int(sys.argv[2]) if len(sys.argv) > 2 else 300,
                            int(sys.argv[3]) if len(sys.argv) > 3 else 0,
@@ -425,7 +777,7 @@ def main():
     for i in range(iters):
         rec = recs[rng.randrange(len(recs))]
         for me in (0, 1):
-            cfr.walk(rec, 0, 0, None, 0, me, rng)
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
         if (i + 1) % max(1, iters // 5) == 0:
             print(f"  {i+1}/{iters} iterations", flush=True)
 
@@ -436,10 +788,11 @@ def main():
     rounds = 20000
     for _ in range(rounds):
         rec = recs[rng.randrange(len(recs))]
-        level, prev, holder, to_act, first = 0, 0, None, 0, None
-        for _ in range(MAXL + 1):
-            acts = actions(level, holder, to_act)
-            key = (rec["b"][to_act], level, prev)
+        level, prev, holds, to_act, first = 0, 0, 0, 0, None
+        holder = None
+        while True:
+            acts = actions(level, holds)
+            key = (rec["b"][to_act], level, prev, holds)
             sig = cfr.average(key, acts)
             r, acc, pick = rng.random(), 0.0, acts[-1]
             for a in acts:
@@ -451,7 +804,11 @@ def main():
                 break
             if first is None:
                 first = pick
-            level, prev, holder, to_act = pick, level, to_act, 1 - to_act
+            holder = to_act
+            if pick == HOLD:
+                holds, to_act = holds + 1, 1 - to_act
+            else:
+                level, prev, holds, to_act = pick, level, 0, 1 - to_act
         # The opener cannot pass, so every auction settles -- there is no
         # passed-out branch to report.
         v = leaf(rec, level, prev, holder)

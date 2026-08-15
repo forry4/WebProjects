@@ -2966,15 +2966,93 @@ biases the make rate in EXPERT's favour and it still loses by 12.6pp, so the gap
 is a floor rather than an estimate. Checked rather than assumed, because the
 opposite sign would have invalidated the whole comparison.
 
-**WHAT IS NOT ESTABLISHED, and do not let the table imply it.** These are two
-self-play regimes of a symmetric zero-sum game, so **neither "declarer EV" column
-is a score** — every seat has EV 0 by construction and the number only says how
-much winning the auction is worth in that regime. Nothing here measures a
-head-to-head margin. The decisive follow-up is the poker-standard one: log every
-Expert auction decision as `(bucket, standing level, chosen level)`, fit it as a
-policy in the abstraction, and compute a BEST RESPONSE to it — that turns "the
-shapes differ" into "Expert's auction is exploitable for X payoff points a deal",
-which is the number a shipping decision needs.
+**Neither "declarer EV" column is a score.** These are two self-play regimes of a
+symmetric zero-sum game — every seat has EV 0 by construction, and the number
+only says how much winning the auction is worth in that regime. So the shapes
+differing stayed an observation until it was priced, below.
+
+### EXPLOITABILITY — 9.06 points a deal against a floor of 0.15
+
+`cfrlab br`. Every Expert auction decision is logged as `(bucket, standing level,
+prev level, holds, action)`, fitted as a policy over the abstraction's own
+infosets, and an EXACT best response is computed against it. This is the
+poker-standard measure and it is what turns the tables above into a number a
+shipping decision can use.
+
+| policy | BR as seat 0 | BR as seat 1 | exploitability |
+|---|---|---|---|
+| CFR equilibrium | +1.81 | −1.51 | **0.15** |
+| Expert (413 rounds, 1311 decisions) | +9.33 | +8.79 | **9.06** |
+
+Exploitability is `(BR0 + BR1)/2` — the game's value is not 0 by seat, because
+the opener is FORCED to bid, and averaging the two cancels that positional term.
+**Read the two rows as a difference and never the Expert row alone**: the CFR row
+is the floor this abstraction reaches, not zero, being an average strategy over
+finite iterations against a bucketed hand.
+
+**Where the 9 points are** — the opening, and it is not a subtle effect:
+
+| bucket | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| equilibrium opens at | 2.98 | 3.09 | 4.00 | 4.00 | 3.99 | 3.79 | 4.00 | 5.00 |
+| **Expert** opens at | 1.38 | 1.65 | 2.60 | 2.47 | 2.78 | 4.04 | 4.46 | 4.48 |
+
+**Expert ramps its opening monotonically with strength; the equilibrium does
+not.** The equilibrium opens near 4 almost regardless — 3 at the very bottom, 5
+only at the very top — while Expert opens 1.38 on its weakest hands and 4.48 on
+its strongest. That is treating the opening as a STRENGTH SIGNAL, and in a
+competitive auction it is exactly backwards: the opening is a claim on the
+contract, and opening low on a weak hand both announces the weakness and invites
+the opponent to buy the contract cheap. It is the mechanism behind the weakest
+bucket declaring 7.1% of contracts against the equilibrium's 1.2%.
+
+Two smaller cells, same table: Expert **concedes level 4** at 50% from bucket 3
+and 17% from bucket 4, where the equilibrium concedes ~0% from bucket 2 up; and
+Expert **contests level 6**, taking it 38% of the time at bucket 6 and 29% at
+bucket 7, where the equilibrium passes at ~100% from every bucket — consistent
+with the ladder table, where a level-6 contract is worth −14.52 even climbed.
+
+**Three checks, because an exploitability number is easy to manufacture.**
+* **The instrument is sharp**: against a UNIFORM random policy it reads 31.43,
+  against the solved equilibrium 0.15. It is responding to the policy, not to
+  the tree.
+* **It is not a sample size.** A best responder steers TOWARDS whatever the fit
+  does not cover, so an unseen infoset is the most exploitable thing there is —
+  the first cut treated a miss as conceding and read **13.20 at 88 rounds**.
+  Misses now BACK OFF along `prev`, then `holds`, then the bucket, and every
+  lookup is renormalised over the legal set (a pooled distribution otherwise
+  puts mass on a HOLD that is illegal at the cap, and vanishing mass reads as
+  extra exploitability). At 413 rounds nothing is unseen, and **split-half fits
+  read 10.09 and 9.24 against the full fit's 9.06** — converging from above, so
+  the residual inflation is under a point.
+* **The coverage figure that matters is reach-weighted**, not "what fraction of
+  infosets did Expert visit". 17.2% of the best responder's own reach lands on an
+  exactly-fitted infoset, 50.2% on one pooled over `holds`.
+
+**THE ABSTRACTION HAD TO GROW A `HOLD` ACTION, and this is the trap worth
+remembering.** A plain level ladder cannot express a same-level overtake in a
+higher-ranked denomination — and **28.6% of Expert's decisions are exactly
+that**. The first cut mapped them to "+1 rung", silently rewriting more than a
+quarter of the behaviour it was fitting. `HOLD` is now its own action with the
+consecutive count in the state; the bound is EXACT rather than a guess, since an
+overtake needs a strictly higher rank out of 5 denominations. **The lesson is
+that the abstraction's coverage of the thing being fitted is itself a
+measurement** — the `flat` counter stays in the harness as that check.
+
+Adding `HOLD` also killed the first best-response implementation, which
+enumerated HISTORIES (255 without it, 65k with). It is now a DP over STATES —
+`(level, prev, holds, actor)`, about 400 of them, children before parents — which
+is exact because the history beyond that tuple changes nothing that follows it,
+and runs in 0.8s.
+
+**WHAT THIS IS NOT.** 9.06 is exploitability inside the abstraction, **not a
+head-to-head margin against Expert** — a best responder is a far harsher opponent
+than Expert is, and the abstraction drops `DENOM_RULE`, which makes the responder
+freer than a real exploiter could be. The equilibrium's policy table is a
+DIRECTION, not a table to ship. The shipping path is: implement the direction
+(open near 4 rather than ramping; do not concede 4; do not contest 6), then
+measure it the way everything else here is measured — CRN-paired auction arena,
+equal time, mirror reading exactly 0.5000.
 
 **Cost shapes, for whoever runs it next.** The equilibrium arm is ~0.5s a deal
 (three double-dummy solves) and the CFR itself is free — 2000 deals and 200k
