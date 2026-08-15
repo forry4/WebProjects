@@ -3551,6 +3551,52 @@ that remains blocked on putting the candidate scoring in the engine. The
 equilibrium rate is the target the fitted margin should be checked against: 11%
 under the candidate, against 27.2% measured for shipped Expert.
 
+### THE WHOLE SCORING SEARCH RAN WITHOUT THE DOUBLE IN THE TREE
+
+Found while sweeping `short` against the doubling rate, and it is the larger
+finding. **Adding the Double changes the settled distribution substantially** --
+it is a real branch of the game with real payoffs, and every distribution in the
+sections above was solved without it:
+
+| | settled | max | made |
+|---|---|---|---|
+| candidate, no Double | `1:5 2:4 3:2 4:15 5:35 6:38` | **38%** | 69.0% |
+| candidate, Double in tree | `1:5 2:5 3:8 4:9 5:55 6:18` | **55%** | 73.6% |
+| shipped, no Double | `5:30 6:63` | 63% | 57.7% |
+| shipped, Double in tree | `3:8 4:15 5:60 6:9` | 60% | 73.5% |
+
+**The candidate's headline result — a settled maximum of 38%, under the 40% cap —
+does not survive the Double.** With it the mass concentrates on level 5 at 55%.
+The shipped scoring moves too (its pile shifts from level 6 to level 5). Every
+scoring comparison in this file was therefore made on a tree missing a branch
+both sides use, and **the search should be re-run with `curvedbl` before any of
+its rankings are trusted**.
+
+**Two sweeps, and the first refuted its own hypothesis.** `short` was the obvious
+lever for the doubling rate -- cheap sets, less to punish -- and it does the
+opposite:
+
+| short | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| doubles taken | 11% | 11% | 12% | 9% | **7%** |
+| made | 73.6% | 75.8% | 76.8% | 77.5% | 78.7% |
+
+Raising it LOWERS doubling and RAISES the make rate, both against prediction: a
+harsher shortfall makes declarers bid conservatively, which produces easier
+contracts and fewer sacrifices to punish.
+
+The set base is the real lever, because it prices the sacrifice itself:
+
+| `Fs` | 12 | 8 | 4 | 8 with `B=1` |
+|---|---|---|---|---|
+| doubles taken | 11% | 11% | **15%** | **16%** |
+| made | 73.6% | 69.5% | 63.1% | 62.0% |
+| loss (Double in tree) | 0.82 | **0.65** | 1.35 | 1.21 |
+
+`Fs = 8` scores better with the Double in the tree (0.65) than the candidate does
+(0.82) -- another sign the candidate was fitted to the wrong tree. Pushing lower
+buys doubling and a lower make rate but piles 57-61% onto level 6.
+
 ### EVERYTHING HERE IS DOUBLE-DUMMY, AND THAT FLATTERS THE COARSENESS
 
 `pts` is what a declarer can guarantee seeing all 40 cards. Real play is noisier,
