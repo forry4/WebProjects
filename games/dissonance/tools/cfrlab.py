@@ -43,7 +43,6 @@ the real game:
    `solve_contract` with the only gap being the adaptive Null threat.
 
     cargo build --release --features bridge --bin bidserve
-    cargo build --release --features bridge --bin bidserve
     # solve the abstraction and report its shape (deals ~0.5s each)
     PYTHONPATH=. python -m games.dissonance.tools.cfrlab 2000 200000
     # the CONTROL arm: shipped Expert on the same seeds, ~25s a deal, shard it
@@ -55,6 +54,7 @@ Env: `CFR_CKPT` for the deal cache, `CFR_EXPERT_CKPT` for the control arm's
 (sharded, one file per shard). Both resume.
 """
 import json
+import math
 import os
 import random
 import statistics
@@ -637,6 +637,96 @@ def expert_main(n, shard=0, nshard=1):
                       f"{100*sum(1 for x in v if x['v'] > 0)/len(v):>6.1f}%")
 
 
+def jump_main(rate, iters, seed=1234):
+    """`cfrlab jump RATE ITERS` -- re-solve under a different JUMP_SET_BONUS.
+
+    A DESIGN knob, not a bot knob. The solve above says the equilibrium opens
+    near 4 almost regardless of the hand, which is a flat and uninformative
+    auction however well a bot plays it -- so the question is whether the
+    SCORING can be moved to make the opening spread out and mean something.
+
+    The jump bonus is the candidate because it rides inside the SET base:
+    `-(N + 10 + rate x j + 5s)`. Its expected cost is `P(set) x rate x j`, so it
+    is already strength-conditioned -- a weak hand goes down more often and pays
+    it more often -- and the rate is the gain on that discrimination.
+
+    NO NEW DEALS ARE NEEDED. `pts` and `duck` are properties of the deal, not of
+    the scoring, so the whole cache re-prices under any terms. That is what
+    makes sweeping a scoring rule affordable at all; the expensive arm is the
+    Expert control, which this does not need.
+
+    TWO DIFFERENT THINGS get reported and they are not the same knob:
+    * **spread** -- how evenly the rungs get used at all, as the normalised
+      entropy of the opening distribution (0 = every hand opens on one rung,
+      1 = uniform over the ladder). This is "more evenly distributed".
+    * **discrimination** -- how far the opening moves between the weakest and
+      strongest bucket. An auction can be perfectly spread and still carry no
+      information, if the spread is randomisation rather than strength.
+    A scoring change is only worth making if it buys the second; the first
+    without it is noise dressed as variety.
+    """
+    E.JUMP_SET_BONUS["classic"] = rate
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    cfr = CFR(recs)
+    rng = random.Random(seed)
+    for _ in range(iters):
+        rec = recs[rng.randrange(len(recs))]
+        for me in (0, 1):
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+    eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
+                      for a, x in s.items()}
+                  for k, s in cfr.S.items()
+                  if sum(max(y, 0.0) for y in s.values()) > 0}, backoff=False)
+
+    # The opening distribution, marginalised over the bucket distribution --
+    # which is uniform by construction, the buckets being quantiles.
+    acts = actions(0, 0)
+    opn = {a: 0.0 for a in acts}
+    per = {}
+    for b in range(NBUCKET):
+        s = eqp.at(b, 0, 0, 0, acts) or {a: 1 / len(acts) for a in acts}
+        per[b] = sum(a * s[a] for a in acts)
+        for a in acts:
+            opn[a] += s[a] / NBUCKET
+    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(acts))
+    mean = sum(a * p for a, p in opn.items())
+    sd = (sum(p * (a - mean) ** 2 for a, p in opn.items())) ** 0.5
+
+    # And what the change COSTS elsewhere: a scoring knob moves the whole game,
+    # so a spread bought by making every contract fail is not a win.
+    settle, made, n = defaultdict(int), 0, 6000
+    for _ in range(n):
+        rec = recs[rng.randrange(len(recs))]
+        level, prev, holds, to_act, holder = 0, 0, 0, 0, None
+        while True:
+            a = actions(level, holds)
+            s = eqp.at(rec["b"][to_act], level, prev, holds, a) or \
+                {x: 1 / len(a) for x in a}
+            r, acc, pick = rng.random(), 0.0, a[-1]
+            for x in a:
+                acc += s[x]
+                if r <= acc:
+                    pick = x
+                    break
+            if pick == -1:
+                break
+            holder = to_act
+            if pick == HOLD:
+                holds, to_act = holds + 1, 1 - to_act
+            else:
+                level, prev, holds, to_act = pick, level, 0, 1 - to_act
+        settle[level] += 1
+        if leaf(rec, level, prev, holder) > 0:
+            made += 1
+    smean = sum(k * v for k, v in settle.items()) / n
+    print(f"{rate:>4}{'' if seed == 1234 else chr(96+seed)} {ent:>8.3f} {sd:>7.2f} {mean:>7.2f} "
+          f"{per[0]:>7.2f} {per[NBUCKET-1]:>7.2f} "
+          f"{per[NBUCKET-1]-per[0]:>+8.2f} {smean:>8.2f} {100*made/n:>7.1f}% "
+          f"| " + " ".join(f"{a}:{100*opn[a]:.0f}" for a in acts if opn[a] > .015),
+          flush=True)
+
+
 def load_expert():
     base = os.environ.get("CFR_EXPERT_CKPT")
     rows, seen = [], set()
@@ -762,6 +852,14 @@ def br_main(iters):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "jump":
+        return jump_main(int(sys.argv[2]),
+                         int(sys.argv[3]) if len(sys.argv) > 3 else 200_000,
+                         int(sys.argv[4]) if len(sys.argv) > 4 else 1234)
+    if len(sys.argv) > 1 and sys.argv[1] == "hdr":
+        return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
+                     f"{'weakest':>7} {'strong':>7} {'discrim':>8} "
+                     f"{'settled':>8} {'made':>8} | opening distribution %")
     if len(sys.argv) > 1 and sys.argv[1] == "br":
         return br_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "expert":

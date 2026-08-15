@@ -3045,6 +3045,67 @@ enumerated HISTORIES (255 without it, 65k with). It is now a DP over STATES —
 is exact because the history beyond that tuple changes nothing that follows it,
 and runs in 0.8s.
 
+### THE JUMP RATE AS A DESIGN KNOB — it buys discrimination, not evenness
+
+`cfrlab jump RATE ITERS [SEED]`. If the equilibrium's answer is "open near 4
+almost regardless", that is a flat auction however well a bot plays it — so the
+question is whether the SCORING moves it. The jump bonus is the natural
+candidate: it rides inside the set base, `-(N + 10 + rate × j + 5s)`, so its
+expected cost is `P(set) × rate × j` and it is already strength-conditioned — a
+weak hand goes down more often and pays it more often.
+
+**No new deals are needed.** `pts` and `duck` are properties of the DEAL, not of
+the scoring, so the whole 2000-deal cache re-prices under any terms. Sweeping a
+scoring rule costs four CFR solves on four cores, not another control arm.
+
+Two seeds per rate, because the first pass read a peak at 4 that turned out to be
+sampling noise:
+
+| rate | spread | discrimination | settled | made |
+|---|---|---|---|---|
+| 0 | 0.34 | +1.05 | 4.96 | 64.8% |
+| **3 (shipped)** | **0.41** | **+1.8** | **4.67** | **72.9%** |
+| 4 | 0.48 | +3.4 | 4.52 | 75.8% |
+| 5 | 0.52 | +3.4 | 4.38 | 79.2% |
+| 6 | 0.55 | +3.6 | 4.32 | 80.9% |
+| 8 | 0.52 | +3.10 | 4.19 | 82.8% |
+| 10 | 0.39 | +2.98 | 4.12 | 82.4% |
+
+*spread* is the normalised entropy of the opening distribution; *discrimination*
+is how far the opening moves from the weakest bucket to the strongest. **They are
+different knobs and the distinction is the whole finding** — an auction can be
+perfectly spread and carry no information, if the spread is randomisation rather
+than strength.
+
+* **The discrimination gain is all at 3 → 4** (+1.8 → +3.4) and then SATURATES:
+  4, 5 and 6 are indistinguishable across seeds. Reading the single-seed numbers
+  (+3.78 / +3.31 / +3.50) as a peak at 4 was noise, and the seed replication is
+  the only reason that did not become a recommendation.
+* Spread keeps climbing to 6 and then COLLAPSES: by 10 the distribution is a
+  50/50 `1:49 4:49`, which is less even, not more.
+* The cost is monotone and real: **the make rate climbs 72.9% → 79.2% at 5j**.
+  Contracts get safe, which drains the play and undercuts the Double, whose
+  whole premise is that contracts fail often enough to bet against.
+
+**IT DOES NOT MAKE THE OPENING EVEN, AND CANNOT.** At every rate the
+distribution stays BIMODAL — even at 6j it is `1:22 2:10 4:56 5:12`, and the mode
+at 4 never drops below 56%. The jump term moves weight from 4 down to 1; it never
+fills in 2, 3, 5 or 6. The reason is structural and the ladder table above says
+it outright: **levels 1–3 make 95.7% / 90.4% / 80.0% and pay the declarer +12.71
+/ +12.32 / +10.39.** They are near-free money, so the auction can never rest
+there — whatever the jump term costs, the opponent simply takes the contract. The
+jump rate makes HIGH openings expensive; it does nothing to make MIDDLE ones
+attractive. A genuinely spread opening needs the low rungs to stop being a
+giveaway, which is the make/set curve (`N² + 10` against a near-linear set base),
+not the jump term.
+
+**What shipping a rate change would entail** (it is a scoring change, so it is
+not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
+and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
+in `rules.jsx`, Expert's own calibration (it was fitted against 3j), and a re-run
+of the `DOUBLE_MARGIN` sweep — the margin of 20 was fitted against a 72.9% make
+rate and would be sitting on a different distribution at 79.2%.
+
 **WHAT THIS IS NOT.** 9.06 is exploitability inside the abstraction, **not a
 head-to-head margin against Expert** — a best responder is a far harsher opponent
 than Expert is, and the abstraction drops `DENOM_RULE`, which makes the responder
