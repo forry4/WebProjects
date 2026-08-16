@@ -876,6 +876,31 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
         }
         None => myopic,
     };
+    // THE OPENING BIAS -- the same shape as `double_margin` above: a per-option
+    // nudge the SERVER computes and the search adds, so no rule lives here.
+    //
+    // Measured: Expert's opening moves 1.38 -> 4.48 across the strength range
+    // while its make rate over the same range runs 36% -> 80%, and an exact best
+    // response to its fitted auction policy wins 9.06 payoff points a deal. The
+    // equilibrium ramps 2.25 -> 4.84 over the same buckets, and the gap is
+    // concentrated at the WEAK end: Expert opens at the floor with hands the
+    // equilibrium opens at 2.25.
+    //
+    // Declarer-signed like every sum here, so a positive entry makes that option
+    // look better to the seat about to take the argmax. Absent or empty, or the
+    // wrong length for the option list, and nothing is charged -- an older
+    // server simply gets the unbiased search.
+    if let Some(bias) = auc.get("open_bias").and_then(|x| x.as_array()) {
+        if bias.len() == sums.len() {
+            let scale = entry.worlds.len().max(1) as f64;
+            let mut biased = sums;
+            for (i, b) in bias.iter().enumerate() {
+                biased[i] += b.as_f64().unwrap_or(0.0) * scale;
+            }
+            *cache = Some((key, entry));
+            return Ok((biased.iter().map(|x| x * sign).collect(), cached));
+        }
+    }
     *cache = Some((key, entry));
     Ok((sums.iter().map(|x| x * sign).collect(), cached))
 }

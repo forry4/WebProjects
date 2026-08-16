@@ -18,6 +18,7 @@ server-side search at any tier.
 
 from __future__ import annotations
 
+import os
 import random
 
 from . import engine as E
@@ -780,3 +781,50 @@ def act(g: dict, seat: int, rng=None):
     if phase == "play":
         return ("play", choose_card(g, seat))
     return (None, None)
+
+
+#: THE OPENING BIAS -- strength-conditioned, and OFF unless `DIS_OPEN_BIAS` sets
+#: a weight. Measured defect: Expert's opening moves 1.38 -> 4.48 across the
+#: eight strength buckets while its make rate over the same range runs 36% ->
+#: 80%, and an exact best response to its fitted auction policy wins 9.06 payoff
+#: points a deal. The equilibrium ramps 2.25 -> 4.84 over the same buckets, so
+#: the gap is concentrated at the WEAK end -- Expert opens at the floor with
+#: hands the equilibrium opens at 2.25.
+#:
+#: The cuts are octiles of `hand_strength` over the seat's best denomination,
+#: measured on the 2000-deal real-play cache; the targets are that cache's CFR+
+#: equilibrium opening, monotonised (its one inversion, 3.86 at bucket 3 against
+#: 3.41 at 4, is inside the per-seed sd of 0.14-0.30 and is pooled to 3.63).
+#:
+#: A DIRECTION, NOT A TABLE TO COPY. It biases the search's own ranking rather
+#: than replacing it, so where the search has a real opinion it still wins.
+_OPEN_CUTS = [7.82, 8.92, 9.82, 10.62, 11.43, 12.32, 13.43]
+_OPEN_TARGET = [2.25, 2.71, 3.26, 3.63, 3.63, 3.76, 3.82, 4.84]
+
+
+def open_bias_terms(g: dict, seat: int, options: list[dict]) -> list[float] | None:
+    """A per-option nudge toward the level this hand's strength wants, or None.
+
+    Only the OPENING, which is where the defect was measured -- nothing stands,
+    so `auction.level` is 0. Every other decision is left exactly as it was.
+    """
+    w = float(os.environ.get("DIS_OPEN_BIAS", "0") or 0)
+    if w <= 0 or E.mode_of(g) != "classic":
+        return None
+    a = g.get("auction") or {}
+    if g.get("phase") != "auction" or a.get("level", 0) != 0:
+        return None
+    best = max(hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1))
+    b = 0
+    while b < len(_OPEN_CUTS) and best >= _OPEN_CUTS[b]:
+        b += 1
+    want = _OPEN_TARGET[b]
+    # Quadratic in the distance, so being one rung off is cheap and being four
+    # off is not -- a linear penalty would shift every opening equally and turn
+    # the bias into a constant the argmax ignores.
+    out = []
+    for o in options:
+        mv = o.get("move") or {}
+        lvl = mv.get("level") if mv.get("kind") == "bid" else None
+        out.append(0.0 if lvl is None else -w * (lvl - want) ** 2)
+    return out

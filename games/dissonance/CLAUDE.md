@@ -3608,6 +3608,52 @@ whenever the Double question is answered, and the tests were rewritten to derive
 both bases from the constants rather than hardcode them -- so the next re-pricing
 lands as five lines, not forty-one failures.
 
+### THE OPENING BIAS — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
+
+The bot arm the exploitability finding asked for. **Off unless `DIS_OPEN_BIAS`
+sets a weight**, so shipped behaviour is byte-identical (`open_bias_terms`
+returns None at weight 0, asserted in the suite's own run).
+
+* **`bot.open_bias_terms`** maps the seat's best-denomination `hand_strength`
+  through octile cuts to the CFR+ equilibrium's opening level, and returns a
+  per-option nudge `-w x (level - target)^2`. Quadratic on purpose: a linear
+  penalty shifts every option equally and the argmax ignores it.
+* **`wire.rs` reads `open_bias`** the same way it already reads `double_margin` —
+  a per-option term the SERVER computes and the search adds, so no rule moves
+  into Rust. Wrong length or absent, nothing is charged, so an older server gets
+  the unbiased search.
+* Cuts `7.82 8.92 9.82 10.62 11.43 12.32 13.43`, targets `2.25 2.71 3.26 3.63
+  3.63 3.76 3.82 4.84` (the equilibrium's one inversion pooled — it was inside
+  the per-seed sd).
+* Arena arm is a trailing `o` on the tier name.
+
+**MIRROR READS EXACTLY +0.0000 ± 0.0000** over 10 paired deals — the first thing
+to run after touching the arena, and it passes.
+
+**The mechanism fires, measured on 22 paired deals:**
+
+| | mean open | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| `expertt` (no bias) | 3.82 | **14%** | 27% | 5% | 9% | 18% | 18% | 9% |
+| `expertto` (bias) | 4.00 | **0%** | 18% | 23% | 18% | 27% | 9% | 5% |
+
+Level-1 openings go 14% → 0% and the distribution concentrates on 3-5, which is
+exactly what the bias was built to do. **18 of 22 auctions differed**, so the arm
+has plenty of measurement power per deal.
+
+**THE PAYOFF IS NOT MEASURED: +0.43 ± 6.60 over 22 paired deals.** Per-deal sigma
+is ~15.8 even CRN-paired and dd-resolved, so ±1.5 needs ~400 deals. The arena
+runs ~10 paired deals per 500s at k=8 with two shards (each shard spawns its own
+`bidserve` per tier per seat, so four shards oversubscribe four cores and finish
+nothing) — call it 20+ hours of arena for a shippable number. **Do not read the
++0.43 as a positive result; it is a plumbing check that happened to have a sign.**
+
+**One bug worth keeping.** The tier suffixes are `t` for the talon model and `o`
+for the bias, and `"expertto".endswith("t")` is False — so the unstripped check
+silently dropped the talon from the bias arm and would have made the comparison
+two changes wide, reading as the bias doing something it did not. The `o` is
+stripped before the `t` is tested.
+
 ### FIXED: CFR+ AND LINEAR AVERAGING (2026-08-16)
 
 The convergence problem below is solved, and solving it changed several answers.

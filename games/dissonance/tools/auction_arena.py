@@ -207,8 +207,21 @@ def ask(g, seat, tier):
     # A trailing `t` on either tier name adds the TALON MODEL -- the fitted
     # swap weights the server ships on classic auction requests -- so the
     # model can be measured against its own absence before it is the default.
-    if tier.endswith("t") and g["phase"] == "auction" and E.mode_of(g) == "classic":
+    # STRIP THE `o` BEFORE ASKING ABOUT `t`. `"expertto".endswith("t")` is
+    # False, so an unstripped check silently drops the talon model from the
+    # bias arm -- which would make the comparison two changes wide and read as
+    # the bias doing something it did not.
+    base = tier[:-1] if tier.endswith("o") else tier
+    if base.endswith("t") and g["phase"] == "auction" and E.mode_of(g) == "classic":
         auc["swap"] = B.swap_policy_terms()
+    # A trailing `o` adds the OPENING BIAS, the same way: an arm the tier name
+    # turns on, so it can be measured against its own absence. `DIS_OPEN_BIAS`
+    # sets the weight; the bias itself returns None when the weight is 0, so a
+    # tier without the suffix is byte-identical to one before this existed.
+    if tier.endswith("o") and g["phase"] == "auction":
+        bias = B.open_bias_terms(g, seat, opts)
+        if bias:
+            auc["open_bias"] = bias
     per_k, nproc = _kspec(K_A if tier == TIER_A else K_B)
     req = json.dumps({"view": E.view_for(g, seat), "auction": auc}) + "\n"
     sums = None
