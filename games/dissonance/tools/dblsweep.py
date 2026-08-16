@@ -8,8 +8,22 @@ the Double. That is the whole point of the tool: a margin sweep by re-running
 the arena per candidate is hours of play per value and comes back inside its own
 error bars anyway.
 
-Run:  PYTHONPATH=. python -m games.dissonance.tools.dblsweep '/path/to/dbl.jsonl*'
+Run:  PYTHONPATH=. python -m games.dissonance.tools.dblsweep --live 20 'dbl.jsonl*'
       (shard globs are fine -- every file matching every pattern is pooled)
+
+`--live M` IS MANDATORY AND IT IS THE TRAP THIS TOOL SET ONCE. The recorded
+sums ALREADY carry whatever `DOUBLE_MARGIN` was live during the run --
+`wire.rs` does `sums[esc] += margin * deals.len()` and the arena records what
+`wire.rs` returned. So a raw threshold swept over those sums is a DELTA on top
+of the live margin, not an absolute margin. Read as absolute it is wrong by
+exactly the live value, silently, with a perfectly plausible table.
+
+That is not hypothetical: on 2026-08-16 a sweep of data recorded at live 20 was
+read as absolute, so column 4 (really margin 24) was shipped as `4`. The
+measured consequence was doubling at 49.4% against the 22.7% the old value
+gave. Verified both ways since -- column 0 reproduces the directly measured
+doubling rate of its own dataset (23.1% vs 22.7% at live 20; 47.2% vs 49.4% at
+live 4), which is the check that pins the semantics.
 
 WHICH COLUMNS DECIDE. The rate columns (`dbl%`, `on FAIL`, `on MADE`, `disc`)
 are DECISIONS: each round's edge is recorded, so every margin's choice on it is
@@ -60,21 +74,25 @@ def rounds(pats):
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            evs = r["events"][0] if r.get("events") else []
-            # FILTER BY TIER. In an asymmetric arm the two seats run different
-            # knobs, so a double event belongs to whichever tier was DEFENDING.
-            # Pooling them would average the arm with its own control.
-            want = os.environ.get("SWEEP_TIER")
-            dbl = next((e for e in evs if e[0] == "double" and len(e) >= 5
-                        and (want is None or e[1] == want)), None)
-            st = next((e for e in evs if e[0] == "settled" and len(e) >= 12), None)
-            if st is None or dbl is None or dbl[3] is None:
-                continue
-            lv = st[11]
-            out.append({"N": st[2], "outcome": st[3], "doubled": bool(st[4]),
-                        "price": st[8], "payoff": st[10], "m": r.get("m"),
-                        "j": lv[-1] - (lv[-2] if len(lv) > 1 else 0),
-                        "edge": (dbl[3] - dbl[4]) / K})
+            # BOTH FLIPS. A checkpoint line holds one deal's two flips (same
+            # cards, seats swapped) and this read only `events[0]` for its
+            # first month, halving every sample it ever reported.
+            for evs in r.get("events", []):
+                # FILTER BY TIER. In an asymmetric arm the two seats run
+                # different knobs, so a double event belongs to whichever tier
+                # was DEFENDING. Pooling would average the arm with its control.
+                want = os.environ.get("SWEEP_TIER")
+                dbl = next((e for e in evs if e[0] == "double" and len(e) >= 5
+                            and (want is None or e[1] == want)), None)
+                st = next((e for e in evs if e[0] == "settled" and len(e) >= 12),
+                          None)
+                if st is None or dbl is None or dbl[3] is None:
+                    continue
+                lv = st[11]
+                out.append({"N": st[2], "outcome": st[3], "doubled": bool(st[4]),
+                            "price": st[8], "payoff": st[10], "m": r.get("m"),
+                            "j": lv[-1] - (lv[-2] if len(lv) > 1 else 0),
+                            "edge": (dbl[3] - dbl[4]) / K})
     return out
 
 
@@ -128,7 +146,15 @@ def se(x):
 
 def main():
     jd = "--jump-outside" not in sys.argv
-    pats = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if "--live" not in sys.argv:
+        print("REFUSING TO GUESS. Pass --live <M>: the DOUBLE_MARGIN that was "
+              "live when\nthis data was recorded (0 if none). The recorded sums "
+              "already carry it, so\nwithout it every row below is wrong by "
+              "exactly that value -- see the header.")
+        sys.exit(2)
+    live = float(sys.argv[sys.argv.index("--live") + 1])
+    skip = {"--live", str(sys.argv[sys.argv.index("--live") + 1])}
+    pats = [a for a in sys.argv[1:] if not a.startswith("--") and a not in skip]
     rs = [r for r in rounds(pats) if invert(r, jd)]
     if not rs:
         print("no rounds with a recorded double decision yet")
@@ -136,10 +162,16 @@ def main():
     fail = [r for r in rs if r["outcome"] == "set"]
     print(f"n={len(rs)} rounds with a recorded double  "
           f"(jump {'inside' if jd else 'OUTSIDE'} the x2)")
+    print(f"recorded at LIVE margin {live:g} -- the `margin` column below is "
+          f"ABSOLUTE\n(live + the swept delta), so the {live:g} row reproduces "
+          f"this run's own behaviour.")
     print(f"oracle floor = the set rate = {100*len(fail)/len(rs):.1f}%\n")
     print(f"{'margin':>7} {'dbl%':>6} {'on FAIL':>8} {'on MADE':>8} {'disc':>7} "
           f"{'prec':>6} {'declarer EV':>16} {'defender gain':>15}")
-    for M in (0, 2, 4, 6, 8, 10, 12, 15, 20, 25, 30):
+    for M_abs in (0, 2, 4, 6, 8, 10, 12, 15, 20, 24, 28, 32, 36, 40):
+        M = M_abs - live          # the delta this data can actually express
+        if M < 0:
+            continue              # below the live margin is not recoverable
         dec = [r["edge"] > M for r in rs]
         # A round the margin un-doubles is re-priced undoubled (same play).
         pays = [(r["payoff"] if d == r["doubled"] else pay(r, 2 if d else 1, jd))
@@ -152,7 +184,7 @@ def main():
         nf = sum(1 for r in rs if r["outcome"] != "made")
         nm = len(rs) - nf
         disc = 100 * onf / max(1, nf) - 100 * onm / max(1, nm)
-        print(f"{M:>7} {100*nd/len(rs):>5.1f}% {100*onf/max(1,nf):>7.1f}% "
+        print(f"{M_abs:>7} {100*nd/len(rs):>5.1f}% {100*onf/max(1,nf):>7.1f}% "
               f"{100*onm/max(1,nm):>7.1f}% {disc:>+6.1f} "
               f"{100*onf/max(1,nd):>5.1f}% "
               f"{statistics.mean(pays):>+8.2f} +-{se(pays):5.2f} "

@@ -188,40 +188,44 @@ CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 #: peaking), taking the Double from a losing bet to a paying one: gain/round
 #: -0.53 -> +2.25, double rate 59.0% -> 31.7%.
 #:
-#: RE-FITTED 2026-08-16, and the old value had become a BUG. Measured on 65
-#: recorded doubles under the new prices, the p90 edge is about 16, so a margin
-#: of 20 rejects nearly everything: the double rate fell to 4.6% and, worse, its
-#: DISCRIMINATION fell to +0.2 -- the few doubles it still took landed on made
-#: and failed contracts at the same rate, which is a coin flip wearing a
-#: threshold.
+#: 20 SURVIVED A RE-FIT ATTEMPT ON 2026-08-16, and the attempt is worth keeping
+#: written down because it SHIPPED A REGRESSION for about two hours first.
 #:
-#: 4 restores it. Doubles 16.9% of contracts against the CFR+ equilibrium's 15%
-#: for these prices, with discrimination +10.2 (failures doubled 23.8%, makes
-#: 13.6%). Lower margins discriminate harder still (+22.2 at 0) but double 23.1%,
-#: past what the equilibrium wants. The rate and discrimination columns are
-#: DECISIONS rather than payoffs and are well determined at this sample; the
-#: payoff columns are not (+-10 on a mean of 10) and did not choose this value.
+#: The claim was that the re-pricing had turned 20 into a bug -- 4.6% doubling
+#: at +0.2 discrimination -- and that 4 restored it. Both numbers came from
+#: `dblsweep.py` run over data recorded while 20 was live, read as though its
+#: `margin` column were ABSOLUTE. It is not: `wire.rs` does
+#: `sums[esc] += margin * deals.len()`, so the recorded sums already carry the
+#: live margin and a swept threshold is a DELTA on top of it. Column 4 of that
+#: run was really margin 24; the "4.6% at +0.2" row was really margin 40.
 #:
-#: WHY, corrected -- the first version of this comment blamed the payoff SCALE
-#: ("the prices shrank so the edges shrank"), and that is refuted: the payoff sd
-#: moved only ~10%, and at the modal level 5 the set base doubling adds is 18
-#: under BOTH price lists. What moved is the DISTRIBUTION, not the scale. At
-#: margin 0 -- threshold-independent, just "is doubling +EV at all" -- doubling
-#: fell 54.4% -> 23.1%, because contracts got easier to make (make rate
-#: 72.9% -> 79.2%, set rate 38% -> 29.2%, equilibrium doubling 36% -> 15%). The
-#: edges shifted down and compressed toward zero, and 20 landed in a far thinner
-#: tail than the one it was fitted in.
+#: Shipping `4` therefore shipped 4 for real, and it is far too loose: measured
+#: at 49.4% of contracts doubled, against 22.7% under 20 and an equilibrium that
+#: wants ~15%. That is most of the way back to the 59% the knob exists to fix.
 #:
-#: THE LESSON, since this will recur: a TAIL THRESHOLD is hypersensitive to a
-#: re-pricing, far beyond what rescaling the price list suggests, because the
-#: re-pricing changes how often the decision is even correct. (A SCALE parameter
-#: over the bulk is not -- EXPERT_OPP_TEMP shares these units and was measured
-#: still in band.) Re-run `tools/dblsweep.py` whenever the scoring moves.
+#: WHAT PINNED IT: column 0 of a sweep must reproduce the directly measured
+#: doubling rate of its own dataset, and it does -- 23.1% against 22.7% measured
+#: at live 20, 47.2% against 49.4% measured at live 4. Two datasets recorded at
+#: different live margins now agree once both are read as absolute (margin 20
+#: reads 23.1% and 26.1%). `dblsweep.py` requires `--live` and refuses to guess.
+#:
+#: SO 20 STANDS, on 322 recorded doubles under the NEW prices: 26.1% of
+#: contracts doubled, discrimination +30.4 (failures 46.3%, makes 15.9%),
+#: defender gain +2.00/round. Healthy on every column, and it is the value the
+#: paired arena actually measured (+1.889 +- 1.032 for this knob alone).
+#:
+#: NOT SETTLED, and deliberately not acted on here: the same sweep says margins
+#: 6-12 discriminate BETTER (+44 to +52) and pay the defender more (+2.7 to
+#: +2.85 against 20's +2.00), at 35-45% doubling. That is plausible -- the
+#: belief prior arrived after 20 was fitted and does some of the same work -- but
+#: it rests on the PAYOFF columns, which are the noisy ones, and it wants a
+#: doubling rate three times the equilibrium's. Moving it needs a paired arena,
+#: not another read of this table.
 #:
 #: CLASSIC ONLY, and per-mode because the units are payoff points: minor's
 #: payoffs run about a quarter of classic's, so this dose would be enormous
 #: there. Minor's own sweep has not been run, and 0 is exactly today.
-DOUBLE_MARGIN = {"classic": 4.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
+DOUBLE_MARGIN = {"classic": 20.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
