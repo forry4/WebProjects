@@ -1238,7 +1238,7 @@ to fail than they were. This is poker's **range** problem.
   distribution, and a level map does not survive the distribution moving — the
   lesson `_DUMMY_LEVEL_NEEDS` already paid for.
 
-**2. `DOUBLE_MARGIN = 20` (classic), charged to the doubled branch before the
+**2. `DOUBLE_MARGIN` (classic), charged to the doubled branch before the
 argmax.** Taking the better of two estimates is a SELECTION, and the winner is
 partly whichever one's noise favoured it. The search's confidence is well
 ORDERED but mis-calibrated: edge 0–5/world really made **65.4%**.
@@ -1247,10 +1247,15 @@ ORDERED but mis-calibrated: edge 0–5/world really made **65.4%**.
   prices every threshold exactly (`tools/dblsweep.py`). The `swaplab` method —
   label the decisions once, evaluate any policy for free — instead of a
   50-minute run per value.
-* **20 is where two independent routes agree**: it is where the calibration
-  curve crosses break-even AND where the swept gain peaks. Effect: gain/round
-  **−0.53 → +2.25**, precision 60.0% → 72.5%, rate **59.0% → 31.7%**. With the
-  prior as well, **30.1% and +3.02**.
+* **20 was where two independent routes agreed UNDER THE OLD PRICES**: where the
+  calibration curve crossed break-even AND where the swept gain peaked. Effect
+  then: gain/round **−0.53 → +2.25**, precision 60.0% → 72.5%, rate **59.0% →
+  31.7%**. With the prior as well, **30.1% and +3.02**.
+* **RE-FITTED TO 4 ON 2026-08-16, and 20 had become a live BUG — see the
+  re-pricing section below.** The margin's units are payoff points, so the
+  scoring change shrank the search's edges out from under a threshold that did
+  not move: at 20 the double rate fell to **4.6%** with discrimination **+0.2**,
+  a coin flip wearing a threshold. 4 doubles **16.9%** at **+10.2**.
 * Per-mode, because the units are payoff points and minor's run a quarter the
   size. Minor's own sweep has not been run; 0 is exactly today.
 
@@ -3658,14 +3663,64 @@ parallelise past two shards, so ±1.5 on ONE weight is ~20 hours. A three-weight
 sweep is a multi-day unattended job, not an interactive one.
 
 **What is left to recalibrate**, in the order it matters:
-* `DOUBLE_MARGIN` (20) was fitted against the old economics. The equilibrium's
-  doubling rate is **15% under the new scoring against 36% under the old**, so
-  the margin should rise — but it is a threshold on the SEARCH's edge estimate,
-  not an equilibrium quantity, so it needs `dblsweep.py` over a recorded arena
-  run rather than arithmetic.
+* ~~`DOUBLE_MARGIN` (20) was fitted against the old economics.~~ **DONE
+  2026-08-16 — and the arithmetic guess in this entry was BACKWARDS.** It read:
+  the equilibrium's doubling rate is 15% under the new scoring against 36% under
+  the old, *so the margin should rise*. The sweep says it must **fall, 20 → 4**.
+  See the re-fit section below for why the guess inverted; the entry's own
+  closing clause — that this is a threshold on the SEARCH's edge estimate and
+  needs `dblsweep.py` rather than arithmetic — is exactly what saved it.
 * The opening bias needs a weight sweep AND the mixing question answered before
   it is worth arena hours.
 * `hand_strength` itself is unexamined against the new economics.
+
+### `DOUBLE_MARGIN` RE-FIT (2026-08-16): A THRESHOLD IN PAYOFF UNITS IS COUPLED TO THE PAYOFF SCALE
+
+**The general lesson first, because it will recur and it is not specific to the
+Double:** any constant whose units are payoff points is silently re-tuned by any
+re-pricing. Nothing errors, no test goes red, and the constant keeps its old
+name and its old comment explaining why it is right. **Re-run `dblsweep.py`
+whenever the scoring moves** — and go looking for the other payoff-unit
+constants at the same time.
+
+The re-pricing shrank the payoffs: `L²+4` against `L²+10` made, `2L+2` against
+`L+10` set. The search's edges shrank with them. The threshold did not. Measured
+on 65 recorded doubles under the new prices the **p90 edge is ≈16**, so a margin
+of 20 sits above almost the entire distribution:
+
+| margin | dbl% | on FAIL | on MADE | discrimination |
+|---|---|---|---|---|
+| 0 | 23.1% | 38.1% | 15.9% | **+22.2** |
+| 2 | 18.5% | 28.6% | 13.6% | +14.9 |
+| **4 (shipped)** | **16.9%** | **23.8%** | **13.6%** | **+10.2** |
+| 6 | 12.3% | 14.3% | 11.4% | +2.9 |
+| **20 (was shipped)** | **4.6%** | **4.8%** | **4.5%** | **+0.2** |
+
+**Discrimination is the column that condemns 20**, not the rate. A margin that
+merely doubled rarely would be conservative; +0.2 means the few doubles it still
+took landed on made and failed contracts *at the same rate*. It had stopped
+selecting at all — a coin flip wearing a threshold. 4 doubles 16.9% against the
+CFR+ equilibrium's 15% for these prices, at +10.2.
+
+**Why the arithmetic guess inverted.** Equilibrium doubling rate and margin move
+in the same direction only if the edge distribution holds still. Here the
+re-pricing moved BOTH: the equilibrium wants to double less often (36% → 15%),
+which argues the margin up, but the edges it thresholds shrank by more, which
+argues it down harder. The second effect dominated. **An equilibrium rate cannot
+be converted into a threshold on a search's estimate** — they are quantities in
+different spaces, and only a sweep relates them.
+
+**READ THE RATE COLUMNS, NOT THE PAYOFF ONES.** Every round's edge is recorded,
+so each margin's decision on it is exact and the rate/discrimination columns are
+DECISIONS — well determined at n=65. The payoff columns carry ±10 on a mean of
+10 and did not choose this value. Quoting them would have supported any margin
+in the table.
+
+`tools/dblsweep.py` now lives in the repo (this file referenced it for two
+sections while it existed only in a scratchpad). Its constants come off
+`engine.py` rather than being typed in — the previous copy hardcoded `10, 5, 1,
+3`, which the re-pricing had moved three of, plus a level RATE the literals could
+not express at all.
 
 ### THE OPENING BIAS — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
 

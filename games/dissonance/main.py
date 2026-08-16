@@ -170,16 +170,36 @@ CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 #: contracts it was barely confident about (edge 0-5/world) really made 65.4% of
 #: the time, against a break-even near 40%.
 #:
-#: 20 is the measured optimum and two independent routes agree on it -- it is
-#: where the calibration curve crosses break-even (edge 10-20 makes 50.6%, edge
-#: 20-30 makes 29.0%) AND where the swept defender gain peaks. It takes the
-#: Double from a LOSING bet to a paying one: gain/round -0.53 -> +2.25, precision
-#: 60.0% -> 72.5%, and the double rate 59.0% -> 31.7%.
+#: 20 WAS the measured optimum under the pre-2026-08-16 prices, on two agreeing
+#: routes (the calibration crossing break-even, and the swept defender gain
+#: peaking), taking the Double from a losing bet to a paying one: gain/round
+#: -0.53 -> +2.25, double rate 59.0% -> 31.7%.
+#:
+#: RE-FITTED 2026-08-16, and the old value had become a BUG. The units are
+#: per-world payoff points, and the re-pricing shrank the payoffs -- `L^2+4`
+#: against `L^2+10` on the made side, `2L+2` against `L+10` on the set side --
+#: so the search's edges shrank with them while the threshold did not. Measured
+#: on 65 recorded doubles under the new prices, the p90 edge is about 16, so a
+#: margin of 20 rejects nearly everything: the double rate fell to 4.6% and,
+#: worse, its DISCRIMINATION fell to +0.2 -- the few doubles it still took landed
+#: on made and failed contracts at the same rate, which is a coin flip wearing a
+#: threshold.
+#:
+#: 4 restores it. Doubles 16.9% of contracts against the CFR+ equilibrium's 15%
+#: for these prices, with discrimination +10.2 (failures doubled 23.8%, makes
+#: 13.6%). Lower margins discriminate harder still (+22.2 at 0) but double 23.1%,
+#: past what the equilibrium wants. The rate and discrimination columns are
+#: DECISIONS rather than payoffs and are well determined at this sample; the
+#: payoff columns are not (+-10 on a mean of 10) and did not choose this value.
+#:
+#: THE LESSON, since this will recur: a threshold in payoff units is coupled to
+#: the payoff SCALE, so any re-pricing silently re-tunes it. Re-run
+#: `tools/dblsweep.py` whenever the scoring moves.
 #:
 #: CLASSIC ONLY, and per-mode because the units are payoff points: minor's
 #: payoffs run about a quarter of classic's, so this dose would be enormous
 #: there. Minor's own sweep has not been run, and 0 is exactly today.
-DOUBLE_MARGIN = {"classic": 20.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
+DOUBLE_MARGIN = {"classic": 4.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45
