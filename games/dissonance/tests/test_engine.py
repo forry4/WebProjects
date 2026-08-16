@@ -322,7 +322,8 @@ def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
     assert terms["make"] == plain["make"] and terms["null"] == plain["null"]
     # ...and the Double doubles it, like the stake it rides beside.
     doubled = E._terms_for("classic", 0, 6, doubling=2, jump=4)
-    assert doubled["set_base"] == 2 * (6 + E.FLAT_SET_PENALTY["classic"]
+    assert doubled["set_base"] == 2 * (E.SET_LEVEL_RATE["classic"] * 6
+                                       + E.FLAT_SET_PENALTY["classic"]
                                        + 4 * E.JUMP_SET_BONUS["classic"])
 
 
@@ -434,34 +435,49 @@ def test_the_auction_survives_a_json_round_trip():
 # --- contract scoring ------------------------------------------------------
 
 
-# The flat +-10 stake (2026-08-11) rides on BOTH bases, so it appears on both
-# sides of this table. Written against the constants like the rates, so the
-# next re-pricing lands here as one edit rather than ten.
+# The flat stake rides on BOTH bases, so it appears on both sides of this table.
+# Written against the constants like the rates, so a re-pricing lands here as one
+# edit rather than ten -- which is exactly what the 2026-08-16 re-pricing was
+# (`L^2 + L + 2` made, `2L + 10` set, shortfall 1), and it landed as these five
+# lines plus two helpers.
 _FM = E.FLAT_MAKE_BONUS["classic"]
+_LM = E.LINEAR_MAKE_BONUS["classic"]
 _FS = E.FLAT_SET_PENALTY["classic"]
+_SL = E.SET_LEVEL_RATE["classic"]
+_SH = E.CLASSIC_SHORT_PENALTY
+
+
+def _mk(level):
+    """What a made contract pays, jumpless."""
+    return level * level + _LM * level + _FM
+
+
+def _st(level, short):
+    """What a set contract pays the defender, jumpless."""
+    return _SL * level + _FS + _SH * short
 
 
 @pytest.mark.parametrize("level,dpts,expect", [
-    (5, 5, (25 + _FM, 0)),
+    (5, 5, (_mk(5), 0)),
     # Past the target, at 1 a point. Exactly on it is still the bare base,
     # which is the boundary the bonus must not move.
-    (5, 9, (25 + _FM + 4, 0)),
-    (5, 6, (25 + _FM + 1, 0)),
+    (5, 9, (_mk(5) + 4, 0)),
+    (5, 6, (_mk(5) + 1, 0)),
     # Set pays the defender N + the stake + SHORT_PENALTY a point short. Three
     # things have moved here: the base went N-1 -> N (2026-08-07, because at
     # the floor the old base contributed nothing, so the cheapest contract paid
     # its breaker by the margin alone), the rate went 4 -> 5 (2026-08-08, to
     # price the sacrifice bidding that pricing the pass unlocked), and the
     # +-10 stake landed on both bases (2026-08-11).
-    (5, 4, (0, 5 + _FS + E.SHORT_PENALTY * 1)),
-    (5, 3, (0, 5 + _FS + E.SHORT_PENALTY * 2)),
-    (5, 0, (0, 5 + _FS + E.SHORT_PENALTY * 5)),
-    (1, 1, (1 + _FM, 0)),
-    (1, 0, (0, 1 + _FS + E.SHORT_PENALTY * 1)),
-    (8, 8, (64 + _FM, 0)),
+    (5, 4, (0, _st(5, 1))),
+    (5, 3, (0, _st(5, 2))),
+    (5, 0, (0, _st(5, 5))),
+    (1, 1, (_mk(1), 0)),
+    (1, 0, (0, _st(1, 1))),
+    (8, 8, (_mk(8), 0)),
     # The declarer's ceiling is the six +2 tricks, so this is the largest
     # overtrick bonus the game can pay.
-    (1, 12, (1 + _FM + 11, 0)),
+    (1, 12, (_mk(1) + 11, 0)),
 ])
 def test_contract_score_table(level, dpts, expect):
     assert E.contract_score(level, dpts) == expect

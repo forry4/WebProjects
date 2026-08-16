@@ -63,9 +63,25 @@ def _terms(level, doubled):
 #: and a parametrize over unbiddable levels fails as an illegal-bid ValueError
 #: rather than as the arithmetic claim it means to make.
 _TOP = E.max_level_for("classic")
-#: The flat stake, off the constants so a re-pricing lands here as one edit.
+#: The prices, off the constants so a re-pricing lands here as one edit -- which
+#: is what the 2026-08-16 re-pricing was (`L^2 + L + 2` made, `2L + 10` set,
+#: shortfall 1). Both bases are derived, never typed out, for the same reason
+#: the ramp below is: a literal only says what someone believed on the day.
 _FM = E.FLAT_MAKE_BONUS["classic"]
+_LM = E.LINEAR_MAKE_BONUS["classic"]
 _FS = E.FLAT_SET_PENALTY["classic"]
+_SL = E.SET_LEVEL_RATE["classic"]
+_SH = E.CLASSIC_SHORT_PENALTY
+
+
+def _mk(level):
+    """A made contract's base, jumpless."""
+    return level * level + _LM * level + _FM
+
+
+def _sb(level):
+    """A set contract's base, jumpless."""
+    return _SL * level + _FS
 
 
 # --- the arithmetic --------------------------------------------------------
@@ -74,27 +90,27 @@ _FS = E.FLAT_SET_PENALTY["classic"]
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_a_made_contract_pays_exactly_double(level):
     plain, dbl = _terms(level, False), _terms(level, True)
-    assert dbl["make"] == 2 * plain["make"] == 2 * (level * level + _FM)
+    assert dbl["make"] == 2 * plain["make"] == 2 * _mk(level)
     assert dbl["over"] == 2 * plain["over"], "overtricks double with the contract"
 
 
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     plain, dbl = _terms(level, False), _terms(level, True)
-    assert plain["set_base"] == level + _FS and plain["ramp"] == 0
-    assert dbl["set_base"] == 2 * (level + _FS)
+    assert plain["set_base"] == _sb(level) and plain["ramp"] == 0
+    assert dbl["set_base"] == 2 * _sb(level)
     assert dbl["short"] == plain["short"], "the flat per-point term is unchanged"
     assert dbl["ramp"] == E.DOUBLE_RAMP == 1
     # DERIVED from the two dials, never typed out: both have moved once already
     # (short 4 -> 5, ramp 0 -> 1) and a literal only says what someone believed
     # on the day. Doubled, the s-th point short costs `short + s*ramp`.
-    P, R = E.SHORT_PENALTY, E.DOUBLE_RAMP
-    pen = [-E.payoff(dbl, level - s, True) - 2 * (level + _FS)
+    P, R = _SH, E.DOUBLE_RAMP
+    pen = [-E.payoff(dbl, level - s, True) - 2 * _sb(level)
            for s in range(1, 6)]
     steps = [b - a for a, b in zip([0] + pen, pen)]
     assert steps == [P + R * s for s in range(1, 6)], steps
     assert steps == sorted(steps) and steps[0] > steps[0] - 1, "it must RISE"
-    flat = [-E.payoff(plain, level - s, True) - (level + _FS)
+    flat = [-E.payoff(plain, level - s, True) - _sb(level)
             for s in range(1, 6)]
     assert flat == [P * s for s in range(1, 6)], "undoubled stays flat"
 
@@ -115,7 +131,7 @@ def test_the_reward_grows_with_the_SHORTFALL_not_just_the_level():
         assert all(b > a for a, b in zip(wins, wins[1:])), wins
         # A near-miss is barely taxed beyond the doubled stake; a deep failure
         # pays the whole ramp on top (s(s+1)/2 x ramp, 20 more by 6 short).
-        assert wins[0] < level + _FS + 2, \
+        assert wins[0] < _sb(level) + 2, \
             f"a 1-short miss should stay cheap: {wins[0]}"
         assert wins[5] - wins[0] >= 20 * E.DOUBLE_RAMP, \
             f"a 6-short collapse should not: {wins}"
@@ -186,12 +202,12 @@ def test_a_doubled_round_scores_the_doubled_numbers():
         assert g["doubled"] is doubled
         t = E.payoff_terms(g)
         # made exactly on target: (N^2 + stake) [x2]
-        assert E.payoff(t, 3, True) == (2 * (9 + _FM) if doubled else 9 + _FM)
+        assert E.payoff(t, 3, True) == (2 * _mk(3) if doubled else _mk(3))
         # set by two. Doubled: base 2(N + stake) + (short+ramp) + (short+2 ramp).
         # Undoubled: base (N + stake) + 2 short.
-        P, R = E.SHORT_PENALTY, E.DOUBLE_RAMP
-        want = (-(2 * (3 + _FS) + (P + R) + (P + 2 * R)) if doubled
-                else -((3 + _FS) + 2 * P))
+        P, R = _SH, E.DOUBLE_RAMP
+        want = (-(2 * _sb(3) + (P + R) + (P + 2 * R)) if doubled
+                else -(_sb(3) + 2 * P))
         assert E.payoff(t, 1, True) == want
         # no +2 trick at all
         assert E.payoff(t, -2, False) == E.NULL_MAKE
@@ -206,8 +222,8 @@ def test_the_result_row_carries_the_double_and_the_numbers_it_used():
         E.apply_play(g, s, bot.choose_card(g, s))
     res = g["result"]
     assert res["doubled"] is True
-    assert res["make_value"] == 2 * (4 * 4 + _FM)
-    assert res["set_base"] == 2 * (4 + _FS)
+    assert res["make_value"] == 2 * _mk(4)
+    assert res["set_base"] == 2 * _sb(4)
     # The panel narrates from these, so they must be the ones actually scored.
     winner = res["declarer"] if res["scores"][res["declarer"]] else 1 - res["declarer"]
     assert res["scores"][winner] > 0
@@ -227,7 +243,7 @@ def test_the_jump_bonus_rides_inside_the_double_as_shipped(monkeypatch):
     """
     assert E.JUMP_DOUBLED["classic"] is True, "the shipped rule doubles it"
     N, j = 5, 4
-    stake, bonus = N + E.FLAT_SET_PENALTY["classic"], E.JUMP_SET_BONUS["classic"] * j
+    stake, bonus = _sb(N), E.JUMP_SET_BONUS["classic"] * j
     on = E._terms_for("classic", 2, N, jump=j, doubling=2)
     off = E._terms_for("classic", 2, N, jump=j)
     assert on["set_base"] == (stake + bonus) * 2
@@ -287,7 +303,7 @@ def test_a_classic_save_written_before_Double_existed_is_not_doubled():
     E.apply_double(g, 1, False)
     del g["doubled"]                            # what an older row deserialises to
     assert E.classic_doubling(g) == 1
-    assert E.payoff_terms(g)["make"] == 9 + _FM
+    assert E.payoff_terms(g)["make"] == _mk(3)
 
 
 # --- what both seats are told ----------------------------------------------
@@ -330,7 +346,7 @@ def test_the_hard_tier_is_offered_both_branches_priced():
     on = next(o for o in opts if o["move"]["on"] is True)
     off = next(o for o in opts if o["move"]["on"] is False)
     assert on["make"] == 2 * off["make"]
-    assert on["set_base"] == 2 * (3 + _FS) and off["set_base"] == 3 + _FS
+    assert on["set_base"] == 2 * _sb(3) and off["set_base"] == _sb(3)
     assert on["ramp"] == 1 and off["ramp"] == 0
     assert all("decline" not in o for o in opts), \
         "both branches carry their own move; neither is an implicit zero"

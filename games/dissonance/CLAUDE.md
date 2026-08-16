@@ -3576,6 +3576,38 @@ scoring comparison in this file was therefore made on a tree missing a branch
 both sides use, and **the search should be re-run with `curvedbl` before any of
 its rankings are trusted**.
 
+**IT DID NOT SHIP — the Double invariant breaks at levels 2-3.** Attempting the
+push turned up a design regression the loss function never looked at.
+`test_doubling_still_risks_more_than_it_wins_on_a_near_miss` asserts that on the
+COMMON failure (one point short) a made contract still risks more than the double
+wins, i.e. `make(L) > set_base(L) + ramp`:
+
+| bid | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| candidate risk / reward | 4 / 13 | **8 / 15** | **14 / 17** | 22 / 19 | 32 / 21 | 44 / 23 |
+| shipped risk / reward | 11 / 12 | 14 / 13 | 19 / 14 | 26 / 15 | 35 / 16 | 46 / 17 |
+
+**Under the candidate, doubling a level-2 or level-3 contract is free money** --
+shipped holds the line from level 2 up, and the candidate breaks it. Those rungs
+carry 11% of settled contracts, which is the same size as the whole measured
+doubling rate, so **the "11% doubled" figure is probably mostly degenerate
+auto-doubles rather than reads.**
+
+The cause is an asymmetry introduced by the re-pricing: the made base's flat term
+went 10 -> 2 while the set base's stayed at 10, so at low levels the set base
+dwarfs the make (4 against 12 at level 1). And the fix costs the win: the
+property needs `L^2 + L + Fm > 2L + Fs + 1` from L=2, which wants `Fm >= 10` or
+`Fs <= 2` -- and BOTH were measured to pile 61-70% of contracts onto level 6.
+**The candidate's settled spread is partly bought by the same lopsided flats that
+break the Double**, so the two cannot be had together by tuning these constants.
+
+What DID land is the refactor, with every value unchanged: `LINEAR_MAKE_BONUS`
+(0), `SET_LEVEL_RATE` (1) and `CLASSIC_SHORT_PENALTY` (5, split from skat's so
+the two can move independently). The scoring change is now one edit per constant
+whenever the Double question is answered, and the tests were rewritten to derive
+both bases from the constants rather than hardcode them -- so the next re-pricing
+lands as five lines, not forty-one failures.
+
 **RE-FITTED ON THE CORRECT TREE — and it beats everything measured either way.**
 One constant moves from the earlier candidate, `Fs` 12 -> 10:
 

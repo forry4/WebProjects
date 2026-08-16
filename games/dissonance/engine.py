@@ -287,6 +287,12 @@ JUMP_DOUBLED = {"classic": True, "skat": True, "minor": True, "dummy": True}
 #: It applies to classic AND skat -- skat's set is `stake + SHORT_PENALTY x
 #: short` too. Minor mode has its own rate below.
 SHORT_PENALTY = 5
+#: Classic's own shortfall rate, split from skat's so the two can move
+#: independently. 5 as shipped, i.e. unchanged. The campaign wants 1: at 5 a
+#: contract bid past what the hand can take is ruinous -- bid 7, make 3, and the
+#: four points short cost 20 on a base that also grew -- which is what pins every
+#: settled contract onto two levels. See CLAUDE.md.
+CLASSIC_SHORT_PENALTY = 5
 
 #: Minor mode's per-point set rate. 2, NOT the classic 5, and the argument is
 #: scale, measured in self-play (tools/minor_calibration.py): minor's payoffs
@@ -373,6 +379,17 @@ OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 #: branch never reads these. The auction lab overrides via DIS_FLAT_MAKE /
 #: DIS_FLAT_SET when it needs a different arm.
 FLAT_MAKE_BONUS = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
+#: THE LINEAR MAKE TERM -- `make = L^2 + LINEAR x L + flat`. 0 as shipped, so
+#: the made base is unchanged; it exists because the re-pricing campaign wants
+#: it at 1 and a knob that has to be introduced at ship time is a knob that gets
+#: introduced wrong. It mirrors the level term the SET base already carries, and
+#: in EV terms is a mild HIGH-contract subsidy -- the opposite tilt to the flat
+#: bonus and the overtrick rate. Measured to lengthen the auction (one-bid rate
+#: 33% -> 25%). See CLAUDE.md for why it has not shipped.
+LINEAR_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0}
+#: What one level of the contract adds to the SET base -- 1 everywhere, which is
+#: what was implicit before this was a constant. The campaign wants 2 in classic.
+SET_LEVEL_RATE = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 #: ...and the level the make bonus starts applying at (1 = every made
 #: contract). Gating it off the floor was the differentiation experiment; it
 #: measured indistinguishable from ungated, because a weak hand's 1-open is a
@@ -2106,7 +2123,9 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # scale rather than copied: the consolation (MINOR_NULL_MAKE) and the
     # per-point set rate (MINOR_SHORT_PENALTY).
     null = MINOR_NULL_MAKE if mode == "minor" else NULL_MAKE
-    short = MINOR_SHORT_PENALTY if mode == "minor" else SHORT_PENALTY
+    short = (MINOR_SHORT_PENALTY if mode == "minor"
+             else CLASSIC_SHORT_PENALTY if mode == "classic"
+             else SHORT_PENALTY)
     # THE FLAT STAKE (see the constants for the measurement): +10 on the made
     # base and +10 on the set base in classic, 0 elsewhere. Inside the Double
     # like the rest of both bases, never on Null (a consolation, not a made
@@ -2114,13 +2133,14 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
     # escape, which is priced everywhere because these terms are pure data all
     # the way to the Rust search and the DD resolver).
     flat_make = FLAT_MAKE_BONUS.get(mode, 0)
-    make = level * level + (flat_make if level >= FLAT_MAKE_MIN_LEVEL else 0)
+    make = (level * level + LINEAR_MAKE_BONUS.get(mode, 0) * level
+            + (flat_make if level >= FLAT_MAKE_MIN_LEVEL else 0))
     # THE JUMP BONUS rides inside the set base, beside the flat stake: `jump`
     # is how far the FINAL bid raised the standing level, and each level of it
     # pays the defender JUMP_SET_BONUS more on a set. Inside the base means the
     # Double doubles it and every consumer of `set_base` -- the result panel's
     # maths, the Hard pricing, the DD resolver -- follows with no new term.
-    stake = level + FLAT_SET_PENALTY.get(mode, 0)
+    stake = SET_LEVEL_RATE.get(mode, 1) * level + FLAT_SET_PENALTY.get(mode, 0)
     bonus = JUMP_SET_BONUS.get(mode, 0) * jump
     setb = stake + bonus
     if doubling > 1:
