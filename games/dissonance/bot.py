@@ -18,6 +18,7 @@ server-side search at any tier.
 
 from __future__ import annotations
 
+import math
 import os
 import random
 
@@ -809,16 +810,39 @@ def act(g: dict, seat: int, rng=None):
 #: gap and not a rounding detail -- reproducing it would mean sampling the
 #: per-bucket distribution rather than pulling toward its mean, at the cost of
 #: overriding the search's per-deal opinion. Unresolved; see CLAUDE.md.
-#: RE-FITTED 2026-08-16 for the re-priced scoring (`L^2+4` make, `2L+2+6j` set).
+#: RE-FITTED 2026-08-16 for the re-priced scoring (L^2+4 make, 2L+2+6j set).
 #: The old targets came from the old economics and do not transfer: under the
-#: doubled jump penalty the equilibrium OPENS LOW AND CLIMBS -- buckets 0-6 all
-#: open between 1.6 and 3.1, and only the top bucket leaps, where the old curve
-#: ran 2.25 -> 4.84 across the range. That is the jump rule doing its designed
-#: job: leaping to 5 costs 42 on a set against 18 for walking there.
-#: The CUTS are unchanged -- they are strength octiles of the deal cache and do
-#: not depend on the scoring at all.
+#: doubled jump penalty the equilibrium OPENS LOW AND CLIMBS, and only the top
+#: bucket leaps. That is the jump rule doing its designed job -- leaping to 5
+#: costs 42 on a set against 18 for walking there.
+#:
+#: THE FULL DISTRIBUTION, NOT ITS MEAN. The first cut pulled quadratically toward
+#: the per-bucket MEAN opening, which cannot express a mixture: bucket 0 plays
+#: 53% level 1 and 38% level 2, and a point target at their mean of 1.59 simply
+#: picks the nearer rung -- measured, level-1 openings vanished entirely, 18% ->
+#: 0%, which is not what the equilibrium does. In an imperfect-information game
+#: the mixing is frequently the point. So the bias is now the equilibrium's LOG
+#: PROBABILITY per level, normalised so its favourite rung costs nothing: rungs
+#: it mixes over stay cheap, rungs it never plays are dear, and the search still
+#: chooses within the shape.
+#:
+#: The CUTS are strength octiles of the deal cache and do not depend on the
+#: scoring at all, so they are unchanged.
 _OPEN_CUTS = [7.82, 8.92, 9.82, 10.62, 11.43, 12.32, 13.43]
-_OPEN_TARGET = [1.59, 1.99, 2.05, 2.72, 2.72, 2.87, 2.87, 4.54]
+#: P(open at level L) by strength bucket, CFR+ at 120k averaged over four seeds.
+_OPEN_DIST = [
+    [0.531, 0.377, 0.070, 0.015, 0.003, 0.001, 0.001, 0.001],
+    [0.361, 0.337, 0.263, 0.029, 0.005, 0.002, 0.001, 0.000],
+    [0.353, 0.355, 0.199, 0.081, 0.008, 0.002, 0.002, 0.001],
+    [0.101, 0.188, 0.346, 0.351, 0.008, 0.003, 0.002, 0.000],
+    [0.301, 0.219, 0.236, 0.224, 0.012, 0.004, 0.003, 0.001],
+    [0.142, 0.111, 0.350, 0.352, 0.036, 0.005, 0.003, 0.001],
+    [0.258, 0.302, 0.156, 0.087, 0.186, 0.007, 0.003, 0.001],
+    [0.007, 0.009, 0.021, 0.436, 0.460, 0.057, 0.007, 0.002],
+]
+#: Never log(0): a rung the equilibrium abandons should be expensive, not
+#: impossible, because the search sees the actual deal and this table does not.
+_OPEN_FLOOR = 0.02
 
 
 def open_bias_terms(g: dict, seat: int, options: list[dict]) -> list[float] | None:
@@ -837,13 +861,15 @@ def open_bias_terms(g: dict, seat: int, options: list[dict]) -> list[float] | No
     b = 0
     while b < len(_OPEN_CUTS) and best >= _OPEN_CUTS[b]:
         b += 1
-    want = _OPEN_TARGET[b]
-    # Quadratic in the distance, so being one rung off is cheap and being four
-    # off is not -- a linear penalty would shift every opening equally and turn
-    # the bias into a constant the argmax ignores.
+    dist = _OPEN_DIST[b]
+    lp = [math.log(max(p, _OPEN_FLOOR)) for p in dist]
+    top = max(lp)
     out = []
     for o in options:
         mv = o.get("move") or {}
         lvl = mv.get("level") if mv.get("kind") == "bid" else None
-        out.append(0.0 if lvl is None else -w * (lvl - want) ** 2)
+        if lvl is None or not 1 <= lvl <= len(lp):
+            out.append(0.0)
+        else:
+            out.append(w * (lp[lvl - 1] - top))
     return out

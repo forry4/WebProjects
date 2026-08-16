@@ -3627,19 +3627,35 @@ against 18 for walking there, so the equilibrium opens low and CLIMBS. `bot.py`'
 `_OPEN_TARGET` is re-fitted; the cuts are unchanged, being strength octiles of
 the deal cache and independent of the scoring.
 
-**AND THE BIAS CANNOT MIX, which is a real gap rather than a detail.** The
-equilibrium's per-bucket opening is a MIXTURE — bucket 0 plays some 1s, some 2s
-and some higher, averaging 1.59. A quadratic pull toward that mean is a POINT
-target, and a point target between two rungs picks the nearer one: at 1.59 the
-bias favours level 2 at every weak bucket and **level-1 openings vanish entirely
-(18% → 0% in the arena)**, which is not what the equilibrium does. In an
-imperfect-information game the mixing is frequently the point. Reproducing it
-means sampling the per-bucket distribution instead of pulling toward its mean,
-which costs the search's per-deal opinion — a genuine trade, unresolved.
+**THE BIAS COULD NOT MIX — FIXED.** The equilibrium's per-bucket opening is a
+MIXTURE: bucket 0 plays **53% level 1 and 38% level 2**. A quadratic pull toward
+its mean of 1.59 is a POINT target that simply picks the nearer rung, so level-1
+openings vanished entirely (18% → 0% in the arena) — not what the equilibrium
+does, and in an imperfect-information game the mixing is frequently the point.
 
-**Arena under the shipped scoring, 22 paired deals: −7.30 ± 8.92.** Leaning
-negative, CI swamps it, and the weight (0.30) is unswept. **Not a result.** The
-bias stays OFF by default.
+The fix is not sampling (which would override the search's per-deal opinion) but
+**biasing by the equilibrium's LOG PROBABILITY per level**, normalised so its
+favourite rung costs nothing. Rungs it mixes over stay cheap, rungs it never
+plays are dear, and the search still chooses within that shape. The full
+`_OPEN_DIST` table replaces `_OPEN_TARGET`, with a 0.02 floor so an abandoned
+rung is expensive rather than impossible — the search sees the actual deal and
+the table does not.
+
+Measured: level-1 openings return at **27%**, and the per-bucket bias reads 0.00
+at every rung the equilibrium favours (bucket 0: L1 0.00, L2 −0.34, L3 −2.03;
+bucket 7: L5 0.00, L4 −0.05, L1 −3.14). The mixture's shape survives.
+
+**THE PAYOFF IS STILL UNMEASURED.** Arena under the shipped scoring: the
+quadratic version read −7.30 ± 8.92 over 22 paired deals; the log-prob version
+reads −2.36 ± 7.14 at w=0.5 and +0.18 ± 13.93 at w=2.0 over 11 deals each. Every
+one of those CIs is several times its own estimate. **None of them is a result**,
+and the weight remains unswept in any meaningful sense. The bias stays OFF by
+default.
+
+The blocker is arithmetic, not design: per-deal sigma is ~15.8 even CRN-paired
+and dd-resolved, the arena manages ~10 paired deals per 500s at k=8 and does not
+parallelise past two shards, so ±1.5 on ONE weight is ~20 hours. A three-weight
+sweep is a multi-day unattended job, not an interactive one.
 
 **What is left to recalibrate**, in the order it matters:
 * `DOUBLE_MARGIN` (20) was fitted against the old economics. The equilibrium's
