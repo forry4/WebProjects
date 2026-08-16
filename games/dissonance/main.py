@@ -108,6 +108,19 @@ SEARCH_AUCTION_TIERS = ("hard", "expert")
 #:
 #: **0 IS EXACTLY THE OLD TREE**, in the Rust and end to end (the arena's null
 #: control reads +0.0000), which is what made the A/B unconfoundable.
+#:
+#: AUDITED 2026-08-16 against the re-pricing, and it needs NOTHING -- recorded
+#: because the units make it look like it should. This is in per-world payoff
+#: points, the same units as DOUBLE_MARGIN, which the re-pricing turned into a
+#: live bug: the softmin computes `exp(-(v/k)/temp)`, so temp divides a payoff
+#: exactly as that margin is compared against one. The difference is WHERE in
+#: the distribution it acts. A margin is a threshold in the TAIL, so a modest
+#: shift makes it reject everything; a temperature is a scale over the BULK, so
+#: it degrades proportionally. Measured, the bulk barely moved: payoff sd ratio
+#: 0.907, make/set gap ratio 0.725. Rescaling the fitted band by those gives
+#: 4.5-10.9 or 3.6-8.7, and 5.0 is inside both -- still in the band it was
+#: fitted in. (The fit was loose to begin with, so a re-fit would measure noise
+#: unless the whole sweep is rebuilt; not worth arena hours while it is in band.)
 EXPERT_OPP_TEMP = 5.0
 
 #: Phases beyond `play` whose decision the browser searches. The talon and the
@@ -175,14 +188,11 @@ CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 #: peaking), taking the Double from a losing bet to a paying one: gain/round
 #: -0.53 -> +2.25, double rate 59.0% -> 31.7%.
 #:
-#: RE-FITTED 2026-08-16, and the old value had become a BUG. The units are
-#: per-world payoff points, and the re-pricing shrank the payoffs -- `L^2+4`
-#: against `L^2+10` on the made side, `2L+2` against `L+10` on the set side --
-#: so the search's edges shrank with them while the threshold did not. Measured
-#: on 65 recorded doubles under the new prices, the p90 edge is about 16, so a
-#: margin of 20 rejects nearly everything: the double rate fell to 4.6% and,
-#: worse, its DISCRIMINATION fell to +0.2 -- the few doubles it still took landed
-#: on made and failed contracts at the same rate, which is a coin flip wearing a
+#: RE-FITTED 2026-08-16, and the old value had become a BUG. Measured on 65
+#: recorded doubles under the new prices, the p90 edge is about 16, so a margin
+#: of 20 rejects nearly everything: the double rate fell to 4.6% and, worse, its
+#: DISCRIMINATION fell to +0.2 -- the few doubles it still took landed on made
+#: and failed contracts at the same rate, which is a coin flip wearing a
 #: threshold.
 #:
 #: 4 restores it. Doubles 16.9% of contracts against the CFR+ equilibrium's 15%
@@ -192,9 +202,21 @@ CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 #: DECISIONS rather than payoffs and are well determined at this sample; the
 #: payoff columns are not (+-10 on a mean of 10) and did not choose this value.
 #:
-#: THE LESSON, since this will recur: a threshold in payoff units is coupled to
-#: the payoff SCALE, so any re-pricing silently re-tunes it. Re-run
-#: `tools/dblsweep.py` whenever the scoring moves.
+#: WHY, corrected -- the first version of this comment blamed the payoff SCALE
+#: ("the prices shrank so the edges shrank"), and that is refuted: the payoff sd
+#: moved only ~10%, and at the modal level 5 the set base doubling adds is 18
+#: under BOTH price lists. What moved is the DISTRIBUTION, not the scale. At
+#: margin 0 -- threshold-independent, just "is doubling +EV at all" -- doubling
+#: fell 54.4% -> 23.1%, because contracts got easier to make (make rate
+#: 72.9% -> 79.2%, set rate 38% -> 29.2%, equilibrium doubling 36% -> 15%). The
+#: edges shifted down and compressed toward zero, and 20 landed in a far thinner
+#: tail than the one it was fitted in.
+#:
+#: THE LESSON, since this will recur: a TAIL THRESHOLD is hypersensitive to a
+#: re-pricing, far beyond what rescaling the price list suggests, because the
+#: re-pricing changes how often the decision is even correct. (A SCALE parameter
+#: over the bulk is not -- EXPERT_OPP_TEMP shares these units and was measured
+#: still in band.) Re-run `tools/dblsweep.py` whenever the scoring moves.
 #:
 #: CLASSIC ONLY, and per-mode because the units are payoff points: minor's
 #: payoffs run about a quarter of classic's, so this dose would be enormous

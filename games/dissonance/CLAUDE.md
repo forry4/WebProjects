@@ -3672,21 +3672,45 @@ sweep is a multi-day unattended job, not an interactive one.
   needs `dblsweep.py` rather than arithmetic — is exactly what saved it.
 * The opening bias needs a weight sweep AND the mixing question answered before
   it is worth arena hours.
-* `hand_strength` itself is unexamined against the new economics.
+* `hand_strength` itself is unexamined against the new economics — and so is
+  `_CLASSIC_LEVEL_NEEDS`, the strength→level map that picks the opening bid for
+  the NON-search tiers, which is the only one of its four siblings with no
+  calibration provenance at all. See the payoff-unit audit below.
+* `EXPERT_OPP_TEMP` was checked and needs nothing — same units as the margin,
+  but a scale parameter rather than a tail threshold. Audit below.
 
-### `DOUBLE_MARGIN` RE-FIT (2026-08-16): A THRESHOLD IN PAYOFF UNITS IS COUPLED TO THE PAYOFF SCALE
+### `DOUBLE_MARGIN` RE-FIT (2026-08-16): A FIXED THRESHOLD ON A DISTRIBUTION THE RE-PRICING MOVED
 
 **The general lesson first, because it will recur and it is not specific to the
-Double:** any constant whose units are payoff points is silently re-tuned by any
+Double:** a constant whose units are payoff points is silently re-tuned by any
 re-pricing. Nothing errors, no test goes red, and the constant keeps its old
 name and its old comment explaining why it is right. **Re-run `dblsweep.py`
 whenever the scoring moves** — and go looking for the other payoff-unit
-constants at the same time.
+constants at the same time (that audit is the section after this one).
 
-The re-pricing shrank the payoffs: `L²+4` against `L²+10` made, `2L+2` against
-`L+10` set. The search's edges shrank with them. The threshold did not. Measured
-on 65 recorded doubles under the new prices the **p90 edge is ≈16**, so a margin
-of 20 sits above almost the entire distribution:
+**THE MECHANISM, CORRECTED THE SAME DAY — the first version of this section and
+its commit message (`2c55515`) got it WRONG, and the wrong version is the
+intuitive one, which is why it is worth the space.** It said: the re-pricing
+shrank the payoffs (`L²+4` against `L²+10` made, `2L+2` against `L+10` set), so
+the search's edges shrank with them while the threshold did not. That story is
+arithmetically appealing and **the measurements refute it**:
+* The payoff **sd moved only ~10%** (31.5 → 28.5 over the outcome grid, each
+  price list weighted by its own settled distribution).
+* At the MODAL level 5 the Double's own quantities are **unchanged or nearly
+  so**: the set base that doubling adds is **18 under both** price lists, and
+  the make side fell only 35 → 29.
+* A 10% scale move cannot carry a doubling rate of 31.7% → 4.6%.
+
+**What actually moved is the DISTRIBUTION of the thing being thresholded, not
+its scale.** At **margin 0** — which is threshold-independent and asks only "how
+often does the search think doubling is +EV at all" — doubling fell **54.4% →
+23.1%**. Three independent quantities agree on the direction: the set rate fell
+**38% → 29.2%**, the make rate rose **72.9% → 79.2%**, and the equilibrium's
+doubling rate fell **36% → 15%**. The new prices simply make doubling correct
+much less often, so the edge distribution shifted down and compressed toward
+zero, and a threshold of 20 ended up in a far thinner tail than the one it was
+fitted in. Measured, the **p90 edge is now ≈16** — 20 sits above almost the
+entire distribution:
 
 | margin | dbl% | on FAIL | on MADE | discrimination |
 |---|---|---|---|---|
@@ -3703,12 +3727,13 @@ selecting at all — a coin flip wearing a threshold. 4 doubles 16.9% against th
 CFR+ equilibrium's 15% for these prices, at +10.2.
 
 **Why the arithmetic guess inverted.** Equilibrium doubling rate and margin move
-in the same direction only if the edge distribution holds still. Here the
-re-pricing moved BOTH: the equilibrium wants to double less often (36% → 15%),
-which argues the margin up, but the edges it thresholds shrank by more, which
-argues it down harder. The second effect dominated. **An equilibrium rate cannot
-be converted into a threshold on a search's estimate** — they are quantities in
-different spaces, and only a sweep relates them.
+in the same direction only if the edge distribution holds still, and here the
+re-pricing moved both. The equilibrium wants to double less often (36% → 15%),
+which argues the margin UP; but the same force that did that — contracts got
+easier to make — also pushed the search's own edges down and toward zero, which
+argues it DOWN, and by more. **An equilibrium rate cannot be converted into a
+threshold on a search's estimate** — they are quantities in different spaces,
+and only a sweep relates them.
 
 **READ THE RATE COLUMNS, NOT THE PAYOFF ONES.** Every round's edge is recorded,
 so each margin's decision on it is exact and the rate/discrimination columns are
@@ -3722,7 +3747,61 @@ sections while it existed only in a scratchpad). Its constants come off
 3`, which the re-pricing had moved three of, plus a level RATE the literals could
 not express at all.
 
-### THE OPENING BIAS — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
+### THE PAYOFF-UNIT CONSTANT AUDIT (2026-08-16) — THE SWEEP THE ABOVE ASKED FOR
+
+`DOUBLE_MARGIN` is one instance of a class, so every other constant that could
+be scale-coupled was swept. **The useful result is the RULE that separates the
+one live bug from the false alarms**, because "it is in payoff units" turns out
+not to be the dangerous property:
+
+> **A THRESHOLD sitting in the TAIL of a distribution is hypersensitive to a
+> re-pricing; a SCALE PARAMETER applied across the BULK degrades only
+> proportionally.** `DOUBLE_MARGIN` is the first kind and went from selective to
+> useless. `EXPERT_OPP_TEMP` is the second kind and is fine. Audit tail
+> thresholds first, and do not spend the same alarm on scale parameters.
+
+| constant | units | verdict |
+|---|---|---|
+| `DOUBLE_MARGIN` | per-world payoff pts | **WAS BROKEN — fixed above** |
+| `EXPERT_OPP_TEMP` | per-world payoff pts | **coupled, measured, STILL IN BAND** |
+| `auction.rs` `LOW=-30`, `set_base=1_000_000` | trick totals / sentinel | not tuning constants; sentinels dominate at any scale these prices reach |
+| `_KONTRA_TARGET` 9, `_KONTRA_STRENGTH` 12.5 | skat CARD points | different currency; skat's prices did not move |
+| `_BID_TILT`, `_SWAP_*` | strength / trick units | not payoff-coupled |
+| `_MINOR_*`, `SKAT_NULL_VALUE`, `SHARP_BONUS` | their own currencies | untouched by the classic re-price |
+
+**`EXPERT_OPP_TEMP = 5.0` is a genuine sibling and it is worth knowing why it
+survived.** The softmin computes `exp(-(v/k)/temp)`, so `temp` divides a
+per-world payoff exactly as the margin is compared against one — the crate's own
+comment says "in per-world payoff points". But it is a scale parameter over the
+bulk, and the bulk barely moved: the payoff sd ratio is **0.907**, the make/set
+gap ratio **0.725**. Rescaling the original fitted band by those gives **4.5–10.9**
+or **3.6–8.7**, and **5.0 is inside both**. The shipped value did not leave the
+band it was fitted in, so there is nothing to change. (That original fit was
+itself loose — "somewhere around 5–12" from a 3-point sweep at n=150 — so a
+re-fit would be measuring noise unless the sweep is rebuilt, which is not worth
+arena hours against a constant that is not out of band.)
+
+**AND A GAP FOUND WHILE SWEEPING, unrelated to payoff units:
+`_CLASSIC_LEVEL_NEEDS = ((6, 15.0), (5, 12.5), (4, 10.5), (3, 8.5), (2, 6.5))`
+carries NO calibration provenance** — while all three of its siblings
+(`_MINOR_LEVEL_NEEDS`, `_SKAT_LEVEL_NEEDS`, `_DUMMY_LEVEL_NEEDS`) have headers
+naming the calibration tool and the date. It is the strength→level map that
+picks the **opening bid for the non-search tiers**, and the re-pricing campaign
+never touched it (the "recalibrate Expert" work was about the search, which does
+not use this map). Measured over 4000 fresh deals, it opens:
+
+| | L1 | L2 | L3 | L4 | L5 | L6 |
+|---|---|---|---|---|---|---|
+| heuristic tiers today | 4.5% | 15.0% | 29.2% | 28.2% | 19.0% | 4.0% |
+| CFR+ equilibrium | 32% | 20% | 15% | 12% | 9% | 6% |
+
+**This is a flag, not a verdict, and the difference must not be over-read.** The
+equilibrium is an abstraction and a DIRECTION rather than a table to ship (the
+standing caution above), and the settled distribution is still level-5-heavy
+under the new prices, so opening at 3–4 and climbing is not obviously wrong. What
+IS established is narrow and sufficient to act on later: this constant is
+uncalibrated, its siblings are not, and nobody has looked at it since the prices
+moved. It belongs with `hand_strength` on the recalibration list, not ahead of it. — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
 
 The bot arm the exploitability finding asked for. **Off unless `DIS_OPEN_BIAS`
 sets a weight**, so shipped behaviour is byte-identical (`open_bias_terms`
