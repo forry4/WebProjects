@@ -497,6 +497,16 @@ class CFR:
         self.recs = recs
         self.R = defaultdict(lambda: defaultdict(float))   # cumulative regret
         self.S = defaultdict(lambda: defaultdict(float))   # cumulative strategy
+        #: CFR+ / LINEAR AVERAGING. Vanilla CFR averages every iteration equally,
+        #: so the average strategy carries all the early ones when it was still
+        #: uniform -- and the OPENING infoset is where that showed: the level-1
+        #: opening rate climbed 27 -> 35 -> 42 -> 49% over 30k -> 200k iterations
+        #: and was still moving, while the settled distribution had long since
+        #: stopped. Rankings read off a solve that had not settled were comparing
+        #: iteration counts as much as scorings. Two standard changes fix it:
+        #: cumulative regrets floored at 0 (regret matching+), and iteration `t`
+        #: contributing to the average with weight `t`.
+        self.t = 1
 
     def strategy(self, key, acts):
         r = self.R[key]
@@ -536,7 +546,7 @@ class CFR:
         if to_act != me:
             # SAMPLE the opponent, and accumulate their average strategy.
             for a in acts:
-                self.S[key][a] += sig[a]
+                self.S[key][a] += self.t * sig[a]
             r, acc = rng.random(), 0.0
             pick = acts[-1]
             for a in acts:
@@ -551,7 +561,7 @@ class CFR:
             vals[a] = child(a)
             node += sig[a] * vals[a]
         for a in acts:
-            self.R[key][a] += vals[a] - node
+            self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
         return node
 
     def dbl_node(self, rec, level, prev, holds, defender, me, rng):
@@ -574,12 +584,12 @@ class CFR:
 
         if defender != me:
             for a in acts:
-                self.S[key][a] += sig[a]
+                self.S[key][a] += self.t * sig[a]
             return val(1 if rng.random() <= sig[1] else 0)
         vals = {a: val(a) for a in acts}
         node = sum(sig[a] * vals[a] for a in acts)
         for a in acts:
-            self.R[key][a] += vals[a] - node
+            self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
         return node
 
     def average(self, key, acts):
@@ -921,8 +931,9 @@ def jump_main(rate, iters, seed=1234):
     bucketise(recs)
     cfr = CFR(recs)
     rng = random.Random(seed)
-    for _ in range(iters):
+    for _i in range(iters):
         rec = recs[rng.randrange(len(recs))]
+        cfr.t = _i + 1
         for me in (0, 1):
             cfr.walk(rec, 0, 0, 0, 0, me, rng)
     eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
@@ -1437,8 +1448,9 @@ def curve_main(spec, iters, seed=1234):
     bucketise(recs)
     cfr = CFR(recs)
     rng = random.Random(seed)
-    for _ in range(iters):
+    for _i in range(iters):
         rec = recs[rng.randrange(len(recs))]
+        cfr.t = _i + 1
         for me in (0, 1):
             cfr.walk(rec, 0, 0, 0, 0, me, rng)
     eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in s.values())
@@ -1565,8 +1577,9 @@ def br_main(iters):
 
     cfr = CFR(recs)
     rng = random.Random(1234)
-    for _ in range(iters):
+    for _i in range(iters):
         rec = recs[rng.randrange(len(recs))]
+        cfr.t = _i + 1
         for me in (0, 1):
             cfr.walk(rec, 0, 0, 0, 0, me, rng)
     eq = {}
@@ -1706,8 +1719,9 @@ def main():
     bucketise(recs)
     cfr = CFR(recs)
     rng = random.Random(1234)
-    for i in range(iters):
+    for _i in range(iters):
         rec = recs[rng.randrange(len(recs))]
+        cfr.t = _i + 1
         for me in (0, 1):
             cfr.walk(rec, 0, 0, 0, 0, me, rng)
         if (i + 1) % max(1, iters // 5) == 0:

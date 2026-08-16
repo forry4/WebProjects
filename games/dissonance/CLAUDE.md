@@ -3608,7 +3608,59 @@ whenever the Double question is answered, and the tests were rewritten to derive
 both bases from the constants rather than hardcode them -- so the next re-pricing
 lands as five lines, not forty-one failures.
 
-### THE EQUILIBRIUM'S OPENING TABLE IS NOT SAFE TO COPY INTO THE BOT (2026-08-16)
+### FIXED: CFR+ AND LINEAR AVERAGING (2026-08-16)
+
+The convergence problem below is solved, and solving it changed several answers.
+
+Vanilla CFR averages every iteration equally, so the average strategy carries all
+the early ones when it was still uniform. Two standard changes: **cumulative
+regrets floored at 0 (regret matching+), and iteration `t` contributing to the
+average with weight `t`.** Four lines, at four sites (`walk` and `dbl_node`, both
+the regret and the strategy update).
+
+**The convergence check is the test.** Same scoring, same deals, iterations only:
+
+| iterations | 30k | 60k | 120k | 200k |
+|---|---|---|---|---|
+| vanilla | 0.63 | 0.54 | 0.67 | **0.88** |
+| **CFR+** | **0.66** | **0.66** | **0.66** | — |
+
+Flat across a 4x range where vanilla swung 0.34. Seed spread at 120k is **0.62
+mean, sd 0.035** over four seeds, and the components that used to drift are now
+steady across seeds: settled `6:` 46/44/44/44, doubling 17/16/17/16%, bids
+3.71/3.66/3.59/3.72. **A difference under ~0.15 is still not a result** once the
+±0.11 deal-sample bar is added, but that is a usable instrument where the old one
+was not.
+
+**TWO EARLIER ANSWERS WERE WRONG AND ARE CORRECTED HERE.**
+
+*The doubling rate.* Vanilla measured 7% for this scoring; CFR+ measures **16-17%,
+stable across seeds**. So the "11% candidate against 32% shipped" comparison is
+unconverged and should not be used — the Double numbers all need re-measuring.
+
+*The bucket-5 anomaly is GONE, and it was an artifact.* Vanilla put bucket 5 two
+rungs below its neighbours in every seed, which is why the bot gate was blocked
+as "unexplained". Under CFR+ the opening by strength bucket reads:
+
+| bucket | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| CFR+ | 2.25 | 2.71 | 3.26 | 3.86 | 3.41 | **3.76** | 3.82 | 4.84 |
+| vanilla | 1.39 | 1.62 | 3.64 | 4.04 | 4.72 | **2.76** | 4.26 | 4.87 |
+
+Bucket 5 now sits ABOVE bucket 4, where it belongs. The residual wobble (3.86 at
+bucket 3 against 3.41 at 4) is inside the per-seed sd of 0.14-0.30 — noise, not
+the structural two-rung dip that vanilla produced consistently. **The lesson: a
+result that reproduces across seeds is not thereby correct. Four seeds agreed on
+the anomaly because they shared the same lagging estimator, not because the
+anomaly was real.**
+
+**And the diagnosis it unblocks is cleaner than before.** The equilibrium ramps
+2.25 -> 4.84 across the strength range; Expert ramps 1.38 -> 4.48. The gap is
+mostly at the WEAK end — Expert opens at the floor with hands the equilibrium
+opens at 2.25 — rather than a uniform flattening. That is monotone, explained,
+and safe to build a gate from.
+
+### (SUPERSEDED by the CFR+ fix above) THE EQUILIBRIUM'S OPENING TABLE IS NOT SAFE TO COPY INTO THE BOT (2026-08-16)
 
 The plan was to lift the equilibrium's per-bucket opening under the shipped
 scoring + real-play leaf + Double, and gate Expert's opening with it. Two things
