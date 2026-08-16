@@ -121,9 +121,9 @@ export default function DissonanceRules() {
 					It changes both ends of the bet, and deliberately not by the same amount:
 				</p>
 				<ul>
-					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × (N × N + 10)
-						instead of N × N + 10, overtricks included.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2 × (N + 10)</b>, and every point
+					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × (N × N + 4)
+						instead of N × N + 4, overtricks included.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2 × (2N + 2)</b>, and every point
 						they finish below N costs them <b>more than the last</b> — 6, then 7, then
 						8, then 9 — instead of a flat 5 each.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
@@ -133,7 +133,7 @@ export default function DissonanceRules() {
 					That rising scale is the whole point. It barely touches a declarer who
 					misses by one — which is what most failed contracts do — and it bites hard
 					on one who finishes miles short, which is what a <b>sacrifice</b> looks
-					like. A level-6 contract one short pays you 38; four short, 62.
+					like. A level-6 contract one short pays you 34; four short, 58.
 				</p>
 				<RulesTip>
 					<p>
@@ -349,17 +349,23 @@ export default function DissonanceRules() {
 				</p>
 				<ul>
 					<li>Declarer <b>makes</b> the contract (finishes with at least N trick points):
-						declarer scores <b>N × N, plus a flat 10</b>, plus <b>1 for every trick
+						declarer scores <b>N × N, plus a flat 4</b>, plus <b>1 for every trick
 						point past N</b>. The defender scores nothing.</li>
-					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>N + 10, plus 5 for
-						every point the declarer finished below N</b> — plus <b>3 per level the
+					<li>Declarer <b>falls short</b>: the <b>defender</b> scores <b>2 × N + 2, plus 5
+						for every point the declarer finished below N</b> — plus <b>6 per level the
 						winning bid jumped</b> in the auction, if it jumped at all.</li>
 				</ul>
 				<p>
-					The flat 10 rides on both ends — every contract carries the same stake on top
-					of its level, win or lose, so a contract is only worth holding if you believe
-					in it. Bidding 3 and making it scores 19; bidding 3 and finishing on 7 scores
-					23; bidding 3 and finishing on 1 gives your opponent 23.
+					Making it grows fast and breaking it grows slowly, so the higher you bid the
+					more you stand to win and the less your opponent collects for stopping you —
+					which is what makes a high contract worth reaching for rather than merely
+					risky. Bidding 3 and making it scores 13; bidding 3 and finishing on 7 scores
+					17; bidding 3 and finishing on 1 gives your opponent 18.
+				</p>
+				<p>
+					The <b>jump</b> is the expensive part, at 6 a level. Climbing to 5 one rung at
+					a time costs you 18 if you go down; leaping straight to 5 costs 42. The ladder
+					is there to be walked.
 				</p>
 				<RulesTip>
 					<p>

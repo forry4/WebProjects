@@ -258,7 +258,7 @@ def raise_cap_for(mode: str) -> int:
 #: it, every consumer (the result panel's maths line, the Hard pricing, the DD
 #: resolver) reads it with no new term, and Null still overrides a set (the
 #: bonus is a set price, and a declarer who ducks out owes none of it).
-JUMP_SET_BONUS = {"classic": 3, "skat": 0, "minor": 0, "dummy": 0}
+JUMP_SET_BONUS = {"classic": 6, "skat": 0, "minor": 0, "dummy": 0}
 
 #: ...and WHETHER THE DOUBLE MULTIPLIES IT. True is the shipped rule (the bonus
 #: rides inside `set_base`, so a Double doubles it with everything else); False
@@ -378,7 +378,7 @@ OVER_BONUS = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
 #: needs its own calibrated dose, if any), dummy's is unmeasured, and skat's
 #: branch never reads these. The auction lab overrides via DIS_FLAT_MAKE /
 #: DIS_FLAT_SET when it needs a different arm.
-FLAT_MAKE_BONUS = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
+FLAT_MAKE_BONUS = {"classic": 4, "skat": 0, "minor": 0, "dummy": 0}
 #: THE LINEAR MAKE TERM -- `make = L^2 + LINEAR x L + flat`. 0 as shipped, so
 #: the made base is unchanged; it exists because the re-pricing campaign wants
 #: it at 1 and a knob that has to be introduced at ship time is a knob that gets
@@ -389,13 +389,13 @@ FLAT_MAKE_BONUS = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
 LINEAR_MAKE_BONUS = {"classic": 0, "skat": 0, "minor": 0, "dummy": 0}
 #: What one level of the contract adds to the SET base -- 1 everywhere, which is
 #: what was implicit before this was a constant. The campaign wants 2 in classic.
-SET_LEVEL_RATE = {"classic": 1, "skat": 1, "minor": 1, "dummy": 1}
+SET_LEVEL_RATE = {"classic": 2, "skat": 1, "minor": 1, "dummy": 1}
 #: ...and the level the make bonus starts applying at (1 = every made
 #: contract). Gating it off the floor was the differentiation experiment; it
 #: measured indistinguishable from ungated, because a weak hand's 1-open is a
 #: surrender, not a value bid -- no make-side price reaches it.
 FLAT_MAKE_MIN_LEVEL = 1
-FLAT_SET_PENALTY = {"classic": 10, "skat": 0, "minor": 0, "dummy": 0}
+FLAT_SET_PENALTY = {"classic": 2, "skat": 0, "minor": 0, "dummy": 0}
 
 #: Denominations are RANKED by index (C < D < H < S < NT < Null), so an
 #: overtake may also stand at the SAME level in a higher-ranked denomination.
