@@ -255,6 +255,31 @@ CAP = 0.40
 CAP_WEIGHT = 2.0
 
 
+def double_violations(cfg):
+    """Levels where the Double stops being a bet and becomes free money.
+
+    THE CONSTRAINT THE SCORING SEARCH WAS MISSING, and it cost a shipping
+    attempt. On the COMMON failure -- one point short -- doubling wins
+    `set_base + ramp` and risks `make`. If the reward exceeds the risk the
+    defender should simply always double, which is not a decision. The shipped
+    scoring holds this from level 2 up; the first re-priced candidate broke it
+    at 2 and 3, where the made base is small and the set base is not.
+
+    Pure arithmetic on the constants, so a violating scoring can be rejected
+    before any CFR time is spent on it. `games/dissonance/tests/test_double.py::
+    test_doubling_still_risks_more_than_it_wins_on_a_near_miss` is the shipped
+    assertion of the same property -- this is that test, moved upstream of the
+    search so it stops proposing scorings the suite will reject.
+    """
+    bad = []
+    for L in range(2, MAXL + 1):
+        make = cfg["A"] * L ** cfg["p"] + cfg.get("C", 0) * L + cfg["Fm"]
+        setb = cfg["B"] * L ** cfg["q"] + cfg["Fs"]
+        if make <= setb + E.DOUBLE_RAMP:
+            bad.append(L)
+    return bad
+
+
 def _tv(got, target):
     """Total-variation distance, plus an explicit penalty for a tall spike."""
     tv = sum(abs(got.get(L, 0.0) - t)
@@ -1103,7 +1128,8 @@ def search_main(n, shard, nshard, iters):
             "Fm": rng.choice([0, 2, 5, 8, 10, 12, 15]),
             "q": rng.choice([1, 1, 2]),
             "B": rng.choice([0, 0, 0.5, 1, 2]),
-            "Fs": rng.choice([0, 2, 5, 8, 10, 12, 15]),
+            "Fs": 0,      # chosen below, inside the Double constraint
+
             "short": rng.choice([1, 2, 2, 3, 4, 5]),
             # Constrained to 5-6: 7 was measured to produce too many level-1
             # openings, and below 5 the ladder stops punishing a big leap.
@@ -1111,8 +1137,21 @@ def search_main(n, shard, nshard, iters):
             # Never 0 -- overtricks must count for something.
             "over": rng.choice([1, 1, 2]),
         }
-        if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["Fm"] <= 34:
+        if not 18 <= cfg["A"] * 4 ** cfg["p"] + cfg["C"] * 4 + cfg["Fm"] <= 34:
             continue                       # same scale anchor as the EV grid
+        # SAMPLE Fs INSIDE THE DOUBLE CONSTRAINT rather than rejecting after the
+        # fact. Rejection cost 98% of the draws (8 of 400 survived), which is
+        # not a search -- it is a lottery. The constraint is linear in `Fs`, so
+        # its ceiling is closed-form: `Fs < make(L) - B x L^q - ramp` at every
+        # level, and the binding level is whichever is tightest.
+        ceil = min(cfg["A"] * L ** cfg["p"] + cfg["C"] * L + cfg["Fm"]
+                   - cfg["B"] * L ** cfg["q"] - E.DOUBLE_RAMP
+                   for L in range(2, MAXL + 1))
+        if ceil <= 0:
+            continue                       # no flat set stake can rescue it
+        cfg["Fs"] = rng.choice([x for x in (0, 2, 5, 8, 10, 12, 15)
+                                if x < ceil] or [0])
+        assert not double_violations(cfg), cfg
         spec = ",".join(f"{k}={v}" for k, v in cfg.items())
         # Each config gets a FRESH process-level scoring state; the knobs are
         # module constants, so a loop that mutated them in place would leak the
@@ -1373,6 +1412,14 @@ def curve_main(spec, iters, seed=1234):
         elif k == "Fs":
             E.FLAT_SET_PENALTY["classic"] = int(v)
         elif k == "short":
+            # `CLASSIC_SHORT_PENALTY`, not `SHORT_PENALTY`. The engine split the
+            # two on 2026-08-16 so classic and skat could move independently,
+            # and this knob kept patching skat's -- so every sweep after the
+            # split silently ran at the shipped 5 whatever it was told. Caught
+            # because two specs differing only in `short` printed byte-identical
+            # rows. Patch BOTH: skat does not reach this branch, and a knob that
+            # half-works is worse than one that does not.
+            E.CLASSIC_SHORT_PENALTY = int(v)
             E.SHORT_PENALTY = int(v)
         elif k == "jump":
             E.JUMP_SET_BONUS["classic"] = int(v)
@@ -1454,6 +1501,14 @@ def curve_main(spec, iters, seed=1234):
           for lv in range(1, MAXL + 1)]
     sd = {k: v / n for k, v in settle.items()}
     lo, ls = _tv(opn, TARGET_OPEN), _tv(sd, TARGET_SETTLE)
+    # A scoring that breaks the Double is not a candidate however well it
+    # distributes, so it is priced into the headline number rather than noted
+    # beside it -- a footnote is what let the first candidate reach a ship.
+    bad = double_violations(dict(
+        A=CURVE.get("A", 1.0), p=CURVE.get("p", 2.0), C=CURVE.get("C", 0.0),
+        Fm=E.FLAT_MAKE_BONUS["classic"], B=CURVE.get("B", 1.0),
+        q=CURVE.get("q", 1.0), Fs=E.FLAT_SET_PENALTY["classic"]))
+    lo += 0.5 * len(bad)
     print(f"{lo+ls:>5.2f} {lo:>5.2f} {ls:>5.2f} "
           f"{spec:>40}{'' if seed == 1234 else chr(96+seed)} "
           f"{per[NBUCKET-1]-per[0]:>+6.2f} {smean:>5.2f} {100*made/n:>5.1f}% | o "
@@ -1466,6 +1521,7 @@ def curve_main(spec, iters, seed=1234):
                      if v / n > .015)
           + (f" | DBL {100*ndbl[1]/max(1,ndbl[0]):.0f}% taken, "
              f"{100*ndbl[2]/max(1,ndbl[1]):.0f}% of those set" if WITH_DOUBLE else "")
+          + (f" | DBL-BROKEN at {bad}" if bad else "")
           + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
 
 

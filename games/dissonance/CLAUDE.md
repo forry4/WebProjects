@@ -3608,6 +3608,51 @@ whenever the Double question is answered, and the tests were rewritten to derive
 both bases from the constants rather than hardcode them -- so the next re-pricing
 lands as five lines, not forty-one failures.
 
+### RE-SEARCHED WITH THE DOUBLE INVARIANT ENFORCED — the gain shrinks to real size
+
+`double_violations()` is the shipped test moved upstream of the search: on the
+common one-short failure, doubling wins `set_base + ramp` and risks `make`, so
+`make(L) > set_base(L) + ramp` must hold from L=2. It is pure arithmetic on the
+constants, so a violating scoring is rejected before any CFR time is spent — and
+`Fs` is now SAMPLED inside the constraint rather than rejected after it, because
+rejection killed 98% of draws (8 of 400 survived) and that is a lottery, not a
+search.
+
+**Best scoring that keeps the Double honest:**
+
+```
+make   L^2 + 8            9 12 17 24 33 44 57 72     +1 per overtrick
+set    2L + 6 x jump      climbed 8 10 12 14 16 18 20 22   NO flat term
+short  5 (unchanged)
+
+loss 0.88   against shipped's 1.06 on the same tree
+settled  1:6 2:3 3:2 4:14 5:32 6:43     max 43%
+opening  1:49 2:15 3:7 4:27 5:2
+bids 3.44 (18% one-bid)   made 66.5%   DBL 7% taken, 59% of those set
+```
+
+**The structural lesson: the set base must carry NO flat term.** A flat stake is
+what made doubling free at low levels — at level 2 the old candidate paid the
+defender 14 for a contract worth 8. Dropping it and steepening the level
+coefficient to `2L` keeps the low rungs cheap to break (8, 10) while the top
+still costs 22, which is what the invariant needs.
+
+**And the honest size of the prize: 1.06 -> 0.88, not 1.06 -> 0.49.** The 0.49
+arm broke the Double, and roughly half the apparent improvement was coming from
+that. The settled maximum is 43%, still over the 40% cap, and openings pile 49%
+on level 1.
+
+**A THIRD SILENT BUG, same shape as the other two.** Splitting
+`CLASSIC_SHORT_PENALTY` out of `SHORT_PENALTY` in the engine left the lab's
+`short` knob patching skat's constant, so every sweep after the split silently
+ran at the shipped 5 whatever it was told. Caught because two specs differing
+only in `short` printed BYTE-IDENTICAL rows. The other two were `g.get("points",
+[0,0])` against a key of `pts`, and a counter spliced into the wrong function.
+**All three were a value that never arrived, and all three produced numbers too
+tidy to question.** Identical output from different inputs is the cheapest
+possible check and it is not run by default — run it whenever a knob is added or
+a constant is split.
+
 **RE-FITTED ON THE CORRECT TREE — and it beats everything measured either way.**
 One constant moves from the earlier candidate, `Fs` 12 -> 10:
 
