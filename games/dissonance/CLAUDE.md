@@ -3608,6 +3608,49 @@ whenever the Double question is answered, and the tests were rewritten to derive
 both bases from the constants rather than hardcode them -- so the next re-pricing
 lands as five lines, not forty-one failures.
 
+### RECALIBRATING EXPERT FOR THE SHIPPED SCORING (2026-08-16)
+
+The re-pricing landed; Expert was fitted against the old economics. First piece
+done, and it moved a long way.
+
+**The equilibrium's opening under the NEW scoring, CFR+ at 120k, four seeds:**
+
+| bucket | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| new scoring | 1.59 | 1.99 | 2.05 | 3.00 | 2.45 | 3.06 | 2.68 | **4.54** |
+| old scoring | 2.25 | 2.71 | 3.26 | 3.86 | 3.41 | 3.76 | 3.82 | 4.87 |
+
+**Buckets 0-6 now all open between 1.6 and 3.1 and only the top bucket leaps** —
+where the old curve ran 2.25 → 4.84 across the whole range. That is the doubled
+jump penalty doing its designed job: leaping to 5 costs the defender 42 on a set
+against 18 for walking there, so the equilibrium opens low and CLIMBS. `bot.py`'s
+`_OPEN_TARGET` is re-fitted; the cuts are unchanged, being strength octiles of
+the deal cache and independent of the scoring.
+
+**AND THE BIAS CANNOT MIX, which is a real gap rather than a detail.** The
+equilibrium's per-bucket opening is a MIXTURE — bucket 0 plays some 1s, some 2s
+and some higher, averaging 1.59. A quadratic pull toward that mean is a POINT
+target, and a point target between two rungs picks the nearer one: at 1.59 the
+bias favours level 2 at every weak bucket and **level-1 openings vanish entirely
+(18% → 0% in the arena)**, which is not what the equilibrium does. In an
+imperfect-information game the mixing is frequently the point. Reproducing it
+means sampling the per-bucket distribution instead of pulling toward its mean,
+which costs the search's per-deal opinion — a genuine trade, unresolved.
+
+**Arena under the shipped scoring, 22 paired deals: −7.30 ± 8.92.** Leaning
+negative, CI swamps it, and the weight (0.30) is unswept. **Not a result.** The
+bias stays OFF by default.
+
+**What is left to recalibrate**, in the order it matters:
+* `DOUBLE_MARGIN` (20) was fitted against the old economics. The equilibrium's
+  doubling rate is **15% under the new scoring against 36% under the old**, so
+  the margin should rise — but it is a threshold on the SEARCH's edge estimate,
+  not an equilibrium quantity, so it needs `dblsweep.py` over a recorded arena
+  run rather than arithmetic.
+* The opening bias needs a weight sweep AND the mixing question answered before
+  it is worth arena hours.
+* `hand_strength` itself is unexamined against the new economics.
+
 ### THE OPENING BIAS — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
 
 The bot arm the exploitability finding asked for. **Off unless `DIS_OPEN_BIAS`

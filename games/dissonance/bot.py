@@ -798,8 +798,27 @@ def act(g: dict, seat: int, rng=None):
 #:
 #: A DIRECTION, NOT A TABLE TO COPY. It biases the search's own ranking rather
 #: than replacing it, so where the search has a real opinion it still wins.
+#:
+#: KNOWN LIMITATION -- IT CANNOT MIX. The equilibrium's per-bucket opening is a
+#: MIXTURE (bucket 0 plays some 1s, some 2s, some higher, averaging 1.59); a
+#: quadratic pull toward that mean is a point target, and a point target between
+#: two rungs simply picks the nearer one. Measured: at target 1.59 the bias
+#: favours level 2 at every weak bucket and level-1 openings vanish entirely
+#: (18% -> 0% in the arena), which is NOT what the equilibrium does. In an
+#: imperfect-information game the mixing is often the point, so this is a real
+#: gap and not a rounding detail -- reproducing it would mean sampling the
+#: per-bucket distribution rather than pulling toward its mean, at the cost of
+#: overriding the search's per-deal opinion. Unresolved; see CLAUDE.md.
+#: RE-FITTED 2026-08-16 for the re-priced scoring (`L^2+4` make, `2L+2+6j` set).
+#: The old targets came from the old economics and do not transfer: under the
+#: doubled jump penalty the equilibrium OPENS LOW AND CLIMBS -- buckets 0-6 all
+#: open between 1.6 and 3.1, and only the top bucket leaps, where the old curve
+#: ran 2.25 -> 4.84 across the range. That is the jump rule doing its designed
+#: job: leaping to 5 costs 42 on a set against 18 for walking there.
+#: The CUTS are unchanged -- they are strength octiles of the deal cache and do
+#: not depend on the scoring at all.
 _OPEN_CUTS = [7.82, 8.92, 9.82, 10.62, 11.43, 12.32, 13.43]
-_OPEN_TARGET = [2.25, 2.71, 3.26, 3.63, 3.63, 3.76, 3.82, 4.84]
+_OPEN_TARGET = [1.59, 1.99, 2.05, 2.72, 2.72, 2.87, 2.87, 4.54]
 
 
 def open_bias_terms(g: dict, seat: int, options: list[dict]) -> list[float] | None:
