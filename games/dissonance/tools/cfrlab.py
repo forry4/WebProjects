@@ -1117,8 +1117,12 @@ def search_main(n, shard, nshard, iters):
         # Each config gets a FRESH process-level scoring state; the knobs are
         # module constants, so a loop that mutated them in place would leak the
         # previous config into the next one.
+        # `curvedbl`, not `curve`: the Double is a branch both sides use, and
+        # solving without it measurably moves the settled distribution -- the
+        # candidate's 38% maximum became 55% once it was there. A search on the
+        # cheaper tree ranks scorings for a game nobody plays.
         subprocess.run([sys.executable, "-m", "games.dissonance.tools.cfrlab",
-                        "curve", spec, str(iters)],
+                        "curvedbl", spec, str(iters)],
                        env=dict(os.environ), check=False)
 
 

@@ -3431,7 +3431,11 @@ linear decay, which wanted 22% at the floor and was penalising the ~38% every ar
 produces -- effort spent fighting a shape nobody objected to, and it competed
 directly with the settled distribution, which is what actually matters.
 
-**THE CANDIDATE:**
+**SUPERSEDED — see "the whole scoring search ran without the Double" below. The
+candidate here was fitted on a tree missing the Double; the arm re-fitted WITH it
+is `Fs = 10`, and its numbers are in that section.**
+
+**THE CANDIDATE (no-Double tree):**
 
 ```
 DECLARER scores, made      L^2 + L + 2   ->  4  8 14 22 32 44 58 74
@@ -3571,6 +3575,34 @@ The shipped scoring moves too (its pile shifts from level 6 to level 5). Every
 scoring comparison in this file was therefore made on a tree missing a branch
 both sides use, and **the search should be re-run with `curvedbl` before any of
 its rankings are trusted**.
+
+**RE-FITTED ON THE CORRECT TREE — and it beats everything measured either way.**
+One constant moves from the earlier candidate, `Fs` 12 -> 10:
+
+```
+DECLARER scores, made      L^2 + L + 2   ->  4  8 14 22 32 44 58 74
+                                             +1 per overtrick
+DEFENDER scores, set       2L + 10 + 6j  ->  climbed 18 20 22 24 26 28 30 32
+                                             opened  18 26 34 42 50 58 66 74
+                                             +1 per point short
+Double doubles both bases, as it already does.
+
+loss     0.49   (best of the campaign, and on the tree the game actually has)
+settled  1:5 2:5 3:6 4:15 5:32 6:37       max 37%, under the cap
+opening  1:31 2:21 3:10 4:34 5:4
+bids     3.22 (25% one-bid)
+made     71.3%      DBL 11% taken, 59% of those set
+```
+
+Verified across four disjoint 500-deal real-play subsets: **0.48 / 0.48 / 0.63 /
+0.60, mean 0.55 sd 0.068** — the usual small-sample bias against the 0.49 on the
+full cache, and consistent.
+
+Six live settled levels with the maximum at 37%, against shipped's two levels
+carrying 93%. **The doubling rate is 11%, still short of the 20-30% band** — the
+set-base sweep shows that band is reachable at `Fs = 4` but only by piling 61% of
+contracts onto level 6, so the two goals trade directly and this arm chooses the
+distribution.
 
 **Two sweeps, and the first refuted its own hypothesis.** `short` was the obvious
 lever for the doubling rate -- cheap sets, less to punish -- and it does the
