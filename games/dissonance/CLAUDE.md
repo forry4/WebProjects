@@ -3608,6 +3608,55 @@ whenever the Double question is answered, and the tests were rewritten to derive
 both bases from the constants rather than hardcode them -- so the next re-pricing
 lands as five lines, not forty-one failures.
 
+### THE EQUILIBRIUM'S OPENING TABLE IS NOT SAFE TO COPY INTO THE BOT (2026-08-16)
+
+The plan was to lift the equilibrium's per-bucket opening under the shipped
+scoring + real-play leaf + Double, and gate Expert's opening with it. Two things
+stopped it, and the second is unresolved.
+
+**1. The solve is not converged at 200k.** Same scoring, same deals, iterations
+only:
+
+| iterations | 30k | 60k | 120k | 200k |
+|---|---|---|---|---|
+| loss | 0.63 | 0.54 | 0.67 | 0.88 |
+| level-1 openings | 27% | 35% | 42% | 49% |
+
+The settled half is stable (`6:` 46/44/45/43); the OPENING is what drifts,
+monotonically, and is still moving where the runs stop. **So every ranking in the
+sections above mixes 60k search numbers with 200k verification numbers and is
+unsound** — that gap is 3x the ±0.11 deal-sample error bar. The much-quoted 0.54
+and the 0.88 are the SAME scoring at different iteration counts, not two results.
+
+**2. Bucket 5 opens LOWER than bucket 4, in every seed.** Mean opening by the
+opener's strength bucket, four seeds:
+
+| bucket | 0 | 1 | 2 | 3 | 4 | **5** | 6 | 7 |
+|---|---|---|---|---|---|---|---|---|
+| opens at | 1.39 | 1.62 | 3.64 | 4.04 | 4.72 | **2.76** | 4.26 | 4.87 |
+
+Not a bucketing artifact — the buckets are cleanly monotone in what the hands can
+actually take (mean points 1.79 / 2.72 / 3.36 / 3.92 / 4.40 / **4.85** / 5.22 /
+5.92, P(take 5+) 3.8% → 88.2%). So a hand measurably stronger than bucket 4 opens
+two rungs lower, reproducibly. It may be a genuine pooling/trap equilibrium of
+the abstraction, which would be exactly the kind of thing that works against an
+equilibrium opponent and fails against Expert or a human. **It is unexplained,
+and an unexplained non-monotonicity is not something to compile into a shipped
+bot.**
+
+**What the finding still supports.** The 9.06-point exploitability stands — it is
+a best-response computation, not a distribution score, so none of the above
+touches it — and so does its diagnosis: Expert's opening moves 0.82 rungs across
+a strength range over which its make rate runs 36% → 80%. Using the equilibrium
+as a DIRECTION (a monotone strength→level mapping) is defensible; copying its
+table is not. The arena is the judge either way.
+
+**And the build cost is not small**: Expert's opening comes from the client
+search, so gating it means a term in the shipped auction payload, a `bid.rs`
+change, a wasm rebuild and regenerated fixtures. That is not work to start on an
+unconverged, partly-unexplained policy source. **Fix the convergence first** —
+the opening distribution needs to stop moving before anything is read off it.
+
 ### RE-SEARCHED WITH THE DOUBLE INVARIANT ENFORCED — the gain shrinks to real size
 
 `double_violations()` is the shipped test moved upstream of the search: on the
