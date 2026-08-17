@@ -1,16 +1,15 @@
-"""Classic's Double — the defender's one bet. UNIFORM since 2026-08-16.
+"""Classic's Double — the defender's one bet, and what it is a bet ON.
 
     made   N^2 + 4   ->  2 (N^2 + 4)      (overtricks doubled with it)
-    set     2N + 2   ->  2 (2N + 2), and a doubled point short costs 2 x 5 = 10
-    Null        20   ->  20               (the one exception)
+    set     2N + 2   ->  UNCHANGED        (`DOUBLE_BASE_MULT` 1)
+      + 6j per level of the final leap  ->  x2   (`DOUBLE_JUMP_MULT`)
+      + 5 per point short               ->  10   (`DOUBLED_SHORT_PENALTY`)
+    Null        20   ->  20               (never scales, whatever the dials say)
 
-So a doubled round pays EXACTLY twice what the undoubled one would have, on every
-scored line. `test_a_doubled_round_is_exactly_twice_the_undoubled_one` asserts
-that over the whole grid, and it is the cleanest statement of the rule.
-
-**Classic's Double is now the same shape as skat's Kontra**, which has always
-been symmetric. This file used to open by contrasting them; if the asymmetry ever
-comes back, that contrast comes back with it.
+**So doubling wins the defender the LEAP and the SHORTFALL, not the fixed
+stake** -- the two things a sacrifice actually has. That is the design, and it is
+what makes the bet discriminate: a near-miss on a climbed contract wins almost
+nothing, a collapse on a leap wins a lot.
 
 HOW IT GOT HERE, all on 2026-08-16, because the sequence explains the dials:
 
@@ -21,16 +20,19 @@ So the reward has to depend on the shortfall.
 
   1. `DOUBLE_RAMP` did it with an ESCALATOR -- 6, 7, 8, 9 per point. Retired:
      legible neither on the round panel nor in the head.
-  2. A flat 5 both ways made the reward SHORTFALL-BLIND -- doubling won the
-     undoubled set base and nothing else -- which pushed break-even above even
-     odds at every level.
-  3. `DOUBLED_SHORT_PENALTY = 6` restored it linearly, at an odd rate.
-  4. `= 10` is 2 x 5, which makes the whole Double uniform and the reward equal
-     to what the round was already worth. Break-even becomes the contract's own
-     make/set ratio and the bet carries no house edge either way.
+  2. A flat 5 both ways made the reward SHORTFALL-BLIND.
+  3. `DOUBLED_SHORT_PENALTY = 10` (2 x 5) made the whole Double UNIFORM -- every
+     scored line exactly x2. Clean to state, but the fixed stake doubling is what
+     made doubling a LOW contract nearly free (break-even 0.26 at level 1), and
+     bot doubling measured 41.7%.
+  4. `DOUBLE_BASE_MULT = 1` with `DOUBLE_JUMP_MULT = 2` takes the fixed stake
+     back out while keeping the leap in. Measured against the uniform Double at
+     two CFR+ seeds: the equilibrium's doubles land on a SET 46-47% of the time
+     against 36%, and the bot's rate falls 41.7% -> 29.2% at the re-fitted
+     `DOUBLE_MARGIN = 12`, at the same discrimination.
 
-The tests below read BOTH dials off the engine rather than pinning either, so
-moving them again needs no edit here.
+Every pin below composes the shipped multipliers rather than typing a number, so
+moving them again should need no edit here.
 """
 
 import random
@@ -94,6 +96,15 @@ _SH = E.CLASSIC_SHORT_PENALTY
 #: absent for a mode means "the same as undoubled", so this expression is the
 #: engine's own fallback and stays correct if the dial is removed again.
 _DSH = E.DOUBLED_SHORT_PENALTY.get("classic", _SH)
+#: The Double's three MULTIPLIERS, read the way `_terms_for` reads them so the
+#: fallbacks match the engine's exactly. Since 2026-08-16 classic runs base x1,
+#: jump x2 -- the flat stake does NOT double, the leap does -- so a doubled set
+#: base is no longer `2 x _sb`, and every arithmetic pin below composes it.
+_JB = E.JUMP_SET_BONUS["classic"]
+_BM = E.DOUBLE_BASE_MULT.get("classic", 2)
+_MM = E.DOUBLE_MAKE_MULT.get("classic", 2)
+_JM = E.DOUBLE_JUMP_MULT.get(
+    "classic", _BM if E.JUMP_DOUBLED.get("classic", True) else 1)
 
 
 def _mk(level):
@@ -104,6 +115,19 @@ def _mk(level):
 def _sb(level):
     """A set contract's base, jumpless."""
     return _SL * level + _FS
+
+
+def _dsb(level, jump=0):
+    """...and the DOUBLED set base, composed term by term."""
+    return _sb(level) * _BM + _JB * jump * _JM
+
+
+def _dwin(level, short, jump=0):
+    """What doubling WINS the defender on a set `short` points below target."""
+    return (E.payoff(E._terms_for("classic", 0, level, jump=jump, doubling=1),
+                     level - short, True)
+            - E.payoff(E._terms_for("classic", 0, level, jump=jump, doubling=2),
+                       level - short, True))
 
 
 # --- the arithmetic --------------------------------------------------------
@@ -120,7 +144,7 @@ def test_a_made_contract_pays_exactly_double(level):
 def test_a_set_contract_pays_2N_and_its_own_per_point_rate(level):
     plain, dbl = _terms(level, False), _terms(level, True)
     assert plain["set_base"] == _sb(level) and plain["ramp"] == 0
-    assert dbl["set_base"] == 2 * _sb(level)
+    assert dbl["set_base"] == _dsb(level)
     assert plain["short"] == _SH
     assert dbl["short"] == _DSH, "a doubled shortfall has its own per-point rate"
     # DERIVED from the two dials, never typed out: both have moved already
@@ -131,7 +155,7 @@ def test_a_set_contract_pays_2N_and_its_own_per_point_rate(level):
     # editing when the ramp was retired on 2026-08-16.
     assert dbl["ramp"] == E.DOUBLE_RAMP
     P, R = _DSH, E.DOUBLE_RAMP
-    pen = [-E.payoff(dbl, level - s, True) - 2 * _sb(level)
+    pen = [-E.payoff(dbl, level - s, True) - _dsb(level)
            for s in range(1, 6)]
     steps = [b - a for a, b in zip([0] + pen, pen)]
     assert steps == [P + R * s for s in range(1, 6)], steps
@@ -153,30 +177,35 @@ def test_a_set_contract_pays_2N_and_its_own_per_point_rate(level):
         assert (pen == flat) == (_DSH == _SH)
 
 
-def test_a_doubled_round_is_exactly_twice_the_undoubled_one():
-    """THE RULE, in one assertion, over the whole grid (2026-08-16).
+def test_the_double_scales_each_term_by_its_own_multiplier():
+    """THE RULE, over the whole grid, composed from the dials rather than typed.
 
-    Uniform doubling means every scored line scales by the same 2 -- make base,
-    overtricks, set base, jump bonus and the per-point shortfall alike. Null is
-    the single exception and is asserted here too, since "everything doubles
-    except Null" is the whole statement of the mechanic.
+    The Double was briefly UNIFORM (every scored line exactly x2, 2026-08-16) and
+    this test asserted that. It is not uniform now -- classic runs base x1 /
+    jump x2 -- so the claim is restated one level up: each TERM scales by its own
+    multiplier, and the payoff follows. That form covers the uniform case too
+    (all multipliers 2), so it survives the next move.
 
-    Derived from nothing: this compares the engine against itself, so it holds
-    for any price list and fails the moment one term stops scaling. It is what
-    would have caught a doubled short rate left at 5 or set to 6.
+    Null is the one term that never scales, whatever the dials say.
     """
-    off_grid = []
+    bad = []
     for level in range(E.MIN_LEVEL, _TOP + 1):
         for jump in (0, 1, level):
-            plain = E._terms_for("classic", 0, level, jump=jump, doubling=1)
-            dbl = E._terms_for("classic", 0, level, jump=jump, doubling=2)
+            a = E._terms_for("classic", 0, level, jump=jump, doubling=1)
+            b = E._terms_for("classic", 0, level, jump=jump, doubling=2)
+            if b["make"] != _MM * a["make"]:
+                bad.append(("make", level, jump))
+            if b["over"] != _MM * a["over"]:
+                bad.append(("over", level, jump))
+            if b["set_base"] != _dsb(level, jump):
+                bad.append(("set_base", level, jump, a["set_base"], b["set_base"]))
+            if b["short"] != _DSH:
+                bad.append(("short", level, jump))
+            # NULL NEVER SCALES.
             for pts in range(-7, 14):
-                if E.payoff(dbl, pts, True) != 2 * E.payoff(plain, pts, True):
-                    off_grid.append((level, jump, pts))
-                # NULL: identical, never scaled.
-                if E.payoff(dbl, pts, False) != E.payoff(plain, pts, False):
-                    off_grid.append(("null", level, jump, pts))
-    assert not off_grid, f"not exactly 2x (or Null moved) at: {off_grid[:5]}"
+                if E.payoff(b, pts, False) != E.payoff(a, pts, False):
+                    bad.append(("null", level, jump, pts))
+    assert not bad, f"a term did not scale by its multiplier: {bad[:5]}"
 
 
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
@@ -202,11 +231,13 @@ def test_what_doubling_wins_rises_with_the_SHORTFALL():
         R = E.DOUBLE_RAMP
         # Doubling adds one more set base, the ramp's triangular term, and the
         # DIFFERENCE between the doubled and undoubled per-point rates.
-        assert wins == [_sb(level) + (_DSH - _SH) * s + R * s * (s + 1) // 2
-                        for s in range(1, 7)], wins
+        # Composed from the three multipliers: the extra stake, the extra
+        # per-point rate, and the ramp's triangular term.
+        assert wins == [(_BM - 1) * _sb(level) + (_DSH - _SH) * s
+                        + R * s * (s + 1) // 2 for s in range(1, 7)], wins
         if R:
             assert all(b > a for a, b in zip(wins, wins[1:])), wins
-            assert wins[0] < _sb(level) + 2, \
+            assert wins[0] < (_BM - 1) * _sb(level) + 2, \
                 f"a 1-short miss should stay cheap: {wins[0]}"
             assert wins[5] - wins[0] >= 20 * R, \
                 f"a 6-short collapse should not: {wins}"
@@ -216,7 +247,7 @@ def test_what_doubling_wins_rises_with_the_SHORTFALL():
             assert all(b - a == _DSH - _SH for a, b in zip(wins, wins[1:])), wins
             assert wins[-1] > wins[0], "a deeper failure must still pay more"
         else:
-            assert len(set(wins)) == 1 and wins[0] == _sb(level), \
+            assert len(set(wins)) == 1 and wins[0] == (_BM - 1) * _sb(level), \
                 f"flat rate both ways: the reward cannot depend on shortfall: {wins}"
 
 
@@ -243,13 +274,14 @@ def test_where_a_near_miss_double_stops_paying():
         risk = dbl["make"] - plain["make"]
         # DERIVED from the price list, so a re-pricing moves the expectation with
         # the game instead of failing this test.
-        want = _mk(level) > _sb(level) + _SH
+        want = (_MM - 1) * _mk(level) > _dwin(level, 1)
         assert (risk > win) == want, \
             f"level {level}: risk {risk} vs win {win}, expected risk>win={want}"
         if risk > win and crossover is None:
             crossover = level
     assert crossover is not None, "some level must protect the declarer"
-    assert all(_mk(l) > _sb(l) + _SH for l in range(crossover, _TOP + 1)), \
+    assert all((_MM - 1) * _mk(l) > _dwin(l, 1)
+               for l in range(crossover, _TOP + 1)), \
         "protection must be monotone once it starts -- make is quadratic, set linear"
 
 
@@ -322,12 +354,13 @@ def test_a_doubled_round_scores_the_doubled_numbers():
         assert g["doubled"] is doubled
         t = E.payoff_terms(g)
         # made exactly on target: (N^2 + stake) [x2]
-        assert E.payoff(t, 3, True) == (2 * _mk(3) if doubled else _mk(3))
-        # set by two. Doubled: base 2(N + stake) + (dshort+ramp) + (dshort+2 ramp).
-        # Undoubled: base (N + stake) + 2 short. The doubled per-point rate is
-        # its own dial (`DOUBLED_SHORT_PENALTY`), so P differs by arm.
+        assert E.payoff(t, 3, True) == (_MM * _mk(3) if doubled else _mk(3))
+        # Set by two. `_settled_flat` ends on a SAME-LEVEL overtake, so there is
+        # no jump and the doubled base is `_sb x DOUBLE_BASE_MULT` -- which is
+        # `_sb` itself at classic's shipped 1. Both the base and the per-point
+        # rate are their own dials, so both differ by arm.
         P, R = (_DSH if doubled else _SH), E.DOUBLE_RAMP
-        want = (-(2 * _sb(3) + (P + R) + (P + 2 * R)) if doubled
+        want = (-(_dsb(3) + (P + R) + (P + 2 * R)) if doubled
                 else -(_sb(3) + 2 * P))
         assert E.payoff(t, 1, True) == want
         # no +2 trick at all
@@ -344,7 +377,7 @@ def test_the_result_row_carries_the_double_and_the_numbers_it_used():
     res = g["result"]
     assert res["doubled"] is True
     assert res["make_value"] == 2 * _mk(4)
-    assert res["set_base"] == 2 * _sb(4)
+    assert res["set_base"] == _dsb(4)
     # The panel narrates from these, so they must be the ones actually scored.
     winner = res["declarer"] if res["scores"][res["declarer"]] else 1 - res["declarer"]
     assert res["scores"][winner] > 0
@@ -354,33 +387,53 @@ def test_the_result_row_carries_the_double_and_the_numbers_it_used():
 
 
 def test_the_jump_bonus_rides_inside_the_double_as_shipped(monkeypatch):
-    """`JUMP_DOUBLED` is an experiment arm and it is ON, which is the shipped
-    rule: the Double multiplies the jump bonus with the rest of the set base.
+    """The jump bonus rides INSIDE the Double, at its own multiplier.
 
-    Off, the bonus is added AFTER the doubling. The property that makes it the
-    surgical candidate is that the UNDOUBLED game cannot move either way -- so
-    it can be measured without relitigating the jump-rate calibration -- and
-    that is asserted here rather than argued.
+    Since 2026-08-16 the flat stake does NOT double while the leap does
+    (`DOUBLE_BASE_MULT` 1, `DOUBLE_JUMP_MULT` 2), so the defender's gain from
+    doubling is the leap and the shortfall rather than the fixed stake.
+
+    Also pins the PRECEDENCE between the two knobs that reach this term, since
+    the older one is now inert for classic and that is easy to trip over.
     """
-    assert E.JUMP_DOUBLED["classic"] is True, "the shipped rule doubles it"
     N, j = 5, 4
-    stake, bonus = _sb(N), E.JUMP_SET_BONUS["classic"] * j
+    stake, bonus = _sb(N), _JB * j
     on = E._terms_for("classic", 2, N, jump=j, doubling=2)
     off = E._terms_for("classic", 2, N, jump=j)
-    assert on["set_base"] == (stake + bonus) * 2
+    # THE BONUS STILL DOUBLES; THE STAKE IT RIDES BESIDE NO LONGER DOES
+    # (`DOUBLE_JUMP_MULT` 2 against `DOUBLE_BASE_MULT` 1, 2026-08-16). Keeping
+    # the bonus inside the Double is what preserves the v2 jump rule's teeth --
+    # at jump x1 a leap stops inviting the Double entirely.
+    assert _JM == 2, "the leap must stay inside the Double"
+    assert on["set_base"] == stake * _BM + bonus * _JM
     assert off["set_base"] == stake + bonus
+    assert on["set_base"] - off["set_base"] == bonus * (_JM - 1) \
+        + stake * (_BM - 1), "the doubled gain is the leap, not the stake"
 
+    # PRECEDENCE, ASSERTED BECAUSE TWO KNOBS NOW REACH THE SAME TERM.
+    # `DOUBLE_JUMP_MULT` is explicit and WINS; `JUMP_DOUBLED` is only the
+    # fallback used when the mode names no multiplier. So flipping
+    # `JUMP_DOUBLED` while classic names a multiplier changes NOTHING -- which
+    # is a live footgun (the arena still exposes `DIS_JUMP_DOUBLED=0`, and that
+    # arm is inert for classic until the multiplier is cleared).
     monkeypatch.setitem(E.JUMP_DOUBLED, "classic", False)
+    assert E._terms_for("classic", 2, N, jump=j, doubling=2) == on, \
+        "DOUBLE_JUMP_MULT must override JUMP_DOUBLED, not be overridden by it"
+
+    # ...and with the multiplier CLEARED the fallback takes over again, which is
+    # what the `JUMP_DOUBLED=False` arm was always for: the bonus is added after
+    # the multiplier instead of inside it.
+    monkeypatch.delitem(E.DOUBLE_JUMP_MULT, "classic")
     arm_on = E._terms_for("classic", 2, N, jump=j, doubling=2)
     arm_off = E._terms_for("classic", 2, N, jump=j)
-    assert arm_on["set_base"] == stake * 2 + bonus, "the bonus is added after the x2"
+    assert arm_on["set_base"] == stake * _BM + bonus, "the bonus is added after"
     assert arm_on["set_base"] < on["set_base"], "the arm must actually trim it"
     # THE WHOLE POINT: the undoubled contract is untouched by the arm.
     assert arm_off == off
     # ...and a jumpless contract is identical under both, since there is no
     # bonus to move -- so the arm can only ever reprice a LEAP.
     assert (E._terms_for("classic", 2, N, jump=0, doubling=2)
-            == on | {"set_base": stake * 2})
+            == on | {"set_base": stake * _BM})
 
 
 def test_the_swap_hands_off_to_the_defenders_double():
@@ -469,7 +522,7 @@ def test_the_hard_tier_is_offered_both_branches_priced():
     on = next(o for o in opts if o["move"]["on"] is True)
     off = next(o for o in opts if o["move"]["on"] is False)
     assert on["make"] == 2 * off["make"]
-    assert on["set_base"] == 2 * _sb(3) and off["set_base"] == _sb(3)
+    assert on["set_base"] == _dsb(3) and off["set_base"] == _sb(3)
     assert on["ramp"] == E.DOUBLE_RAMP and off["ramp"] == 0
     assert all("decline" not in o for o in opts), \
         "both branches carry their own move; neither is an implicit zero"
@@ -518,10 +571,16 @@ def test_the_break_even_curve_never_meets_the_failure_curve():
     prev = 0.0
     for level in range(E.MIN_LEVEL, _TOP + 1):
         plain, dbl = _terms(level, False), _terms(level, True)
-        win = dbl["set_base"] - plain["set_base"]
+        # THE WIN IS NOT THE SET-BASE DELTA ANY MORE. At `DOUBLE_BASE_MULT = 1`
+        # a jumpless contract's base does not move at all, so reading the win
+        # off the bases alone gives 0 at every level and a flat curve of 1.0.
+        # The win is what doubling actually pays, which is `_dwin` -- taken at
+        # the MEDIAN ordinary shortfall of 2, the case a defender doubling an
+        # honest contract is betting against.
+        win = _dwin(level, 2)
         risk = dbl["make"] - plain["make"]
         be = risk / (win + risk)
-        assert be > prev, "break-even must rise with the level"
+        assert be > prev, f"break-even must rise with the level (L{level}: {be})"
         prev = be
     # The +-10 stake compressed the top of the curve (0.93 -> 0.85: the win
     # side gained the doubled stake, which matters more where N is the whole

@@ -400,7 +400,19 @@ DOUBLED_SHORT_PENALTY = {"classic": 10}
 #: SHIPPED AS 2/2 (a plain Double). Both are per-mode and both ship as DATA out
 #: of `_terms_for`, so a change needs no wire field and no Rust edit.
 DOUBLE_MAKE_MULT = {}
-DOUBLE_BASE_MULT = {}
+#: CLASSIC IS 1: the flat set stake does NOT double (2026-08-16). So the
+#: defender's winnings from a Double come only from the LEAP the declarer took
+#: and HOW FAR SHORT they finish -- the two things a sacrifice actually has --
+#: rather than from the fixed stake, which is large exactly where the make base
+#: is small and is what made doubling a low contract nearly free.
+#:
+#: MEASURED at two CFR+ seeds against a plain x2: the doubles the equilibrium
+#: takes land on a SET 46-47% of the time against 36%, at essentially the same
+#: rate (27-28% against 30-31%) and a marginally BETTER distribution match
+#: (loss 0.49-0.50 against 0.51-0.54). So this is a precision change, not a rate
+#: change -- `dbase=1, djump=1` reaches 17-18% but spikes the settled
+#: distribution to 50% at level 5 and gives up the jump invitation.
+DOUBLE_BASE_MULT = {"classic": 1}
 
 #: ...and the JUMP BONUS's own multiplier, which only matters once
 #: `DOUBLE_BASE_MULT` stops being 2. Absent == whatever the base does
@@ -415,7 +427,13 @@ DOUBLE_BASE_MULT = {}
 #: goes from INVITING the Double to protected. This dial keeps the invitation
 #: while the fixed stake stays single -- the defender's winnings then come from
 #: the shortfall AND the leap, which are the two things a sacrifice actually has.
-DOUBLE_JUMP_MULT = {}
+#: ...and CLASSIC IS 2, so the jump bonus still doubles even though the stake it
+#: rides inside does not. Without this the base multiplier of 1 takes the bonus
+#: down with it and a jumped level-2/3/4 contract stops inviting the Double (win
+#: 23/31/39 vs risk 8/13/20 becomes win 5) -- throwing away the v2 jump rule's
+#: deliberate teeth. Measured, keeping it costs most of the rate reduction
+#: (27-28% rather than 17-18%) and is what buys the invitation back.
+DOUBLE_JUMP_MULT = {"classic": 2}
 
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:

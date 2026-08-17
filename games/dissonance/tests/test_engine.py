@@ -320,11 +320,22 @@ def test_the_final_bids_jump_is_recorded_and_pays_the_defender_on_a_set():
     assert terms["set_base"] == plain["set_base"] + 4 * E.JUMP_SET_BONUS["classic"]
     # The bonus is a SET price: a make and the Null consolation are untouched.
     assert terms["make"] == plain["make"] and terms["null"] == plain["null"]
-    # ...and the Double doubles it, like the stake it rides beside.
+    # ...and the Double doubles THE BONUS -- but no longer the stake it rides
+    # beside (`DOUBLE_JUMP_MULT` 2 against `DOUBLE_BASE_MULT` 1, 2026-08-16).
+    # Composed from the dials so a further move lands as one edit.
+    bm = E.DOUBLE_BASE_MULT.get("classic", 2)
+    jm = E.DOUBLE_JUMP_MULT.get(
+        "classic", bm if E.JUMP_DOUBLED.get("classic", True) else 1)
     doubled = E._terms_for("classic", 0, 6, doubling=2, jump=4)
-    assert doubled["set_base"] == 2 * (E.SET_LEVEL_RATE["classic"] * 6
-                                       + E.FLAT_SET_PENALTY["classic"]
-                                       + 4 * E.JUMP_SET_BONUS["classic"])
+    assert doubled["set_base"] == (
+        (E.SET_LEVEL_RATE["classic"] * 6 + E.FLAT_SET_PENALTY["classic"]) * bm
+        + 4 * E.JUMP_SET_BONUS["classic"] * jm)
+    # The leap is what the Double actually multiplies here, which is the v2 jump
+    # rule's teeth: a jumpless contract's doubled base would not move at all.
+    assert (doubled["set_base"] - terms["set_base"]
+            == 4 * E.JUMP_SET_BONUS["classic"] * (jm - 1)
+            + (E.SET_LEVEL_RATE["classic"] * 6
+               + E.FLAT_SET_PENALTY["classic"]) * (bm - 1))
 
 
 def test_an_opening_passed_out_is_charged_its_whole_level():

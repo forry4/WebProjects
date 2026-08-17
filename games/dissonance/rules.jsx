@@ -118,29 +118,29 @@ export default function DissonanceRules() {
 				<p>
 					Once the contract is settled and the declarer has taken their talon card,
 					the <b>defender</b> gets one decision: <b>Kontra</b>, or let it stand.
-					The rule is as simple as it sounds — <b>everything doubles</b>:
+					It doubles what the contract is <i>riding on</i>, not the flat stake:
 				</p>
 				<ul>
 					<li>Declarer <b>makes</b> it: they score <b>2 × (N × N + 4)</b>, overtricks
 						doubled with it.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2 ×</b> whatever the set was
-						worth — the base <i>and</i> the per-point shortfall, so <b>10 a point</b>
-						instead of 5.</li>
-					<li><b>Null is the one exception.</b> A declarer who wins no +2 trick still
-						scores the flat 20, Kontra or not.</li>
+					<li>Declarer <b>falls short</b>: the base <b>2N + 2</b> is unchanged, but
+						every point they finish below N costs <b>10 instead of 5</b>, and the
+						jump penalty for the leap that won the auction <b>doubles</b> too.</li>
+					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
+						the flat 20, Kontra or not.</li>
 				</ul>
 				<p>
-					So a Kontra'd round pays exactly twice what it would have — which means
-					Kontra has no built-in edge either way. It is a straight bet at the
-					contract's own odds: you win what the round was already worth to you. A
-					level-6 contract pays you <b>38</b> one short and <b>68</b> four short,
-					against 19 and 34 if you had let it stand.
+					So Kontra is a bet on <b>how badly</b> they miss, not merely that they do.
+					A level-6 contract climbed one rung at a time pays you <b>24</b> one short
+					but <b>54</b> four short. The same contract reached by <i>opening</i> at 6
+					and being passed out carries a six-level jump, and Kontra doubles that too
+					— <b>96</b> one short, <b>126</b> four short.
 				</p>
 				<p className="rl-note">
-					One consequence worth knowing: at <b>levels 1–3</b> being set already costs
-					the declarer more than making pays them, so a Kontra there is worth it even
-					if you only expect them to miss by one. From <b>level 4</b> up the made
-					contract is the bigger number and Kontra becomes a real gamble.
+					Which is the point: a <b>sacrifice</b> — leaping to a contract you can't
+					make, just to stop them scoring — is exactly a big jump that finishes far
+					short, and Kontra is how you charge for it. An honest contract that comes
+					up one trick shy is barely touched.
 				</p>
 				<RulesTip>
 					<p>

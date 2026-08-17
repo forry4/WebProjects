@@ -225,7 +225,31 @@ CLIENT_AI_AUCTION_WORLDS_EXPERT = 8
 #: CLASSIC ONLY, and per-mode because the units are payoff points: minor's
 #: payoffs run about a quarter of classic's, so this dose would be enormous
 #: there. Minor's own sweep has not been run, and 0 is exactly today.
-DOUBLE_MARGIN = {"classic": 20.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
+#: RE-FITTED TO 12 (2026-08-16) when the Double's shape changed to base x1 /
+#: jump x2. That shrank the doubled branch, so the old 20 was cutting a smaller
+#: edge distribution and had become over-tight. Swept off a 192-round recording
+#: made at LIVE MARGIN 0 -- deliberately, because the sweep can only price
+#: UPWARD from the margin a run was recorded under, and the whole question was
+#: whether to go lower:
+#:
+#:   margin   dbl%   on FAIL  on MADE   disc   precision
+#:        6  40.6%    81.2%    20.3%   +60.9     66.7%
+#:       10  32.3%    65.6%    15.6%   +50.0     67.7%
+#:       12  29.2%    59.4%    14.1%   +45.3     67.9%   <- shipped
+#:       20  19.8%    37.5%    10.9%   +26.6     63.2%   <- the old value
+#:       24  16.7%    28.1%    10.9%   +17.2     56.2%
+#:
+#: 12 is the peak of BOTH precision and defender gain, and it lands the quality
+#: of the previous scoring at a lower rate: the old uniform Double at margin 20
+#: measured 41.7% doubling at discrimination +44.3 and precision 65.0%, against
+#: 29.2% / +45.3 / 67.9% here. Same discrimination, better precision, 30% fewer
+#: doubles.
+#:
+#: DO NOT COMPARE THE `defender gain` COLUMN ACROSS SCORINGS. Under base x1 a
+#: double is a smaller bet by construction, so its gain per round is smaller
+#: without being worse. The comparable columns are the rate and the
+#: discrimination/precision pair.
+DOUBLE_MARGIN = {"classic": 12.0, "minor": 0.0, "skat": 0.0, "dummy": 0.0}
 
 #: Minimum wall-clock a bot move takes, so the board does not jump.
 BOT_FLOOR_SECONDS = 0.45

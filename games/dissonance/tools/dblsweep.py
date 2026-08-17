@@ -101,55 +101,49 @@ def rounds(pats):
     return out
 
 
-def base_set(N, j, D, jump_doubled=True):
-    stake, bonus = SET_RATE * N + FLAT_SET, JUMP * j
-    if D <= 1:
-        return stake + bonus
-    return (stake + bonus) * D if jump_doubled else stake * D + bonus
+def terms_of(r, D):
+    """The engine's OWN terms for this round at doubling `D`.
+
+    OFF THE ENGINE, NOT RE-DERIVED. This file used to rebuild the set base from
+    copied constants, and that broke three separate times in one day -- the
+    2026-08-16 re-pricing, then `DOUBLED_SHORT_PENALTY`, then the base/jump
+    multipliers -- each time by silently failing to invert the DOUBLED rows and
+    dropping exactly the sample the table was about. `_terms_for` is the function
+    the game itself scores with, so there is nothing left to keep in sync.
+    """
+    return _E._terms_for(MODE, 0, r["N"], jump=r["j"], doubling=D)
 
 
 def invert(r, jd=True):
-    """Recover what the recorded payoff actually WAS, and its decomposition.
+    """Recover the round's final POINTS from its recorded payoff.
 
-    The arena records the payoff, not its decomposition, and re-pricing a round
-    under the other doubling needs the decomposition. Solving for it rather than
-    logging it keeps the arena's own output byte-compatible -- and it is checked:
-    a row that does not invert is DROPPED and REPORTED, so a scoring change this
-    file has not caught up with shows as a loud mismatch, not as quiet prices.
+    Points are all the re-pricing needs -- `E.payoff` turns points plus terms
+    into a number, so the other doubling is one more call rather than a
+    decomposition this file has to model. A row that does not invert is DROPPED
+    and REPORTED, which is the loud version of the failure above.
 
-    THE ARENA'S `outcome` IS NOT THE PLAYED RESULT and must not be trusted here.
-    It is a DOUBLE-DUMMY classification -- "null" means the optimal line went
-    through Null, whether or not the bots found it -- so a round can be labelled
-    `null` and actually have been played as a set. 12 of 192 rounds in the
-    2026-08-16 run were exactly that, and treating the label as the result
-    dropped every one of them. `kind` below is the result the PAYOFF implies,
-    which is the only thing the re-pricing and the FAIL/MADE split may use.
+    THE ARENA'S `outcome` IS NOT THE PLAYED RESULT: it is a double-dummy label,
+    so "null" means the optimal line went through Null whether or not the bots
+    found it. It is used here only to break the one genuine ambiguity (a made
+    contract that happens to pay exactly `NULL`), never as the answer.
     """
-    N, j, D = r["N"], r["j"], 2 if r["doubled"] else 1
+    D = 2 if r["doubled"] else 1
+    t = terms_of(r, D)
     P = r["payoff"]
-    if P == NULL:
-        r["kind"] = "null"
+    hits = [pts for pts in range(-13, 14) if _E.payoff(t, pts, True) == P]
+    if hits and not (P == NULL and r["outcome"] == "null"):
+        r["pts"], r["scored"] = hits[0], True
+        r["kind"] = "made" if hits[0] >= t["target"] else "set"
         return True
-    for over in range(0, 13):
-        if D * (N * N + LIN_MAKE * N + FLAT_MAKE) + D * over == P:
-            r["kind"], r["over"] = "made", over
-            return True
-    ramp, sh = (RAMP, DSHORT) if D > 1 else (0, SHORT)
-    for s in range(1, N + 1):
-        if -(base_set(N, j, D, jd) + sh * s + ramp * s * (s + 1) // 2) == P:
-            r["kind"], r["s"] = "set", s
-            return True
+    if P == NULL:
+        r["pts"], r["scored"], r["kind"] = 0, False, "null"
+        return True
     return False
 
 
 def pay(r, D, jd=True):
-    if r["kind"] == "null":
-        return NULL      # never doubled, so D is irrelevant
-    if r["kind"] == "made":
-        return D * (r["N"] ** 2 + LIN_MAKE * r["N"] + FLAT_MAKE) + D * r["over"]
-    ramp, sh = (RAMP, DSHORT) if D > 1 else (0, SHORT)
-    return -(base_set(r["N"], r["j"], D, jd) + sh * r["s"]
-             + ramp * r["s"] * (r["s"] + 1) // 2)
+    """Re-price the round under doubling `D`, with the play it actually got."""
+    return _E.payoff(terms_of(r, D), r["pts"], r["scored"])
 
 
 def se(x):
