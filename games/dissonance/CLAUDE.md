@@ -3269,6 +3269,66 @@ seed variance (tight: ±0.03 within a cache). Nothing was wrong. **The deal
 sample was the whole effect**, and it had been invisible because every earlier
 comparison happened to reuse one cache.
 
+### MORE BIDS PER AUCTION IS NOT A SCORING QUESTION (2026-08-16)
+
+**Asked directly — "how could we get more bids per auction?" — and the answer is
+that the payoff curve cannot deliver it.** Four `cfrlab curve` arms on the
+real-play cache (`cfr_real2.ckpt`, 2000 deals, 200k CFR+ iterations each):
+
+| arm | loss | bids/auc | opening 1..5 | settled | made |
+|---|---|---|---|---|---|
+| `C=0` (shipped) | 0.69 | **3.49** | 34 28 13 14 10 | 5/5/5/8/**52**/23/2 | 69.8% |
+| `C=1` | 0.76 | **3.44** | 22 24 19 23 11 | 2/2/4/7/31/**49**/3 | 62.2% |
+| `C=2` | 1.16 | **3.46** | 16 19 21 26 17 | –/2/4/7/14/**63**/8 | 56.5% |
+| `tscale=0.5` | 2.02 | **3.26** | 25 27 13 7 2 (8:25) | 3/3/4/2/**8:85** | 84.7% |
+
+**bids/auction moves 3.26–3.49 across price curves that relocate the settled
+mode from L5 to L6 to L8.** It is the one statistic in the table that will not
+move. Read the arms as deltas only — the abstraction drops `DENOM_RULE`, so its
+absolute 3.49 is not comparable to shipped Expert's 1.94.
+
+**THE REASON IS ALREADY IN THIS REPO, in `denom_main`'s docstring, and it is
+worth promoting because it is a general result:** every payoff rule scales the
+per-rung fall in `P(make)` and the per-hand spread by the SAME `(make + set)`
+factor, so **no payoff rule can move their RATIO** — and auction length depends
+on that ratio, not on the prices. Rescaling payoffs rescales both seats'
+valuations together; it changes WHERE they stop, not HOW MANY rungs they walk.
+The four arms above are that invariance measured.
+
+**The linear make term (`LINEAR_MAKE_BONUS`, the `C` knob) is refuted twice
+over** and should not be revisited as a way to lengthen auctions: bids flat at
+3.44, AND it breaks the "no level above 40%" constraint outright — L6 goes 23% →
+**49%** at `C=1` and **63%** at `C=2`, with the make rate falling 69.8% → 62.2%
+→ 56.5%. Raising the make reward makes the TOP of the ladder more attractive, so
+the auction's destination rises; the path to it does not lengthen. `tscale`
+(a finer ladder) is worse still — 85% settle on the top rung.
+
+**THE ONE MECHANISM THAT ESCAPES THE INVARIANCE** is putting more rungs inside a
+single step of DIFFICULTY, which changes the denominator directly. The five
+ranked denominations may already be exactly that: a same-level overtake means
+playing a genuinely WORSE suit, so it is harder than the standing contract and
+easier than the next level. If that holds the ladder is ~5x finer than
+`target = level` suggests, and what stops players walking it is
+`DENOM_RULE = "used"` — the per-player forever-ban.
+
+**CORRECTION to a same-day dismissal.** The forever-ban was waved off on the
+grounds that at 1.05 overtakes/auction nobody approaches the five-bid ceiling.
+That reasoning is wrong: the ban does not only bite at the ceiling, it forbids a
+seat from re-bidding its BEST denomination, so it bites on that seat's SECOND
+bid — precisely where the marginal contests are. Corroborating: the cfrlab
+abstraction drops the ban entirely and produces 3.49 bids against shipped
+Expert's 1.94, so the ban sits inside that gap. The two relaxations measured on
+2026-08-13 were rejected on strength grounds, not on auction length, and they
+were measured under the OLD prices.
+
+**STATUS: the decisive test is the one already flagged INCONCLUSIVE below** —
+`cfrlab dcache`, the suit-priced ladder, which prices a same-level overtake as a
+genuinely worse contract instead of merely a dearer one. It needs the
+all-denomination cache at 2000 deals (600 today, ~1 hour of solving) to be
+compared paired and at equal size. Until then, whether more bids/auction is
+reachable at all is OPEN — and the honest prior is that shipped 1.94 is close to
+structural for this ladder.
+
 ### THE SUIT-PRICED LADDER — INCONCLUSIVE, not refuted
 
 `cfrlab dcache` builds a cache with `pts`/`duck` for ALL FIVE denominations per
