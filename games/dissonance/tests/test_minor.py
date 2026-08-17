@@ -139,14 +139,21 @@ def test_minor_terms_make_set_null_and_short_rate():
     assert c["make"] == 9 + E.FLAT_MAKE_BONUS["classic"]
 
 
-def test_the_double_doubles_and_ramps_in_minor_too():
+def test_the_double_doubles_in_minor_too():
+    """Minor shares classic's Double machinery, including the retirement of the
+    shortfall ramp on 2026-08-16 -- `DOUBLE_RAMP` is ONE scalar for every mode,
+    so minor lost it at the same time. Derived off the constant rather than
+    pinned, so switching it back on needs no edit here."""
     t = E._terms_for("minor", 2, 3, doubling=2)
     assert t["make"] == 18 and t["set_base"] == 6 and t["over"] == 2
-    assert t["ramp"] == E.DOUBLE_RAMP == 1
+    assert t["ramp"] == E.DOUBLE_RAMP
     # Null is NOT doubled, same argument as classic's.
     assert t["null"] == 6
-    # Set by 2, doubled: 2N + short*s + ramp*s(s+1)/2 = 6 + 4 + 3.
-    assert E.payoff(t, 1, True) == -13
+    # Set by 2, doubled: 2N + short*s + ramp*s(s+1)/2.
+    #   ramp on : 6 + 4 + 3 = 13.   ramp off: 6 + 4 = 10.
+    short, ramp = E.MINOR_SHORT_PENALTY, E.DOUBLE_RAMP
+    assert E.payoff(t, 1, True) == -(6 + short * 2 + ramp * 2 * 3 // 2)
+    assert E.payoff(t, 1, True) == (-13 if ramp else -10)
 
 
 def test_null_pays_a_level_ones_ceiling_exactly():

@@ -76,7 +76,7 @@ export default function DissonanceRules() {
 					{ t: "The opener must bid", d: "Passing is not allowed on the first bid, however bad the hand is." },
 					{ t: "Denominations are ranked", d: "♣ < ♦ < ♥ < ♠ < NT. A bid at the same number in a higher-ranked denomination outranks the one standing." },
 					{ t: "Overtaking", d: "Match the number in a higher-ranked denomination, or raise it by any amount in any denomination YOU have not named before. Or pass." },
-					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +3 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 18. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
+					{ t: "Jumps carry a price", d: "If the bid that WINS the auction raised the level, the defender scores +6 per level of that raise when they defeat the contract — and the opening bid counts, as a raise from level 0: open at 6, get set, and your opponent collects an extra 36. Climbing one rung at a time is the cheap way up; leaping is legal but hands the defender a fatter set." },
 					{ t: "The last bid wins", d: "That player is the declarer, their denomination is trump (or no-trump), and their number is the target." },
 					{ t: "Declarer leads", d: "The declarer leads to trick 1 — which is an odd, LOSING trick. Leading first is a real disadvantage, and it's why the auction isn't a free-for-all." },
 				]} />
@@ -123,23 +123,23 @@ export default function DissonanceRules() {
 				<ul>
 					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × (N × N + 4)
 						instead of N × N + 4, overtricks included.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2 × (2N + 2)</b>, and every point
-						they finish below N costs them <b>more than the last</b> — 6, then 7, then
-						8, then 9 — instead of a flat 5 each.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2 × (2N + 2)</b>, plus the
+						usual <b>5 for every point</b> they finish below N. The per-point rate is
+						the same whether or not you Kontra — only the base doubles.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 20, Kontra or not.</li>
 				</ul>
 				<p>
-					That rising scale is the whole point. It barely touches a declarer who
-					misses by one — which is what most failed contracts do — and it bites hard
-					on one who finishes miles short, which is what a <b>sacrifice</b> looks
-					like. A level-6 contract one short pays you 34; four short, 58.
+					So Kontra is a flat bet on one question: <b>will they get there?</b> It wins
+					you the same amount whether they miss by one or by five — a level-6 contract
+					pays you 33 one short and 48 four short, against 19 and 34 if you had let it
+					stand. Both of those are the doubled base doing the work, not the shortfall.
 				</p>
 				<RulesTip>
 					<p>
 						<b>What it's for.</b> When you're about to make a big contract, your
 						opponent's best move is often to <b>outbid you with nothing</b> — 6♣ over
-						your 5♠ — because being set costs them less than letting you score 35.
+						your 5♠ — because being set costs them less than letting you score 29.
 						Kontra is how you charge them properly for that. Note the escape,
 						though: a declarer who hasn't yet won a +2 trick can duck every one of
 						them and take Null instead, and Kontra doesn't touch Null. So the bet
@@ -269,7 +269,8 @@ export default function DissonanceRules() {
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
 						ceiling, the relationship classic's Null had before the flat stake
 						re-anchored it to 20.</li>
-					<li>The Kontra works unchanged, ramp and all. The <b>match plays to
+					<li>The Kontra works unchanged — doubled base, flat per-point shortfall,
+						just like classic's. The <b>match plays to
 						25</b>, which buys about the same number of rounds as classic's 150.</li>
 				</ul>
 				<RulesTip>

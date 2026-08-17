@@ -1,19 +1,23 @@
 """Classic's Double — the defender's one bet, and its deliberately lopsided odds.
 
 Skat doubles with Kontra, symmetrically: everything ×2 whichever way it falls.
-Classic's Double is NOT that, and the asymmetry is the design (the flat ±10
-stake of 2026-08-11 rides INSIDE both bases, so it doubles with them):
+Classic's Double is NOT that, and the asymmetry is the design (the flat stake
+rides INSIDE both bases, so it doubles with them). At the shipped prices:
 
-    made   N^2 + 10  ->  2 (N^2 + 10)     (overtricks doubled with it)
-    set      N + 10  ->  2 (N + 10), and the shortfall RAMPS: 6, 7, 8 a point
-                         instead of a flat 5
-    Null         12  ->  12               (untouched)
+    made   N^2 + 4   ->  2 (N^2 + 4)      (overtricks doubled with it)
+    set     2N + 2   ->  2 (2N + 2), with a FLAT 5 a point short either way
+    Null        20   ->  20               (untouched)
 
-The ramp is the part that makes the mechanic work. Doubling has to tell a
-SACRIFICE from a near-miss, and what separates them is not the level -- both
-have that -- but how far short the declarer finishes: ordinary failures are a
-median of 2 short with 48% by exactly 1, sacrifices a median of 4. Scaling by
-the level taxes what they share; ramping taxes what only a sacrifice has.
+THE RAMP WAS RETIRED 2026-08-16 (`DOUBLE_RAMP = 0`). It used to make the doubled
+shortfall escalate -- 6, 7, 8 a point instead of a flat 5 -- because doubling has
+to tell a SACRIFICE from a near-miss, and what separates them is not the level
+(both have that) but how far short the declarer finishes: ordinary failures are a
+median of 2 short with 48% by exactly 1, sacrifices a median of 4. Ramping taxed
+what only a sacrifice has. Without it, doubling wins the undoubled set base flat,
+whatever happens, and needs better than even odds at every level.
+
+The tests below assert BOTH arms off `E.DOUBLE_RAMP` rather than pinning it, so
+switching the ramp back on needs no edit here.
 """
 
 import random
@@ -63,10 +67,11 @@ def _terms(level, doubled):
 #: and a parametrize over unbiddable levels fails as an illegal-bid ValueError
 #: rather than as the arithmetic claim it means to make.
 _TOP = E.max_level_for("classic")
-#: The prices, off the constants so a re-pricing lands here as one edit -- which
-#: is what the 2026-08-16 re-pricing was (`L^2 + L + 2` made, `2L + 10` set,
-#: shortfall 1). Both bases are derived, never typed out, for the same reason
-#: the ramp below is: a literal only says what someone believed on the day.
+#: The prices, off the constants so a re-pricing lands here as one edit. Both
+#: bases are DERIVED, never typed out, for the same reason the ramp is read from
+#: its constant: a literal only says what someone believed on the day, and these
+#: have already moved twice (the 2026-08-16 re-pricing, then the ramp's
+#: retirement). Today: `L^2 + 4` made, `2L + 2` set, a flat 5 a point short.
 _FM = E.FLAT_MAKE_BONUS["classic"]
 _LM = E.LINEAR_MAKE_BONUS["classic"]
 _FS = E.FLAT_SET_PENALTY["classic"]
@@ -100,19 +105,31 @@ def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     assert plain["set_base"] == _sb(level) and plain["ramp"] == 0
     assert dbl["set_base"] == 2 * _sb(level)
     assert dbl["short"] == plain["short"], "the flat per-point term is unchanged"
-    assert dbl["ramp"] == E.DOUBLE_RAMP == 1
-    # DERIVED from the two dials, never typed out: both have moved once already
-    # (short 4 -> 5, ramp 0 -> 1) and a literal only says what someone believed
-    # on the day. Doubled, the s-th point short costs `short + s*ramp`.
+    # DERIVED from the two dials, never typed out: both have moved already
+    # (short 4 -> 5, ramp 0 -> 1 -> 0) and a literal only says what someone
+    # believed on the day. Doubled, the s-th point short costs `short + s*ramp`,
+    # which is the SHIPPED arithmetic whether or not the ramp is switched on --
+    # so this test does not pin `DOUBLE_RAMP` to a value and did not need
+    # editing when the ramp was retired on 2026-08-16.
+    assert dbl["ramp"] == E.DOUBLE_RAMP
     P, R = _SH, E.DOUBLE_RAMP
     pen = [-E.payoff(dbl, level - s, True) - 2 * _sb(level)
            for s in range(1, 6)]
     steps = [b - a for a, b in zip([0] + pen, pen)]
     assert steps == [P + R * s for s in range(1, 6)], steps
-    assert steps == sorted(steps) and steps[0] > steps[0] - 1, "it must RISE"
+    # Monotone either way; STRICTLY rising only while the ramp is on. Asserting
+    # both arms rather than only the live one keeps the test meaningful if the
+    # ramp is ever switched back on, which is the reason it is a constant.
+    assert steps == sorted(steps), steps
+    if R:
+        assert steps[-1] > steps[0], "with a ramp the shortfall must ESCALATE"
+    else:
+        assert len(set(steps)) == 1 == len({P}), "no ramp: a flat rate per point"
     flat = [-E.payoff(plain, level - s, True) - _sb(level)
             for s in range(1, 6)]
     assert flat == [P * s for s in range(1, 6)], "undoubled stays flat"
+    if not R:
+        assert pen == flat, "no ramp: doubled and undoubled shortfalls match"
 
 
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
@@ -120,21 +137,34 @@ def test_null_is_never_doubled(level):
     assert _terms(level, True)["null"] == _terms(level, False)["null"] == E.NULL_MAKE
 
 
-def test_the_reward_grows_with_the_SHORTFALL_not_just_the_level():
-    """The design property, asserted rather than left in prose: what doubling
-    wins you must rise with how far short the declarer finishes, or it cannot
-    distinguish a sacrifice from a near-miss."""
+def test_what_doubling_wins_tracks_the_ramp_and_nothing_else():
+    """What doubling WINS, as a function of how far short the declarer finishes.
+
+    This was the ramp's whole design property -- the reward had to rise with the
+    shortfall or the Double could not tell a sacrifice from a near-miss. The ramp
+    was RETIRED on 2026-08-16 (`DOUBLE_RAMP = 0`), so the reward is now FLAT in
+    the shortfall: doubling wins exactly the undoubled set base, whatever
+    happens. That is the trade the retirement makes, and it is asserted here
+    rather than left in prose so nobody has to rediscover it.
+
+    Both arms are asserted, because the ramp is a constant and may come back."""
     for level in (3, 6):
         plain, dbl = _terms(level, False), _terms(level, True)
         wins = [E.payoff(plain, level - s, True) - E.payoff(dbl, level - s, True)
                 for s in range(1, 7)]
-        assert all(b > a for a, b in zip(wins, wins[1:])), wins
-        # A near-miss is barely taxed beyond the doubled stake; a deep failure
-        # pays the whole ramp on top (s(s+1)/2 x ramp, 20 more by 6 short).
-        assert wins[0] < _sb(level) + 2, \
-            f"a 1-short miss should stay cheap: {wins[0]}"
-        assert wins[5] - wins[0] >= 20 * E.DOUBLE_RAMP, \
-            f"a 6-short collapse should not: {wins}"
+        # Derived, not typed: doubling adds one more set base plus the ramp's
+        # triangular term, so the win at s short is `sb + ramp*s(s+1)/2`.
+        R = E.DOUBLE_RAMP
+        assert wins == [_sb(level) + R * s * (s + 1) // 2 for s in range(1, 7)], wins
+        if R:
+            assert all(b > a for a, b in zip(wins, wins[1:])), wins
+            assert wins[0] < _sb(level) + 2, \
+                f"a 1-short miss should stay cheap: {wins[0]}"
+            assert wins[5] - wins[0] >= 20 * R, \
+                f"a 6-short collapse should not: {wins}"
+        else:
+            assert len(set(wins)) == 1 and wins[0] == _sb(level), \
+                f"no ramp: the reward cannot depend on the shortfall: {wins}"
 
 
 def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
@@ -182,14 +212,22 @@ def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
         risk = dbl["make"] - plain["make"]
         need[level] = round(risk / (win + risk), 2)
     # Derived, and asserted as a SHAPE: break-even must rise with the level,
-    # and stay reachable at the bottom where a sacrifice is cheapest to punish.
-    # The +-10 stake lifted the floor (level-1 break-even 0.31 -> 0.44: the
-    # risk grew by the whole stake, the reward only by its doubled half) but
-    # flattened the top -- see the curve test below.
+    # and stay reachable at the top or the bet is dead.
+    #
+    # RETIRING THE RAMP MOVED THIS, and it is the change's main consequence:
+    # break-even now reads 0.56 / 0.57 / 0.62 / 0.67 against 0.44 / .. / < 0.75
+    # before. The reward no longer grows with the shortfall, so the defender
+    # needs BETTER THAN EVEN ODDS at every level, where a level-1 Double used to
+    # pay from 44%. Asserted as `> 0.5` rather than pinned to 0.56 so the claim
+    # is the design property and not the arithmetic of one day.
     assert sorted(need) == [1, 2, 3, 4]
     vals = [need[k] for k in (1, 2, 3, 4)]
     assert all(b > a for a, b in zip(vals, vals[1:])), need
-    assert vals[0] < 0.5 and vals[-1] < 0.75, need
+    assert vals[-1] < 0.75, need
+    if E.DOUBLE_RAMP:
+        assert vals[0] < 0.5, f"with a ramp a low Double pays under even odds: {need}"
+    else:
+        assert vals[0] > 0.5, f"no ramp: every Double needs better than even: {need}"
 
 
 # --- end to end ------------------------------------------------------------
@@ -347,7 +385,7 @@ def test_the_hard_tier_is_offered_both_branches_priced():
     off = next(o for o in opts if o["move"]["on"] is False)
     assert on["make"] == 2 * off["make"]
     assert on["set_base"] == 2 * _sb(3) and off["set_base"] == _sb(3)
-    assert on["ramp"] == 1 and off["ramp"] == 0
+    assert on["ramp"] == E.DOUBLE_RAMP and off["ramp"] == 0
     assert all("decline" not in o for o in opts), \
         "both branches carry their own move; neither is an implicit zero"
 

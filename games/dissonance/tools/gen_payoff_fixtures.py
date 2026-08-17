@@ -100,8 +100,31 @@ def _contracts():
                     yield g
 
 
+#: SYNTHETIC RAMPED TERMS, because the shipped `DOUBLE_RAMP` is 0 (retired
+#: 2026-08-16) and the ramp arithmetic still exists in BOTH implementations --
+#: `E.payoff`'s `ramp x s(s+1)//2` and `dd::Contract::payoff`'s `ramp * s * (s+1)
+#: / 2`. Generating only reachable contracts would leave that term at ramp=0 on
+#: every row, so the two copies could silently diverge and the gate would pass:
+#: a term nothing exercises is a term nobody is holding to anything. These rows
+#: are NOT reachable game states and are not claimed to be -- they exist purely
+#: to pin one shared formula, which is what this fixture set is for.
+_RAMPED = [
+    {"denom": 0, "level": 3, "target": 3, "make": 26, "over": 2,
+     "set_base": 28, "short": 5, "ramp": 1, "null": 20, "declarer": 0},
+    {"denom": 2, "level": 6, "target": 6, "make": 80, "over": 2,
+     "set_base": 40, "short": 5, "ramp": 2, "null": 20, "declarer": 1},
+    {"denom": 4, "level": 1, "target": 1, "make": 10, "over": 2,
+     "set_base": 20, "short": 4, "ramp": 3, "null": 20, "declarer": 0},
+]
+
+
 def main() -> None:
     out = []
+    for terms in _RAMPED:
+        rows = [[p, s, E.payoff(terms, p, s)]
+                for p in range(-7, 13) for s in (False, True)]
+        out.append(json.dumps({"mode": "classic", "terms": terms, "rows": rows},
+                              separators=(",", ":")))
     for g in _contracts():
         terms = E.payoff_terms(g)
         # Every total the round can reach, and both sides of the Null cliff.

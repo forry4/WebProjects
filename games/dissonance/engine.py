@@ -306,23 +306,35 @@ CLASSIC_SHORT_PENALTY = 5
 #: Double and its shortfall RAMP apply in minor unchanged.
 MINOR_SHORT_PENALTY = 2
 
-#: THE DOUBLE'S ESCALATOR. Doubled, the first point short costs
-#: `SHORT_PENALTY + DOUBLE_RAMP`, the second `+ 2 x DOUBLE_RAMP`, and so on --
-#: 6, 7, 8, 9 at the shipped values.
+#: THE DOUBLE'S ESCALATOR, RETIRED 2026-08-16 -- a doubled shortfall now costs
+#: the flat `SHORT_PENALTY` per point, exactly like an undoubled one. Kept as a
+#: constant rather than deleted because the term is on the wire, in the Rust
+#: `Contract`, and in the result panel's narration; 0 turns it off everywhere
+#: through one number, and the arithmetic
+#: `short x s + ramp x s(s+1)/2` degrades to `short x s` with no other change.
 #:
-#: WHY A RAMP RATHER THAN A BIGGER FLAT BASE. Doubling has to tell a SACRIFICE
-#: from a near-miss, and what separates them is not the LEVEL -- both cases have
-#: that -- but how far short the declarer finishes: ordinary failures come up a
-#: median of 2 short with 48% of them by exactly 1, while sacrifices come up a
-#: median of 4. Scaling the base by N taxes the level; ramping taxes the
-#: shortfall, which only a sacrifice has.
+#: WHAT IT DID, and what turning it off gives up. Doubling has to tell a
+#: SACRIFICE from a near-miss, and what separates them is not the LEVEL -- both
+#: have that -- but how far short the declarer finishes: ordinary failures come
+#: up a median of 2 short with 48% of them by exactly 1, while sacrifices come up
+#: a median of 4. Scaling the base by N taxes the level; ramping taxed the
+#: shortfall, which only a sacrifice has. Measured at the time, doubling a
+#: level-6 sacrifice ran EV -0.24 on a flat base against +9.20 with the ramp,
+#: while an ordinary level-6 contract stayed at -11.70. **So expect doubling a
+#: sacrifice to be roughly break-even again rather than clearly +EV.** That is a
+#: deliberate simplicity-for-sharpness trade, requested explicitly; it is not a
+#: measurement saying the ramp was wrong.
 #:
-#: MEASURED: doubling a level-6 sacrifice goes from EV -0.24 (flat 2N) to +9.20
-#: with this ramp, while an ordinary level-6 contract stays at -11.70 -- and the
-#: worst single round is 93 rather than the 138 a +2 ramp allows, which matters
-#: in a match to 100. A +2 ramp measured +18.64 but pushed the sacrifice RATE
-#: from 36% to 7%, i.e. it removes the play rather than pricing it.
-DOUBLE_RAMP = 1
+#: NOT A FREE CHANGE ELSEWHERE: `DOUBLE_MARGIN` is a threshold in payoff points
+#: and this shrinks the doubled branch's value, so the shipped 20 is now sitting
+#: on a slightly different edge distribution. See `main.DOUBLE_MARGIN` -- the
+#: `dblsweep.py` re-check is queued, not done.
+#:
+#: ONE SCALAR FOR EVERY MODE, which is why minor and skat lose it too: the
+#: request was a flat per-point rate, and each mode already has its own
+#: `short` (classic 5, minor 2, skat its own), so zero here means "whatever this
+#: mode charges per point, charge it evenly".
+DOUBLE_RAMP = 0
 
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:
