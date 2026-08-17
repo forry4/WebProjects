@@ -211,14 +211,21 @@ def ask(g, seat, tier):
     # False, so an unstripped check silently drops the talon model from the
     # bias arm -- which would make the comparison two changes wide and read as
     # the bias doing something it did not.
-    base = tier[:-1] if tier.endswith("o") else tier
+    base = tier[:-1] if tier.endswith("b") else tier
     if base.endswith("t") and g["phase"] == "auction" and E.mode_of(g) == "classic":
         auc["swap"] = B.swap_policy_terms()
-    # A trailing `o` adds the OPENING BIAS, the same way: an arm the tier name
+    # A trailing `b` adds the OPENING BIAS, the same way: an arm the tier name
     # turns on, so it can be measured against its own absence. `DIS_OPEN_BIAS`
     # sets the weight; the bias itself returns None when the weight is 0, so a
     # tier without the suffix is byte-identical to one before this existed.
-    if tier.endswith("o") and g["phase"] == "auction":
+    #
+    # `b`, NOT `o`, AND THAT IS A BUG FIX. The bias shipped on `o`, which
+    # `old_double` above already claimed -- `"o" in "to"` is True, so `expertto`
+    # silently ran the OLD Double as well, making the arm two changes wide and
+    # crediting the bias with whatever the Double lost. Exactly the failure the
+    # `t`-stripping note above warns about, committed one suffix later. Any
+    # `expertto` number recorded before 2026-08-16 is bias + old-Double pooled.
+    if tier.endswith("b") and g["phase"] == "auction":
         bias = B.open_bias_terms(g, seat, opts)
         if bias:
             auc["open_bias"] = bias

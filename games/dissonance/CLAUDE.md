@@ -3672,8 +3672,12 @@ sweep is a multi-day unattended job, not an interactive one.
   a threshold on the SEARCH's edge estimate and needs `dblsweep.py` rather than
   arithmetic — was right, and was still not enough, because the sweep itself was
   misread.
-* The opening bias needs a weight sweep AND the mixing question answered before
-  it is worth arena hours.
+* ~~The opening bias needs a weight sweep AND the mixing question answered.~~
+  **CLOSED 2026-08-16: the mixing question is answered and it kills the arm.** A
+  log-probability bias over an ARGMAX cannot express a mixture, so no weight
+  reaches the target — measured at w=1/2.5/5, every one made both bids/auction
+  and the opening distribution WORSE. **Do not run the weight sweep.** Section
+  below.
 * `hand_strength` itself is unexamined against the new economics — and so is
   `_CLASSIC_LEVEL_NEEDS`, the strength→level map that picks the opening bid for
   the NON-search tiers, which is the only one of its four siblings with no
@@ -3819,7 +3823,71 @@ standing caution above), and the settled distribution is still level-5-heavy
 under the new prices, so opening at 3–4 and climbing is not obviously wrong. What
 IS established is narrow and sufficient to act on later: this constant is
 uncalibrated, its siblings are not, and nobody has looked at it since the prices
-moved. It belongs with `hand_strength` on the recalibration list, not ahead of it. — built, mirror-clean, mechanism confirmed, PAYOFF UNRESOLVED
+moved. It belongs with `hand_strength` on the recalibration list, not ahead of it.
+
+### THE OPENING BIAS — MEASURED 2026-08-16 AND IT DOES NOT WORK. STAYS OFF.
+
+**Verdict first: the mechanism cannot do what it was built to do, and no weight
+fixes it.** The old note here said it needed "a weight sweep AND the mixing
+question answered". The mixing question is now answered and it is fatal, so the
+weight sweep — the ~20-hour job — should NOT be run.
+
+**A log-probability bias plus an ARGMAX cannot express a mixture.** The bias adds
+`w x (log p[level] - log p_best)` per option and the search then takes an argmax
+over `value + bias`. Argmax of a biased value is still a POINT choice. Within a
+strength bucket the bot therefore picks ONE level, and the only thing that
+produces a spread of openings across hands in that bucket is hand-to-hand
+variation in the search value — which is exactly what a larger `w` overwhelms.
+So turning the bias up does not converge on the target distribution, it
+COLLAPSES each bucket onto its modal level. To hit a distribution you need to
+SAMPLE (softmax over the biased values), not to bias an argmax.
+
+**Measured**, 4 arms, ~120 auctions each, self-play `experttb`, `play`-resolved
+(auction statistics are resolution-independent; validated by counting bids two
+ways on the dd data — from the `settled` field and from `decision` kinds — both
+give exactly 1.94):
+
+| w | bids/auction | 1-bid | opening L1..L6 | TV from equilibrium |
+|---|---|---|---|---|
+| **0 (shipped)** | **2.19 ±0.18** | 26.5% | 24 24 22 12 12 6 | **10.4** |
+| 1 | 1.93 ±0.17 | 38.3% | 27 17 10 25 17 5 | 18.0 |
+| 2.5 | 1.96 ±0.21 | 43.6% | 35 11 4 31 11 9 | 30.1 |
+| 5 | 1.88 ±0.18 | 43.9% | 25 14 23 19 19 0 | 12.6 |
+
+* **It never helps on either axis.** Every weight LOWERS bids/auction and every
+  weight moves the opening distribution FURTHER from the equilibrium. The
+  per-arm CIs on bids/auction overlap, but the direction is consistent across
+  three independent weights.
+* **The collapse is visible in the shape.** At w=2.5 the distribution is
+  BIMODAL — L1 35% and L4 31% with a hole at L3 (4%, against 22% unbiased).
+  That is the predicted signature and it is far outside sampling noise.
+
+**AND THE PREMISE WAS PARTLY WRONG.** Shipped Expert's opening MARGINAL is
+already close to the equilibrium's (TV 10.4). The exploitability defect was
+never that the marginal is wrong — it is that opening level does not vary enough
+WITH HAND STRENGTH (0.82 rungs across a range where the make rate runs 36%→80%).
+That is a CONDITIONAL defect, and a bias steered by a marginal-shaped target
+cannot fix it. Any successor must be judged conditionally — correlation of
+opening level with strength — not by distribution distance.
+
+**Do not confuse the two reference distributions**, which this campaign did once:
+`TARGET_OPEN` `[32 20 15 12 9 6 4 2]` is the DESIGN ASPIRATION the scoring
+search was fitted against; the CFR+ equilibrium's actual marginal is
+`[26 24 21 20 9 1 0 0]` (the average of `_OPEN_DIST` over its equal-mass
+octiles). The second is what the bias steers toward and the right yardstick for
+the bot; the first is a statement about the SCORING.
+
+**HARNESS BUG FOUND WHILE SETTING THIS UP, and it invalidates earlier numbers.**
+The bias arm was armed by a trailing `o` on the tier name — but `old_double` is
+tested as `"o" in tier[len("expert"):]`, which `expertto` also satisfies. So the
+bias arm silently ran the OLD Double as well: two changes wide, with the bias
+credited for whatever the Double lost. **Every `expertto` figure recorded before
+2026-08-16 is bias + old-Double pooled** (they were all non-results with CIs
+several times their estimate, so nothing was concluded from them). The bias
+suffix is now `b`; `o` keeps its original meaning. This is the exact failure the
+adjacent `t`-stripping comment warns about, committed one suffix later.
+
+The description below is the mechanism as built, kept for whoever revisits it.
 
 The bot arm the exploitability finding asked for. **Off unless `DIS_OPEN_BIAS`
 sets a weight**, so shipped behaviour is byte-identical (`open_bias_terms`
