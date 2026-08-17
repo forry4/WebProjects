@@ -336,29 +336,41 @@ MINOR_SHORT_PENALTY = 2
 #: mode charges per point, charge it evenly".
 DOUBLE_RAMP = 0
 
-#: WHAT A DOUBLED SHORTFALL COSTS PER POINT, when it differs from the undoubled
-#: rate. Absent for a mode == that mode's own `short`, i.e. no change.
+#: WHAT A DOUBLED SHORTFALL COSTS PER POINT. Absent for a mode == that mode's own
+#: `short`, i.e. that mode does not change the rate when doubled.
 #:
-#: This is the ramp's job done with a FLAT rate instead of an escalator (2026-08-16,
-#: after the ramp was retired the same day). The ramp charged 6, 7, 8, 9 for the
-#: first, second, third, fourth point short; this charges a flat 6 for every
-#: point. It keeps the Double's teeth against a deep failure without the
-#: escalation, and unlike the ramp it is legible on the round panel as one rate.
+#: CLASSIC IS 10 = 2 x 5, WHICH MAKES THE DOUBLE UNIFORM: make, set base and the
+#: per-point shortfall all scale by the same 2, so a doubled round pays EXACTLY
+#: twice what the undoubled one would have. Null alone is untouched. That is the
+#: whole rule, statable in four words -- "the Double doubles everything" -- and it
+#: is what shipped 2026-08-16 after two intermediate shapes:
 #:
-#: WHY IT IS NEEDED AT ALL: retiring the ramp made doubling win a FLAT amount --
-#: exactly the undoubled set base, whatever the shortfall -- which took the
-#: break-even odds above 50% at every level and left the bet with nothing to say
-#: about a sacrifice. A rate of 6 restores the shortfall dependence linearly:
-#: doubling a contract that finishes `s` short now wins `set_base + s` more than
-#: letting it stand, so a deep failure is worth more than a near-miss again,
-#: just not quadratically.
+#:   ramp (6, 7, 8, 9 per point)   reward grew QUADRATICALLY with the shortfall
+#:   flat 5 both ways              reward was SHORTFALL-BLIND: break-even above
+#:                                 even odds at every level
+#:   flat 6 doubled                reward grew LINEARLY but at an odd rate
+#:   flat 10 doubled (today)       reward = the undoubled round, exactly
+#:
+#: THE CONSEQUENCE WORTH KNOWING: because both ends scale together, doubling
+#: wins the defender precisely what the round was already worth to them, so the
+#: break-even odds are the contract's own make/set ratio and nothing else. The
+#: bet stops having a house edge in either direction -- which is the point of
+#: doing it this way, and is also why it no longer needs its own justification
+#: the way the ramp did.
+#:
+#: THIS MAKES CLASSIC'S DOUBLE THE SAME SHAPE AS SKAT'S KONTRA, which has always
+#: been symmetric. Prose that contrasts the two -- `rules.jsx`, this file's
+#: tests -- had to be inverted when this shipped; if you make it asymmetric again,
+#: invert it back.
 #:
 #: SEPARATE FROM THE BOT QUESTION, and do not conflate them: `main.DOUBLE_MARGIN`
 #: is a threshold in payoff points, so a bot that "never doubles" may simply be
-#: over-thresholded rather than under-rewarded. Re-run `tools/dblsweep.py`
-#: whenever this moves -- it changes the doubled branch's value, which is exactly
+#: over-thresholded rather than under-rewarded -- measured 2026-08-16, the bots
+#: double 15.6% of contracts and those doubles are EV-NEGATIVE, which is a
+#: threshold/calibration fault and not a pricing one. Re-run `tools/dblsweep.py`
+#: whenever this moves: it changes the doubled branch's value, which is exactly
 #: what that margin cuts.
-DOUBLED_SHORT_PENALTY = {"classic": 6}
+DOUBLED_SHORT_PENALTY = {"classic": 10}
 
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:

@@ -1,27 +1,33 @@
-"""Classic's Double — the defender's one bet, and its deliberately lopsided odds.
-
-Skat doubles with Kontra, symmetrically: everything ×2 whichever way it falls.
-Classic's Double is NOT that, and the asymmetry is the design (the flat stake
-rides INSIDE both bases, so it doubles with them). At the shipped prices:
+"""Classic's Double — the defender's one bet. UNIFORM since 2026-08-16.
 
     made   N^2 + 4   ->  2 (N^2 + 4)      (overtricks doubled with it)
-    set     2N + 2   ->  2 (2N + 2), and a doubled point short costs 6, not 5
-    Null        20   ->  20               (untouched)
+    set     2N + 2   ->  2 (2N + 2), and a doubled point short costs 2 x 5 = 10
+    Null        20   ->  20               (the one exception)
 
-WHY THE DOUBLED SHORTFALL HAS ITS OWN RATE, in two moves both made 2026-08-16:
+So a doubled round pays EXACTLY twice what the undoubled one would have, on every
+scored line. `test_a_doubled_round_is_exactly_twice_the_undoubled_one` asserts
+that over the whole grid, and it is the cleanest statement of the rule.
+
+**Classic's Double is now the same shape as skat's Kontra**, which has always
+been symmetric. This file used to open by contrasting them; if the asymmetry ever
+comes back, that contrast comes back with it.
+
+HOW IT GOT HERE, all on 2026-08-16, because the sequence explains the dials:
 
 The Double has to tell a SACRIFICE from a near-miss, and what separates them is
 not the level (both have that) but how far short the declarer finishes: ordinary
 failures are a median of 2 short with 48% by exactly 1, sacrifices a median of 4.
-So the reward for doubling has to depend on the shortfall.
+So the reward has to depend on the shortfall.
 
-  1. `DOUBLE_RAMP` did it with an ESCALATOR -- 6, 7, 8, 9 for the first, second,
-     third, fourth point. Retired: legible neither on the panel nor in the head.
-  2. With a flat 5 both ways, doubling wins the undoubled set base and NOTHING
-     else -- the same amount whether they miss by one or five -- which pushed
-     break-even above even odds at every level and left the bet shortfall-blind.
-  3. `DOUBLED_SHORT_PENALTY = 6` restores the dependence LINEARLY: doubling a
-     contract `s` short wins `set_base + s` more than letting it stand.
+  1. `DOUBLE_RAMP` did it with an ESCALATOR -- 6, 7, 8, 9 per point. Retired:
+     legible neither on the round panel nor in the head.
+  2. A flat 5 both ways made the reward SHORTFALL-BLIND -- doubling won the
+     undoubled set base and nothing else -- which pushed break-even above even
+     odds at every level.
+  3. `DOUBLED_SHORT_PENALTY = 6` restored it linearly, at an odd rate.
+  4. `= 10` is 2 x 5, which makes the whole Double uniform and the reward equal
+     to what the round was already worth. Break-even becomes the contract's own
+     make/set ratio and the bet carries no house edge either way.
 
 The tests below read BOTH dials off the engine rather than pinning either, so
 moving them again needs no edit here.
@@ -147,6 +153,32 @@ def test_a_set_contract_pays_2N_and_its_own_per_point_rate(level):
         assert (pen == flat) == (_DSH == _SH)
 
 
+def test_a_doubled_round_is_exactly_twice_the_undoubled_one():
+    """THE RULE, in one assertion, over the whole grid (2026-08-16).
+
+    Uniform doubling means every scored line scales by the same 2 -- make base,
+    overtricks, set base, jump bonus and the per-point shortfall alike. Null is
+    the single exception and is asserted here too, since "everything doubles
+    except Null" is the whole statement of the mechanic.
+
+    Derived from nothing: this compares the engine against itself, so it holds
+    for any price list and fails the moment one term stops scaling. It is what
+    would have caught a doubled short rate left at 5 or set to 6.
+    """
+    off_grid = []
+    for level in range(E.MIN_LEVEL, _TOP + 1):
+        for jump in (0, 1, level):
+            plain = E._terms_for("classic", 0, level, jump=jump, doubling=1)
+            dbl = E._terms_for("classic", 0, level, jump=jump, doubling=2)
+            for pts in range(-7, 14):
+                if E.payoff(dbl, pts, True) != 2 * E.payoff(plain, pts, True):
+                    off_grid.append((level, jump, pts))
+                # NULL: identical, never scaled.
+                if E.payoff(dbl, pts, False) != E.payoff(plain, pts, False):
+                    off_grid.append(("null", level, jump, pts))
+    assert not off_grid, f"not exactly 2x (or Null moved) at: {off_grid[:5]}"
+
+
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
 def test_null_is_never_doubled(level):
     assert _terms(level, True)["null"] == _terms(level, False)["null"] == E.NULL_MAKE
@@ -188,17 +220,37 @@ def test_what_doubling_wins_rises_with_the_SHORTFALL():
                 f"flat rate both ways: the reward cannot depend on shortfall: {wins}"
 
 
-def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
-    """It must stay a real bet. On the COMMON failure -- 1 short, 48% of them --
-    the risk of a made contract still dwarfs the reward.
+def test_where_a_near_miss_double_stops_paying():
+    """On the COMMON failure -- 1 short, 48% of them -- does doubling risk more
+    than it wins? Under the UNIFORM Double (everything x2, 2026-08-16) that is no
+    longer true everywhere, and where it flips is pure arithmetic:
 
-    JUMP-FREE contracts only: the v2 jump rule deliberately breaks this for
-    jumped ones -- see the companion test below."""
-    for level in range(2, _TOP + 1):
+        risk > win(1)   <=>   L^2 + Fm  >  (SL*L + Fs) + short
+        at the shipped prices   L^2 + 4 > 2L + 7   <=>   L > 3
+
+    So L1-L3 INVITE the double even on a near-miss, and L4 up protect the
+    declarer. That is not the Double being lopsided -- it is the make curve being
+    quadratic off a base of 4 while the set base is linear, so at the bottom of
+    the ladder being set already costs more than making pays. Uniform doubling
+    only exposes it.
+
+    JUMP-FREE contracts only: the v2 jump rule deliberately breaks this further
+    for jumped ones -- see the companion test below."""
+    crossover = None
+    for level in range(1, _TOP + 1):
         plain, dbl = _terms(level, False), _terms(level, True)
         win = E.payoff(plain, level - 1, True) - E.payoff(dbl, level - 1, True)
         risk = dbl["make"] - plain["make"]
-        assert risk > win, f"level {level}: risk {risk} <= reward {win}"
+        # DERIVED from the price list, so a re-pricing moves the expectation with
+        # the game instead of failing this test.
+        want = _mk(level) > _sb(level) + _SH
+        assert (risk > win) == want, \
+            f"level {level}: risk {risk} vs win {win}, expected risk>win={want}"
+        if risk > win and crossover is None:
+            crossover = level
+    assert crossover is not None, "some level must protect the declarer"
+    assert all(_mk(l) > _sb(l) + _SH for l in range(crossover, _TOP + 1)), \
+        "protection must be monotone once it starts -- make is quadratic, set linear"
 
 
 def test_a_jumped_contracts_double_out_wins_its_risk_at_low_levels():
@@ -405,10 +457,12 @@ def test_the_declarer_keeps_sight_of_the_talon_through_the_double_phase():
 
 
 def test_the_hard_tier_is_offered_both_branches_priced():
-    """Skat's Kontra ships ONE option and decides on its sign, which works only
-    because Kontra is symmetric. Classic's Double is lopsided, so declining is
-    not worth zero -- it is worth the undoubled contract -- and the search has
-    to be able to compare the two."""
+    """Skat's Kontra ships ONE option and decides on its sign. Classic ships TWO
+    and the search compares them -- and it must keep doing so even now that the
+    Double is uniform, because the reason has nothing to do with symmetry:
+    DECLINING IS NOT WORTH ZERO. It is worth the undoubled contract, which is a
+    live payoff either way, so a one-option "is it positive" test would be
+    comparing the doubled branch against nothing."""
     g = _settled_flat(level=3)
     opts = E.auction_payoff_options(g)
     assert len(opts) == 2
@@ -529,6 +583,11 @@ def test_a_sacrifice_is_the_case_the_double_is_priced_for():
     # Measured shortfall medians: ordinary failures 2, sacrifices 4.
     ordinary = 0.56 * win(2) - 0.44 * risk
     sacrifice = 0.78 * win(4) - 0.13 * risk
-    assert ordinary < -5, ordinary
-    assert sacrifice > 5, f"the ramp must make the sacrifice case pay: {sacrifice}"
+    # The DESIGN property is the SIGN and the SEPARATION, not the magnitude --
+    # which has swung with every re-pricing (see the history above; -9.6, then
+    # -4.16 under the uniform Double of 2026-08-16). Asserting `< 0` rather than
+    # `< -5` states the claim that actually matters and stops this test being
+    # re-tuned by hand every time the price list moves.
+    assert ordinary < 0, f"doubling an ORDINARY contract must lose: {ordinary}"
+    assert sacrifice > 5, f"doubling a SACRIFICE must pay: {sacrifice}"
     assert sacrifice - ordinary > 15, "...and separate it from an honest contract"

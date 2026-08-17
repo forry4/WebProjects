@@ -87,7 +87,9 @@ from the parity, never typed beside it).
   magnitude (median ~2 in both sweeps), so the classic rate made the set the
   biggest number on the table: two-thirds of rounds ended in a set paying ~11
   against makes of 1–6, i.e. "whoever had to open loses". 2 tracks the
-  ceiling ratio. The Double and its shortfall ramp apply unchanged.
+  ceiling ratio. The Double applies unchanged, but minor keeps its own flat 2
+  a point when doubled -- classic doubles its per-point rate (2026-08-16),
+  minor does not, and the shortfall ramp is retired in both.
 * **Null 6 (`MINOR_NULL_MAKE`)** — the relationship classic's 12 had (before
   the stake re-anchored classic's Null to 20; minor carries no stake):
   exactly a made level-1's CEILING under the overtrick bonus (1 + 5). The
@@ -1074,15 +1076,44 @@ So a made round reads *"Alice bid 4♠ and took 3 extra points"* over
 ## Double — classic's defender bet, priced for the SACRIFICE (2026-08-07)
 
 A `double` phase between the classic swap and trick 1, the DEFENDER to act.
-Skat keeps Kontra; classic gets this, and the two are deliberately different
-shapes. `g["doubled"]`, `classic_doubling`, `apply_double`.
+`g["doubled"]`, `classic_doubling`, `apply_double`.
 
-    made   N^2 + 10  ->  2 (N^2 + 10)   (the overtrick rate doubles with it;
-                                         the flat stake rides INSIDE both bases
-                                         since 2026-08-11)
-    set      N + 10  ->  2 (N + 10), and the shortfall RAMPS: 6, 7, 8 a point
-                         (`DOUBLE_RAMP`) instead of a flat 5
-    Null         20  ->  20             (untouched, as skat's Kontra leaves its own)
+**UNIFORM SINCE 2026-08-16 — everything doubles except Null**, which also makes
+classic the SAME shape as skat's Kontra. It reached that in four moves in one
+day, and the dials are all still there:
+
+    made   N^2 + 4   ->  2 (N^2 + 4)    (the overtrick rate doubles with it)
+    set     2N + 2   ->  2 (2N + 2), and the per-point shortfall doubles too:
+                         10 a point, not 5 (`DOUBLED_SHORT_PENALTY`)
+    Null        20   ->  20             (the one exception)
+
+| shape | doubled shortfall | reward vs shortfall | break-even L1 |
+|---|---|---|---|
+| `DOUBLE_RAMP = 1` | 6, 7, 8, 9 per point | quadratic | 0.44 |
+| flat 5 both ways | 5 per point | **BLIND** | 0.56 |
+| `DOUBLED_SHORT_PENALTY = 6` | 6 per point | linear | 0.45 |
+| **= 10 (shipped)** | **10 per point** | **= the undoubled round** | **0.26** |
+
+**A doubled round pays EXACTLY twice the undoubled one on every scored line**,
+asserted over the whole grid by
+`test_a_doubled_round_is_exactly_twice_the_undoubled_one`. So the bet has no
+house edge either way and break-even is the contract's own make/set ratio:
+0.26 / 0.33 / 0.42 / 0.50 / 0.57 / 0.62 for levels 1-6.
+
+**THE CONSEQUENCE TO KNOW, because it reads as a bug and is not one:** at levels
+1-3 doubling pays even against a 1-point near-miss, because `L^2 + 4` is smaller
+than `2L + 2 + 5` down there — being set already costs more than making pays.
+That is the make curve being quadratic off a base of 4 against a linear set base,
+not the Double being lopsided; uniform doubling only exposes it. The crossover is
+exactly `L^2 + Fm > (SL x L + Fs) + short`, i.e. L > 3, and
+`test_where_a_near_miss_double_stops_paying` derives it from the price list rather
+than pinning 4.
+
+**The tables below are PRE-2026-08-16 measurements** that chose the ramp. Their
+SHAPE arguments stand -- ordinary failures come up a median of 2 short with 48%
+by exactly 1, sacrifices a median of 4, and that is still why the reward has to
+track the shortfall -- but every absolute EV in them was computed under a
+different price list and a different doubling rule.
 
 **The ±10 stake re-priced this bet (2026-08-11), in the sacrifice's favour:**
 the doubled stake pays the defender 20 more on a set while the risk only grew
@@ -1091,9 +1122,10 @@ the doubled stake pays the defender 20 more on a set while the risk only grew
 compressed 0.93 → 0.85. The tables below are the PRE-STAKE measurements that
 chose the ramp; their shape argument stands, their absolute EVs do not.
 
-**Kontra is symmetric and this is not**, which is the one thing to keep hold
-of: because a made contract doubles while a set one steps by N+1, DECLINING IS
-NOT WORTH ZERO — it is worth the undoubled contract. So `auction_payoff_options`
+**Kontra is symmetric and so is this now (2026-08-16)** — but the thing to keep
+hold of survives the change, for a reason that was never about symmetry:
+DECLINING IS NOT WORTH ZERO — it is worth the undoubled contract, which is a live
+payoff either way. So `auction_payoff_options`
 prices BOTH branches as their own options, each carrying its own move, and the
 Hard tier picks the better. Skat's Kontra can ship one option and decide on its
 sign precisely because its doubling cancels out of the comparison.
