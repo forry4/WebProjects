@@ -991,10 +991,14 @@ distribution any variant produced (3/7.5/12.5/21/27.5/22/6/0.5%); made
 climb past the make point now costs jump bonus too); Doubles 26.5% (doubled
 avg −7.5, defender's doubled set avg 54.7); sacrifices 25.0%; +1 is the most
 common overtake (37.6% of 1.15/auction) and the charged final rise is live
-in ~85% of rounds. The residual limiter on auction length is the
+in ~85% of rounds. ~~The residual limiter on auction length is the
 denomination forever-ban — a climb burns a suit per rung — which is what
-`DENOM_RULE` "standing" (the same-suit-never-twice-in-a-row experiment)
-addresses.
+`DENOM_RULE` "standing" addresses.~~ **THAT CLAIM IS REFUTED (2026-08-16):**
+the suit-priced ladder measurement shows a same-level overtake costs MORE
+difficulty than a level raise (1.13 points against 1.00) while paying the same,
+so the rungs the forever-ban withholds are rungs nobody wants. Relaxing
+`DENOM_RULE` does not lengthen auctions. See "THE SUIT-PRICED LADDER —
+RESOLVED".
 
 **THE 500-ROUND EXPERT PROFILE UNDER v1 OF THE RULE (2026-08-13; opening
 exempt from the jump; k=8 one tree, talon model, dd-resolved, mirror exactly
@@ -3311,15 +3315,16 @@ easier than the next level. If that holds the ladder is ~5x finer than
 `target = level` suggests, and what stops players walking it is
 `DENOM_RULE = "used"` — the per-player forever-ban.
 
-**CORRECTION to a same-day dismissal.** The forever-ban was waved off on the
-grounds that at 1.05 overtakes/auction nobody approaches the five-bid ceiling.
-That reasoning is wrong: the ban does not only bite at the ceiling, it forbids a
-seat from re-bidding its BEST denomination, so it bites on that seat's SECOND
-bid — precisely where the marginal contests are. Corroborating: the cfrlab
-abstraction drops the ban entirely and produces 3.49 bids against shipped
-Expert's 1.94, so the ban sits inside that gap. The two relaxations measured on
-2026-08-13 were rejected on strength grounds, not on auction length, and they
-were measured under the OLD prices.
+**THE `DENOM_RULE` QUESTION WENT BACK AND FORTH TWICE IN ONE DAY AND IS NOW
+SETTLED BY MEASUREMENT — relaxing it does NOT lengthen auctions.** First it was
+dismissed (nobody nears the five-bid ceiling), then that dismissal was retracted
+(the ban bites on a seat's SECOND bid, where the marginal contests are, and the
+abstraction that drops the ban bids more). The retraction's reasoning about WHEN
+the ban bites is correct and its conclusion is still wrong, because it never
+asked what the withheld rungs are WORTH: measured, a same-level overtake costs
+1.13 points of difficulty against a level's 1.00 and pays the same, so it is
+strictly a bad deal. The ban withholds rungs nobody wants. See "THE SUIT-PRICED
+LADDER — RESOLVED" below for the paired 2000-deal arms.
 
 **STATUS: the decisive test is the one already flagged INCONCLUSIVE below** —
 `cfrlab dcache`, the suit-priced ladder, which prices a same-level overtake as a
@@ -3329,7 +3334,7 @@ compared paired and at equal size. Until then, whether more bids/auction is
 reachable at all is OPEN — and the honest prior is that shipped 1.94 is close to
 structural for this ladder.
 
-### THE SUIT-PRICED LADDER — INCONCLUSIVE, not refuted
+### THE SUIT-PRICED LADDER — RESOLVED 2026-08-16, AND THE HYPOTHESIS IS REFUTED
 
 `cfrlab dcache` builds a cache with `pts`/`duck` for ALL FIVE denominations per
 seat, ordered by the seat's own `hand_strength` (never by the solved result,
@@ -3337,11 +3342,55 @@ which would be a cheater's ladder). `leaf` then indexes by `holds`, so a
 same-level overtake selects a genuinely WORSE contract rather than merely a
 dearer one — the flaw that made the earlier `dmult` probe uninformative.
 
-600 deals were collected and it read 0.74 against 0.65 for the same scoring on
-the old cache. **That difference is inside the ±0.11 error bar and the caches are
-different sizes, so this says nothing either way.** A real answer needs the
-all-denomination cache extended to 2000 deals (~1 hour of solving) so it can be
-compared paired and at equal size.
+**The cache is now 2000 deals** (600 + 1400, ~70 min of solving over four
+shards), which is what this section previously said an answer required. The flat
+CONTROL is derived from the same rows by repeating the best denomination, so the
+two arms are paired on identical cards by construction — and where the real-play
+`eps` is used it is drawn with the same seed sequence in both, so they are paired
+on the noise too.
+
+| ladder | leaf | **bids/auction** | settled | made |
+|---|---|---|---|---|
+| flat (overtake costs no difficulty) | double-dummy | 2.43 | 4:61 5:35 | 79.5% |
+| **suit-priced** | double-dummy | **1.61** | 4:60 5:37 | 79.1% |
+| flat | real-play | 3.67 | 5:35 6:44 | 64.8% |
+| **suit-priced** | real-play | **2.71** | 5:32 6:45 | 64.0% |
+
+**THE HYPOTHESIS IS REFUTED, and in the direction opposite to the guess.** The
+idea was that five ranked denominations interleave four extra DIFFICULTY rungs
+between every pair of levels, making the ladder ~5x finer and the auction
+correspondingly longer. Pricing them honestly makes the auction **SHORTER** —
+−0.82 bids double-dummy, −0.96 with real play, consistent across both regimes and
+paired on the same deals.
+
+**The mechanism, measured directly on the cache**: stepping down one
+denomination costs **1.13 points** of achievable target (sd 1.60, n=4000), while
+one LEVEL of the ladder costs 1.00. So a same-level overtake is *harder* than
+raising a level — and it pays the SAME, because the level did not change. It is
+strictly a bad deal, so the equilibrium declines it. Denominations are not
+granularity; they are a penalty on overtaking.
+
+**THEREFORE RELAXING `DENOM_RULE` WILL NOT LENGTHEN AUCTIONS**, and the
+"residual limiter on auction length" framing elsewhere in this file is wrong.
+The extra same-level rungs the forever-ban withholds are rungs nobody wants. This
+also retracts a same-day correction that talked itself into the opposite view —
+the ban does bite on a seat's second bid, but what it withholds is worthless, so
+the bite costs nothing. Two reversals on one question in one day; the measurement
+is the only thing here worth trusting.
+
+**THE BIGGEST DRIVER OF AUCTION LENGTH IS NOT IN THE RULES AT ALL.** Real-play
+noise adds **+1.10** bids (1.61 → 2.71 suit-priced, 2.43 → 3.67 flat) — larger
+than any scoring knob and larger than the ladder's own structure. Uncertainty is
+what makes a seat willing to contest. Any future attempt at longer auctions
+should start there rather than in the price list.
+
+**WHERE SHIPPED EXPERT SITS.** The most realistic cell — suit-priced, real
+play — is **2.71** against Expert's measured **1.94**, so Expert under-contests
+by ~0.8 bids and the headroom is a BOT gap, not a rules gap. **But 2.71 is an
+UPPER BOUND**: the abstraction still drops `DENOM_RULE`, and this section's own
+result is that structural penalties on overtaking cost ~0.9 bids, so the true
+equilibrium with the forever-ban could plausibly sit at or below 1.94. Do not
+quote 2.71 as a target without closing that gap.
 
 ### MEASURED: THE REAL LADDER IS 16% LOOSER, AND THE TUNING WAS AGAINST THE WRONG GAME
 
