@@ -336,6 +336,30 @@ MINOR_SHORT_PENALTY = 2
 #: mode charges per point, charge it evenly".
 DOUBLE_RAMP = 0
 
+#: WHAT A DOUBLED SHORTFALL COSTS PER POINT, when it differs from the undoubled
+#: rate. Absent for a mode == that mode's own `short`, i.e. no change.
+#:
+#: This is the ramp's job done with a FLAT rate instead of an escalator (2026-08-16,
+#: after the ramp was retired the same day). The ramp charged 6, 7, 8, 9 for the
+#: first, second, third, fourth point short; this charges a flat 6 for every
+#: point. It keeps the Double's teeth against a deep failure without the
+#: escalation, and unlike the ramp it is legible on the round panel as one rate.
+#:
+#: WHY IT IS NEEDED AT ALL: retiring the ramp made doubling win a FLAT amount --
+#: exactly the undoubled set base, whatever the shortfall -- which took the
+#: break-even odds above 50% at every level and left the bet with nothing to say
+#: about a sacrifice. A rate of 6 restores the shortfall dependence linearly:
+#: doubling a contract that finishes `s` short now wins `set_base + s` more than
+#: letting it stand, so a deep failure is worth more than a near-miss again,
+#: just not quadratically.
+#:
+#: SEPARATE FROM THE BOT QUESTION, and do not conflate them: `main.DOUBLE_MARGIN`
+#: is a threshold in payoff points, so a bot that "never doubles" may simply be
+#: over-thresholded rather than under-rewarded. Re-run `tools/dblsweep.py`
+#: whenever this moves -- it changes the doubled branch's value, which is exactly
+#: what that margin cuts.
+DOUBLED_SHORT_PENALTY = {"classic": 6}
+
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:
 #: A per-mode dict like `MATCH_TARGET`, and like that one it currently reads the
@@ -2163,7 +2187,12 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
                 else stake * doubling + bonus)
         return {"denom": denom, "level": level, "target": level,
                 "make": make * doubling, "over": over * doubling,
-                "set_base": setb, "short": short,
+                "set_base": setb,
+                # A DOUBLED contract may charge a different per-point rate --
+                # see DOUBLED_SHORT_PENALTY. `short` is already a wire term and
+                # a field on the Rust `Contract`, so this needs no mirror: the
+                # solver reads whatever rate it is handed.
+                "short": DOUBLED_SHORT_PENALTY.get(mode, short),
                 "ramp": DOUBLE_RAMP, "null": null}
     return {"denom": denom, "level": level, "target": level,
             "make": make, "over": over, "set_base": setb,

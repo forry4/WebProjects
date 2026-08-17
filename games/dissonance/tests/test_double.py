@@ -5,19 +5,26 @@ Classic's Double is NOT that, and the asymmetry is the design (the flat stake
 rides INSIDE both bases, so it doubles with them). At the shipped prices:
 
     made   N^2 + 4   ->  2 (N^2 + 4)      (overtricks doubled with it)
-    set     2N + 2   ->  2 (2N + 2), with a FLAT 5 a point short either way
+    set     2N + 2   ->  2 (2N + 2), and a doubled point short costs 6, not 5
     Null        20   ->  20               (untouched)
 
-THE RAMP WAS RETIRED 2026-08-16 (`DOUBLE_RAMP = 0`). It used to make the doubled
-shortfall escalate -- 6, 7, 8 a point instead of a flat 5 -- because doubling has
-to tell a SACRIFICE from a near-miss, and what separates them is not the level
-(both have that) but how far short the declarer finishes: ordinary failures are a
-median of 2 short with 48% by exactly 1, sacrifices a median of 4. Ramping taxed
-what only a sacrifice has. Without it, doubling wins the undoubled set base flat,
-whatever happens, and needs better than even odds at every level.
+WHY THE DOUBLED SHORTFALL HAS ITS OWN RATE, in two moves both made 2026-08-16:
 
-The tests below assert BOTH arms off `E.DOUBLE_RAMP` rather than pinning it, so
-switching the ramp back on needs no edit here.
+The Double has to tell a SACRIFICE from a near-miss, and what separates them is
+not the level (both have that) but how far short the declarer finishes: ordinary
+failures are a median of 2 short with 48% by exactly 1, sacrifices a median of 4.
+So the reward for doubling has to depend on the shortfall.
+
+  1. `DOUBLE_RAMP` did it with an ESCALATOR -- 6, 7, 8, 9 for the first, second,
+     third, fourth point. Retired: legible neither on the panel nor in the head.
+  2. With a flat 5 both ways, doubling wins the undoubled set base and NOTHING
+     else -- the same amount whether they miss by one or five -- which pushed
+     break-even above even odds at every level and left the bet shortfall-blind.
+  3. `DOUBLED_SHORT_PENALTY = 6` restores the dependence LINEARLY: doubling a
+     contract `s` short wins `set_base + s` more than letting it stand.
+
+The tests below read BOTH dials off the engine rather than pinning either, so
+moving them again needs no edit here.
 """
 
 import random
@@ -77,6 +84,10 @@ _LM = E.LINEAR_MAKE_BONUS["classic"]
 _FS = E.FLAT_SET_PENALTY["classic"]
 _SL = E.SET_LEVEL_RATE["classic"]
 _SH = E.CLASSIC_SHORT_PENALTY
+#: What a DOUBLED shortfall costs per point. Its own dial since 2026-08-16 --
+#: absent for a mode means "the same as undoubled", so this expression is the
+#: engine's own fallback and stays correct if the dial is removed again.
+_DSH = E.DOUBLED_SHORT_PENALTY.get("classic", _SH)
 
 
 def _mk(level):
@@ -100,11 +111,12 @@ def test_a_made_contract_pays_exactly_double(level):
 
 
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
-def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
+def test_a_set_contract_pays_2N_and_its_own_per_point_rate(level):
     plain, dbl = _terms(level, False), _terms(level, True)
     assert plain["set_base"] == _sb(level) and plain["ramp"] == 0
     assert dbl["set_base"] == 2 * _sb(level)
-    assert dbl["short"] == plain["short"], "the flat per-point term is unchanged"
+    assert plain["short"] == _SH
+    assert dbl["short"] == _DSH, "a doubled shortfall has its own per-point rate"
     # DERIVED from the two dials, never typed out: both have moved already
     # (short 4 -> 5, ramp 0 -> 1 -> 0) and a literal only says what someone
     # believed on the day. Doubled, the s-th point short costs `short + s*ramp`,
@@ -112,7 +124,7 @@ def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     # so this test does not pin `DOUBLE_RAMP` to a value and did not need
     # editing when the ramp was retired on 2026-08-16.
     assert dbl["ramp"] == E.DOUBLE_RAMP
-    P, R = _SH, E.DOUBLE_RAMP
+    P, R = _DSH, E.DOUBLE_RAMP
     pen = [-E.payoff(dbl, level - s, True) - 2 * _sb(level)
            for s in range(1, 6)]
     steps = [b - a for a, b in zip([0] + pen, pen)]
@@ -124,12 +136,15 @@ def test_a_set_contract_pays_2N_and_a_RAMPED_shortfall(level):
     if R:
         assert steps[-1] > steps[0], "with a ramp the shortfall must ESCALATE"
     else:
-        assert len(set(steps)) == 1 == len({P}), "no ramp: a flat rate per point"
+        assert len(set(steps)) == 1, "no ramp: a flat rate per point"
     flat = [-E.payoff(plain, level - s, True) - _sb(level)
             for s in range(1, 6)]
-    assert flat == [P * s for s in range(1, 6)], "undoubled stays flat"
+    assert flat == [_SH * s for s in range(1, 6)], "undoubled stays flat"
     if not R:
-        assert pen == flat, "no ramp: doubled and undoubled shortfalls match"
+        # Both sides flat, but at their OWN rates -- equal only if the doubled
+        # dial is set to the undoubled rate.
+        assert pen == [_DSH * s for s in range(1, 6)]
+        assert (pen == flat) == (_DSH == _SH)
 
 
 @pytest.mark.parametrize("level", range(E.MIN_LEVEL, _TOP + 1))
@@ -137,17 +152,15 @@ def test_null_is_never_doubled(level):
     assert _terms(level, True)["null"] == _terms(level, False)["null"] == E.NULL_MAKE
 
 
-def test_what_doubling_wins_tracks_the_ramp_and_nothing_else():
+def test_what_doubling_wins_rises_with_the_SHORTFALL():
     """What doubling WINS, as a function of how far short the declarer finishes.
 
-    This was the ramp's whole design property -- the reward had to rise with the
-    shortfall or the Double could not tell a sacrifice from a near-miss. The ramp
-    was RETIRED on 2026-08-16 (`DOUBLE_RAMP = 0`), so the reward is now FLAT in
-    the shortfall: doubling wins exactly the undoubled set base, whatever
-    happens. That is the trade the retirement makes, and it is asserted here
-    rather than left in prose so nobody has to rediscover it.
-
-    Both arms are asserted, because the ramp is a constant and may come back."""
+    The Double's core design property: the reward must rise with the shortfall or
+    the bet cannot tell a sacrifice from a near-miss. Which DIAL delivers that has
+    changed twice (`DOUBLE_RAMP` quadratically, then `DOUBLED_SHORT_PENALTY`
+    linearly), so all three arms are asserted off the constants -- ramp on, both
+    rates equal (shortfall-blind, the one state that FAILS the property), and a
+    raised doubled rate."""
     for level in (3, 6):
         plain, dbl = _terms(level, False), _terms(level, True)
         wins = [E.payoff(plain, level - s, True) - E.payoff(dbl, level - s, True)
@@ -155,16 +168,24 @@ def test_what_doubling_wins_tracks_the_ramp_and_nothing_else():
         # Derived, not typed: doubling adds one more set base plus the ramp's
         # triangular term, so the win at s short is `sb + ramp*s(s+1)/2`.
         R = E.DOUBLE_RAMP
-        assert wins == [_sb(level) + R * s * (s + 1) // 2 for s in range(1, 7)], wins
+        # Doubling adds one more set base, the ramp's triangular term, and the
+        # DIFFERENCE between the doubled and undoubled per-point rates.
+        assert wins == [_sb(level) + (_DSH - _SH) * s + R * s * (s + 1) // 2
+                        for s in range(1, 7)], wins
         if R:
             assert all(b > a for a, b in zip(wins, wins[1:])), wins
             assert wins[0] < _sb(level) + 2, \
                 f"a 1-short miss should stay cheap: {wins[0]}"
             assert wins[5] - wins[0] >= 20 * R, \
                 f"a 6-short collapse should not: {wins}"
+        elif _DSH > _SH:
+            # The 2026-08-16 replacement for the ramp: the reward rises with the
+            # shortfall again, LINEARLY rather than quadratically.
+            assert all(b - a == _DSH - _SH for a, b in zip(wins, wins[1:])), wins
+            assert wins[-1] > wins[0], "a deeper failure must still pay more"
         else:
             assert len(set(wins)) == 1 and wins[0] == _sb(level), \
-                f"no ramp: the reward cannot depend on the shortfall: {wins}"
+                f"flat rate both ways: the reward cannot depend on shortfall: {wins}"
 
 
 def test_doubling_still_risks_more_than_it_wins_on_a_near_miss():
@@ -224,10 +245,19 @@ def test_the_break_even_odds_are_what_the_bot_policy_rests_on():
     vals = [need[k] for k in (1, 2, 3, 4)]
     assert all(b > a for a, b in zip(vals, vals[1:])), need
     assert vals[-1] < 0.75, need
-    if E.DOUBLE_RAMP:
-        assert vals[0] < 0.5, f"with a ramp a low Double pays under even odds: {need}"
+    # THIS MOVED TWICE ON 2026-08-16 and the sequence is the useful record:
+    #   ramp on               0.44 / .. / < 0.75   reward grows quadratically
+    #   ramp off, flat 5      0.56 0.57 0.62 0.67  reward FLAT in the shortfall
+    #   ramp off, doubled 6   0.45 0.50 0.57 0.62  reward grows linearly
+    # The design property is not any of those triples -- it is that the bottom of
+    # the ladder pays from UNDER even odds exactly when doubling's reward depends
+    # on the shortfall at all. Asserted that way so it survives the next move.
+    if bool(E.DOUBLE_RAMP) or _DSH > _SH:
+        assert vals[0] < 0.5, \
+            f"a low Double should pay from under even odds: {need}"
     else:
-        assert vals[0] > 0.5, f"no ramp: every Double needs better than even: {need}"
+        assert vals[0] > 0.5, \
+            f"a shortfall-blind Double needs better than even: {need}"
 
 
 # --- end to end ------------------------------------------------------------
@@ -241,9 +271,10 @@ def test_a_doubled_round_scores_the_doubled_numbers():
         t = E.payoff_terms(g)
         # made exactly on target: (N^2 + stake) [x2]
         assert E.payoff(t, 3, True) == (2 * _mk(3) if doubled else _mk(3))
-        # set by two. Doubled: base 2(N + stake) + (short+ramp) + (short+2 ramp).
-        # Undoubled: base (N + stake) + 2 short.
-        P, R = _SH, E.DOUBLE_RAMP
+        # set by two. Doubled: base 2(N + stake) + (dshort+ramp) + (dshort+2 ramp).
+        # Undoubled: base (N + stake) + 2 short. The doubled per-point rate is
+        # its own dial (`DOUBLED_SHORT_PENALTY`), so P differs by arm.
+        P, R = (_DSH if doubled else _SH), E.DOUBLE_RAMP
         want = (-(2 * _sb(3) + (P + R) + (P + 2 * R)) if doubled
                 else -(_sb(3) + 2 * P))
         assert E.payoff(t, 1, True) == want

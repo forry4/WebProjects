@@ -123,17 +123,18 @@ export default function DissonanceRules() {
 				<ul>
 					<li>Declarer <b>makes</b> it: they score <b>double</b> — 2 × (N × N + 4)
 						instead of N × N + 4, overtricks included.</li>
-					<li>Declarer <b>falls short</b>: you score <b>2 × (2N + 2)</b>, plus the
-						usual <b>5 for every point</b> they finish below N. The per-point rate is
-						the same whether or not you Kontra — only the base doubles.</li>
+					<li>Declarer <b>falls short</b>: you score <b>2 × (2N + 2)</b>, plus
+						<b>6 for every point</b> they finish below N — one more per point than
+						the 5 an undoubled set pays.</li>
 					<li><b>Null is untouched.</b> A declarer who wins no +2 trick still scores
 						the flat 20, Kontra or not.</li>
 				</ul>
 				<p>
-					So Kontra is a flat bet on one question: <b>will they get there?</b> It wins
-					you the same amount whether they miss by one or by five — a level-6 contract
-					pays you 33 one short and 48 four short, against 19 and 34 if you had let it
-					stand. Both of those are the doubled base doing the work, not the shortfall.
+					That extra point per shortfall is what makes Kontra worth aiming. It barely
+					changes a declarer who misses by one — which is what most failed contracts
+					do — and it adds up against one who finishes miles short, which is what a
+					<b>sacrifice</b> looks like. A level-6 contract pays you <b>34</b> one short
+					and <b>52</b> four short, against 19 and 34 if you had let it stand.
 				</p>
 				<RulesTip>
 					<p>
@@ -269,8 +270,8 @@ export default function DissonanceRules() {
 					<li><b>Null pays 6</b> — exactly a made level-1 contract played to its
 						ceiling, the relationship classic's Null had before the flat stake
 						re-anchored it to 20.</li>
-					<li>The Kontra works unchanged — doubled base, flat per-point shortfall,
-						just like classic's. The <b>match plays to
+					<li>The Kontra works unchanged — doubled base, and minor keeps its own
+						flat 2 a point (the raised doubled rate is classic's alone). The <b>match plays to
 						25</b>, which buys about the same number of rounds as classic's 150.</li>
 				</ul>
 				<RulesTip>

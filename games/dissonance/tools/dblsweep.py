@@ -54,6 +54,11 @@ MODE = "classic"
 FLAT_SET = _E.FLAT_SET_PENALTY[MODE]
 SET_RATE = _E.SET_LEVEL_RATE[MODE]
 SHORT = _E.CLASSIC_SHORT_PENALTY
+#: A DOUBLED shortfall may charge its own rate (`DOUBLED_SHORT_PENALTY`, 2026-08-16).
+#: Missing this made `invert` fail on exactly the doubled SET rows and drop them,
+#: which left the doubled sample all-makes and printed "on FAIL 0.0%" with a
+#: NEGATIVE discrimination -- a clean-looking table that was pure selection.
+DSHORT = _E.DOUBLED_SHORT_PENALTY.get(MODE, SHORT)
 RAMP = _E.DOUBLE_RAMP
 JUMP = _E.JUMP_SET_BONUS[MODE]
 NULL = _E.NULL_MAKE
@@ -104,39 +109,46 @@ def base_set(N, j, D, jump_doubled=True):
 
 
 def invert(r, jd=True):
-    """Recover the overtricks / tricks-short the recorded payoff implies.
+    """Recover what the recorded payoff actually WAS, and its decomposition.
 
     The arena records the payoff, not its decomposition, and re-pricing a round
     under the other doubling needs the decomposition. Solving for it rather than
     logging it keeps the arena's own output byte-compatible -- and it is checked:
-    a row that does not invert is DROPPED, so a scoring change this file has not
-    caught up with shows as a collapsing `n` and not as quietly wrong prices.
+    a row that does not invert is DROPPED and REPORTED, so a scoring change this
+    file has not caught up with shows as a loud mismatch, not as quiet prices.
+
+    THE ARENA'S `outcome` IS NOT THE PLAYED RESULT and must not be trusted here.
+    It is a DOUBLE-DUMMY classification -- "null" means the optimal line went
+    through Null, whether or not the bots found it -- so a round can be labelled
+    `null` and actually have been played as a set. 12 of 192 rounds in the
+    2026-08-16 run were exactly that, and treating the label as the result
+    dropped every one of them. `kind` below is the result the PAYOFF implies,
+    which is the only thing the re-pricing and the FAIL/MADE split may use.
     """
     N, j, D = r["N"], r["j"], 2 if r["doubled"] else 1
     P = r["payoff"]
-    if r["outcome"] == "null":
-        return P == NULL
-    if r["outcome"] == "set":
-        ramp = RAMP if D > 1 else 0
-        for s in range(1, N + 1):
-            if -(base_set(N, j, D, jd) + SHORT * s + ramp * s * (s + 1) // 2) == P:
-                r["s"] = s
-                return True
-        return False
+    if P == NULL:
+        r["kind"] = "null"
+        return True
     for over in range(0, 13):
         if D * (N * N + LIN_MAKE * N + FLAT_MAKE) + D * over == P:
-            r["over"] = over
+            r["kind"], r["over"] = "made", over
+            return True
+    ramp, sh = (RAMP, DSHORT) if D > 1 else (0, SHORT)
+    for s in range(1, N + 1):
+        if -(base_set(N, j, D, jd) + sh * s + ramp * s * (s + 1) // 2) == P:
+            r["kind"], r["s"] = "set", s
             return True
     return False
 
 
 def pay(r, D, jd=True):
-    if r["outcome"] == "null":
-        return NULL
-    if r["outcome"] == "made":
+    if r["kind"] == "null":
+        return NULL      # never doubled, so D is irrelevant
+    if r["kind"] == "made":
         return D * (r["N"] ** 2 + LIN_MAKE * r["N"] + FLAT_MAKE) + D * r["over"]
-    ramp = RAMP if D > 1 else 0
-    return -(base_set(r["N"], r["j"], D, jd) + SHORT * r["s"]
+    ramp, sh = (RAMP, DSHORT) if D > 1 else (0, SHORT)
+    return -(base_set(r["N"], r["j"], D, jd) + sh * r["s"]
              + ramp * r["s"] * (r["s"] + 1) // 2)
 
 
@@ -155,11 +167,23 @@ def main():
     live = float(sys.argv[sys.argv.index("--live") + 1])
     skip = {"--live", str(sys.argv[sys.argv.index("--live") + 1])}
     pats = [a for a in sys.argv[1:] if not a.startswith("--") and a not in skip]
-    rs = [r for r in rounds(pats) if invert(r, jd)]
+    all_rows = rounds(pats)
+    rs = [r for r in all_rows if invert(r, jd)]
+    dropped = len(all_rows) - len(rs)
+    if dropped:
+        # LOUD, because a silent drop is selection. `invert` recovers the
+        # overtricks/shortfall the recorded payoff implies, and it can only fail
+        # if this tool's price list disagrees with the one the run was played
+        # under -- in which case the rows it drops are the ones the mismatch
+        # touches, and every column below is a biased subsample.
+        print(f"*** {dropped} of {len(all_rows)} rounds did NOT invert and were "
+              f"DROPPED.\n*** That is a PRICE-LIST MISMATCH, not noise: this tool's "
+              f"constants disagree\n*** with the run's. Do not read the table until "
+              f"it is 0.")
     if not rs:
         print("no rounds with a recorded double decision yet")
         return
-    fail = [r for r in rs if r["outcome"] == "set"]
+    fail = [r for r in rs if r["kind"] == "set"]
     print(f"n={len(rs)} rounds with a recorded double  "
           f"(jump {'inside' if jd else 'OUTSIDE'} the x2)")
     print(f"recorded at LIVE margin {live:g} -- the `margin` column below is "
@@ -179,9 +203,12 @@ def main():
         gain = [(-(p - pay(r, 1, jd)) if d else 0.0)
                 for r, d, p in zip(rs, dec, pays)]
         nd = sum(dec)
-        onf = sum(1 for r, d in zip(rs, dec) if d and r["outcome"] != "made")
-        onm = sum(1 for r, d in zip(rs, dec) if d and r["outcome"] == "made")
-        nf = sum(1 for r in rs if r["outcome"] != "made")
+        # ONLY A SET PAYS THE DOUBLE. Null pays the DECLARER +20, so the old
+        # `outcome != "made"` test credited the bet for rounds where the
+        # declarer escaped and the defender collected nothing.
+        onf = sum(1 for r, d in zip(rs, dec) if d and r["kind"] == "set")
+        onm = sum(1 for r, d in zip(rs, dec) if d and r["kind"] != "set")
+        nf = sum(1 for r in rs if r["kind"] == "set")
         nm = len(rs) - nf
         disc = 100 * onf / max(1, nf) - 100 * onm / max(1, nm)
         print(f"{M_abs:>7} {100*nd/len(rs):>5.1f}% {100*onf/max(1,nf):>7.1f}% "
@@ -218,7 +245,7 @@ def main():
         sel = [r for r in rs if lo < r["edge"] <= hi]
         if not sel:
             continue
-        made = 100 * sum(1 for r in sel if r["outcome"] == "made") / len(sel)
+        made = 100 * sum(1 for r in sel if r["kind"] != "set") / len(sel)
         bar = "#" * int(made / 4)
         print(f"    {lo:>6}-{hi if hi < 1e9 else '+':<7} {len(sel):>5} "
               f"{made:>12.1f}%  {bar}")
