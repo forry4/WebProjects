@@ -544,12 +544,21 @@ function ContractChip({ game, nameOf, sharpBonus }) {
       <span className="dis-chip-den">
         {a.level}<Den d={a.denom} />
       </span>
-      {/* POINTS, not "score": the target is a promise in TRICK points, and
-          "score" is reserved for what the round pays out. This is the line a
-          phone leans on -- the side panel is display:none there. */}
+      {/* SKAT ONLY, and that is the whole rule (2026-08-17). The target is a
+          promise in TRICK points -- "score" is reserved for what the round pays
+          out -- but in classic and minor the target IS the level, already shown
+          as a glyph immediately to the left, so spelling it out restated the
+          same number in words one span later. Skat keeps it because there the
+          target genuinely differs from the bid: the sharp bonus is added on top,
+          so "must take N" is a fact the glyph does not carry.
+          This is the line a phone leans on -- the side panel is display:none
+          there -- which is exactly why it should not spend half its width
+          saying something twice. */}
       <span className="dis-chip-who">
-        {nameOf(a.declarer)} must take{" "}
-        {ptsLabel(a.level + (ct.sharp ? sharpBonus : 0))}
+        {nameOf(a.declarer)}
+        {game.mode === "skat"
+          ? <>{" must take "}{ptsLabel(a.level + (ct.sharp ? sharpBonus : 0))}</>
+          : null}
       </span>
       {(parts.length > 0 || doubling > 1) && (
         <span className={`dis-chip-mult${doubling > 1 ? " dbl" : ""}`}>
@@ -3185,8 +3194,16 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     classic, "no +1 trick" in minor, "no positive trick" under
                     card scoring). `nullCond` reads it off the wire, so the
                     line is right in every mode without knowing which. */}
+                {/* NO "needs N pts" HERE EITHER (2026-08-17). The target IS the
+                    level in classic and minor -- `_terms_for` sets
+                    `target = level` -- so it restated the number in the headline
+                    directly above it, one line down and in words. That is the
+                    same glyph-vs-word duplication the note above says was
+                    removed once already; it had simply survived in the other
+                    half of the box. What is left is the two PAYOUTS, which are
+                    real facts and appear nowhere else on screen. */}
                 <div className="dis-ctsub">
-                  needs <b>{ptsLabel(game.auction.level)}</b> · makes{" "}
+                  makes{" "}
                   <b>{(game.doubled ? 2 : 1)
                     * (game.auction.level * game.auction.level + flatMake)}</b>
                   {" "}· Null <b>{nullMake}</b>{" "}

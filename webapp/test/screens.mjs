@@ -2612,6 +2612,8 @@ try {
 		// all four of its decisions read as "answered 4 of 6 armed".
 		const frames = { ai_search: 0, room_update: 0 };
 		const decisions = new Set();
+		const restated = new Set();   // any "needs/must take N pts" seen in play
+		let ctSeen = false;           // ...and whether the contract box ever rendered
 		page.on("websocket", (ws) => {
 			ws.on("framereceived", ({ payload }) => {
 				if (typeof payload !== "string") return;
@@ -2714,6 +2716,31 @@ try {
 				return {};
 			});
 			if (st.over) break;
+			// THE TARGET MUST NOT BE RESTATED IN WORDS (2026-08-17). In classic and
+			// minor the target IS the level, already on screen as a glyph, so any
+			// line spelling it out says the same number twice. It was removed from
+			// the auction panel, reported still visible, and found in TWO more
+			// places -- the in-play contract box ("needs 2 pts") and the phone chip
+			// ("must take 2 pts"), different words each time. Grepping one phrasing
+			// is what let it survive twice, so this reads RENDERED text.
+			//
+			// SAMPLED EVERY TURN rather than once: the contract box only exists
+			// during play, so a single check placed in the auction block passed
+			// against elements that were not on screen yet -- vacuous in exactly
+			// the place the bug lived. `ctSeen` is the non-vacuity latch and is
+			// asserted below, so "never looked" fails as loudly as "found one".
+			const rest = await page.evaluate(() => {
+				const sel = ".dis-ctsub, .dis-chip, .dis-ctline, .dis-contractrow";
+				const els = [...document.querySelectorAll(sel)];
+				const bad = [];
+				for (const el of els) {
+					const t = el.textContent.replace(/\s+/g, " ").trim();
+					if (/needs \d+ pts?|must take \d+ pts?/.test(t)) bad.push(t);
+				}
+				return { n: els.length, box: !!document.querySelector(".dis-ctsub"), bad };
+			});
+			if (rest.box) ctSeen = true;
+			for (const b of rest.bad) restated.add(b);
 			if (st.bidding) { await disBidCheaply(page); await sleep(250); continue; }
 			await sleep(st.acted ? 120 : 250);
 		}
@@ -2757,6 +2784,13 @@ try {
 			`no auction answer among ${searches.length}: ${JSON.stringify(searches.slice(0, 3))}`);
 		check("no page errors driving the client-side search",
 			!errors.some((e) => !e.startsWith("[info]")), errors.slice(0, 3).join(" | ").slice(0, 300));
+		// NON-VACUITY FIRST, because this is the check that was already vacuous
+		// once: if the contract box never rendered, the scan above proved nothing
+		// and must say so rather than pass.
+		check("the in-play contract box actually rendered (else the scan below is empty)",
+			ctSeen, "no .dis-ctsub was ever on screen during the game");
+		check("...and the target is never restated in words beside its own glyph",
+			restated.size === 0, JSON.stringify([...restated].slice(0, 3)));
 		await ctx.close();
 	}
 
@@ -2923,6 +2957,7 @@ try {
 		check("...with no placeholder and no separate 'needs N pts' row",
 			!!row && !/no bid yet|no contract yet|needs/.test(row.text) && !row.standing,
 			JSON.stringify(row));
+
 		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a
 		// 5-column grid — a responder's short legal set centers instead of
 		// hugging the left edge beside dead tracks. Fifth-width keys are what
