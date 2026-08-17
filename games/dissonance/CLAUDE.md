@@ -1109,6 +1109,39 @@ exactly `L^2 + Fm > (SL x L + Fs) + short`, i.e. L > 3, and
 `test_where_a_near_miss_double_stops_paying` derives it from the price list rather
 than pinning 4.
 
+**MEASURED AGAINST THE COMPLAINT THAT PROMPTED IT** ("the bots never double even
+for sacrifices"), 192 dd-resolved Expert self-play rounds per arm at
+`DOUBLE_MARGIN = 20`, same harness, adjacent deal windows:
+
+| doubled shortfall | dbl% | on FAIL | on MADE | disc | defender gain | declarer EV |
+|---|---|---|---|---|---|---|
+| 6 a point | 15.6% | 21.4% | 13.2% | +8.2 | **−2.11** | +11.79 |
+| **10 a point (uniform)** | **41.7%** | **68.4%** | **24.1%** | **+44.3** | **+6.16** | **−6.19** |
+
+**It fixed the thing it was aimed at, and by more than the rate suggests.** The
+bots were doubling 15.6% -- not "never" -- but those doubles were EV-NEGATIVE and
+barely discriminating. Uniform doubling flips the sign (−2.11 → +6.16 a round for
+the defender) and takes discrimination from +8.2 to +44.3, with 68.4% of failed
+contracts doubled against 24.1% of made ones. So the earlier diagnosis -- that
+this was a threshold fault rather than a pricing one -- was WRONG: the reward
+really was too small for the search to find the bet.
+
+**TWO THINGS TO WATCH, both product decisions rather than bugs:**
+* **41.7% is a lot**, against a set rate of 39.6% -- the defender is doubling
+  nearly everything that fails, plus some. The earlier campaign called 59% "far
+  too much", though that was when doubling LOST money; it now pays.
+* **Declaring got markedly less attractive**: the declarer's mean payoff moved
+  +11.79 → −6.19 across the same arms, an 18-point swing, and the set rate itself
+  rose 29.2% → 39.6% (the auction search prices the double branch, so a scarier
+  Double feeds back into the bidding). At n=192 that second figure carries ±7pp
+  and should be re-measured before anything is built on it.
+
+**IF 41.7% READS AS TOO LOOSE IN PLAYTEST, THE FIX IS FREE AND IS NOT A SCORING
+CHANGE.** The same recorded run prices every threshold: `DOUBLE_MARGIN` 32 gives
+24.0% doubling at discrimination +34.4 and gain +5.73, and 36 gives 20.8% at
++35.2 and +5.99 -- most of the benefit at half the rate. Re-run
+`tools/dblsweep.py --live 20` over `dsh10/` to see the full column.
+
 **The tables below are PRE-2026-08-16 measurements** that chose the ramp. Their
 SHAPE arguments stand -- ordinary failures come up a median of 2 short with 48%
 by exactly 1, sacrifices a median of 4, and that is still why the reward has to
