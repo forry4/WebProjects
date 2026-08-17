@@ -2880,6 +2880,49 @@ try {
 		// may be offered, and the keys are the same width in both cases.
 		check("no bid above the mode's cap is ever offered",
 			auc.levels.length > 0 && Math.max(...auc.levels) <= 10, JSON.stringify(auc));
+
+		// THE STANDING-BID LINE (2026-08-17). It is ONE row -- "Ada 5♦" -- where it
+		// used to be a contract row plus a separate "Ada needs 5 pts" beneath, and
+		// the pre-bid state renders NOTHING where it used to say "no bid yet".
+		//
+		// OBSERVES ONLY. The first version of this bid, to force the standing
+		// state -- which consumed this block's own turn and left the three level-pad
+		// checks below reading an auction that had moved on. Never spend shared
+		// state in a block that measures it.
+		//
+		// WHICH SEAT OPENS IS RANDOM, so both states are asserted rather than one
+		// being waited for: empty when nothing stands, holder-plus-contract when
+		// something does. The RESERVE is checked unconditionally off the computed
+		// style, because that is the property that actually matters and it does not
+		// depend on who opened -- an empty row now takes its height from
+		// `min-height` alone, and if that is ever lost the row collapses to 0 and
+		// the first bid of every auction shoves the keypad down. Which is exactly
+		// the bug the old placeholders were shortened to avoid.
+		const row = await page.evaluate(() => {
+			const el = document.querySelector(".dis-contractrow");
+			if (!el) return null;
+			const c = el.querySelector(".dis-contract");
+			return {
+				reserve: parseFloat(getComputedStyle(el).minHeight) || 0,
+				h: Math.round(el.getBoundingClientRect().height),
+				text: el.textContent.trim(),
+				holder: c?.querySelector(".dis-holder")?.textContent.trim() || "",
+				chHeight: c ? Math.round(c.getBoundingClientRect().height) : 0,
+				standing: !!document.querySelector(".dis-standing"),
+			};
+		});
+		check("the contract row reserves its height in CSS, not with placeholder text",
+			!!row && row.reserve >= 32, JSON.stringify(row));
+		check(row?.text
+			? "a standing bid is ONE line, holder and contract together"
+			: "...and nothing at all is drawn before a bid stands",
+			!!row && (row.text
+				? (!!row.holder && row.chHeight <= row.reserve + 6)
+				: row.h >= 32),
+			JSON.stringify(row));
+		check("...with no placeholder and no separate 'needs N pts' row",
+			!!row && !/no bid yet|no contract yet|needs/.test(row.text) && !row.standing,
+			JSON.stringify(row));
 		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a
 		// 5-column grid — a responder's short legal set centers instead of
 		// hugging the left edge beside dead tracks. Fifth-width keys are what

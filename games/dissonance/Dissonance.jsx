@@ -1311,17 +1311,25 @@ function ModeBadge({ mode }) {
   return <span className="dis-modebadge">{MODE_LABEL[mode]}</span>;
 }
 
-function ContractLine({ game }) {
+// `who` prefixes the holder's name, so the standing bid is ONE line -- "Ada 5♦"
+// rather than a contract row with a separate "Ada needs 5 pts" under it.
+//
+// NOTHING is rendered before a bid stands: the placeholders ("no bid yet", "no
+// contract yet") are gone. The row keeps its height from `.dis-contractrow`'s
+// `min-height`, NOT from its content, which is what stops the keypad below
+// moving when the first bid lands -- the bug those two placeholders were
+// themselves shortened to avoid. Deleting the text without that reserve would
+// reintroduce it.
+function ContractLine({ game, who }) {
   const a = game.auction || {};
   // Skat mode: until the declaration lands, all there is to show is the number.
   if (game.mode === "skat" && !a.level) {
-    return a.value
-      ? <span className="dis-contract"><b>{a.value}</b></span>
-      : <span className="muted">no bid yet</span>;
+    return a.value ? <span className="dis-contract"><b>{a.value}</b></span> : null;
   }
-  if (!a.level) return <span className="muted">no contract yet</span>;
+  if (!a.level) return null;
   return (
     <span className="dis-contract">
+      {who ? <span className="dis-holder">{who}</span> : null}
       <b>{a.level}</b>
       <Den d={a.denom} />
     </span>
@@ -2339,32 +2347,19 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   line below is always rendered: `ContractLine` swaps a
                   body-size "no contract yet" for a 1.5rem contract the moment
                   a bid lands, and those are different heights — measured at
-                  7px, which the whole keypad underneath inherited as a jump. */}
-              <div className="dis-contractrow"><ContractLine game={game} /></div>
+                  7px, which the whole keypad underneath inherited as a jump.
+                  The placeholder is gone entirely now, so the row is empty
+                  until a bid stands and the reserve is doing ALL the work. */}
+              <div className="dis-contractrow">
+                <ContractLine game={game}
+                  who={game.auction.level > 0
+                    ? nameOf(game.auction.declarer) : null} />
+              </div>
               {/* POINTS, not "score" — the level is a promise in TRICK points,
                   and "score" is what the round pays out. Same vocabulary the
                   result panel keeps to. (This comment sits OUTSIDE the `&&`:
                   a JSX comment is a child expression, and one inside those
                   parens is a syntax error.) */}
-              {/* ALWAYS RENDERED, never conditional, and that is the bid pad
-                  holding still. This line only appeared once a bid stood, so
-                  the first bid of every auction pushed the whole keypad down
-                  33px — measured — and the key under your thumb moved even
-                  though the pad itself had stopped shrinking. A reserved row
-                  costs one line of panel; a moving keypad costs a misbid. */}
-              {/* BOTH FORMS ARE ONE LINE, which is the other half of the pad
-                  holding still. The first placeholder here read "no bid yet —
-                  the opener names a contract" and WRAPPED in the 17rem rail:
-                  40px against the standing line's 20px, measured, so the
-                  keypad still moved — just for a different reason than the
-                  one that had been fixed. Short both ways, and the row keeps
-                  its reserved height regardless. */}
-              <div className="muted dis-standing">
-                {game.auction.level > 0
-                  ? <>{nameOf(game.auction.declarer)} needs {game.auction.level}{" "}
-                    {game.auction.level === 1 ? "pt" : "pts"}</>
-                  : "no bid yet"}
-              </div>
               {myTurn ? (
                 <>
                   <div className="dis-bidgrid">

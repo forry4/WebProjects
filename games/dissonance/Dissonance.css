@@ -1295,7 +1295,8 @@
   .dis-game .dis-table { --dis-talon-cw: 92px; }
   .dis-game .dis-table > .dis-auction .dis-card.sm { --cw: 92px; }
   .dis-game .dis-table > .dis-auction { padding: 1.2rem 1rem; gap: 0.9rem; }
-  .dis-game .dis-table > .dis-auction .dis-contract { font-size: 1.7rem; }
+  .dis-game .dis-table > .dis-auction .dis-contract {
+  white-space: nowrap; font-size: 1.7rem; }
   .dis-game .dis-table > .dis-auction .muted { font-size: 0.92rem; }
   .dis-game .dis-table > .dis-auction > .muted:first-child { font-size: 0.86rem; }
   /* The CONTROLS scale too, not just the prose. A Kontra box whose rows and
@@ -1522,7 +1523,13 @@
 /* THE STANDING-BID LINE RESERVES ITS ROW even before anything stands, so the
    keypad below it does not drop 33px the moment the first bid lands. One line,
    fixed: the text swaps, the geometry does not. */
-.dis-standing { min-height: 1.25em; line-height: 1.25; text-align: center; }
+/* The holder's name, riding INSIDE the contract line so the standing bid is one
+   row -- "Ada 5♦". Sized in `em` so it tracks the contract's own responsive
+   font-size rather than needing a copy at each breakpoint, and NOWRAP on the
+   line because a long name plus a two-digit level would otherwise wrap in the
+   17rem rail and push the keypad down, which is the failure the row's
+   `min-height` reserve exists to prevent. */
+.dis-holder { font-size: 0.58em; font-weight: 600; opacity: 0.75; }
 /* ...and the row above it, for the same reason one rung up: a standing
    contract renders at 1.5rem where the placeholder is body text. Reserve the
    taller form's height so the swap costs no layout. */

@@ -1569,19 +1569,30 @@ opponent's hand, **both** seats' OUTER pile bottoms, and the unshown talon.
 
 ## A game is a MATCH of rounds (2026-08-07)
 
-`MATCH_TARGET` — **150 in classic, 100 in skat**. A round is one deal; a game is rounds
+`MATCH_TARGET` — **200 in classic, 100 in skat**. A round is one deal; a game is rounds
 played onto a running total until one side reaches the target. **Re-measure if
 the bases or the payoff arithmetic move** — the target is a product decision,
 but the round count it buys is not a guess, and skat was a median of 8 to the
 same 100 before its bases were re-priced by colour.
 
-**RE-MEASURED for the ±10 stake (2026-08-11, full normal-bot self-play
-matches), and classic MOVED 100 → 150:** the measured length-preserving point
-— **median 9 rounds** (p10–p90 7–12) against the pre-stake median 10 (7–13)
-at 100. The bracketing doses were measured too: keeping 100 shortens to
-median 6 (4–8), 200 stretches to 13 (10–15). Skat's median 11 (6–18) predates
-the overtrick bonus and is still un-re-run — the stake never touches its
-branch, but the bonus does.
+**THAT WARNING CAME DUE (2026-08-17): classic MOVED 150 → 200.** The 150 was
+fitted on 2026-08-11 to hold a match at ~9 rounds, but the 2026-08-16 re-pricing
+and the Double's re-shaping took the mean absolute round transfer to **~41**, so
+150 had quietly drifted to buying a median of **six** rounds. Re-measured by
+bootstrapping 4000 matches off 192 recorded self-play rounds under the shipped
+scoring:
+
+| target | median rounds | p10–p90 |
+|---|---|---|
+| 100 | 4 | 2–6 |
+| 150 | 6 | 3–9 (what it had drifted to) |
+| **200** | **8** | **5–11** (shipped) |
+| 250 | 10 | 7–14 |
+
+200 restores roughly the length 150 was chosen to buy. **Note the old note's
+bracketing doses now read BACKWARDS** — it said "200 stretches to 13" because a
+round paid far less then, which is exactly the drift this entry is about. Skat's
+median 11 (6–18) predates the overtrick bonus and is still un-re-run.
 
 A per-mode DICT, because the modes score on different
 scales and nothing requires them to agree: a classic round pays level² + the

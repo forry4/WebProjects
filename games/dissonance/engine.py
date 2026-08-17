@@ -909,14 +909,25 @@ def max_level_for(mode: str) -> int:
 #: A DICT because the modes score on different scales and there is no reason
 #: they must agree: a classic round pays level^2 + the flat 10 stake (11..154,
 #: flat 20 for Null), a skat one base x level x the announcements (2..60, flat
-#: 20). CLASSIC MOVED 100 -> 150 with the +-10 flat stake (2026-08-11): the
-#: stake adds ~10 to every settled round's transfer, and 150 is the measured
-#: point that PRESERVES the pre-stake match length -- full normal-bot
-#: self-play matches read median 9 rounds (p10-p90 7-12) against the old
-#: scoring's median 10 (7-13) at 100. The bracketing doses were measured too:
-#: keeping 100 shortens to median 6 (4-8), 200 stretches to 13 (10-15). Skat
-#: is unchanged at 100 (median 11 rounds, 6-18) -- the stake never touches
-#: its branch.
+#: 20). Skat is unchanged at 100 (median 11 rounds, 6-18).
+#:
+#: CLASSIC MOVED 100 -> 150 (2026-08-11, with the +-10 flat stake) -> 200
+#: (2026-08-17). The 150 was fitted to hold match length at ~9 rounds under the
+#: prices of the day, and THAT NOTE WENT STALE EXACTLY AS IT WARNED IT WOULD:
+#: the 2026-08-16 re-pricing plus the Double's re-shaping took the mean absolute
+#: round transfer to ~41, so 150 was buying a median of SIX rounds, not nine.
+#: Re-measured by bootstrapping 4000 matches off 192 recorded self-play rounds
+#: under the shipped scoring:
+#:
+#:     target   median rounds   p10-p90
+#:        100         4           2-6
+#:        150         6           3-9      <- what it had drifted to
+#:        200         8           5-11     <- shipped
+#:        250        10           7-14
+#:
+#: So 200 restores roughly the length 150 was chosen to buy. Note the direction
+#: of the old note's bracketing doses is now REVERSED -- it read "200 stretches
+#: to 13" because a round paid far less then.
 #:
 #: Re-measure if the bases or the payoff arithmetic move: the target is a
 #: product decision, but the round count it buys is not a guess. Skat was a
@@ -944,7 +955,7 @@ def max_level_for(mode: str) -> int:
 #: classic's ~6.2 at 100; 400 would now buy nearly twelve, which is a different
 #: and much longer game than the other three modes offer. Measured in
 #: tools/dummy_calibration.py.
-MATCH_TARGET = {"classic": 150, "skat": 100, "minor": 25, "dummy": 200}
+MATCH_TARGET = {"classic": 200, "skat": 100, "minor": 25, "dummy": 200}
 
 #: value = base x level. Indexed by denomination (clubs..no-trump).
 #:

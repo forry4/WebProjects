@@ -17,8 +17,8 @@ export default function DissonanceRules() {
 
 			<RulesFacts items={[
 				{ k: "Players", v: "2 (friend or bot)" },
-				{ k: "Length", v: "A few minutes a round; a match is about 9 of them" },
-				{ k: "You win by", v: "Being first to 150 points (100 in Skat mode, 25 in Minor)" },
+				{ k: "Length", v: "A few minutes a round; a match is about 8 of them" },
+				{ k: "You win by", v: "Being first to 200 points (100 in Skat mode, 25 in Minor)" },
 			]} />
 
 			<RulesSection title="If you've never played a trick-taking game">
@@ -279,7 +279,8 @@ export default function DissonanceRules() {
 					<li>The Kontra works unchanged, but minor keeps its own flat <b>2</b> a
 						point when doubled — classic doubles its per-point rate, minor does not.
 						The <b>match plays to
-						25</b>, which buys about the same number of rounds as classic's 150.</li>
+						25</b>, which buys a comparable number of rounds at minor's much smaller
+						scale.</li>
 				</ul>
 				<RulesTip>
 					<p>
@@ -388,7 +389,7 @@ export default function DissonanceRules() {
 				</RulesTip>
 				<p>
 					<b>A game is a match, not a deal.</b> Rounds are scored onto a running total
-					and the first player past the target — <b>150</b> in classic, <b>100</b> in
+					and the first player past the target — <b>200</b> in classic, <b>100</b> in
 					Skat mode — wins. That's usually nine or ten rounds either way. One deal can
 					simply be bad; over a match the deals even out and what's left is your bidding.
 					Whoever opens the bidding alternates every round — opening means naming a
