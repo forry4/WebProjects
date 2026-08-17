@@ -1434,6 +1434,21 @@ def curve_main(spec, iters, seed=1234):
             E.SHORT_PENALTY = int(v)
         elif k == "jump":
             E.JUMP_SET_BONUS["classic"] = int(v)
+        elif k == "dshort":
+            # The DOUBLED per-point rate (`DOUBLED_SHORT_PENALTY`). Its own dial
+            # since 2026-08-16 -- patching `short` alone would move the undoubled
+            # game too and make a Double sweep un-attributable.
+            E.DOUBLED_SHORT_PENALTY["classic"] = int(v)
+        elif k == "dmake":
+            E.DOUBLE_MAKE_MULT["classic"] = int(v)
+        elif k == "djump":
+            E.DOUBLE_JUMP_MULT["classic"] = int(v)
+        elif k == "dbase":
+            # THE DIAL THAT SETS HOW OFTEN DOUBLING IS CORRECT. At 1 the
+            # defender's winnings come only from the shortfall, so the Double
+            # becomes a bet on HOW BADLY the contract misses rather than that it
+            # does -- which raises the break-even and thins the rate.
+            E.DOUBLE_BASE_MULT["classic"] = int(v)
         elif k == "over":
             # The ONE term that scales with HOW MUCH you make rather than
             # whether -- so it is the only knob that can discriminate by hand

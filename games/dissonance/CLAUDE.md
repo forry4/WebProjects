@@ -1142,6 +1142,72 @@ CHANGE.** The same recorded run prices every threshold: `DOUBLE_MARGIN` 32 gives
 +35.2 and +5.99 -- most of the benefit at half the rate. Re-run
 `tools/dblsweep.py --live 20` over `dsh10/` to see the full column.
 
+### REDUCING THE *OPTIMAL* DOUBLING RATE — THE FORMULA SWEEP (2026-08-16)
+
+The uniform Double doubles 41.7% of contracts in bot self-play, and the honest way
+to thin that is to make doubling correct less often rather than to handicap the
+search with `main.DOUBLE_MARGIN` (which suppresses a bet the search has correctly
+found, and leaves a HUMAN opponent doubling at the old rate anyway).
+
+**The dials, and the one ratio they all move.** `DOUBLE_MAKE_MULT`,
+`DOUBLE_BASE_MULT`, `DOUBLE_JUMP_MULT`, `DOUBLED_SHORT_PENALTY` — all per-mode,
+all shipping as DATA out of `_terms_for`, so none needs a wire field or a Rust
+edit. What they control:
+
+    p* = risk / (win + risk)                  the odds the defender needs
+    risk = (make_mult - 1) x make
+    win  = (base_mult - 1) x stake  +  (jump_mult - 1) x 6j
+           + (short_mult - 1) x short x (points short)
+
+**EQUILIBRIUM doubling rate per candidate** (`cfrlab curvedbl`, real-play cache,
+2000 deals, 200k CFR+ iterations each — the equilibrium is the right instrument
+here because "optimal rate" is the question):
+
+| candidate | base | jump | **DBL taken** | **of those SET** | loss | settled max | bids |
+|---|---|---|---|---|---|---|---|
+| **A uniform x2 (shipped)** | 2 | 2 | **30%** | 36% | 0.51 | 41 (L4) | 2.70 |
+| **B base x1** | 1 | 1 | **17%** | **55%** | 0.65 | 50 (L5) | 3.16 |
+| B' base x1, jump x2 | 1 | 2 | 28% | 46% | **0.50** | 42 (L5) | 3.10 |
+| C make x3 | 2 | 2 | 27% | 37% | 0.52 | 41 (L4) | 2.71 |
+| F jump x1 (`JUMP_DOUBLED=False`) | 2 | 1 | 26% | 42% | 0.58 | 47 (L5) | 2.65 |
+
+**ONLY `DOUBLE_BASE_MULT = 1` ACTUALLY MOVES THE RATE.** Everything else clusters
+at 26-30% against the shipped 30%; B alone reaches 17%, and it simultaneously has
+the best PRECISION by a wide margin (55% of its doubles land on a set, against
+36%). It doubles less AND better, which is the combination worth having.
+
+**Why the others fail, and it is the same reason each time:** the defender's
+winnings are dominated by the doubled fixed stake, which is large exactly where
+the make base is small. Raising the make multiplier (C) adds risk but leaves that
+term alone, so low-level doubling stays cheap. Taking the jump out (F) trims a
+term most contracts barely carry. `base_mult = 1` removes the dominant term
+directly: the defender's winnings then come ONLY from the shortfall, so the Double
+stops being a bet that the contract MISSES and becomes a bet on HOW BADLY — which
+is the sacrifice-vs-near-miss discrimination the retired ramp existed to buy,
+obtained from a multiplier instead of an escalator.
+
+**THREE COSTS OF B, none of them hidden:**
+* **It kills the jump INVITATION.** Measured, a jumped level-2/3/4 contract goes
+  from inviting the Double (win 23/31/39 against risk 8/13/20) to protected (win
+  5). The jump PRICE survives untouched -- `6j` is still in the undoubled base --
+  so leaping still hands the defender a fatter set; what goes is the Double's
+  extra leverage on it, which is arguably a double-count. `DOUBLE_JUMP_MULT = 2`
+  (candidate B') buys the invitation back, but at 28% it gives up nearly all of
+  the rate reduction, so the two cannot both be had from these dials.
+* **The worst distribution match of the five** (loss 0.65 against 0.50-0.58), and
+  a settled distribution 50% concentrated at level 5 -- against the standing "no
+  level above 40%" preference. A is already marginally over at 41%, but B is
+  clearly over.
+* **It raises bids/auction 2.70 -> 3.16**, which is a bonus against the separate
+  goal of longer auctions, but is a live change to the auction and not just to the
+  Double.
+
+**NOT SHIPPED.** The dials are in and default to a plain x2, so shipped behaviour
+is byte-identical (the payoff fixtures did not move). Before B ships it wants an
+Expert self-play arm: the rate and precision here are EQUILIBRIUM numbers, and the
+settled-distribution cost has to be checked against the 40% rule on the real bot
+rather than on the abstraction.
+
 **The tables below are PRE-2026-08-16 measurements** that chose the ramp. Their
 SHAPE arguments stand -- ordinary failures come up a median of 2 short with 48%
 by exactly 1, sacrifices a median of 4, and that is still why the reward has to

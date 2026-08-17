@@ -372,6 +372,51 @@ DOUBLE_RAMP = 0
 #: what that margin cuts.
 DOUBLED_SHORT_PENALTY = {"classic": 10}
 
+#: HOW MUCH THE DOUBLE MULTIPLIES THE MADE BASE, and the SET BASE, when those
+#: differ from a plain 2. Absent for a mode == 2, i.e. the ordinary Double.
+#:
+#: TOGETHER WITH `DOUBLED_SHORT_PENALTY` THESE ARE THE THREE DIALS OF THE DOUBLE,
+#: and what they control is one ratio -- the break-even probability the defender
+#: needs, which is what sets how often doubling is CORRECT:
+#:
+#:     p* = risk / (win + risk)
+#:     risk = (make_mult - 1) x make                     the declarer's upside
+#:     win  = (base_mult - 1) x set_base
+#:            + (short_mult - 1) x short x (points short) the defender's upside
+#:
+#: Raising `p*` makes doubling correct LESS often -- which is the honest way to
+#: reduce the doubling rate, as against handicapping the bot with
+#: `main.DOUBLE_MARGIN` (that suppresses a bet the search has correctly found,
+#: and leaves a human opponent doubling at the old rate).
+#:
+#: WHY `set_base` IS THE INTERESTING ONE. At a plain uniform x2 the break-even
+#: runs 0.26 at level 1 -- doubling a low contract is nearly free, because
+#: `L^2 + 4` is tiny down there while the set base is not. Dropping the base
+#: multiplier to 1 makes the defender's winnings come ONLY from the shortfall, so
+#: the Double stops being a bet that they MISS and becomes a bet on HOW BADLY --
+#: which is exactly the sacrifice-vs-near-miss discrimination the retired ramp
+#: existed to buy, obtained from the multiplier instead of an escalator.
+#:
+#: SHIPPED AS 2/2 (a plain Double). Both are per-mode and both ship as DATA out
+#: of `_terms_for`, so a change needs no wire field and no Rust edit.
+DOUBLE_MAKE_MULT = {}
+DOUBLE_BASE_MULT = {}
+
+#: ...and the JUMP BONUS's own multiplier, which only matters once
+#: `DOUBLE_BASE_MULT` stops being 2. Absent == whatever the base does
+#: (`JUMP_DOUBLED` True) or 1 (False), so naming nothing reproduces both of the
+#: pre-existing behaviours exactly.
+#:
+#: WHY IT IS SEPARABLE AT ALL. Dropping the base multiplier to 1 thins the
+#: doubling rate, but it also takes the jump bonus down with it -- and that
+#: bonus riding inside the doubled base is what makes a LEAP invite the Double
+#: (`test_a_jumped_contracts_double_out_wins_its_risk_at_low_levels`, the v2 jump
+#: rule's deliberate teeth). Measured: at base x1 a jumped level-2/3/4 contract
+#: goes from INVITING the Double to protected. This dial keeps the invitation
+#: while the fixed stake stays single -- the defender's winnings then come from
+#: the shortfall AND the leap, which are the two things a sacrifice actually has.
+DOUBLE_JUMP_MULT = {}
+
 #: What each trick point ABOVE the target adds to a MADE contract (2026-08-07).
 #:
 #: A per-mode dict like `MATCH_TARGET`, and like that one it currently reads the
@@ -2195,10 +2240,20 @@ def _terms_for(mode: str, denom: int, level: int, sharp: bool = False,
         # JUMP_DOUBLED False takes the bonus back OUT of the multiplier -- the
         # experiment arm, off as shipped. Still one scalar either way, so every
         # consumer of `set_base` follows with no new term.
-        setb = (setb * doubling if JUMP_DOUBLED.get(mode, True)
-                else stake * doubling + bonus)
+        # The Double's two base multipliers. Default to `doubling` itself, so a
+        # mode that names neither behaves exactly as a plain x2 -- and `doubling`
+        # is 1 on the undoubled path, which never reaches here.
+        bmult = DOUBLE_BASE_MULT.get(mode, doubling)
+        mmult = DOUBLE_MAKE_MULT.get(mode, doubling)
+        # Composed term by term rather than scaling `setb` wholesale, so the jump
+        # bonus can move independently of the fixed stake. The default reproduces
+        # both older behaviours exactly: JUMP_DOUBLED True -> the bonus scales
+        # with the base, False -> it is added after the multiplier.
+        jmult = DOUBLE_JUMP_MULT.get(
+            mode, bmult if JUMP_DOUBLED.get(mode, True) else 1)
+        setb = stake * bmult + bonus * jmult
         return {"denom": denom, "level": level, "target": level,
-                "make": make * doubling, "over": over * doubling,
+                "make": make * mmult, "over": over * mmult,
                 "set_base": setb,
                 # A DOUBLED contract may charge a different per-point rate --
                 # see DOUBLED_SHORT_PENALTY. `short` is already a wire term and
