@@ -20,6 +20,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { RulesModal } from "../../shared/lobby.jsx";
 import { contractPrices, payoffFor } from "./pricing.js";
+// THE CARD CARRIES ITS OWN CHROME, because it mounts where the board does not:
+// the offline hub opens it with no room, no board and no Dissonance.css. The
+// board composes the same two strings, so opening the card from inside a room
+// injects them twice, identically — one copy on disk, nothing to drift.
+import _bidpadCss from "./bidpad.css?inline";
+import _scorecardCss from "./scorecard.css?inline";
 
 const KEY = "dis_scorecard_v1";
 //: The five denominations, in rank order. Kept here rather than imported from
@@ -167,6 +173,8 @@ export default function DissonanceScorecard({ catalog, onClose }) {
 	}));
 
 	return (
+		<>
+		<style>{_bidpadCss + _scorecardCss}</style>
 		<RulesModal title="Scorecard — Dissonance classic" icon="🧮"
 			closeLabel="Done" onClose={onClose}>
 			<p className="rl-lead">
@@ -327,5 +335,6 @@ export default function DissonanceScorecard({ catalog, onClose }) {
 				</div>
 			</div>
 		</RulesModal>
+		</>
 	);
 }

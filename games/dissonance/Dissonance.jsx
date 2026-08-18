@@ -16,13 +16,19 @@ import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.j
 // by this component's own <style> while mounted. Never a JS template literal —
 // one stray backtick there reparses the rest of the file and blanks the page.
 import _cssText from "./Dissonance.css?inline";
+// The bid pad and the paper scorecard are their own sheets because the CARD
+// mounts outside this component (the offline hub opens it with no room and no
+// board). Composed here too, appended last — see bidpad.css for why that is
+// safe rather than lucky.
+import _bidpadCss from "./bidpad.css?inline";
+import _scorecardCss from "./scorecard.css?inline";
 
 const WS_RAW = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
 const OT_WS = WS_RAW.replace(/\/ws$/, "/dissonance/ws");
 const OT_HTTP = WS_RAW.replace(/^ws/, "http").replace(/\/ws$/, "/dissonance");
 
 const styles = baseCss + lobbyCss + gameMenuCss + createModalCss + lobbyCreateRowCss
-  + rulesModalCss + _cssText;
+  + rulesModalCss + _cssText + _bidpadCss + _scorecardCss;
 
 const SUIT_GLYPH = ["♣", "♦", "♥", "♠"];   // c d h s
 // 32-card deck: 7 low, ace high, eight ranks per suit — ids 0..31, `suit*8 +

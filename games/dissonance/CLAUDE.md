@@ -1134,6 +1134,40 @@ arithmetic out the way the result panel does, and runs the match to
   EVALUATES the arithmetic the panel printed and requires it to equal the score
   banked, so the check carries no price list of its own.
 
+### …AND IT IS IN THE OFFLINE HUB TOO, because that is the only screen you can REACH with nothing answering (2026-08-18)
+
+The card was already network-free — `localStorage` plus `pricing.js`, with
+`catalog` optional and the shipped classic list as its fallback — so the thing
+standing between it and a table with no signal was never the arithmetic. It was
+the DOOR: the Dissonance lobby sits behind the boot ping, so with no connection
+you never get past the loading screen. `/offline` is the one route the boot gate
+skips, so the card is opened from there as well as from the lobby.
+
+* **The import is EAGER, in the shell, and that is the whole point.** A
+  `React.lazy` chunk is only in the service worker's cache once it has been
+  FETCHED, so a card meant for a signal-less table would be missing exactly when
+  it is wanted — and it would fail silently, as a spinner. The entry chunk is
+  fetched on every load and cache-first in `sw.js`, so riding along in it is what
+  makes the promise true. Measured cost: entry **350.19 → 374.26 kB raw, 106.77
+  → 115.01 kB gzip (+8.2 kB)**, and the Dissonance chunk *fell* 235.13 → 229.84
+  since the card left it.
+* **THE CARD NOW CARRIES ITS OWN CHROME** — `bidpad.css` (the board's bid keys
+  and the suit inks, which the card borrows) and `scorecard.css` (the `.dsc-*`
+  rules), both split out of `Dissonance.css`. The board composes them too, so
+  opening the card from inside a room injects them twice, identically: one copy
+  on disk, nothing to drift. Appending them after `Dissonance.css` is safe
+  rather than lucky — every other rule mentioning those selectors is strictly
+  more specific (`.dis .dis-bidgrid button` in a phone `@media`, the two
+  `.dis-game .dis-table > .dis-auction` blocks, `.dis-denoms button small`,
+  `.dis-result`/`.dis-clear .dis-suit-*`), so source order decides none of them.
+  A new EQUAL-specificity rule for a bid key belongs in `bidpad.css`.
+* **The gate blocks the API origin and then opens the card**, which is the claim
+  rather than "the modal renders": `page.route("http://localhost:8000/**", abort)`,
+  then `/offline`, then Open. It also MEASURES that the card is dressed — the
+  pad's fifth-width key and its 9px radius — because a DOM-only check passes just
+  as happily over an unstyled card, and unstyled is exactly what a missing
+  stylesheet looks like.
+
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
 The round has two quantities that are both "how much", and the panel used one

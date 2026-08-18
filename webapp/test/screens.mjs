@@ -1364,6 +1364,46 @@ try {
 		const rows = await page.locator(".dsc-table .dsc-row").count().catch(() => 0);
 		check("the card survives a reload", rows === 3, `rows ${rows} (1 head + 2)`);
 
+		// ── AND IT IS REACHABLE WITH THE BACKEND GONE ──────────────────────
+		// The card is for a table with real cards, where there may be no signal
+		// at all — so the claim under test is not "the modal renders" but "you
+		// can GET to it with nothing answering". The Dissonance lobby cannot be
+		// reached then (it sits behind the boot ping); the offline hub can, and
+		// that is why the card is duplicated there. Blocking the API origin is
+		// the honest simulation: the 5173 bundle still serves, nothing else does.
+		await page.route(`http://localhost:${API_PORT}/**`, (r) => r.abort());
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "domcontentloaded" });
+		await page.waitForSelector(".offline-hub", { timeout: 25_000 }).catch(() => {});
+		check("the offline hub opens with the backend unreachable",
+			await page.locator(".offline-hub").count() === 1);
+		await page.getByRole("button", { name: /^Open$/ }).first()
+			.click({ timeout: 10_000 }).catch(() => {});
+		await page.waitForSelector(".dsc-entry", { timeout: 10_000 }).catch(() => {});
+		check("...and the paper scorecard opens there too",
+			await page.locator(".dsc-entry").count() === 1);
+		// IT ALSO HAS TO BE DRESSED. The card borrows the board's bid keys, and
+		// the board's stylesheet is not loaded here — that is the entire reason
+		// bidpad.css and scorecard.css exist as their own files. A DOM-only check
+		// passes just as happily over an unstyled card, so measure the two rules
+		// that can only come from those sheets: the pad's fifth-width key, and
+		// the card's own flex row.
+		const dressed = await page.evaluate(() => {
+			const key = document.querySelector(".dsc-pads .dis-bidgrid button");
+			const row = document.querySelector(".dsc-players");
+			const pad = document.querySelector(".dsc-pads .dis-bidgrid");
+			if (!key || !row || !pad) return { missing: true };
+			return {
+				keyW: key.getBoundingClientRect().width,
+				padW: pad.getBoundingClientRect().width,
+				display: getComputedStyle(row).display,
+				radius: getComputedStyle(key).borderTopLeftRadius,
+			};
+		});
+		check("...wearing the board's own bid keys, five to a row",
+			!dressed.missing && dressed.display === "flex" && dressed.radius === "9px"
+			&& dressed.keyW > 0 && dressed.keyW < dressed.padW / 4,
+			JSON.stringify(dressed));
+
 		check("no page errors on the scorecard", errors.length === 0,
 			errors[0]?.slice(0, 160) || "");
 		await ctx.close();

@@ -73,6 +73,15 @@ import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 import { createOfflineCocGame, COC_BOARD_NAMES } from "../castles_of_crimson/offline.js";
 // Duel's offline driver: same split — the hub creates, SpenderDuel plays.
 import { createOfflineDuelGame } from "../spender_duel/offline.js";
+// Dissonance's PAPER SCORECARD, in the offline hub. EAGER, not a lazy chunk,
+// and that is the whole point of it being here: a lazy chunk is only cached
+// once it has been fetched, so a card meant for a table with no signal would
+// be missing exactly when it is wanted. The entry chunk is fetched on every
+// load and cache-first in the service worker, so this rides along for ~6KB.
+// It carries its own stylesheet (bidpad.css + scorecard.css) and needs no
+// room, no board and no network — `catalog` is optional and pricing.js
+// falls back to the shipped classic list.
+import DissonanceScorecard from "../dissonance/scorecard.jsx";
 
 // CSS lives in the sibling .css file(s) imported below, NOT in a JS template
 // literal. `?inline` hands us the stylesheet as a STRING, so it is still injected
@@ -763,6 +772,8 @@ export default function SpenderApp() {
 	const [offlinePlay, setOfflinePlay] = useState(null);
 	// Per-game download state: {spender|coc|duel: null | {done,total} | "ok" | "err"}
 	const [precacheState, setPrecacheState] = useState({});
+	// Dissonance's paper scorecard, opened from the hub (see the import).
+	const [offlineCard, setOfflineCard] = useState(false);
 
 	// ── Derived game state (must be before useEffect hooks that use `game`) ──
 	const liveGame = roomData?.game;
@@ -2991,7 +3002,29 @@ export default function SpenderApp() {
 							);
 						})}
 					</div>
+
+					{/* KEEPING SCORE AT A REAL TABLE — the one thing here that needs no
+					    engine at all. The card is localStorage plus `pricing.js`, the
+					    same mirror of `engine._terms_for` the board prices with, so it
+					    works with no connection and no download. It sits in the hub
+					    because the hub is the only screen you can REACH with no
+					    connection: the Dissonance lobby is behind the backend ping. */}
+					<div className="offline-panel">
+						<h3 className="offline-h">Playing with real cards?</h3>
+						<p className="offline-note">
+							Keep a Dissonance scorecard here — it works with no connection and
+							nothing to download, and it scores each round the way the game does.
+						</p>
+						<div className="offline-save-row">
+							<div className="offline-save-info"><b>Paper scorecard</b> · classic</div>
+							<div className="offline-save-btns">
+								<button className="btn btn-outline btn-sm"
+									onClick={() => setOfflineCard(true)}>Open</button>
+							</div>
+						</div>
+					</div>
 				</div>
+				{offlineCard && <DissonanceScorecard onClose={() => setOfflineCard(false)} />}
 				{toast && <div className="toast">{toast}</div>}
 			</div>
 		</>
