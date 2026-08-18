@@ -242,10 +242,18 @@ try {
 		if (await levels.count() === 0) {
 			await page.getByRole("button", { name: /^Pass$/ }).first()
 				.click({ timeout: 5_000 }).catch(() => {});
-			return;
+			return "";
 		}
 		await levels.first().click({ timeout: 5_000 }).catch(() => {});
 		await sleep(150);
+		// WHAT THE SELECTED BID IS WORTH, read HERE and returned to the caller.
+		// The pick row is filled from local state the instant a rung is chosen,
+		// so it is populated on every bid this harness makes -- where the
+		// STANDING contract's row depends on whether a bid has landed yet, i.e.
+		// on which seat opened, which is random. A check that sampled the
+		// standing row at one instant duly failed in CI and skipped the deploy.
+		const picked = await page.locator(".dis-worth-pick").first()
+			.textContent().catch(() => "");
 		const denoms = page.locator(".dis-denoms button:not([disabled])");
 		const n = await denoms.count();
 		for (let d = 0; d < n; d++) {
@@ -254,13 +262,14 @@ try {
 			const bid = page.getByRole("button", { name: /^Bid / }).first();
 			if (await bid.count() && await bid.isEnabled()) {
 				await bid.click({ timeout: 5_000 }).catch(() => {});
-				return;
+				return (picked || "").replace(/\s+/g, " ").trim();
 			}
 		}
 		// Nothing legal at that level — pass if the rules allow it. The opener
 		// cannot, but by then some denomination above will have worked.
 		await page.getByRole("button", { name: /^Pass$/ }).first()
 			.click({ timeout: 5_000 }).catch(() => {});
+		return (picked || "").replace(/\s+/g, " ").trim();
 	};
 
 	async function routeMounts(log) {
@@ -2614,6 +2623,10 @@ try {
 		const decisions = new Set();
 		const restated = new Set();   // any "needs/must take N pts" seen in play
 		let ctSeen = false;           // ...and whether the contract box ever rendered
+		const worthBad = new Set();   // any malformed "makes N · down from N"
+		let worthSeen = false;        // ...and whether a priced row was ever shown
+		//   (latched from the BID PICKER, which fills from local state on every
+		//    bid, and from the standing-contract row sampled below)
 		page.on("websocket", (ws) => {
 			ws.on("framereceived", ({ payload }) => {
 				if (typeof payload !== "string") return;
@@ -2737,11 +2750,29 @@ try {
 					const t = el.textContent.replace(/\s+/g, " ").trim();
 					if (/needs \d+ pts?|must take \d+ pts?/.test(t)) bad.push(t);
 				}
-				return { n: els.length, box: !!document.querySelector(".dis-ctsub"), bad };
+				const worth = [...document.querySelectorAll(".dis-worth")]
+					.map((el) => el.textContent.replace(/\s+/g, " ").trim());
+				return { n: els.length, box: !!document.querySelector(".dis-ctsub"), bad, worth };
 			});
 			if (rest.box) ctSeen = true;
 			for (const b of rest.bad) restated.add(b);
-			if (st.bidding) { await disBidCheaply(page); await sleep(250); continue; }
+			// WHAT A BID IS WORTH, latched. A standing bid exists at some point in
+			// every game, so sampling the whole game reaches the populated form
+			// without depending on which seat opened.
+			for (const t of rest.worth) {
+				if (!t) continue;
+				worthSeen = true;
+				if (!/makes \d+ · down from \d+/.test(t)) worthBad.add(t);
+			}
+			if (st.bidding) {
+				const pick = await disBidCheaply(page);
+				if (pick) {
+					worthSeen = true;
+					if (!/makes \d+ · down from \d+/.test(pick)) worthBad.add(pick);
+				}
+				await sleep(250);
+				continue;
+			}
 			await sleep(st.acted ? 120 : 250);
 		}
 
@@ -2791,6 +2822,10 @@ try {
 			ctSeen, "no .dis-ctsub was ever on screen during the game");
 		check("...and the target is never restated in words beside its own glyph",
 			restated.size === 0, JSON.stringify([...restated].slice(0, 3)));
+		check("a bid is priced before it is made: makes N, down from N",
+			worthSeen, "no .dis-worth row ever carried text during the game");
+		check("...and every priced row it showed was well-formed",
+			worthBad.size === 0, JSON.stringify([...worthBad].slice(0, 3)));
 		await ctx.close();
 	}
 
@@ -2971,11 +3006,17 @@ try {
 				texts: rows.map((r) => r.textContent.replace(/\s+/g, " ").trim()),
 			};
 		});
-		check("the auction prices the standing contract: makes N, down from N",
-			worth.n >= 1 && worth.texts.some((t) => /makes \d+ · down from \d+/.test(t)),
-			JSON.stringify(worth));
-		check("...and those rows keep their height reserve when empty",
+		// BOTH ROWS EXIST AND RESERVE THEIR HEIGHT. Whether they have TEXT here
+		// depends on which seat opened, which is random -- so the populated form
+		// is asserted in `dissonanceHard`, latched over a whole game, rather than
+		// gambled on at one instant. (This check first demanded the text and CI
+		// duly opened from the other seat, failing the render gate and skipping
+		// the deploy: the feature was fine, the check was not.)
+		check("the auction reserves a row for what a contract is worth",
 			worth.n >= 1 && worth.reserved, JSON.stringify(worth));
+		check("...and whatever it shows is a price, never a stray label",
+			worth.texts.every((t) => t === "" || /makes \d+ · down from \d+/.test(t)),
+			JSON.stringify(worth));
 
 		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a
 		// 5-column grid — a responder's short legal set centers instead of
