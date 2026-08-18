@@ -9,6 +9,14 @@ import {
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
 import DissonanceScorecard from "./scorecard.jsx";
+// OFFLINE VS-AI: the local driver (wasm referee + IndexedDB saves). The
+// component below cannot tell which referee it is talking to -- both hand it
+// `engine.view_for`'s payload and both take the same move objects -- so the
+// wiring is a `send` that routes to the driver and a bot loop that arms
+// `ai_search` the way the server does. See offline.js.
+import { dissonanceOfflineRoomData, applyOfflineDissonanceMove,
+  runDissonanceBotLoop, loadOfflineDissonanceGame,
+  abandonOfflineDissonanceGame } from "./offline.js";
 import { contractPrices } from "./pricing.js";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
 
@@ -1434,7 +1442,7 @@ function useSocket(onMessage) {
 
 // ─── main ───────────────────────────────────────────────────────────────────
 
-export default function Dissonance({ myId, authUser, onExit }) {
+export default function Dissonance({ myId, authUser, onExit, offline = null }) {
   const [screen, setScreen] = useState("lobby");     // lobby | waiting | game
   const [roomId, setRoomId] = useState("");
   const [roomData, setRoomData] = useState(null);
@@ -1536,7 +1544,85 @@ export default function Dissonance({ myId, authUser, onExit }) {
     }
   }, [myId]);
 
-  const { connected, connect, send, disconnect, socketReady } = useSocket(onMessage);
+  const { connected, connect, send: wsSend, disconnect, socketReady } = useSocket(onMessage);
+
+  // ─── OFFLINE VS-AI ────────────────────────────────────────────────────────
+  // Mounted by the shell with `offline` = a saved-game record (or its id): no
+  // socket at all. `send` below routes the SAME message objects to the local
+  // referee instead, so every call site in this file is unchanged and there is
+  // one protocol rather than two.
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
+  const offRecRef = useRef(null);       // the live record (mutated by the driver)
+  const offTokenRef = useRef(0);        // bumps on unmount → cancels stale bot loops
+
+  const publishOffline = useCallback(async (rec, aiSearch) => {
+    offRecRef.current = rec;
+    const data = await dissonanceOfflineRoomData(rec, myId, authUser?.name);
+    // The armed decision rides on roomData exactly as the server ships it, so
+    // the pool effect below needs no offline branch at all.
+    setRoomData(aiSearch ? { ...data, ai_search: aiSearch } : data);
+  }, [myId, authUser?.name]);
+
+  const pumpOfflineBot = useCallback(() => {
+    const token = offTokenRef.current;
+    const rec = offRecRef.current;
+    if (!rec) return;
+    runDissonanceBotLoop(rec, myId, publishOffline, () => offTokenRef.current === token)
+      .catch((e) => console.debug("[dissonance offline-AI] bot loop:", e));
+  }, [myId, publishOffline]);
+
+  /* One `send` for both referees. Offline the move objects are identical —
+     that is the whole point of the driver taking `engine.apply_move`'s own
+     shapes — so this is a router, never a second protocol. */
+  const send = useCallback((msg) => {
+    if (!offlineRef.current) { wsSend(msg); return; }
+    const rec = offRecRef.current;
+    if (!rec) return;
+    (async () => {
+      if (msg.action === "move" || msg.action === "ai_move") {
+        const isAi = msg.action === "ai_move";
+        // A search answer that lands after the position moved on is DROPPED,
+        // not played — the online staleness rule, which offline needs just as
+        // much because the pool answers asynchronously.
+        if (isAi && msg.decision !== rec.decisionSeq) return;
+        const move = isAi
+          ? (msg.move || { kind: "play", card: msg.card })
+          : msg.move;
+        const res = await applyOfflineDissonanceMove(rec, move, myId, { isAi });
+        if (!res.ok) { setToast(res.err); return; }
+        await publishOffline(res.rec, null);
+        pumpOfflineBot();
+        return;
+      }
+      if (msg.action === "abandon") {
+        await publishOffline(await abandonOfflineDissonanceGame(rec), null);
+        return;
+      }
+      // `start` and `client_ai_ready` have no offline meaning: there is no
+      // lobby to start and nothing to tell a server about.
+    })().catch((e) => setToast(String(e?.message || e)));
+  }, [wsSend, myId, publishOffline, pumpOfflineBot]);
+
+  useEffect(() => {
+    if (!offline) return;
+    let live = true;
+    (async () => {
+      try {
+        const rec = typeof offline === "string" ? await loadOfflineDissonanceGame(offline) : offline;
+        if (!rec || !live) return;
+        offRecRef.current = rec;
+        setScreen("game");
+        setRoomId(rec.id);
+        await publishOffline(rec, null);
+        // The bot may be on turn already — it opens the bidding half the time.
+        pumpOfflineBot();
+      } catch (e) {
+        setToast(String(e?.message || "Couldn't open the offline game"));
+      }
+    })();
+    return () => { live = false; offTokenRef.current += 1; };
+  }, [offline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchGames = useCallback(() => {
     setLoadingGames(true);
@@ -1888,6 +1974,10 @@ export default function Dissonance({ myId, authUser, onExit }) {
     }).then(() => fetchGames()).catch(() => {});
   };
   const leaveToLobby = () => {
+    // OFFLINE THERE IS NO LOBBY TO GO BACK TO -- the shell owns the URL
+    // (/offline/<id>) and the hub is the screen behind this one, so hand the
+    // exit back rather than routing to a lobby that needs the backend.
+    if (offlineRef.current) { offTokenRef.current += 1; onExit?.(); return; }
     disconnect(); setRoomId(""); setRoomData(null); setScreen("lobby");
     pushPath(buildPath("dissonance", null));
   };

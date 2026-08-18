@@ -3875,6 +3875,162 @@ try {
 	// cache. Seats are dealt randomly, so the scenario just waits for OUR turn
 	// (the bot's opening decision, if it goes first, runs the offline search),
 	// takes one token, and requires the bot's reply with the network OFF.
+	/* DISSONANCE OFFLINE — the referee runs in the browser, not just the AI.
+	 *
+	 * This is the block that would catch the failure the whole feature is built
+	 * to avoid: `classic.rs` refereeing a round through the wasm, priced by
+	 * pricing.js, with nothing answering. The Rust parity gate proves the RULES
+	 * agree with the server; only a browser can prove the three pieces are
+	 * actually wired to each other, and the ways they can fail (a worker that
+	 * never loads, a view the board cannot render, a bot loop that never arms)
+	 * all look like a game that simply sits there.
+	 */
+	async function offlineDissonance(log) {
+		const ctx = await browser.newContext();
+		await ctx.addInitScript((user) => {
+			localStorage.setItem("spender_user", user);
+		}, JSON.stringify({ id: "dis-offline-harness", name: "DisOff", guest: true }));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		let searched = false;
+		const aiLines = [];
+		page.on("console", (m) => {
+			const t = m.text();
+			// BOTH log prefixes: the card path says "dissonance", the auction
+			// path still says "oddtrick" (an export-era name the artifact keeps).
+			if (/client-AI/.test(t)) { searched = true; aiLines.push(t.slice(0, 120)); }
+		});
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
+		await page.waitForSelector(".offline-panel", { timeout: 20_000 }).catch(() => {});
+		await page.locator(".cm-seg button", { hasText: "Dissonance" }).click({ timeout: 10_000 }).catch(() => {});
+		await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
+		const mounted = await page.waitForSelector(".dis", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("a local Dissonance game mounts the board", mounted);
+		check("...at its /offline/<LOCALID> URL",
+			/^\/offline\/LOCAL[A-Z0-9]+$/.test(new URL(page.url()).pathname),
+			new URL(page.url()).pathname);
+		if (!mounted) {
+			check("no page errors dealing an offline round", errors.length === 0,
+				errors[0]?.slice(0, 200) || "");
+			await ctx.close();
+			return;
+		}
+
+		// THE DEAL CAME OUT OF THE WASM, and it is a real one: two seats, seven
+		// cards in the near hand and its three piles. A referee that answered
+		// with an empty or half-built view would still "mount".
+		const dealt = await page.evaluate(() => {
+			const seats = [...document.querySelectorAll(".dis-table .dis-seat")];
+			const near = seats[seats.length - 1];
+			return {
+				seats: seats.length,
+				hand: near?.querySelectorAll(".dis-hand .dis-card").length ?? 0,
+				piles: near?.querySelectorAll(".dis-pilewrap").length ?? 0,
+			};
+		});
+		check("the local referee dealt a real hand", dealt.seats === 2 && dealt.hand === 7,
+			JSON.stringify(dealt));
+
+		// Drive the round the way `dissonanceBeat` does — the same button names
+		// and the same `.dis-seat .dis-card.play` affordance, so this block is
+		// testing the REFEREE rather than a second idea of how the board works.
+		const step = async (name) => {
+			const b = page.getByRole("button", { name }).first();
+			if (await b.count() === 0) return false;
+			await b.click({ timeout: 5_000 }).catch(() => {});
+			await sleep(220);
+			return true;
+		};
+		// THE NETWORK GOES OFF ONCE THE POOL HAS LOADED, not before, and that is
+		// a property of the HARNESS rather than a softening of the claim.
+		// localhost runs no service worker, so a page taken offline before its
+		// workers have fetched `dissonance-worker.js` and the 300KB wasm can
+		// never load them — the bot then answers nothing and the round stalls in
+		// the auction, which is exactly what this block did on its first run and
+		// is an artifact of the harness, not of the feature. In the product the
+		// hub's Download button has already put both in the SW cache. Everything
+		// after the flip — the referee, the search, the trick fold, the save —
+		// runs with nothing answering.
+		let offlineFrom = -1;
+		let reachedPlay = false, played = 0;
+		for (let i = 0; i < 160; i++) {
+			if (offlineFrom < 0 && searched) {
+				await ctx.setOffline(true);
+				offlineFrom = i;
+			}
+			if (!reachedPlay && await page.locator(".dis-trickinfo").count() > 0) reachedPlay = true;
+			if (played >= 3 && offlineFrom >= 0) break;
+			// The bid pad first: either seat may open, so the harness bids
+			// whenever it is offered one.
+			if (await page.locator(".dis-bidgrid button:not([disabled])").count() > 0) {
+				await disBidCheaply(page);
+				await sleep(260);
+				continue;
+			}
+			if (await step(/^Stand pat$/)) continue;          // decline the swap
+			if (await step(/^Let it stand$/)) continue;       // decline the Double
+			if (await step(/^Pass$/)) continue;               // settle the auction
+			const card = page.locator(".dis-seat .dis-card.play").last();
+			if (await card.count() > 0) {
+				await card.click({ timeout: 5_000 }).catch(() => {});
+				played += 1;
+				await sleep(400);
+				continue;
+			}
+			await sleep(400);                                  // the bot is thinking
+		}
+		// WHAT THE BOARD WAS SHOWING, so a stall says which phase it stalled in
+		// rather than "false". A round that never leaves the auction and one
+		// that never gets a card back from the bot are different bugs.
+		const stuck = await page.evaluate(() => ({
+			bidPad: !!document.querySelector(".dis-bidgrid"),
+			myKeys: document.querySelectorAll(".dis-bidgrid button:not([disabled])").length,
+			buttons: [...document.querySelectorAll("button")].map((b) => b.textContent.trim())
+				.filter(Boolean).slice(0, 8),
+			contract: document.querySelector(".dis-contract")?.textContent?.trim() || "",
+			trick: document.querySelector(".dis-trickinfo")?.textContent?.trim() || "",
+			playable: document.querySelectorAll(".dis-seat .dis-card.play").length,
+			// THE REFEREE'S REFUSAL, if it made one: the driver surfaces an
+			// illegal move as a toast rather than throwing, so without this a
+			// rejected bot move looks exactly like a bot that never answered.
+			toast: document.querySelector(".toast")?.textContent?.trim() || "",
+		}));
+		check("the round reaches trick 1", reachedPlay,
+			JSON.stringify(stuck) + " ai=" + JSON.stringify(aiLines.slice(0, 3)));
+		check("...and the network was off for it", offlineFrom >= 0,
+			"the search pool never loaded, so the block never went offline");
+		// EVERY CARD AFTER THE FIRST IS THE PROOF: to be offered a second one,
+		// the referee had to apply ours, see whose turn it was, arm a decision,
+		// take the search's answer and fold the trick — the whole loop, with
+		// nothing answering.
+		check("cards play through the local referee, and the bot answers", played >= 2,
+			`played ${played} ${JSON.stringify(stuck)}`);
+		const trickNo = await page.locator(".dis-trickinfo").first().textContent().catch(() => "");
+		check("...and the round advances past trick 1 with no network",
+			/Trick ([2-9]|1[0-3]) of 13/.test(trickNo), trickNo);
+		check("...with the search really running in this browser", searched,
+			"no [dissonance client-AI] line — the bot fell through to nothing");
+
+		// A save survives a reload, which is the difference between a game and a
+		// tab. (Back online only for the assets: localhost has no service worker.)
+		await ctx.setOffline(false);
+		await page.reload({ waitUntil: "load" }).catch(() => {});
+		const resumed = await page.waitForSelector(".dis", { timeout: 25_000 })
+			.then(() => true).catch(() => false);
+		check("the local game resumes after a reload", resumed);
+
+		check("no page errors playing offline", errors.length === 0,
+			errors[0]?.slice(0, 200) || "");
+		await ctx.close();
+	}
+
 	async function offlineDuel(log) {
 		const ctx = await browser.newContext();
 		await ctx.addInitScript((user) => {
@@ -3997,7 +4153,7 @@ try {
 	// last ~20s either way, so this costs nothing and buys it a quiet machine.
 	// skat → Hard → beat stay contiguous and in order, preserving the adjacency the
 	// comments in those blocks were written against.
-	const laneA = [offlineSpender, offlineCoc, offlineDuel,
+	const laneA = [offlineSpender, offlineCoc, offlineDuel, offlineDissonance,
 		dissonanceSkat, dissonanceHard, dissonanceBeat];
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
 		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,

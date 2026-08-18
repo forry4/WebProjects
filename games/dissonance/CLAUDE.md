@@ -1103,6 +1103,97 @@ player while they decide.
   catalog directly. A screen that starts multiplying a level by itself is a
   second price list, which is the thing that just cost three surfaces.
 
+## DISSONANCE PLAYS OFFLINE — the browser referees its own room (2026-08-18)
+
+The fourth game to get an offline vs-AI mode, and the first whose ENGINE had to
+be written for it. Spender, CoC and Duel each carry a full `engine.rs` in their
+crate already, because their searches simulate whole games; this crate models
+CARD PLAY only (`state.rs`), since that is all the solver ever needed. The
+auction, the talon swap, the Double and the per-seat redaction lived in Python
+alone — fine for a refereed room, useless on a plane.
+
+**The four pieces, and where each one lives:**
+
+| piece | where | why there |
+|---|---|---|
+| the rules | `rust-cores/dissonance-core/src/classic.rs` | one referee, gated against Python |
+| the prices | `games/dissonance/pricing.js` | already the client's one mirror of `_terms_for`/`payoff` |
+| the room | `games/dissonance/offline.js` | IndexedDB saves + the per-decision bot loop |
+| the AI | the existing wasm search | it was already client-side; this needed nothing |
+
+* **`classic.rs` NEVER SCORES, and that split is the design.** When the
+  thirteenth trick lands it sets `phase: "over"` and leaves `result` null; the
+  driver prices the round and banks the match through `pricing.js`. Composing
+  the price list a third time — in the language furthest from the tests — is
+  the drift `payoff_terms` exists to prevent, and a wrong number there PAYS OUT
+  SILENTLY, which is the worst place to be wrong and the least likely to be
+  noticed.
+* **It works on `serde_json::Value`, not a struct.** The frontend renders
+  `view_for`'s output and the save IS the game dict, so the JSON shape is the
+  contract; a struct with derived serde would put a second spelling of thirty
+  keys between the port and the thing it must match, and every mismatch would
+  surface as a board that renders slightly wrong rather than a type error. It
+  runs once per move, never in a search loop.
+* **Card COMPARISON is not re-implemented** — `state::beats` and `cards::esuit`
+  are the solver's own, so "what beats what" keeps its single owner, Grand
+  included.
+* **CLASSIC ONLY, refused at the door.** Minor is this machine at another trick
+  value (nearly free, not done); skat is a second auction, a declinable talon, a
+  declaration, announcements and Kontra/Re; **dummy is impossible here** — the
+  crate is two-seat to its bones, the same reason `client_searchable` already
+  refuses it online. `any_other_mode_is_refused_at_the_door` pins it.
+* **HARD, not Expert.** Expert's edge is the auction TREE, which needs
+  `auction.search` — the priced settlement table `auction_search_payload`
+  builds. The driver does not ship it, so an "Expert" offline room would
+  silently BE Hard: the exact label-says-Hard-plays-Normal failure this repo has
+  paid for twice. The hub offers Hard and says so.
+* **The talon model is not shipped either** (`auction.swap`, the fitted swap
+  weights). It is optional on the wire, so the leaf prices each world's deal AS
+  DEALT — worth about −1.5 points of auction accuracy against the online tier.
+  Stated because it is a measured cost, not an unknown.
+
+**THE GATE IS 120 RECORDED ROUNDS, REPLAYED MOVE BY MOVE**
+(`tools/gen_classic_fixtures.py` → `tests/fixtures/classic.jsonl` →
+`rust-cores/dissonance-core/tests/classic.rs`, which CI already runs via
+`rust-dissonance.yml`). Both seats' views are compared after every single move.
+* **Digest per step, full views on both ends.** Recording every view whole came
+  to 72KB a round — 8.6MB, twenty-odd times the largest fixture here. The
+  per-step check is FNV-1a over the canonical JSON; the two full views are what
+  makes a failure diagnosable AND are the canonicalisation control, since a
+  Python/Rust formatting difference would otherwise hide as thirty identical
+  digest misses.
+* **Verified non-vacuous by injecting two regressions**: a flipped trick parity
+  (caught at round 0 step 7) and a same-level overtake into a lower-ranked
+  denomination (caught by the full-view control, which named the field).
+* `test_classic_parity.py` asks the CORPUS what it contains — a same-level
+  overtake, a seat out of denominations, both halves of the swap and the
+  Double — because a gate is only as good as the states it replays, and a
+  corpus is exactly the thing that quietly stops covering something.
+
+**THE ARMED REQUEST IS THE SERVER'S, FIELD FOR FIELD, AND THE ONE I LEFT OUT
+COST AN AFTERNOON.** The driver arms `ai_search` exactly as `main.py` does so
+the component's pool effect needs no offline branch at all. The first version
+shipped `{options}` alone; `wire.rs` also needs **`phase`** and **`declarer`** —
+whoever would be DECLARING under those options, which at the Double is NOT the
+seat being asked. Without them every worker errored, the main thread's filter
+dropped them without a word, and the round sat in the auction forever. Same
+silent shape as the online bug that section already records.
+
+**A note on the browser gate, because it looks like a softened claim and is
+not.** `offlineDissonance` flips the network off only once the search pool has
+loaded. localhost runs no service worker, so a page taken offline before its
+workers have fetched the worker file and the 300KB wasm can never load them —
+the bot then answers nothing, which is a property of the HARNESS, not the
+feature (in the product the hub's Download button has already cached both).
+Everything after the flip — the referee, the search, the trick fold, the save
+and a reload — runs with nothing answering.
+
+**The wasm grew 66.8 → 117.7 kB gzipped (+51 kB)** for `serde_json`'s
+serialiser and the referee. It is fetched only when a room arms a searching
+tier, which is exactly the audience for offline play, and the download entry in
+the hub is ~350 KB — the smallest of the four, because here the AI and the
+referee are the same artifact.
+
 ## THE PAPER SCORECARD — for a game played with real cards (2026-08-18)
 
 A lobby modal (`scorecard.jsx`, the `extra` slot of the shared create row,

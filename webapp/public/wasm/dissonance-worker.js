@@ -26,6 +26,13 @@
 //     -> { id, moves:[...], sum:[...], worlds:n }
 //   { id, kind:"pick", moves, sum } -> { id, card }
 //   { id, kind:"review", req } -> { id, value } | { id, error }
+//   { id, kind:"deal", seats, seed, opener, match } -> { id, g } | { id, error }
+//   { id, kind:"apply", g, pid, move, seed }        -> { id, g } | { id, error }
+//   { id, kind:"view",  g, seat }                   -> { id, view } | { id, error }
+//     THE OFFLINE REFEREE (classic only). Same worker because it is the same
+//     wasm module -- a second loader would mean a second 300KB instance of it
+//     in memory -- but a DIFFERENT job: these run the room, they do not search
+//     it. `games/dissonance/offline.js` is the only caller.
 //     One EXACT solve of a finished round's deal (`odd_review`) -- no seed and
 //     no pooling, because a review has no uncertainty to sample: the round is
 //     over and every card is known. Same answer every time, which is what lets
@@ -40,6 +47,10 @@
 import * as wasm from "./dissonance.js";
 
 const { default: init, odd_pick_card, odd_best_card, odd_pick_bid, odd_review } = wasm;
+// THE OFFLINE REFEREE, read off the same namespace import and possibly absent:
+// a cached artifact older than the offline build has none of these, and the
+// driver probes for them before it offers to deal rather than dying here.
+const { odd_new_round, odd_apply, odd_view } = wasm;
 
 // Which wire vintage this artifact speaks. Probed off the EXPORT TABLE and
 // then off the export's own VALUE, because those are the things an old
@@ -124,6 +135,28 @@ self.onmessage = async (e) => {
       const r = JSON.parse(odd_review(String(msg.req)));
       if (r.error) { self.postMessage({ id: msg.id, error: r.error }); return; }
       self.postMessage({ id: msg.id, value: r.value });
+    } else if (msg.kind === "deal" || msg.kind === "apply" || msg.kind === "view") {
+      // Refuse rather than guess if this artifact predates the referee: the
+      // driver turns that into "go online once to download the engine", which
+      // is honest, where calling an undefined export would throw a stack trace
+      // at a player with no connection to fix it with.
+      if (!odd_new_round || !odd_apply || !odd_view) {
+        self.postMessage({ id: msg.id, error: "this saved engine is too old to referee a game — go online once to update it" });
+        return;
+      }
+      let out;
+      if (msg.kind === "deal") {
+        out = JSON.parse(odd_new_round(JSON.stringify(msg.seats), Number(msg.seed) || 1,
+          (msg.opener >>> 0), JSON.stringify(msg.match ?? null)));
+      } else if (msg.kind === "apply") {
+        out = JSON.parse(odd_apply(JSON.stringify(msg.g), String(msg.pid),
+          JSON.stringify(msg.move), Number(msg.seed) || 1));
+      } else {
+        out = JSON.parse(odd_view(JSON.stringify(msg.g), (msg.seat >>> 0)));
+      }
+      if (out && out.error) { self.postMessage({ id: msg.id, error: out.error }); return; }
+      // `deal` and `view` return the object itself; `apply` wraps it in `g`.
+      self.postMessage({ id: msg.id, ...(msg.kind === "apply" ? { g: out.g } : msg.kind === "deal" ? { g: out } : { view: out }) });
     } else if (msg.kind === "pick") {
       const card = odd_best_card(JSON.stringify({ moves: msg.moves, sum: msg.sum }));
       self.postMessage({ id: msg.id, card });

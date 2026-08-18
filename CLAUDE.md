@@ -463,7 +463,7 @@ covers the logic; each game's wiring is one line).
 - **`screens` runs its ~20 blocks in TWO LANES, and a new block MUST be listed in one** (`laneA`/`laneB`
   at the foot of the file; 116s → ~60s for the same 202 checks). The split is not arbitrary and is not
   "parallelise everything": a client-WASM pool takes `max(1, min(hc-1, 4))` workers, so **lane A holds
-  every block that arms a pool (Dissonance Hard + the three offline blocks) plus the two that measure
+  every block that arms a pool (Dissonance Hard + the FOUR offline blocks) plus the two that measure
   frame-level TIMING** (skat's panel recorder; the beat block's per-trick dwells, which want ≥550ms out
   of a 700ms hold) — two searching blocks at once oversubscribe a 4-core box. Lane A's ORDER matters
   too: the offline blocks run first so the beat block lands in the tail with the machine nearly to

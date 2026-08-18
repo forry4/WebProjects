@@ -73,6 +73,10 @@ import { OFFLINE_AI_PID, createOfflineGame, loadOfflineGame, deleteOfflineGame,
 import { createOfflineCocGame, COC_BOARD_NAMES } from "../castles_of_crimson/offline.js";
 // Duel's offline driver: same split — the hub creates, SpenderDuel plays.
 import { createOfflineDuelGame } from "../spender_duel/offline.js";
+// Dissonance's offline driver: the hub creates the record, the Dissonance
+// component plays it. Its referee is `classic.rs` in the same wasm the search
+// pool uses -- see games/dissonance/offline.js.
+import { createOfflineDissonanceGame } from "../dissonance/offline.js";
 // Dissonance's PAPER SCORECARD, in the offline hub. EAGER, not a lazy chunk,
 // and that is the whole point of it being here: a lazy chunk is only cached
 // once it has been fetched, so a card meant for a table with no signal would
@@ -2080,7 +2084,7 @@ export default function SpenderApp() {
 	// Enter a saved game by record, routed by which game owns it: Spender plays on this
 	// file's game screen; a CoC/Duel record mounts that game's component instead.
 	const enterOfflineRecord = (rec) => {
-		if (rec.game === "coc" || rec.game === "duel") {
+		if (rec.game === "coc" || rec.game === "duel" || rec.game === "dissonance") {
 			disconnect();                    // never share the screen with a live socket
 			setOfflinePlay(rec);
 			offlinePlayRef.current = rec;
@@ -2117,6 +2121,12 @@ export default function SpenderApp() {
 			}
 			if (offlineGameSel === "duel") {
 				const rec = await createOfflineDuelGame({ tier: offlineDuelTier });
+				pushPath(buildPath("offline", rec.id));
+				await enterOfflineRecord(rec);
+				return;
+			}
+			if (offlineGameSel === "dissonance") {
+				const rec = await createOfflineDissonanceGame({ tier: "hard", myId });
 				pushPath(buildPath("offline", rec.id));
 				await enterOfflineRecord(rec);
 				return;
@@ -2211,6 +2221,15 @@ export default function SpenderApp() {
 				"wasm/coc_pv_model.bin", "wasm/coc_pv_model_hard.bin"],
 			warm: () => fetch(`${HTTP_BASE}/coc/boards`).then((r) => r.json())
 				.then((data) => { try { localStorage.setItem("coc_boards_v1", JSON.stringify(data)); } catch {} }),
+		},
+		dissonance: {
+			label: "Dissonance", size: "~350 KB",
+			// The SMALLEST of the four, and the only one whose wasm is both the
+			// AI and the referee: `classic.rs` runs the room offline, so there is
+			// no engine to download beside the search.
+			urls: ["wasm/dissonance-worker.js", "wasm/dissonance.js", "wasm/dissonance_bg.wasm"],
+			warm: () => fetch(`${HTTP_BASE}/dissonance/catalog`).then((r) => r.json())
+				.then((d) => { try { localStorage.setItem("dis_catalog", JSON.stringify(d)); } catch {} }),
 		},
 		duel: {
 			label: "Spender Duel", size: "~1 MB",
@@ -2867,8 +2886,11 @@ export default function SpenderApp() {
 			{offlinePlay.game === "duel"
 				? <SpenderDuel myId={myId} authUser={authUser} offline={offlinePlay}
 					onExit={exitOfflinePlayToHub} />
-				: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
-					onExit={exitOfflinePlayToHub} />}
+				: offlinePlay.game === "dissonance"
+					? <Dissonance myId={myId} authUser={authUser} offline={offlinePlay}
+						onExit={exitOfflinePlayToHub} />
+					: <CastlesOfCrimson myId={myId} authUser={authUser} offline={offlinePlay}
+						onExit={exitOfflinePlayToHub} />}
 		</Suspense>
 	);
 
@@ -2893,6 +2915,7 @@ export default function SpenderApp() {
 								{ value: "spender", label: "Spender" },
 								{ value: "coc", label: "Castles of Crimson" },
 								{ value: "duel", label: "Spender Duel" },
+								{ value: "dissonance", label: "Dissonance" },
 							]} />
 						</CmRow>
 						{offlineGameSel === "duel" && (
@@ -2944,6 +2967,13 @@ export default function SpenderApp() {
 								</select>
 							</CmRow>
 						</>)}
+						{offlineGameSel === "dissonance" && (
+							<CmRow label="Difficulty">
+								<span className="cm-hint">
+									Hard — the exact solver, in this browser. Classic rounds to 200.
+								</span>
+							</CmRow>
+						)}
 						{/* duel: the Difficulty row above is its whole config (always 2p, one board) */}
 						<button type="button" className="cm-create" style={{ marginTop: 10 }}
 							onClick={createAndEnterOffline}>
