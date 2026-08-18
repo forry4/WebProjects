@@ -25,6 +25,10 @@ pub mod view;
 // `wire` only under `bridge`, so the default library stays dependency-free.
 #[cfg(any(feature = "bridge", target_arch = "wasm32"))]
 pub mod wire;
+// The OFFLINE REFEREE: classic's whole phase machine, so a browser with no
+// connection can run its own room. JSON in, JSON out, same gating as `wire`.
+#[cfg(any(feature = "bridge", target_arch = "wasm32"))]
+pub mod classic;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 
