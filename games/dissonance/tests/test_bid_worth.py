@@ -1,6 +1,6 @@
 """The auction panel prices a bid BEFORE it is made — guard that second copy.
 
-`priceBid` in `Dissonance.jsx` renders "makes 29 · down from 23" beside the bid
+`priceBid` in `Dissonance.jsx` renders "makes 29 · down for 23" beside the bid
 keys, which means the make/set curve is now written twice: once in
 `engine._terms_for`, once in the client. Nothing at runtime notices when they
 disagree — the server still scores every settled round itself, so a drift here
@@ -84,6 +84,6 @@ def test_the_panels_arithmetic_matches_the_engine():
             down = sr * level + fs + jb * max(0, jump) + sh
             assert make == terms["make"], f"L{level} j{jump}: make {make} vs {terms['make']}"
             # `down` is the CHEAPEST loss: the set base plus exactly one point
-            # short, which is what "down from" claims on screen.
+            # short, which is what "down for" claims on screen.
             assert down == -E.payoff(terms, level - 1, True), \
                 f"L{level} j{jump}: down {down} vs {-E.payoff(terms, level - 1, True)}"

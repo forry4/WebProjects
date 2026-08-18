@@ -1032,14 +1032,18 @@ these numbers evaporate otherwise:
 Two rows in the classic auction panel, both `BidWorth`: what the STANDING
 contract is worth, under the one-line headline, and what the SELECTED bid would
 be worth, under the Bid button — the price sits where the decision is taken.
-Both read `makes N · down from N`.
+Both read `makes N · down for N`.
 
 * **`down` is the CHEAPEST way to lose it** — the set base plus a single point
-  short — because how far short you finish is not knowable at bid time. The copy
-  says "down FROM" rather than a bare number to keep that honest.
+  short — because how far short you finish is not knowable at bid time, and the
+  number grows with the shortfall. The copy read "down FROM" for exactly two
+  hours to signal that floor and was changed to **"down FOR"** on request: it
+  parallels "makes", which reads better beside it. So the row states a FLOOR in
+  the voice of a fixed price — a deliberate trade of precision for symmetry, and
+  the thing to know if it ever reads as a promise.
 * **The jump is measured from the STANDING level**, which is what the set bonus
   actually charges for, so leaping shows its own cost: at level 5 it reads
-  "down from 23" climbing a rung and "down from 47" opening straight there.
+  "down for 23" climbing a rung and "down for 47" opening straight there.
 * **Priced off the LEVEL alone**, so it fills in the moment a rung is picked
   rather than waiting for a denomination — the suit changes who can outrank the
   bid, never what it pays.

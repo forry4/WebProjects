@@ -2623,7 +2623,7 @@ try {
 		const decisions = new Set();
 		const restated = new Set();   // any "needs/must take N pts" seen in play
 		let ctSeen = false;           // ...and whether the contract box ever rendered
-		const worthBad = new Set();   // any malformed "makes N · down from N"
+		const worthBad = new Set();   // any malformed "makes N · down for N"
 		let worthSeen = false;        // ...and whether a priced row was ever shown
 		//   (latched from the BID PICKER, which fills from local state on every
 		//    bid, and from the standing-contract row sampled below)
@@ -2762,13 +2762,13 @@ try {
 			for (const t of rest.worth) {
 				if (!t) continue;
 				worthSeen = true;
-				if (!/makes \d+ · down from \d+/.test(t)) worthBad.add(t);
+				if (!/makes \d+ · down for \d+/.test(t)) worthBad.add(t);
 			}
 			if (st.bidding) {
 				const pick = await disBidCheaply(page);
 				if (pick) {
 					worthSeen = true;
-					if (!/makes \d+ · down from \d+/.test(pick)) worthBad.add(pick);
+					if (!/makes \d+ · down for \d+/.test(pick)) worthBad.add(pick);
 				}
 				await sleep(250);
 				continue;
@@ -2822,7 +2822,7 @@ try {
 			ctSeen, "no .dis-ctsub was ever on screen during the game");
 		check("...and the target is never restated in words beside its own glyph",
 			restated.size === 0, JSON.stringify([...restated].slice(0, 3)));
-		check("a bid is priced before it is made: makes N, down from N",
+		check("a bid is priced before it is made: makes N, down for N",
 			worthSeen, "no .dis-worth row ever carried text during the game");
 		check("...and every priced row it showed was well-formed",
 			worthBad.size === 0, JSON.stringify([...worthBad].slice(0, 3)));
@@ -3015,7 +3015,7 @@ try {
 		check("the auction reserves a row for what a contract is worth",
 			worth.n >= 1 && worth.reserved, JSON.stringify(worth));
 		check("...and whatever it shows is a price, never a stray label",
-			worth.texts.every((t) => t === "" || /makes \d+ · down from \d+/.test(t)),
+			worth.texts.every((t) => t === "" || /makes \d+ · down for \d+/.test(t)),
 			JSON.stringify(worth));
 
 		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a

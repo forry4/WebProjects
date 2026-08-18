@@ -1362,7 +1362,7 @@ function BidWorth({ level, jump, price, label }) {
   return (
     <span className="dis-worth-in">
       {label ? <span className="dis-worth-lbl">{label}</span> : null}
-      makes <b>{make}</b> · down from <b>{down}</b>
+      makes <b>{make}</b> · down for <b>{down}</b>
     </span>
   );
 }
