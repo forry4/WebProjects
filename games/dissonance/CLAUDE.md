@@ -1027,6 +1027,44 @@ these numbers evaporate otherwise:
   settled 5–6 make only 43.8%/35.6%, so self-play still overbids the make
   point — whether the payoff asymmetry rewards it is unmeasured.
 
+## A BID IS PRICED BEFORE IT IS MADE (2026-08-17)
+
+Two rows in the classic auction panel, both `BidWorth`: what the STANDING
+contract is worth, under the one-line headline, and what the SELECTED bid would
+be worth, under the Bid button — the price sits where the decision is taken.
+Both read `makes N · down from N`.
+
+* **`down` is the CHEAPEST way to lose it** — the set base plus a single point
+  short — because how far short you finish is not knowable at bid time. The copy
+  says "down FROM" rather than a bare number to keep that honest.
+* **The jump is measured from the STANDING level**, which is what the set bonus
+  actually charges for, so leaping shows its own cost: at level 5 it reads
+  "down from 23" climbing a rung and "down from 47" opening straight there.
+* **Priced off the LEVEL alone**, so it fills in the moment a rung is picked
+  rather than waiting for a denomination — the suit changes who can outrank the
+  bid, never what it pays.
+* **Every term comes off `/catalog`** (`set_level_rate`, `linear_make_bonus`,
+  `flat_make_bonus`, `flat_set_penalty`, `jump_set_bonus`,
+  `classic_short_penalty`), never a literal in the JSX — the same
+  `payoff_terms` discipline the bot rides on, one surface further out.
+  `tests/test_bid_worth.py` holds the panel's arithmetic to `_terms_for`'s own
+  answer across every level and four jump sizes, and asserts the client reads
+  each term off the catalog rather than hardcoding it.
+* **The rows RESERVE their height** (`min-height` on `.dis-worth`) and carry no
+  placeholder text, for the same reason `ContractLine` does: the keypad
+  underneath must not move when the first bid lands.
+
+**AND ITS BROWSER GATE MUST NOT DEPEND ON WHO OPENED, which cost a deploy.**
+The standing-contract row only carries text once a bid has landed, so the first
+check sampled it at one instant and passed locally and failed in CI — where the
+harness's own seat opened, so nothing stood. The render gate is a REQUIRED job,
+so Build/Upload/Deploy were skipped and the frontend simply never shipped: green
+locally, red in CI, and the only symptom is the user not seeing the change. The
+check now reads the BID PICKER's row instead (`disBidCheaply` returns what it
+saw), which fills from local state on every bid the harness makes and is
+therefore seat-independent; the auction block keeps only claims true whoever
+opened — the height reserve, and "whatever it shows is a price".
+
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
 The round has two quantities that are both "how much", and the panel used one
@@ -2233,7 +2271,7 @@ the only signal.
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.
 
-## Tests (490)
+## Tests (560)
 
 `test_minor.py` (24) minor mode end to end — the ±1 parity and the −1 pool,
 the derived 1..6 ladder, the re-anchored prices (Null 6, set rate 2, the
@@ -2266,7 +2304,11 @@ whole-card-space assertion that no other contract moved), and the **overtrick
 bonus** (the make boundary, the flat-through-the-multipliers rule, and that no
 trick is ever skipped) · `test_client_ai.py` (12) the Hard tier's protocol: the armed
 request, the re-validation, the stale drop, the watchdog, and the picker/server
-tier agreement · `test_expert.py` (16) what the server ships so the browser can
+tier agreement · `test_bid_worth.py` (3) the auction panel's price
+row: `/catalog` serves every term the price is built from, the client reads
+them off the catalog instead of hardcoding them, and the panel's arithmetic
+matches `_terms_for` at every level and four jump sizes ·
+`test_expert.py` (16) what the server ships so the browser can
 SEARCH the auction: the payload is the auction verbatim, every settlement it
 prices is `_terms_for`'s own answer, every option the server offers has a row to
 settle on, unreachable rows are pruned, and only an EXPERT room carries the
