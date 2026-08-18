@@ -1469,6 +1469,19 @@ async def catalog():
         # is the engine's own arithmetic and not a hardcoded 10.
         "flat_make_bonus": dict(engine.FLAT_MAKE_BONUS),
         "flat_set_penalty": dict(engine.FLAT_SET_PENALTY),
+        # THE REST OF THE CLASSIC CURVE, so the auction panel can price a bid
+        # BEFORE it is made -- "5D makes 29, goes down for 23" -- with the
+        # engine's own numbers instead of a second copy of `L^2 + 4` and
+        # `2L + 2` in the client. Per-mode dicts like the two above.
+        "set_level_rate": dict(engine.SET_LEVEL_RATE),
+        "linear_make_bonus": dict(engine.LINEAR_MAKE_BONUS),
+        # CLASSIC'S OWN per-point set rate. `short_penalty` above is
+        # `SHORT_PENALTY`, which classic STOPPED using on 2026-08-16 when
+        # `CLASSIC_SHORT_PENALTY` was split out so classic and skat could move
+        # independently. They are both 5 today, so a client reading the wrong
+        # one is not visibly wrong yet -- which is exactly why it is served now,
+        # before the two diverge and the panel quietly prices the wrong game.
+        "classic_short_penalty": engine.CLASSIC_SHORT_PENALTY,
     }
 
 

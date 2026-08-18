@@ -1530,6 +1530,24 @@
    17rem rail and push the keypad down, which is the failure the row's
    `min-height` reserve exists to prevent. */
 .dis-holder { font-size: 0.58em; font-weight: 600; opacity: 0.75; }
+/* What a contract pays and costs. RESERVES ITS HEIGHT like the contract row
+   above it: it is empty until there is something to price, and a row that
+   appeared when the first bid landed would push the keypad down -- the failure
+   this panel has already been through twice. `nowrap` for the same reason the
+   contract line has it: two numbers plus their labels wrapping in the 17rem
+   rail costs a second line and moves everything below. */
+.dis-worth {
+  min-height: 1.2em; line-height: 1.2; text-align: center;
+  /* `--text-dim`, NOT `--muted` -- this sheet has no such token, and a
+     var() that resolves to nothing makes the browser drop the whole
+     declaration silently. `shared/tests/test_css_tokens.py` caught it. */
+  font-size: 0.82rem; color: var(--text-dim); white-space: nowrap;
+}
+.dis-worth b { color: var(--text); font-weight: 700; }
+/* The SELECTED bid's price sits under the Bid button, so it reads as a
+   consequence of the pending action rather than as part of the headline. */
+.dis-worth-pick { margin-top: 0.15rem; }
+.dis-worth-lbl { opacity: 0.8; }
 /* ...and the row above it, for the same reason one rung up: a standing
    contract renders at 1.5rem where the placeholder is body text. Reserve the
    taller form's height so the swap costs no layout. */

@@ -1345,6 +1345,28 @@ function ContractLine({ game, who }) {
   );
 }
 
+/** What a contract pays and what it costs, for a bid not yet made.
+ *
+ *  Two call sites and one component: the bid the player has SELECTED (beside
+ *  the Bid button, so the price is read where the decision is taken) and the
+ *  contract currently STANDING (under the auction's headline).
+ *
+ *  Renders nothing when there is no contract to price, and the row it sits in
+ *  reserves its own height -- same reason as the contract row above it. A line
+ *  that appears when the first bid lands would push the keypad down, which is
+ *  the bug this panel has now been through twice.
+ */
+function BidWorth({ level, jump, price, label }) {
+  if (!level) return null;
+  const { make, down } = price(level, jump);
+  return (
+    <span className="dis-worth-in">
+      {label ? <span className="dis-worth-lbl">{label}</span> : null}
+      makes <b>{make}</b> · down from <b>{down}</b>
+    </span>
+  );
+}
+
 // ─── socket ─────────────────────────────────────────────────────────────────
 
 function useSocket(onMessage) {
@@ -1504,9 +1526,15 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // room's mode. `game?.mode` is safely undefined outside a room, where
   // nothing renders either number.
   const isMinorRoom = game?.mode === "minor";
+  // CLASSIC READS ITS OWN RATE. `short_penalty` is `SHORT_PENALTY`, which
+  // classic stopped using on 2026-08-16 when `CLASSIC_SHORT_PENALTY` was split
+  // out so classic and skat could move independently. Both are 5 today, so this
+  // was not visibly wrong -- it was wrong in waiting.
   const shortRate = isMinorRoom
     ? (catalog?.minor_short_penalty ?? 2)
-    : (catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK);
+    : game?.mode === "classic"
+      ? (catalog?.classic_short_penalty ?? SHORT_PENALTY_FALLBACK)
+      : (catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK);
   const nullMake = isMinorRoom
     ? (catalog?.minor_null_make ?? 6)
     : (catalog?.null_make ?? NULL_MAKE);
@@ -1517,6 +1545,27 @@ export default function Dissonance({ myId, authUser, onExit }) {
     ?? (game?.mode === "classic" ? 10 : 0);
   const flatSet = catalog?.flat_set_penalty?.[game?.mode]
     ?? (game?.mode === "classic" ? 10 : 0);
+  // The rest of the curve, so a bid can be PRICED BEFORE IT IS MADE. Same
+  // source as the two above: the engine's own dicts off `/catalog`, never a
+  // second copy of the arithmetic.
+  const setRate = catalog?.set_level_rate?.[game?.mode] ?? 1;
+  const linMake = catalog?.linear_make_bonus?.[game?.mode] ?? 0;
+  const jumpBonus = catalog?.jump_set_bonus?.[game?.mode] ?? 0;
+  /** What a contract at `level` reached by a `jump`-rung rise is worth, undoubled.
+   *
+   *  `make` is exact. `down` is the CHEAPEST way to lose it -- the set base plus
+   *  a single point short -- because how far short you finish is not knowable at
+   *  bid time; it is the floor of the loss, not the loss. The panel says "from"
+   *  to keep that honest rather than implying a fixed price.
+   *
+   *  Mirrors `engine._terms_for` for the undoubled classic/minor branch. It is a
+   *  DISPLAY, not a decision: nothing is scored from it, the server prices every
+   *  settled round itself, so a drift here is cosmetic rather than a wrong payout.
+   */
+  const priceBid = (level, jump) => ({
+    make: level * level + linMake * level + flatMake,
+    down: setRate * level + flatSet + jumpBonus * Math.max(0, jump) + shortRate,
+  });
   useEffect(() => {
     fetch(`${OT_HTTP}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
@@ -2364,6 +2413,13 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   who={game.auction.level > 0
                     ? nameOf(game.auction.declarer) : null} />
               </div>
+              {/* What the STANDING contract is worth. Always rendered so the
+                  keypad below cannot move when the first bid lands; empty until
+                  there is something to price. */}
+              <div className="dis-worth">
+                <BidWorth level={game.auction.level}
+                  jump={game.auction.jump ?? 0} price={priceBid} />
+              </div>
               {/* POINTS, not "score" — the level is a promise in TRICK points,
                   and "score" is what the round pays out. Same vocabulary the
                   result panel keeps to. (This comment sits OUTSIDE the `&&`:
@@ -2405,6 +2461,17 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       Bid {bidLevel ?? ""}{bidDenom !== null ? <Den d={bidDenom} /> : ""}
                     </button>
                     {opt.may_pass && <button className="btn btn-ghost" onClick={doPass}>Pass</button>}
+                  </div>
+                  {/* ...and what the SELECTED bid would be worth, priced off the
+                      level alone -- the denomination changes who can outrank it,
+                      never what it pays -- so this fills in as soon as a rung is
+                      picked rather than waiting for both halves. The jump is
+                      measured from the STANDING level, which is what the set
+                      bonus charges for. */}
+                  <div className="dis-worth dis-worth-pick">
+                    <BidWorth level={bidLevel}
+                      jump={(bidLevel ?? 0) - game.auction.level}
+                      price={priceBid} label="if you bid: " />
                   </div>
                   {/* No hint row at all. It said "The opener must bid." at the
                       opening and nothing afterwards, and the panel is centred

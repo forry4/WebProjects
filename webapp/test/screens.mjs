@@ -2958,6 +2958,25 @@ try {
 			!!row && !/no bid yet|no contract yet|needs/.test(row.text) && !row.standing,
 			JSON.stringify(row));
 
+		// WHAT A BID IS WORTH, beside the keys (2026-08-17). Two rows: the
+		// STANDING contract's price and the SELECTED bid's. The NUMBERS are
+		// pinned against the engine in `tests/test_bid_worth.py`, which is where
+		// arithmetic belongs; what can only fail here is the row rendering empty
+		// or losing the height reserve it shares with the contract row above.
+		const worth = await page.evaluate(() => {
+			const rows = [...document.querySelectorAll(".dis-worth")];
+			return {
+				n: rows.length,
+				reserved: rows.every((r) => r.getBoundingClientRect().height >= 12),
+				texts: rows.map((r) => r.textContent.replace(/\s+/g, " ").trim()),
+			};
+		});
+		check("the auction prices the standing contract: makes N, down from N",
+			worth.n >= 1 && worth.texts.some((t) => /makes \d+ · down from \d+/.test(t)),
+			JSON.stringify(worth));
+		check("...and those rows keep their height reserve when empty",
+			worth.n >= 1 && worth.reserved, JSON.stringify(worth));
+
 		// The ladder is centered FLEX at fifth-widths (2026-08-12), not a
 		// 5-column grid — a responder's short legal set centers instead of
 		// hugging the left edge beside dead tracks. Fifth-width keys are what
