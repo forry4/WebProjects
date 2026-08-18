@@ -131,8 +131,8 @@ export default function DissonanceRules() {
 				</ul>
 				<p>
 					So Kontra is a bet on <b>how badly</b> they miss, not merely that they do.
-					A level-6 contract climbed one rung at a time pays you <b>24</b> one short
-					but <b>54</b> four short. The same contract reached by <i>opening</i> at 6
+					A level-6 contract climbed one rung at a time pays you <b>36</b> one short
+					but <b>66</b> four short. The same contract reached by <i>opening</i> at 6
 					and being passed out carries a six-level jump, and Kontra doubles that too
 					— <b>96</b> one short, <b>126</b> four short.
 				</p>

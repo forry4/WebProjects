@@ -1,8 +1,9 @@
-"""The auction panel prices a bid BEFORE it is made — guard that second copy.
+"""The panels price a contract THEMSELVES — guard that second copy.
 
-`priceBid` in `Dissonance.jsx` renders "makes 29 · down for 23" beside the bid
-keys, which means the make/set curve is now written twice: once in
-`engine._terms_for`, once in the client. Nothing at runtime notices when they
+`priceContract` in `Dissonance.jsx` renders "makes 29 · down for 23" beside the
+bid keys, the Kontra prompt's now/doubled table, the contract box's "set pays"
+row and the result panel's maths line, which means the make/set curve is now
+written twice: once in `engine._terms_for`, once in the client. Nothing at runtime notices when they
 disagree — the server still scores every settled round itself, so a drift here
 pays out correctly and simply LIES to the player while they are choosing, which
 is the worst place to be wrong and the least likely to be noticed.
@@ -41,6 +42,16 @@ TERMS = {
     "linear_make_bonus": lambda: E.LINEAR_MAKE_BONUS,
     "jump_set_bonus": lambda: E.JUMP_SET_BONUS,
     "classic_short_penalty": lambda: E.CLASSIC_SHORT_PENALTY,
+    # THE DOUBLE'S DIALS. The same panel prices a Kontra -- the prompt's
+    # now/doubled table, the contract box's "set pays" row and the result
+    # panel's maths line -- and those three spent months printing a flat x2 on
+    # both bases plus the retired shortfall ramp, i.e. a rule the game had
+    # stopped applying. Served and read for the same reason as the curve above.
+    "double_make_mult": lambda: E.DOUBLE_MAKE_MULT,
+    "double_base_mult": lambda: E.DOUBLE_BASE_MULT,
+    "double_jump_mult": lambda: E.DOUBLE_JUMP_MULT,
+    "jump_doubled": lambda: E.JUMP_DOUBLED,
+    "doubled_short_penalty": lambda: E.DOUBLED_SHORT_PENALTY,
 }
 
 
@@ -57,13 +68,47 @@ def test_the_catalog_serves_every_term_the_panel_prices_with():
 
 def test_the_client_reads_every_term_off_the_catalog():
     src = JSX.read_text(encoding="utf-8")
-    body = src[src.index("const priceBid"):]
-    body = body[:body.index("});") + 3]
-    for name in ("flatMake", "flatSet", "setRate", "linMake", "jumpBonus", "shortRate"):
-        assert name in body, f"priceBid no longer uses {name!r} -- hardcoded?"
+    body = src[src.index("const priceContract"):]
+    body = body[:body.index("\n  };") + 4]
+    for name in ("flatMake", "flatSet", "setRate", "linMake", "jumpBonus",
+                 "shortRate", "dblMake", "dblBase", "dblJump", "dblShort"):
+        assert name in body, f"priceContract no longer uses {name!r} -- hardcoded?"
     for key in TERMS:
         assert re.search(rf"catalog\?\.{key}\b", src), \
             f"{key!r} is no longer read from the catalog in Dissonance.jsx"
+    # `double_ramp` is a scalar rather than a per-mode dict, so it is read
+    # without the `?.[mode]` the others carry -- and it is what decides whether
+    # the shortfall row prints a flat rate or a rising sequence.
+    assert re.search(r"catalog\?\.double_ramp\b", src), \
+        "double_ramp is no longer read from the catalog in Dissonance.jsx"
+
+
+def test_the_panels_price_the_double_the_way_the_engine_does():
+    """The doubled arm of the same mirror -- the one that had actually drifted.
+
+    Written like the undoubled test below it: a throwaway copy of the JSX line
+    for line, so an engine move that leaves the client behind fails here with
+    both numbers rather than on a screen nobody is diffing.
+    """
+    m = "classic"
+    fm, fs = E.FLAT_MAKE_BONUS[m], E.FLAT_SET_PENALTY[m]
+    sr, lm, jb = E.SET_LEVEL_RATE[m], E.LINEAR_MAKE_BONUS[m], E.JUMP_SET_BONUS[m]
+    mm = E.DOUBLE_MAKE_MULT.get(m, 2)
+    bm = E.DOUBLE_BASE_MULT.get(m, 2)
+    jm = E.DOUBLE_JUMP_MULT.get(m, bm if E.JUMP_DOUBLED.get(m, True) else 1)
+    sh = E.DOUBLED_SHORT_PENALTY.get(m, E.CLASSIC_SHORT_PENALTY)
+    for level in range(1, E.max_level_for(m) + 1):
+        for jump in (0, 1, level):
+            terms = E._terms_for(m, 0, level, jump=jump, doubling=2)
+            make = (level * level + lm * level + fm) * mm
+            base = (sr * level + fs) * bm + jb * max(0, jump) * jm
+            assert make == terms["make"], f"L{level} j{jump}: make {make} vs {terms['make']}"
+            assert base == terms["set_base"], \
+                f"L{level} j{jump}: set base {base} vs {terms['set_base']}"
+            assert sh == terms["short"], f"L{level}: short {sh} vs {terms['short']}"
+            # …and the row the Kontra prompt draws its "per point short" from is
+            # the rate itself, so a ramp coming back would have to move this.
+            assert terms.get("ramp", 0) == E.DOUBLE_RAMP
 
 
 def test_the_panels_arithmetic_matches_the_engine():

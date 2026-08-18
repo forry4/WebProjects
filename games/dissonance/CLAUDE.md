@@ -751,13 +751,14 @@ never forced to. Winner leads next.
 
 **Scoring** (contract only; trick points are the yardstick *and* the margin —
 and in skat mode "trick points" means CARD points, per the section above):
-make → **N² + the flat 10 stake, + 1 per trick point past N**; set → defender
-scores **N + 10, + 5 × shortfall, + 3 × the final bid's level jump (classic
-only — see the JUMP BONUS section)** (the ±10 stake — see its bullet below — is
-classic-only). **NULL OVERRIDES A SET**: a declarer who won **no +2
+make → **N² + the flat 4 stake, + 1 per trick point past N**; set → defender
+scores **2N + 2, + 5 × shortfall, + 6 × the final bid's level jump (classic
+only — see the JUMP BONUS section)** (the flat stakes — see the bullet below —
+are classic-only, and are +4/+2 since the 2026-08-16 re-price; the original
+dose was a symmetric ±10). **NULL OVERRIDES A SET**: a declarer who won **no +2
 trick all round** scores a flat **20** (both modes; classic moved 12 → 20 with
-the stake — sets got 10 fatter, so the escape was re-anchored just under the
-made level-1 ceiling of 22) instead, whatever they
+the stake — sets got fatter, so the escape was re-anchored just under a made
+level-1's ceiling) instead, whatever they
 declared. **Every round runs all thirteen tricks** — see the overtrick section.
 
 ### Why these numbers, in one line each
@@ -790,7 +791,7 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   DECLARER'S consolation (its make rate defending is ~0%).
 * **N² make / linear set** — the make/set RATIO is what lifts bidding. Matched
   curves cancel: N² on both left the floor cluster identically at 42.7%.
-* **set base N, not N−1 (2026-08-07)** — a product decision, not a measurement,
+* **set base N, not N−1 (2026-08-07; the base is `2N + 2` since the 2026-08-16 re-price — `SET_LEVEL_RATE` 2 and `FLAT_SET_PENALTY` 2, and the argument below is about the +1 that got it off N−1)** — a product decision, not a measurement,
   and it is one number in one place (`_terms_for`'s classic `set_base`). At the
   floor the old base contributed *nothing*: breaking a level-1 contract paid the
   defender by the margin alone, and ~42% of openings sit at level 1. It adds
@@ -804,7 +805,7 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `cmatch.rs`, `abench.rs`), and the two places that print the arithmetic to a
   human (the result panel's maths line, `rules.jsx`). Skat is untouched: its set
   base is the STAKE, so there was no N−1 in it to add to.
-* **the ±10 flat stake (2026-08-11, classic only)** — `FLAT_MAKE_BONUS` /
+* **the flat stake (2026-08-11, classic only) — MEASURED AT ±10, SHIPPING AT +4 MAKE / +2 SET** since the 2026-08-16 re-price folded most of the set side into `SET_LEVEL_RATE = 2`; the symmetry argument below is what the dial is FOR and it survives the dose, but every absolute number in this bullet was measured at ±10 — `FLAT_MAKE_BONUS` /
   `FLAT_SET_PENALTY`, per-mode dicts; +10 on the made base AND +10 to the
   defender on a set, inside the Double like the bases they ride. Symmetry is
   the design: a make-only bonus adds `F·p(make)` to holding any contract (an
@@ -821,7 +822,7 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
   `contract_for` / `abench.rs` (the bins that claim the shipped scoring),
   `rules.jsx`, and the result panel now reads `make_value`/`set_base` OFF THE
   ROW rather than recomputing N².
-* **short 4** — the sacrifice dial. Doubling it roughly halves sacrifice bids.
+* **short 5** (`CLASSIC_SHORT_PENALTY`; 4 until 2026-08-08) — the sacrifice dial. Doubling it roughly halves sacrifice bids. A DOUBLED shortfall is its own rate, `DOUBLED_SHORT_PENALTY` = 10 — see the Double section.
 * **per-player denominations — KEPT.** Two relaxations were measured on
   2026-08-13 and NEITHER was adopted: "standing" (nobody bids the standing
   suit twice in a row) and "own" (no seat repeats its OWN last suit). They
@@ -1120,14 +1121,22 @@ So a made round reads *"Alice bid 4♠ and took 3 extra points"* over
 A `double` phase between the classic swap and trick 1, the DEFENDER to act.
 `g["doubled"]`, `classic_doubling`, `apply_double`.
 
-**UNIFORM SINCE 2026-08-16 — everything doubles except Null**, which also makes
-classic the SAME shape as skat's Kontra. It reached that in four moves in one
-day, and the dials are all still there:
+**IT BETS ON THE LEAP AND THE SHORTFALL (candidate B', shipped 2026-08-17)**,
+which is the two things a SACRIFICE actually has. The fixed stake does not
+double, so doubling a cheap jump-free contract is no longer nearly free:
 
     made   N^2 + 4   ->  2 (N^2 + 4)    (the overtrick rate doubles with it)
-    set     2N + 2   ->  2 (2N + 2), and the per-point shortfall doubles too:
-                         10 a point, not 5 (`DOUBLED_SHORT_PENALTY`)
+    set     2N + 2   ->  2N + 2         (`DOUBLE_BASE_MULT` = 1 — UNCHANGED)
+      + 6j the final leap  ->  x2       (`DOUBLE_JUMP_MULT`)
+      + 5 a point short    ->  10       (`DOUBLED_SHORT_PENALTY`)
     Null        20   ->  20             (the one exception)
+
+**IT WAS BRIEFLY UNIFORM (2026-08-16, one day)** — everything x2 except Null,
+the same shape as skat's Kontra — and the paragraphs below that read as though
+that is the rule are that day's. What they establish still holds where it is
+about the SHAPE (a doubled round having no house edge, Null never scaling); what
+they say about a doubled SET is one price list out of date. See the formula
+sweep below for how B' was chosen and what it costs.
 
 | shape | doubled shortfall | reward vs shortfall | break-even L1 |
 |---|---|---|---|
@@ -1136,17 +1145,22 @@ day, and the dials are all still there:
 | `DOUBLED_SHORT_PENALTY = 6` | 6 per point | linear | 0.45 |
 | **= 10 (shipped)** | **10 per point** | **= the undoubled round** | **0.26** |
 
-**A doubled round pays EXACTLY twice the undoubled one on every scored line**,
-asserted over the whole grid by
-`test_a_doubled_round_is_exactly_twice_the_undoubled_one`. So the bet has no
-house edge either way and break-even is the contract's own make/set ratio:
-0.26 / 0.33 / 0.42 / 0.50 / 0.57 / 0.62 for levels 1-6.
+**Under the uniform Double that break-even column WAS the contract's own
+make/set ratio** — 0.26 / 0.33 / 0.42 / 0.50 / 0.57 / 0.62 for levels 1-6 — with
+no house edge either way, which is what made "everything x2" statable in four
+words. **Base x1 deliberately gives that up**: the defender's winnings now come
+only from the leap and the shortfall, so break-even RISES on a jump-free
+contract and the bet is priced for the sacrifice rather than for the miss. The
+grid is asserted term by term instead of as one multiplier —
+`test_the_double_scales_each_term_by_its_own_multiplier`,
+`test_a_set_contract_pays_2N_and_its_own_per_point_rate`,
+`test_the_break_even_odds_are_what_the_bot_policy_rests_on`.
 
 **THE CONSEQUENCE TO KNOW, because it reads as a bug and is not one:** at levels
 1-3 doubling pays even against a 1-point near-miss, because `L^2 + 4` is smaller
 than `2L + 2 + 5` down there — being set already costs more than making pays.
 That is the make curve being quadratic off a base of 4 against a linear set base,
-not the Double being lopsided; uniform doubling only exposes it. The crossover is
+not the Double being lopsided. The crossover is
 exactly `L^2 + Fm > (SL x L + Fs) + short`, i.e. L > 3, and
 `test_where_a_near_miss_double_stops_paying` derives it from the price list rather
 than pinning 4.
@@ -1244,11 +1258,17 @@ obtained from a multiplier instead of an escalator.
   goal of longer auctions, but is a live change to the auction and not just to the
   Double.
 
-**NOT SHIPPED.** The dials are in and default to a plain x2, so shipped behaviour
-is byte-identical (the payoff fixtures did not move). Before B ships it wants an
-Expert self-play arm: the rate and precision here are EQUILIBRIUM numbers, and the
-settled-distribution cost has to be checked against the 40% rule on the real bot
-rather than on the abstraction.
+**B' SHIPPED THE NEXT DAY (2026-08-17): `DOUBLE_BASE_MULT = 1`,
+`DOUBLE_JUMP_MULT = 2`,** i.e. the leap and the shortfall double and the fixed
+stake does not. Re-measured at two CFR+ seeds on the same 2000-deal cache, its
+doubles land on a SET 46-47% of the time against uniform's 36%, at 27-28%
+against 30-31% and a marginally better distribution match (loss 0.49-0.50 vs
+0.51-0.54) — a PRECISION change rather than a rate change. Plain B (jump x1)
+reaches 17% but spikes the settled distribution to 50% at level 5 and throws the
+jump invitation away, so the rate reduction and the invitation could not both be
+had from these dials and the invitation won. `main.DOUBLE_MARGIN` was re-fitted
+20 → 12 with it, off a 192-round recording made at live margin 0 (the sweep can
+only price upward from the margin a run was recorded under).
 
 **The tables below are PRE-2026-08-16 measurements** that chose the ramp. Their
 SHAPE arguments stand -- ordinary failures come up a median of 2 short with 48%

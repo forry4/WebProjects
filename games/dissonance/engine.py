@@ -326,9 +326,9 @@ MINOR_SHORT_PENALTY = 2
 #: measurement saying the ramp was wrong.
 #:
 #: NOT A FREE CHANGE ELSEWHERE: `DOUBLE_MARGIN` is a threshold in payoff points
-#: and this shrinks the doubled branch's value, so the shipped 20 is now sitting
-#: on a slightly different edge distribution. See `main.DOUBLE_MARGIN` -- the
-#: `dblsweep.py` re-check is queued, not done.
+#: and this shrinks the doubled branch's value, so it sits on a different edge
+#: distribution afterwards. That re-check has since been DONE, off a fresh
+#: `dblsweep.py` run, and it moved the margin 20 -> 12; see `main.DOUBLE_MARGIN`.
 #:
 #: ONE SCALAR FOR EVERY MODE, which is why minor and skat lose it too: the
 #: request was a flat per-point rate, and each mode already has its own
@@ -339,11 +339,13 @@ DOUBLE_RAMP = 0
 #: WHAT A DOUBLED SHORTFALL COSTS PER POINT. Absent for a mode == that mode's own
 #: `short`, i.e. that mode does not change the rate when doubled.
 #:
-#: CLASSIC IS 10 = 2 x 5, WHICH MAKES THE DOUBLE UNIFORM: make, set base and the
-#: per-point shortfall all scale by the same 2, so a doubled round pays EXACTLY
-#: twice what the undoubled one would have. Null alone is untouched. That is the
-#: whole rule, statable in four words -- "the Double doubles everything" -- and it
-#: is what shipped 2026-08-16 after two intermediate shapes:
+#: CLASSIC IS 10 = 2 x 5. That made the Double UNIFORM for one day (2026-08-16):
+#: make, set base and the per-point shortfall all scaling by the same 2, so a
+#: doubled round paid EXACTLY twice the undoubled one and Null alone was
+#: untouched. `DOUBLE_BASE_MULT = 1` ended the uniformity the next day -- the
+#: fixed stake no longer doubles -- but this rate is unchanged by that, and it is
+#: what makes the SHORTFALL half of the bet track the round. It shipped after two
+#: intermediate shapes:
 #:
 #:   ramp (6, 7, 8, 9 per point)   reward grew QUADRATICALLY with the shortfall
 #:   flat 5 both ways              reward was SHORTFALL-BLIND: break-even above
@@ -397,8 +399,10 @@ DOUBLED_SHORT_PENALTY = {"classic": 10}
 #: which is exactly the sacrifice-vs-near-miss discrimination the retired ramp
 #: existed to buy, obtained from the multiplier instead of an escalator.
 #:
-#: SHIPPED AS 2/2 (a plain Double). Both are per-mode and both ship as DATA out
-#: of `_terms_for`, so a change needs no wire field and no Rust edit.
+#: SHIPPED AS make x2, base x1 (see `DOUBLE_BASE_MULT` below -- classic names it,
+#: so an absent entry here is the plain x2 on the MAKE side only). Both are
+#: per-mode and both ship as DATA out of `_terms_for`, so a change needs no wire
+#: field and no Rust edit.
 DOUBLE_MAKE_MULT = {}
 #: CLASSIC IS 1: the flat set stake does NOT double (2026-08-16). So the
 #: defender's winnings from a Double come only from the LEAP the declarer took

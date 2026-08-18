@@ -229,7 +229,7 @@ function DoubleWorth({ res, nameOf }) {
  *  wrong was live here: the old line printed `4 × 4 × 2 = 32 + 3 = 38`, which
  *  does not add up, because a Double doubles the overtrick RATE too
  *  (`over_bonus`) and the tail only ever showed the raw points. */
-function ResultMaths({ res, nameOf }) {
+function ResultMaths({ res, nameOf, price }) {
   const lvl = res.level;
   if (res.null) {
     return <div className="dis-maths">
@@ -252,23 +252,55 @@ function ResultMaths({ res, nameOf }) {
       {" = "}<Score>{res.scores[res.declarer]}</Score> to {nameOf(res.declarer)}
     </div>;
   }
-  // Set: the base is the level plus the stake (doubled, twice it), then the
-  // shortfall charge. Undoubled that is a flat rate times the points missed;
-  // doubled it RAMPS, so the terms are spelled out rather than faked as a
-  // product. The stake comes off the row like the make side's.
+  // Set: the set base, then the shortfall charge. Undoubled that is a flat rate
+  // times the points missed; a ramped one is spelled out rather than faked as a
+  // product. Every number is the ROW's own.
+  //
+  // THE BASE IS NO LONGER "THE LEVEL, DOUBLED". This line used to print
+  // `(N + stake) × 2`, which was three separate claims the game has stopped
+  // making: the set base is `SET_LEVEL_RATE × N + stake`, the LEAP the winning
+  // bid took rides inside it, and Kontra multiplies those two by different
+  // amounts (classic: the stake by 1, the leap by 2). So the terms are priced
+  // by `priceContract` and CHECKED against `set_base` before they are shown --
+  // if they do not reproduce the base the engine charged (an old round scored
+  // under a different price list, or a catalog fetch that never landed), the
+  // base is printed whole rather than decomposed into a lie.
   const ramp = res.ramp || 0;
   const flat = res.short_rate ?? 4;
   const s = res.short || 0;
-  const stakeS = (res.set_base ?? dbl * lvl) / dbl - lvl;
-  const base = stakeS ? <>(<Lvl>{lvl}</Lvl> + {stakeS})</> : <Lvl>{lvl}</Lvl>;
+  const total = res.set_base ?? dbl * lvl;
+  const p = price ? price(lvl, res.jump || 0, !!res.doubled) : null;
+  const parts = p && p.setBase === total ? p : null;
+  const base = parts && (parts.setParts.rate > 1 || parts.setParts.flat || parts.leap)
+    ? <>({parts.setParts.rate > 1 ? <>{parts.setParts.rate} × </> : null}
+      <Lvl>{lvl}</Lvl>
+      {parts.setParts.flat ? ` + ${parts.setParts.flat}` : ""}
+      {parts.leap ? ` + ${parts.leap}` : ""})</>
+    : <Lvl>{total}</Lvl>;
   return <div className="dis-maths">
-    {res.doubled ? <>{base} × 2</> : base} + (
+    {base} + (
     {ramp
       ? Array.from({ length: s }, (_, i) => flat + ramp * (i + 1)).join(" + ")
       : <>{flat} × <Pts>{s}</Pts></>}
     ){" = "}<Score>{res.scores[1 - res.declarer]}</Score> to{" "}
     {nameOf(1 - res.declarer)}
   </div>;
+}
+
+/** One row of the Kontra prompt's table: what it pays now, and doubled.
+ *
+ *  The arrow is DROPPED when the number does not move, which is a fact about
+ *  the shipped bet rather than a rendering nicety: classic's set base takes
+ *  `DOUBLE_BASE_MULT = 1`, so a jump-free contract's set price is the same
+ *  either way and "14 → 14" would read as a typo. */
+function KontraRow({ label, now, dbl }) {
+  return (
+    <div className="dis-scorerow">
+      <span>{label}</span>
+      <b>{now === dbl ? <span className="dis-kbig">{dbl}</span>
+        : <>{now}{" → "}<span className="dis-kbig">{dbl}</span></>}</b>
+    </div>
+  );
 }
 
 const suitOf = (c) => (c < NCARD ? Math.floor(c / 8)
@@ -1243,7 +1275,7 @@ function useParTable(r, roomId, denoms) {
 
 /** What the declared skat game is worth right now, and why.
  *  `rows` renders it as side-panel score rows; otherwise as one inline line. */
-function SkatStake({ game, nameOf, rows }) {
+function SkatStake({ game, nameOf, rows, shortRate }) {
   const ct = game.contract || {};
   if (!ct.value) return null;
   const doubling = ct.re ? 4 : ct.kontra ? 2 : 1;
@@ -1267,7 +1299,8 @@ function SkatStake({ game, nameOf, rows }) {
       {why && <div className="muted" style={{ fontSize: "0.72rem" }}>{why}</div>}
       <div className="muted" style={{ fontSize: "0.72rem" }}>
         Made, it goes to {nameOf(game.auction.declarer)} plus 1 a point over;
-        missed, to {nameOf(1 - game.auction.declarer)} plus 4 a point short.
+        missed, to {nameOf(1 - game.auction.declarer)} plus{" "}
+        {shortRate ?? SHORT_PENALTY_FALLBACK} a point short.
       </div>
     </>
   );
@@ -1538,34 +1571,79 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const nullMake = isMinorRoom
     ? (catalog?.minor_null_make ?? 6)
     : (catalog?.null_make ?? NULL_MAKE);
-  // THE FLAT STAKE (2026-08-11): ±10 riding on classic's make and set bases,
-  // read off the catalog's per-mode dicts like the rates above so a re-priced
-  // stake needs no client change. The fallback mirrors the shipped rule.
+  // THE FLAT STAKE (2026-08-11, re-priced 2026-08-17 to +4 / +2): the fixed
+  // amounts riding on classic's make and set bases, read off the catalog's
+  // per-mode dicts like the rates above so a re-priced stake needs no client
+  // change. The fallback -- which only renders when the catalog fetch never
+  // landed -- mirrors the shipped rule.
   const flatMake = catalog?.flat_make_bonus?.[game?.mode]
-    ?? (game?.mode === "classic" ? 10 : 0);
+    ?? (game?.mode === "classic" ? 4 : 0);
   const flatSet = catalog?.flat_set_penalty?.[game?.mode]
-    ?? (game?.mode === "classic" ? 10 : 0);
+    ?? (game?.mode === "classic" ? 2 : 0);
   // The rest of the curve, so a bid can be PRICED BEFORE IT IS MADE. Same
   // source as the two above: the engine's own dicts off `/catalog`, never a
   // second copy of the arithmetic.
   const setRate = catalog?.set_level_rate?.[game?.mode] ?? 1;
   const linMake = catalog?.linear_make_bonus?.[game?.mode] ?? 0;
   const jumpBonus = catalog?.jump_set_bonus?.[game?.mode] ?? 0;
-  /** What a contract at `level` reached by a `jump`-rung rise is worth, undoubled.
+  // THE DOUBLE'S DIALS (2026-08-16), served for exactly the reason the curve
+  // above is: three surfaces state what Kontra costs -- the Kontra prompt, the
+  // contract box and the result panel -- and all three were doing it with a
+  // hardcoded ×2 and the retired shortfall ramp months after the shipped rule
+  // became "the LEAP and the SHORTFALL double, the fixed stake does not".
+  //
+  // TWO FALLBACKS, and they answer different questions. `served` is what an
+  // absent MODE means -- `_terms_for` reads these with `.get(mode, doubling)`,
+  // so a mode nobody named gets the plain ×2 -- while `offline` is what a
+  // catalog fetch that never landed should render, which is whatever classic
+  // ships. Collapsing them into one `??` would quietly turn classic's base ×1
+  // back into a ×2 the moment the fetch failed.
+  const isClassicRoom = game?.mode === "classic";
+  const dialFor = (table, served, offline) =>
+    (table ? (table[game?.mode] ?? served) : offline);
+  const dblMake = dialFor(catalog?.double_make_mult, 2, 2);
+  const dblBase = dialFor(catalog?.double_base_mult, 2, isClassicRoom ? 1 : 2);
+  const dblJump = dialFor(catalog?.double_jump_mult,
+    (catalog?.jump_doubled?.[game?.mode] ?? true) ? dblBase : 1,
+    isClassicRoom ? 2 : dblBase);
+  const dblShort = dialFor(catalog?.doubled_short_penalty, shortRate,
+    isClassicRoom ? 2 * shortRate : shortRate);
+  const dblRamp = catalog?.double_ramp ?? 0;
+  /** What a contract at `level`, reached by a `jump`-rung rise, is worth --
+   *  undoubled, or with the Kontra on it.
    *
-   *  `make` is exact. `down` is the CHEAPEST way to lose it -- the set base plus
-   *  a single point short -- because how far short you finish is not knowable at
-   *  bid time; it is the floor of the loss, not the loss. The panel says "from"
-   *  to keep that honest rather than implying a fixed price.
+   *  `make` and `setBase` are exact. `down` is the CHEAPEST way to lose it --
+   *  the set base plus a single point short -- because how far short you finish
+   *  is not knowable at bid time; it is the floor of the loss, not the loss. The
+   *  panel says "down for" to keep that honest rather than implying a price.
    *
-   *  Mirrors `engine._terms_for` for the undoubled classic/minor branch. It is a
-   *  DISPLAY, not a decision: nothing is scored from it, the server prices every
-   *  settled round itself, so a drift here is cosmetic rather than a wrong payout.
+   *  Mirrors `engine._terms_for`'s classic/minor branch, doubled arm included:
+   *  the fixed stake takes `DOUBLE_BASE_MULT`, the jump bonus takes its own
+   *  `DOUBLE_JUMP_MULT`, and a doubled shortfall charges `DOUBLED_SHORT_PENALTY`
+   *  a point. `setParts` is the same stake taken apart, so a panel can print the
+   *  terms rather than one opaque number and still provably reach the total.
+   *
+   *  It is a DISPLAY, not a decision: nothing is scored from it, the server
+   *  prices every settled round itself, so a drift here is cosmetic rather than
+   *  a wrong payout -- which is also why it is the least likely thing to be
+   *  noticed, and why `tests/test_bid_worth.py` guards it against the engine.
    */
-  const priceBid = (level, jump) => ({
-    make: level * level + linMake * level + flatMake,
-    down: setRate * level + flatSet + jumpBonus * Math.max(0, jump) + shortRate,
-  });
+  const priceContract = (level, jump, doubled) => {
+    const mm = doubled ? dblMake : 1;
+    const bm = doubled ? dblBase : 1;
+    const jm = doubled ? dblJump : 1;
+    const stake = (setRate * level + flatSet) * bm;
+    const leap = jumpBonus * Math.max(0, jump) * jm;
+    const short = doubled ? dblShort : shortRate;
+    return {
+      make: (level * level + linMake * level + flatMake) * mm,
+      stake, leap, short, setBase: stake + leap,
+      setParts: { rate: setRate * bm, flat: flatSet * bm },
+      down: stake + leap + short,
+    };
+  };
+  /** The auction's own pricing: a bid is not doubled while it is being made. */
+  const priceBid = (level, jump) => priceContract(level, jump, false);
   useEffect(() => {
     fetch(`${OT_HTTP}/catalog`).then((r) => r.json()).then(setCatalog).catch(() => {});
   }, []);
@@ -2671,29 +2749,34 @@ export default function Dissonance({ myId, authUser, onExit }) {
                       the buttons under a scrollbar, which is worse than not
                       explaining it. Two rows, each `now → doubled`, so the
                       asymmetry is something you SEE rather than parse. */}
-                  <div className="dis-ktable">
-                    <div className="dis-scorerow">
-                      <span>They make it</span>
-                      <b>{game.auction.level * game.auction.level + flatMake}
-                        {" → "}
-                        <span className="dis-kbig">
-                          {2 * (game.auction.level * game.auction.level + flatMake)}
-                        </span></b>
-                    </div>
-                    <div className="dis-scorerow">
-                      <span>You set them</span>
-                      <b>{game.auction.level + flatSet}
-                        {" → "}
-                        <span className="dis-kbig">{2 * (game.auction.level + flatSet)}</span></b>
-                    </div>
-                    <div className="dis-scorerow">
-                      <span>…plus, per point short</span>
-                      <b>{shortRate}{" → "}
-                        <span className="dis-kbig">
-                          {[1, 2, 3].map((i) => shortRate + i).join(", ")}…
-                        </span></b>
-                    </div>
-                  </div>
+                  {(() => {
+                    // PRICED, never retyped: both columns come out of
+                    // `priceContract`, which mirrors `_terms_for`. The three
+                    // rows used to hardcode a ×2 on both bases and a rising
+                    // ramp on the shortfall, and by 2026-08-17 every one of
+                    // those was a rule the game had stopped applying — the
+                    // set base does NOT double any more, the leap does, and a
+                    // doubled point short is a flat rate rather than a ramp.
+                    const jump = game.auction.jump ?? 0;
+                    const now = priceContract(game.auction.level, jump, false);
+                    const dbl = priceContract(game.auction.level, jump, true);
+                    return (
+                      <div className="dis-ktable">
+                        <KontraRow label="They make it" now={now.make} dbl={dbl.make} />
+                        {/* The set base and the leap in one number, because
+                            that is what a set pays. With classic's base ×1 and
+                            no leap this row does not move under Kontra — which
+                            is the bet's whole shape, so it is shown standing
+                            still rather than dropped. */}
+                        <KontraRow label="You set them" now={now.setBase} dbl={dbl.setBase} />
+                        <KontraRow label="…plus, per point short"
+                          now={now.short}
+                          dbl={dblRamp
+                            ? [1, 2, 3].map((i) => dbl.short + dblRamp * i).join(", ") + "…"
+                            : dbl.short} />
+                      </div>
+                    );
+                  })()}
                   <div className="dis-actrow">
                     <button className="btn dis-kontrabtn"
                       onClick={() => doMove({ kind: "double", on: true })}>Kontra</button>
@@ -2709,7 +2792,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
             <div className="dis-auction">
               <div className="muted">{game.phase === "re" ? "Re?" : "Kontra?"}</div>
               <ContractLine game={game} />
-              <SkatStake game={game} nameOf={nameOf} />
+              <SkatStake game={game} nameOf={nameOf} shortRate={shortRate} />
               {myKontra ? (
                 <>
                   <div className="muted dis-hint">
@@ -2861,7 +2944,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     number arriving from nowhere. Every term is the result row's
                     own -- off the terms `_finish` scored with -- so the panel
                     cannot narrate an arithmetic the room did not apply. */}
-                <ResultMaths res={res} nameOf={nameOf} />
+                <ResultMaths res={res} nameOf={nameOf} price={priceContract} />
                 {res.doubled && (
                   /* WHAT THE BET WAS WORTH, as the difference it made. This
                      used to report the set BASE moving ("the set base went
@@ -3237,7 +3320,7 @@ export default function Dissonance({ myId, authUser, onExit }) {
                   <span>Must score</span>
                   <b>{game.auction.level + (ct.sharp ? (catalog?.sharp_bonus ?? 2) : 0)}</b>
                 </div>
-                <SkatStake game={game} nameOf={nameOf} rows />
+                <SkatStake game={game} nameOf={nameOf} rows shortRate={shortRate} />
               </>}
             </>}
             {/* THE CLASSIC CONTRACT IS ONE HEADLINE AND ONE MONEY LINE.
@@ -3271,19 +3354,25 @@ export default function Dissonance({ myId, authUser, onExit }) {
                     real facts and appear nowhere else on screen. */}
                 <div className="dis-ctsub">
                   makes{" "}
-                  <b>{(game.doubled ? 2 : 1)
-                    * (game.auction.level * game.auction.level + flatMake)}</b>
+                  <b>{priceContract(game.auction.level, game.auction.jump ?? 0,
+                    !!game.doubled).make}</b>
                   {" "}· Null <b>{nullMake}</b>{" "}
                   <span className="dis-ctcond">({nullCond(game)})</span>
                 </div>
                 {game.doubled && (
                   <div className="dis-scorerow">
                     <span>Kontra · set pays</span>
-                    {/* The catalog's rate plus the rising ramp, not a literal —
-                        the old "+ 4 each" here predated BOTH the 4 -> 5 move
-                        and the ramp, and minor's rate is 2. */}
-                    <b>{2 * (game.auction.level + flatSet)} + {shortRate + 1},{" "}
-                      {shortRate + 2}…</b>
+                    {/* PRICED, not retyped. This row has now been wrong twice
+                        in the same way: it predated the 4 -> 5 shortfall move,
+                        and then it kept doubling the set base and ramping the
+                        shortfall after the Double stopped doing either. Both
+                        numbers come out of `priceContract` now, so the next
+                        re-pricing moves them without an edit. */}
+                    <b>{priceContract(game.auction.level, game.auction.jump ?? 0,
+                      true).setBase}{" + "}
+                      {dblRamp
+                        ? `${dblShort + dblRamp}, ${dblShort + 2 * dblRamp}…`
+                        : `${dblShort} a point`}</b>
                   </div>
                 )}
               </>

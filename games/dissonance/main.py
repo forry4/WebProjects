@@ -1482,6 +1482,21 @@ async def catalog():
         # one is not visibly wrong yet -- which is exactly why it is served now,
         # before the two diverge and the panel quietly prices the wrong game.
         "classic_short_penalty": engine.CLASSIC_SHORT_PENALTY,
+        # THE DOUBLE'S DIALS (2026-08-16), for the same reason as the curve
+        # above: the Kontra prompt, the contract box and the result panel all
+        # state what doubling costs, and every one of them was doing it with a
+        # hardcoded x2 and a retired ramp long after the shipped rule became
+        # "the leap and the shortfall double, the fixed stake does not".
+        # Served as the engine's own dicts, ABSENCES INCLUDED -- a mode missing
+        # from one of these means "the plain Double" in `_terms_for`, and the
+        # client mirrors that default rather than being handed a filled-in copy
+        # it could not tell apart from a deliberate 2.
+        "double_make_mult": dict(engine.DOUBLE_MAKE_MULT),
+        "double_base_mult": dict(engine.DOUBLE_BASE_MULT),
+        "double_jump_mult": dict(engine.DOUBLE_JUMP_MULT),
+        "jump_doubled": dict(engine.JUMP_DOUBLED),
+        "doubled_short_penalty": dict(engine.DOUBLED_SHORT_PENALTY),
+        "double_ramp": engine.DOUBLE_RAMP,
     }
 
 
