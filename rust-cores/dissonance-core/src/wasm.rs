@@ -271,3 +271,75 @@ pub fn odd_pool() -> i32 {
 pub fn odd_wire() -> i32 {
     4
 }
+
+// ─── THE OFFLINE REFEREE ────────────────────────────────────────────────────
+//
+// Three exports the search does not use at all: they run a whole CLASSIC round
+// in the browser with nothing answering (`games/dissonance/offline.js`). The
+// game dict crosses as JSON in both directions and IS `engine.py`'s dict, so a
+// saved offline game and a saved online one are the same object — see
+// `classic.rs` for why the shape is the contract and why this side never
+// scores.
+//
+// They are ADDITIVE, so an older page loading a newer artifact is unaffected
+// and a newer page against an older artifact fails at `undefined is not a
+// function` rather than silently: the driver probes for `odd_new_round` before
+// offering to deal, which is the same fail-closed shape `odd_wire` gives the
+// search path.
+
+/// Deal a classic round. `match_json` carries a running match in (`"null"` for
+/// a fresh one); the seed is the caller's, so a test can replay a deal exactly.
+#[wasm_bindgen]
+pub fn odd_new_round(seats_json: &str, seed: f64, opener: u32, match_json: &str) -> String {
+    let seats: Vec<String> = match serde_json::from_str(seats_json) {
+        Ok(s) => s,
+        Err(e) => return format!(r#"{{"error":"seats: {e}"}}"#),
+    };
+    if seats.len() != 2 {
+        return r#"{"error":"a classic round seats exactly two"}"#.to_string();
+    }
+    let m: Option<serde_json::Value> = match serde_json::from_str(match_json) {
+        Ok(serde_json::Value::Null) | Err(_) => None,
+        Ok(v) => Some(v),
+    };
+    let g = crate::classic::new_game(
+        [seats[0].clone(), seats[1].clone()],
+        seed as u64,
+        (opener % 2) as usize,
+        m,
+    );
+    serde_json::to_string(&g).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
+}
+
+/// Apply one move. Returns `{"g": <the new game dict>}` or `{"error": "..."}`.
+///
+/// AN ERROR IS A NORMAL ANSWER, not a crash: the driver is the referee, so an
+/// illegal move from a tampered save or a bot answering out of turn has to be
+/// REFUSED and reported rather than applied. Same discipline as
+/// `_validated_bot_move` server-side.
+#[wasm_bindgen]
+pub fn odd_apply(game_json: &str, pid: &str, move_json: &str, seed: f64) -> String {
+    let mut g: serde_json::Value = match serde_json::from_str(game_json) {
+        Ok(v) => v,
+        Err(e) => return format!(r#"{{"error":"game: {e}"}}"#),
+    };
+    let mv: serde_json::Value = match serde_json::from_str(move_json) {
+        Ok(v) => v,
+        Err(e) => return format!(r#"{{"error":"move: {e}"}}"#),
+    };
+    match crate::classic::apply_move(&mut g, pid, &mv, seed as u64) {
+        Ok(()) => serde_json::json!({ "g": g }).to_string(),
+        Err(e) => serde_json::json!({ "error": e }).to_string(),
+    }
+}
+
+/// The round as one seat may see it — the payload `Dissonance.jsx` renders.
+#[wasm_bindgen]
+pub fn odd_view(game_json: &str, seat: u32) -> String {
+    let g: serde_json::Value = match serde_json::from_str(game_json) {
+        Ok(v) => v,
+        Err(e) => return format!(r#"{{"error":"game: {e}"}}"#),
+    };
+    let v = crate::classic::view_for(&g, (seat % 2) as usize);
+    serde_json::to_string(&v).unwrap_or_else(|e| format!(r#"{{"error":"{e}"}}"#))
+}

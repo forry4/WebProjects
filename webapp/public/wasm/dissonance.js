@@ -1,4 +1,36 @@
 /**
+ * Apply one move. Returns `{"g": <the new game dict>}` or `{"error": "..."}`.
+ *
+ * AN ERROR IS A NORMAL ANSWER, not a crash: the driver is the referee, so an
+ * illegal move from a tampered save or a bot answering out of turn has to be
+ * REFUSED and reported rather than applied. Same discipline as
+ * `_validated_bot_move` server-side.
+ * @param {string} game_json
+ * @param {string} pid
+ * @param {string} move_json
+ * @param {number} seed
+ * @returns {string}
+ */
+export function odd_apply(game_json, pid, move_json, seed) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(game_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(pid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(move_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_apply(ptr0, len0, ptr1, len1, ptr2, len2, seed);
+        deferred4_0 = ret[0];
+        deferred4_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * The card the pooled sums choose: highest total, ties to the earliest legal
  * move.
  *
@@ -14,6 +46,32 @@ export function odd_best_card(pooled_json) {
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.odd_best_card(ptr0, len0);
     return ret;
+}
+
+/**
+ * Deal a classic round. `match_json` carries a running match in (`"null"` for
+ * a fresh one); the seed is the caller's, so a test can replay a deal exactly.
+ * @param {string} seats_json
+ * @param {number} seed
+ * @param {number} opener
+ * @param {string} match_json
+ * @returns {string}
+ */
+export function odd_new_round(seats_json, seed, opener, match_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(seats_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(match_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_new_round(ptr0, len0, seed, opener, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
 }
 
 /**
@@ -134,6 +192,27 @@ export function odd_review(request_json) {
         const ptr0 = passStringToWasm0(request_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.odd_review(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * The round as one seat may see it — the payload `Dissonance.jsx` renders.
+ * @param {string} game_json
+ * @param {number} seat
+ * @returns {string}
+ */
+export function odd_view(game_json, seat) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(game_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.odd_view(ptr0, len0, seat);
         deferred2_0 = ret[0];
         deferred2_1 = ret[1];
         return getStringFromWasm0(ret[0], ret[1]);
