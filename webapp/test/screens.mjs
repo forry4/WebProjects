@@ -1268,6 +1268,107 @@ try {
 	// line. Driven against a STUBBED /games/history rather than a seeded DB: the
 	// point is the reveal, and 55 synthetic rows make both the page size and the
 	// HISTORY_MAX cap exact instead of dependent on what this box has played.
+	// ── The paper scorecard ────────────────────────────────────────────────
+	// Dissonance's lobby keeps a manual score-keeper for a game played with real
+	// cards, and it is the one screen that COMPUTES a payout rather than quoting
+	// one the server settled. Nothing at runtime would notice it drifting from
+	// the engine, so this drives a real round through it and checks the two
+	// things a wrong price list would break: that the arithmetic it PRINTS
+	// evaluates to the score it BANKS (no hardcoded prices in the harness --
+	// the line is evaluated, so the assertion survives any re-pricing), and that
+	// the Null consolation flips who scores.
+	async function dissonanceScorecard(log) {
+		const ctx = await browser.newContext();
+		await ctx.addInitScript(() => localStorage.setItem("spender_user",
+			JSON.stringify({ id: "card-harness", name: "Cardy", guest: true })));
+		const page = await ctx.newPage();
+		const errors = [];
+		page.on("pageerror", (e) => errors.push(String(e)));
+		const check = (name, cond, detail = "") => {
+			if (cond) log(`  OK   ${name}`);
+			else { shell.push(name); log(`  FAIL ${name}  ${detail}`); }
+		};
+
+		await page.goto(`http://localhost:${PORT}/dissonance`, { waitUntil: "networkidle" });
+		await page.waitForSelector(".lby-create-row", { timeout: 25_000 }).catch(() => {});
+		// The slot carries its OWN class: `.lby-rules` is how the rules block
+		// counts Rules buttons, and a second button wearing it would read there
+		// as a duplicate rather than as the scorecard.
+		const rules = await page.locator(".lby-rules").count().catch(() => 0);
+		const extra = await page.locator(".lby-extra").count().catch(() => 0);
+		check("the dissonance lobby offers Rules AND a Scorecard", rules === 1 && extra === 1,
+			`rules ${rules} extra ${extra}`);
+		if (!extra) { await ctx.close(); return; }
+
+		await page.locator(".lby-extra").click({ timeout: 10_000 }).catch(() => {});
+		await page.waitForSelector(".dsc-entry", { timeout: 10_000 }).catch(() => {});
+		check("the scorecard opens", await page.locator(".dsc-entry").count() === 1);
+
+		const names = page.locator(".dsc-player input");
+		await names.nth(0).fill("Alice");
+		await names.nth(1).fill("Bob");
+		const field = (label) => page.locator(".dsc-field").filter({ hasText: label });
+		const bump = async (label, n, which) => {
+			for (let i = 0; i < n; i++) {
+				await field(label).locator(".dsc-step button").nth(which).click({ timeout: 5_000 });
+			}
+		};
+		// A made contract, Kontra'd, with a one-rung leap and two overtricks --
+		// which is every term the price list has in one round.
+		await page.locator(".dsc-field .dis-bidgrid button", { hasText: /^4$/ }).first().click();
+		await page.locator(".dsc-field .dis-denoms button").nth(3).click();
+		await bump("Final jump", 1, 1);
+		await page.getByRole("button", { name: /Not doubled/ }).click();
+		await bump("Declarer's points", 6, 1);
+
+		const shown = (await page.locator(".dsc-preview").innerText()).replace(/\s+/g, " ");
+		// THE PRINTED LINE, EVALUATED. `×` to `*` and the unicode minus to ASCII
+		// is the whole translation -- if the panel ever prints a term it did not
+		// charge, or charges one it did not print, these stop agreeing.
+		const m = shown.match(/scores (\d+)/);
+		const maths = (await page.locator(".dsc-pre-maths").innerText())
+			.replace(/×/g, "*").replace(/−/g, "-");
+		let evaluated = null;
+		try { evaluated = Function(`"use strict"; return (${maths});`)(); } catch { /* below */ }
+		check("the scorecard's arithmetic reaches the score it shows",
+			!!m && evaluated === Number(m[1]), `${shown} => ${maths} = ${evaluated}`);
+
+		await page.getByRole("button", { name: "Add round" }).click();
+		const banked = await page.locator(".dsc-table .dsc-row").nth(1).innerText().catch(() => "");
+		check("the round lands on the card with that score",
+			!!m && banked.replace(/\s+/g, " ").includes(m[1]), `${banked} vs ${m?.[1]}`);
+
+		// NULL. A declarer on a non-positive total may have won no scoring trick
+		// at all, which the points alone cannot settle -- so the toggle appears
+		// there and nowhere else, and it moves the score to the other side.
+		await page.locator(".dsc-field .dis-bidgrid button", { hasText: /^5$/ }).first().click();
+		await page.locator(".dsc-field .dis-denoms button").nth(0).click();
+		await bump("Declarer's points", 3, 0);
+		const set = await page.locator(".dsc-pre-line").innerText();
+		const nullBtn = page.getByRole("button", { name: /Won no \+\d+ trick/ });
+		check("a non-positive total offers the Null consolation",
+			await nullBtn.count() === 1);
+		await nullBtn.click({ timeout: 5_000 }).catch(() => {});
+		const nul = await page.locator(".dsc-pre-line").innerText();
+		// Alice is still the declarer here (adding a round resets the contract,
+		// not the seat), so being set pays BOB and the consolation pays ALICE.
+		check("Null pays the DECLARER instead of setting them",
+			set.includes("Bob") && nul.includes("Alice"), `${set} -> ${nul}`);
+
+		// It is a card for a game that outlasts a tab.
+		await page.getByRole("button", { name: "Add round" }).click();
+		await page.reload({ waitUntil: "networkidle" });
+		await page.waitForSelector(".lby-extra", { timeout: 25_000 }).catch(() => {});
+		await page.locator(".lby-extra").click({ timeout: 10_000 }).catch(() => {});
+		await page.waitForSelector(".dsc-table", { timeout: 10_000 }).catch(() => {});
+		const rows = await page.locator(".dsc-table .dsc-row").count().catch(() => 0);
+		check("the card survives a reload", rows === 3, `rows ${rows} (1 head + 2)`);
+
+		check("no page errors on the scorecard", errors.length === 0,
+			errors[0]?.slice(0, 160) || "");
+		await ctx.close();
+	}
+
 	async function lobbyHistory(log) {
 		const ctx = await browser.newContext();
 		// a session_token so the lobby actually fetches history (a guest is short-
@@ -3859,7 +3960,7 @@ try {
 	const laneA = [offlineSpender, offlineCoc, offlineDuel,
 		dissonanceSkat, dissonanceHard, dissonanceBeat];
 	const laneB = [routeMounts, shellNav, authScreen, spenderPlayTurn, spenderWaitingRoom,
-		rulesModal, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
+		rulesModal, dissonanceScorecard, dmExpansionPicker, dmCardFace, lobbyHistory, dmAdventures,
 		dmEmpires, dmRenaissance, dmInfoModal, phoneLobbyColumns, lastDifficulty];
 
 	// EVERY BLOCK MUST BE IN A LANE. Before the lanes existed, adding a block meant

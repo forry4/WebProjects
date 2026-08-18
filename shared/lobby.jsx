@@ -258,7 +258,8 @@ export const createModalCss = _createModalCssText;
 export const lobbyCreateRowCss = _lobbyCreateRowCssText;
 
 export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false,
-	onRules, rulesLabel = "Rules", createLabel = "+ Create Game", codeMaxLength = 6 }) {
+	onRules, rulesLabel = "Rules", createLabel = "+ Create Game", codeMaxLength = 6,
+	extra = null }) {
 	const [code, setCode] = useState("");
 	const submit = () => { const c = code.trim().toUpperCase(); if (c) onJoin(c); };
 	return (
@@ -278,6 +279,17 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 					<span className="lby-rules-ic" aria-hidden="true">📖</span>{rulesLabel}
 				</button>
 			)}
+			{/* ONE OPTIONAL SLOT, after Rules, for a control only one game has —
+			    today Dissonance's paper scorecard. A node rather than an
+			    `onX`/`xLabel` pair, so the kit never learns what any single game
+			    keeps there. Style its button `.lby-extra`, which the sheet gives
+			    the Rules look: a SEPARATE class on purpose, because `.lby-rules`
+			    is how the render gate counts Rules buttons and a second one
+			    wearing that class reads as a duplicate. It is the SIXTH control
+			    in a row that already stops fitting a phone at ~430px, which the
+			    sideways scroll handles (`justify-content: safe center` — plain
+			    `center` pushes the overflow off the unreachable LEFT edge). */}
+			{extra}
 		</div>
 	);
 }
@@ -290,7 +302,8 @@ export function LobbyCreateRow({ onCreate, onJoin, onRefresh, refreshing = false
 // Append `rulesModalCss` to the game's CSS (after `lobbyCreateRowCss`).
 export const rulesModalCss = _rulesModalCssText;
 
-export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it", children }) {
+export function RulesModal({ title = "How to play", onClose, closeLabel = "Got it",
+	icon = "📖", children }) {
 	useEffect(() => {
 		const onKey = (e) => { if (e.key === "Escape") onClose(); };
 		document.addEventListener("keydown", onKey);
@@ -301,7 +314,7 @@ export function RulesModal({ title = "How to play", onClose, closeLabel = "Got i
 			<div className="rl-panel" role="dialog" aria-modal="true" aria-label={title}
 				onClick={(e) => e.stopPropagation()}>
 				<div className="rl-head">
-					<div className="rl-title">📖 {title}</div>
+					<div className="rl-title">{icon} {title}</div>
 					<button type="button" className="rl-x" aria-label="Close" onClick={onClose}>✕</button>
 				</div>
 				<div className="rl-body">{children}</div>

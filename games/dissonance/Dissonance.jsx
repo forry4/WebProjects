@@ -8,6 +8,8 @@ import {
   useProgressiveList, notWaiting, LobbyAction, useLastDifficulty,
 } from "../../shared/lobby.jsx";
 import DissonanceRules from "./rules.jsx";
+import DissonanceScorecard from "./scorecard.jsx";
+import { contractPrices } from "./pricing.js";
 import { parsePath, buildPath, pushPath, subscribe } from "../../shared/router.js";
 
 // CSS lives in the sibling .css file, imported ?inline as a STRING and injected
@@ -1442,6 +1444,9 @@ export default function Dissonance({ myId, authUser, onExit }) {
   const [reconnecting, setReconnecting] = useState(false);
   const [toast, setToast] = useState("");
   const [showRules, setShowRules] = useState(false);
+  // THE PAPER SCORECARD -- a keeper for a classic game played with real cards,
+  // lobby-only because that is where you are when you are not playing here.
+  const [showCard, setShowCard] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   // The scorecard row someone asked to see face up, or null.
@@ -1558,90 +1563,19 @@ export default function Dissonance({ myId, authUser, onExit }) {
   // scale whose payoffs run a quarter of classic's), so both are picked by the
   // room's mode. `game?.mode` is safely undefined outside a room, where
   // nothing renders either number.
-  const isMinorRoom = game?.mode === "minor";
-  // CLASSIC READS ITS OWN RATE. `short_penalty` is `SHORT_PENALTY`, which
-  // classic stopped using on 2026-08-16 when `CLASSIC_SHORT_PENALTY` was split
-  // out so classic and skat could move independently. Both are 5 today, so this
-  // was not visibly wrong -- it was wrong in waiting.
-  const shortRate = isMinorRoom
-    ? (catalog?.minor_short_penalty ?? 2)
-    : game?.mode === "classic"
-      ? (catalog?.classic_short_penalty ?? SHORT_PENALTY_FALLBACK)
-      : (catalog?.short_penalty ?? SHORT_PENALTY_FALLBACK);
-  const nullMake = isMinorRoom
-    ? (catalog?.minor_null_make ?? 6)
-    : (catalog?.null_make ?? NULL_MAKE);
-  // THE FLAT STAKE (2026-08-11, re-priced 2026-08-17 to +4 / +2): the fixed
-  // amounts riding on classic's make and set bases, read off the catalog's
-  // per-mode dicts like the rates above so a re-priced stake needs no client
-  // change. The fallback -- which only renders when the catalog fetch never
-  // landed -- mirrors the shipped rule.
-  const flatMake = catalog?.flat_make_bonus?.[game?.mode]
-    ?? (game?.mode === "classic" ? 4 : 0);
-  const flatSet = catalog?.flat_set_penalty?.[game?.mode]
-    ?? (game?.mode === "classic" ? 2 : 0);
-  // The rest of the curve, so a bid can be PRICED BEFORE IT IS MADE. Same
-  // source as the two above: the engine's own dicts off `/catalog`, never a
-  // second copy of the arithmetic.
-  const setRate = catalog?.set_level_rate?.[game?.mode] ?? 1;
-  const linMake = catalog?.linear_make_bonus?.[game?.mode] ?? 0;
-  const jumpBonus = catalog?.jump_set_bonus?.[game?.mode] ?? 0;
-  // THE DOUBLE'S DIALS (2026-08-16), served for exactly the reason the curve
-  // above is: three surfaces state what Kontra costs -- the Kontra prompt, the
-  // contract box and the result panel -- and all three were doing it with a
-  // hardcoded ×2 and the retired shortfall ramp months after the shipped rule
-  // became "the LEAP and the SHORTFALL double, the fixed stake does not".
+  // THE PRICE LIST, off the catalog and out of `pricing.js` -- one mirror of
+  // `engine._terms_for` for the whole client, because the paper scorecard needs
+  // the same arithmetic and a second copy of it is exactly the drift that guard
+  // exists to prevent. `game?.mode` is safely undefined outside a room, where
+  // nothing renders a number.
   //
-  // TWO FALLBACKS, and they answer different questions. `served` is what an
-  // absent MODE means -- `_terms_for` reads these with `.get(mode, doubling)`,
-  // so a mode nobody named gets the plain ×2 -- while `offline` is what a
-  // catalog fetch that never landed should render, which is whatever classic
-  // ships. Collapsing them into one `??` would quietly turn classic's base ×1
-  // back into a ×2 the moment the fetch failed.
-  const isClassicRoom = game?.mode === "classic";
-  const dialFor = (table, served, offline) =>
-    (table ? (table[game?.mode] ?? served) : offline);
-  const dblMake = dialFor(catalog?.double_make_mult, 2, 2);
-  const dblBase = dialFor(catalog?.double_base_mult, 2, isClassicRoom ? 1 : 2);
-  const dblJump = dialFor(catalog?.double_jump_mult,
-    (catalog?.jump_doubled?.[game?.mode] ?? true) ? dblBase : 1,
-    isClassicRoom ? 2 : dblBase);
-  const dblShort = dialFor(catalog?.doubled_short_penalty, shortRate,
-    isClassicRoom ? 2 * shortRate : shortRate);
-  const dblRamp = catalog?.double_ramp ?? 0;
-  /** What a contract at `level`, reached by a `jump`-rung rise, is worth --
-   *  undoubled, or with the Kontra on it.
-   *
-   *  `make` and `setBase` are exact. `down` is the CHEAPEST way to lose it --
-   *  the set base plus a single point short -- because how far short you finish
-   *  is not knowable at bid time; it is the floor of the loss, not the loss. The
-   *  panel says "down for" to keep that honest rather than implying a price.
-   *
-   *  Mirrors `engine._terms_for`'s classic/minor branch, doubled arm included:
-   *  the fixed stake takes `DOUBLE_BASE_MULT`, the jump bonus takes its own
-   *  `DOUBLE_JUMP_MULT`, and a doubled shortfall charges `DOUBLED_SHORT_PENALTY`
-   *  a point. `setParts` is the same stake taken apart, so a panel can print the
-   *  terms rather than one opaque number and still provably reach the total.
-   *
-   *  It is a DISPLAY, not a decision: nothing is scored from it, the server
-   *  prices every settled round itself, so a drift here is cosmetic rather than
-   *  a wrong payout -- which is also why it is the least likely thing to be
-   *  noticed, and why `tests/test_bid_worth.py` guards it against the engine.
-   */
-  const priceContract = (level, jump, doubled) => {
-    const mm = doubled ? dblMake : 1;
-    const bm = doubled ? dblBase : 1;
-    const jm = doubled ? dblJump : 1;
-    const stake = (setRate * level + flatSet) * bm;
-    const leap = jumpBonus * Math.max(0, jump) * jm;
-    const short = doubled ? dblShort : shortRate;
-    return {
-      make: (level * level + linMake * level + flatMake) * mm,
-      stake, leap, short, setBase: stake + leap,
-      setParts: { rate: setRate * bm, flat: flatSet * bm },
-      down: stake + leap + short,
-    };
-  };
+  // DECLARED AFTER `catalog`, not before: it is a `const` from `useState`, so
+  // touching it above that line is a temporal dead zone -- which throws at
+  // render and blanks the entire screen rather than failing softly.
+  const prices = useMemo(() => contractPrices(catalog, game?.mode),
+    [catalog, game?.mode]);
+  const { short: shortRate, nullMake, dblShort, dblRamp } = prices;
+  const priceContract = prices.price;
   /** The auction's own pricing: a bid is not doubled while it is being made. */
   const priceBid = (level, jump) => priceContract(level, jump, false);
   useEffect(() => {
@@ -2129,6 +2063,12 @@ export default function Dissonance({ myId, authUser, onExit }) {
           onRefresh={fetchGames}
           onRules={() => setShowRules(true)}
           refreshing={loadingGames}
+          extra={(
+            <button type="button" className="lby-extra"
+              onClick={() => setShowCard(true)}>
+              <span className="lby-rules-ic" aria-hidden="true">🧮</span>Scorecard
+            </button>
+          )}
         />
         {/* `key`, not `id` — LobbyTabs reads `t.key`, and the grid's `tab-<key>`
             class is what the CSS hides the other columns off. With `id` the bar
@@ -2185,6 +2125,9 @@ export default function Dissonance({ myId, authUser, onExit }) {
           </CreateModal>
         )}
         {showRules && <OddRulesModal onClose={() => setShowRules(false)} />}
+        {showCard && (
+          <DissonanceScorecard catalog={catalog} onClose={() => setShowCard(false)} />
+        )}
         {toast && <div className="toast">{toast}</div>}
       </div>
     );

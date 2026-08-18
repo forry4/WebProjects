@@ -1050,11 +1050,13 @@ Both read `makes N · down for N`.
   bid, never what it pays.
 * **Every term comes off `/catalog`** (`set_level_rate`, `linear_make_bonus`,
   `flat_make_bonus`, `flat_set_penalty`, `jump_set_bonus`,
-  `classic_short_penalty`), never a literal in the JSX — the same
-  `payoff_terms` discipline the bot rides on, one surface further out.
-  `tests/test_bid_worth.py` holds the panel's arithmetic to `_terms_for`'s own
-  answer across every level and four jump sizes, and asserts the client reads
-  each term off the catalog rather than hardcoding it.
+  `classic_short_penalty`, and the Double's `double_make_mult` /
+  `double_base_mult` / `double_jump_mult` / `jump_doubled` /
+  `doubled_short_penalty` / `double_ramp`), never a literal in the JSX — the
+  same `payoff_terms` discipline the bot rides on, one surface further out.
+  `tests/test_bid_worth.py` holds the arithmetic to `_terms_for`'s own answer
+  across every level and four jump sizes, undoubled AND doubled, and asserts
+  the client reads each term off the catalog rather than hardcoding it.
 * **The rows RESERVE their height** (`min-height` on `.dis-worth`) and carry no
   placeholder text, for the same reason `ContractLine` does: the keypad
   underneath must not move when the first bid lands.
@@ -1069,6 +1071,68 @@ check now reads the BID PICKER's row instead (`disBidCheaply` returns what it
 saw), which fills from local state on every bid the harness makes and is
 therefore seat-independent; the auction block keeps only claims true whoever
 opened — the height reserve, and "whatever it shows is a price".
+
+## THE CLIENT HAS ONE PRICE LIST — `pricing.js` (2026-08-18)
+
+`contractPrices(catalog, mode)` + `payoffFor` are the whole client-side mirror
+of `_terms_for` / `payoff`. Everything that states a number about scoring goes
+through it: the auction's two `BidWorth` rows, the Kontra prompt's now/doubled
+table, the contract box's "makes" and "set pays", the result panel's maths line,
+and the paper scorecard below.
+
+**It was extracted because the second copy had already gone wrong.** `rules.jsx`
+was updated with the 2026-08-16 re-price and again with the Double's move to
+base ×1 / jump ×2 the next day; the BOARD was not, and by 2026-08-17 three of
+its surfaces were priced by hand against a list the game no longer charged —
+the Kontra prompt still doubling the set base and ramping the shortfall, the
+contract box the same, the result panel printing `(N + stake) × 2`. Nothing
+failed, because nothing is scored from them: the server prices every settled
+round itself, so a wrong number here pays out correctly and only LIES to the
+player while they decide.
+
+* **Two fallbacks, and they answer different questions.** An absent MODE means
+  the plain ×2 (`_terms_for` reads the dials with `.get(mode, doubling)`); an
+  absent CATALOG means render what classic ships. Collapsing them into one `??`
+  turns classic's base ×1 back into a ×2 the moment the fetch fails.
+* **The result panel's set line decomposes only what it can PROVE.** It prices
+  the same contract through the mirror and compares against the row's own
+  `set_base`; if they disagree — a round scored under an older price list, no
+  catalog — it prints the base whole rather than a decomposition that lies.
+* **`test_bid_worth.py` is the gate** and it now also asserts the NEGATIVE:
+  neither `Dissonance.jsx` nor `scorecard.jsx` may read a scoring term off the
+  catalog directly. A screen that starts multiplying a level by itself is a
+  second price list, which is the thing that just cost three surfaces.
+
+## THE PAPER SCORECARD — for a game played with real cards (2026-08-18)
+
+A lobby modal (`scorecard.jsx`, the `extra` slot of the shared create row,
+beside Rules) that keeps score for a CLASSIC game played away from the site.
+Two names, then per round: the declarer, the contract, the final jump, Kontra,
+and the declarer's trick points — and it prices the round, spells the
+arithmetic out the way the result panel does, and runs the match to
+`MATCH_TARGET`.
+
+* **It is the only screen that COMPUTES a payout** rather than quoting one the
+  server settled, which is exactly why it goes through `pricing.js` and why the
+  test file grew a `payoffFor`-vs-`engine.payoff` arm.
+* **NULL NEEDS ITS OWN TOGGLE, and this is not a UI preference.** The points do
+  not settle it: 0 points is "no scoring trick at all" (the consolation, 20 to
+  the declarer) or "one even trick and two odd ones" (a set, paid to the
+  defender). So the toggle appears exactly where it is reachable — a total at or
+  below zero — and never above it.
+* **The level and denomination pads are the BOARD's own** (`.dis-bidgrid` /
+  `.dis-denoms`): a card kept beside a live game should be entered on the keys
+  it is played with.
+* **`localStorage` only.** A real-life match runs an hour and the tab gets
+  closed; none of it is worth a room or an account. Round rows store the SCORES
+  they were computed with, so a card in progress cannot silently re-price under
+  its players.
+* **The shared kit gained one optional `extra` node** in `LobbyCreateRow`, and
+  the button wears `.lby-extra` rather than `.lby-rules` — the render gate
+  counts Rules buttons by that class, and a second one wearing it reads there as
+  a duplicate. Covered by `screens.mjs`'s `dissonanceScorecard` block, which
+  EVALUATES the arithmetic the panel printed and requires it to equal the score
+  banked, so the check carries no price list of its own.
 
 ## The round-end panel says POINTS or SCORE, never both as "scored" (2026-08-09)
 
@@ -2290,7 +2354,9 @@ the only signal.
    missing these is why the chunk was never fetched; the route resolved to no
    screen at all and the `screens` gate caught it.
 4. `shared/HomeScreen.jsx` → card + icon
-5. `webapp/test/screens.mjs` → `SCREENS` entry, marker `.dis`
+5. `webapp/test/screens.mjs` → `SCREENS` entry, marker `.dis` (and any new
+   interaction block must also be listed in a LANE at the foot of that file —
+   forgetting compiles, runs and passes with the block never executing)
 
 `LobbyHeader`'s `user` prop takes a **node**, not the auth object — passing
 `authUser` raw throws React error #31 and blanks the screen.

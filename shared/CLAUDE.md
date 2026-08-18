@@ -18,6 +18,13 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
   passes `onRules`; the button is opt-in only so the component stays usable without one, and
   `screens.mjs` drives all six lobbies precisely because a game that forgets it still renders a
   perfectly fine lobby with no way in.
+  **`LobbyCreateRow` has ONE optional `extra` node**, rendered after Rules, for a control a
+  single game keeps there — today Dissonance's paper scorecard. A node rather than another
+  `onX`/`xLabel` pair, so the kit never learns what any one game puts in it; style its button
+  `.lby-extra`, which the sheet gives the Rules look. **Deliberately NOT `.lby-rules`**: the
+  render gate counts Rules buttons by that class, so a second button wearing it reads there as a
+  duplicate. `RulesModal` also takes an `icon` (default 📖) — the panel is reused for things that
+  are not a rulebook.
   **On phones (≤600px) `.lby-create-row` SCROLLS SIDEWAYS instead of wrapping** — five controls stop
   fitting at ~430px, and a wrap pushed the lists a whole row down. It uses `justify-content:safe
   center`: plain `center` pushes the overflow off the LEFT edge, where no scroll can reach it. Token-driven via a per-game `--lby-accent` with **hard fallbacks so
