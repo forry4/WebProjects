@@ -835,7 +835,12 @@ def expert_round(seed):
            # it, and two opponent models' rows are indistinguishable once
            # pooled. Absent means the soft/minimax path, which is what every
            # row written before this arm existed ran.
-           "dv": OPP_DIVERSE, "dvn": OPP_N if OPP_DIVERSE > 0 else 0}
+           "dv": OPP_DIVERSE, "dvn": OPP_N if OPP_DIVERSE > 0 else 0,
+           # AND THE BIDDER ITSELF, which the first cut of this stamp forgot --
+           # a blueprint corpus carried `dv: 0` and `temp: 5` and so was
+           # labelled "soft temp 5 (expert)", i.e. exactly the mislabelling the
+           # rest of this stamp exists to prevent. Same bug, one release later.
+           "bp": 1 if BLUEPRINT else 0}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1971,14 +1976,17 @@ def corpus_tiers(rows):
         # The opponent MODEL is part of the tier, not just its temperature: a
         # diverse corpus and a soft one are different bidders and pooling them
         # reports the exploitability of neither.
-        seen[(r.get("temp", 0.0), r.get("dv", 0.0), r.get("dvn", 0))] += 1
+        seen[(r.get("temp", 0.0), r.get("dv", 0.0), r.get("dvn", 0),
+              r.get("bp", 0))] += 1
     return dict(seen)
 
 
 def _tier_line(rows):
     t = corpus_tiers(rows)
     def name(k):
-        temp, dv, dvn = k
+        temp, dv, dvn, bp = k
+        if bp:
+            return "blueprint (CFR equilibrium as the bidder)"
         if dv > 0:
             return f"diverse spread {dv:g} n {dvn}"
         return "minimax (hard)" if temp == 0 else f"soft temp {temp:g} (expert)"

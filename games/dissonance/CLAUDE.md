@@ -5038,6 +5038,60 @@ the continuation but ALSO makes the bot open lower across every bucket, and the
 two cancelled. A test that isolates the asymmetry has to leave the opening
 alone.
 
+### MULTI-VALUED STATES CUT EXPLOITABILITY 23%, AND THE BLUEPRINT NUMBER IS CIRCULAR (2026-08-19)
+
+Three bidders, **same 400-deal cache, same instrument, same 90 rounds, same
+`CFR_PROBES=96`** — so the three are comparable TO EACH OTHER and to nothing
+else in this file:
+
+| bidder | BR seat 0 | BR seat 1 | exploitability | split-halves |
+|---|---|---|---|---|
+| CFR equilibrium (the floor) | −1.73 | +3.22 | **0.75** | — |
+| **base** — shipped Expert, `soft` temp 5 | +8.08 | +10.20 | **9.14** | 10.01 / 10.77 |
+| **diverse** — `OppModel::Diverse(6, 3)` | +4.64 | +9.47 | **7.06** | 7.76 / 7.71 |
+| **blueprint** — the equilibrium as the bidder | −0.88 | +3.81 | **1.46** | 1.67 / 1.59 |
+
+**THE ABSOLUTE NUMBERS DO NOT COMPARE TO THE 5.45 / 5.70 ON RECORD.** Different
+deal cache (400 deals against 2000), different corpus size (90 rounds against
+420), and the floor moves with it — 0.75 here against 1.47 there. This file
+already states the rule and it applies to its own new rows: read the two rows as
+a difference, and only within one cache.
+
+**DIVERSE IS THE REAL RESULT: 9.14 → 7.06, a 23% cut**, with split-halves 7.76 /
+7.71 against base's 10.01 / 10.77 — the two bands do not overlap. It is the first
+thing this campaign has measured that moves exploitability at all: the opening
+bias did not, the exact leaf did not, and the temperature knob's own sweep
+cancelled. And it is **not** circular — `Diverse` is a minimax variant, not the
+equilibrium, so the abstraction's best responder has no special purchase on it.
+
+**THE BLUEPRINT'S 1.46 IS LARGELY CIRCULAR AND MUST NOT BE READ AS STRENGTH.**
+The blueprint plays (an approximation of) the abstraction's own equilibrium, and
+the best responder is computed *inside that same abstraction*. A policy scoring
+near the floor of the game it was solved for is the expected outcome, not
+evidence about the real game — where denominations exist, the forever-ban binds,
+and a real opponent is not restricted to the ladder. **The only thing that can
+price the blueprint is a CRN-paired auction arena against Expert at equal time,
+with the mirror reading exactly 0.5000.** That has not been run.
+
+**COSTS, measured.** `Diverse` runs about **2.5x slower** than `soft` on the
+control arm (the base arm's three shards finished in ~6 minutes; diverse took
+~15). That is worth understanding before shipping: a MIN node under `soft`
+evaluates every child and memoises, while `Diverse` evaluates at most three but
+also prices every legal reply through `opp_myopic` first, and the narrower child
+set appears to share less of the memo. At the shipped 12s watchdog that matters.
+
+**WHAT IS NOT ESTABLISHED.** 90 rounds is well under the 200–414 this file's own
+readings use (200 read 6.01, 414 read 5.87 on the other cache), so treat all
+three as preliminary. No head-to-head has been run for either arm, and this file
+is explicit that exploitability and head-to-head strength are different
+quantities — Expert is *more* exploitable than Hard while beating it +0.957.
+
+**THE STAMP HAD THE SAME BUG AGAIN, ONE RELEASE LATER.** The blueprint corpus
+carried `dv: 0` and `temp: 5`, so `corpus_tiers` labelled it "soft temp 5
+(expert)" — the exact mislabelling the stamp exists to prevent, reintroduced by
+adding a bidder without adding it to the stamp. `bp` is in the row now. Fourth
+instrument bug of this shape.
+
 ## Not built yet
 
 **Before picking anything here up, read
