@@ -4704,6 +4704,109 @@ the answer "the equilibrium bids lower than Expert". Fixed to `level - prev`
 (and `prev = 0` gives the v2 opening rule for free); the settled mean moved
 4.47 → 4.67 and the make rate 77.1% → 72.0%.
 
+### THE EXPLOITABILITY INSTRUMENT WAS MEASURING THE CORPUS, AND IT WAS MEASURING THE WRONG TIER (2026-08-19)
+
+Two independent faults in the same measurement, found by decomposing a number
+this campaign had already acted on twice. **Both are fixed; the headline
+survives, its provenance does not, and two nulls it produced are now suspect.**
+
+**FAULT 1 — 74% of the exploitability sat on infosets with two observations or
+fewer, and 54% on ones Expert had never visited at all.** `cfrlab attrib`
+decomposes the best responder's winnings by the one-step deviation: at every
+node the policy acts on, what would it have saved by playing its best single
+action there, everything downstream held at the responder's own values.
+Reach-weighted, one choice per infoset (a per-deal minimum would be a cheater's
+alternative), reported beside the raw observation count. On the 414-round
+self-play corpus:
+
+| observations behind the infoset | share of the loss |
+|---|---|
+| **unseen (backed off)** | **53.6%** |
+| 1-2 | 20.2% |
+| 3-5 | 11.5% |
+| 6-10 | 9.7% |
+| 11+ | 5.1% |
+
+Half of it landed at standing level 7, where the fitted "policy" read a crisp
+`pass:50% hold:50%` off one observation or zero. **A best responder steers
+TOWARDS the holes by construction**, so the fit's own coverage was most of the
+number.
+
+* **THIS RETRACTS A CLAIM THIS FILE MADE TWICE — "at 413 rounds nothing is
+  unseen".** The coverage line was printed all along and said only 16.1% of the
+  responder's reach lands on an EXACTLY fitted infoset; it was read as though
+  the 22.1% marked UNSEEN was the whole problem. A distribution pooled over
+  `prev` or `holds` is just as much a fabrication as a missing one — it is the
+  harness's average, not Expert's behaviour.
+* **And it explains both of the nulls recorded above.** The opening bias and the
+  exact leaf could not have moved this number, because it was dominated by nodes
+  Expert never plays. No change to how Expert plays reaches them.
+
+**THE FIX IS OFF-POLICY COVERAGE (`CFR_PROBES`).** Per deal, N states drawn
+uniformly from the abstraction's own reachable set; a REAL auction is driven
+into each with real bids — so `used`, `last` and `jump` come out right by
+construction rather than from a second copy of the auction's bookkeeping — and
+Expert is asked what it does there. Uniform rather than reach-weighted
+deliberately: a corpus weighted by the current fit would be measuring the fit,
+which is the complaint.
+* **Both actor parities are built.** The shortest path's LENGTH fixes whose turn
+  it is, so the other seat's version of the same state needs a path one bid
+  longer (an earlier, lower opening). A probe that only built the short path
+  would leave half the state space unvisited — the very defect it exists to fix,
+  one level down. Measured: usable probes per 16 sampled went 3.7 -> 6.7.
+* **It is very nearly FREE**, which is the only reason it is affordable:
+  `bid::Solved` is cached on the HAND and a probe moves the standing bid rather
+  than the cards, so every probe after the first on a seat is arithmetic over
+  worlds already solved. Measured **16.4 s/deal at 0 probes, 13.1 at 96**
+  (~70 usable) — inside the noise, for a corpus ~20x larger.
+* Result at 420 rounds: **100.0% exact lookups along the responder's reach**,
+  no backoff and nothing unseen; infosets 233 -> 1448; **97.7% of the loss now
+  sits on infosets with 11+ observations.** `CFR_PROBES=0` reproduces the old
+  corpus exactly, so every checkpoint written before this stays readable.
+
+**FAULT 2 — the harness has been measuring HARD's auction while its docstring
+said Expert.** `engine.auction_search_payload` ships the auction's shape and its
+prices; **`opp_model` is added by `main.py`, and only for the expert tier.**
+cfrlab built its payload straight from the engine, so the field was absent, and
+`wire::auc_rules_from_json` maps absent to `OppModel::Minimax`. Expert's ONLY
+difference from Hard is that one field. **So 9.06, 5.87 and the first 5.45 all
+describe Hard.** `CFR_OPP_TEMP` now defaults to `main.EXPERT_OPP_TEMP`, is
+STAMPED on every recorded row, and every reader prints the corpus's tier and
+shouts if a corpus pools two.
+
+**Third instrument bug of this exact shape** — after the `expertto` suffix
+collision (an arm that silently ran two changes wide) and `dblsweep`'s
+live-margin delta (a column read as absolute). The pattern to watch for: **a
+harness that rebuilds a payload the server assembles in more than one place will
+silently ship the default for whatever it forgot.**
+
+**THE HONEST NUMBERS, 420 rounds each, same deals, same instrument, 100%
+coverage:**
+
+| tier | BR seat 0 | BR seat 1 | exploitability | split-halves |
+|---|---|---|---|---|
+| CFR+ equilibrium (the floor) | +1.75 | +1.19 | **1.47** | — |
+| **Hard** (`opp_temp` 0, plain minimax) | +6.19 | +4.70 | **5.45** | 5.60 / 5.50 |
+| **Expert** (`opp_temp` 5, shipped) | +6.20 | +5.21 | **5.70** | 5.80 / 5.73 |
+
+**Expert is marginally MORE exploitable than Hard, and that is not a
+contradiction of its measured +0.957 ± 0.454 head-to-head win over the same
+tree.** Exploitability and head-to-head strength are different quantities: a
+policy that exploits a particular opponent better can be easier for a best
+responder to punish. Worth stating because the two numbers will otherwise read
+as a conflict. The softening does move behaviour in the predicted direction —
+Expert concedes level 4 at 31-43% against Hard's 30-62% — but it also opens
+lower across every bucket (1.09 vs 1.33 at the floor), and the net is a wash.
+
+**THE ONE HUGE DIVERGENCE SURVIVES BOTH TIERS AND IS NOW WELL-OBSERVED: the
+equilibrium essentially NEVER concedes level 4 (0-5% from every bucket) and both
+tiers concede it 31-67%.** The attribution says the same thing over and over,
+now at 97.8% on infosets with 11+ observations: **wants `bid 5` or `bid 6`, does
+`pass:59% hold:30%`**, at standing 3-5, from middle and strong buckets alike.
+That is exactly the failure the crate documents for a tree whose modelled
+opponent is handed our hand — contesting looks worthless, so the search shades
+everything down — and softening it at temp 5 is measurably not enough.
+
 ### THE EXACT AUCTION LEAF — BUILT, EXACT, CHEAP, AND IT DOES NOT MOVE EXPLOITABILITY (2026-08-19)
 
 **Verdict first: the mechanism is real and correct, the gate says do not spend
@@ -4784,6 +4887,15 @@ defence picking whichever half of the threat hurts us more.
 effect was several points; the observed one is +0.20 in the wrong direction,
 well inside a split-half spread of 5.94-6.58. Per the gate this was built
 under, **no arena time is warranted.**
+
+**...BUT THIS NULL WAS TAKEN ON THE BROKEN INSTRUMENT AND IS PENDING A RE-RUN.**
+Both arms above were fitted on the SELF-PLAY-ONLY corpus, which the section
+above shows was 54% fabricated infosets — and a leaf change moves what Expert
+does, which by construction cannot move loss attributed to nodes Expert never
+visits. So the null is un-diagnostic rather than wrong: it may simply have been
+measured on the part of the number that no bot change can touch. Re-run it with
+`CFR_PROBES=96` against the 5.45 / 5.70 baselines before treating "the exact
+leaf does nothing" as settled.
 
 **AND THE MEASUREMENT IS NOT VACUOUS, which is the first thing to check on a
 null.** With the exact leaf on, **70% of auctions bid a different sequence, 52%
