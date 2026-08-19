@@ -3294,3 +3294,50 @@ Expert's once it pays for its suits, four nulls are explained at once.
 **Method note worth keeping: a monotone dose–response is worth more than any
 single arm.** Two points would have read as noise; three made the answer
 unambiguous and also proved there is no middle setting worth hunting for.
+
+### 2026-08-19 (end of session) — five treatments, five failures, and a stopping rule
+
+Continued into the auction tree itself. Built the burn-count abstraction (so the
+equilibrium finally pays classic's denomination forever-ban), the jump-weight
+calibration, and the attribution and dose machinery to judge them.
+
+**A retraction first.** `br`'s concession table reports ONE infoset per level,
+and I generalised its "equilibrium concedes level 4 on 0-5%" into a claim about
+the level. A reach-weighted playout of the same equilibrium concedes standing-4
+on **69%**. Four treatments were aimed at my generalisation.
+
+**The correctly-diagnosed version.** The equilibrium's concession rotates hard on
+the standing bid's JUMP; the tree's is flat (standing 4: equilibrium 2% of
+one-rung climbs vs 28% of leaps; tree 52% vs 53%), and 44.4% of the tree's
+attributed loss sits at jump 1. Verified as a calibration and not a bug: editing
+only `state.jump` moves the option sums by a median of 54 and flips 2 decisions
+in 40.
+
+**And the treatment for it failed the same way.** `jump_weight` is SYMMETRIC —
+it makes conceding their leap more attractive and our own leaps less attractive
+at once. At 3x the slope barely moved (+1 → +4, +1 → −2, +4 → +2) while the
+settled mean fell 4.48 → 4.15. Another shift where a rotation was needed. 5.78
+against 5.45.
+
+**The full table**: shipped 5.45; exact leaf 5.58; opponent softening 5.70; xfit
+0.4 5.69; jump weight 3 5.78; xfit 1.0 6.11; floor 1.47. Every perturbation is
+worse, in both directions on aggression, across four mechanisms.
+
+**The instrument was then tested, because after five failures it had to be.**
+Hypothesis: a best responder punishes predictability, so anything sharpening the
+bot's conditioning reads as worse. Measured, mean policy entropy against
+exploitability: **corr +0.62, the wrong sign**, and `jump weight 3` is the
+decisive counterexample — lowest entropy of any arm, still worse. Cleared.
+
+**Conclusion, stated as a stopping rule:** the residual exploitability is not
+reachable by re-weighting the existing search. Every treatment tried changes a
+coefficient inside a tree that searches from one seat's information set with the
+modelled opponent handed our exact hand. That is the auction-side twin of
+CAMPAIGN.md's card-play verdict. The only live direction is modelling the
+opponent's uncertainty — nested sampling, its own budget, and the one thing none
+of the five touches. **Do not spend on another coefficient.**
+
+**Method lesson, the transferable half:** what settled this was not a better
+treatment but a DOSE CURVE (monotone across three weights) and a NEGATIVE
+CONTROL (entropy vs exploitability). When treatments keep failing, stop
+proposing treatments — sweep a dose, and test the instrument.

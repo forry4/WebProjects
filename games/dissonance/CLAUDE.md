@@ -5137,6 +5137,70 @@ EQUILIBRIUM does either. **The abstraction's one liberty is priced and it is
 small.** Worth having as a permanent arm regardless, since every future
 comparison against this equilibrium inherits the question.
 
+### FIVE TREATMENTS, FIVE FAILURES: THE SHIPPED TREE IS A LOCAL OPTIMUM ON THIS AXIS (2026-08-19)
+
+**The conclusion of the day, and it is a stopping rule.** Every perturbation of
+the auction search measured against the honest instrument makes it MORE
+exploitable, in both directions on aggression and on four different mechanisms:
+
+| treatment | what it changes | exploitability |
+|---|---|---|
+| **shipped** (Hard tree) | — | **5.45** |
+| opening bias | the opening's marginal shape | worse at every weight |
+| exact leaf | leaf ACCURACY (`payoff_exact`) | 5.58 (paired, 247) |
+| opponent softening (`temp 5`) | the opponent's aggregation | 5.70 |
+| jump weight 3 | what the jump term is worth | 5.78 |
+| cross-fit 0.4 / 1.0 | the selection bias, both node kinds | 5.69 / **6.11** |
+| *(the floor this abstraction reaches)* | | *1.47* |
+
+**AND THE INSTRUMENT IS NOT THE EXPLANATION — checked, because after five
+failures it had to be.** The obvious worry is that a best responder punishes
+PREDICTABILITY, and inside an 8-bucket abstraction the only thing making a
+search bot look "mixed" at an infoset is variation between deals sharing a
+bucket — so anything that sharpens the bot's conditioning on the STATE would
+read as more exploitable whether or not it played better. Measured, the mean
+policy entropy per arm against its exploitability: **corr +0.62 over five arms,
+which is the WRONG SIGN for that story** (more mixing reading as more
+exploitable), and the decisive case is `jump weight 3` — the **lowest** entropy
+of any arm (0.408 against the shipped 0.436) and still worse at 5.78. Predictability
+is not what is being measured.
+
+**WHY THE JUMP WEIGHT COULD NOT ROTATE EITHER, which is the last mechanism to
+fall and the most instructive.** The diagnosis was right and well-attributed:
+the equilibrium's concession rotates hard on the standing bid's jump and the
+tree's is flat (44.4% of the tree's attributed loss sits at jump 1). But
+`jump_weight` is **SYMMETRIC** — it makes conceding THEIR leap more attractive
+and OUR OWN leaps less attractive, in the same breath. Measured at 3x, the slope
+barely moved (level 3 +1 → +4, level 4 +1 → **−2**, level 5 +4 → +2) while the
+settled mean fell 4.48 → 4.15 and the make rate rose 68.3% → 73.1%. **It shifted
+again.** Rotating would need the weight applied only where the tree prices the
+OPPONENT's standing contract and not its own prospective bids — which is no
+longer a calibration of a scoring term but a thumb on the scale, and on this
+evidence would very likely shift something else instead.
+
+**WHAT THIS IS AND IS NOT.** It is not "the tree is optimal" — it sits 3.98
+points above this abstraction's own floor. It is that **the residual is not
+reachable by re-weighting the existing search**, which is what all five
+treatments are. Every one of them changes a COEFFICIENT inside a tree that
+searches from one seat's information set with the modelled opponent handed our
+exact hand. That is the same verdict `CAMPAIGN.md` reached for card play from
+the other end — "PIMC's residual error is strategy fusion, which no better world
+distribution can fix" — and it now has an auction-side twin.
+
+**SO THE ONLY LIVE DIRECTION IS THE ONE ALREADY IN "Not built yet": modelling
+the opponent's UNCERTAINTY** — a search whose MIN nodes choose against worlds
+drawn from the OPPONENT's information set rather than from ours. It is a much
+bigger program (nested sampling, its own solve budget) and it is the one thing
+none of these five touches. **Do not spend on another coefficient.**
+
+**THE METHOD LESSON, which is the transferable half.** The campaign spent four
+treatments on a defect I had generalised out of a single unrepresentative table
+cell, and the fifth on the correctly-diagnosed version of it. What finally
+settled the question was not a better treatment but a DOSE CURVE (cross-fitting,
+monotone across three weights) and a NEGATIVE CONTROL (policy entropy against
+exploitability). **When treatments keep failing, stop proposing treatments:
+sweep a dose, and test the instrument.**
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
@@ -5155,8 +5219,12 @@ comparison against this equilibrium inherits the question.
   settled, and skat's talon resolves before the game is named. It needs its
   own `swaplab` run, not the classic weights on faith —
   `test_the_skat_talon_still_runs_the_old_policy` is the marker.
-* **Modelling the opponent's UNCERTAINTY in the auction tree.** The single
-  clearest reason Expert's lookahead does not pay is that its modelled opponent
+* **Modelling the opponent's UNCERTAINTY in the auction tree — and as of
+  2026-08-19 this is the ONLY live direction left on the auction bot.** Five
+  separate re-weightings of the existing search were measured against the
+  equilibrium instrument and every one made it more exploitable (section above);
+  the residual is not reachable by changing a coefficient. The single clearest
+  reason Expert's lookahead does not pay is that its modelled opponent
   is handed our exact hand. Anything that makes their branch choose without it
   (a sampled-opponent-view search, or simply capping how sharply their reply is
   modelled) attacks the mechanism the measurements point at.
