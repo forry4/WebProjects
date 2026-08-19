@@ -642,6 +642,10 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         // default false, and false is the tree that has always run -- so an
         // older server, and the arm's own control, reproduce today exactly.
         xfit: r.get("xfit").and_then(|x| x.as_f64()).unwrap_or(0.0),
+        // OPTIONAL, default 1.0 -- the shipped scoring, bit for bit. See
+        // `AucRules::jump_weight`: it scales what the SEARCH believes the jump
+        // bonus is worth, never what the room pays for one.
+        jump_weight: r.get("jump_weight").and_then(|x| x.as_f64()).unwrap_or(1.0),
         top_denom: n("top_denom")? as u8,
         ladder: r.get("ladder").and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())

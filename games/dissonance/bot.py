@@ -820,6 +820,32 @@ def cross_fit() -> float:
     return float(os.environ.get("DIS_XFIT", "0") or 0)
 
 
+def jump_weight() -> float:
+    """How heavily the auction SEARCH weights the jump bonus, against how
+    heavily the room PAYS it. 1.0 (the shipped scoring) unless `DIS_JUMP_W`
+    says otherwise.
+
+    NOT A RULES CHANGE: the engine still scores a set at `JUMP_SET_BONUS x j`
+    and nothing about what a round pays moves. This scales only what the tree
+    BELIEVES that term is worth while it decides -- the `DOUBLE_MARGIN` /
+    `open_bias` shape, a per-decision nudge the server computes.
+
+    WHY. Measured against the abstraction's equilibrium, the tree's concession
+    is FLAT in the jump where the equilibrium's rotates hard on it: at standing
+    4 the equilibrium concedes 2% of one-rung climbs and 28% of leaps, the tree
+    52% and 53%. The term does reach the argmax -- editing only `state.jump`
+    moves the option sums by a median of 54 and flips 2 decisions in 40 -- so it
+    is a magnitude question, and 44.4% of the tree's attributed exploitability
+    sits at jump 1, the cheap climbs it hands over.
+
+    It is the first treatment in this campaign that ROTATES the policy rather
+    than SHIFTING it. Four uniform ones (the opening bias, the exact leaf,
+    opponent softening, cross-fitting) came back null or monotonically worse,
+    and a shift cannot produce a rotation at any dose.
+    """
+    return float(os.environ.get("DIS_JUMP_W", "1") or 1)
+
+
 def search_rules_overrides() -> dict:
     """Every EXPERIMENT knob the auction search's `rules` block takes, in ONE
     place -- and that is the whole point of the function.
@@ -841,6 +867,8 @@ def search_rules_overrides() -> dict:
     out = {}
     if cross_fit() > 0:
         out["xfit"] = cross_fit()
+    if jump_weight() != 1.0:
+        out["jump_weight"] = jump_weight()
     return out
 
 

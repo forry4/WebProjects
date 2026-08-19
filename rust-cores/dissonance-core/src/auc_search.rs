@@ -114,6 +114,27 @@ pub struct AucRules {
     pub min_level: u8,
     pub max_level: u8,
     pub max_raise: u8,
+    /// HOW HEAVILY THE SEARCH WEIGHTS THE JUMP, against how heavily the room
+    /// PAYS it. 1.0 is the shipped scoring exactly, and is bit-identical.
+    ///
+    /// A SEARCH CALIBRATION, not a rules change: the engine still scores a set
+    /// at `jump_set_bonus x j` and nothing about what a round pays moves. This
+    /// scales only what the tree BELIEVES that term is worth while it decides,
+    /// the same shape as `double_margin` and `open_bias` -- a per-decision nudge
+    /// the server computes.
+    ///
+    /// WHY IT EXISTS. Measured against this abstraction's equilibrium, the
+    /// tree's concession is FLAT in the jump where the equilibrium's rotates
+    /// hard on it: at standing 4 the equilibrium concedes 2% of one-rung climbs
+    /// and 28% of leaps, the tree 52% and 53%. The term does reach the argmax
+    /// (editing only `state.jump` moves the option sums by a median of 54 and
+    /// flips 2 decisions in 40), so this is a magnitude question and not a
+    /// wiring one -- and 44.4% of the tree's attributed exploitability sits at
+    /// jump 1, the cheap climbs it hands over.
+    ///
+    /// It is the first treatment in this campaign that ROTATES rather than
+    /// SHIFTS. Four uniform ones came back null or monotonically worse.
+    pub jump_weight: f64,
     /// Classic's jump bonus (2026-08-13): what each level the SETTLING bid
     /// jumped adds to the defender's set score. A rule rather than a term row,
     /// because the rows are keyed by the settlement and the jump is a property
@@ -518,7 +539,12 @@ impl<'a> Search<'a> {
     #[inline]
     fn with_jump(&self, o: &Option_, jump: u8) -> Option_ {
         let mut o = *o;
-        o.set_base += self.rules.jump_set_bonus * jump as i32;
+        // `jump_weight` scales what the SEARCH thinks the term is worth, never
+        // what the room pays. At 1.0 this is `set_base += rate * jump`, the
+        // integer arithmetic the engine does, and the rounding below is exact
+        // on it -- so the default is bit-identical rather than merely equal.
+        o.set_base += (self.rules.jump_set_bonus as f64 * jump as f64
+                       * self.rules.jump_weight).round() as i32;
         o
     }
 
@@ -848,14 +874,14 @@ mod tests {
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 4, xfit: 0.0,
+                   opener_may_pass: false, top_denom: 4, xfit: 0.0, jump_weight: 1.0,
                    ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 6, xfit: 0.0,
+                   opener_may_pass: false, top_denom: 6, xfit: 0.0, jump_weight: 1.0,
                    ladder, opp: OppModel::Minimax }
     }
 
@@ -944,6 +970,46 @@ mod tests {
         assert!(hard > 0.3, "the hard max is not showing the bias: {hard:+.3}");
         assert!(cross < hard, "cross-fitting must lower a max, not lift it");
         assert!(cross.abs() < hard.abs() / 2.0);
+    }
+
+    /// THE JUMP WEIGHT SCALES THE TERM AND NOTHING ELSE, and 1.0 is the
+    /// shipped arithmetic bit for bit.
+    ///
+    /// Worth pinning because this is a SEARCH calibration sitting inside a
+    /// SCORING term: get it wrong and the tree is priced against a set base the
+    /// room does not charge, which is the drift `payoff_terms` exists to
+    /// prevent. A made contract must not move at any weight -- the jump bonus
+    /// is a set price only, which the engine-side test
+    /// `the_settling_bids_jump_fattens_the_set_and_only_the_set` already pins
+    /// on the other side of the wire.
+    #[test]
+    fn the_jump_weight_scales_the_set_price_and_only_that() {
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        let mut r = classic_rules();
+        r.jump_set_bonus = 3;
+        let base = Option_ { denom: 0, target: 4, make: 20, over: 1, set_base: 10,
+                             short: 5, ramp: 0, null: 20, opp: false, redeal: false };
+        let at = |lam: f64| {
+            let mut rr = r.clone();
+            rr.jump_weight = lam;
+            let s = Search::new(0, rr, &t, &w);
+            s.with_jump(&base, 2)
+        };
+        assert_eq!(at(1.0).set_base, 16, "1.0 must be the engine's own 10 + 3x2");
+        assert_eq!(at(1.0).make, base.make, "the make base must never move");
+        assert_eq!(at(3.0).set_base, 28, "3x weight is 10 + 3x(3x2)");
+        assert_eq!(at(3.0).make, base.make, "...still only the set price");
+        assert_eq!(at(0.0).set_base, base.set_base, "0 removes the term entirely");
+        // A jump of ZERO -- the same-level overtake, the one jump-free way to
+        // buy a contract -- must be untouched at every weight, or the tier
+        // would price the auction's one free rung as though it had leapt.
+        for lam in [0.0, 1.0, 3.0, 7.5] {
+            let mut rr = r.clone();
+            rr.jump_weight = lam;
+            assert_eq!(Search::new(0, rr, &t, &w).with_jump(&base, 0).set_base,
+                       base.set_base, "weight {lam} charged a jump of zero");
+        }
     }
 
     /// OFF IS THE TREE THAT HAS ALWAYS RUN, and on really does something.
