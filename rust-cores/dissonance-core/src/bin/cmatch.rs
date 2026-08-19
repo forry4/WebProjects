@@ -30,20 +30,13 @@ fn arg(name: &str, dflt: i64) -> i64 {
         .unwrap_or(dflt)
 }
 
-/// The shipped classic-mode scoring, as `engine.payoff_terms` builds it:
-/// N^2 + the flat 10 stake against a set base of N + 10 (2026-08-11), the
-/// short rate 5 (2026-08-08).
+/// The shipped classic-mode scoring, from the crate's ONE copy of it.
+///
+/// This used to be a local table and it had gone stale by three constants --
+/// see `dd::shipped_classic_terms`, which is now the only place the numbers
+/// live.
 fn contract_for(level: i32, declarer: usize) -> Contract {
-    Contract {
-        ramp: 0,
-        level,
-        declarer,
-        make_base: level * level + 10,
-        over: 0,
-        set_base: level + 10,
-        short: 5,
-        null: Some(20),
-    }
+    dissonance::dd::shipped_classic_terms(level, declarer)
 }
 
 fn main() {

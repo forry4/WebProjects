@@ -21,7 +21,10 @@ fn main() {
     let k = 3usize;
 
     let opts: Vec<Option_> = (0..5)
-        .map(|d| Option_ { denom: d, target: 3, make: 19, over: 0, set_base: 13, short: 5, ramp: 0, null: 20,
+        // The shipped level-3 classic terms, from the crate's one copy: this
+        // line carried `make: 19, over: 0, set_base: 13` -- the pre-2026-08-16
+        // price list -- while claiming to bench the shipped bidder.
+        .map(|d| Option_ { denom: d, target: 3, make: 3 * 3 + 4, over: 1, set_base: 2 * 3 + 2, short: 5, ramp: 0, null: 20,
                   opp: false, redeal: false })
         .collect();
 

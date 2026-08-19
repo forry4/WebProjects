@@ -43,11 +43,21 @@ const MAXLEVEL: i32 = 12;
 struct Acc {
     dd: Vec<i32>,
     got: Vec<i32>,
+    /// Paired lead swing for seat 0: its points when it LEADS minus its points
+    /// on the identical deal and denomination when the other seat leads.
+    ///
+    /// MEASURED RATHER THAN INFERRED, because the file's standing "+0.93 pts"
+    /// for the opening lead does not say whether it is a one-sided edge over
+    /// par or the paired swing between the two, and those differ by exactly the
+    /// factor of two that would make this harness agree or disagree with it.
+    /// Solving both directions on the same shuffle answers it outright.
+    lead_dd: Vec<i32>,
+    lead_got: Vec<i32>,
 }
 
 impl Acc {
     fn new() -> Acc {
-        Acc { dd: Vec::new(), got: Vec::new() }
+        Acc { dd: Vec::new(), got: Vec::new(), lead_dd: Vec::new(), lead_got: Vec::new() }
     }
 }
 
@@ -88,37 +98,49 @@ fn main() {
                     }
                     let seed = idx as u64 + 1;
                     for &den in DENOMS_PLAYED.iter() {
-                        // SAME DEAL, five denominations: the shuffle is the
-                        // expensive shared thing and the contract is what
-                        // varies, exactly as the par table does it.
-                        let g0 = Game::deal(&mut Rng::new(seed), den, 0);
+                        // SAME DEAL, five denominations, BOTH LEADERS: the
+                        // shuffle is the expensive shared thing and everything
+                        // else is what varies, exactly as the par table does it.
+                        let mut pair_dd = [0i32; 2];
+                        let mut pair_got = [0i32; 2];
+                        for leader in 0..2u8 {
+                            let g0 = Game::deal(&mut Rng::new(seed), den, leader);
 
-                        // What seat 0 can guarantee, seeing everything.
-                        let diff = root.solve(&g0.s) as i32;
-                        let dd0 = (POOL as i32 + diff) / 2;
+                            // What seat 0 can guarantee, seeing everything.
+                            let diff = root.solve(&g0.s) as i32;
+                            let dd0 = (POOL as i32 + diff) / 2;
 
-                        // What it actually gets, both seats on the shipped tier.
-                        // Bot seeds are per SEAT, never per identity — the
-                        // cmatch lesson: seeding by identity swaps the RNG
-                        // streams along with the roles and manufactures an edge.
-                        let mut g = g0.clone();
-                        let mut bots: Vec<PimcBot> = (0..2)
-                            .map(|q| {
-                                PimcBot::new(
-                                    k,
-                                    0x5164 ^ seed.wrapping_mul(31) ^ (den as u64) << 40 ^ (q as u64) << 56,
-                                    20,
-                                )
-                            })
-                            .collect();
-                        while !g.over() {
-                            let p = g.s.to_play() as usize;
-                            let v = g.view(p);
-                            let c = bots[p].pick(&v);
-                            g.apply(c);
+                            // What it actually gets, both seats on the shipped
+                            // tier. Bot seeds are per SEAT, never per identity
+                            // -- the cmatch lesson: seeding by identity swaps
+                            // the RNG streams along with the roles and
+                            // manufactures an edge.
+                            let mut g = g0.clone();
+                            let mut bots: Vec<PimcBot> = (0..2)
+                                .map(|q| {
+                                    PimcBot::new(
+                                        k,
+                                        0x5164 ^ seed.wrapping_mul(31)
+                                            ^ (den as u64) << 40
+                                            ^ (q as u64) << 56,
+                                        20,
+                                    )
+                                })
+                                .collect();
+                            while !g.over() {
+                                let p = g.s.to_play() as usize;
+                                let v = g.view(p);
+                                let c = bots[p].pick(&v);
+                                g.apply(c);
+                            }
+                            acc.dd.push(dd0);
+                            acc.got.push(g.s.pts[0] as i32);
+                            pair_dd[leader as usize] = dd0;
+                            pair_got[leader as usize] = g.s.pts[0] as i32;
                         }
-                        acc.dd.push(dd0);
-                        acc.got.push(g.s.pts[0] as i32);
+                        // leader 0 = seat 0 leads; leader 1 = it does not.
+                        acc.lead_dd.push(pair_dd[0] - pair_dd[1]);
+                        acc.lead_got.push(pair_got[0] - pair_got[1]);
                     }
                 }
                 acc
@@ -131,6 +153,8 @@ fn main() {
     for p in &parts {
         acc.dd.extend_from_slice(&p.dd);
         acc.got.extend_from_slice(&p.got);
+        acc.lead_dd.extend_from_slice(&p.lead_dd);
+        acc.lead_got.extend_from_slice(&p.lead_got);
     }
     let n = acc.dd.len();
 
@@ -155,6 +179,20 @@ fn main() {
     println!("  sd    {:.3}   <- THIS IS SIGMA", sd(&delta));
     let exact = delta.iter().filter(|&&d| d == 0.0).count();
     println!("  landed exactly on the double-dummy value: {:.1}%", 100.0 * exact as f64 / n as f64);
+    println!();
+
+    let ld: Vec<f64> = acc.lead_dd.iter().map(|&x| x as f64).collect();
+    let lg: Vec<f64> = acc.lead_got.iter().map(|&x| x as f64).collect();
+    println!("THE OPENING LEAD, both directions on the same shuffle (n={} pairs)", ld.len());
+    println!(
+        "  paired swing, double-dummy  {:+.3} +/- {:.3} pts",
+        mean(&ld), sd(&ld) / (ld.len() as f64).sqrt()
+    );
+    println!(
+        "  paired swing, real play     {:+.3} +/- {:.3} pts",
+        mean(&lg), sd(&lg) / (lg.len() as f64).sqrt()
+    );
+    println!("  (one-sided edge over par is half of each)");
     println!();
 
     println!("THE LADDER, MEASURED RATHER THAN CONVOLVED");

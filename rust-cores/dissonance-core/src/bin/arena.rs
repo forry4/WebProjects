@@ -15,10 +15,20 @@ use dissonance::game::{play_round, Bot, Game};
 use dissonance::rng::Rng;
 use dissonance::state::POOL;
 
+/// `amu:M:K` is alpha-mu at depth M over K worlds -- `amu:1:K` is `pimc:K`
+/// EXACTLY (asserted in `bots::amu_tests`), which is what makes it a clean null
+/// control for the depth knob.
+///
 /// `pimc:K` is textbook PIMC. `pimc:K:PARTICLES:TEMP:AGG` turns on
 /// opponent-aware resampling; AGG is mean | vote | qNN (e.g. q25).
 /// TEMP `inf` weights every world equally, which reproduces `pimc:K` exactly.
 fn make(spec: &str, seed: u64, bits: u32) -> Box<dyn Bot> {
+    if let Some(rest) = spec.strip_prefix("amu:") {
+        let f: Vec<&str> = rest.split(':').collect();
+        let m: usize = f[0].parse().expect("amu:M:K");
+        let k: usize = f[1].parse().expect("amu:M:K");
+        return Box::new(AlphaMuBot::new(k, m, seed, bits));
+    }
     if let Some(rest) = spec.strip_prefix("pimc:") {
         let f: Vec<&str> = rest.split(':').collect();
         let k: usize = f[0].parse().expect("pimc:K");

@@ -209,6 +209,47 @@ impl Default for CEntry {
     }
 }
 
+/// The classic-mode contract the SHIPPED game charges, at `level`, undoubled
+/// and with no jump.
+///
+/// THIS EXISTS BECAUSE TWO OFFLINE HARNESSES HAD EACH HARDCODED THEIR OWN COPY
+/// AND BOTH WENT STALE (found 2026-08-19). `cmatch.rs` said in terms "the
+/// shipped classic-mode scoring, as `engine.payoff_terms` builds it" while
+/// charging `N^2 + 10` against a set base of `N + 10` with `over: 0`;
+/// `abench.rs` carried the same numbers for level 3. Those are the constants
+/// from before the 2026-08-16 re-price. The engine has shipped
+/// `FLAT_MAKE_BONUS = 4`, `SET_LEVEL_RATE = 2`, `FLAT_SET_PENALTY = 2` since,
+/// i.e. `N^2 + 4` against `2N + 2` -- and `over` has been 1 since the overtrick
+/// bonus landed on 2026-08-07.
+///
+/// WHY THE EXISTING GATE DID NOT CATCH IT. `wire::payoff_parity` holds the
+/// arithmetic that turns TERMS INTO A NUMBER to a fixture of the engine's own
+/// answers, which is the thing this crate writes twice. Nothing anywhere
+/// asserted WHICH TERMS the shipped game charges, so a bin that invents its own
+/// is unguarded by construction. Consolidating the two copies into one is the
+/// cheap half of the fix; the mechanical half is to have
+/// `tools/gen_payoff_fixtures.py` emit the plain per-level terms and assert
+/// against them here, which would track the engine automatically. Until that
+/// exists, the table in `the_shipped_terms_match_the_engine` is the guard and
+/// it is pinned to a real engine run rather than to these constants.
+///
+/// The measurements this invalidates are named where they are recorded: every
+/// `cmatch` number (the contract-vs-points search at +0.55/+1.25, and the "6-7
+/// Nulls per 40 rounds") was taken with `over: 0`, i.e. on flat payouts, which
+/// is exactly the caveat the Dissonance manual already flags as un-re-run.
+pub fn shipped_classic_terms(level: i32, declarer: usize) -> Contract {
+    Contract {
+        ramp: 0,
+        level,
+        declarer,
+        make_base: level * level + 4,
+        over: 1,
+        set_base: 2 * level + 2,
+        short: 5,
+        null: Some(20),
+    }
+}
+
 pub struct Dd {
     tt: Vec<Entry>,
     ctt: Vec<CEntry>,
@@ -1027,5 +1068,60 @@ impl Dd {
         }
         moves[..k].copy_from_slice(&kept[..k]);
         k
+    }
+}
+
+#[cfg(test)]
+mod shipped_terms {
+    use super::*;
+
+    /// PINNED TO A REAL ENGINE RUN, not to the constants above.
+    ///
+    /// The table below was read out of `games.dissonance.engine._terms_for`
+    /// ("classic", jump 0, undoubled) on 2026-08-19. Deriving the expectation
+    /// from `shipped_classic_terms`' own arithmetic would make this test agree
+    /// with any bug it contains, which is precisely how the two bins it
+    /// replaces stayed wrong: each was internally consistent and neither was
+    /// checked against the game.
+    ///
+    /// If the engine's price list moves, this fails HERE -- in one place --
+    /// instead of silently mis-scoring two offline harnesses. The permanent
+    /// fix is for `gen_payoff_fixtures.py` to emit these rows so the check is
+    /// mechanical; see `shipped_classic_terms`.
+    #[test]
+    fn the_shipped_terms_match_the_engine() {
+        // (level, make, set_base, over, short, null)
+        let engine: [(i32, i32, i32, i32, i32, i32); 4] = [
+            (1, 5, 4, 1, 5, 20),
+            (3, 13, 8, 1, 5, 20),
+            (4, 20, 10, 1, 5, 20),
+            (6, 40, 14, 1, 5, 20),
+        ];
+        for (level, make, set_base, over, short, null) in engine {
+            let c = shipped_classic_terms(level, 0);
+            assert_eq!(c.make_base, make, "level {level}: make base");
+            assert_eq!(c.set_base, set_base, "level {level}: set base");
+            assert_eq!(c.over, over, "level {level}: overtrick rate");
+            assert_eq!(c.short, short, "level {level}: shortfall rate");
+            assert_eq!(c.null, Some(null), "level {level}: null consolation");
+        }
+    }
+
+    /// The stale numbers must NOT come back -- stated as SEQUENCES, because the
+    /// two price lists intersect and a per-level `assert_ne` is therefore a
+    /// false alarm waiting to happen. At level 8 the old `N + 10` and the new
+    /// `2N + 2` are both 18; the first cut of this test asserted per level and
+    /// failed on that coincidence rather than on a regression.
+    #[test]
+    fn the_pre_repricing_constants_are_gone() {
+        let makes: Vec<i32> = (1..=8).map(|l| shipped_classic_terms(l, 0).make_base).collect();
+        let sets: Vec<i32> = (1..=8).map(|l| shipped_classic_terms(l, 0).set_base).collect();
+        let stale_makes: Vec<i32> = (1..=8).map(|l| l * l + 10).collect();
+        let stale_sets: Vec<i32> = (1..=8).map(|l| l + 10).collect();
+        assert_ne!(makes, stale_makes, "the +10 make stake is back");
+        assert_ne!(sets, stale_sets, "the N+10 set base is back");
+        for l in 1..=8 {
+            assert_ne!(shipped_classic_terms(l, 0).over, 0, "the overtrick bonus is off again");
+        }
     }
 }
