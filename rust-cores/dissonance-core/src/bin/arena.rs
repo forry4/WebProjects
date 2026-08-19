@@ -5,6 +5,19 @@
 //! exactly 2.500 — that mirror reading is the harness's own correctness check,
 //! and a run that does not produce it is measuring something other than skill.
 //!
+//! THAT HOLDS ONLY FOR BOTS SEEDED IDENTICALLY, AND THIS HARNESS DOES NOT SEED
+//! THEM IDENTICALLY (measured 2026-08-19). A and B get `0x5EED` and `0xB0B`, so
+//! two runs of the SAME algorithm sample different worlds. The seat swap cancels
+//! deal luck; nothing cancels a seed that happens to sample better worlds on
+//! this particular deal set. Measured at 204 rounds the pedestal is
+//! **+0.147 ± 0.077** for `pimc:8` against itself. It averages away — the
+//! campaign's 1606-round null reads −0.014 — but it does not vanish at the
+//! sample sizes small arms actually get run at.
+//!
+//! **So a result near ±0.15 at n≈200 means nothing without its own identity
+//! control on the same deals.** Running one flipped the alpha-mu verdict from
+//! "no effect" to "a loss"; see CAMPAIGN.md.
+//!
 //!   arena <botA> <botB> [--games N] [--threads T] [--trump s|r] [--tt BITS]
 //!   bot := random | greedy | pimc:K | oracle
 

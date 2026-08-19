@@ -115,6 +115,77 @@ restricted to public-information play. Standard PIMC is pessimistic in a
 specific way (its opponent sees our hand); that variant is optimistic in the
 opposite way, and bracketing the two should beat either.
 
+## ALPHA-MU: BUILT, CORRECT, AND IT MEASURES WORSE THAN PIMC (2026-08-19)
+
+**Verdict first: `AlphaMuBot` is committed and gated OFF. At depth 2 it is about
+0.22 pts/round WORSE than `pimc:8` for roughly ten times the compute.** This is
+the fifth entry in this campaign where a mechanism that is real and correctly
+implemented did not convert; it is recorded in full because the reasoning that
+motivated it still looks right and someone will want to try it again.
+
+**WHAT WAS BUILT.** Cazenave & Ventos's answer to strategy fusion is not a better
+aggregator but a different SEARCH: commit to ONE card across every world you
+cannot tell apart, iterated `m` of your own decisions deep, and only then let the
+double-dummy solver take over. `m = 1` is plain PIMC. Faithful here in that
+mechanism; NOT faithful in keeping Pareto fronts over boolean outcomes, since our
+shipped objective is a real-valued payoff where Pareto dominance is too weak to
+prune on — so this is alpha-mu's commitment structure with PIMC's aggregator.
+
+**THE NULL CONTROL IS AN IDENTITY, NOT A RESEMBLANCE.** `alpha_mu_at_depth_one_is_exactly_pimc`
+plays a whole game card-for-card against `PimcBot` across 6 deals x k in {1,4,8}
+x both seats. Beside it `alpha_mu_at_depth_two_actually_diverges_from_pimc` is
+the positive control, so the identity is a clean arm rather than an inert knob.
+
+**THE GROUPING IS THE ALGORITHM.** After our card the opponent replies, and who
+leads next — and what they lead — depends on hidden cards, so it differs across
+worlds; and our OWN two outer pile bottoms are hidden from us too, so the card
+exposed under a pile we play differs per world and is something we would
+actually see. Committing one card across worlds we can TELL APART is not a
+stronger search, it is an illegal one: the first cut keyed only on the
+opponent's cards and hit `panic!("illegal card ...")` on the second decision.
+Worlds are partitioned by everything observable before each of our decisions.
+
+**THE MEASUREMENT, and the control is the interesting half:**
+
+| arm (bot A vs bot B, same 102 deals, 204 paired rounds) | edge to A |
+|---|---|
+| `amu:1:8` vs `pimc:8` — same algorithm, different seed | **+0.147 ± 0.077** |
+| `amu:2:8` vs `pimc:8` — identical opponent, identical deals | **−0.074 ± 0.078** |
+| **difference (the only valid reading)** | **≈ −0.22** |
+
+The two runs share their deals AND their opponent, differing only in bot A, so
+the difference is paired and its true error bar is below the 0.11 an independent
+combination would give.
+
+**THE ARENA'S NULL IS NOT ZERO AT THIS SAMPLE SIZE, AND ITS DOCSTRING SAYS IT
+MUST BE.** `arena.rs` states "two identical deterministic bots must therefore
+score exactly 2.500 — that mirror reading is the harness's own correctness
+check". That holds only for bots seeded IDENTICALLY, and the arena deliberately
+seeds A with `0x5EED` and B with `0xB0B`. Same algorithm, different stream, and
+at 204 rounds the pedestal is **+0.147 ± 0.077** — the seat swap cancels deal
+luck but nothing cancels a seed that happens to sample better worlds on this
+particular deal set. It averages out (this campaign's own 1606-round null read
+−0.014) but it does NOT vanish at the sample sizes small arms get run at. **Read
+no arena number near ±0.15 at n≈200 without running its own identity control on
+the same deals.** That is why the row above exists and it is the reason the
+alpha-mu verdict flipped from "no effect" to "a loss".
+
+**WHY IT PLAUSIBLY LOSES, which is the part worth carrying.** PIMC is already
+pessimistic in a specific way this file documents: its modelled opponent sees
+our hand. Alpha-mu constrains US to one card across the group while leaving THEM
+free to answer world by world, so it tightens our side of an asymmetry that was
+already against us. Removing our own fusion has to pay for that, and at depth 2
+it does not. The published algorithm keeps a Pareto front and takes the root
+choice off it rather than collapsing to a mean, which may be exactly what pays
+for the constraint; a mean aggregator throws that away. **If this is reopened,
+implement the Pareto front over a BINARISED objective (made / set, which this
+game has) before touching the depth knob again.**
+
+**And the shape of the game predicted this**, which is worth noting for
+calibration: leaf correlation measures 0.713 near the leaves (below), and high
+leaf correlation is the regime the PIMC-properties paper says PIMC already
+handles well. The recoverable slice was always small.
+
 ## THE THREE PIMC PROPERTIES, MEASURED (2026-08-19)
 
 `bin/pimcprops`, 400 deals, PimcBot k=8, classic parity, 32 cards. Long,
