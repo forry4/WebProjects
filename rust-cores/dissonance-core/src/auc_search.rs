@@ -131,11 +131,23 @@ pub struct AucRules {
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
     pub ladder: Vec<u16>,
-    /// CROSS-FIT the tree's own selections -- see `Search::combine`. False as
-    /// shipped and on any payload that predates it, and false is bit-identical
+    /// HOW MUCH of the cross-fit correction to apply -- see `Search::combine`.
+    /// 0 as shipped and on any payload that predates it, and 0 is bit-identical
     /// to the tree that has always run, so an A/B against it is unconfounded
     /// (the `opp_temp` discipline, one rung further in).
-    pub xfit: bool,
+    ///
+    /// A WEIGHT rather than a flag because the full correction OVERSHOOTS,
+    /// measured: at 1.0 the tree concedes less and bids higher exactly as
+    /// intended (settled mean 4.48 -> 4.92, probe-pass 81.7% -> 77.0%) and its
+    /// contracts stop coming home (made 68.5% -> 49.2%, exploitability 5.45 ->
+    /// 6.11). The reason is not a bug and cannot be tuned away by a better
+    /// scheme: removing a selection bias entirely costs the selection. When the
+    /// sampling noise is larger than the gap between two actions, a cross-fitted
+    /// choice cannot tell them apart and returns roughly their MEAN where the
+    /// truth is their MIN. Leave-one-out is already the sharpest cross-fit there
+    /// is (it selects on k-1 worlds); a coarser fold would correct HARDER, not
+    /// softer. So the only axis left is how much of the correction to take.
+    pub xfit: f64,
     /// How the opponent's turns are modelled -- see `OppModel`.
     pub opp: OppModel,
 }
@@ -568,15 +580,18 @@ impl<'a> Search<'a> {
         let k = kids[0].len();
         let totals: Vec<f64> = kids.iter().map(|v| v.iter().sum()).collect();
         let better = |a: f64, b: f64| if maxing { a > b } else { a < b };
-        if !self.rules.xfit || k < 2 || kids.len() < 2 {
-            let mut pick = 0usize;
-            for i in 1..kids.len() {
-                if better(totals[i], totals[pick]) {
-                    pick = i;
-                }
+        // The tree's own answer: one action, chosen on the whole sample.
+        let mut pick = 0usize;
+        for i in 1..kids.len() {
+            if better(totals[i], totals[pick]) {
+                pick = i;
             }
-            return kids[pick].clone();
         }
+        let hard = &kids[pick];
+        if self.rules.xfit <= 0.0 || k < 2 || kids.len() < 2 {
+            return hard.clone();
+        }
+        let lam = self.rules.xfit;
         let mut out = vec![0.0; k];
         for j in 0..k {
             // The leave-one-out total. Subtracting is exact enough here and
@@ -591,7 +606,10 @@ impl<'a> Search<'a> {
                     best = v;
                 }
             }
-            out[j] = kids[pick][j];
+            // SHRUNK toward the tree's own answer. `lam = 1` is the full
+            // correction and overshoots; 0 is the tree unchanged, bit for bit,
+            // because this line is then never reached.
+            out[j] = hard[j] + lam * (kids[pick][j] - hard[j]);
         }
         out
     }
@@ -734,7 +752,7 @@ impl<'a> Search<'a> {
                 None
             }
         };
-        if !self.rules.xfit || k < 2 || kids.len() < 2 {
+        if self.rules.xfit <= 0.0 || k < 2 || kids.len() < 2 {
             let n = k.max(1) as f64;
             let ex: Vec<f64> = totals.iter().map(|v| -(v / n) / temp).collect();
             let out = match mix(ex, &|i| totals[i]) {
@@ -753,7 +771,7 @@ impl<'a> Search<'a> {
         for j in 0..k {
             let ex: Vec<f64> = totals.iter().enumerate()
                 .map(|(i, v)| -((v - kids[i][j]) / n) / temp).collect();
-            out[j] = match mix(ex, &|i| kids[i][j]) {
+            let full = match mix(ex, &|i| kids[i][j]) {
                 Some(v) => v,
                 None => {
                     let mut pick = 0usize;
@@ -765,6 +783,22 @@ impl<'a> Search<'a> {
                     kids[pick][j]
                 }
             };
+            out[j] = full;
+        }
+        // The soft opponent's own aggregation is already a smoothing of the
+        // min, so its correction is shrunk by the same weight for the same
+        // reason -- a tier must never be half-corrected.
+        if self.rules.xfit < 1.0 {
+            let n = k.max(1) as f64;
+            let ex: Vec<f64> = totals.iter().map(|v| -(v / n) / temp).collect();
+            let plain = match mix(ex, &|i| totals[i]) {
+                Some(v) => v,
+                None => totals.iter().cloned().fold(f64::INFINITY, f64::min),
+            } / n;
+            let lam = self.rules.xfit;
+            for v in out.iter_mut() {
+                *v = plain + lam * (*v - plain);
+            }
         }
         out
     }
@@ -814,14 +848,14 @@ mod tests {
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 4, xfit: false,
+                   opener_may_pass: false, top_denom: 4, xfit: 0.0,
                    ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 6, xfit: false,
+                   opener_may_pass: false, top_denom: 6, xfit: 0.0,
                    ladder, opp: OppModel::Minimax }
     }
 
@@ -846,7 +880,7 @@ mod tests {
         let w = one_world(3, 10);
         let plain = Search::new(0, classic_rules(), &t, &w);
         let mut fit = classic_rules();
-        fit.xfit = true;
+        fit.xfit = 1.0;
         let xf = Search::new(0, fit, &t, &w);
 
         let mut rng = crate::rng::Rng::new(20260819);
@@ -874,6 +908,25 @@ mod tests {
         // reads higher. The opposite would mean the fix is making the tree more
         // pessimistic, which is the defect it exists to remove.
         assert!(cross > hard, "cross-fitting must lift a min, not lower it");
+
+        // THE WEIGHT IS A WEIGHT: half the correction must be half of it, and
+        // zero must be none at all. Without this a shrinkage knob can silently
+        // be a flag -- which is what the campaign's `open_bias` weight turned
+        // out to be, measured only after a 20-hour sweep was proposed for it.
+        let kids = vec![vec![1.0, 1.0, 1.0, -9.0], vec![-1.0, -1.0, -1.0, -1.0]];
+        let at = |lam: f64| {
+            let mut r = classic_rules();
+            r.xfit = lam;
+            Search::new(0, r, &t, &w).combine(&kids, false).iter().sum::<f64>()
+        };
+        let (off, full) = (at(0.0), at(1.0));
+        assert_ne!(off, full, "the correction does nothing on a case built for it");
+        assert!((at(0.5) - (off + full) / 2.0).abs() < 1e-9,
+                "half the weight is not half the correction: {} vs {}",
+                at(0.5), (off + full) / 2.0);
+        assert_eq!(at(0.0), Search::new(0, classic_rules(), &t, &w)
+                   .combine(&kids, false).iter().sum::<f64>(),
+                   "zero must be the untouched tree, bit for bit");
 
         // A MAX node carries the identical bias with the opposite sign, and is
         // corrected the same way -- asserted because correcting only the
@@ -903,11 +956,11 @@ mod tests {
     fn cross_fitting_is_off_by_default_and_changes_something_when_on() {
         let t = classic_terms();
         let w = one_world(3, 10);
-        assert!(!classic_rules().xfit, "shipped default must be off");
+        assert_eq!(classic_rules().xfit, 0.0, "shipped default must be off");
         let plain = Search::new(0, classic_rules(), &t, &w)
             .value_of(AucState::opening(0));
         let mut fit = classic_rules();
-        fit.xfit = true;
+        fit.xfit = 1.0;
         let single = Search::new(0, fit.clone(), &t, &w).value_of(AucState::opening(0));
         // ONE world cannot hold anything out, so the flag is inert there -- and
         // it must be inert rather than divide by zero.

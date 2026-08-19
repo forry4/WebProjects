@@ -784,9 +784,9 @@ def act(g: dict, seat: int, rng=None):
     return (None, None)
 
 
-def cross_fit() -> bool:
-    """Should the auction tree CROSS-FIT its own selections? OFF unless
-    `DIS_XFIT` is set, so shipped behaviour is bit-identical.
+def cross_fit() -> float:
+    """HOW MUCH of the auction tree's cross-fit correction to apply. 0 unless
+    `DIS_XFIT` sets a weight, so shipped behaviour is bit-identical.
 
     THE DEFECT. `min` and `max` over noisy estimates are biased -- the winner is
     partly whichever estimate's noise favoured it, so a min reads LOW and a max
@@ -807,8 +807,17 @@ def cross_fit() -> bool:
     THE FIX costs no solves: choose the action using every sampled world EXCEPT
     one, then score it on the one held out, and average over which is held out.
     See `auc_search::Search::combine`.
+
+    A WEIGHT RATHER THAN A FLAG, because the FULL correction overshoots and that
+    is measured, not feared: at 1.0 the tree does exactly what it was built to
+    do -- concedes less and bids higher (settled mean 4.48 -> 4.92, probe-pass
+    81.7% -> 77.0%) -- and its contracts stop coming home (made 68.5% -> 49.2%,
+    exploitability 5.45 -> 6.11). Removing a selection bias entirely costs the
+    selection: when sampling noise exceeds the gap between two actions, a
+    cross-fitted choice cannot tell them apart and returns roughly their MEAN
+    where the truth is their MIN.
     """
-    return bool(os.environ.get("DIS_XFIT"))
+    return float(os.environ.get("DIS_XFIT", "0") or 0)
 
 
 def search_rules_overrides() -> dict:
@@ -830,8 +839,8 @@ def search_rules_overrides() -> dict:
     row instead, which is the guard that fits its shape.
     """
     out = {}
-    if cross_fit():
-        out["xfit"] = True
+    if cross_fit() > 0:
+        out["xfit"] = cross_fit()
     return out
 
 
