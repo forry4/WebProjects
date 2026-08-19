@@ -3194,3 +3194,56 @@ And it joins the belief prior as the fourth instance in this campaign of *a
 measured defect whose correction did not measure as a gain*. The direction that
 is left is conditioning the opening on strength, by something that can express a
 MIXTURE — which an argmax over a biased value provably cannot.
+
+### 2026-08-19 (later) — the instrument was broken twice, and fixing it saved the conclusions
+
+Continuing the same session. Asked "where does the 5.87 actually come from"
+before guessing at another fix, which turned out to be the whole afternoon.
+
+**`cfrlab attrib`** decomposes the best responder's winnings by the one-step
+deviation at each policy node, reach-weighted, reported beside the raw
+observation count. On the self-play corpus: **54% of the exploitability came
+from infosets Expert had never visited, 74% from ones with ≤2 observations.**
+A best responder steers toward holes by construction, so the fit's coverage was
+most of the number — and that is why the opening bias and the exact leaf both
+measured null. *No change to how the bot plays can move loss attributed to nodes
+the bot never plays.*
+
+**Fix 1 — off-policy probes (`CFR_PROBES`).** Per deal, states drawn uniformly
+from the abstraction's reachable set, driven into with REAL bids so `used`,
+`last` and `jump` come out right by construction. Both actor parities (the short
+path fixes whose turn it is; the other seat needs a path one bid longer). Nearly
+free — `bid::Solved` is cached on the hand and a probe moves the standing bid,
+not the cards: 16.4 s/deal at 0 probes, 13.1 at 96. Result: coverage 100.0%
+exact, infosets 233 → 1448, 97.7% of the loss on infosets with 11+ observations.
+
+**Fix 2 — the harness was measuring the wrong tier.** `opp_model` is added by
+`main.py`, only for the expert tier; cfrlab built its payload from the engine, so
+the field was absent and Rust defaulted to `Minimax`. **Every figure this
+campaign produced — 9.06, 5.87, 5.45 — was Hard's auction under a docstring
+saying Expert.** Third instrument bug of this shape. `CFR_OPP_TEMP` now defaults
+to the shipped value and is stamped on every row.
+
+**The honest numbers** (420 rounds, same deals, 100% coverage): floor **1.47**,
+Hard **5.45**, Expert **5.70**. Expert is marginally *more* exploitable than
+Hard — not a contradiction of its +0.957 head-to-head win, since exploitability
+and head-to-head strength are different quantities.
+
+**Three treatments, three nulls.** The opening bias (worse at every weight), the
+exact leaf (+0.23, replicated paired on the fixed instrument at 247 seeds), and
+opponent softening (+0.25). And the last confound is closed: `cfrlab banned`
+shows the pass rate is **44% vs 44%** at standing 4 whether the seat's best
+denomination is free or banned, so the concession is genuine timidity and not
+the abstraction's missing `DENOM_RULE`.
+
+**What is left is a structural asymmetry, not a parameter.** In the tree,
+passing is a LEAF priced myopically from the opponent's side; raising continues
+into a subtree whose modelled opponent knows our exact hand and always finds the
+punishing reply. The pessimism applies only to the branch that continues, which
+predicts exactly the observed sign. The temp knob cannot isolate it — softening
+also lowers the opening across every bucket, and the two cancel.
+
+**The method lesson, and it is the one worth carrying:** *a headline number that
+resists two plausible treatments is telling you to decompose it, not to try a
+third.* Both nulls were correct answers to the wrong question, and one hour of
+attribution explained both and repriced the entire campaign's instrument.

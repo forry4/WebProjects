@@ -4893,9 +4893,9 @@ Both arms above were fitted on the SELF-PLAY-ONLY corpus, which the section
 above shows was 54% fabricated infosets — and a leaf change moves what Expert
 does, which by construction cannot move loss attributed to nodes Expert never
 visits. So the null is un-diagnostic rather than wrong: it may simply have been
-measured on the part of the number that no bot change can touch. Re-run it with
-`CFR_PROBES=96` against the 5.45 / 5.70 baselines before treating "the exact
-leaf does nothing" as settled.
+measured on the part of the number that no bot change can touch. **RE-RUN AND IT HOLDS** -- paired at 247
+seeds on the probed corpus, 5.35 myopic against 5.58 exact, the same +0.2 in the
+same direction. See the section below; "the exact leaf does nothing" is settled.
 
 **AND THE MEASUREMENT IS NOT VACUOUS, which is the first thing to check on a
 null.** With the exact leaf on, **70% of auctions bid a different sequence, 52%
@@ -4921,6 +4921,76 @@ honestly, and the "the leaf is a proxy" caveat that qualifies half the
 measurements in this file can now be removed from any of them by re-running the
 arm. It is deliberately not shipped: the exploitability gate says no gain, and
 2.1x would put Expert's first decision of a hand at ~7s of a 12s watchdog.
+
+### AND THE NULL REPLICATES ON THE FIXED INSTRUMENT (2026-08-19)
+
+Re-run with `CFR_PROBES=96`, Hard tier both arms, **paired on the same 247
+seeds** and read at 100% exact coverage:
+
+| leaf | exploitability |
+|---|---|
+| points proxy (shipped) | **5.35** |
+| exact (`DIS_EXACT_LEAF`) | **5.58** |
+
+Same direction and nearly the same size as the broken-instrument reading
+(+0.20). **So the exact leaf's null is real and not an artefact of the corpus**
+— the mechanism is exact, cheap and correct, and it does not reduce
+exploitability. That conclusion is now settled on an instrument that deserves
+the word.
+
+### THE FOREVER-BAN IS NOT WHAT MAKES THE TREE CONCEDE — the last confound, closed (2026-08-19)
+
+The one divergence surviving every arm is that the equilibrium essentially never
+concedes level 4 while both tiers concede it 31-67%. **Before spending anything
+on that, the obvious alternative reading had to be killed:** the abstraction has
+no denominations, so it lets a seat raise in its best suit every time, where
+classic bans a suit that seat has already named. "The equilibrium raises and
+Expert concedes" could just be a freedom the real bot does not have — this
+file's own standing caveat about the abstraction.
+
+`cfrlab banned` measures it at exactly the nodes the attribution blames, over
+9,032 probed decisions. **The pass rate split on whether the seat's best
+denomination is still legal:**
+
+| standing | best free: n | passes | best banned: n | passes |
+|---|---|---|---|---|
+| 3 | 453 | 29% | 213 | 30% |
+| **4** | **654** | **44%** | **322** | **44%** |
+| 5 | 823 | 65% | 415 | 74% |
+| 6 | 972 | 91% | 536 | 91% |
+
+**Identical.** At the level that carries the argument it is 44% against 44%.
+The ban binds less than one would guess anyway (the best denomination is still
+free on 64-81% of decisions, costing 0.3-0.6 of `hand_strength` when it is not),
+and where it does bind it does not change what the tree does. **So the
+concession is genuine timidity, not a constrained option set**, and the
+abstraction's one documented liberty is not the explanation.
+
+**WHERE THAT LEAVES THE CAMPAIGN.** The defect is now real, well-observed
+(97.8% of the loss on infosets with 11+ observations), not a coverage artefact,
+not an abstraction artefact, and not fixed by either of the two mechanisms
+tried:
+
+| treatment | result |
+|---|---|
+| opening bias (marginal-shaped) | worse on every weight; argmax cannot express a mixture |
+| exact leaf (accuracy) | +0.23, replicated on both instruments |
+| opponent softening at temp 5 (Expert) | +0.25 against Hard's minimax |
+
+**THE STRUCTURAL ASYMMETRY THAT IS LEFT, and it is the hypothesis worth testing
+next.** In the tree, PASSING is a leaf — priced once, myopically, as the
+standing contract from the opponent's side — while RAISING continues into a
+subtree whose modelled opponent is handed our exact hand and always finds the
+punishing reply. **The pessimism is applied only to the branch that continues.**
+That is not a leaf-accuracy problem (measured: no) and not a marginal-shape
+problem (measured: no); it is an asymmetry between how the two kinds of branch
+are valued, and it predicts exactly the observed sign — concede too often, at
+every strength.
+
+The temp knob is the wrong instrument for it: softening reduces the pessimism on
+the continuation but ALSO makes the bot open lower across every bucket, and the
+two cancelled. A test that isolates the asymmetry has to leave the opening
+alone.
 
 ## Not built yet
 

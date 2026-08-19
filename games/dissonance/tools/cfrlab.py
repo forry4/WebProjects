@@ -548,7 +548,7 @@ def probe_round(seed, rng, n=PROBES):
     rather than the cards, so every probe after the first on a given seat is
     arithmetic over worlds that are already solved.
     """
-    out = []
+    out, ctx = [], []
     pool = [st for st in states() if st[0] <= MAXL]
     for level, prev, holds, actor in rng.sample(pool, min(n, len(pool))):
         path = _path_to(level, prev, holds, actor)
@@ -565,7 +565,31 @@ def probe_round(seed, rng, n=PROBES):
         a = _abstract(bid(g, seat), level)
         if a is not None:
             out.append([seat, level, prev, holds, a])
-    return out
+            ctx.append([seat, level, prev, holds] + _constraint(g, seat))
+    return out, ctx
+
+
+def _constraint(g, seat):
+    """How much the DENOMINATION FOREVER-BAN is costing this seat, here.
+
+    THE ABSTRACTION HAS NO DENOMINATIONS, and that is its one documented
+    liberty: it lets a seat raise in its best suit every time, where classic
+    bans a suit that seat has already named. So when the equilibrium raises and
+    Expert concedes, there are two possible readings -- Expert is too timid, or
+    Expert cannot raise anywhere worth raising -- and the ladder cannot tell
+    them apart. Before spending anything on the first, measure the second.
+
+    Returns `[best_still_legal, strength_given_up]`: whether the seat's best
+    denomination is still available to it, and how much `hand_strength` it loses
+    by having to name the best one that is.
+    """
+    banned = g["auction"]["used"][seat]
+    by = {d: B.hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1)}
+    best = max(by.values())
+    free = [v for d, v in by.items() if not (banned >> d) & 1]
+    if not free:
+        return [False, round(best, 3)]
+    return [best == max(free), round(best - max(free), 3)]
 
 
 def expert_round(seed):
@@ -637,7 +661,8 @@ def expert_round(seed):
     # off-policy probes, and mixing them into `dec` would quietly re-weight
     # every distribution this harness reports.
     if PROBES:
-        row["probe"] = probe_round(seed, random.Random(seed ^ 0x9E37), PROBES)
+        row["probe"], row["pctx"] = probe_round(
+            seed, random.Random(seed ^ 0x9E37), PROBES)
     return row
 
 
@@ -1793,6 +1818,63 @@ def load_expert():
     return rows
 
 
+def banned_main():
+    """`cfrlab banned` -- is "Expert concedes where the equilibrium raises" a
+    DEFECT or an ARTIFACT of the abstraction dropping `DENOM_RULE`?
+
+    The abstraction lets a seat raise in its best denomination every time;
+    classic bans a suit that seat has already named. So the equilibrium's "never
+    concede level 4" may simply be a freedom the real bot does not have. This
+    reports, at exactly the nodes the attribution blames, how often Expert's
+    best denomination is still legal for it and what it gives up when it is not.
+    """
+    rows = [r for r in load_expert() if r.get("pctx")]
+    if not rows:
+        raise SystemExit("no probe context recorded -- re-run `cfrlab expert` "
+                         "with CFR_PROBES set on a build that records `pctx`")
+    print(_tier_line(rows))
+    by = defaultdict(lambda: [0, 0, 0.0, 0, 0])   # n, best-free, loss, passed, raised
+    for r in rows:
+        for (seat, level, prev, holds, free, loss), (_, _, _, _, act) in zip(
+                r["pctx"], r["probe"]):
+            k = level
+            b = by[k]
+            b[0] += 1
+            b[1] += 1 if free else 0
+            b[2] += loss
+            b[3] += 1 if act == -1 else 0
+            b[4] += 1 if act not in (-1, HOLD) else 0
+    print(f"\n  at each STANDING level, over {sum(v[0] for v in by.values())} "
+          f"probed decisions:")
+    print(f"  {'standing':>9} {'n':>6} {'best denom free':>16} "
+          f"{'strength given up':>18} {'passes':>8} {'raises':>8}")
+    for k in sorted(by):
+        n, free, loss, passed, raised = by[k]
+        print(f"  {k:>9} {n:>6} {100*free/n:>15.0f}% {loss/n:>18.2f} "
+              f"{100*passed/n:>7.0f}% {100*raised/n:>7.0f}%")
+
+    # THE DECISIVE SPLIT: among decisions at the same standing level, does
+    # Expert pass MORE when its best denomination is gone? If the ban is what
+    # drives the concessions, this gap is large; if it is timidity, there is
+    # no gap and the abstraction's liberty is not the explanation.
+    print(f"\n  PASS RATE, split on whether the best denomination is still free:")
+    print(f"  {'standing':>9} {'free: n':>9} {'pass':>7} {'banned: n':>11} {'pass':>7}")
+    for k in sorted(by):
+        a = [0, 0]
+        b = [0, 0]
+        for r in rows:
+            for (seat, level, prev, holds, free, loss), (_, _, _, _, act) in zip(
+                    r["pctx"], r["probe"]):
+                if level != k:
+                    continue
+                t = a if free else b
+                t[0] += 1
+                t[1] += 1 if act == -1 else 0
+        if a[0] and b[0]:
+            print(f"  {k:>9} {a[0]:>9} {100*a[1]/a[0]:>6.0f}% "
+                  f"{b[0]:>11} {100*b[1]/b[0]:>6.0f}%")
+
+
 def _act_name(a):
     return "pass" if a == -1 else ("hold" if a == HOLD else f"bid {a}")
 
@@ -1900,25 +1982,34 @@ def br_main(iters):
     print(f"  same-level overtakes (the HOLD action): {flat} = "
           f"{100*flat/nd:.1f}% of decisions")
 
-    cfr = CFR(recs)
-    rng = random.Random(1234)
-    for _i in range(iters):
-        rec = recs[rng.randrange(len(recs))]
-        cfr.t = _i + 1
-        for me in (0, 1):
-            cfr.walk(rec, 0, 0, 0, 0, me, rng)
-    eq = {}
-    for key, s in cfr.S.items():
-        tot = sum(max(x, 0.0) for x in s.values())
-        if tot > 0:
-            eq[key] = {a: max(x, 0.0) / tot for a, x in s.items()}
+    # THE FLOOR ROW COSTS THE WHOLE CFR SOLVE AND DOES NOT DEPEND ON THE POLICY
+    # BEING MEASURED -- it is a property of the deal cache alone, so a sweep
+    # comparing bidders on one cache re-derives the same 1.47 every time.
+    # `CFR_BR_EQ=0` skips it, which takes a reading from ~5 minutes to seconds.
+    # Default ON: the two rows are only meaningful as a difference, and a lone
+    # Expert number is exactly the misreading this file warns about.
+    eq = None
+    if os.environ.get("CFR_BR_EQ", "1") != "0":
+        cfr = CFR(recs)
+        rng = random.Random(1234)
+        for _i in range(iters):
+            rec = recs[rng.randrange(len(recs))]
+            cfr.t = _i + 1
+            for me in (0, 1):
+                cfr.walk(rec, 0, 0, 0, 0, me, rng)
+        eq = {}
+        for key, s in cfr.S.items():
+            tot = sum(max(x, 0.0) for x in s.values())
+            if tot > 0:
+                eq[key] = {a: max(x, 0.0) / tot for a, x in s.items()}
 
     print(f"\n=== EXPLOITABILITY (payoff points a deal, {len(recs)} deals) ===")
     print(f"  {'policy':>12} {'BR as seat 0':>13} {'BR as seat 1':>13} "
           f"{'exploitability':>15}")
     tally = {}
-    for name, p in (("CFR equilib", Policy(eq, backoff=False)),
-                    ("EXPERT", pol)):
+    arms = ([("CFR equilib", Policy(eq, backoff=False))] if eq is not None else
+            [])
+    for name, p in arms + [("EXPERT", pol)]:
         b0 = best_response(recs, p, 0)
         p.hits.clear()
         b1 = best_response(recs, p, 1)
@@ -2032,6 +2123,8 @@ def main():
         return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
                      f"{'weakest':>7} {'strong':>7} {'discrim':>8} "
                      f"{'settled':>8} {'made':>8} | opening distribution %")
+    if len(sys.argv) > 1 and sys.argv[1] == "banned":
+        return banned_main()
     if len(sys.argv) > 1 and sys.argv[1] == "attrib":
         return attrib_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "br":
