@@ -11,6 +11,28 @@
 .cm-seg-btn+.cm-seg-btn{border-left:1px solid var(--border,#3a3226)}
 .cm-seg-btn:hover{color:var(--text,#e8dfce)}
 .cm-seg-btn.sel{background:var(--lby-accent,var(--gold,#d4a84c));color:#171310}
+/* WRAPPING VARIANT (`<CmSeg wrap>`), for a picker whose options outgrow one
+   phone row. The base control is `overflow:hidden` + `nowrap`, so an option
+   past the fold is UNREACHABLE rather than merely off-screen -- measured on the
+   offline hub's four-game picker at 390px: 485px of buttons in a 330px box,
+   the last one ending 154px past the edge, with nothing to scroll.
+
+   It becomes separate chips rather than a segmented bar: the shared 1px
+   dividers (`border-left` between siblings) cannot survive wrapping -- the
+   first chip of every later row would wear one against the container edge, and
+   there is no divider between the rows at all. Chips need no divider to read as
+   a group, so the container drops its own border and the buttons take one each.
+   `flex:1 1 10.5rem` is what makes it responsive without a breakpoint, and the
+   number is measured rather than picked: the panel caps at 560px, so the row's
+   widest client box is ~512px and a smaller basis packs THREE chips with the
+   fourth stranded alone on row 2 at every desktop width. 10.5rem is the
+   smallest basis that cannot fit three there (3 x 168 + 12 > 512), so it reads
+   2 x 2 on a desktop, 2 x 2 from ~430px, and one per row on a small phone --
+   never clipped at any of them. A BASIS rather than a percentage, so a fifth
+   option adds a row instead of silently re-clipping. */
+.cm-seg-wrap{flex-wrap:wrap;gap:6px;border:none;border-radius:0;overflow:visible}
+.cm-seg-wrap .cm-seg-btn{flex:1 1 10.5rem;border:1px solid var(--border,#3a3226);border-radius:8px}
+.cm-seg-wrap .cm-seg-btn+.cm-seg-btn{border-left:1px solid var(--border,#3a3226)}
 .cm-pills{display:grid;grid-template-columns:1fr 1fr;gap:7px}
 .cm-pill{border:1px solid var(--border,#3a3226);border-radius:8px;padding:8px 11px;background:var(--surface2,#241d16);cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:1px;min-width:0;transition:border-color .12s,background .12s}
 .cm-pill:hover{border-color:var(--text-dim,#b8ab90)}

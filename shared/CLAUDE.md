@@ -73,6 +73,39 @@ Cross-game frontend kits. **Dependency direction is one-way: `games/* → shared
 
 ---
 
+## `CmSeg` CLIPS RATHER THAN SCROLLS, so a long picker needs `wrap` (2026-08-18)
+
+The segmented control is `overflow: hidden` with `white-space: nowrap` buttons.
+That is right for the 2–3 option pickers every create modal uses, and it fails
+TOTALLY the moment the options outgrow one phone row: an option past the fold is
+not off-screen, it is **unreachable** — nothing to scroll, nothing to swipe, no
+affordance that anything is missing. The only symptom is a game that appears not
+to exist.
+
+**Measured when Dissonance became the offline hub's FOURTH game**: 485px of
+buttons in a 330px box at a 390px viewport, the last option ending **154px past
+the right edge**. Every width below ~545px was affected.
+
+* **`<CmSeg wrap>` is the opt-in**, and it becomes separate CHIPS rather than a
+  segmented bar: the shared 1px dividers (`border-left` between siblings) cannot
+  survive wrapping — the first chip of each later row would wear one against the
+  container edge, and nothing would divide the rows at all. Chips read as a group
+  without dividers, so the container drops its border and each button takes one.
+* **The basis is measured, not picked.** `flex: 1 1 10.5rem` — the hub's panel
+  caps at 560px, so the row's widest client box is ~512px, and any smaller basis
+  packs THREE chips with the fourth stranded alone on row 2 at every desktop
+  width. 10.5rem is the smallest that cannot fit three there, giving 2×2 on a
+  desktop, 2×2 from ~430px and one per row on a small phone.
+* **A BASIS rather than a percentage**, so a fifth option adds a row instead of
+  silently re-clipping.
+* **Gated by rectangles, not by the DOM** (`screens.mjs`, `offlineDissonance` at
+  a 390px viewport): every button must sit inside its container's box and the
+  container must not overflow. A DOM-only check passed the entire time the bug
+  was live. Verified non-vacuous by dropping `wrap` — it fails and NAMES the
+  options that fall outside.
+
+---
+
 ## URL routing (`router.js` — LIVE on prod)
 
 Every mode has a path (`/spender /coc /duel /werewolf /books /puzzles`) and every room a sub-path

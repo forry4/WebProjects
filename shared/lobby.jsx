@@ -401,10 +401,21 @@ export function CmRow({ label, children }) {
 	);
 }
 
-// Segmented control: options = [{ value, label, title? }].
-export function CmSeg({ options, value, onChange }) {
+/* Segmented control: options = [{ value, label, title? }].
+ *
+ * `wrap` turns the single clipped row into a WRAPPING chip group, and it exists
+ * because the base control cannot hold four long labels on a phone: the buttons
+ * are `white-space: nowrap` inside an `overflow: hidden` box, so anything past
+ * the fold is not merely off-screen, it is UNREACHABLE — no scroll, no
+ * affordance, nothing to swipe. Measured on the offline hub's game picker at a
+ * 390px viewport: 485px of buttons in a 330px box, with the fourth option
+ * ending 154px past the right edge. Opt in wherever the option count or the
+ * label length can grow; the default stays exactly as it was for the five
+ * modals that fit.
+ */
+export function CmSeg({ options, value, onChange, wrap = false }) {
 	return (
-		<div className="cm-seg">
+		<div className={`cm-seg${wrap ? " cm-seg-wrap" : ""}`}>
 			{options.map((o) => (
 				<button key={String(o.value)} type="button" title={o.title}
 					className={`cm-seg-btn${value === o.value ? " sel" : ""}`}

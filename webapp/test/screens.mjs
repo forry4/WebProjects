@@ -3908,6 +3908,38 @@ try {
 
 		await page.goto(`http://localhost:${PORT}/offline`, { waitUntil: "load" });
 		await page.waitForSelector(".offline-panel", { timeout: 20_000 }).catch(() => {});
+
+		// EVERY GAME IN THE PICKER IS REACHABLE ON A PHONE, and this is measured
+		// rather than assumed because the failure is silent and total: the base
+		// `.cm-seg` is `overflow:hidden` with `nowrap` buttons, so an option past
+		// the fold cannot be scrolled to, swiped to, or seen. Adding Dissonance
+		// made four options 485px wide in a 330px box at 390px — the last one
+		// ending 154px past the edge — and the only symptom was a game that did
+		// not appear to exist. A DOM check would have passed the whole time, so
+		// this compares rectangles.
+		await page.setViewportSize({ width: 390, height: 844 });
+		await sleep(200);
+		const picker = await page.evaluate(() => {
+			const seg = document.querySelector(".cm-seg");
+			if (!seg) return { missing: true };
+			const box = seg.getBoundingClientRect();
+			return {
+				clipped: seg.scrollWidth > seg.clientWidth + 1,
+				outside: [...seg.querySelectorAll(".cm-seg-btn")]
+					.filter((b) => {
+						const r = b.getBoundingClientRect();
+						return r.right > box.right + 1 || r.left < box.left - 1;
+					})
+					.map((b) => b.textContent.trim()),
+				n: seg.querySelectorAll(".cm-seg-btn").length,
+			};
+		});
+		check("every offline game is reachable in the picker on a phone",
+			!picker.missing && !picker.clipped && picker.outside?.length === 0 && picker.n >= 4,
+			JSON.stringify(picker));
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await sleep(200);
+
 		await page.locator(".cm-seg button", { hasText: "Dissonance" }).click({ timeout: 10_000 }).catch(() => {});
 		await page.locator(".cm-create", { hasText: "Start Game" }).click({ timeout: 10_000 }).catch(() => {});
 		const mounted = await page.waitForSelector(".dis", { timeout: 25_000 })

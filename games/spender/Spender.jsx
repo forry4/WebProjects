@@ -2911,7 +2911,9 @@ export default function SpenderApp() {
 				<div className="browser offline-hub">
 					<div className="offline-panel">
 						<CmRow label="Game">
-							<CmSeg value={offlineGameSel} onChange={setOfflineGameSel} options={[
+							{/* WRAP: four games no longer fit one phone row, and the base
+							    control clips rather than scrolls -- see cm-seg-wrap. */}
+							<CmSeg wrap value={offlineGameSel} onChange={setOfflineGameSel} options={[
 								{ value: "spender", label: "Spender" },
 								{ value: "coc", label: "Castles of Crimson" },
 								{ value: "duel", label: "Spender Duel" },
