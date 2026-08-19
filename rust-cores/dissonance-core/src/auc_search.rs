@@ -226,6 +226,28 @@ pub enum OppModel {
     /// Softmax over the opponent's replies; `temp` is in per-world payoff
     /// points. See the type note above.
     Soft(f64),
+    /// THE OPPONENT CHOOSES FROM THEIR OWN INFORMATION SET (2026-08-19).
+    ///
+    /// Every other variant here answers the question "how sharply does the
+    /// opponent punish the hand we actually hold" -- `Minimax` perfectly,
+    /// `Soft` with a temperature, `Myopic` with a price list. All three share
+    /// the flaw: the sample they choose against contains OUR REAL CARDS in
+    /// every world, so the modelled opponent is clairvoyant no matter how the
+    /// aggregation is softened.
+    ///
+    /// This replaces the aggregation with a second SEARCH. For each sampled
+    /// world, the opponent runs the same tree over deals drawn from THEIR
+    /// information set in that world (`bid::belief_into`, `View::belief_of`) --
+    /// they know the hand that world dealt them, and ours is resampled. Their
+    /// choice therefore varies with their own holding and is blind to ours,
+    /// which no temperature can express: a softmax gives one mixed reply shared
+    /// across every world, where this gives a DIFFERENT reply per world,
+    /// correlated with the hand that would be making it.
+    ///
+    /// Falls back to `Minimax` when the belief sample is absent, so a payload
+    /// that asks for it without paying for the extra solves gets today's tree
+    /// rather than a silently degraded one.
+    Belief,
 }
 
 /// The classic-shape auction's denomination restriction (2026-08-13).
@@ -725,6 +747,18 @@ impl<'a> Search<'a> {
             self.memo.insert(s, best.clone());
             return best;
         }
+        // THE OPPONENT FROM THEIR OWN CHAIR. Not an aggregation at all: their
+        // reply is chosen per world by a search over deals sampled from THEIR
+        // information set, so it tracks their hand and not ours.
+        if !maxing && self.rules.opp == OppModel::Belief && !self.worlds.belief.is_empty() {
+            let kids: Vec<Vec<f64>> =
+                moves.iter().map(|&b| self.step_value_v(&s, b)).collect();
+            if !kids.is_empty() {
+                let out = self.belief_pick(&s, &moves, &kids);
+                self.memo.insert(s, out.clone());
+                return out;
+            }
+        }
         // SOFT MIN: the opponent is good, not clairvoyant. Every child is
         // evaluated either way (the exact min needs them all), so the only
         // difference is the aggregation — see `OppModel::Soft`.
@@ -752,6 +786,44 @@ impl<'a> Search<'a> {
         };
         self.memo.insert(s, best.clone());
         best
+    }
+
+    /// One reply per world, chosen by the opponent's OWN search.
+    ///
+    /// For world `w` the opponent's belief sample is `worlds.belief[w]`, and
+    /// the tree run over it has `me` set to THEM -- so its max nodes are their
+    /// choices and its `settled` is signed for them, exactly as ours is for us.
+    /// Whatever it likes best is then scored on world `w` from our side.
+    ///
+    /// THE INNER SEARCH IS PLAIN MINIMAX, which is where the regress is cut:
+    /// its own `belief` is empty (`belief_into` never fills it), so the
+    /// opponent models US as clairvoyant. One level, deliberately -- the
+    /// second is worth far less than the first and costs another factor of `m`.
+    ///
+    /// A world whose belief entry is missing or empty falls back to the value
+    /// the hard min would have taken there, so a partial sample degrades one
+    /// world at a time rather than poisoning the node.
+    fn belief_pick(&self, s: &AucState, moves: &[Bid], kids: &[Vec<f64>]) -> Vec<f64> {
+        let k = kids[0].len();
+        let mut out = vec![0.0; k];
+        let mut inner = self.rules.clone();
+        inner.opp = OppModel::Minimax;
+        for w in 0..k {
+            let pick = self.worlds.belief.get(w)
+                .filter(|b| !b.worlds.is_empty())
+                .and_then(|b| {
+                    let mut sub = Search::new(1 - self.me, inner.clone(), self.terms, b);
+                    let (bid, _) = sub.best(*s);
+                    moves.iter().position(|&m| m == bid)
+                });
+            out[w] = match pick {
+                Some(i) => kids[i][w],
+                // No belief for this world: take the hard min there, which is
+                // what the tier did before and is never worse than a guess.
+                None => kids.iter().map(|v| v[w]).fold(f64::INFINITY, f64::min),
+            };
+        }
+        out
     }
 
     /// The soft opponent (`OppModel::Soft`), per world and cross-fitted.
@@ -912,7 +984,7 @@ mod tests {
         let mut rng = crate::rng::Rng::new(20260819);
         // A cheap symmetric noise: +-1 per world, so each option's true mean is
         // exactly 0 and the sample mean is the only thing that moves.
-        let mut draw = |rng: &mut crate::rng::Rng, k: usize| -> Vec<f64> {
+        let draw = |rng: &mut crate::rng::Rng, k: usize| -> Vec<f64> {
             (0..k).map(|_| if rng.below(2) == 0 { -1.0 } else { 1.0 }).collect()
         };
         const K: usize = 8;
@@ -1069,6 +1141,94 @@ mod tests {
     /// One world where WE can guarantee 3 and THEY can guarantee 10: the
     /// opponent has a crushing reply to anything, which is exactly the
     /// position the soft model exists for.
+    /// A world with a given strength for each side, for building belief samples.
+    fn world(pts: i32, opp: i32) -> World {
+        let mut w = World::default();
+        for d in 0..w.pts.len() {
+            w.pts[d] = pts;
+            w.opp_pts[d] = opp;
+        }
+        w
+    }
+
+    fn solved(ws: Vec<World>, belief: Vec<Solved>) -> Solved {
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f,
+                 covered_opp: 0x7f, exact: false, belief, worlds: ws }
+    }
+
+    /// THE ONE THING A TEMPERATURE CANNOT DO: a reply that VARIES with the
+    /// opponent's own hand.
+    ///
+    /// `OppModel::Soft` gives one mixed reply shared across every sampled
+    /// world, because it softens an aggregation. `Belief` gives a DIFFERENT
+    /// reply per world, chosen by a search over deals drawn from the
+    /// opponent's information set in that world -- so it correlates with the
+    /// hand that would be making it, which is the whole mechanism.
+    ///
+    /// Built so the two worlds pull opposite ways: in world 0 the opponent is
+    /// strong (their belief says they can take a lot) and should contest; in
+    /// world 1 they are weak and should concede. A clairvoyant min takes one
+    /// action for both.
+    #[test]
+    fn a_belief_opponent_replies_to_its_own_hand_and_not_to_ours() {
+        let t = classic_terms();
+        // Their belief in each world: strong first, hopeless second.
+        //
+        // NOTE THE CONVENTION, which is easy to invert and was, once, here: a
+        // belief entry is solved from THEIR chair, so its `pts` is what THEY
+        // can guarantee and its `opp_pts` is what we can. `belief_into` crosses
+        // the masks and the declarer for exactly this reason, and the inner
+        // search's `me` is them, so the two agree by construction.
+        let w = solved(vec![world(2, 9), world(2, 9)],
+                       vec![solved(vec![world(11, 0)], Vec::new()),
+                            solved(vec![world(-6, 0)], Vec::new())]);
+        let mut r = classic_rules();
+        r.opp = OppModel::Belief;
+        let s = AucState { level: 3, denom: 1, declarer: 0, to_act: 1,
+                           ..AucState::opening(1) };
+
+        let mut belief = Search::new(0, r.clone(), &t, &w);
+        let per = belief.value(s);
+        assert_eq!(per.len(), 2);
+
+        // What a clairvoyant min does on the same position: ONE action, so its
+        // two worlds are the two halves of a single child.
+        let mut hard = Search::new(0, classic_rules(), &t, &w);
+        let flat = hard.value(s);
+
+        assert_ne!(per, flat,
+                   "the belief opponent picked exactly what the clairvoyant one \
+                    did in both worlds -- the arm is inert");
+        // ...and the two worlds really took DIFFERENT actions, which is the
+        // property `Soft` cannot produce at any temperature: had they taken the
+        // same one, both entries would match some single child's entries.
+        let mut moves = Vec::new();
+        legal_bids(&s, &r, &mut moves);
+        let kids: Vec<Vec<f64>> = moves.iter()
+            .map(|&b| Search::new(0, classic_rules(), &t, &w).step_value_v(&s, b))
+            .collect();
+        assert!(!kids.iter().any(|kid| kid[0] == per[0] && kid[1] == per[1]),
+                "both worlds took the same reply -- no single child should match \
+                 a genuinely per-world choice");
+    }
+
+    /// AND IT MUST NOT HALF-RUN. `Belief` without a belief sample is plain
+    /// minimax, not a silently degraded tier -- the failure mode this package
+    /// has paid for three times (a room saying Hard while playing the server
+    /// bot). The wire pays for the sample explicitly (`belief_worlds`), so a
+    /// payload that asks for the model without funding it gets today's tree.
+    #[test]
+    fn a_belief_opponent_with_no_sample_is_exactly_the_old_tree() {
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        assert!(w.belief.is_empty());
+        let mut r = classic_rules();
+        r.opp = OppModel::Belief;
+        assert_eq!(Search::new(0, r, &t, &w).value_of(AucState::opening(0)),
+                   Search::new(0, classic_rules(), &t, &w)
+                       .value_of(AucState::opening(0)));
+    }
+
     #[test]
     fn a_soft_opponent_reduces_to_minimax_at_zero_and_never_shades_below_it() {
         let t = classic_terms();
@@ -1249,7 +1409,7 @@ mod tests {
             w.pts[d] = pts;
             w.opp_pts[d] = opp;
         }
-        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f, exact: false,
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f, exact: false, belief: Vec::new(),
                  worlds: vec![w] }
     }
 

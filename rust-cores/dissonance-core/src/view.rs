@@ -151,6 +151,53 @@ impl View {
         }
     }
 
+    /// THE OPPONENT'S OWN INFORMATION SET, given one determinized world.
+    ///
+    /// WHY THIS EXISTS — the last structural flaw in the auction tree, and the
+    /// only one five separate re-weightings could not touch. The tree searches
+    /// from OUR information set: our hand is the same in every sampled world
+    /// and only theirs varies, so at a MIN node the modelled opponent picks the
+    /// reply that punishes OUR EXACT HOLDING. A real opponent must reply into
+    /// their own uncertainty and cannot. `OppModel::Soft` prices the
+    /// CONSEQUENCE of that (they miss the punishing reply when it is barely
+    /// better); this builds the CAUSE, which is a strictly stronger thing: an
+    /// opponent whose choice varies with THEIR OWN hand and is blind to ours.
+    ///
+    /// `opp_hand` is what the opponent holds in the world being modelled. From
+    /// there their information set is exactly this view with the two seats
+    /// swapped: they know that hand and the same public cards, and everything
+    /// we could hold joins the pool they must resample.
+    ///
+    /// **AUCTION ONLY**, and the assert says so rather than the docstring
+    /// alone. `Knowledge` is inference drawn from cards already played — voids
+    /// and must-head ceilings — and it is inference about the seat that is
+    /// about to become the OBSERVER here, which this construction has no way to
+    /// carry across. Before trick 1 there is none to carry, which is the only
+    /// reason the swap is exact.
+    pub fn belief_of(&self, opp_hand: Mask) -> View {
+        debug_assert!(self.history.is_empty(),
+                      "belief_of is exact only before a card is played");
+        let opp = 1 - self.me;
+        let mine = self.s.hand[self.me];
+        let mut v = View {
+            me: opp,
+            s: self.s,
+            opp_hand_n: mine.count_ones(),
+            // Everything they cannot place: what WE hold, plus whatever of the
+            // original pool their own hand did not account for -- the covered
+            // pile bottoms and the unidentified out-cards, which are hidden
+            // from both seats alike.
+            pool: (self.pool & !opp_hand) | mine,
+            kn: Default::default(),
+            history: Vec::new(),
+            first_leader: self.first_leader,
+            n_out_hidden: self.n_out_hidden,
+        };
+        v.s.hand[opp] = opp_hand;
+        v.s.hand[self.me] = 0;
+        v
+    }
+
     /// Legal moves for the observer — unaffected by the hidden cards, since
     /// everything the observer can play is something the observer can see.
     pub fn legal(&self, out: &mut [u8; 16]) -> usize {

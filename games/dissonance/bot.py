@@ -846,6 +846,32 @@ def jump_weight() -> float:
     return float(os.environ.get("DIS_JUMP_W", "1") or 1)
 
 
+def belief_worlds() -> int:
+    """How many deals the modelled opponent gets to choose against, drawn from
+    THEIR OWN information set. 0 (the shipped default) means no belief sample is
+    drawn and the tree is exactly the one that has always run.
+
+    THE LAST STRUCTURAL FLAW IN THE AUCTION TREE, and the only one five separate
+    re-weightings could not touch. The tree searches from OUR information set:
+    our hand is identical in every sampled world and only theirs varies, so at a
+    MIN node the modelled opponent picks the reply that punishes OUR EXACT
+    HOLDING. A real opponent must reply into their own uncertainty and cannot.
+
+    `EXPERT_OPP_TEMP` prices the CONSEQUENCE of that -- they miss the punishing
+    reply when it is barely better -- and measured slightly worse (5.70 against
+    Hard's 5.45). This builds the CAUSE, and it is qualitatively different in
+    one way no temperature can reach: a softmax gives ONE mixed reply shared
+    across every world, where a belief search gives a DIFFERENT reply per world,
+    correlated with the hand that would be making it.
+
+    IT COSTS SOLVES, which is why it is a number and not a flag: `k x m` extra
+    determinizations, each solved in every denomination on both sides. At the
+    shipped k = 8, m = 4 is about 4x the auction's solve budget -- an offline
+    arm first, a serving question only if it earns one.
+    """
+    return int(os.environ.get("DIS_BELIEF_W", "0") or 0)
+
+
 def search_rules_overrides() -> dict:
     """Every EXPERIMENT knob the auction search's `rules` block takes, in ONE
     place -- and that is the whole point of the function.

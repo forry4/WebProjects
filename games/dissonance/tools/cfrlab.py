@@ -485,6 +485,13 @@ def bid(g, seat):
                 s["rules"]["opp_temp"] = OPP_TEMP
             # ...and every other arm from the SAME place the server reads them.
             s["rules"].update(B.search_rules_overrides())
+            # The opponent's own uncertainty. `belief_worlds` buys the solves;
+            # `opp_model` says what to do with them. Both or neither -- the
+            # tree falls back to plain minimax on a payload that asks without
+            # paying, which is what keeps an arm from half-running.
+            if B.belief_worlds() > 0:
+                auc["belief_worlds"] = B.belief_worlds()
+                s["rules"]["opp_model"] = "belief"
             auc["search"] = s
         auc["swap"] = B.swap_policy_terms()
     r = rpc({"view": E.view_for(g, seat), "auction": auc})
@@ -689,7 +696,8 @@ def expert_round(seed):
     row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat,
            # STAMPED, because a checkpoint outlives the shell that made it and
            # two tiers' rows are indistinguishable once pooled.
-           "temp": OPP_TEMP, "xfit": B.cross_fit(), "jw": B.jump_weight()}
+           "temp": OPP_TEMP, "xfit": B.cross_fit(), "jw": B.jump_weight(),
+           "bw": B.belief_worlds()}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1841,7 +1849,7 @@ def corpus_tiers(rows):
     seen = defaultdict(int)
     for r in rows:
         seen[(r.get("temp", 0.0), float(r.get("xfit") or 0),
-              float(r.get("jw", 1) or 1))] += 1
+              float(r.get("jw", 1) or 1), int(r.get("bw", 0) or 0))] += 1
     return dict(seen)
 
 
@@ -1850,8 +1858,8 @@ def _tier_line(rows):
     return "  corpus tier: " + ", ".join(
         f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}"
         f"{f' +xfit {x:g}' if x else ''}{f' +jumpw {j:g}' if j != 1 else ''}"
-        f": {v} rounds"
-        for (k, x, j), v in sorted(t.items())) + (
+        f"{f' +belief {w}' if w else ''}: {v} rounds"
+        for (k, x, j, w), v in sorted(t.items())) + (
         "   *** MIXED TIERS -- this pools two different bidders ***"
         if len(t) > 1 else "")
 

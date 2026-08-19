@@ -287,6 +287,19 @@ pub struct Solved {
     /// is the failure shape this crate keeps paying for.
     pub exact: bool,
     pub worlds: Vec<World>,
+    /// ONE BELIEF SAMPLE PER WORLD -- what the OPPONENT would be looking at, if
+    /// the world at that index were the truth. Empty unless the tier asked for
+    /// it (`OppModel::Belief`); see `belief_into`.
+    ///
+    /// A `Solved` inside a `Solved` is deliberate rather than a second type:
+    /// the inner one is the same object doing the same job from the other
+    /// seat's chair, and the tree reads it through the same `settled` it uses
+    /// for ours. Nesting is ONE LEVEL by construction -- `belief_into` never
+    /// fills the inner entries' own `belief`, so the modelled opponent models
+    /// us as clairvoyant. That is the standard cut, and it is the honest place
+    /// to make it: the regress is infinite and the second level is worth far
+    /// less than the first.
+    pub belief: Vec<Solved>,
 }
 
 /// Solve one determinized deal in every denomination in `todo`.
@@ -441,6 +454,47 @@ pub fn leaf(o: &Option_, exact: bool, pts: i32, duck: bool, threat: i32) -> i32 
     } else {
         o.payoff(pts, duck)
     }
+}
+
+/// Solve, for every sampled world, the deals the OPPONENT would be choosing
+/// against if that world were the truth.
+///
+/// THE COST, stated plainly: `k x m` extra determinizations, each solved in
+/// every denomination the tree can price, on both sides. At the shipped k = 8
+/// with m = 4 that is 4x the auction's solve budget -- which is why this is an
+/// offline arm first and a serving question afterwards. Everything else about
+/// the tier is unchanged, and `m = 0` does no work at all.
+///
+/// The belief sample is drawn from `View::belief_of`, i.e. from the OPPONENT's
+/// information set in that world: they know the hand the world dealt them and
+/// the same public cards, and OUR hand joins the pool they resample. So their
+/// choice can depend on their own cards -- which is legitimate, they hold them
+/// -- and cannot depend on ours, which is the whole point.
+pub fn belief_into(v: &View, dd: &mut Dd, rng: &mut Rng, m: usize,
+                   wanted: u8, wanted_opp: u8, declarer: usize,
+                   cache: &mut Solved, swap: Option<&SwapPolicy>) {
+    if m == 0 || cache.deals.is_empty() {
+        return;
+    }
+    let opp = 1 - v.me;
+    let mut out = Vec::with_capacity(cache.deals.len());
+    for deal in &cache.deals {
+        let bv = v.belief_of(deal.hand[opp]);
+        let mut e = Solved::default();
+        // The SAME denominations, both sides: the opponent is choosing among
+        // the same settlements we are, and pricing their choice on a narrower
+        // set would decide it for them.
+        //
+        // NOTE the sides swap with the seat: `belief_of` makes THEM the
+        // observer, so what `solve_into` calls "mine" is theirs. The masks are
+        // therefore crossed on the way in, and `Search` reads them back through
+        // an inner search whose `me` is also them -- so the two agree by
+        // construction rather than by a sign convention anyone has to remember.
+        solve_into(&bv, dd, rng, m, wanted_opp, wanted, 1 - declarer, &mut e,
+                   swap, false);
+        out.push(e);
+    }
+    cache.belief = out;
 }
 
 /// THE CHEAP HALF: price each option against already-solved deals.
@@ -809,6 +863,58 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE BELIEF SAMPLE IS THE OPPONENT'S INFORMATION SET, and every clause of
+    /// that is checked separately, because a sample that is merely PLAUSIBLE is
+    /// the exact failure this crate keeps paying for: it would return legal,
+    /// reasonable-looking numbers for a model of the wrong game.
+    #[test]
+    fn the_belief_sample_is_the_opponents_information_set() {
+        let mut dd = Dd::new(16);
+        let mut seen_ours = std::collections::HashSet::new();
+        let mut checked = 0usize;
+        for seed in 0..4u64 {
+            let g = crate::game::Game::deal(&mut Rng::new(seed + 7700), 2, 0);
+            let v = View::of(&g, 0);
+            let mut rng = Rng::new(seed + 31);
+            let mut cache = Solved::default();
+            solve_into(&v, &mut dd, &mut rng, 3, 0b00001, 0b00001, 0, &mut cache,
+                       None, false);
+            belief_into(&v, &mut dd, &mut rng, 2, 0b00001, 0b00001, 0, &mut cache,
+                        None);
+            assert_eq!(cache.belief.len(), cache.deals.len(),
+                       "one belief entry per sampled world");
+            for (w, b) in cache.deals.iter().zip(&cache.belief) {
+                assert_eq!(b.deals.len(), 2, "m sub-worlds per world");
+                // ONE LEVEL OF NESTING. The regress has to stop somewhere and
+                // this is where; an inner entry that had its own belief would
+                // be a second level nobody paid for.
+                assert!(b.belief.is_empty(), "the nesting is one level deep");
+                for sub in &b.deals {
+                    // (1) They know the hand that world dealt THEM...
+                    assert_eq!(sub.hand[1], w.hand[1],
+                               "the opponent's own hand must be fixed across \
+                                their own belief -- they are holding it");
+                    // (2) ...and they do NOT know ours: it is resampled, and
+                    // must not simply come back as the hand we really hold.
+                    assert_eq!(sub.hand[0].count_ones(), w.hand[0].count_ones(),
+                               "our hand keeps its SIZE under their belief");
+                    seen_ours.insert(sub.hand[0]);
+                    // (3) The deal is still a legal one: no card in two places.
+                    assert_eq!(sub.hand[0] & sub.hand[1], 0, "a card in both hands");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= 20, "only {checked} belief deals built");
+        // NON-VACUITY, and it is the whole mechanism: if their belief always
+        // handed them our real hand back, this would be plain minimax wearing a
+        // different name -- which is precisely what `OppModel::Soft` could not
+        // escape and what this exists to.
+        assert!(seen_ours.len() > 4,
+                "the opponent's belief about our hand never varied ({} distinct \
+                 holdings over {checked} deals)", seen_ours.len());
+    }
 
     /// THE CLAIM THE EXACT LEAF RESTS ON, swept rather than argued.
     ///

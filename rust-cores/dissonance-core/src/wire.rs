@@ -660,6 +660,10 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
             // `opp_temp` is in per-world payoff points; absent or <= 0 is the
             // exact minimax, so a payload that names "soft" without a
             // temperature behaves as today rather than as something new.
+            // The opponent choosing from THEIR information set. Needs the
+            // belief sample below to have been paid for; without it the tree
+            // falls back to plain minimax rather than degrading silently.
+            Some("belief") => crate::auc_search::OppModel::Belief,
             Some("soft") => crate::auc_search::OppModel::Soft(
                 r.get("opp_temp").and_then(|x| x.as_f64()).unwrap_or(0.0)),
             Some(_) => return None,
@@ -856,9 +860,20 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
     // plausible-looking number, which is how every silent failure in this file
     // has looked.
     let exact = auc.get("exact_leaf").and_then(|x| x.as_bool()).unwrap_or(false);
+    // HOW MANY DEALS THE MODELLED OPPONENT GETS TO CHOOSE AGAINST, from their
+    // own information set. 0 (the default, and any payload that predates this)
+    // means no belief sample is drawn and `OppModel::Belief` falls back to
+    // plain minimax -- so the arm cannot half-run.
+    //
+    // Part of the CACHE IDENTITY, like `swap` and `exact_leaf`: an entry
+    // without the belief solves answers a different question, and a tier that
+    // found one would price the opponent as clairvoyant while reporting itself
+    // as the belief tier.
+    let belief_k = auc.get("belief_worlds").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
     let key = crate::bid::hand_key(&view, declarer, k.max(1))
         ^ swap.as_ref().map_or(0, |sp| sp.key())
-        ^ if exact { 0xE4AC_71EA } else { 0 };
+        ^ if exact { 0xE4AC_71EA } else { 0 }
+        ^ (belief_k as u64) << 48;
     // A different hand starts a new entry; the same hand extends the one it
     // has, and asking about nothing new does no work at all.
     let (mut entry, _) = cache.take(key);
@@ -866,6 +881,14 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
     if !cached {
         crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer,
                                &mut entry, swap.as_ref(), exact);
+    }
+    // The belief sample rides on the same entry and is drawn once per hand, so
+    // it is paid for on the first decision of a hand exactly as the worlds are.
+    // Only the AUCTION asks for it: `belief_of` is exact only before a card is
+    // played, and the settled-contract phases have no opponent reply to model.
+    if belief_k > 0 && entry.belief.is_empty() && expert.is_some() {
+        crate::bid::belief_into(&view, dd, rng, belief_k, wanted, wanted_opp,
+                                declarer, &mut entry, swap.as_ref());
     }
     let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp,
                                    entry.exact);

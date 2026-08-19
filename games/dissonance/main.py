@@ -922,6 +922,17 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                     # `tools/cfrlab.py` read them -- see the docstring there for
                     # why that is a function rather than two literals.
                     search["rules"].update(bot.search_rules_overrides())
+                    # THE OPPONENT'S OWN UNCERTAINTY -- an experiment, 0 as
+                    # shipped. It rides beside the options rather than inside
+                    # `rules` because it buys SOLVES rather than describing the
+                    # auction: `belief_worlds` is how many deals the modelled
+                    # opponent chooses against, and `rules.opp_model` is what
+                    # the tree then does with them. Asking for the model without
+                    # funding the sample falls back to plain minimax.
+                    if bot.belief_worlds() > 0:
+                        room["_ai_search"]["auction"]["belief_worlds"] = \
+                            bot.belief_worlds()
+                        search["rules"]["opp_model"] = "belief"
                     room["_ai_search"]["auction"]["search"] = search
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()
