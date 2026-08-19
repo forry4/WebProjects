@@ -64,6 +64,7 @@ from collections import defaultdict
 
 from games.dissonance import bot as B
 from games.dissonance import engine as E
+from games.dissonance import main as M
 
 BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve")
 CKPT = os.environ.get("CFR_CKPT")
@@ -411,8 +412,31 @@ def actions(level, holds):
     return acts + list(range(level + 1, MAXL + 1))
 
 
+#: THE OPPONENT MODEL, and it has to be set HERE or the harness quietly
+#: measures the wrong tier.
+#:
+#: `engine.auction_search_payload` ships the auction's shape and its prices;
+#: `opp_model` is added by `main.py`, and ONLY for the expert tier. So a payload
+#: built straight from the engine reads `None` on the Rust side, which
+#: `auc_rules_from_json` maps to `OppModel::Minimax` -- the HARD tree. Every
+#: exploitability figure this campaign produced before 2026-08-19 (9.06, 5.87,
+#: 5.45) was therefore measured against Hard's auction, not Expert's, while the
+#: docstring below said "shipped Expert".
+#:
+#: It now defaults to what the server ships and is stamped onto every recorded
+#: row, so a corpus can never be read as the wrong tier again. `CFR_OPP_TEMP=0`
+#: is exactly the old behaviour -- and is a legitimate arm, since Expert's only
+#: difference from Hard is this number.
+OPP_TEMP = float(os.environ.get("CFR_OPP_TEMP", str(M.EXPERT_OPP_TEMP)))
+
+
 def bid(g, seat):
-    """One SHIPPED Expert auction decision, through the served path."""
+    """One SHIPPED auction decision, through the served path.
+
+    The tier is `OPP_TEMP`: 0 is Hard's plain minimax, `main.EXPERT_OPP_TEMP` is
+    Expert. Everything else about the two tiers is identical, which is why one
+    float is the whole switch.
+    """
     opts = E.auction_payoff_options(g)
     if not opts:
         return None
@@ -424,6 +448,9 @@ def bid(g, seat):
     if g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:
+            if OPP_TEMP > 0:
+                s["rules"]["opp_model"] = "soft"
+                s["rules"]["opp_temp"] = OPP_TEMP
             auc["search"] = s
         auc["swap"] = B.swap_policy_terms()
     r = rpc({"view": E.view_for(g, seat), "auction": auc})
@@ -601,7 +628,10 @@ def expert_round(seed):
     }})
     terms = E._terms_for("classic", 0, level, jump=a.get("jump", level))
     v = E.payoff(terms, r.get("pts", 0), not bool(r.get("duck")))
-    row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat}
+    row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat,
+           # STAMPED, because a checkpoint outlives the shell that made it and
+           # two tiers' rows are indistinguishable once pooled.
+           "temp": OPP_TEMP}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1723,6 +1753,29 @@ def curve_main(spec, iters, seed=1234):
           + " | EV " + " ".join(f"{v:+.0f}" for v in ev), flush=True)
 
 
+def corpus_tiers(rows):
+    """Which opponent-model temperatures a corpus was recorded at.
+
+    Rows written before the temperature was stamped are MINIMAX (0.0), which is
+    what the harness silently ran -- see `OPP_TEMP`. Pooling two tiers would
+    average two different bidders into one policy and report the exploitability
+    of neither, so every reader prints this.
+    """
+    seen = defaultdict(int)
+    for r in rows:
+        seen[r.get("temp", 0.0)] += 1
+    return dict(seen)
+
+
+def _tier_line(rows):
+    t = corpus_tiers(rows)
+    return "  corpus tier: " + ", ".join(
+        f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}: {v} rounds"
+        for k, v in sorted(t.items())) + (
+        "   *** MIXED TIERS -- this pools two different bidders ***"
+        if len(t) > 1 else "")
+
+
 def load_expert():
     base = os.environ.get("CFR_EXPERT_CKPT")
     rows, seen = [], set()
@@ -1773,6 +1826,7 @@ def attrib_main(iters):
     ndec = sum(len(r["dec"]) for r in rows)
     print(f"  fitted Expert over {len(rows)} rounds / {ndec} decisions, "
           f"{len(pol.t)} infosets")
+    print(_tier_line(rows))
 
     hits = []
     for seat in (0, 1):
@@ -1842,6 +1896,7 @@ def br_main(iters):
     pol = fit_policy(rows)
     print(f"  fitted Expert over {len(rows)} rounds / {nd} decisions, "
           f"{len(pol.t)} infosets")
+    print(_tier_line(rows))
     print(f"  same-level overtakes (the HOLD action): {flat} = "
           f"{100*flat/nd:.1f}% of decisions")
 
