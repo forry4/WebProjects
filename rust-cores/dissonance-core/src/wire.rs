@@ -638,6 +638,10 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
         },
         // OPTIONAL, default false: every older server forced the opening bid.
         opener_may_pass: r.get("opener_may_pass").and_then(|x| x.as_bool()).unwrap_or(false),
+        // CROSS-FIT the tree's selections (`Search::combine`). OPTIONAL and
+        // default false, and false is the tree that has always run -- so an
+        // older server, and the arm's own control, reproduce today exactly.
+        xfit: r.get("xfit").and_then(|x| x.as_bool()).unwrap_or(false),
         top_denom: n("top_denom")? as u8,
         ladder: r.get("ladder").and_then(|x| x.as_array())
             .map(|a| a.iter().filter_map(|x| x.as_u64()).map(|x| x as u16).collect())

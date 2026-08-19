@@ -131,6 +131,11 @@ pub struct AucRules {
     pub top_denom: u8,
     /// Skat's bid ladder, ascending. Empty in classic.
     pub ladder: Vec<u16>,
+    /// CROSS-FIT the tree's own selections -- see `Search::combine`. False as
+    /// shipped and on any payload that predates it, and false is bit-identical
+    /// to the tree that has always run, so an A/B against it is unconfounded
+    /// (the `opp_temp` discipline, one rung further in).
+    pub xfit: bool,
     /// How the opponent's turns are modelled -- see `OppModel`.
     pub opp: OppModel,
 }
@@ -408,7 +413,7 @@ pub struct Search<'a> {
     rules: AucRules,
     terms: &'a TermsTable,
     worlds: &'a Solved,
-    memo: HashMap<AucState, f64>,
+    memo: HashMap<AucState, Vec<f64>>,
     pub nodes: u64,
 }
 
@@ -429,19 +434,24 @@ impl<'a> Search<'a> {
     /// A denomination nobody solved is left at 0 rather than read out of a
     /// default `World`, where it would price as a flat 0 points in every deal —
     /// a plausible-looking number that would outrank genuinely bad contracts.
-    pub fn settled(&self, s: &AucState) -> f64 {
+    ///
+    /// PER WORLD, because the selection de-biasing above it needs to hold one
+    /// action's value out of the sample it was chosen on. `settled` sums this
+    /// in the same world order the old scalar version accumulated in, so the
+    /// un-de-biased path is bit-identical rather than merely equivalent.
+    pub fn settled_v(&self, s: &AucState) -> Vec<f64> {
+        let mut out = vec![0.0; self.k()];
         if s.declarer < 0 {
-            return 0.0; // nothing was ever bid
+            return out; // nothing was ever bid
         }
         let rows = match self.terms.get(settling_bid(s, self.rules.mode).key()) {
             Some(r) if !r.is_empty() => r,
-            _ => return 0.0,
+            _ => return out,
         };
         let decl = s.declarer as usize;
         let mine = decl == self.me;
         let mask = if mine { self.worlds.covered } else { self.worlds.covered_opp };
-        let mut total = 0.0;
-        for w in &self.worlds.worlds {
+        for (wi, w) in self.worlds.worlds.iter().enumerate() {
             // The DECLARER picks the game, so the best row wins — for them.
             let mut best: Option<i32> = None;
             for o in rows {
@@ -468,10 +478,24 @@ impl<'a> Search<'a> {
                 best = Some(best.map_or(v, |b: i32| b.max(v)));
             }
             if let Some(v) = best {
-                total += if mine { v as f64 } else { -v as f64 };
+                out[wi] = if mine { v as f64 } else { -v as f64 };
             }
         }
-        total
+        out
+    }
+
+    /// The settled value summed over the worlds -- the number every caller
+    /// outside the tree wants, and the one the tests are written against.
+    pub fn settled(&self, s: &AucState) -> f64 {
+        self.settled_v(s).iter().sum()
+    }
+
+    /// How many worlds the entry holds. Every per-world vector in this tree is
+    /// exactly this long, so a child's `j`th entry is the same deal as a
+    /// parent's -- which is what makes holding one out meaningful at all.
+    #[inline]
+    fn k(&self) -> usize {
+        self.worlds.worlds.len()
     }
 
     /// A terms row adjusted for how the settling bid arrived: the jump bonus
@@ -486,12 +510,90 @@ impl<'a> Search<'a> {
         o
     }
 
-    fn step_value(&mut self, s: &AucState, b: Bid) -> f64 {
+    fn step_value_v(&mut self, s: &AucState, b: Bid) -> Vec<f64> {
         match step(s, &self.rules, b) {
-            Step::Settled(t) => self.settled(&t),
-            Step::Redeal => 0.0,
+            Step::Settled(t) => self.settled_v(&t),
+            Step::Redeal => vec![0.0; self.k()],
             Step::Node(n) => self.value(n),
         }
+    }
+
+    fn step_value(&mut self, s: &AucState, b: Bid) -> f64 {
+        self.step_value_v(s, b).iter().sum()
+    }
+
+    /// CHOOSE ON THE OTHER WORLDS, SCORE ON THE HELD-OUT ONE (2026-08-19).
+    ///
+    /// THE DEFECT. `min` and `max` over noisy estimates are biased -- the
+    /// winner is partly whichever estimate's noise favoured it, so a min reads
+    /// LOW and a max reads HIGH. This crate already records the consequence
+    /// ("the optimiser's curse compounds with depth... Expert takes max/min
+    /// repeatedly down the tree"), and what it had not recorded is that the
+    /// bias is therefore DEPTH-DEPENDENT and the auction's two branch kinds
+    /// have different depths: PASSING settles immediately, while RAISING buys
+    /// one more opponent `min` before anything settles. So every raise is
+    /// shaded down against every pass, at every strength -- which is exactly
+    /// the defect measured against the abstraction's equilibrium, where both
+    /// tiers concede level 4 on 31-67% of decisions and the equilibrium
+    /// concedes it on 0-5%.
+    ///
+    /// It is not a leaf-accuracy problem (an exact leaf was built and measured:
+    /// no change) and not a marginal-shape problem (the opening bias: no
+    /// change). It is the selection itself.
+    ///
+    /// THE FIX is the standard one for a selection bias, and it costs no
+    /// solves: pick the action using every world EXCEPT `j`, then take that
+    /// action's value ON `j`. The choice is then independent of the sample it
+    /// is scored against, so the node's value is an unbiased estimate of a
+    /// good action instead of a biased estimate of the best one. Averaging
+    /// over every held-out `j` (leave-one-out rather than a single split) uses
+    /// the whole sample for both jobs and keeps the selection nearly as sharp
+    /// as the full-sample one.
+    ///
+    /// It is applied at BOTH kinds of node deliberately. Correcting only the
+    /// opponent's would be a directional thumb on the scale dressed as a
+    /// principle -- our own max carries the identical bias with the opposite
+    /// sign, and a de-biasing that only ever helps is not one.
+    ///
+    /// OFF unless `rules.xfit`, and off it takes the same argmax over the same
+    /// world-major sums the tree always did, so the control arm is bit-
+    /// identical rather than merely equivalent.
+    fn combine(&self, kids: &[Vec<f64>], maxing: bool) -> Vec<f64> {
+        if kids.is_empty() {
+            return Vec::new();
+        }
+        // THE VECTORS' OWN LENGTH, not `self.k()`: they are the sample being
+        // held out, and reading the count from somewhere else is how a guard
+        // ends up disabling the thing it guards.
+        let k = kids[0].len();
+        let totals: Vec<f64> = kids.iter().map(|v| v.iter().sum()).collect();
+        let better = |a: f64, b: f64| if maxing { a > b } else { a < b };
+        if !self.rules.xfit || k < 2 || kids.len() < 2 {
+            let mut pick = 0usize;
+            for i in 1..kids.len() {
+                if better(totals[i], totals[pick]) {
+                    pick = i;
+                }
+            }
+            return kids[pick].clone();
+        }
+        let mut out = vec![0.0; k];
+        for j in 0..k {
+            // The leave-one-out total. Subtracting is exact enough here and
+            // avoids an O(k x a x k) re-sum; the quantity being compared is a
+            // sum of payoffs, not a cancellation of near-equal terms.
+            let mut pick = 0usize;
+            let mut best = totals[0] - kids[0][j];
+            for i in 1..kids.len() {
+                let v = totals[i] - kids[i][j];
+                if better(v, best) {
+                    pick = i;
+                    best = v;
+                }
+            }
+            out[j] = kids[pick][j];
+        }
+        out
     }
 
     /// What bid `b` is worth TO THE OPPONENT, priced the way the Hard tier
@@ -551,10 +653,11 @@ impl<'a> Search<'a> {
         }
     }
 
-    /// Minimax value of `s` to `me`.
-    pub fn value(&mut self, s: AucState) -> f64 {
-        if let Some(&v) = self.memo.get(&s) {
-            return v;
+    /// Minimax value of `s` to `me`, PER WORLD -- see `combine` for why the
+    /// tree carries a vector rather than a scalar.
+    pub fn value(&mut self, s: AucState) -> Vec<f64> {
+        if let Some(v) = self.memo.get(&s) {
+            return v.clone();
         }
         self.nodes += 1;
         let maxing = s.to_act as usize == self.me;
@@ -572,10 +675,10 @@ impl<'a> Search<'a> {
                 }
             }
             let best = match pick {
-                Some((b, _)) => self.step_value(&s, b),
-                None => self.settled(&s),
+                Some((b, _)) => self.step_value_v(&s, b),
+                None => self.settled_v(&s),
             };
-            self.memo.insert(s, best);
+            self.memo.insert(s, best.clone());
             return best;
         }
         // SOFT MIN: the opponent is good, not clairvoyant. Every child is
@@ -584,49 +687,92 @@ impl<'a> Search<'a> {
         if !maxing {
             if let OppModel::Soft(temp) = self.rules.opp {
                 if temp > 0.0 {
-                    let k = self.worlds.worlds.len().max(1) as f64;
-                    let vals: Vec<f64> = moves.iter().map(|&b| self.step_value(&s, b)).collect();
-                    if !vals.is_empty() {
-                        // Their preference is DESCENDING in our value; shift by
-                        // the max exponent before exponentiating or a wide
-                        // spread overflows to inf/NaN and the node returns
-                        // garbage that propagates up the whole tree.
-                        let ex: Vec<f64> = vals.iter().map(|v| -(v / k) / temp).collect();
-                        let hi = ex.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                        let w: Vec<f64> = ex.iter().map(|e| (e - hi).exp()).collect();
-                        let z: f64 = w.iter().sum();
-                        let out = if z > 0.0 && z.is_finite() {
-                            w.iter().zip(&vals).map(|(wi, v)| wi * v).sum::<f64>() / z
-                        } else {
-                            // Degenerate weights (every term underflowed) mean
-                            // one option dominates by a mile: that is the exact
-                            // min, which is the right answer anyway.
-                            vals.iter().cloned().fold(f64::INFINITY, f64::min)
-                        };
-                        self.memo.insert(s, out);
+                    let kids: Vec<Vec<f64>> =
+                        moves.iter().map(|&b| self.step_value_v(&s, b)).collect();
+                    if !kids.is_empty() {
+                        let out = self.soft(&kids, temp);
+                        self.memo.insert(s, out.clone());
                         return out;
                     }
                 }
             }
         }
-        let mut best = if maxing { f64::NEG_INFINITY } else { f64::INFINITY };
-        for b in moves {
-            let v = self.step_value(&s, b);
-            if maxing {
-                if v > best {
-                    best = v
-                }
-            } else if v < best {
-                best = v
-            }
-        }
-        if !best.is_finite() {
-            // No legal action at all: treat the auction as settled where it
-            // stands rather than propagating an infinity into an average.
-            best = self.settled(&s);
-        }
-        self.memo.insert(s, best);
+        let kids: Vec<Vec<f64>> =
+            moves.iter().map(|&b| self.step_value_v(&s, b)).collect();
+        // No legal action at all: treat the auction as settled where it stands
+        // rather than propagating an infinity into an average.
+        let best = if kids.is_empty() {
+            self.settled_v(&s)
+        } else {
+            self.combine(&kids, maxing)
+        };
+        self.memo.insert(s, best.clone());
         best
+    }
+
+    /// The soft opponent (`OppModel::Soft`), per world and cross-fitted.
+    ///
+    /// The weights are a softmin over the SUMS -- the opponent commits to one
+    /// reply across the whole sample, which is what keeps this less fused than
+    /// a per-world choice would be -- and under `xfit` the weights for world
+    /// `j` are formed from every world except `j`, exactly as `combine` picks
+    /// its action. So the two aggregations are de-biased the same way and a
+    /// tier is never half-corrected.
+    fn soft(&self, kids: &[Vec<f64>], temp: f64) -> Vec<f64> {
+        let k = kids.first().map_or(0, |v| v.len());
+        let totals: Vec<f64> = kids.iter().map(|v| v.iter().sum()).collect();
+        // Their preference is DESCENDING in our value; shift by the max
+        // exponent before exponentiating or a wide spread overflows to
+        // inf/NaN and the node returns garbage that propagates up the tree.
+        let mix = |ex: Vec<f64>, at: &dyn Fn(usize) -> f64| -> Option<f64> {
+            let hi = ex.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let w: Vec<f64> = ex.iter().map(|e| (e - hi).exp()).collect();
+            let z: f64 = w.iter().sum();
+            if z > 0.0 && z.is_finite() {
+                Some(w.iter().enumerate().map(|(i, wi)| wi * at(i)).sum::<f64>() / z)
+            } else {
+                None
+            }
+        };
+        if !self.rules.xfit || k < 2 || kids.len() < 2 {
+            let n = k.max(1) as f64;
+            let ex: Vec<f64> = totals.iter().map(|v| -(v / n) / temp).collect();
+            let out = match mix(ex, &|i| totals[i]) {
+                Some(v) => v,
+                // Degenerate weights (every term underflowed) mean one option
+                // dominates by a mile: that is the exact min, which is the
+                // right answer anyway.
+                None => totals.iter().cloned().fold(f64::INFINITY, f64::min),
+            };
+            // The scalar is spread back over the worlds so the node still
+            // returns a vector; only its SUM is ever read above.
+            return vec![out / k.max(1) as f64; k.max(1)];
+        }
+        let n = (k - 1) as f64;
+        let mut out = vec![0.0; k];
+        for j in 0..k {
+            let ex: Vec<f64> = totals.iter().enumerate()
+                .map(|(i, v)| -((v - kids[i][j]) / n) / temp).collect();
+            out[j] = match mix(ex, &|i| kids[i][j]) {
+                Some(v) => v,
+                None => {
+                    let mut pick = 0usize;
+                    for i in 1..kids.len() {
+                        if totals[i] - kids[i][j] < totals[pick] - kids[pick][j] {
+                            pick = i;
+                        }
+                    }
+                    kids[pick][j]
+                }
+            };
+        }
+        out
+    }
+
+    /// The node's value summed over the worlds -- what every caller outside the
+    /// tree means by "the value", and what the pooling protocol adds up.
+    pub fn value_of(&mut self, s: AucState) -> f64 {
+        self.value(s).iter().sum()
     }
 
     /// The minimax value of each of `bids` from `s`, in the caller's order.
@@ -668,15 +814,115 @@ mod tests {
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 4,
+                   opener_may_pass: false, top_denom: 4, xfit: false,
                    ladder: Vec::new(), opp: OppModel::Minimax }
     }
 
     fn skat_rules(ladder: Vec<u16>) -> AucRules {
         AucRules { mode: AucMode::Skat, min_level: 1, max_level: 12, max_raise: 2,
                    jump_set_bonus: 0, denom_rule: DenomRule::Used,
-                   opener_may_pass: false, top_denom: 6,
+                   opener_may_pass: false, top_denom: 6, xfit: false,
                    ladder, opp: OppModel::Minimax }
+    }
+
+    /// THE CURSE IS A POPULATION BIAS, so it has to be SIMULATED, not asserted
+    /// on one world set.
+    ///
+    /// Over any FIXED set of worlds the hard min is the correct answer -- the
+    /// opponent really does want the option with the lowest total on those
+    /// worlds. The bias only exists relative to the distribution the worlds are
+    /// a SAMPLE from: `E[min_a mean_w v(a,w)] <= min_a E[v(a)]`, because the
+    /// winner is partly whichever option's sampling noise happened to favour
+    /// it. That is why a single hand-built example proves nothing here and this
+    /// test draws many samples instead.
+    ///
+    /// Setup: two options of EQUAL true value (0), differing only by per-world
+    /// noise. The truth a node should report is 0. The hard min reports well
+    /// below it; cross-fitting -- choose on the other worlds, score on the
+    /// held-out one -- reports close to it.
+    #[test]
+    fn cross_fitting_removes_the_selection_bias_a_hard_min_carries() {
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        let plain = Search::new(0, classic_rules(), &t, &w);
+        let mut fit = classic_rules();
+        fit.xfit = true;
+        let xf = Search::new(0, fit, &t, &w);
+
+        let mut rng = crate::rng::Rng::new(20260819);
+        // A cheap symmetric noise: +-1 per world, so each option's true mean is
+        // exactly 0 and the sample mean is the only thing that moves.
+        let mut draw = |rng: &mut crate::rng::Rng, k: usize| -> Vec<f64> {
+            (0..k).map(|_| if rng.below(2) == 0 { -1.0 } else { 1.0 }).collect()
+        };
+        const K: usize = 8;
+        const TRIALS: usize = 4000;
+        let (mut hard, mut cross) = (0.0f64, 0.0f64);
+        for _ in 0..TRIALS {
+            let kids: Vec<Vec<f64>> =
+                (0..4).map(|_| draw(&mut rng, K)).collect();
+            hard += plain.combine(&kids, false).iter().sum::<f64>() / K as f64;
+            cross += xf.combine(&kids, false).iter().sum::<f64>() / K as f64;
+        }
+        let (hard, cross) = (hard / TRIALS as f64, cross / TRIALS as f64);
+        eprintln!("min node over {TRIALS} samples: hard {hard:+.3}, cross-fit {cross:+.3}");
+        // The truth is 0. Both numbers are estimates of it.
+        assert!(hard < -0.3, "the hard min is not showing the bias: {hard:+.3}");
+        assert!(cross.abs() < hard.abs() / 2.0,
+                "cross-fitting did not halve the bias: hard {hard:+.3}, cross {cross:+.3}");
+        // ...and the correction has a SIGN: a min reads low, so de-biasing it
+        // reads higher. The opposite would mean the fix is making the tree more
+        // pessimistic, which is the defect it exists to remove.
+        assert!(cross > hard, "cross-fitting must lift a min, not lower it");
+
+        // A MAX node carries the identical bias with the opposite sign, and is
+        // corrected the same way -- asserted because correcting only the
+        // opponent's node would be a thumb on the scale dressed as a principle.
+        let mut rng = crate::rng::Rng::new(20260819);
+        let (mut hard, mut cross) = (0.0f64, 0.0f64);
+        for _ in 0..TRIALS {
+            let kids: Vec<Vec<f64>> =
+                (0..4).map(|_| draw(&mut rng, K)).collect();
+            hard += plain.combine(&kids, true).iter().sum::<f64>() / K as f64;
+            cross += xf.combine(&kids, true).iter().sum::<f64>() / K as f64;
+        }
+        let (hard, cross) = (hard / TRIALS as f64, cross / TRIALS as f64);
+        eprintln!("max node over {TRIALS} samples: hard {hard:+.3}, cross-fit {cross:+.3}");
+        assert!(hard > 0.3, "the hard max is not showing the bias: {hard:+.3}");
+        assert!(cross < hard, "cross-fitting must lower a max, not lift it");
+        assert!(cross.abs() < hard.abs() / 2.0);
+    }
+
+    /// OFF IS THE TREE THAT HAS ALWAYS RUN, and on really does something.
+    ///
+    /// The first half is what makes an A/B against this unconfounded -- the
+    /// `opp_temp` discipline, which this crate adopted after an arm that
+    /// silently ran two changes wide. The second is non-vacuity: a flag that
+    /// changes no answer would measure as a clean null forever.
+    #[test]
+    fn cross_fitting_is_off_by_default_and_changes_something_when_on() {
+        let t = classic_terms();
+        let w = one_world(3, 10);
+        assert!(!classic_rules().xfit, "shipped default must be off");
+        let plain = Search::new(0, classic_rules(), &t, &w)
+            .value_of(AucState::opening(0));
+        let mut fit = classic_rules();
+        fit.xfit = true;
+        let single = Search::new(0, fit.clone(), &t, &w).value_of(AucState::opening(0));
+        // ONE world cannot hold anything out, so the flag is inert there -- and
+        // it must be inert rather than divide by zero.
+        assert_eq!(single, plain,
+                   "with a single world there is nothing to hold out");
+
+        // With a real sample it must move. `combine` is where it lives, so the
+        // demonstration above is the mechanism; this pins that the tree is
+        // actually wired to it.
+        let s = Search::new(0, fit, &t, &w);
+        let kids = vec![vec![3.0, -9.0], vec![-1.0, -1.0]];
+        assert_ne!(s.combine(&kids, false).iter().sum::<f64>(),
+                   Search::new(0, classic_rules(), &t, &w)
+                       .combine(&kids, false).iter().sum::<f64>(),
+                   "the tree is not reading the flag");
     }
 
     #[test]
@@ -708,10 +954,10 @@ mod tests {
     fn a_soft_opponent_reduces_to_minimax_at_zero_and_never_shades_below_it() {
         let t = classic_terms();
         let w = one_world(3, 10);
-        let exact = Search::new(0, classic_rules(), &t, &w).value(AucState::opening(0));
+        let exact = Search::new(0, classic_rules(), &t, &w).value_of(AucState::opening(0));
         let mut zero = classic_rules();
         zero.opp = OppModel::Soft(0.0);
-        assert_eq!(Search::new(0, zero, &t, &w).value(AucState::opening(0)), exact,
+        assert_eq!(Search::new(0, zero, &t, &w).value_of(AucState::opening(0)), exact,
                    "temp 0 must BE the old minimax — an A/B that moves here is confounded");
         // Warmer opponents miss the punishing reply more often, so our lines
         // are worth at least what the clairvoyant model said, monotonically.
@@ -719,7 +965,7 @@ mod tests {
         for temp in [1.0, 4.0, 16.0] {
             let mut r = classic_rules();
             r.opp = OppModel::Soft(temp);
-            let v = Search::new(0, r, &t, &w).value(AucState::opening(0));
+            let v = Search::new(0, r, &t, &w).value_of(AucState::opening(0));
             assert!(v.is_finite(), "temp {temp} produced {v}");
             assert!(v >= prev - 1e-9,
                     "temp {temp}: {v} shaded below the clairvoyant {prev}");
@@ -737,11 +983,11 @@ mod tests {
         let w = one_world(3, 10);
         let mut r = classic_rules();
         r.opp = OppModel::Soft(0.5);
-        let soft = Search::new(0, r, &t, &w).value(AucState::opening(0));
-        let exact = Search::new(0, classic_rules(), &t, &w).value(AucState::opening(0));
+        let soft = Search::new(0, r, &t, &w).value_of(AucState::opening(0));
+        let exact = Search::new(0, classic_rules(), &t, &w).value_of(AucState::opening(0));
         let mut hot = classic_rules();
         hot.opp = OppModel::Soft(64.0);
-        let random = Search::new(0, hot, &t, &w).value(AucState::opening(0));
+        let random = Search::new(0, hot, &t, &w).value_of(AucState::opening(0));
         assert!((soft - exact).abs() < (random - exact).abs(),
                 "cold {soft} should sit nearer the exact {exact} than hot {random}");
     }

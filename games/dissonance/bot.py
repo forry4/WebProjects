@@ -784,6 +784,57 @@ def act(g: dict, seat: int, rng=None):
     return (None, None)
 
 
+def cross_fit() -> bool:
+    """Should the auction tree CROSS-FIT its own selections? OFF unless
+    `DIS_XFIT` is set, so shipped behaviour is bit-identical.
+
+    THE DEFECT. `min` and `max` over noisy estimates are biased -- the winner is
+    partly whichever estimate's noise favoured it, so a min reads LOW and a max
+    reads HIGH. The tree takes one such aggregation per ply, so the bias is
+    DEPTH-DEPENDENT, and the auction's two branch kinds have different depths:
+    PASSING settles immediately, while RAISING buys one more opponent `min`
+    before anything settles. Every raise is therefore shaded down against every
+    pass, at every strength.
+
+    That is exactly what the abstraction's equilibrium says is wrong with the
+    shipped bidder: it concedes level 4 on 31-67% of decisions where the
+    equilibrium concedes on 0-5%, and the attribution repeats one sentence --
+    wants `bid 5` or `bid 6`, does `pass`. It is not leaf accuracy (an exact
+    leaf was built and measured: no change), not the opening's marginal shape
+    (the opening bias: no change), and not the denomination forever-ban
+    (`cfrlab banned`: 44% against 44%). It is the selection itself.
+
+    THE FIX costs no solves: choose the action using every sampled world EXCEPT
+    one, then score it on the one held out, and average over which is held out.
+    See `auc_search::Search::combine`.
+    """
+    return bool(os.environ.get("DIS_XFIT"))
+
+
+def search_rules_overrides() -> dict:
+    """Every EXPERIMENT knob the auction search's `rules` block takes, in ONE
+    place -- and that is the whole point of the function.
+
+    `engine.auction_search_payload` is pure and knows nothing about arms; the
+    flags are the caller's. But there are two callers -- `main.py` and
+    `tools/cfrlab.py` -- and a harness that rebuilds a payload the server
+    assembles somewhere else silently ships the DEFAULT for whatever it forgot.
+    That has now happened three times in this package (the `expertto` suffix
+    collision, `dblsweep`'s live margin, and cfrlab omitting `opp_model` and so
+    measuring Hard's auction for the entire CFR campaign while its docstring
+    said Expert). Both callers `update()` from here.
+
+    `opp_model` is deliberately NOT here: it is a TIER, not an arm, and the two
+    callers choose it differently on purpose -- the server from the room's
+    difficulty, the lab from `CFR_OPP_TEMP`. It is stamped on every recorded
+    row instead, which is the guard that fits its shape.
+    """
+    out = {}
+    if cross_fit():
+        out["xfit"] = True
+    return out
+
+
 def exact_leaf() -> bool:
     """Should the auction search price its leaves EXACTLY? OFF unless
     `DIS_EXACT_LEAF` is set, so shipped behaviour is byte-identical.

@@ -451,6 +451,8 @@ def bid(g, seat):
             if OPP_TEMP > 0:
                 s["rules"]["opp_model"] = "soft"
                 s["rules"]["opp_temp"] = OPP_TEMP
+            # ...and every other arm from the SAME place the server reads them.
+            s["rules"].update(B.search_rules_overrides())
             auc["search"] = s
         auc["swap"] = B.swap_policy_terms()
     r = rpc({"view": E.view_for(g, seat), "auction": auc})
@@ -655,7 +657,7 @@ def expert_round(seed):
     row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat,
            # STAMPED, because a checkpoint outlives the shell that made it and
            # two tiers' rows are indistinguishable once pooled.
-           "temp": OPP_TEMP}
+           "temp": OPP_TEMP, "xfit": bool(B.cross_fit())}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1788,15 +1790,16 @@ def corpus_tiers(rows):
     """
     seen = defaultdict(int)
     for r in rows:
-        seen[r.get("temp", 0.0)] += 1
+        seen[(r.get("temp", 0.0), bool(r.get("xfit")))] += 1
     return dict(seen)
 
 
 def _tier_line(rows):
     t = corpus_tiers(rows)
     return "  corpus tier: " + ", ".join(
-        f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}: {v} rounds"
-        for k, v in sorted(t.items())) + (
+        f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}"
+        f"{' +xfit' if x else ''}: {v} rounds"
+        for (k, x), v in sorted(t.items())) + (
         "   *** MIXED TIERS -- this pools two different bidders ***"
         if len(t) > 1 else "")
 

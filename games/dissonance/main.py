@@ -918,6 +918,10 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                     if tier == "expert":
                         search["rules"]["opp_model"] = "soft"
                         search["rules"]["opp_temp"] = EXPERT_OPP_TEMP
+                    # The experiment arms, from the one place both this and
+                    # `tools/cfrlab.py` read them -- see the docstring there for
+                    # why that is a function rather than two literals.
+                    search["rules"].update(bot.search_rules_overrides())
                     room["_ai_search"]["auction"]["search"] = search
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()
