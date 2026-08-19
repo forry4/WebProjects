@@ -4670,6 +4670,52 @@ double-dummy `pts` against what the shipped PIMC search actually achieves on the
 same deal and contract — and it has not been measured. Until it is, read every
 "the ladder is too coarse" statement here as an upper bound on the coarseness.
 
+**MEASURED 2026-08-19 — AND THE "NOT MEASURED" ABOVE WAS ALREADY STALE WHEN
+WRITTEN.** Two things, and the first is a documentation fault. `cfrlab playnoise`
+had measured this three sections up ("THE REAL LADDER IS 16% LOOSER"), reading
+sd **1.94** and a mean deviation of **+0.95** for the declarer at an imposed
+contract. This section asked for it as though nobody had. Both numbers stand;
+what follows is an INDEPENDENT second instrument, `dissonance-core/bin/sigma`,
+measuring a deliberately different quantity — symmetric points play with no
+imposed contract, both seats on the shipped `pimc:8`, every deal played in all
+five denominations and BOTH lead directions.
+
+| | double-dummy | real play |
+|---|---|---|
+| seat 0 points, sd | 2.053 | 2.447 |
+| **sigma** (real minus double-dummy) | — | **sd 1.586**, mean +0.013 ± 0.041 |
+| landed exactly on the solver's value | — | 28.4% |
+| per-rung cost in P(make), live range | 13.3 pts | 12.3 pts (**7.7% looser**) |
+
+**Sigma replicates**: 1.590 on a 240-deal single-lead run and 1.586 on this
+150-deal paired one. So does the looseness, 7.9% and 7.7%.
+
+**THE CONVOLUTION OVERSTATES THE LOOSENING BY ABOUT 2.4x, which is the point of
+having measured it.** Interpolating the table above to the measured sigma of
+1.59 predicts a per-rung cost of ~14.3 against 17.6 at sigma 0 — i.e. ~19%
+looser. Measured: **7.7%.** The model assumed the noise is additive, symmetric
+and independent of the position; it is none of those (`playnoise` already
+measured the two seats' outcomes at −0.658 correlated). So "read every 'too
+coarse' statement as an upper bound" was the right instruction and the bound is
+loose by a factor of roughly two.
+
+**AND THE OPENING LEAD IS WORTH A THIRD LESS THAN THE NUMBER THAT JUSTIFIED IT.**
+Solving and playing the same shuffle with each seat leading in turn, 750 pairs:
+
+| | paired swing |
+|---|---|
+| double-dummy | **+0.992 ± 0.031** pts |
+| real play | **+0.673 ± 0.072** pts |
+
+The double-dummy figure reproduces this file's own **+0.93** to inside its error
+bar, which is what validates the harness — and settles that the +0.93 is the
+PAIRED SWING rather than a one-sided edge over par, a factor of two this file
+never stated. Under real play it falls to +0.673, a drop of 0.319 ± 0.079 (4
+SE). **"The opening lead was measured at +0.93 pts, the strongest single lever
+on contract height" is a double-dummy number, and about a third of it is play
+the shipped tier does not find.** That bears on `declarer leads` and on the
+Null-defending asymmetry, both of which are argued from it.
+
 **What shipping a rate change would entail** (it is a scoring change, so it is
 not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
