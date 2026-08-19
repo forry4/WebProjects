@@ -5066,6 +5066,77 @@ level 4 climbs toward Expert's once it has to pay for its suits, the entire
 "Expert concedes too much" finding dissolves and four nulls are explained at
 once. **Nothing else should be spent on the auction bot until that is run.**
 
+### THE DEFECT, FOUND AT LAST: THE TREE DOES NOT CONDITION ITS CONCESSION ON THE JUMP (2026-08-19)
+
+**And the first thing this section has to do is retract a reading of mine that
+four treatments were built on.**
+
+**THE MISREADING.** `br`'s table reports the concession rate at ONE infoset per
+level — standing `L`, reached from `L-1`, no holds. Read there, the equilibrium
+concedes level 4 on 0-5% of decisions and both shipped tiers on 31-67%. I
+generalised that to "the equilibrium essentially never concedes level 4". **A
+reach-weighted playout of the same equilibrium concedes standing-4 on 69% of
+decisions.** The cell was real; it was not representative of the level, and the
+generalisation was mine, not the table's.
+
+**WHAT SURVIVES IS SHARPER AND IS THE ACTUAL DEFECT.** The equilibrium's
+concession is strongly conditioned on HOW THE STANDING BID GOT THERE — which is
+exactly what the jump bonus prices, since a contract climbed one rung carries
+`3 x 1` on a set and the same level OPENED carries `3 x 4`. `cfrlab jumpcond`,
+both sides on the same 2000-deal cache:
+
+| standing | EQUILIBRIUM | SHIPPED TREE |
+|---|---|---|
+| 3 | climb **7%** -> leap **16%** (**+9**) | 38% -> 39% (**+1**) |
+| 4 | climb **2%** -> leap **28%** (**+26**) | 52% -> 53% (**+1**) |
+| 5 | climb **13%** -> leap **71%** (**+58**) | 72% -> 75% (**+4**) |
+| 6 | climb 83% -> leap 92% (+9) | 93% -> 94% (+1) |
+
+**The equilibrium rotates on the jump axis; the tree is flat.** And the
+attribution agrees about where that costs: **44.4% of the one-step loss sits at
+jump 1**, at 1.78 loss per unit of reach against 0.94-1.06 everywhere else. The
+money is in cheaply-climbed contracts the tree hands over.
+
+**IT IS A CALIBRATION, NOT A BUG — checked rather than assumed.** The tree does
+read the field: holding the deal, the seat, the hand, the standing level and the
+option list fixed and editing ONLY `search.state.jump`, the option sums move by
+a median of 54 and the decision flips on **2 of 40** deals, in the right
+direction (a leap is conceded). So `step`'s `n.jump = level - s.level` and
+`Search::with_jump` are both correct and the term reaches the argmax; it is
+simply worth about a fifth of what the equilibrium acts as though it is worth.
+
+**AND THIS EXPLAINS ALL FOUR FAILED TREATMENTS AT ONCE.** The opening bias, the
+exact leaf, opponent softening and cross-fitting are every one of them a
+UNIFORM SHIFT — they move what the tree thinks of continuing, equally at every
+jump. The defect is a ROTATION about the jump axis: concede LESS on a cheap
+climb and MORE on a leap. A shift cannot produce a rotation at any dose, which
+is why cross-fitting moved the concession rate 81.7% -> 77.0% *uniformly* and
+made the bot monotonically worse — it removed concessions where conceding was
+right along with where it was wrong.
+
+**THE FOREVER-BAN IS NOT THE EXPLANATION EITHER, and that is now measured from
+the side that matters.** `cfrlab burn` models classic's per-player denomination
+ban inside the abstraction — a burn count per seat in the state and in the
+infoset, the contract indexed by it against the all-denomination cache, and a
+seat that has named all five reduced to passing. Solved twice on the same 600
+deals, same iterations, same RNG stream:
+
+| | ladder (no ban) | + forever-ban |
+|---|---|---|
+| bids / auction | 1.80 | 1.68 |
+| settled mean | 4.37 | 4.36 |
+| contracts made | 74.3% | 72.8% |
+| concedes standing-4 | **69%** | **72%** |
+| concedes standing-3 | 17% | 39% |
+
+So paying for its suits makes the equilibrium concede *slightly more*, and
+nothing like enough to close a gap that was never as wide as I read it. The
+earlier `cfrlab banned` result (the ban does not change what EXPERT does, 44%
+against 44%) now has its counterpart: it does not much change what the
+EQUILIBRIUM does either. **The abstraction's one liberty is priced and it is
+small.** Worth having as a permanent arm regardless, since every future
+comparison against this equilibrium inherits the question.
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but

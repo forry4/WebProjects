@@ -78,6 +78,22 @@ NBUCKET = 8
 #: them, so at most 4 can follow the bid that set the level.
 HOLDCAP = E.NOTRUMP
 HOLD = 0          # the abstract action; -1 is pass, >=1 is "raise to that level"
+#: MODEL THE DENOMINATION FOREVER-BAN (`CFR_BURN`). Off reproduces the
+#: abstraction this campaign has used throughout, exactly.
+#:
+#: THE ABSTRACTION'S ONE LIBERTY, and by 2026-08-19 the only surviving candidate
+#: for the whole "Expert concedes where the equilibrium does not" finding. The
+#: ladder has no denominations, so a level RAISE resets `holds` and hands the
+#: bidder its best suit back -- for ever, as often as it likes. Classic bans a
+#: suit that seat has already named, permanently and per player, so a real climb
+#: is made in progressively worse suits and a seat that has named all five can
+#: only pass.
+#:
+#: With `CFR_BURN` the state carries a BURN COUNT per seat -- how many bids that
+#: seat has made -- and the contract is indexed by it, so climbing costs what it
+#: costs. See `leaf` for how the index is formed and `actions` for the seat that
+#: runs out.
+BURN = bool(os.environ.get("CFR_BURN"))
 
 _P = None
 
@@ -289,7 +305,7 @@ def _tv(got, target):
     return tv + CAP_WEIGHT * max(0.0, over)
 
 
-def leaf(rec, level, prev, declarer, holds=0, dbl=False):
+def leaf(rec, level, prev, declarer, holds=0, dbl=False, burn=0):
     """What the settled contract pays, DECLARER-SIGNED.
 
     `payoff_terms`' own arithmetic on the shipped scoring. THE JUMP IS THE FINAL
@@ -378,7 +394,16 @@ def leaf(rec, level, prev, declarer, holds=0, dbl=False):
     # PRICE of an overtake while leaving its difficulty identical.
     pts, duck = rec["pts"][declarer], rec["duck"][declarer]
     if isinstance(pts, list):
-        i = min(holds, len(pts) - 1)
+        # WHICH SUIT THE DECLARER IS ACTUALLY IN, under two constraints that
+        # both push it down its own preference list:
+        #   `holds` -- a same-level overtake must OUTRANK the standing bid;
+        #   `burn`  -- it may never re-name a suit it has already used.
+        # The seat names the best suit satisfying both, so the index is the
+        # larger. An APPROXIMATION, and stated as one: the two constraints are
+        # over different orderings (rank vs this seat's own strength), so `max`
+        # is a lower bound on how far down the list it really lands -- it can
+        # understate the cost of climbing, never overstate it.
+        i = min(max(holds, burn if BURN else 0), len(pts) - 1)
         pts, duck = pts[i], duck[i]
     # REAL-PLAY LEAF. `pts` is the double-dummy guarantee, which assumes a
     # PERFECT DEFENDER; 794 measured rounds put real outcomes 0.95 points above
@@ -396,17 +421,24 @@ def leaf(rec, level, prev, declarer, holds=0, dbl=False):
     return E.payoff(terms, pts, not duck)
 
 
-def actions(level, holds):
+def actions(level, holds, burn=0):
     """Legal abstract actions from a state. `level == 0` is the forced opening.
 
     Pass concedes the standing bid; HOLD overtakes it at the same level in a
     higher-ranked denomination; anything else raises to that level. The opener
     can do neither of the first two (`OPENER_MAY_PASS` is off in classic, and
     there is nothing standing to overtake).
+
+    `burn` is how many denominations this seat has already named. Under
+    `CFR_BURN` a seat that has named all five CAN ONLY PASS -- a real state the
+    parity corpus covers deliberately ("a seat runs out of denominations"), and
+    one the ladder could not express at all.
     """
     if level == 0:
         return list(range(1, MAXL + 1))
     acts = [-1]
+    if BURN and burn >= E.NOTRUMP + 1:
+        return acts
     if holds < HOLDCAP:
         acts.append(HOLD)
     return acts + list(range(level + 1, MAXL + 1))
@@ -692,7 +724,7 @@ class CFR:
             return {a: pos[a] / tot for a in acts}
         return {a: 1.0 / len(acts) for a in acts}
 
-    def walk(self, rec, level, prev, holds, to_act, me, rng):
+    def walk(self, rec, level, prev, holds, to_act, me, rng, burn=(0, 0)):
         """External-sampling MCCFR. Returns the value to `me`.
 
         THE STATE IS THE WHOLE HISTORY, and that is what makes the exact best
@@ -701,23 +733,35 @@ class CFR:
         different auctions that reach it are interchangeable from here on.
         There is also no separate `holder` -- every non-passing action hands the
         turn over, so the standing bid always belongs to the seat NOT to act.
+
+        Under `CFR_BURN` the tuple grows by both seats' BURN COUNTS, and they
+        belong in the INFOSET as well as the state: which suits have been named
+        is public, both players watched it happen, and a bidder that could not
+        condition on its own spent suits would be modelling a game nobody plays.
         """
         holder = 1 - to_act if level else None
-        acts = actions(level, holds)
+        acts = actions(level, holds, burn[to_act])
         # `prev` is in the infoset because it prices the standing contract's
         # jump: conceding is worth different amounts at the same level depending
         # on how the ladder got there, and the whole auction is public.
-        key = (rec["b"][to_act], level, prev, holds)
+        key = (rec["b"][to_act], level, prev, holds) + (burn if BURN else ())
         sig = self.strategy(key, acts)
+        # The standing contract was bought by the holder's PREVIOUS bid, so the
+        # suit it is played in is the one they had spent before making it.
+        held = max(0, burn[holder] - 1) if holder is not None else 0
+        bid = tuple(b + (a == to_act) for a, b in enumerate(burn))
 
         def child(a):
             if a == -1:
                 if WITH_DOUBLE:
-                    return self.dbl_node(rec, level, prev, holds, to_act, me, rng)
-                return leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
+                    return self.dbl_node(rec, level, prev, holds, to_act, me, rng,
+                                         burn)
+                return leaf(rec, level, prev, holder, holds, burn=held) \
+                    * (1 if holder == me else -1)
             if a == HOLD:
-                return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng)
-            return self.walk(rec, a, level, 0, 1 - to_act, me, rng)
+                return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng,
+                                 bid)
+            return self.walk(rec, a, level, 0, 1 - to_act, me, rng, bid)
 
         if to_act != me:
             # SAMPLE the opponent, and accumulate their average strategy.
@@ -740,7 +784,7 @@ class CFR:
             self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
         return node
 
-    def dbl_node(self, rec, level, prev, holds, defender, me, rng):
+    def dbl_node(self, rec, level, prev, holds, defender, me, rng, burn=(0, 0)):
         """The DEFENDER's Double, priced as its own decision.
 
         Reached the moment somebody concedes: the passer is the defender, and
@@ -750,13 +794,15 @@ class CFR:
         scoring change forces a Double re-tune rather than merely permitting one.
         """
         decl = 1 - defender
-        key = ("D", rec["b"][defender], level, prev, holds)
+        held = max(0, burn[1 - defender] - 1)
+        key = ("D", rec["b"][defender], level, prev, holds) + (burn if BURN else ())
         acts = [0, 1]                       # 0 = decline, 1 = double
         sig = self.strategy(key, acts)
         sign = 1 if decl == me else -1
 
         def val(a):
-            return leaf(rec, level, prev, decl, holds, dbl=bool(a)) * sign
+            return leaf(rec, level, prev, decl, holds, dbl=bool(a),
+                        burn=held) * sign
 
         if defender != me:
             for a in acts:
@@ -975,8 +1021,12 @@ class Policy:
                     acc[(depth,) + kk][a] += p
             self.pool.update(acc)
 
-    def at(self, bucket, level, prev, holds, acts, w=1.0):
-        k = (bucket, level, prev, holds)
+    def at(self, bucket, level, prev, holds, acts, w=1.0, key_extra=()):
+        # `key_extra` carries whatever the arm has ADDED to the infoset -- the
+        # per-seat burn counts under `CFR_BURN`. It is appended rather than
+        # folded in so the backoff below keeps operating on the four axes it was
+        # written for, and so an arm that adds nothing is byte-identical.
+        k = (bucket, level, prev, holds) + tuple(key_extra)
         src = self.t.get(k)
         tier = 0
         if src is None and self.backoff:
@@ -1878,6 +1928,247 @@ def banned_main():
                   f"{b[0]:>11} {100*b[1]/b[0]:>6.0f}%")
 
 
+def jumpcond_main(iters=200_000, seed=1234):
+    """`cfrlab jumpcond` -- CONCESSION BY THE STANDING BID'S JUMP, equilibrium
+    against the shipped bot, on the same deals.
+
+    WHY THIS EXISTS, and it is a correction of my own reading. `br`'s table
+    reports the concession rate at ONE infoset per level: standing `L`, reached
+    from `L-1`, no holds. Read there, the equilibrium concedes level 4 on 0-5%
+    of decisions and both tiers on 31-67%, and that gap is what four separate
+    treatments were aimed at. A REACH-WEIGHTED playout of the same equilibrium
+    concedes standing-4 on **69%** of decisions -- so the cell was not
+    representative of the level, and "the equilibrium never concedes 4" was a
+    generalisation the table did not support.
+
+    What survives is sharper and is a real difference: the equilibrium's
+    concession is strongly conditioned on HOW THE STANDING BID GOT THERE. A
+    contract climbed one rung carries a jump bonus of `3 x 1`; the same level
+    OPENED carries `3 x 4`, which is a much fatter set to defend against -- so
+    the equilibrium contests a cheap climb and concedes a leap. Whether the
+    shipped tree conditions on that at all is what this measures.
+
+    Both sides on the SAME deals: the equilibrium is solved on `CFR_CKPT`, which
+    is the cache the Expert corpus was recorded against, so the two tables are
+    not separated by their sample.
+    """
+    global BURN
+    BURN = False
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    cfr = CFR(recs)
+    rng = random.Random(seed)
+    for i in range(iters):
+        rec = recs[rng.randrange(len(recs))]
+        cfr.t = i + 1
+        for me in (0, 1):
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+    eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in v.values())
+                      for a, x in v.items()}
+                  for k, v in cfr.S.items()
+                  if sum(max(y, 0.0) for y in v.values()) > 0}, backoff=False)
+    eq = _playout(recs, eqp, random.Random(seed + 7))
+
+    rows = [r for r in load_expert() if r.get("probe")]
+    if not rows:
+        raise SystemExit("no probe corpus -- run `cfrlab expert` with CFR_PROBES")
+    print(_tier_line(rows))
+    bot = defaultdict(lambda: [0, 0])
+    for r in rows:
+        for seat, level, prev, holds, act in r["probe"]:
+            t = bot[(level, level - prev)]
+            t[0] += 1
+            t[1] += 1 if act == -1 else 0
+
+    print(f"\n  CONCESSION RATE by the standing bid's JUMP "
+          f"({len(recs)} deals, equilibrium reach-weighted; "
+          f"bot over uniformly probed states)")
+    print(f"  {'standing':>9} {'jump':>5} | {'n':>7} {'EQUILIBRIUM':>12} | "
+          f"{'n':>6} {'SHIPPED TREE':>13}")
+    for lv in range(1, MAXL + 1):
+        for j in range(1, lv + 1):
+            a, b = eq["jump"].get((lv, j), [0, 0]), bot.get((lv, j), [0, 0])
+            if a[0] < 100 or b[0] < 40:
+                continue
+            print(f"  {lv:>9} {j:>5} | {a[0]:>7} {100*a[1]/a[0]:>11.0f}% | "
+                  f"{b[0]:>6} {100*b[1]/b[0]:>12.0f}%")
+    # THE SLOPE IS THE CLAIM, not any single cell: does conceding get MORE
+    # likely as the standing bid's leap gets bigger, and by how much?
+    print(f"\n  ...and the SLOPE, which is the whole question: within a level, "
+          f"how much more readily is a LEAP conceded than a one-rung climb?")
+    print(f"  {'standing':>9} | {'EQUILIBRIUM':>24} | {'SHIPPED TREE':>24}")
+    for lv in range(3, MAXL + 1):
+        cells = []
+        for src, lo in ((eq["jump"], 100), (bot, 40)):
+            one = src.get((lv, 1), [0, 0])
+            big = [0, 0]
+            for j in range(3, lv + 1):
+                t = src.get((lv, j), [0, 0])
+                big[0] += t[0]
+                big[1] += t[1]
+            if one[0] < lo or big[0] < lo:
+                cells.append(f"{'--':>24}")
+            else:
+                a, b = 100 * one[1] / one[0], 100 * big[1] / big[0]
+                cells.append(f"climb {a:>4.0f}%  leap {b:>4.0f}%  {b-a:>+5.0f}")
+        print(f"  {lv:>9} | {cells[0]} | {cells[1]}")
+
+
+def burn_main(iters=200_000, seed=1234):
+    """`cfrlab burn [ITERS]` -- DOES THE EQUILIBRIUM STILL REFUSE TO CONCEDE
+    ONCE IT HAS TO PAY FOR ITS SUITS?
+
+    THE QUESTION, and it is the last one standing. Every treatment aimed at the
+    measured divergence -- the opening bias, the exact leaf, opponent softening,
+    cross-fitting the tree -- came back null or monotonically worse. The
+    divergence itself is one number: this abstraction's equilibrium concedes a
+    standing level 4 on 0-5% of decisions from every bucket, where both shipped
+    tiers concede it on 31-67%.
+
+    But the abstraction has NO DENOMINATIONS. A level raise resets `holds`, so
+    the equilibrium may re-bid its best suit for ever; classic bans a suit that
+    seat has named, permanently and per player, so a real climb runs through
+    progressively worse suits and a seat that has named all five can only pass.
+    That freedom has been the standing caveat on this whole campaign, and it has
+    never been priced.
+
+    `cfrlab banned` tested the WRONG SIDE of it: it asked whether the ban
+    changes what EXPERT does (it does not -- 44% against 44%). What decides the
+    finding is whether the ban would change what the EQUILIBRIUM does, and only
+    an abstraction that HAS the ban can answer that.
+
+    So: solve the same deals twice, once with `CFR_BURN` off and once on, and
+    play both equilibria out. Everything else -- the cache, the leaf, the
+    iteration count, the RNG stream -- is identical, which is what makes the
+    difference attributable to the ban and nothing else.
+
+    Needs the ALL-DENOMINATION cache (`CFR_DCKPT`, built by `cfrlab dcache`):
+    with a single-denomination cache the burn count has no worse suit to point
+    at and the arm is silently inert.
+    """
+    global BURN
+    if not DCKPT or not os.path.exists(DCKPT):
+        raise SystemExit("`cfrlab burn` needs the all-denomination cache: "
+                         "CFR_DCKPT=... python -m ...cfrlab dcache 600")
+    recs = [json.loads(x) for x in open(DCKPT) if x.strip()]
+    bucketise(recs)
+    if not isinstance(recs[0]["pts"][0], list):
+        raise SystemExit("CFR_DCKPT is a single-denomination cache -- the burn "
+                         "count would have no worse suit to point at")
+    print(f"  {len(recs)} deals, all five denominations per seat, "
+          f"{iters} CFR+ iterations per arm")
+
+    out = {}
+    for arm in (False, True):
+        BURN = arm
+        cfr = CFR(recs)
+        rng = random.Random(seed)
+        for i in range(iters):
+            rec = recs[rng.randrange(len(recs))]
+            cfr.t = i + 1
+            for me in (0, 1):
+                cfr.walk(rec, 0, 0, 0, 0, me, rng)
+        eqp = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in v.values())
+                          for a, x in v.items()}
+                      for k, v in cfr.S.items()
+                      if sum(max(y, 0.0) for y in v.values()) > 0}, backoff=False)
+        out[arm] = _playout(recs, eqp, random.Random(seed + 7))
+    _burn_report(out)
+
+
+def _playout(recs, pol, rng, n=20000):
+    """Play the solved policy out and record what it DOES.
+
+    Read off a playout rather than off the policy table because the infoset
+    grows a burn count under the arm being tested -- so "the concession rate at
+    level 4" is no longer one cell to look up, and picking a burn context by
+    hand would be choosing the answer. A playout weights every context by how
+    often the equilibrium actually reaches it, which is the honest version of
+    the question.
+    """
+    st = {"open": defaultdict(lambda: defaultdict(int)),
+          "pass": defaultdict(lambda: [0, 0]),
+          "jump": defaultdict(lambda: [0, 0]),
+          "settle": defaultdict(int), "bids": 0, "made": 0, "n": n,
+          "exhaust": 0}
+    for _ in range(n):
+        rec = recs[rng.randrange(len(recs))]
+        level, prev, holds, to_act, holder = 0, 0, 0, 0, None
+        burn, bids = [0, 0], 0
+        while True:
+            a = actions(level, holds, burn[to_act])
+            if BURN and level and burn[to_act] >= E.NOTRUMP + 1:
+                st["exhaust"] += 1
+            s = pol.at(rec["b"][to_act], level, prev, holds, a,
+                       key_extra=tuple(burn) if BURN else ())                 or {x: 1 / len(a) for x in a}
+            r, acc, pick = rng.random(), 0.0, a[-1]
+            for x in a:
+                acc += s[x]
+                if r <= acc:
+                    pick = x
+                    break
+            if level == 0:
+                st["open"][rec["b"][to_act]][pick] += 1
+            else:
+                # THE CELL THE WHOLE CAMPAIGN TURNS ON: facing a standing bid at
+                # this level, how often does a seat hand it over? Recorded BY
+                # THE JUMP as well as by the level, because that turned out to
+                # be the axis that separates the equilibrium from the bot -- see
+                # `jumpcond_main`.
+                for t in (st["pass"][level], st["jump"][(level, level - prev)]):
+                    t[0] += 1
+                    t[1] += 1 if pick == -1 else 0
+            if pick == -1:
+                break
+            holder = to_act
+            burn[to_act] += 1
+            bids += 1
+            if pick == HOLD:
+                holds, to_act = holds + 1, 1 - to_act
+            else:
+                level, prev, holds, to_act = pick, level, 0, 1 - to_act
+        st["settle"][level] += 1
+        st["bids"] += bids
+        held = max(0, burn[holder] - 1) if holder is not None else 0
+        if leaf(rec, level, prev, holder, holds, burn=held) > 0:
+            st["made"] += 1
+    return st
+
+
+def _burn_report(out):
+    n = out[False]["n"]
+    print(f"\n  {'':>26}   {'ladder (no ban)':>15} {'+ forever-ban':>15}")
+    rows = [("bids / auction", lambda s: f"{s['bids']/s['n']:.2f}"),
+            ("settled mean", lambda s: f"{sum(k*v for k,v in s['settle'].items())/s['n']:.2f}"),
+            ("contracts made", lambda s: f"{100*s['made']/s['n']:.1f}%")]
+    for lab, f in rows:
+        print(f"  {lab:>26}   {f(out[False]):>15} {f(out[True]):>15}")
+    print(f"\n  CONCESSION RATE facing a standing bid -- the cell every "
+          f"treatment has aimed at:")
+    print(f"  {'standing':>10}   {'n':>7} {'no ban':>8}   {'n':>7} {'+ban':>8}")
+    for lv in sorted(set(out[False]["pass"]) | set(out[True]["pass"])):
+        a, b = out[False]["pass"].get(lv, [0, 0]), out[True]["pass"].get(lv, [0, 0])
+        if a[0] < 50 and b[0] < 50:
+            continue
+        pa = f"{100*a[1]/a[0]:.0f}%" if a[0] else "--"
+        pb = f"{100*b[1]/b[0]:.0f}%" if b[0] else "--"
+        print(f"  {lv:>10}   {a[0]:>7} {pa:>8}   {b[0]:>7} {pb:>8}")
+    print(f"\n  OPENING LEVEL by bucket (0 = weakest):")
+    print(f"  {'bucket':>8}   {'no ban':>8} {'+ban':>8}")
+    for b in range(NBUCKET):
+        cells = []
+        for arm in (False, True):
+            d = out[arm]["open"][b]
+            t = sum(d.values())
+            cells.append(f"{sum(k*v for k,v in d.items())/t:.2f}" if t else "--")
+        print(f"  {b:>8}   {cells[0]:>8} {cells[1]:>8}")
+    if out[True]["exhaust"]:
+        print(f"\n  a seat was out of denominations at "
+              f"{out[True]['exhaust']} decisions "
+              f"({100*out[True]['exhaust']/max(1,n):.1f}% of auctions) -- a real "
+              f"state the ladder cannot express at all")
+
+
 def _act_name(a):
     return "pass" if a == -1 else ("hold" if a == HOLD else f"bid {a}")
 
@@ -1947,6 +2238,25 @@ def attrib_main(iters):
     for k in sorted(by, key=lambda x: -by[x]):
         print(f"  {('open' if k == 0 else k):>9} {by[k]:>8.3f} "
               f"{100*by[k]/tot:>6.1f}% {reach[k]:>8.3f}")
+
+    # BY THE STANDING BID'S JUMP, which is the axis the equilibrium conditions
+    # on hard and the shipped tree barely does (`cfrlab jumpcond`: at level 4
+    # the equilibrium concedes 2% of one-rung climbs against 28% of leaps, the
+    # tree 52% against 53%). If the loss does not concentrate here, that
+    # difference is a curiosity rather than the defect -- which is the check
+    # four failed treatments were built without.
+    byj = defaultdict(float)
+    reachj = defaultdict(float)
+    for h in hits:
+        if h["level"]:
+            j = min(h["level"] - h["prev"], 4)
+            byj[j] += h["loss"]
+            reachj[j] += h["reach"]
+    print(f"\n  {'jump':>9} {'loss':>8} {'share':>7} {'reach':>8} {'loss/reach':>11}")
+    for k in sorted(byj):
+        lbl = f"{k}+" if k == 4 else str(k)
+        print(f"  {lbl:>9} {byj[k]:>8.3f} {100*byj[k]/tot:>6.1f}% "
+              f"{reachj[k]:>8.3f} {byj[k]/max(1e-9, reachj[k]):>11.2f}")
 
     # ...and the individual nodes, with what the policy DOES against what it
     # should. This is the actionable half: a node is only worth fixing if the
@@ -2126,6 +2436,11 @@ def main():
         return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
                      f"{'weakest':>7} {'strong':>7} {'discrim':>8} "
                      f"{'settled':>8} {'made':>8} | opening distribution %")
+    if len(sys.argv) > 1 and sys.argv[1] == "jumpcond":
+        return jumpcond_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
+    if len(sys.argv) > 1 and sys.argv[1] == "burn":
+        return burn_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000,
+                         int(sys.argv[3]) if len(sys.argv) > 3 else 1234)
     if len(sys.argv) > 1 and sys.argv[1] == "banned":
         return banned_main()
     if len(sys.argv) > 1 and sys.argv[1] == "attrib":
