@@ -811,8 +811,9 @@ def exact_leaf() -> bool:
 #: THE OPENING BIAS -- strength-conditioned, and OFF unless `DIS_OPEN_BIAS` sets
 #: a weight. Measured defect: Expert's opening moves 1.38 -> 4.48 across the
 #: eight strength buckets while its make rate over the same range runs 36% ->
-#: 80%, and an exact best response to its fitted auction policy wins 9.06 payoff
-#: points a deal. The equilibrium ramps 2.25 -> 4.84 over the same buckets, so
+#: 80%, and an exact best response to its fitted auction policy wins 5.87 payoff
+#: points a deal (9.06 when this was written, under the pre-2026-08-16 prices;
+#: re-measured 2026-08-19 against this abstraction's own 1.47 floor). The equilibrium ramps 2.25 -> 4.84 over the same buckets, so
 #: the gap is concentrated at the WEAK end -- Expert opens at the floor with
 #: hands the equilibrium opens at 2.25.
 #:

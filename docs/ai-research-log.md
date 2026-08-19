@@ -3122,3 +3122,75 @@ standing scratchpad for these one-off UI fixes.
 
 ---
 
+
+## 2026-08-19 — Dissonance: the exact auction leaf. Built, exact, cheap, no gain.
+
+**Asked for:** the better Expert auction leaf (an exact contract solve replacing
+the points proxy), **gated on `cfrlab br` exploitability before any arena time**
+— the user's own framing: "that's a same-day signal on whether the mechanism is
+working, on the one axis where the required edge and the available edge are the
+same order of magnitude."
+
+**The gate said no. It shipped OFF.**
+
+### 1. The baseline was stale and nobody had noticed
+
+The 9.06 on record was measured under the pre-2026-08-16 price list. Re-run on
+414 rounds under the shipped scoring against the 2000-deal real-play cache:
+**Expert 5.87, equilibrium floor 1.47** (the 0.15 on record came off a different
+cache — the two rows are only readable as a difference). **The re-pricing alone
+moved Expert 9.06 → 5.87**, the biggest single movement this campaign has
+produced, and it was free: nobody had re-run it.
+
+Converged rather than assumed: 200 rounds → 6.01, 414 → 5.87, split-halves at
+207 → 6.00 / 6.05. The 22.1% of the best responder's reach that lands on unseen
+infosets is identical at both sizes, so that is structure, not sample.
+
+### 2. The leaf turned out to be affordable, against this repo's own standing note
+
+CLAUDE.md said closing the leaf error needs "a `solve_contract` per
+(denomination, level) per world" — fifty settlements in a tree, hopeless. It
+does not, **because the outcome space is totally ordered.** A round ends either
+with the declarer taking no scoring trick (the consolation, one flat value) or
+with a points total (a strictly increasing function of it). In a
+perfect-information zero-sum game with totally ordered outcomes the value under
+any monotone payoff is that payoff applied to the best outcome the declarer can
+FORCE — so two scalars price every contract on a deal, at every level and jump:
+
+* `P` — the points solve, "the largest x I can force `pts ≥ x`";
+* `Q` — `dd::threat_value`, the same question with the duck moved to the TOP of
+  the order.
+
+`max(contract(P), min(null, contract(Q)))`. `Q` subsumes the ducking search, so
+it is one solve swapped for another. Cost **2.1×** (17.5 → 38.1 s/deal on the
+control arm) once `threat_value` runs MTD(f) seeded from `P` — free, since
+`Q ≥ P` always and the two are equal on ~85% of contracts. The identity is
+SWEPT against `solve_contract` over every denomination × declarer × level ×
+jump, and the non-vacuity assert found its own floor: at two deals the sweep
+reaches no mis-priced contract and fails.
+
+### 3. The result
+
+| arm (200 paired rounds, same seeds/cache/instrument) | exploitability | split-halves | made |
+|---|---|---|---|
+| shipped leaf | **6.01** | 6.58 / 5.94 | 72.5% |
+| exact leaf | **6.21** | 6.16 / 6.00 | 67.5% |
+
+**Nothing, and the required effect was several points.** Not vacuous either,
+which is the first thing to check on a null: with the exact leaf on, **70% of
+auctions bid a different sequence, 52% settle at a different level, 28% end with
+a different declarer.**
+
+### 4. Why, and the reusable part
+
+The exploitability defect is that Expert's opening **barely varies with its
+hand**. A better leaf makes every candidate's price more accurate; it does not
+make the price more STRENGTH-CONDITIONED — it shifts them all together. That is
+the same reason the opening bias failed from the opposite end of the pipeline: a
+marginal-shaped treatment cannot fix a conditional defect. **Two mechanisms,
+opposite ends, one diagnosis.**
+
+And it joins the belief prior as the fourth instance in this campaign of *a
+measured defect whose correction did not measure as a gain*. The direction that
+is left is conditioning the opening on strength, by something that can express a
+MIXTURE — which an argmax over a biased value provably cannot.

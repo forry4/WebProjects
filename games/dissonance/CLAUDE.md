@@ -3382,6 +3382,16 @@ differing stayed an observation until it was priced, below.
 
 ### EXPLOITABILITY — 9.06 points a deal against a floor of 0.15
 
+**BOTH NUMBERS IN THIS HEADING ARE SUPERSEDED — see "THE EXACT AUCTION LEAF"
+below. Under the shipped (post-2026-08-16) price list and the real-play deal
+cache, Expert reads 5.87 against a floor of 1.47.** The re-pricing alone did
+that; the 9.06 was taken against the prices the game charged in mid-August and
+was never re-run when they moved. Everything about the METHOD in this section
+stands, and so does the DIAGNOSIS below (the opening ramping with strength where
+the equilibrium's does not). Only the two magnitudes are stale, and the lesson
+is the one this file already states about `DOUBLE_MARGIN`: **a constant — or a
+measurement — in payoff units is silently re-scaled by a re-pricing.**
+
 `cfrlab br`. Every Expert auction decision is logged as `(bucket, standing level,
 prev level, holds, action)`, fitted as a policy over the abstraction's own
 infosets, and an EXACT best response is computed against it. This is the
@@ -4529,7 +4539,8 @@ equilibrium opponent and fails against Expert or a human. **It is unexplained,
 and an unexplained non-monotonicity is not something to compile into a shipped
 bot.**
 
-**What the finding still supports.** The 9.06-point exploitability stands — it is
+**What the finding still supports.** The exploitability finding stands (its
+MAGNITUDE was re-measured at 5.87 under the shipped prices, 2026-08-19) — it is
 a best-response computation, not a distribution score, so none of the above
 touches it — and so does its diagnosis: Expert's opening moves 0.82 rungs across
 a strength range over which its make rate runs 36% → 80%. Using the equilibrium
@@ -4666,7 +4677,8 @@ in `rules.jsx`, Expert's own calibration (it was fitted against 3j), and a re-ru
 of the `DOUBLE_MARGIN` sweep — the margin of 20 was fitted against a 72.9% make
 rate and would be sitting on a different distribution at 79.2%.
 
-**WHAT THIS IS NOT.** 9.06 is exploitability inside the abstraction, **not a
+**WHAT THIS IS NOT.** The exploitability figure (9.06 then, **5.87 under the
+shipped prices**) is measured inside the abstraction, **not a
 head-to-head margin against Expert** — a best responder is a far harsher opponent
 than Expert is, and the abstraction drops `DENOM_RULE`, which makes the responder
 freer than a real exploiter could be. The equilibrium's policy table is a
@@ -4692,15 +4704,124 @@ the answer "the equilibrium bids lower than Expert". Fixed to `level - prev`
 (and `prev = 0` gives the v2 opening rule for free); the settled mean moved
 4.47 → 4.67 and the make rate 77.1% → 72.0%.
 
+### THE EXACT AUCTION LEAF — BUILT, EXACT, CHEAP, AND IT DOES NOT MOVE EXPLOITABILITY (2026-08-19)
+
+**Verdict first: the mechanism is real and correct, the gate says do not spend
+arena time on it, and it ships OFF (`DIS_EXACT_LEAF`).** This is the fourth
+entry in this file to record a measured defect whose correction did not measure
+as a gain — see the belief thread's "A MEASURED BIAS DID NOT IMPLY A MEASURED
+GAIN", which this now joins by a third independent instrument.
+
+**THE BASELINE HAD TO BE RE-MEASURED FIRST, AND IT MOVED A LONG WAY.** The 9.06
+on record was taken under the PRE-2026-08-16 price list, so it is not a valid
+"before" for anything measured today. Re-run on 414 rounds under the shipped
+scoring, against the same 2000-deal real-play cache:
+
+| policy | BR as seat 0 | BR as seat 1 | exploitability |
+|---|---|---|---|
+| CFR+ equilibrium | +1.75 | +1.19 | **1.47** |
+| Expert (414 rounds, 1247 decisions) | +6.20 | +5.54 | **5.87** |
+
+**Read the two rows as a difference, always** — the floor is 1.47 here, not the
+0.15 on record, because that figure came off a different deal cache. **The
+re-pricing itself took Expert from 9.06 to 5.87**, which is the single largest
+movement anything in this campaign has produced, and nobody had measured it.
+Converged: 200 rounds read 6.01, 414 reads 5.87, and the 207-round split-halves
+read 6.00 and 6.05. What does NOT converge is coverage — 22.1% of the best
+responder's reach lands on infosets Expert never visits, at 200 rounds and at
+414 alike, so that is structural rather than a sample size.
+
+**THE DEFECT THE LEAF FIXES IS REAL AND WAS ALREADY MEASURED.** The search
+prices a candidate as `max(contract(P), null if the duck is GUARANTEED)` — the
+better of two SEPARATELY guaranteed plans. A real defence has to stop both at
+once and often cannot, so the shipped leaf under-prices declaring: over 900
+(deal, contract) pairs it agrees with an exact `solve_contract` 93.3% of the
+time and **every one of the gaps is positive**.
+
+**AND IT IS AFFORDABLE, WHICH THIS FILE HAD SAID IT WAS NOT.** The standing note
+was that closing it needs "a `solve_contract` per (denomination, level) per
+world" against a tree reaching fifty settlements. It does not, **because the
+outcome space is totally ordered**: a round ends either with the declarer taking
+no scoring trick — worth the consolation, one flat value — or with a points
+total, worth a strictly increasing function of it (`Contract::payoff` is
+monotone on both branches). In a perfect-information zero-sum game with totally
+ordered outcomes, the value under any monotone payoff is that payoff applied to
+the best outcome the declarer can FORCE. So **two scalars price every contract
+on a deal, at every level and every jump**:
+
+* `P` — the points solve: the largest `x` with "I can force `pts >= x`";
+* `Q` — `dd::threat_value`: the largest `x` with "I can force `pts >= x` OR no
+  scoring trick", i.e. the same question with the duck moved to the TOP of the
+  order;
+
+folded by `Option_::payoff_exact` as `max(contract(P), min(null, contract(Q)))`.
+The two branches are the two forcible upward-closed sets, and the `min` is the
+defence picking whichever half of the threat hurts us more.
+
+* **`Q` SUBSUMES `null_no_even_makeable`** — a guaranteed duck is exactly `Q` at
+  the sentinel — so this is one solve swapped for another, not a second bolted on.
+* **The identity is SWEPT, not argued.**
+  `the_threat_value_prices_every_contract_exactly` checks `payoff_exact(P, Q)`
+  against `solve_contract` over whole deals x every denomination x both
+  declarers x five levels x two jump sizes, and asserts the gap against the
+  shipped leaf is never negative. 60 of 360 contracts (16.7%) are mis-priced by
+  the shipped leaf, worst **+60**. **Three deals is the FLOOR, not a round
+  number**: at two the sweep reaches no mis-priced contract at all and the
+  non-vacuity assert fails, which is how that floor was found.
+* **Cost 2.1x**, measured on `cfrlab`'s control arm: 17.5 -> 51.8 s/deal
+  full-window, 38.1 once `threat_value` runs MTD(f) **seeded from the points
+  solve** — free evidence, since `Q >= P` always and the two are equal on ~85%
+  of contracts, so the seed is usually the answer.
+
+**THE GATE, ON THE SAME 200 SEEDS, SAME CACHE, SAME INSTRUMENT:**
+
+| arm | exploitability | split-halves | settled mean | made | 
+|---|---|---|---|---|
+| shipped leaf | **6.01** | 6.58 / 5.94 | 4.52 | 72.5% |
+| **exact leaf** | **6.21** | 6.16 / 6.00 | 4.51 | 67.5% |
+
+**No movement, and certainly nothing heading for the 1.47 floor.** The required
+effect was several points; the observed one is +0.20 in the wrong direction,
+well inside a split-half spread of 5.94-6.58. Per the gate this was built
+under, **no arena time is warranted.**
+
+**AND THE MEASUREMENT IS NOT VACUOUS, which is the first thing to check on a
+null.** With the exact leaf on, **70% of auctions bid a different sequence, 52%
+settle at a different level and 28% end with a different declarer**. The bidder
+really moved; its exploitability did not. The make rate falling 72.5% -> 67.5%
+is the predicted direction and not a bug — every correction is positive, so
+declaring is priced up and the bot declares more.
+
+**WHY IT PLAUSIBLY CANNOT HELP, and this is the part to carry.** The
+exploitability defect this campaign measured is that Expert's opening **barely
+varies with its hand** (1.38 -> 4.48 across buckets whose make rate runs 36% ->
+80%, against an equilibrium ramping 2.25 -> 4.84). A better leaf makes every
+candidate's price more accurate, but it does not make the price more
+STRENGTH-CONDITIONED — it shifts all of them in the same direction. That is the
+same reason the opening bias failed from the other end: a marginal-shaped
+treatment cannot fix a conditional defect. **Two mechanisms, opposite ends of the
+pipeline, same diagnosis.**
+
+**WHAT IS LEFT STANDING, and it is not nothing.** `threat_value` is committed,
+gated and correct, and it is one env var away from being the leaf. So any FUTURE
+experiment whose result could turn on leaf accuracy can be run with it on
+honestly, and the "the leaf is a proxy" caveat that qualifies half the
+measurements in this file can now be removed from any of them by re-running the
+arm. It is deliberately not shipped: the exploitability gate says no gain, and
+2.1x would put Expert's first decision of a hand at ~7s of a 12s watchdog.
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
-* **The Expert tier's leaf is still a points solve, and that is where the next
-  effort belongs** — not on the tree, which demonstrably reaches the lines it
-  was built for. Pricing a candidate exactly needs a `solve_contract` per
-  (denomination, level) per world; the tree makes the option list smaller than
-  Hard's ~50, so this is closer to affordable than it was.
+* ~~**The Expert tier's leaf is still a points solve, and that is where the
+  next effort belongs.**~~ **BUILT AND MEASURED 2026-08-19 — it is exact, it
+  costs 2.1x rather than the per-contract solve this bullet assumed, and it
+  moves exploitability not at all (6.01 -> 6.21 on 200 paired rounds).** Off
+  behind `DIS_EXACT_LEAF`; see the section above. Do not re-open it as "the next
+  effort" — what the exploitability measurement points at is that Expert's
+  opening barely varies with its hand, which is a CONDITIONAL defect no leaf
+  accuracy can touch.
 * **Skat's talon swap still runs the OLD take-high/give-low rule.** Classic's
   was replaced 2026-08-08 by a fitted policy (see the swap section below); the
   fit was trained and gated on classic decisions, where the contract is
