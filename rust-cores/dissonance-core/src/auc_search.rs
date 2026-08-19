@@ -50,6 +50,7 @@
 //!      stops; the defender's bet is priced on its own turn, by Hard's pricing,
 //!      which is exactly right for a decision with no reply after it.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::bid::{Option_, Solved};
@@ -469,12 +470,35 @@ pub struct Search<'a> {
     terms: &'a TermsTable,
     worlds: &'a Solved,
     memo: HashMap<AucState, Vec<f64>>,
+    /// ONE OPPONENT SEARCH PER WORLD, kept alive for the whole run.
+    ///
+    /// Not an optimisation detail -- it is the difference between the arm being
+    /// affordable and not. `belief_pick` is called once per state (the outer
+    /// memo sees to that), and a fresh inner `Search` per call throws away a
+    /// memo that would have answered most of the next call: the inner trees
+    /// overlap almost entirely, since they are the same auction from states one
+    /// bid apart. Measured, rebuilding them cost 103 s/deal in `cfrlab`'s
+    /// control arm against 13 without the arm at all; kept, it is 24.
+    inner: RefCell<Vec<Search<'a>>>,
     pub nodes: u64,
 }
 
 impl<'a> Search<'a> {
     pub fn new(me: usize, rules: AucRules, terms: &'a TermsTable, worlds: &'a Solved) -> Self {
-        Search { me, rules, terms, worlds, memo: HashMap::new(), nodes: 0 }
+        // The opponent's own searches, one per sampled world, built once. Their
+        // `opp` is plain minimax and their `belief` is empty, which is where the
+        // regress is cut -- see `belief_pick`.
+        let inner = if rules.opp == OppModel::Belief && !worlds.belief.is_empty() {
+            let mut r = rules.clone();
+            r.opp = OppModel::Minimax;
+            worlds.belief.iter()
+                .map(|b| Search::new(1 - me, r.clone(), terms, b))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Search { me, rules, terms, worlds, memo: HashMap::new(),
+                 inner: RefCell::new(inner), nodes: 0 }
     }
 
     /// What the standing contract is worth TO `me`, SUMMED over the sampled
@@ -806,13 +830,11 @@ impl<'a> Search<'a> {
     fn belief_pick(&self, s: &AucState, moves: &[Bid], kids: &[Vec<f64>]) -> Vec<f64> {
         let k = kids[0].len();
         let mut out = vec![0.0; k];
-        let mut inner = self.rules.clone();
-        inner.opp = OppModel::Minimax;
+        let mut subs = self.inner.borrow_mut();
         for w in 0..k {
-            let pick = self.worlds.belief.get(w)
-                .filter(|b| !b.worlds.is_empty())
-                .and_then(|b| {
-                    let mut sub = Search::new(1 - self.me, inner.clone(), self.terms, b);
+            let pick = subs.get_mut(w)
+                .filter(|sub| !sub.worlds.worlds.is_empty())
+                .and_then(|sub| {
                     let (bid, _) = sub.best(*s);
                     moves.iter().position(|&m| m == bid)
                 });
