@@ -433,6 +433,114 @@ def bid(g, seat):
     return opts[max(range(len(opts)), key=lambda j: sums[j])]["move"]
 
 
+#: How many OFF-POLICY probes to take per deal. 0 reproduces the self-play-only
+#: corpus exactly, so every checkpoint written before this stays valid.
+PROBES = int(os.environ.get("CFR_PROBES", "0"))
+
+
+def _path_to(level, prev, holds, actor):
+    """A bid sequence landing on `(level, prev, holds)` with `actor` to act.
+
+    `prev` is the level of the bid the STANDING bid overtook, so the shortest
+    path is `[prev, level]` plus one same-level overtake per hold. Whose turn it
+    then is falls out of the path's LENGTH -- which means the other seat's
+    version of the same state needs a path one bid longer, and the cheapest such
+    path is an earlier, lower opening. Both parities are genuinely reachable in
+    a real auction and the abstraction enumerates both, so a probe that only
+    ever built the short path would leave half the state space unvisited --
+    which is the exact defect it exists to fix, one level down.
+
+    None when no path exists: an opening that already set the level (`prev` 0)
+    has nothing before it, and neither does `prev` 1.
+    """
+    base = ([prev, level] if prev else [level]) + [level] * holds
+    if len(base) % 2 == actor:
+        return base
+    if prev >= 2:
+        return [prev - 1] + base
+    return None
+
+
+def _drive_to(g, path):
+    """Bid a REAL auction into the abstract state `(level, prev, holds)`.
+
+    THE POINT OF DOING IT WITH REAL BIDS rather than by writing the auction dict
+    is that `used`, `last` and `jump` then come out right by construction --
+    they are exactly what the path made them, and the abstraction's `prev` is
+    the standing bid's own rise, which the engine records itself. Writing the
+    fields directly would be a second implementation of the auction's
+    bookkeeping, and this file already records what happens when a harness
+    carries its own copy of a rule.
+
+    Returns False when the path is not legal on this deal -- the denomination
+    forever-ban can leave a seat with no bid at the level a probe wants, which
+    is a real state and not a broken probe.
+    """
+    for want in path:
+        opts = E.auction_options(g)
+        pick = None
+        for lvl, den in opts["bids"]:
+            if lvl == want:
+                pick = (lvl, den)
+                break
+        if pick is None:
+            return False
+        E.apply_move(g, g["seats"][g["auction"]["to_act"]],
+                     {"kind": "bid", "level": pick[0], "denom": pick[1]})
+    return True
+
+
+def _abstract(mv, standing):
+    """One Expert answer in the abstraction's vocabulary."""
+    if mv is None:
+        return None
+    if mv["kind"] != "bid":
+        return -1
+    return HOLD if mv["level"] == standing else mv["level"]
+
+
+def probe_round(seed, rng, n=PROBES):
+    """Expert's answer at states its own self-play never reaches.
+
+    THIS IS WHAT THE EXPLOITABILITY NUMBER WAS MISSING, and `cfrlab attrib` is
+    what found it: fitted on the self-play corpus alone, **54% of a best
+    responder's winnings came from infosets Expert had never visited and 74%
+    from infosets with two observations or fewer**. A responder steers TOWARDS
+    the holes by construction, so the fit's own coverage was most of the
+    measurement -- which is why two separate mechanisms (the opening bias, the
+    exact leaf) both failed to move a number that was never mostly about them.
+
+    The corpus is off-policy now: per deal, `n` states drawn uniformly from the
+    abstraction's own reachable set, driven to with real bids, and Expert asked
+    what it does there. UNIFORM rather than weighted by the responder's reach,
+    deliberately -- a corpus weighted by the current fit would be measuring the
+    fit, and the whole complaint is that it already was.
+
+    It is nearly free, which is the only reason it is affordable at all:
+    `bid::Solved` is cached on the HAND, and a probe changes the standing bid
+    rather than the cards, so every probe after the first on a given seat is
+    arithmetic over worlds that are already solved.
+    """
+    out = []
+    pool = [st for st in states() if st[0] <= MAXL]
+    for level, prev, holds, actor in rng.sample(pool, min(n, len(pool))):
+        path = _path_to(level, prev, holds, actor)
+        if path is None:
+            continue
+        g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
+        if not _drive_to(g, path):
+            continue
+        seat = E.turn_seat(g)
+        # The path is built to land on `actor`; assert it rather than trust it,
+        # since a legality refusal mid-path would silently shift the parity.
+        if seat is None or g["phase"] != "auction" or seat != actor:
+            continue
+        a = _abstract(bid(g, seat), level)
+        if a is not None:
+            out.append([seat, level, prev, holds, a])
+    return out
+
+
 def expert_round(seed):
     """What Expert's auction settles at on one deal, scored by the SAME leaf.
 
@@ -493,7 +601,14 @@ def expert_round(seed):
     }})
     terms = E._terms_for("classic", 0, level, jump=a.get("jump", level))
     v = E.payoff(terms, r.get("pts", 0), not bool(r.get("duck")))
-    return {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat}
+    row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat}
+    # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
+    # about self-play and must stay that way; only the POLICY FIT wants the
+    # off-policy probes, and mixing them into `dec` would quietly re-weight
+    # every distribution this harness reports.
+    if PROBES:
+        row["probe"] = probe_round(seed, random.Random(seed ^ 0x9E37), PROBES)
+    return row
 
 
 class CFR:
@@ -624,7 +739,7 @@ def states():
     return out
 
 
-def best_response(recs, pol, br_seat):
+def best_response(recs, pol, br_seat, attrib=None):
     """EXACT best response for `br_seat` against `pol`, in payoff points a deal.
 
     The poker-standard measure, and the reason it is worth the machinery: two
@@ -713,6 +828,45 @@ def best_response(recs, pol, br_seat):
                         acc += sig[a] * kid(a)[i]
                 v[i] = acc
             val[s] = v
+            # WHERE THE MONEY COMES FROM. A single exploitability number says
+            # how much a best responder wins and nothing about which decision
+            # it wins it at, so this decomposes it by the one-step deviation:
+            # at every node the POLICY acts on, what would it have saved by
+            # playing its best single action there instead of its own mixture,
+            # holding everything downstream at the values already computed?
+            #
+            # ONE CHOICE PER INFOSET, grouped by hand bucket exactly as the
+            # responder's own maximisation is -- a per-deal minimum would be a
+            # cheater's alternative and would attribute loss to nodes where the
+            # policy is playing perfectly well on what it can see.
+            #
+            # It is a RANKING, not an exact additive split of the total: the
+            # deviations interact, and the game's positional value sits outside
+            # all of them. What it is for is deciding what to fix next, which
+            # this campaign has repeatedly got wrong by guessing.
+            if attrib is not None:
+                grp = defaultdict(list)
+                for i, rc in enumerate(recs):
+                    grp[rc["b"][actor]].append(i)
+                for bk, idx in grp.items():
+                    w = sum(reach[s][i] for i in idx)
+                    if w <= 0:
+                        continue
+                    tot = {a: sum(reach[s][i] * (conc if a == -1 else kid(a))[i]
+                                  for i in idx)
+                           for a in acts}
+                    actual = sum(reach[s][i] * v[i] for i in idx)
+                    # The policy MINIMISES the responder's value, so its best
+                    # single action is the argmin and the loss is non-negative.
+                    pick = min(tot, key=lambda a: tot[a])
+                    attrib.append({
+                        "level": level, "prev": prev, "holds": holds,
+                        "bucket": bk, "reach": w / len(recs),
+                        "loss": (actual - tot[pick]) / len(recs),
+                        "want": pick,
+                        "does": pol.at(recs[idx[0]]["b"][actor], level, prev,
+                                       holds, acts) or {},
+                    })
 
     # The root: seat 0 opens and cannot pass.
     if br_seat == 0:
@@ -784,12 +938,25 @@ class Policy:
         return {a: p / tot for a, p in out.items()} if tot > 0 else None
 
 
-def fit_policy(rows):
-    """Expert's auction as a table over the abstraction's own infosets."""
+def fit_policy(rows, counts=None):
+    """Expert's auction as a table over the abstraction's own infosets.
+
+    `counts`, if given, is filled with the raw observation count behind each
+    infoset. THAT IS NOT BOOKKEEPING: a table fitted from two decisions reads as
+    a crisp 50/50 mixture, which a best responder exploits exactly as hard as a
+    real one -- so an exploitability figure is only about the BIDDER to the
+    extent its infosets are populated. `attrib` reports the split.
+    """
     cnt = defaultdict(lambda: defaultdict(float))
     for r in rows:
-        for seat, level, prev, holds, a in r.get("dec", []):
+        # `dec` is the self-play path, `probe` the off-policy states a best
+        # responder actually steers into. Both are Expert answering the same
+        # question about the same hand, so both belong in the policy; only the
+        # settled-contract statistics are self-play-only.
+        for seat, level, prev, holds, a in r.get("dec", []) + r.get("probe", []):
             cnt[(r["bk"][seat], level, prev, holds)][a] += 1.0
+    if counts is not None:
+        counts.update({k: sum(v.values()) for k, v in cnt.items()})
     return Policy({k: {a: c / sum(v.values()) for a, c in v.items()}
                    for k, v in cnt.items()})
 
@@ -1573,6 +1740,90 @@ def load_expert():
     return rows
 
 
+def _act_name(a):
+    return "pass" if a == -1 else ("hold" if a == HOLD else f"bid {a}")
+
+
+def attrib_main(iters):
+    """`cfrlab attrib` -- WHERE the exploitability is, not just how much.
+
+    `br` prices Expert's auction at 5.87 payoff points a deal against this
+    abstraction's 1.47 floor, and that single number has now sent two separate
+    mechanisms into the ground: the opening bias (a marginal-shaped treatment
+    for a conditional defect) and the exact leaf (more accurate prices, equally
+    accurate at every strength). Both were plausible readings of the same
+    headline. This decomposes it instead.
+
+    Per node, the one-step deviation: what the policy would have SAVED by
+    playing its best single action there, everything downstream held at the
+    responder's own values. Reported reach-weighted, so a node that is wrong by
+    a mile but almost never reached ranks below one that is slightly wrong all
+    day.
+    """
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    bucketise(recs)
+    rows = [r for r in load_expert() if r.get("dec")]
+    if not rows:
+        raise SystemExit("no Expert rounds carry a decision log")
+    for r in rows:
+        i = r["seed"] - 800_000
+        r["bk"] = recs[i]["b"]
+    counts = {}
+    pol = fit_policy(rows, counts)
+    ndec = sum(len(r["dec"]) for r in rows)
+    print(f"  fitted Expert over {len(rows)} rounds / {ndec} decisions, "
+          f"{len(pol.t)} infosets")
+
+    hits = []
+    for seat in (0, 1):
+        acc = []
+        best_response(recs, pol, seat, attrib=acc)
+        for h in acc:
+            h["seat"] = seat
+            h["n"] = counts.get((h["bucket"], h["level"], h["prev"], h["holds"]), 0)
+        hits += acc
+    tot = sum(h["loss"] for h in hits)
+    print(f"\n=== ATTRIBUTED ({tot:.2f} points of one-step loss, both seats) ===")
+
+    # HOW MUCH OF THIS IS THE BIDDER AND HOW MUCH IS THE SAMPLE. An infoset
+    # fitted from two decisions reads as a crisp 50/50 and a best responder
+    # exploits it exactly as hard as a real mixture -- so loss sitting on
+    # thinly-observed infosets is a statement about the corpus, not about
+    # Expert. Reported as a split rather than a caveat because the campaign has
+    # twice acted on a headline whose provenance nobody had decomposed.
+    for lo, hi in ((0, 0), (1, 2), (3, 5), (6, 10), (11, 10**9)):
+        sub = sum(h["loss"] for h in hits if lo <= h["n"] <= hi)
+        lbl = "unseen (backed off)" if hi == 0 else f"{lo}-{hi} obs" \
+            if hi < 10**9 else f"{lo}+ obs"
+        print(f"    {lbl:>20}: {sub:>8.3f}  {100*sub/tot:>5.1f}%")
+
+    # BY THE STANDING LEVEL, which is the axis the campaign's two open
+    # questions are phrased on ("concedes 4", "contests 6").
+    by = defaultdict(float)
+    reach = defaultdict(float)
+    for h in hits:
+        by[h["level"]] += h["loss"]
+        reach[h["level"]] += h["reach"]
+    print(f"\n  {'standing':>9} {'loss':>8} {'share':>7} {'reach':>8}")
+    for k in sorted(by, key=lambda x: -by[x]):
+        print(f"  {('open' if k == 0 else k):>9} {by[k]:>8.3f} "
+              f"{100*by[k]/tot:>6.1f}% {reach[k]:>8.3f}")
+
+    # ...and the individual nodes, with what the policy DOES against what it
+    # should. This is the actionable half: a node is only worth fixing if the
+    # better action is one a bot could plausibly be made to take.
+    print(f"\n  {'seat':>4} {'standing':>8} {'prev':>4} {'holds':>5} {'bkt':>3} "
+          f"{'obs':>4} {'loss':>7} {'reach':>6}  wants -> currently")
+    for h in sorted(hits, key=lambda x: -x["loss"])[:18]:
+        does = " ".join(f"{_act_name(a)}:{100*p:.0f}%"
+                        for a, p in sorted(h["does"].items(), key=lambda kv: -kv[1])
+                        if p > 0.05) or "(unseen: concedes)"
+        print(f"  {h['seat']:>4} {('open' if h['level'] == 0 else h['level']):>8} "
+              f"{h['prev']:>4} {h['holds']:>5} {h['bucket']:>3} "
+              f"{h['n']:>4.0f} {h['loss']:>7.3f} {h['reach']:>6.3f}  "
+              f"{_act_name(h['want']):>6} -> {does}")
+
+
 def br_main(iters):
     """`cfrlab br` -- price the difference, instead of describing it."""
     recs = [json.loads(x) for x in open(CKPT) if x.strip()]
@@ -1726,6 +1977,8 @@ def main():
         return print(f"{'rate':>4} {'spread':>8} {'sd':>7} {'mean':>7} "
                      f"{'weakest':>7} {'strong':>7} {'discrim':>8} "
                      f"{'settled':>8} {'made':>8} | opening distribution %")
+    if len(sys.argv) > 1 and sys.argv[1] == "attrib":
+        return attrib_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "br":
         return br_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "expert":
