@@ -4992,6 +4992,80 @@ the continuation but ALSO makes the bot open lower across every bucket, and the
 two cancelled. A test that isolates the asymmetry has to leave the opening
 alone.
 
+### THE TREE'S PESSIMISM ABOUT CONTINUING IS LOAD-BEARING, NOT A DEFECT (2026-08-19)
+
+**The fourth treatment, the most carefully aimed one, and the most informative
+failure. `xfit` ships at 0.**
+
+**THE MECHANISM IS REAL AND IS IN THE TREE.** `min` and `max` over noisy
+estimates are biased — the winner is partly whichever estimate's noise favoured
+it — so a min reads LOW and a max reads HIGH. The crate already recorded that
+"the optimiser's curse compounds with depth"; what it had not recorded is the
+consequence. **The bias is DEPTH-DEPENDENT, and the auction's two branch kinds
+have different depths**: PASSING settles immediately, RAISING buys one more
+opponent `min` before anything settles. So every raise is shaded down against
+every pass, at every strength — which is exactly the shape of the measured
+divergence.
+
+Demonstrated by simulation rather than asserted (the curse is a POPULATION bias:
+over any fixed world set the hard min is simply correct, and it is only wrong
+relative to the distribution those worlds are sampled from). Two options of
+equal true value differing only by per-world noise, 4000 samples at k=8:
+**min node hard −0.367 against cross-fit −0.018; max node +0.355 against +0.008.**
+
+**THE CORRECTION WORKS, IN THE DIRECTION PREDICTED, AND MAKES THE BOT WORSE.**
+Leave-one-out cross-fitting — choose on the other worlds, score on the held-out
+one — costs no solves. Measured on the honest instrument, Hard tier, paired:
+
+| `xfit` | settled mean | made | probe-pass | **exploitability** |
+|---|---|---|---|---|
+| 0 (shipped) | 4.48 | **68.5%** | 81.7% | **5.45** |
+| 0.4 | — | — | — | **5.69** |
+| 1.0 | 4.92 | **49.2%** | 77.0% | **6.11** |
+
+It concedes less and bids higher, exactly as designed — and its contracts stop
+coming home. **Monotone in the dose**, which is far stronger evidence than any
+single arm: there is no weight at which this helps, and the curve says so
+without anyone having to guess a middle value.
+
+* **Why full correction cannot be the answer, and no better scheme fixes it:
+  REMOVING A SELECTION BIAS ENTIRELY COSTS THE SELECTION.** When sampling noise
+  exceeds the gap between two actions, a cross-fitted choice cannot tell them
+  apart and returns roughly their MEAN where the truth is their MIN.
+  Leave-one-out is already the SHARPEST cross-fit available (it selects on k−1
+  worlds); a coarser fold corrects *harder*, not softer. So shrinkage was the
+  only axis left, and the dose curve closed it.
+* `xfit = 0` is the tree that has always run, bit for bit — the shrink line is
+  never reached — so the A/B is unconfounded. A unit test pins that the weight
+  is a WEIGHT (half of it is half the correction, zero is none), because this
+  campaign has already shipped a "weight" that was really a flag.
+
+**WHAT THIS ACTUALLY TELLS US, and it is a retraction of my own reading.** The
+tree's pessimism about continuing is not a bug to be removed: correcting it
+makes the bot overbid and collapses the make rate. Combined with three other
+nulls, the honest conclusion is that **the divergence from the equilibrium is
+probably not Expert's defect at all — it is the equilibrium's freedom.**
+
+**AND `cfrlab banned` TESTED THE WRONG SIDE OF THAT.** It asked whether the
+denomination forever-ban changes what EXPERT does (it does not: 44% against
+44%). The question that decides the headline is the other one — **whether the
+ban would change what the EQUILIBRIUM does** — and the abstraction cannot
+answer it, because it has no denominations at all and so never pays the ban's
+cost. That cost is real and measured: 0.3–0.6 of `hand_strength` on the 19–36%
+of decisions where it binds. A bidder that must climb using progressively worse
+suits *should* concede more than one that may re-bid its best every time.
+
+**THE DECISIVE TEST, and it is bounded work in the lab alone.** Put the ban into
+the abstraction: carry a per-seat BURN COUNT in the state (0..5 each, so ~36x
+the states — thousands, which the exact DP handles), and index the leaf by that
+seat's (c+1)-th best denomination. **The machinery already exists** —
+`cfrlab dcache` builds exactly that cache, `pts`/`duck` for all five
+denominations per seat ordered by the seat's own `hand_strength`, and it was
+built for the suit-priced ladder study. If the equilibrium's concession rate at
+level 4 climbs toward Expert's once it has to pay for its suits, the entire
+"Expert concedes too much" finding dissolves and four nulls are explained at
+once. **Nothing else should be spent on the auction bot until that is run.**
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but

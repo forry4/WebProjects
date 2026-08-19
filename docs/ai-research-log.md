@@ -3247,3 +3247,50 @@ also lowers the opening across every bucket, and the two cancel.
 resists two plausible treatments is telling you to decompose it, not to try a
 third.* Both nulls were correct answers to the wrong question, and one hour of
 attribution explained both and repriced the entire campaign's instrument.
+
+### 2026-08-19 (later still) — cross-fitting the tree: the fourth null, and the one that reframes the other three
+
+The user opened the door to changing how the tree values its two branch kinds,
+so I built the change the diagnosis pointed at.
+
+**The mechanism.** `min`/`max` over noisy estimates are biased, the tree takes
+one such aggregation per ply, so the bias is depth-dependent — and passing is
+the shallowest branch there is while raising buys one more opponent `min`. Every
+raise is shaded against every pass. Fixed by leave-one-out cross-fitting (choose
+on the other worlds, score on the held-out one), which costs no solves.
+Demonstrated by simulation, since the curse is a population bias and any fixed
+world set makes the hard min correct: min node −0.367 → −0.018, max +0.355 →
++0.008 over 4000 samples at k=8.
+
+**It works and it is worse.** Paired on the honest instrument, Hard tier:
+5.45 → 5.69 (weight 0.4) → 6.11 (weight 1.0). Monotone. Behaviourally it did
+exactly what it was built to do — probe-pass 81.7% → 77.0%, settled mean 4.48 →
+4.92 — and the make rate fell 68.5% → 49.2%. Removing a selection bias entirely
+costs the selection: when noise exceeds the gap between two actions, a
+cross-fitted choice returns their mean where the truth is their min. LOO is
+already the sharpest cross-fit possible, so shrinkage was the only axis, and the
+dose curve closed it.
+
+**The reframe, which is the actual output of the day.** Four treatments — the
+opening bias, the exact leaf, opponent softening, cross-fitting — all null or
+worse, and the last one *monotonically* worse in the direction of the
+equilibrium's behaviour. The tree's pessimism about continuing is load-bearing.
+So the likeliest reading is no longer "Expert concedes too much" but "the
+equilibrium concedes too little, because the abstraction lets it re-bid its best
+suit forever and classic does not."
+
+**And I tested the wrong side of that confound earlier.** `cfrlab banned` asked
+whether the ban changes EXPERT's behaviour (no: 44% vs 44%). The question that
+decides the headline is whether it would change the EQUILIBRIUM's — and the
+abstraction has no denominations, so it never pays the cost, which is a measured
+0.3–0.6 of hand strength on the 19–36% of decisions where it binds.
+
+**Next, and nothing else until it runs:** carry a per-seat burn count in the
+abstract state (~36× the states, thousands, fine for the exact DP) and index the
+leaf by that seat's (c+1)-th best denomination. `cfrlab dcache` already builds
+exactly that cache. If the equilibrium's level-4 concession climbs toward
+Expert's once it pays for its suits, four nulls are explained at once.
+
+**Method note worth keeping: a monotone dose–response is worth more than any
+single arm.** Two points would have read as noise; three made the answer
+unambiguous and also proved there is no middle setting worth hunting for.
