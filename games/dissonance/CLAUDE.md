@@ -4994,6 +4994,30 @@ alone.
 
 ## Not built yet
 
+**Before picking anything here up, read
+[`docs/dissonance-external-ai-survey.md`](../../docs/dissonance-external-ai-survey.md)
+(2026-08-19).** It maps the world's strongest AIs for adjacent games — Skat
+(Kermit, and Edelkamp's paranoia search / hope cards), bridge declarer play
+(NooK), heads-up poker (Libratus / Modicum / ReBeL), DouDizhu (PerfectDou) — onto
+the two open problems this file has measured, and it names published algorithms
+for both. The three findings worth knowing without opening it:
+
+* **No game with this shape has a superhuman AI** (two-player trick-taking WITH a
+  competitive auction). Skat is expert-level and is the closest cousin for CARD
+  PLAY; heads-up poker is the closest cousin for the AUCTION.
+* **The auction is a BETTER-CONDITIONED problem than the one poker solved**,
+  because its leaf is exactly solvable and cached per hand. `cfrlab`'s
+  equilibrium is currently only an instrument; poker's answer to "the abstraction
+  is too coarse to ship" was to make the blueprint a SEED and re-solve the real
+  subgame at decision time.
+* **`OppModel::Soft` and CAMPAIGN.md's "untried one-sided search" are both
+  hand-rolled cousins of published algorithms** — multi-valued states
+  (Brown/Sandholm/Amos) and αµ (Cazenave/Ventos) respectively. The two cheapest
+  items are pure diagnostics that need no new search: this game's three PIMC
+  properties (leaf correlation / bias / disambiguation factor), which predict in
+  advance how much strategy fusion is recoverable, and the sigma measurement this
+  file already asks for and has never run.
+
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
 * ~~**The Expert tier's leaf is still a points solve, and that is where the
