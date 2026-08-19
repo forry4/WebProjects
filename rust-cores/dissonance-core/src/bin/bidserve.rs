@@ -90,7 +90,7 @@ fn main() {
     // sampling its own worlds, sums added) into four copies of one worker.
     let mut seed: u64 = 0x5EED_1234 ^ args.get(2)
         .and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-    let mut cache: Option<(u64, dissonance::bid::Solved)> = None;
+    let mut cache = dissonance::bid::SolvedCache::default();
     for line in stdin.lock().lines() {
         let line = match line { Ok(l) => l, Err(_) => break };
         if line.trim().is_empty() { continue }

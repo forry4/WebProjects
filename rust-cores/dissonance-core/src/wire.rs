@@ -723,7 +723,7 @@ pub fn auc_state_from_json(s: &Value) -> Option<crate::auc_search::AucState> {
 /// Returns the per-option sums SIGNED FOR THE ASKER, in the server's own order,
 /// plus whether the solve was already in hand.
 pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rng,
-                      cache: &mut Option<(u64, crate::bid::Solved)>)
+                      cache: &mut crate::bid::SolvedCache)
     -> Result<(Vec<f64>, bool), &'static str> {
     let view = view_from_json(v.get("view").unwrap_or(v)).ok_or("not a searchable position")?;
     let auc = v.get("auction").ok_or("no auction request")?;
@@ -768,11 +768,9 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
         // "today's phase order happens to make the keys differ" is exactly the
         // kind of reasoning the contract-table bug was built on.
         let key = crate::bid::hand_key(&view, declarer, k.max(1)) ^ 0xD0B1;
-        let hit = matches!(cache.as_ref(), Some((k0, _)) if *k0 == key);
-        if let Some((_, s)) = cache.take() {
-            if hit {
-                entry = s;
-            }
+        let (cached, hit) = cache.take(key);
+        if hit {
+            entry = cached;
         }
         // THE AUCTION AS EVIDENCE. Optional and absent = uniform sampling, so
         // an older server (or the arm's own control) reproduces today exactly.
@@ -807,7 +805,7 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
                 sums[esc] += margin * entry.deals.len() as f64;
             }
         }
-        *cache = Some((key, entry));
+        cache.put(key, entry);
         return Ok((sums.iter().map(|x| x * sign).collect(), hit));
     }
     // EXPERT: a tree instead of a price list. It needs the same solved worlds,
@@ -838,10 +836,7 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
         ^ swap.as_ref().map_or(0, |sp| sp.key());
     // A different hand starts a new entry; the same hand extends the one it
     // has, and asking about nothing new does no work at all.
-    let mut entry = match cache.take() {
-        Some((k0, s)) if k0 == key => s,
-        _ => crate::bid::Solved::default(),
-    };
+    let (mut entry, _) = cache.take(key);
     let cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
     if !cached {
         crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer,
@@ -897,11 +892,11 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
             for (i, b) in bias.iter().enumerate() {
                 biased[i] += b.as_f64().unwrap_or(0.0) * scale;
             }
-            *cache = Some((key, entry));
+            cache.put(key, entry);
             return Ok((biased.iter().map(|x| x * sign).collect(), cached));
         }
     }
-    *cache = Some((key, entry));
+    cache.put(key, entry);
     Ok((sums.iter().map(|x| x * sign).collect(), cached))
 }
 
@@ -1740,7 +1735,7 @@ mod exact_double {
         let run = |dd: &mut Dd, m: Option<f64>| {
             let req = double_request(m).expect("a classic view fixture");
             let mut rng = crate::rng::Rng::new(77);
-            let mut cache = None;
+            let mut cache = crate::bid::SolvedCache::default();
             answer_auction(&req, 4, dd, &mut rng, &mut cache).unwrap().0
         };
         let plain = run(&mut dd, None);

@@ -61,7 +61,12 @@ thread_local! {
     /// 3, 2 — a seat cannot re-bid a denomination it has named), so an entry
     /// identified by that set missed on every round and re-solved denominations
     /// it already held. Every round after the first is now arithmetic.
-    static LAST_BID: RefCell<Option<(u64, crate::bid::Solved)>> = RefCell::new(None);
+    // ONE SLOT IS RIGHT HERE and the type still allows more: a worker answers
+    // for one seat, so the second slot would never be read. The harnesses that
+    // drive BOTH seats through one process take the default 4 — see
+    // `bid::SolvedCache`.
+    static LAST_BID: RefCell<crate::bid::SolvedCache> =
+        RefCell::new(crate::bid::SolvedCache::with_capacity(1));
 }
 
 fn err(msg: &str) -> String {

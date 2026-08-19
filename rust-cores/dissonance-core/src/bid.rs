@@ -618,6 +618,58 @@ pub fn price_exact(opts: &[Option_], deals: &[State], declarer: usize,
     sums
 }
 
+/// A tiny LRU of solved hands, and it exists because ONE slot thrashes.
+///
+/// A browser worker answers for one seat, so a single slot was right there and
+/// every measurement harness inherited it — but the ARENA and `cfrlab`'s
+/// control arm drive BOTH seats through one process, and the seats alternate.
+/// Seat 1's solve evicted seat 0's, so seat 0's next decision re-solved its
+/// hand from scratch: measured at 2.7 auction decisions a deal costing 6.95s
+/// EACH, where the cache's whole claim is that only the first decision of a
+/// hand costs anything ("~1.0s for the first, ~0 for every one after it").
+///
+/// This is the same footgun the crate already recorded once from the other
+/// direction — a cross-phase ask evicting the auction's entry, worked around by
+/// routing those asks to a separate process. That workaround is unnecessary
+/// with more than one slot.
+///
+/// Four slots: two seats' auction entries plus their exactly-priced Double
+/// entries (a different key by construction). A `Solved` holds k sampled deals
+/// and a value per denomination, so the whole cache is kilobytes.
+pub struct SolvedCache {
+    slots: Vec<(u64, Solved)>,
+    cap: usize,
+}
+
+impl Default for SolvedCache {
+    fn default() -> Self {
+        Self { slots: Vec::new(), cap: 4 }
+    }
+}
+
+impl SolvedCache {
+    pub fn with_capacity(cap: usize) -> Self {
+        Self { slots: Vec::new(), cap: cap.max(1) }
+    }
+
+    /// The entry for `key`, REMOVED from the cache — or a fresh one. Removing
+    /// rather than borrowing keeps the caller's `entry` owned, which is what
+    /// `solve_into` needs, and `put` is what returns it.
+    pub fn take(&mut self, key: u64) -> (Solved, bool) {
+        if let Some(i) = self.slots.iter().position(|(k, _)| *k == key) {
+            return (self.slots.remove(i).1, true);
+        }
+        (Solved::default(), false)
+    }
+
+    /// Most recently used at the front; the oldest falls off the end.
+    pub fn put(&mut self, key: u64, entry: Solved) {
+        self.slots.retain(|(k, _)| *k != key);
+        self.slots.insert(0, (key, entry));
+        self.slots.truncate(self.cap);
+    }
+}
+
 /// What the seat HOLDS, as one number. Two auction decisions with the same key
 /// are asking about the same cards and can share a solve; the talon swap
 /// changes the hand and so changes this.
