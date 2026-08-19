@@ -188,6 +188,64 @@ pub enum OppModel {
     /// Softmax over the opponent's replies; `temp` is in per-world payoff
     /// points. See the type note above.
     Soft(f64),
+    /// DIVERSE CONTINUATION STRATEGIES — Brown, Sandholm & Amos's multi-valued
+    /// states, in the shape this tree can carry (2026-08-19).
+    ///
+    /// THE DEFECT IT ATTACKS, in this file's own words: the tree runs from OUR
+    /// information set, so at a MIN node the opponent picks the reply that is
+    /// best knowing our exact hand. `Myopic` removed the clairvoyance and
+    /// measured WORSE (-0.62 +/- 0.50), which is the paper's own point — best-
+    /// responding to ONE model is brittle. `Soft` blurred the min instead and
+    /// measured +0.957, but it is a temperature rather than a model of what the
+    /// opponent knows, and the crate's standing note is that the pessimism
+    /// applies only to the branch that CONTINUES: passing is priced myopically
+    /// from their side while raising walks into a subtree where they read our
+    /// cards. A temperature cannot separate those; it lowers both.
+    ///
+    /// Here the opponent commits to one of `n` strategies spanning a bias
+    /// toward conceding through a bias toward contesting, each strategy
+    /// choosing its reply by the opponent's OWN myopic price — which is
+    /// computed from their side and does not read our hand. The node takes the
+    /// worst of them for us.
+    ///
+    /// SO THE CANDIDATE REPLIES ARE HAND-BLIND AND ONLY THE SELECTION AMONG
+    /// `n` OF THEM IS NOT. That is the honest description and it is weaker than
+    /// the paper's: Modicum fixes the opponent's continuation at the depth
+    /// limit and holds it, where this re-selects per node, so the leak is
+    /// bounded at log2(n) bits a node rather than closed. It sits strictly
+    /// between `Myopic` (n = 1) and `Minimax` (every legal reply, selected
+    /// against our value), which is the middle this crate had never tried --
+    /// both endpoints were measured and only the endpoints.
+    ///
+    /// `spread` is in per-world payoff points, the same units as `Soft`'s temp
+    /// and as `DOUBLE_MARGIN`. `Diverse(_, 1)` is EXACTLY `Myopic`, asserted.
+    Diverse(f64, u8),
+}
+
+impl OppModel {
+    /// The bias each strategy applies to CONTESTING (naming a contract) over
+    /// conceding, in per-world payoff points. Symmetric around 0 and always
+    /// containing it, so the neutral strategy -- the one `Myopic` plays -- is
+    /// in the set at every `n`.
+    pub fn diverse_biases(spread: f64, n: u8) -> Vec<f64> {
+        // ODD, ALWAYS. An even ladder straddles zero and so does NOT contain the
+        // neutral strategy — the opponent is then forced to be biased, the node
+        // can score ABOVE `Myopic`, and the ordering that makes this model "the
+        // middle" rather than a fourth unrelated one is lost. Caught by
+        // `diverse_sits_between_myopic_and_the_exact_min` reading 16 against a
+        // Myopic 10 at n = 2. Rounding up is a real change to the caller's
+        // parameter, so it is documented here and asserted below.
+        let n = n.max(1) as usize;
+        let n = if n % 2 == 0 { n + 1 } else { n };
+        if n == 1 {
+            return vec![0.0];
+        }
+        // n points evenly spanning [-spread, +spread]; odd n includes 0
+        // exactly, even n straddles it.
+        (0..n)
+            .map(|i| -spread + 2.0 * spread * (i as f64) / ((n - 1) as f64))
+            .collect()
+    }
 }
 
 /// The classic-shape auction's denomination restriction (2026-08-13).
@@ -578,6 +636,67 @@ impl<'a> Search<'a> {
             self.memo.insert(s, best);
             return best;
         }
+        // DIVERSE CONTINUATIONS: the opponent commits to one of `n` hand-blind
+        // strategies and we take the worst. See `OppModel::Diverse`.
+        if !maxing {
+            if let OppModel::Diverse(spread, n) = self.rules.opp {
+                let biases = OppModel::diverse_biases(spread, n);
+                let k = self.worlds.worlds.len().max(1) as f64;
+                // Their own price for each reply, computed from their side.
+                let prices: Vec<f64> = moves.iter().map(|&b| self.opp_myopic(&s, b)).collect();
+                let mut picked: Vec<Bid> = Vec::with_capacity(biases.len());
+                for beta in &biases {
+                    // The bias is per-world; `opp_myopic` sums over worlds, so
+                    // it scales with the sample exactly as `Soft`'s temp does.
+                    let adj = beta * k;
+                    let mut best: Option<(usize, f64)> = None;
+                    for (i, &b) in moves.iter().enumerate() {
+                        if !prices[i].is_finite() {
+                            continue; // unpriced option: never chosen
+                        }
+                        // THE BIAS IS ON HOW FAR THEY CLIMB, not on whether
+                        // they climb at all. A flat contest/concede bonus is
+                        // the same constant on every contract, so it can only
+                        // ever flip pass-against-the-field and never reorder
+                        // the contracts among themselves -- the first cut did
+                        // that and collapsed onto `Myopic` on every fixture,
+                        // which is how narrow a lever it is. Pricing the RAISE
+                        // gives strategies that genuinely bid higher or lower
+                        // than their own book, which is the diversity the model
+                        // is supposed to supply.
+                        let climb = match b {
+                            Bid::Pass => 0.0,
+                            Bid::Contract { level, .. } => (level as f64) - (s.level as f64),
+                            _ => 1.0,
+                        };
+                        let v = prices[i] + adj * climb;
+                        if best.map_or(true, |(_, bv)| v > bv) {
+                            best = Some((i, v));
+                        }
+                    }
+                    if let Some((i, _)) = best {
+                        if !picked.contains(&moves[i]) {
+                            picked.push(moves[i]);
+                        }
+                    }
+                }
+                let out = if picked.is_empty() {
+                    self.settled(&s)
+                } else {
+                    // The opponent takes whichever of their strategies hurts us
+                    // most. Deduped above, so an `n` whose biases all agree
+                    // costs exactly one child -- which is why this is not more
+                    // expensive than the exact min it replaces.
+                    picked
+                        .iter()
+                        .map(|&b| self.step_value(&s, b))
+                        .fold(f64::INFINITY, f64::min)
+                };
+                self.memo.insert(s, out);
+                return out;
+            }
+        }
+
         // SOFT MIN: the opponent is good, not clairvoyant. Every child is
         // evaluated either way (the exact min needs them all), so the only
         // difference is the aggregation — see `OppModel::Soft`.
@@ -664,6 +783,9 @@ impl<'a> Search<'a> {
 mod tests {
     use super::*;
     use crate::bid::World;
+    use crate::dd::Dd;
+    use crate::game::Game;
+    use crate::rng::Rng;
 
     fn classic_rules() -> AucRules {
         AucRules { mode: AucMode::Classic, min_level: 1, max_level: 12, max_raise: 2,
@@ -888,6 +1010,29 @@ mod tests {
                  worlds: vec![w] }
     }
 
+    /// Several worlds, each with its own opponent strength. `Diverse` can only
+    /// differ from `Myopic` where the opponent's own price and our value are
+    /// not perfectly anti-correlated — and with ONE world and no uncertainty
+    /// they are exactly anti-correlated, so their myopic pick already is the
+    /// reply that hurts us most and every bias collapses onto it. That is not a
+    /// quirk of the fixture, it is the model working: uncertainty about their
+    /// hand is the entire thing this opponent model exists to represent.
+    fn worlds_of(ws: &[(i32, i32)]) -> Solved {
+        let worlds = ws
+            .iter()
+            .map(|&(ours, theirs)| {
+                let mut w = World::default();
+                for d in 0..w.pts.len() {
+                    w.pts[d] = ours;
+                    w.opp_pts[d] = theirs;
+                }
+                w
+            })
+            .collect();
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f,
+                 exact: false, worlds }
+    }
+
     fn classic_terms() -> TermsTable {
         let mut t = TermsTable::new();
         for lvl in 1..=12i32 {
@@ -1003,5 +1148,150 @@ mod tests {
         assert_eq!(v.len(), 2);
         let mut alone = Search::new(0, classic_rules(), &t, &w);
         assert_eq!(v[0], alone.step_value(&AucState::opening(0), asked[0]));
+    }
+
+    /// ONE STRATEGY IS EXACTLY THE MODEL THIS CRATE ALREADY MEASURED, and that
+    /// is what makes a `Diverse` A/B unconfoundable in the same way `Soft(0)`
+    /// made the soft-min one: the arm at `n = 1` is not merely similar to
+    /// `Myopic`, it is the same number on every node.
+    #[test]
+    fn one_diverse_strategy_is_exactly_myopic() {
+        for spread in [0.0, 3.0, 25.0] {
+            let (t, w) = (classic_terms(), one_world(3, 10));
+            let s = AucState::opening(0);
+            let mut my = classic_rules();
+            my.opp = OppModel::Myopic;
+            let mut dv = classic_rules();
+            dv.opp = OppModel::Diverse(spread, 1);
+            assert_eq!(
+                Search::new(0, my, &t, &w).value(s).to_bits(),
+                Search::new(0, dv, &t, &w).value(s).to_bits(),
+                "Diverse(spread {}, n 1) diverged from Myopic",
+                spread
+            );
+        }
+    }
+
+    /// A ZERO SPREAD IS ONE STRATEGY however many are asked for -- every bias
+    /// is 0, they all pick the same reply, and the dedupe collapses them. So
+    /// the knob has a genuine null at both ends and `n` alone cannot move the
+    /// answer.
+    #[test]
+    fn a_zero_spread_collapses_to_myopic_at_every_n() {
+        let (t, w) = (classic_terms(), one_world(3, 10));
+        let s = AucState::opening(0);
+        let mut my = classic_rules();
+        my.opp = OppModel::Myopic;
+        let want = Search::new(0, my, &t, &w).value(s);
+        for n in [1u8, 2, 3, 5, 8] {
+            let mut dv = classic_rules();
+            dv.opp = OppModel::Diverse(0.0, n);
+            assert_eq!(
+                Search::new(0, dv, &t, &w).value(s).to_bits(),
+                want.to_bits(),
+                "Diverse(0.0, {}) is not Myopic",
+                n
+            );
+        }
+    }
+
+    /// THE BIAS LADDER IS SYMMETRIC AND ALWAYS CONTAINS THE NEUTRAL STRATEGY at
+    /// odd `n`, which is the property that makes `Diverse` a superset of
+    /// `Myopic` rather than a different bot: whatever else the opponent may
+    /// commit to, "play your own price" is on the menu.
+    #[test]
+    fn the_bias_ladder_is_symmetric_and_always_holds_the_neutral_strategy() {
+        for n in [1u8, 2, 3, 4, 5, 6, 7] {
+            let b = OppModel::diverse_biases(6.0, n);
+            let want = if n % 2 == 0 { n + 1 } else { n } as usize;
+            assert_eq!(b.len(), want, "even n rounds up to odd so 0 stays on the ladder");
+            assert!(b.iter().any(|x| x.abs() < 1e-12), "n={} has no neutral strategy", n);
+            for i in 0..b.len() {
+                let mirror = b[b.len() - 1 - i];
+                assert!((b[i] + mirror).abs() < 1e-9, "ladder is not symmetric at n={}", n);
+            }
+        }
+        assert_eq!(OppModel::diverse_biases(6.0, 1), vec![0.0]);
+    }
+
+    /// AND IT IS NOT VACUOUS -- but only where a biased opponent can actually
+    /// hurt us more than their own price would, which is a narrower set of
+    /// positions than it looks and is worth understanding before reading any
+    /// arena result.
+    ///
+    /// The neutral strategy is in the ladder at every odd `n` and the node
+    /// takes the MIN, so `Diverse <= Myopic` everywhere by construction. On a
+    /// position where the opponent's myopic choice is already the one that
+    /// hurts us most, no bias can find anything worse and the model collapses
+    /// to `Myopic` exactly -- which is correct, not a bug. It is also why the
+    /// first version of this test failed on a single crushing-opponent fixture
+    /// and why the sweep below is over a GRID of hand strengths.
+    /// Worlds solved off REAL deals, because the synthetic fixtures cannot
+    /// answer this question and it took two rounds of failing tests to see why.
+    ///
+    /// `Diverse` differs from `Myopic` only where the opponent's own price and
+    /// our value DISAGREE about which reply is worst for us. In a hand-built
+    /// fixture with one world they are exactly anti-correlated (`settled` for a
+    /// contract they hold is minus their price), so their myopic pick already
+    /// is the worst reply and every bias collapses onto it. Even with several
+    /// worlds it stays anti-correlated while the auction ends at the next pass.
+    /// Real solved worlds are the first fixture where the recursion actually
+    /// bites.
+    fn real_worlds(seed: u64, k: usize) -> Solved {
+        let g = Game::deal(&mut Rng::new(seed), 0, 0);
+        let v = g.view(0);
+        let mut dd = Dd::new(18);
+        let mut rng = Rng::new(0xA11CE ^ seed);
+        let mut cache = Solved::default();
+        crate::bid::solve_into(&v, &mut dd, &mut rng, k, 0x1f, 0x1f, 0, &mut cache, None, false);
+        cache
+    }
+
+    #[test]
+    fn a_wide_spread_actually_moves_the_tree_on_real_deals() {
+        let t = classic_terms();
+        let s = AucState::opening(0);
+        let mut my = classic_rules();
+        my.opp = OppModel::Myopic;
+        let mut moved = 0;
+        for seed in 1..=6u64 {
+            let w = real_worlds(seed, 2);
+            let base = Search::new(0, my.clone(), &t, &w).value(s);
+            if [3.0, 10.0, 40.0].iter().any(|&spread| {
+                let mut dv = classic_rules();
+                dv.opp = OppModel::Diverse(spread, 3);
+                Search::new(0, dv, &t, &w).value(s).to_bits() != base.to_bits()
+            }) {
+                moved += 1;
+            }
+        }
+        assert!(moved > 0, "no real deal at any spread moved the tree off Myopic");
+    }
+
+    /// THE ORDERING IS THE WHOLE CLAIM: Myopic >= Diverse >= Minimax, at every
+    /// spread and every `n`. The upper bound is forced by the neutral strategy
+    /// always being on the ladder, which is why `diverse_biases` rounds even
+    /// `n` up to odd; the lower bound is forced by the opponent choosing from a
+    /// SUBSET of their legal replies.
+    #[test]
+    fn diverse_sits_between_myopic_and_the_exact_min() {
+        let t = classic_terms();
+        let s = AucState::opening(0);
+        let mut my = classic_rules();
+        my.opp = OppModel::Myopic;
+        for seed in 1..=4u64 {
+            let w = real_worlds(seed, 2);
+            let ceil = Search::new(0, my.clone(), &t, &w).value(s);
+            let floor = Search::new(0, classic_rules(), &t, &w).value(s);
+            for n in [1u8, 2, 3, 4, 5] {
+                for spread in [1.0, 5.0, 20.0, 60.0] {
+                    let mut dv = classic_rules();
+                    dv.opp = OppModel::Diverse(spread, n);
+                    let v = Search::new(0, dv, &t, &w).value(s);
+                    assert!(v <= ceil + 1e-6, "seed {seed}: Diverse({spread},{n}) = {v} rose above Myopic {ceil}");
+                    assert!(v >= floor - 1e-6, "seed {seed}: Diverse({spread},{n}) = {v} fell below the min {floor}");
+                }
+            }
+        }
     }
 }

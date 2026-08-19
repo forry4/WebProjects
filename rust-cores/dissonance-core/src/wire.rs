@@ -654,6 +654,14 @@ pub fn auc_rules_from_json(r: &Value) -> Option<crate::auc_search::AucRules> {
             // temperature behaves as today rather than as something new.
             Some("soft") => crate::auc_search::OppModel::Soft(
                 r.get("opp_temp").and_then(|x| x.as_f64()).unwrap_or(0.0)),
+            // DIVERSE CONTINUATIONS. `opp_spread` is in per-world payoff
+            // points like `opp_temp`; `opp_n` is how many strategies span it.
+            // Absent `opp_n` is 1, which is exactly `Myopic` -- so a payload
+            // that names the model but forgets the knob degrades to a tier
+            // this crate already measured rather than to something undefined.
+            Some("diverse") => crate::auc_search::OppModel::Diverse(
+                r.get("opp_spread").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                r.get("opp_n").and_then(|x| x.as_u64()).unwrap_or(1) as u8),
             Some(_) => return None,
         },
     };
@@ -1440,6 +1448,40 @@ mod fixture_replay {
 
 #[cfg(test)]
 mod auction_legality {
+
+    /// THE OPPONENT MODEL COMES OFF THE WIRE, AND A MISSING FIELD IS A TIER.
+    ///
+    /// This crate has now paid three times for a harness that rebuilds a
+    /// payload the server assembles elsewhere and ships the default for
+    /// whatever it forgot -- `cfrlab` measured HARD's auction for a whole
+    /// campaign while its docstring said Expert, on one absent `opp_model`.
+    /// So every model's parse is pinned here, including what each one does
+    /// when its own knob is missing.
+    #[test]
+    fn every_opponent_model_parses_and_a_missing_knob_is_a_known_tier() {
+        use crate::auc_search::OppModel;
+        let base = r#"{"mode":"classic","min_level":1,"max_level":12,"max_raise":2,
+                       "jump_set_bonus":0,"denom_rule":"used","opener_may_pass":false,
+                       "top_denom":4"#;
+        let parse = |extra: &str| -> OppModel {
+            let txt = format!("{base}{extra}}}");
+            let v: Value = serde_json::from_str(&txt).expect("fixture parses");
+            super::auc_rules_from_json(&v).expect("rules parse").opp
+        };
+        assert_eq!(parse(""), OppModel::Minimax, "absent opp_model is Hard's tree");
+        assert_eq!(parse(r#","opp_model":"minimax""#), OppModel::Minimax);
+        assert_eq!(parse(r#","opp_model":"myopic""#), OppModel::Myopic);
+        assert_eq!(parse(r#","opp_model":"soft","opp_temp":5.0"#), OppModel::Soft(5.0));
+        // Soft without a temperature is exactly minimax, which is the tier the
+        // crate already measured rather than something undefined.
+        assert_eq!(parse(r#","opp_model":"soft""#), OppModel::Soft(0.0));
+        assert_eq!(
+            parse(r#","opp_model":"diverse","opp_spread":6.0,"opp_n":3"#),
+            OppModel::Diverse(6.0, 3)
+        );
+        // ...and diverse without its knobs is `Myopic`, likewise a measured tier.
+        assert_eq!(parse(r#","opp_model":"diverse""#), OppModel::Diverse(0.0, 1));
+    }
     // THE AUCTION'S LEGALITY, held to the engine's own answer.
     //
     // Everything the Expert tier's tree needs is shipped as DATA except this:

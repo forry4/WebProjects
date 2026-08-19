@@ -429,6 +429,26 @@ def actions(level, holds):
 #: difference from Hard is this number.
 OPP_TEMP = float(os.environ.get("CFR_OPP_TEMP", str(M.EXPERT_OPP_TEMP)))
 
+#: THE DIVERSE-CONTINUATIONS ARM (2026-08-19). Non-zero switches the tree's
+#: opponent model from `soft` to `diverse` -- Brown/Sandholm/Amos multi-valued
+#: states, where the opponent commits to one of `CFR_OPP_N` hand-blind
+#: strategies spanning a bias toward conceding through a bias toward
+#: contesting, and the node takes the worst of them for us.
+#:
+#: WHY THIS ARM EXISTS AND THE TEMPERATURE COULD NOT SETTLE IT. The standing
+#: diagnosis is structural rather than a parameter: passing is a leaf priced
+#: myopically from the opponent's side, while raising continues into a subtree
+#: whose modelled opponent is handed our exact hand and always finds the
+#: punishing reply, so the pessimism applies only to the branch that CONTINUES.
+#: A temperature lowers both branches and the two cancelled. Diverse changes
+#: WHICH replies are on the menu rather than how they are averaged.
+#:
+#: 0 leaves the soft/minimax path exactly as it was, so this cannot confound a
+#: re-run of any earlier arm. `CFR_OPP_N` is rounded up to odd by the Rust so
+#: the neutral strategy is always on the ladder.
+OPP_DIVERSE = float(os.environ.get("CFR_OPP_DIVERSE", "0"))
+OPP_N = int(os.environ.get("CFR_OPP_N", "3"))
+
 
 def bid(g, seat):
     """One SHIPPED auction decision, through the served path.
@@ -448,7 +468,11 @@ def bid(g, seat):
     if g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:
-            if OPP_TEMP > 0:
+            if OPP_DIVERSE > 0:
+                s["rules"]["opp_model"] = "diverse"
+                s["rules"]["opp_spread"] = OPP_DIVERSE
+                s["rules"]["opp_n"] = OPP_N
+            elif OPP_TEMP > 0:
                 s["rules"]["opp_model"] = "soft"
                 s["rules"]["opp_temp"] = OPP_TEMP
             auc["search"] = s
@@ -655,7 +679,13 @@ def expert_round(seed):
     row = {"level": level, "decl": decl, "v": v, "dec": dec, "flat": flat,
            # STAMPED, because a checkpoint outlives the shell that made it and
            # two tiers' rows are indistinguishable once pooled.
-           "temp": OPP_TEMP}
+           "temp": OPP_TEMP,
+           # THE ARM, stamped beside the temperature for exactly the reason the
+           # temperature is stamped: a checkpoint outlives the shell that wrote
+           # it, and two opponent models' rows are indistinguishable once
+           # pooled. Absent means the soft/minimax path, which is what every
+           # row written before this arm existed ran.
+           "dv": OPP_DIVERSE, "dvn": OPP_N if OPP_DIVERSE > 0 else 0}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1788,15 +1818,23 @@ def corpus_tiers(rows):
     """
     seen = defaultdict(int)
     for r in rows:
-        seen[r.get("temp", 0.0)] += 1
+        # The opponent MODEL is part of the tier, not just its temperature: a
+        # diverse corpus and a soft one are different bidders and pooling them
+        # reports the exploitability of neither.
+        seen[(r.get("temp", 0.0), r.get("dv", 0.0), r.get("dvn", 0))] += 1
     return dict(seen)
 
 
 def _tier_line(rows):
     t = corpus_tiers(rows)
+    def name(k):
+        temp, dv, dvn = k
+        if dv > 0:
+            return f"diverse spread {dv:g} n {dvn}"
+        return "minimax (hard)" if temp == 0 else f"soft temp {temp:g} (expert)"
+
     return "  corpus tier: " + ", ".join(
-        f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}: {v} rounds"
-        for k, v in sorted(t.items())) + (
+        f"{name(k)}: {v} rounds" for k, v in sorted(t.items())) + (
         "   *** MIXED TIERS -- this pools two different bidders ***"
         if len(t) > 1 else "")
 
