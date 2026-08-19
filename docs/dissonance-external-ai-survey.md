@@ -337,9 +337,14 @@ It is the same reasoning Kermit's inference tables encode.
 
 ## Part 4 — suggested order, cheapest-diagnostic-first
 
-1. **Measure Dissonance's three PIMC properties** (leaf correlation, bias, disambiguation
-   factor). Hours, not days; needs no new search. Predicts the payoff of items 3 and 6 in
-   advance, and settles why inference paid in Skat and washed here.
+1. ~~**Measure Dissonance's three PIMC properties**~~ — **DONE 2026-08-19**, `bin/pimcprops`,
+   400 deals. Leaf correlation **0.713** near the leaves (favours PIMC), bias **0.605**
+   (mid), disambiguation **0.505** per ply — **mid-range, which the paper names as the worst
+   case for PIMC**. Two of three axes put this game where PIMC is not near-optimal, so
+   strategy fusion is structurally present and item 3 is worth one bounded experiment. The
+   same tool counts the information set exactly and decomposes it: hard-constraint inference
+   (voids + must-head) is worth **at most ~0.6 bits** against sets 6-27 bits wide. Full
+   numbers in `rust-cores/dissonance-core/CAMPAIGN.md`.
 2. **Measure sigma** — double-dummy `pts` vs what the shipped PIMC search actually achieves,
    per position. The file already asks for this. Same pass produces the labels for item 4 and
    tightens every "the ladder is too coarse" claim, all of which are currently upper bounds.

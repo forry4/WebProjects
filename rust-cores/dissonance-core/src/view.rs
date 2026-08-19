@@ -172,6 +172,63 @@ impl View {
         (slots, n)
     }
 
+    /// log10 of the NUMBER of complete deals consistent with everything the
+    /// observer knows — i.e. the size of this information set.
+    ///
+    /// This is `determinize`'s own sample space read as a number rather than
+    /// sampled from, which is why it can be exact: the opponent's hand is any
+    /// `nh`-subset of the cards no void and no must-head ceiling excludes, and
+    /// every remaining pool card falls either into one of the labelled covered
+    /// side-pile slots or into the unordered out-pile. So
+    ///
+    ///   |I| = C(n_allowed, nh) * (nslots + n_out)! / n_out!
+    ///
+    /// Kept next to `determinize` deliberately: the two share the constraint
+    /// structure, and a count that drifts from what the sampler actually draws
+    /// from is worse than no count at all. `counts_exactly_what_determinize_can_draw`
+    /// holds them together.
+    ///
+    /// `infer = false` drops the void and must-head constraints — the set a
+    /// searcher faces if it never reads the play record. The gap between the
+    /// two is what follow-suit inference is worth, in bits.
+    pub fn infoset_log10(&self, infer: bool) -> f64 {
+        let opp = 1 - self.me;
+        let (_, nslots) = self.hidden_slots();
+        let nh = self.opp_hand_n as usize;
+        let n_out = self.n_out_hidden as usize;
+
+        let voids = self.kn.hand_void[opp];
+        let caps = self.kn.hand_cap[opp];
+        let mut n_allowed = 0usize;
+        let mut m = self.pool;
+        while m != 0 {
+            let c = m.trailing_zeros() as u8;
+            m &= m - 1;
+            if !infer {
+                n_allowed += 1;
+                continue;
+            }
+            let cls = esuit(c, self.s.trump) as usize;
+            if !voids[cls] && rank(c) <= caps[cls] {
+                n_allowed += 1;
+            }
+        }
+
+        let mut lg = 0f64;
+        for j in 0..nh {
+            if n_allowed <= j {
+                // Unreachable if the inference is sound, and `determinize`
+                // degrades on the same condition rather than hanging.
+                return 0.0;
+            }
+            lg += ((n_allowed - j) as f64).log10() - ((j + 1) as f64).log10();
+        }
+        for j in 0..nslots {
+            lg += ((nslots + n_out - j) as f64).log10();
+        }
+        lg
+    }
+
     /// A complete deal consistent with everything the observer knows.
     pub fn determinize(&self, rng: &mut Rng, buf: &mut Vec<u8>) -> State {
         let opp = 1 - self.me;
@@ -228,5 +285,125 @@ impl View {
             d.pile[q][i].c[0] = buf[nh + k];
         }
         d
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bots::{GreedyBot, PimcBot};
+    use crate::game::Bot;
+    use std::collections::HashSet;
+
+    /// The deal's own arithmetic, done by hand: 7 opponent hand cards, four
+    /// covered side-pile bottoms and six out of play is 17 unknowns, and the
+    /// hand is any 7 of them with the rest falling into four labelled slots.
+    ///
+    /// Hardcoded on purpose — a expectation derived from the same constants the
+    /// implementation reads would share any bug in how it reads them.
+    #[test]
+    #[cfg(not(any(feature = "rank7", feature = "rank9", feature = "rank10")))]
+    fn a_fresh_deal_has_exactly_98_017_920_consistent_worlds() {
+        let g = Game::deal(&mut Rng::new(7), 0, 0);
+        let v = g.view(0);
+        // C(17,7) = 19448 ways to pick the hand; 10*9*8*7 = 5040 to fill the
+        // four covered slots from the remaining ten.
+        let expect = (19448f64 * 5040f64).log10();
+        assert!(
+            (v.infoset_log10(true) - expect).abs() < 1e-9,
+            "fresh-deal information set: got 10^{}, want 10^{}",
+            v.infoset_log10(true),
+            expect
+        );
+        // Nothing has been played, so inference has nothing to say yet.
+        assert_eq!(v.infoset_log10(true), v.infoset_log10(false));
+    }
+
+    /// THE COUNT AND THE SAMPLER MUST AGREE, and this is the only test that can
+    /// say so: `infoset_log10` is a closed form over `determinize`'s sample
+    /// space, so the honest check is to run the sampler somewhere the space is
+    /// small enough to enumerate and confirm it reaches exactly that many
+    /// distinct deals and no more.
+    ///
+    /// Deep in the round, where the set is countable by brute force.
+    #[test]
+    fn counts_exactly_what_determinize_can_draw() {
+        let mut checked = 0;
+        for seed in 1..40u64 {
+            let mut g = Game::deal(&mut Rng::new(seed), 0, 0);
+            let mut bot = GreedyBot;
+            // Play until one seat's information set is small enough to
+            // enumerate by sampling, then compare.
+            while !g.over() {
+                let p = g.s.to_play() as usize;
+                let v = g.view(p);
+                let n = 10f64.powf(v.infoset_log10(true));
+                if n >= 2.0 && n <= 60.0 {
+                    let mut seen: HashSet<(Mask, [u8; 4])> = HashSet::new();
+                    let mut rng = Rng::new(0xBEEF ^ seed);
+                    let mut buf = Vec::new();
+                    let (slots, nslots) = v.hidden_slots();
+                    // Far more draws than the space, so coverage is not the
+                    // thing under test — the COUNT is.
+                    for _ in 0..20000 {
+                        let d = v.determinize(&mut rng, &mut buf);
+                        let mut key = [255u8; 4];
+                        for k in 0..nslots {
+                            let (q, i) = slots[k];
+                            key[k] = d.pile[q][i].c[0];
+                        }
+                        seen.insert((d.hand[1 - p], key));
+                    }
+                    assert_eq!(
+                        seen.len() as f64,
+                        n.round(),
+                        "seed {} ply: counted 10^{} = {} worlds, sampler reached {}",
+                        seed,
+                        v.infoset_log10(true),
+                        n.round(),
+                        seen.len()
+                    );
+                    checked += 1;
+                    break;
+                }
+                let c = bot.pick(&v);
+                g.apply(c);
+            }
+            if checked >= 6 {
+                break;
+            }
+        }
+        assert!(checked >= 6, "only {} positions were small enough to enumerate", checked);
+    }
+
+    /// Inference can only ever SHRINK the set, and by the end of the round it
+    /// has to have collapsed to a single deal — every card is accounted for.
+    #[test]
+    fn inference_only_shrinks_and_the_set_collapses_by_the_end() {
+        for seed in 1..8u64 {
+            let mut g = Game::deal(&mut Rng::new(seed), (seed % 5) as u8, 0);
+            let mut bot = PimcBot::new(2, 0x1234 ^ seed, 16);
+            let mut last = f64::INFINITY;
+            while !g.over() {
+                let p = g.s.to_play() as usize;
+                let v = g.view(p);
+                let with = v.infoset_log10(true);
+                let without = v.infoset_log10(false);
+                assert!(
+                    with <= without + 1e-9,
+                    "seed {}: inference GREW the set, {} > {}",
+                    seed,
+                    with,
+                    without
+                );
+                if p == 0 {
+                    assert!(with <= last + 1e-9, "seat 0's set grew: {} > {}", with, last);
+                    last = with;
+                }
+                let c = bot.pick(&v);
+                g.apply(c);
+            }
+            assert!(last < 1.0, "seed {}: seat 0 ended still holding 10^{} worlds", seed, last);
+        }
     }
 }

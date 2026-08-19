@@ -115,6 +115,82 @@ restricted to public-information play. Standard PIMC is pessimistic in a
 specific way (its opponent sees our hand); that variant is optimistic in the
 opposite way, and bracketing the two should beat either.
 
+## THE THREE PIMC PROPERTIES, MEASURED (2026-08-19)
+
+`bin/pimcprops`, 400 deals, PimcBot k=8, classic parity, 32 cards. Long,
+Sturtevant, Buro & Bowling (AAAI 2010) parameterise a synthetic tree by three
+numbers and show which combinations leave PIMC near-optimal. This game had never
+been placed on those axes, and two of the three put it in the region where PIMC
+is NOT near-optimal — which is the first evidence independent of `diag` that the
+residual above is structural rather than a sampling artefact.
+
+| property | measured | reading |
+|---|---|---|
+| **leaf correlation** | **0.713** at trick 12 (deepest trick with choices, n=631), rising 0.257 -> 0.713 from trick 1; 0.365 pooled over 8346 choice nodes | HIGH near the leaves, which FAVOURS PIMC |
+| **bias** | seat 0 ahead on **60.5%** of deals under exact double-dummy play, no ties (n=400); distance from even **0.210** | near-even, i.e. mid-range — does not help |
+| **disambiguation** | **0.505** mean per ply over the round, **0.568** over the first 13 plies | MID-RANGE, which the paper names as the WORST CASE for PIMC |
+
+**What each is here, because none of the three has a canonical estimator on a
+real game** — the paper's own note is that a real game is "a cloud of parameters"
+rather than a point, and its three knobs are knobs on a synthetic binary tree:
+
+* **leaf correlation** — at a reachable node where the mover has >= 2 legal
+  cards, solve the TRUE world for every one of them and ask whether they all come
+  back equal. The per-trick curve is the useful object; "near a leaf" is the part
+  of their model that carries the weight. Mean sibling SPREAD falls with it, 2.58
+  points at trick 1 to 0.87 at trick 12.
+* **bias** — off the exact root solve, so it is a property of the GAME rather
+  than of whoever is playing it. The 60.5% is the opening lead, already measured
+  at +0.93 pts and here in a second currency.
+* **disambiguation** — `View::infoset_log10` COUNTS the information set exactly
+  (see below), and df = 1 - |I_t+1| / |I_t| per ply. Same construction as their
+  model, where a set shrinks by a factor of (1 - df) per level; the mapping onto
+  their synthetic tree is qualitative and should not be read as a calibrated
+  number.
+
+**THE COUNT IS EXACT, AND THAT IS THE PART TO TRUST.** `determinize` is uniform
+over consistent deals and its constraint structure is simple enough to count in
+closed form rather than sample: the opponent's hand is any `nh`-subset of the
+cards no void and no must-head ceiling excludes, and every remaining pool card
+falls into a labelled covered-pile slot or the unordered out-pile, so
+`|I| = C(n_allowed, nh) * (nslots + n_out)! / n_out!`. A fresh deal is exactly
+**98,017,920** worlds. Both are tested — `a_fresh_deal_has_exactly_98_017_920_consistent_worlds`
+pins the arithmetic against a hand computation, and
+`counts_exactly_what_determinize_can_draw` runs the SAMPLER 20,000 times at
+positions where the set is small enough to enumerate and demands it reach exactly
+that many distinct deals and no more. Verified non-vacuous: a one-off in the
+falling factorial fails both.
+
+**AND THE COUNT DECOMPOSES, which is the number this campaign never had.** The
+same count with the void and must-head constraints DROPPED is what a searcher
+faces if it never reads the play record, so the gap between the two curves is
+what follow-suit inference is worth, in bits:
+
+| ply | log10 \|I\| | inference gap | share of remaining uncertainty |
+|---|---|---|---|
+| 0 | 7.99 (26.5 bits) | 0.00 bits | 0% — nothing played yet |
+| 4 | 6.35 (21.1 bits) | 0.19 bits | 0.9% |
+| 12 | 3.48 (11.5 bits) | 0.50 bits | 4.3% |
+| 18 | 1.75 (5.8 bits) | 0.58 bits | 9.9% |
+| 25 | 0.14 (0.5 bits) | 0.19 bits | — |
+
+**Hard-constraint inference never removes more than about six tenths of a bit**,
+against sets 6 to 27 bits wide, and its SHARE only becomes non-trivial late,
+by which point the set is collapsing on its own at ~50% a ply. Scope this
+precisely before citing it: it measures the channel `determinize` actually
+enforces (voids + must-head ceilings). The opponent-consistency resampling in
+`infer.rs` is a softer, separate channel and so is `bid::BidPrior`'s auction
+evidence — neither is in this number.
+
+**WHAT IT PREDICTS, and it is genuinely two-sided.** High leaf correlation is
+the strongest PIMC-favourable signal there is and we have it, which is consistent
+with `diag`'s 89.5%-already-optimal. But a mid-range disambiguation factor is the
+paper's stated worst case, and 0.505 is as mid-range as the axis gets. So the
+shape of the game says strategy fusion is STRUCTURALLY PRESENT rather than
+absent — it supports spending one bounded experiment on a fusion-aware search
+(alpha-mu), and it does not move the ceiling, which is still the 0.79 oracle gap
+of which most is the value of simply knowing 13 cards.
+
 # Bidding
 
 `bidlab` runs full auctions and resolves the contract by an exact double-dummy
