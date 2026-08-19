@@ -86,6 +86,11 @@ fn build_bounds_cards(max: bool) -> [i16; 14] {
     a
 }
 
+/// The top of the outcome order, for `Dd::threat_value`. Any value the deck's
+/// point totals cannot reach and the search's own window comfortably holds --
+/// `solve_contract` opens at +-1_000_000, and a round's totals live in -7..12.
+pub const THREAT_TOP: i32 = 100_000;
+
 /// A contract to be played out exactly, rather than for maximum points.
 ///
 /// Once anything about the payoff depends on the MARGIN -- an overtrick bonus,
@@ -339,6 +344,88 @@ impl Dd {
             t.play(m);
             out[i] = self.solve_contract(&t, c);
         }
+    }
+
+
+    /// THE NULL THREAT, as one number: the most the declarer can guarantee when
+    /// taking no scoring trick counts as winning outright.
+    ///
+    /// WHY THIS EXISTS. The auction leaf prices a contract as
+    /// `max(contract(P), null if the duck is GUARANTEED)`, where `P` is the
+    /// points solve — and that is the crate's one documented leaf error:
+    /// measured over 900 (deal, contract) pairs it agrees with an exact
+    /// `solve_contract` 93.3% of the time, every gap is POSITIVE (+6.5
+    /// conditional, worst +27), and the mechanism is always the same. A
+    /// declarer who cannot GUARANTEE ducking can still leverage the THREAT of
+    /// it: the defender cannot both prevent the Null and hold the points down,
+    /// so they must give up one, and `max` of two separately-guaranteed plans
+    /// credits neither.
+    ///
+    /// THE OUTCOME SPACE IS TOTALLY ORDERED, WHICH IS THE WHOLE TRICK. A round
+    /// ends either with the declarer having taken no scoring trick — worth the
+    /// consolation, a single flat value — or with a points total, worth a
+    /// function of that total which `Contract::payoff` makes strictly
+    /// increasing on both its branches. In a perfect-information zero-sum game
+    /// with totally ordered outcomes, the value under any monotone payoff is
+    /// that payoff applied to the best outcome the declarer can FORCE. So two
+    /// scalars price every contract on this deal, at every level and every
+    /// jump:
+    ///
+    /// * `P` — the points solve: the largest `x` with "I can force `pts >= x`";
+    /// * `Q` — this function: the largest `x` with "I can force `pts >= x` OR
+    ///   no scoring trick", which is the same question with the duck moved to
+    ///   the TOP of the order.
+    ///
+    /// and `payoff_exact` folds them (see `bid::Option_::payoff_exact`). `Q`
+    /// therefore replaces a per-CONTRACT solve with a per-DENOMINATION one —
+    /// the reason the exact leaf is affordable at all, since a classic auction
+    /// tree can reach fifty settlements over five denominations.
+    ///
+    /// It also SUBSUMES `null_no_even_makeable`: a guaranteed duck is exactly
+    /// `Q == THREAT_TOP`, because forcing the top of the order needs no points
+    /// at all.
+    pub fn threat_value(&mut self, s: &State, declarer: usize, guess: i32) -> i32 {
+        // `payoff` reads: no scoring trick -> the consolation, flat; otherwise
+        // `0 + 1 x (pts - 0)` above the target and `-(0 + 1 x (0 - pts))` below
+        // it -- both of which are `pts`. So this contract's payoff IS the
+        // declarer's point total, with the duck pinned above every total the
+        // deck can produce.
+        let c = Contract {
+            level: 0,
+            declarer,
+            make_base: 0,
+            over: 1,
+            set_base: 0,
+            short: 1,
+            ramp: 0,
+            null: Some(THREAT_TOP),
+        };
+        // MTD(f) FROM THE POINTS SOLVE, which is free evidence: `Q >= P`
+        // always (forcing `pts >= P` also forces "duck OR `pts >= P`") and the
+        // two are equal on the ~85% of contracts where the threat adds nothing,
+        // so the seed is usually the answer and the ladder costs one probe.
+        // A full-window `solve_contract` here measured a whole auction at 3.0x
+        // the myopic one (17.5 -> 51.8 s/deal in `cfrlab`'s control arm);
+        // seeded, it is 2.1x (38.1).
+        //
+        // The window is the point-total range plus the duck's sentinel, and it
+        // steps by 1: the reachable set is `pts` totals AND `THREAT_TOP`, which
+        // no parity argument spans, so the stride-2 trick `mtdf` uses for the
+        // points ladder would step straight past the answer.
+        self.ckey = c.key();
+        let (mut lo, mut hi) = (-64i32, THREAT_TOP);
+        let mut g = guess.clamp(lo, hi);
+        while lo < hi {
+            let beta = if g <= lo { lo + 1 } else { g };
+            let v = self.csearch(s, &c, beta - 1, beta);
+            if v < beta {
+                hi = v;
+            } else {
+                lo = v;
+            }
+            g = v;
+        }
+        g
     }
 
     /// Exact value of playing out a CONTRACT, as declarer score minus defender

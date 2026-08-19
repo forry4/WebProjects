@@ -43,8 +43,8 @@ fn main() {
                     rng = Rng::new(99);
                 }
                 let n0 = dd.nodes;
-                solve_into(&v, &mut dd, &mut rng, k, wanted, 0, 0, &mut cache, None);
-                let _ = price(&opts, &cache.worlds, cache.covered, cache.covered_opp);
+                solve_into(&v, &mut dd, &mut rng, k, wanted, 0, 0, &mut cache, None, false);
+                let _ = price(&opts, &cache.worlds, cache.covered, cache.covered_opp, false);
                 nodes[turn] += dd.nodes - n0;
             }
         }

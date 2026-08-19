@@ -417,6 +417,10 @@ def bid(g, seat):
     if not opts:
         return None
     auc = {"phase": g["phase"], "declarer": seat, "options": opts}
+    # The exact-leaf arm, off unless `DIS_EXACT_LEAF` is set -- the same switch
+    # `main.py` reads, so the control arm here really is the served bidder.
+    if B.exact_leaf():
+        auc["exact_leaf"] = True
     if g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:

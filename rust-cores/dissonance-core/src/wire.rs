@@ -832,17 +832,35 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
     // with the swap applied answer a different question than worlds solved
     // as dealt, and the contract-table bug was this exact shape.
     let swap = auc.get("swap").and_then(swap_from_json);
+    // THE EXACT LEAF (optional, default false -- so an older server, and the
+    // arm's own control, reproduce today's answer byte for byte).
+    //
+    // The shipped leaf prices a contract as `max(contract(P), null if the duck
+    // is GUARANTEED)`. That is the crate's one documented leaf error: it takes
+    // the better of two SEPARATELY guaranteed plans, where a real defence has
+    // to stop both and cannot always do it. `Dd::threat_value` adds the one
+    // extra scalar that closes it, per DENOMINATION rather than per contract --
+    // see `Option_::payoff_exact`, and the sweep that proves the identity.
+    //
+    // It is part of the CACHE IDENTITY for the same reason `swap` is: worlds
+    // solved without the threat cannot price an exact leaf, and their zeroed
+    // `threat` would read as "the declarer can force nothing at all" -- a
+    // plausible-looking number, which is how every silent failure in this file
+    // has looked.
+    let exact = auc.get("exact_leaf").and_then(|x| x.as_bool()).unwrap_or(false);
     let key = crate::bid::hand_key(&view, declarer, k.max(1))
-        ^ swap.as_ref().map_or(0, |sp| sp.key());
+        ^ swap.as_ref().map_or(0, |sp| sp.key())
+        ^ if exact { 0xE4AC_71EA } else { 0 };
     // A different hand starts a new entry; the same hand extends the one it
     // has, and asking about nothing new does no work at all.
     let (mut entry, _) = cache.take(key);
     let cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
     if !cached {
         crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer,
-                               &mut entry, swap.as_ref());
+                               &mut entry, swap.as_ref(), exact);
     }
-    let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp);
+    let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp,
+                                   entry.exact);
     let sums = match &expert {
         Some((st, rules, terms, edges)) => {
             let mut s = crate::auc_search::Search::new(view.me, rules.clone(), terms, &entry);
@@ -1687,7 +1705,7 @@ mod exact_double {
                 let pool = g.s.pool() as i32;
                 w.pts[2] = (pool + diff) / 2;
                 w.duck[2] = dd.null_no_even_makeable(&g.s, 0);
-                let proxy = price(&opts, &[w], 1 << 2, 0);
+                let proxy = price(&opts, &[w], 1 << 2, 0, false);
                 // The DECISION each would take: double iff it costs the declarer.
                 n += 1;
                 if (exact[0] < exact[1]) != (proxy[0] < proxy[1]) {

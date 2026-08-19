@@ -78,16 +78,58 @@ impl Option_ {
     /// priced only the first would decline hands it should be bidding.
     #[inline]
     pub fn payoff(&self, guaranteed_pts: i32, can_duck: bool) -> i32 {
-        let contract = if guaranteed_pts >= self.target {
-            self.make + self.over * (guaranteed_pts - self.target)
-        } else {
-            let s = self.target - guaranteed_pts;
-            -(self.set_base + self.short * s + self.ramp * s * (s + 1) / 2)
-        };
+        let contract = self.contract_value(guaranteed_pts);
         if can_duck {
             contract.max(self.null)
         } else {
             contract
+        }
+    }
+
+    /// The same price, EXACT: `payoff` above is the crate's one documented leaf
+    /// error and this is what removes it.
+    ///
+    /// `payoff` takes the better of two SEPARATELY GUARANTEED plans -- reach the
+    /// target, or duck every scoring trick -- and a declarer who can guarantee
+    /// neither is credited with the worse of them. Real play does not work that
+    /// way: the defender has to stop BOTH, and when they cannot, the declarer
+    /// takes whichever the defence gave up. Measured over 900 (deal, contract)
+    /// pairs, `payoff` agrees with an exact `solve_contract` 93.3% of the time
+    /// and every one of the gaps is POSITIVE (+6.5 conditional, worst +27) --
+    /// so the shipped leaf leans, one-directionally, toward CONCEDING.
+    ///
+    /// `threat` is `Dd::threat_value`: the most the declarer can force when the
+    /// duck counts as winning outright. See that function for why two scalars
+    /// are enough to price every level and every jump on one deal, which is the
+    /// only reason an exact leaf is affordable in a tree that reaches fifty
+    /// settlements.
+    ///
+    /// The fold, and each branch is a forcible set of outcomes:
+    /// * `contract(P)` -- force `pts >= P`, taking whatever that pays;
+    /// * `min(null, contract(Q))` -- force "duck OR `pts >= Q`", where the
+    ///   defence picks whichever of the two is worse for us.
+    ///
+    /// A guaranteed duck is `Q == THREAT_TOP`, and the second branch collapses
+    /// to `null` -- i.e. this REPRODUCES `payoff(.., true)` exactly there,
+    /// which is what makes an A/B against it unconfounded.
+    #[inline]
+    pub fn payoff_exact(&self, guaranteed_pts: i32, threat: i32) -> i32 {
+        let plain = self.contract_value(guaranteed_pts);
+        if threat >= crate::dd::THREAT_TOP {
+            return plain.max(self.null);
+        }
+        plain.max(self.null.min(self.contract_value(threat)))
+    }
+
+    /// What the contract alone pays at a point total, with no consolation --
+    /// shared by both pricers so the two can never disagree about the curve.
+    #[inline]
+    fn contract_value(&self, pts: i32) -> i32 {
+        if pts >= self.target {
+            self.make + self.over * (pts - self.target)
+        } else {
+            let s = self.target - pts;
+            -(self.set_base + self.short * s + self.ramp * s * (s + 1) / 2)
         }
     }
 }
@@ -200,11 +242,19 @@ pub struct World {
     pub pts: [i32; NDENOM_SLOTS],
     /// Could the declarer take NO +2 trick, in that denomination as trump?
     pub duck: [bool; NDENOM_SLOTS],
+    /// `Dd::threat_value` -- the most the declarer can force when the duck
+    /// counts as winning outright. With `pts` it prices every level and every
+    /// jump EXACTLY (`Option_::payoff_exact`), which is the only reason an
+    /// exact leaf fits in a tree that reaches fifty settlements. Solved only
+    /// when the entry is an exact one; `duck` is then derived from it rather
+    /// than searched separately.
+    pub threat: [i32; NDENOM_SLOTS],
     /// The same two questions with the OPPONENT declaring, for pricing a pass.
     /// A separate solve, not a sign flip of the above: the declarer LEADS, so
     /// swapping who declares changes the position, not just the perspective.
     pub opp_pts: [i32; NDENOM_SLOTS],
     pub opp_duck: [bool; NDENOM_SLOTS],
+    pub opp_threat: [i32; NDENOM_SLOTS],
 }
 
 /// The sampled deals AND what has been solved on them so far.
@@ -229,6 +279,13 @@ pub struct Solved {
     /// apart because the two sides are asked for independently: an auction
     /// round wants our five and their one, and the sets do not move together.
     pub covered_opp: u8,
+    /// Whether these worlds carry `threat`, i.e. whether they can price an
+    /// EXACT leaf. Part of the entry's identity rather than a detail: worlds
+    /// solved without it answer a different question, and reading a zero
+    /// `threat` as a real one would price every contract as though the
+    /// declarer could force nothing at all -- a plausible-looking number, which
+    /// is the failure shape this crate keeps paying for.
+    pub exact: bool,
     pub worlds: Vec<World>,
 }
 
@@ -238,7 +295,7 @@ pub struct Solved {
 /// fixed its trump asks about one, and paying for the other four would be four
 /// full 13-trick solves thrown away.
 fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut World,
-               for_opponent: bool, shown: Mask, swap: Option<&SwapPolicy>) {
+               for_opponent: bool, shown: Mask, swap: Option<&SwapPolicy>, exact: bool) {
     // MTD(f) converges by a ladder of null-window probes, so each denomination
     // seeds the next: the same hand is worth a similar amount in hearts and in
     // spades, and the first full solve pays for the other four.
@@ -276,13 +333,28 @@ fn solve_world(dd: &mut Dd, base: &State, declarer: usize, wanted: u8, w: &mut W
         let pool = s.pool() as i32;
         let p0 = (pool + diff) / 2;
         let mine = if declarer == 0 { p0 } else { pool - p0 };
-        let duck = dd.null_no_even_makeable(&s, declarer);
+        // THE EXACT LEAF SUBSUMES THE DUCKING SEARCH rather than adding to it:
+        // a guaranteed duck is exactly the top of `threat_value`'s outcome
+        // order, so this is one solve swapped for another and not a second one
+        // bolted on. (`the_threat_value_prices_every_contract_exactly` asserts
+        // the two agree, which is what lets this branch drop `nsearch`.)
+        // Seeded with this denomination's own points value -- see
+        // `Dd::threat_value`. `mine` is exactly the largest total the declarer
+        // can force, and the threat can only be higher.
+        let threat = if exact { dd.threat_value(&s, declarer, mine) } else { 0 };
+        let duck = if exact {
+            threat >= crate::dd::THREAT_TOP
+        } else {
+            dd.null_no_even_makeable(&s, declarer)
+        };
         if for_opponent {
             w.opp_pts[d as usize] = mine;
             w.opp_duck[d as usize] = duck;
+            w.opp_threat[d as usize] = threat;
         } else {
             w.pts[d as usize] = mine;
             w.duck[d as usize] = duck;
+            w.threat[d as usize] = threat;
         }
     }
 }
@@ -327,8 +399,13 @@ pub fn wanted_denoms(opts: &[Option_]) -> (u8, u8) {
 /// and a superset solves only the difference, on the same deals.
 pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
                   wanted: u8, wanted_opp: u8, declarer: usize, cache: &mut Solved,
-                  swap: Option<&SwapPolicy>) {
+                  swap: Option<&SwapPolicy>, exact: bool) {
     let k = k.max(1);
+    // The entry records which leaf it was solved FOR. An entry that has not
+    // paid for the threat solves cannot price an exact leaf, and its zeroed
+    // `threat` would read as "the declarer can force nothing" -- so the flag
+    // rides with the worlds and the callers key on it.
+    cache.exact = exact;
     deals_into(v, rng, k, cache, None);
     let todo = wanted & !cache.covered;
     let todo_opp = wanted_opp & !cache.covered_opp;
@@ -339,17 +416,31 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
         .zip(cache.shown.iter())
     {
         if todo != 0 {
-            solve_world(dd, deal, declarer, todo, w, false, shown, swap);
+            solve_world(dd, deal, declarer, todo, w, false, shown, swap, exact);
         }
         if todo_opp != 0 {
             // The other seat declaring, which is a DIFFERENT position and not a
             // sign flip: the declarer leads to trick 1. The SAME shown set:
             // `shown_at_deal` is fixed before the auction, whoever wins it.
-            solve_world(dd, deal, 1 - declarer, todo_opp, w, true, shown, swap);
+            solve_world(dd, deal, 1 - declarer, todo_opp, w, true, shown, swap, exact);
         }
     }
     cache.covered |= todo;
     cache.covered_opp |= todo_opp;
+}
+
+/// One option against one world, by whichever leaf the entry was solved for.
+///
+/// ONE FUNCTION so the myopic and exact leaves can never disagree about which
+/// scalars they read: the pricer and the tree both come through here, and the
+/// `exact` flag is the entry's own (`Solved::exact`), never a caller's opinion.
+#[inline]
+pub fn leaf(o: &Option_, exact: bool, pts: i32, duck: bool, threat: i32) -> i32 {
+    if exact {
+        o.payoff_exact(pts, threat)
+    } else {
+        o.payoff(pts, duck)
+    }
 }
 
 /// THE CHEAP HALF: price each option against already-solved deals.
@@ -358,7 +449,8 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
 /// solved must be left at zero rather than read out of a default `World`, where
 /// it would price as a flat 0 points in every deal — a plausible-looking number
 /// that would outrank genuinely bad contracts.
-pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8) -> Vec<f64> {
+pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8,
+             exact: bool) -> Vec<f64> {
     let mut sums = vec![0f64; opts.len()];
     for w in worlds {
         for (i, o) in opts.iter().enumerate() {
@@ -375,9 +467,9 @@ pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8) -> Vec<
             // NEGATED for a pass: the option is priced for the opponent, and
             // every entry in this list is signed for the seat being asked.
             sums[i] += if o.opp {
-                -o.payoff(w.opp_pts[d], w.opp_duck[d]) as f64
+                -leaf(o, exact, w.opp_pts[d], w.opp_duck[d], w.opp_threat[d]) as f64
             } else {
-                o.payoff(w.pts[d], w.duck[d]) as f64
+                leaf(o, exact, w.pts[d], w.duck[d], w.threat[d]) as f64
             };
         }
     }
@@ -710,13 +802,103 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     }
     let (wanted, wanted_opp) = wanted_denoms(opts);
     let mut cache = Solved::default();
-    solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache, None);
-    price(opts, &cache.worlds, cache.covered, cache.covered_opp)
+    solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache, None, false);
+    price(opts, &cache.worlds, cache.covered, cache.covered_opp, false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE CLAIM THE EXACT LEAF RESTS ON, swept rather than argued.
+    ///
+    /// `payoff_exact(P, Q)` must equal `Dd::solve_contract` on the same deal
+    /// and the same contract, for EVERY level and denomination -- because the
+    /// whole point of `threat_value` is that two per-DENOMINATION scalars price
+    /// every one of a tree's fifty per-CONTRACT settlements. If the identity
+    /// held only at some levels the saving would be imaginary and the leaf
+    /// would be a new approximation wearing the word "exact".
+    ///
+    /// Swept over whole deals rather than sampled: this is a claim about the
+    /// solver's outcome ordering, and the crate has already paid twice for
+    /// checking that kind of claim at one point (`esuit`, `beats_mask`).
+    ///
+    /// IT IS THE SLOWEST TEST IN THE CRATE (~105s of a ~125s gate) and the cost is
+    /// all CONTROL: one full-window `solve_contract` per contract, which is
+    /// exactly the per-contract work `threat_value` exists to avoid paying at
+    /// serving time. Seeding it would be checking the optimisation against
+    /// itself. The deal count is what to turn down if this ever needs to be
+    /// cheaper -- never the level or jump axes, which are what the identity
+    /// could plausibly break along. **Three deals is the FLOOR, not a round
+    /// number**: at two the sweep reaches no mis-priced contract at all and the
+    /// non-vacuity assert below fails, which is how that floor was found.
+    #[test]
+    fn the_threat_value_prices_every_contract_exactly() {
+        use crate::cards::DENOMS;
+        let mut dd = Dd::new(18);
+        let (mut checked, mut corrected, mut worst) = (0usize, 0usize, 0i32);
+        for seed in 0..3u64 {
+            let g = crate::game::Game::deal(&mut Rng::new(seed + 4400), 2, 0);
+            for &d in DENOMS.iter() {
+                for declarer in 0..2usize {
+                    let s = State { trump: d, trick: 0, led: -1, leader: declarer as u8,
+                                    pts: [0, 0], escored: 0, ..g.s };
+                    // The two per-denomination scalars.
+                    let raw = dd.solve_from(&s, 0) as i32;
+                    let pool = s.pool() as i32;
+                    let p0 = (pool + raw) / 2;
+                    let p = if declarer == 0 { p0 } else { pool - p0 };
+                    let q = dd.threat_value(&s, declarer, p);
+                    // ...and the duck, which `threat_value` claims to subsume.
+                    assert_eq!(q >= crate::dd::THREAT_TOP,
+                               dd.null_no_even_makeable(&s, declarer),
+                               "seed {seed} denom {d} declarer {declarer}: the \
+                                threat solve disagrees with the ducking search");
+                    // Levels across the whole ladder and BOTH jump sizes: the jump
+                    // moves the set base, which is what moves where the consolation
+                    // sits in the outcome order -- so it is the axis most likely to
+                    // break an identity that folds two scalars into every level.
+                    for level in [1i32, 3, 5, 7, 10] {
+                        for jump in [0i32, 3] {
+                            let o = Option_ {
+                                denom: d, target: level, make: level * level + 4,
+                                over: 1, set_base: 2 * level + 2 + 6 * jump,
+                                short: 5, ramp: 0, null: 20,
+                                opp: false, redeal: false,
+                            };
+                            let c = crate::dd::Contract {
+                                level: o.target, declarer, make_base: o.make,
+                                over: o.over, set_base: o.set_base, short: o.short,
+                                ramp: o.ramp, null: Some(o.null),
+                            };
+                            let want = dd.solve_contract(&s, &c);
+                            assert_eq!(o.payoff_exact(p, q), want,
+                                       "seed {seed} denom {d} declarer {declarer} \
+                                        level {level} jump {jump}: P={p} Q={q}");
+                            checked += 1;
+                            let gap = want - o.payoff(p, q >= crate::dd::THREAT_TOP);
+                            if gap != 0 {
+                                corrected += 1;
+                                worst = worst.max(gap);
+                            }
+                            assert!(gap >= 0, "the shipped leaf OVER-priced a \
+                                    contract, which contradicts the measured \
+                                    one-sidedness: gap {gap}");
+                        }
+                    }
+                }
+            }
+        }
+        // NON-VACUITY, and it is the interesting half: the identity above is
+        // trivially true on any contract the two pricers already agree on, so
+        // the sweep is only evidence if it REACHED the disagreements.
+        assert!(checked > 300, "only {checked} contracts swept");
+        assert!(corrected > 0,
+                "the sweep never reached a contract the shipped leaf mis-prices \
+                 -- it is asserting nothing about the correction");
+        eprintln!("threat leaf: {checked} contracts, {corrected} corrected \
+                   ({:.1}%), worst +{worst}", 100.0 * corrected as f64 / checked as f64);
+    }
 
     /// A classic-mode option: a made contract pays flat, so `over` is 0.
     /// Set pays N + 4 a point short (2026-08-07: N, not N-1).
@@ -785,14 +967,14 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, 0, &mut cache, None);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b11111, 0, 0, &mut cache, None, false);
         assert_eq!(cache.covered, 0b11111);
         let after_open = dd.nodes;
         let pts = cache.worlds[0].pts;
 
         // The auction narrows, exactly as `auction_payoff_options` does.
         for wanted in [0b11111u8, 0b11110, 0b11100, 0b11000] {
-            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, 0, &mut cache, None);
+            solve_into(&v, &mut dd, &mut rng, 2, wanted, 0, 0, &mut cache, None, false);
         }
         assert_eq!(dd.nodes, after_open, "a subset must not search a single node");
         assert_eq!(cache.worlds[0].pts, pts, "...nor disturb what was solved");
@@ -805,11 +987,11 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(11), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, 0, &mut cache, None);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00001, 0, 0, &mut cache, None, false);
         let first = cache.worlds[0].pts[0];
         let deals = cache.deals.clone();
 
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, 0, &mut cache, None);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00011, 0, 0, &mut cache, None, false);
         assert_eq!(cache.covered, 0b00011);
         // The new denomination is solved on the SAME deals, so the two are
         // comparable — a fresh sample would make the choice between them noise.
@@ -826,8 +1008,8 @@ mod tests {
         // An option nobody solved must contribute nothing instead.
         let o = Option_ { denom: 3, ..opt(4, 16, 12) };
         let worlds = vec![World::default()];
-        assert_eq!(price(&[o], &worlds, 0b00000, 0), vec![0.0]);
-        assert_eq!(price(&[o], &worlds, 0b01000, 0), vec![-20.0]);   // -(4 + 4x4)
+        assert_eq!(price(&[o], &worlds, 0b00000, 0, false), vec![0.0]);
+        assert_eq!(price(&[o], &worlds, 0b01000, 0, false), vec![-20.0]);   // -(4 + 4x4)
     }
 
     #[test]
@@ -841,14 +1023,14 @@ mod tests {
         let g = crate::game::Game::deal(&mut Rng::new(31), 0, 0);
         let v = View::of(&g, 0);
         let mut cache = Solved::default();
-        solve_into(&v, &mut dd, &mut rng, 2, 0b00100, 0b00100, 0, &mut cache, None);
+        solve_into(&v, &mut dd, &mut rng, 2, 0b00100, 0b00100, 0, &mut cache, None, false);
         assert_eq!(cache.covered, 0b00100);
         assert_eq!(cache.covered_opp, 0b00100);
 
         let mine = Option_ { denom: 2, target: 3, make: 9, over: 1, set_base: 3,
                              short: 4, ramp: 0, null: 12, opp: false, redeal: false };
         let theirs = Option_ { opp: true, ..mine };
-        let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp);
+        let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp, false);
         let by_hand: f64 = cache.worlds.iter()
             .map(|w| -theirs.payoff(w.opp_pts[2], w.opp_duck[2]) as f64).sum();
         assert_eq!(sums[1], by_hand, "the pass is not the negated opponent solve");
@@ -865,7 +1047,7 @@ mod tests {
         let (mine, theirs) = wanted_denoms(&[redeal]);
         assert_eq!((mine, theirs), (0, 0), "a pass-out asks for no solve at all");
         let worlds = vec![World::default(); 3];
-        assert_eq!(price(&[redeal], &worlds, 0, 0), vec![0.0]);
+        assert_eq!(price(&[redeal], &worlds, 0, 0, false), vec![0.0]);
     }
 
     #[test]

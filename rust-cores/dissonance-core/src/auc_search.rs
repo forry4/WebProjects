@@ -454,10 +454,16 @@ impl<'a> Search<'a> {
                 // to the path), so it lands here, inside the set base exactly
                 // where the engine folds it.
                 let o = self.with_jump(o, s.jump);
+                // THE LEAF IS THE ENTRY'S OWN, never this tree's opinion:
+                // `Solved::exact` says whether the worlds carry the threat
+                // solves, and `bid::leaf` is the one fold both pricers use.
+                // A tree reading an exact leaf out of myopic worlds would price
+                // every contract as though the declarer could force nothing.
+                let ex = self.worlds.exact;
                 let v = if mine {
-                    o.payoff(w.pts[d], w.duck[d])
+                    crate::bid::leaf(&o, ex, w.pts[d], w.duck[d], w.threat[d])
                 } else {
-                    o.payoff(w.opp_pts[d], w.opp_duck[d])
+                    crate::bid::leaf(&o, ex, w.opp_pts[d], w.opp_duck[d], w.opp_threat[d])
                 };
                 best = Some(best.map_or(v, |b: i32| b.max(v)));
             }
@@ -530,8 +536,9 @@ impl<'a> Search<'a> {
                             if d >= w.opp_pts.len() || mask & (1 << o.denom) == 0 {
                                 continue;
                             }
-                            let v = self.with_jump(o, jump)
-                                .payoff(w.opp_pts[d], w.opp_duck[d]);
+                            let v = crate::bid::leaf(
+                                &self.with_jump(o, jump), self.worlds.exact,
+                                w.opp_pts[d], w.opp_duck[d], w.opp_threat[d]);
                             best = Some(best.map_or(v, |x: i32| x.max(v)));
                         }
                         if let Some(v) = best {
@@ -877,7 +884,7 @@ mod tests {
             w.pts[d] = pts;
             w.opp_pts[d] = opp;
         }
-        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f,
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f, exact: false,
                  worlds: vec![w] }
     }
 

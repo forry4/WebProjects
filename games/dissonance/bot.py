@@ -784,6 +784,30 @@ def act(g: dict, seat: int, rng=None):
     return (None, None)
 
 
+def exact_leaf() -> bool:
+    """Should the auction search price its leaves EXACTLY? OFF unless
+    `DIS_EXACT_LEAF` is set, so shipped behaviour is byte-identical.
+
+    THE DEFECT IT ADDRESSES is the crate's one documented leaf error. The search
+    prices a candidate contract as `max(what I can guarantee on points, the Null
+    consolation if I can guarantee ducking)` -- the better of two SEPARATELY
+    guaranteed plans. A real defence has to stop both at once and often cannot,
+    so the shipped leaf under-prices declaring: measured over 900 (deal,
+    contract) pairs it agrees with an exact solve 93.3% of the time and every
+    single gap is POSITIVE.
+
+    `dd::threat_value` closes it for one extra solve per DENOMINATION -- not per
+    contract, which is what makes it affordable in a tree that reaches fifty
+    settlements. See `Option_::payoff_exact` and the Rust sweep that proves the
+    two scalars price every level and every jump exactly.
+
+    An EXPERIMENT until it is measured: the gate is `cfrlab br` exploitability
+    (the baseline is 5.87 against this abstraction's own 1.47 floor), and only
+    after that moves is an arena worth its hours.
+    """
+    return bool(os.environ.get("DIS_EXACT_LEAF"))
+
+
 #: THE OPENING BIAS -- strength-conditioned, and OFF unless `DIS_OPEN_BIAS` sets
 #: a weight. Measured defect: Expert's opening moves 1.38 -> 4.48 across the
 #: eight strength buckets while its make rate over the same range runs 36% ->

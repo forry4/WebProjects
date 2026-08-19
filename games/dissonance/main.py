@@ -899,6 +899,13 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # EXPERT: the same options, valued by a tree instead of a price.
             # Optional on the wire and ignored by any wasm that predates it, so
             # the cached-bundle window degrades to Hard rather than to nothing.
+            # THE EXACT LEAF -- an experiment, off unless `DIS_EXACT_LEAF` is
+            # set (see `bot.exact_leaf`). It applies to the myopic pricer and
+            # the tree alike, so it rides beside the options rather than inside
+            # the Expert block, and it is optional on the wire: a wasm that
+            # predates it prices the old way.
+            if bot.exact_leaf():
+                room["_ai_search"]["auction"]["exact_leaf"] = True
             tier = _valid_difficulty(room.get("ai_difficulty"))
             if tier in SEARCH_AUCTION_TIERS:
                 search = engine.auction_search_payload(g)
