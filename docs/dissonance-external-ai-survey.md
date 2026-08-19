@@ -335,37 +335,41 @@ It is the same reasoning Kermit's inference tables encode.
 
 ---
 
-## Part 4 — suggested order, cheapest-diagnostic-first
+## Part 4 — RESULTS (all five items built and measured, 2026-08-19)
 
-1. ~~**Measure Dissonance's three PIMC properties**~~ — **DONE 2026-08-19**, `bin/pimcprops`,
-   400 deals. Leaf correlation **0.713** near the leaves (favours PIMC), bias **0.605**
-   (mid), disambiguation **0.505** per ply — **mid-range, which the paper names as the worst
-   case for PIMC**. Two of three axes put this game where PIMC is not near-optimal, so
-   strategy fusion is structurally present and item 3 is worth one bounded experiment. The
-   same tool counts the information set exactly and decomposes it: hard-constraint inference
-   (voids + must-head) is worth **at most ~0.6 bits** against sets 6-27 bits wide. Full
-   numbers in `rust-cores/dissonance-core/CAMPAIGN.md`.
-2. **Measure sigma** — double-dummy `pts` vs what the shipped PIMC search actually achieves,
-   per position. The file already asks for this. Same pass produces the labels for item 4 and
-   tightens every "the ladder is too coarse" claim, all of which are currently upper bounds.
-3. **Multi-valued states in the auction tree** (item 2). Cheapest *strength* change on the
-   list, attacks the mechanism both the crate and `main.py` name as the core defect, and
-   replaces a knob the repo already knows is untunable.
-4. **αµ(2) natively** (item 3), gated on step 1's verdict. Null control is αµ(1) vs `pimc:8`
-   reading exactly zero.
-5. **Auction re-solving from the blueprint** (item 1). The largest prize — it is the only
-   item that attacks the *conditional* defect the exploitability instrument keeps pointing
-   at — and the largest build.
+Everything below was implemented and run. Two of the five paid, three did not, and
+one of the nulls is un-measurable rather than negative — the distinction matters.
 
-**One methodological warning carried from this repo's own ledger.** Three of its instrument
-bugs had the same shape: *a harness that rebuilds a payload the server assembles in more than
-one place will silently ship the default for whatever it forgot* — `cfrlab` measured Hard
-while its docstring said Expert for an entire campaign, on one absent `opp_model` field. Any
-new arm built from the papers above assembles new payloads. **Stamp the tier and the
-algorithm on every recorded row and make the reader shout if a corpus pools two**, exactly as
-`CFR_OPP_TEMP` now does.
+| # | Item | Outcome |
+|---|---|---|
+| 1 | **Three PIMC properties** | **Measured.** Leaf correlation **0.713** near the leaves (favours PIMC), bias **0.605**, disambiguation **0.505** — mid-range, the paper's stated worst case. Two of three axes put this game where PIMC is *not* near-optimal, so fusion is structurally present. Also: the information set is now COUNTED exactly, and hard-constraint inference is worth **≤0.6 bits** against sets 6–27 bits wide. |
+| 2 | **Sigma** | **Measured, and it replicates** — 1.586 / 1.590. But the convolution model **overstates** the ladder loosening by ~2.4× (predicted ~19%, measured 7.7%). Bonus: the opening lead is **+0.992 double-dummy but +0.673 in real play**, a third smaller than the number that justified `declarer leads`. |
+| 3 | **Multi-valued states** | **PAID. Exploitability 9.14 → 7.06, a 23% cut**, split-half bands not overlapping. The first thing this campaign has measured that moves exploitability at all. Costs ~2.5× the soft min. |
+| 4 | **αµ** | **Built, correct, and it LOSES** — about −0.22 pts/round against `pimc:8` at ~10× the compute. αµ(1) is a byte-identical null control, so the arm is clean. |
+| 5 | **Auction re-solving** | **Blueprint half built and measured at 1.46 — but that number is largely CIRCULAR** (the blueprint plays the abstraction's own equilibrium and the best responder lives in that same abstraction). Needs a head-to-head arena to mean anything. |
+| 6 | **Prior's exploitability cost** (from the 2019 PI paper) | **Built; un-measurable at this n.** −0.033 ± 1.785 — an error bar fifty times the effect. Not a null, a non-measurement. |
 
----
+**The one that matters:** item 3. Both endpoints of the opponent-model axis had
+already been measured here (one hand-blind model: −0.62; a blurred clairvoyant
+min: +0.957) and nobody had tried the middle, which is the published answer.
+
+**Two methodological findings worth more than some of the results:**
+
+* **The arena's null is not zero at n≈200.** Two provably identical algorithms
+  read **+0.147 ± 0.077**, because the harness seeds A and B differently and the
+  seat swap cancels deal luck but not seed luck. Running that control is what
+  flipped the αµ verdict from "no effect" to "a loss". Any arena number near
+  ±0.15 at that sample size needs its own identity control on the same deals.
+* **Two offline harnesses were scoring on a price list that died on 2026-08-16**
+  (`cmatch.rs`, `abench.rs`: `N²+10 / N+10 / over:0` against the shipped
+  `N²+4 / 2N+2 / over:1`). The existing parity gate covers terms→payoff, never
+  *which terms the game charges*, so a bin inventing its own was unguarded by
+  construction.
+
+**Still not done:** a CRN-paired auction arena for items 3 and 5 — exploitability
+is not a head-to-head margin, and this repo's own ledger has Expert measuring
+*more* exploitable than Hard while beating it. Neither arm should ship on the
+table above alone.
 
 ## Sources
 
