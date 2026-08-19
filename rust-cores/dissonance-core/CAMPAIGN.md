@@ -115,6 +115,59 @@ restricted to public-information play. Standard PIMC is pessimistic in a
 specific way (its opponent sees our hand); that variant is optimistic in the
 opposite way, and bracketing the two should beat either.
 
+## DOES THE BELIEF PRIOR COST EXPLOITABILITY? BUILT, AND THE ANSWER IS "NOT MEASURABLE AT THIS n" (2026-08-19)
+
+**Verdict: `bin/priorexp` is committed and correct, and its reading is
+−0.033 ± 1.785 — an error bar fifty times the effect. This is NOT a null. It is
+an instrument that cannot see anything smaller than about 3.5 payoff points,
+and nobody should quote the point estimate.**
+
+**THE QUESTION.** Solinas, Rebstock & Buro (*Policy Based Inference in
+Trick-Taking Card Games*, 2019) report that inference improves a determinized
+player's results and that the gain "comes at the cost of increasing the player's
+exploitability". This crate ships such an inference — `bid::BidPrior` reweights
+the defender's worlds by `exp(tilt * strength)` conditioned on the level the
+declarer bought the contract at — and shipped it on a gain that was never
+established (+0.161 ± 0.623 at the Double, +0.617 ± 2.522 in card play, both
+spanning zero). An unestablished benefit with an unmeasured cost is worth
+pricing.
+
+**AN ORACLE OPPONENT WOULD NOT MEASURE IT**, which is worth writing down because
+it is the obvious cheap proxy and it is wrong. A cheating opponent does not model
+us at all, so it cannot feed our belief model anything. PI is exploitable
+specifically by an opponent who DEVIATES FROM THE MODEL: our prior assumes a
+declarer's level tracks their strength, so a declarer who deliberately underbids
+a strong hand makes the correction wrong in a known direction.
+
+**SO IT IS A DIFFERENCE IN DIFFERENCES.** Underbidding changes the contract, and
+a cheaper contract is worth a different amount whatever anybody believes — but
+that effect is identical with the prior on and off, so it cancels:
+
+`cost = [deviate − honest | prior ON] − [deviate − honest | prior OFF]`
+
+| arm (122 rows, pimc:8, declarer underbids by 2) | defender's gain from the deviation |
+|---|---|
+| prior ON | −6.311 ± 1.809 |
+| prior OFF | −6.279 ± 1.912 |
+| **difference in differences** | **−0.033 ± 1.785** |
+
+The −6.3 on both arms is the confound doing exactly what it was expected to do
+(a lower contract is easier to make, so the defender loses by it), and the DiD
+removes it cleanly. What is left is noise.
+
+**WHY IT IS SO NOISY, AND WHAT WOULD FIX IT.** The DiD is already paired within
+a deal; the residual variance comes from the two arms' RNG streams diverging the
+moment the prior turns on, since importance sampling draws 24 candidates per
+world and the draw pattern changes. That is inherent to the arm and cannot be
+seeded away. Getting the error bar under ±0.3 needs roughly forty times the rows
+— a few thousand, i.e. hours rather than minutes. The alternative is a
+lower-variance statistic: scoring in trick POINTS rather than contract payoff
+would cut the spread by most of an order of magnitude, at the cost of asking a
+slightly different question.
+
+**This file's own rule applies to it**: an interval spanning zero is not a
+direction, and this is now the fourth time that has had to be recorded.
+
 ## ALPHA-MU: BUILT, CORRECT, AND IT MEASURES WORSE THAN PIMC (2026-08-19)
 
 **Verdict first: `AlphaMuBot` is committed and gated OFF. At depth 2 it is about

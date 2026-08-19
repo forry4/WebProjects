@@ -451,6 +451,22 @@ OPP_N = int(os.environ.get("CFR_OPP_N", "3"))
 
 
 def bid(g, seat):
+    """One auction decision, through the served path.
+
+    `CFR_BLUEPRINT` routes it to the equilibrium instead -- see `blueprint_bid`.
+    The fallback to the shipped tier is deliberate and is reported by
+    `blueprint_bid` returning None: an arm that guessed outside the
+    abstraction's support would be measuring the guess.
+    """
+    if BLUEPRINT and g.get("phase") == "auction":
+        if BP_MIX <= 0 or random.random() >= BP_MIX:
+            mv = blueprint_bid(g, seat)
+            if mv is not None:
+                return mv
+    return _shipped_bid(g, seat)
+
+
+def _shipped_bid(g, seat):
     """One SHIPPED auction decision, through the served path.
 
     The tier is `OPP_TEMP`: 0 is Hard's plain minimax, `main.EXPERT_OPP_TEMP` is
@@ -482,6 +498,140 @@ def bid(g, seat):
     if not sums or len(sums) != len(opts):
         return None
     return opts[max(range(len(opts)), key=lambda j: sums[j])]["move"]
+
+
+#: THE BLUEPRINT BIDDER (2026-08-19) -- the CFR equilibrium made a PLAYER
+#: instead of a measuring stick.
+#:
+#: This file's standing verdict is that "the equilibrium's policy table is a
+#: DIRECTION, not a table to ship", because the abstraction buckets the hand and
+#: drops denominations entirely. That is the same objection poker faced, and
+#: poker's answer was not to ship the blueprint either: Libratus and Pluribus
+#: use it as a PRIOR over the subgame and re-solve the real action space at
+#: decision time. This is the first half of that pipeline, and it is the half
+#: that is cheap.
+#:
+#: THE DECOMPOSITION IS THE WHOLE IDEA, and it respects what the abstraction
+#: actually knows. The ladder has no denominations, so it is competent about
+#: LEVELS and silent about suits. So the blueprint picks the level and the
+#: SHIPPED EXACT PRICER picks the denomination among the real legal options at
+#: that level. Neither component is asked a question it cannot answer.
+#:
+#: `CFR_BLUEPRINT=1` switches `bid()` onto it. `CFR_BP_MIX` blends: 0 is pure
+#: blueprint, 1 is the shipped tier untouched, and anything between plays the
+#: blueprint with that probability -- so the arm has a null at BOTH ends and the
+#: A/B cannot be confounded by anything else moving.
+BLUEPRINT = os.environ.get("CFR_BLUEPRINT", "") not in ("", "0")
+BP_MIX = float(os.environ.get("CFR_BP_MIX", "0"))
+
+#: Filled by `load_blueprint()`: the solved average strategy and the bucket cuts
+#: it was fitted under. Both are needed -- a policy read with the wrong cuts is
+#: a different policy, and this file has already paid twice for a harness that
+#: rebuilt half a payload.
+_BP = {"cfr": None, "cuts": None}
+
+
+def load_blueprint():
+    """The equilibrium and the bucket boundaries it was solved against."""
+    if _BP["cfr"] is not None:
+        return _BP
+    if not CKPT or not os.path.exists(CKPT):
+        raise SystemExit("CFR_BLUEPRINT needs CFR_CKPT pointing at a solved cache")
+    recs = [json.loads(x) for x in open(CKPT) if x.strip()]
+    cuts = bucketise(recs)
+    cfr = CFR(recs)
+    # The same external-sampling loop every other solve in this file runs; there
+    # is no `CFR.solve`, and writing one here would be a second driver.
+    iters = int(os.environ.get("CFR_BP_ITERS", "200000"))
+    rng = random.Random(int(os.environ.get("CFR_BP_SEED", "1234")))
+    for i in range(iters):
+        rec = recs[rng.randrange(len(recs))]
+        cfr.t = i + 1
+        for me in (0, 1):
+            cfr.walk(rec, 0, 0, 0, 0, me, rng)
+    _BP["cfr"], _BP["cuts"] = cfr, cuts
+    return _BP
+
+
+def _bucket_of(g, seat, cuts):
+    """This seat's abstraction bucket, computed the way the solve computed it.
+
+    Best denomination by `hand_strength`, which is information-legal by
+    construction -- it never touches the solve, which depends on cards this seat
+    cannot see.
+    """
+    best = max(B.hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1))
+    i = 0
+    while i < len(cuts) and best >= cuts[i]:
+        i += 1
+    return i
+
+
+def _live_abstract_state(g):
+    """`(level, prev, holds)` for a REAL auction in progress.
+
+    Derived from the bid levels in order rather than from a second copy of the
+    auction's bookkeeping -- `holds` is the trailing run at the standing level
+    and `prev` is the level under that run, which is exactly how `_path_to`
+    builds a path to the same state. Reading it any other way would be the
+    duplicate-rule mistake this file keeps recording.
+    """
+    # THE LOG HAS NO `kind` FIELD -- a bid entry is `{seat, level, denom}` and a
+    # pass is `{seat, pass: True}`. Filtering on `kind == "bid"` (which is the
+    # MOVE's vocabulary, not the log's) matches nothing and silently reports the
+    # opening state at every node, which is a blueprint that always thinks it is
+    # opening. Verified against the engine rather than assumed.
+    levels = [m["level"] for m in g["auction"].get("log", []) if "level" in m]
+    if not levels:
+        return 0, 0, 0
+    level = levels[-1]
+    holds = 0
+    i = len(levels) - 2
+    while i >= 0 and levels[i] == level:
+        holds += 1
+        i -= 1
+    prev = levels[i] if i >= 0 else 0
+    return level, prev, holds
+
+
+def blueprint_bid(g, seat):
+    """One auction decision: the blueprint names a level, the pricer a suit.
+
+    Returns None when the abstraction cannot express the position (above its
+    ladder, or no real option matches the chosen level), and the caller then
+    falls back to the shipped bidder -- a blueprint that silently guessed
+    outside its own support would be measuring the fallback.
+    """
+    opts = E.auction_payoff_options(g)
+    if not opts:
+        return None
+    bp = load_blueprint()
+    level, prev, holds = _live_abstract_state(g)
+    if level > MAXL or holds > HOLDCAP:
+        return None
+    acts = actions(level, holds)
+    dist = bp["cfr"].average((_bucket_of(g, seat, bp["cuts"]), level, prev, holds), acts)
+
+    # The abstraction is strictly MORE permissive than classic (no forever-ban,
+    # no same-level overtake rule), so its favourite action may not exist here.
+    # Walk its own ranking and take the best one that does, which keeps the
+    # blueprint's preference order rather than falling through on the first miss.
+    for act in sorted(acts, key=lambda a: -dist.get(a, 0.0)):
+        pool = []
+        for o in opts:
+            mv = o["move"]
+            if act == -1:
+                if mv["kind"] != "bid":
+                    pool.append(o)
+            elif mv["kind"] == "bid":
+                want = level if act == HOLD else act
+                if mv["level"] == want:
+                    pool.append(o)
+        if pool:
+            # THE PRICER PICKS THE SUIT. The blueprint has no opinion about
+            # denominations and must not be asked for one.
+            return max(pool, key=lambda o: o.get("value", 0))["move"]
+    return None
 
 
 #: How many OFF-POLICY probes to take per deal. 0 reproduces the self-play-only
