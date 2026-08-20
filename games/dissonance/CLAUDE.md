@@ -5046,6 +5046,56 @@ the continuation but ALSO makes the bot open lower across every bucket, and the
 two cancelled. A test that isolates the asymmetry has to leave the opening
 alone.
 
+### THE WIDENED ABSTRACTION CARRIES REAL SIGNAL — the equilibrium conditions on it (2026-08-20)
+
+The Edelkamp direction, first half. `CFR_FEATURES=2` makes the private bucket a
+JOINT index over strength x `tops` (quick tricks: cards in the top two ranks the
+seat can NAME), 8 buckets to 24. Solved on a purpose-built 1500-deal cache,
+200k external-sampling iterations, all 24 buckets occupied:
+
+**MEAN OPENING BY (strength bucket, tops bin) — and read across the ROWS:**
+
+| strength | tops=0 | tops=1 | tops=2 | spread |
+|---|---|---|---|---|
+| 0 | 1.43 | 1.57 | 1.68 | 0.24 |
+| 1 | 1.50 | 1.96 | 1.75 | 0.47 |
+| 2 | 1.49 | 2.00 | 1.89 | 0.52 |
+| 3 | 3.28 | 2.03 | 2.35 | 1.26 |
+| 4 | 3.83 | 3.28 | 2.67 | 1.16 |
+| 5 | 2.31 | 3.03 | 3.49 | 1.18 |
+| 6 | 2.92 | 2.85 | 3.95 | 1.10 |
+| 7 | 3.94 | 3.05 | 4.95 | 1.90 |
+
+**At the SAME strength, the equilibrium opens up to 1.9 rungs apart depending on
+quick tricks.** That is the whole claim the widening had to support: the feature
+is not merely correlated with the leaf, it changes what the solved policy does.
+A feature the policy ignored would have shown flat rows and the 24 buckets would
+have been 8 buckets in an expensive coat.
+
+**MEASURED BEFORE BUILT.** `tools/featlab.py` scored every candidate by the R^2
+it adds ON TOP of the strength already in the bucket — `tops` +0.0294,
+`shortest` +0.0216, `voids` +0.0114 against a 0.4013 baseline, over 1600
+seat-hands. The control in that table is `s_mean`: 0.3660 alone, **+0.0001
+incremental**, the same information restated. Anything that could not separate
+those two would be measuring correlation and calling it structure.
+
+**THE COST IS REAL AND VISIBLE IN THE OCCUPANCY.** 24 buckets over 3000
+seat-hands: median 117, **minimum 1**. The tail is thin, which is precisely what
+this file records as having wrecked the exploitability instrument once already
+(54% of a best responder's winnings coming from infosets nobody visited).
+Widening is only affordable against a bigger cache, which is the bootstrapping
+half of the idea and why the cache was rebuilt at 1500 rather than reused at 400.
+`CFR_FEATURES=3` (adding `shortest`, 72 buckets) is built and should not be run
+until the cache is several times larger again.
+
+**WHAT IS NOT ESTABLISHED, and it is the important half.** This says the widened
+equilibrium BIDS DIFFERENTLY, conditioned on a feature the narrow one cannot
+see. It says nothing about whether it PLAYS BETTER. Per the gate above,
+exploitability and head-to-head strength are close to independent in this game,
+so the only thing that can answer that is a CRN-paired arena — blueprint-wide
+against blueprint-narrow, and against Expert. Until that runs this is a
+structural result, not a strength result.
+
 ### THE GATE: DIVERSE IS LESS EXPLOITABLE AND NOT STRONGER. IT DOES NOT SHIP. (2026-08-20)
 
 **`expertdt` vs `expertst`, CRN-paired, dd-resolved, 1550 paired deals — the
