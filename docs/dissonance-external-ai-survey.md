@@ -335,10 +335,13 @@ It is the same reasoning Kermit's inference tables encode.
 
 ---
 
-## Part 4 — RESULTS (all five items built and measured, 2026-08-19)
+## Part 4 — RESULTS (eleven items built and measured, 2026-08-19/20)
 
-Everything below was implemented and run. Two of the five paid, three did not, and
-one of the nulls is un-measurable rather than negative — the distinction matters.
+Everything below was implemented and run. **Not one produced a shippable strength
+gain.** What they produced instead is a well-evidenced map of where the strength
+is not, several corrected instruments, and three methodological findings that are
+worth more than most of the results — which is the honest summary and is stated
+that way deliberately.
 
 | # | Item | Outcome |
 |---|---|---|
@@ -350,6 +353,8 @@ one of the nulls is un-measurable rather than negative — the distinction matte
 | 7 | **Widen the abstraction (Edelkamp)** | **Built and measured. The features are real and the axis is wrong.** `tops` adds +0.029 R² beyond strength and the solved equilibrium conditions on it by up to 1.9 rungs — but the blueprint carrying it still loses by 12.8. **The binding constraint is the abstraction's ACTION space (no denominations, ladder capped at 8), not its hand space.** |
 | 6 | **Prior's exploitability cost** (from the 2019 PI paper) | **Re-scored in trick points: −0.033 ± 1.785 → +0.145 ± 0.139, a 13× tightening.** The cost does not reproduce; if anything the sign is the opposite of the paper's warning. |
 | 8 | **The prior's unspent channels** | **Measured.** Its own axis is finished (strength 0.737 → 0.508 under the tilt). **Trump length is untouched and bigger than the bias the prior was built for** — 0.779, and the tilt removes 13% of it. `tops` is mildly over-corrected, `voids` empty. Bid-path and talon-swap could not be measured under a server-bot driver. |
+| 10 | **Trump length: correct it** | **Built, correct, CENTRES the channel — and worth nothing.** A flat per-trump term takes trumps 0.744 → 0.530 with strength inside 2 SE of 0.500 and `tops` improving. Gate: **+0.328 ± 0.784 a round** over 320 CRN-paired deals against exact truth, with agreement and discrimination both moving the *wrong* way. **The whole nominal gain is a base rate** — the available value moved +0.481 ± 0.547 because the term changes the bidding too; net of it the decision is −0.153 ± 0.565. Ships at 0.0. |
+| 11 | **`DOUBLE_MARGIN` 20 vs 12** | **One run's luck; 12 stays.** A first 320-deal recording put margin 20 at +0.681 ± 0.351; an independent 320 put it at −0.156. Pooled over 1280 doubles the curve is **flat from 12 to 22** (all ~1 SE) and falls off a cliff below (−3.8 SE at 8, −9.1 at 0). The one thing established is that the reverted 2026-08-16 re-fit *downward* was wrong. |
 | 9 | **The Double** | **Investigated, and it corrected me.** A server-bot-driven probe said "net destructive, −3.73/round"; on **Expert-bid** contracts it discriminates by **+60.0 points** (75.5% of failing contracts doubled vs 15.5% of making ones), agrees with exact truth **81.9%**, and captures **+0.66**. The defect was the driver's base rate, not the Double. |
 
 **The one that matters is what items 3 and 5 proved together, and it is not what
@@ -380,10 +385,35 @@ from the start, not on the number that motivated it.
   *which terms the game charges*, so a bin inventing its own was unguarded by
   construction.
 
-**Still not done:** a CRN-paired auction arena for items 3 and 5 — exploitability
-is not a head-to-head margin, and this repo's own ledger has Expert measuring
-*more* exploitable than Hard while beating it. Neither arm should ship on the
-table above alone.
+**A third methodological finding, added 2026-08-20 and the sharpest of them:**
+
+* **A defensive decision cannot be judged without its base rate.** Item 10's
+  trump-length prior showed +0.328 value captured a round — until the *available*
+  value was measured on the same pairing and had moved +0.481. The whole apparent
+  gain was more doubleable contracts arriving, not better doubling. Item 9 is the
+  same error found after the fact (a server-bot driver whose contracts were worth
+  doubling 9.5% of the time against Expert's 29.4%), and item 11 is the same
+  shape once more (a margin peak that was one deal sample's luck). **"Which bot
+  did the bidding IS the distribution" applies to a bot bidding against itself
+  under a changed knob**, not only to swapping bidders.
+
+**Items 3 and 5 are now BOTH gated and both refused** — `Diverse` at −0.681 ±
+0.533 over 1550 paired deals, the blueprint at −12.84 ± 1.47 over 354. So the
+survey's headline recommendation is answered: making the equilibrium a player
+does not work here, and the reason it looked promising was exploitability, which
+items 3 and 5 jointly showed is not the thing.
+
+**Still not done:** the one direction none of the eleven items touched. Every
+arm above attacked either the sampler (items 6, 8, 10 — all null, four
+instruments now agreeing that a better world distribution is not a better bot)
+or the abstraction (items 3, 5, 7 — refused). The standing diagnosis is
+untouched by all of it and is structural: **in the auction tree, PASSING is a
+leaf priced myopically while RAISING continues into a subtree whose modelled
+opponent is handed our exact hand.** The pessimism is applied only to the branch
+that continues, which predicts precisely the observed defect — concede too
+often, at every strength. Nothing here tested that, and the temperature knob is
+the wrong instrument for it because softening the continuation also lowers the
+opening and the two cancel.
 
 ## Sources
 
