@@ -59,6 +59,11 @@ fn main() {
     let mut decl_pay = [0f64; 2];
     let mut def_pay = [0f64; 2];
     let mut nulls = [0usize; 2];
+    // PER-ROUND PAIRED DIFFERENCES, so the harness can print an interval.
+    // It printed a bare point estimate until 2026-08-19, which is a number this
+    // repo's own rule ("an interval spanning zero is not a direction") cannot
+    // be applied to.
+    let mut diffs: Vec<f64> = Vec::with_capacity(deals * 2);
     for d in 0..deals {
         let trump = (d % NDEN) as u8;
         let declarer = d % 2;
@@ -94,6 +99,10 @@ fn main() {
                     def_pay[who] += v as f64;
                 }
             }
+            // The two sides of one round are exact negatives, so the paired
+            // difference is twice the aware side's value.
+            let aware_v = if i_aware == declarer { pay } else { -pay };
+            diffs.push(2.0 * aware_v as f64);
         }
     }
     let n = (deals * 2) as f64;
@@ -104,5 +113,14 @@ fn main() {
     println!("  ...as declarer     {:12.3} {:11.3}", decl_pay[0] / (n / 2.0), decl_pay[1] / (n / 2.0));
     println!("  ...as defender     {:12.3} {:11.3}", def_pay[0] / (n / 2.0), def_pay[1] / (n / 2.0));
     println!("Nulls taken          {:12} {:11}", nulls[0], nulls[1]);
-    println!("edge (aware - points) {:11.3} per round", (tot[0] - tot[1]) / n);
+    let mean = diffs.iter().sum::<f64>() / diffs.len().max(1) as f64;
+    let se = if diffs.len() > 1 {
+        (diffs.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>()
+            / (diffs.len() - 1) as f64
+            / diffs.len() as f64)
+            .sqrt()
+    } else {
+        0.0
+    };
+    println!("edge (aware - points) {:11.3} +/- {:.3} per round", (tot[0] - tot[1]) / n, se);
 }

@@ -14,7 +14,7 @@
 use dissonance::bots::PimcBot;
 use dissonance::game::Bot;
 use dissonance::cards::NOTRUMP;
-use dissonance::dd::{Contract, Dd};
+use dissonance::dd::Dd;
 use dissonance::game::Game;
 use dissonance::rng::Rng;
 
@@ -33,8 +33,11 @@ fn main() {
     for d in 0..deals {
         for declarer in 0..2usize {
             let g = Game::deal(&mut rng, NOTRUMP, declarer as u8);
-            let c = Contract { level, declarer, make_base: level * level + 10, over: 1,
-                               set_base: level + 10, short: 5, ramp: 0, null: Some(20) };
+            // THE CRATE'S ONE COPY. This line carried `make_base: level*level + 10`
+            // and `set_base: level + 10` -- the pre-2026-08-16 price list -- so
+            // every Null rate it has ever reported was measured against a game
+            // that stopped shipping. Third bin found with the same defect.
+            let c = dissonance::dd::shipped_classic_terms(level, declarer);
             n += 1;
             if dd.null_no_even_makeable(&g.s, declarer) { forced += 1; }
             let mut def = PimcBot::new(k, 0xB07 ^ (d as u64), 20);

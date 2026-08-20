@@ -234,10 +234,10 @@ function DoubleWorth({ res, nameOf }) {
 
 /** The classic/minor round's arithmetic, spelled out and never simplified.
  *
- *  Deliberately NOT reduced to an intermediate ("4 × 4 + 10 = 26 + 3 = 29"):
+ *  Deliberately NOT reduced to an intermediate ("4 × 4 + 4 = 20 + 3 = 23"):
  *  the reader wants to see the contract they bought, the flat stake riding on
  *  it, and the points they took as separate, recognisable terms, so the shape
- *  stays `(N × N + 10) + P = X` — the
+ *  stays `(N × N + 4) + P = X` — the
  *  "+ 0" of a contract brought home exactly included, because a formula that
  *  changes shape with its values is one the eye has to re-parse every round.
  *

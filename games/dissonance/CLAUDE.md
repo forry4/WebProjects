@@ -834,11 +834,16 @@ declared. **Every round runs all thirteen tricks** — see the overtrick section
 ## THE JUMP BONUS — classic dropped the raise cap and prices the leap instead (2026-08-13)
 
 Classic's `MAX_RAISE` is gone: an overtake may raise by ANY amount up to the
-ceiling. What replaced it is a scoring rule, `JUMP_SET_BONUS` (3, classic
-only): **if the FINAL bid of the auction raised the level — a jump of j over
-the bid it overtook — the defender scores an extra `3 × j` on a set.** THE
+ceiling. What replaced it is a scoring rule, **`JUMP_SET_BONUS` — 6 in classic since the
+2026-08-16 re-price, 3 when this section was written**: **if the FINAL bid of
+the auction raised the level — a jump of j over the bid it overtook — the
+defender scores an extra `6 × j` on a set.** THE
 OPENING BID COUNTS, as a raise over level 0 (**v2, same day**): open at 6 and
-get set and the defender collects +18 on top; open at 1 and it costs 3. A
+get set and the defender collects +36 on top; open at 1 and it costs 6.
+(**CORRECTED 2026-08-19.** This section — the one that DEFINES the rule — still
+said 3 three days after `a317bb1` changed it to 6, while `rules.jsx` had been
+updated and was telling players the right number. A constant stated in the
+section that defines it is the one place a reader trusts without checking.) A
 same-level overtake in a higher denomination is a jump of 0 — the only
 jump-free way to buy a contract. The intent: keep the auction climbing in
 small steps (every rung gives the opponent a decision) by making the leap
@@ -4716,8 +4721,10 @@ on contract height" is a double-dummy number, and about a third of it is play
 the shipped tier does not find.** That bears on `declarer leads` and on the
 Null-defending asymmetry, both of which are argued from it.
 
-**What shipping a rate change would entail** (it is a scoring change, so it is
-not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
+**What shipping a rate change would entail** — **and it HAS since shipped: 3 → 6
+in `a317bb1`, the same commit that re-priced make and set. Read this list as the
+checklist that was followed, not as pending work** (it is a scoring change, so it
+is not a one-constant edit): `JUMP_SET_BONUS` in `engine.py`, the mirrored constant
 and the committed parity fixtures in `rust-cores/dissonance-core`, the rules copy
 in `rules.jsx`, Expert's own calibration (it was fitted against 3j), and a re-run
 of the `DOUBLE_MARGIN` sweep — the margin of 20 was fitted against a 72.9% make
@@ -4743,7 +4750,8 @@ checkpoint, and the reporter reads every shard — **a per-shard summary is a
 quarter of the sample and reads exactly like the whole thing.**
 
 **The bug this nearly shipped a conclusion on:** the leaf originally priced every
-contract with `jump=level`. Classic's set base is `(N + 10 + 3j) × D`, so that
+contract with `jump=level`. Classic's set base was `(N + 10 + 3j) × D` when this
+was written and is `(2N + 2 + 6j) × D` today, so that
 charges the maximum jump penalty on a climb that earned none — it taxes exactly
 the deep auctions the harness exists to judge, in the direction that manufactures
 the answer "the equilibrium bids lower than Expert". Fixed to `level - prev`
@@ -5091,6 +5099,84 @@ carried `dv: 0` and `temp: 5`, so `corpus_tiers` labelled it "soft temp 5
 (expert)" — the exact mislabelling the stamp exists to prevent, reintroduced by
 adding a bidder without adding it to the stamp. `bp` is in the row now. Fourth
 instrument bug of this shape.
+
+### THE 2026-08-16 RE-PRICE LEFT THREE OFFLINE HARNESSES AND FOUR DOC CLAIMS BEHIND (audited 2026-08-19)
+
+**The question that started it: "anything tested against the wrong scoring must
+be invalid — do we need to restart anything?" The answer is yes for two
+harnesses, no for a third, and no for anything measured on 2026-08-19.**
+
+`a317bb1` re-priced classic in one commit — make `N²+10 → N²+4`, set
+`N+10 → 2N+2`, and `JUMP_SET_BONUS 3 → 6`. It updated the engine, `rules.jsx`
+and `payoff.jsonl`. It did not update anything that builds its own `Contract`.
+
+**THE THREE STALE BINS.** Each was internally consistent, which is why each
+stayed wrong:
+
+| bin | carried | shipped | what it invalidates |
+|---|---|---|---|
+| `cmatch.rs` | `N²+10` / `N+10` / **`over: 0`** | `N²+4` / `2N+2` / `over: 1` | every contract-vs-points number, incl. "+0.55 at level 4, +1.25 at level 1" and "6–7 Nulls per 40 rounds" |
+| `nullbot.rs` | `N²+10` / `N+10` / `over: 1` | as above | every Null rate it has reported |
+| `abench.rs` | level-3 `make 19` / `set_base 13` / `over: 0` | `13` / `8` / `1` | **nothing — see below** |
+
+**`abench` SURVIVES, and the reason is worth stating rather than assumed.** Its
+numbers are NODE COUNTS (18,435k → 7,220k, −61%; MTD(f) −6%; the cross-world
+seeding null). Those measure hits in `bid::Solved`, which is keyed on the HAND
+and the denomination — the price list changes the arithmetic layered on top of a
+solve, never which solves happen. The caching results stand as measured.
+
+**`cmatch`, RE-RUN on the shipped price list** (80 deals x2, k=8):
+
+| level | edge (contract-aware − points) | mirror control | Nulls |
+|---|---|---|---|
+| 1 | **+2.562 ± 1.605** | **0.000 ± 1.602** | 12 vs 0 |
+| 4 | **+7.112** | — | 14 vs 0 |
+
+**AND THE HARNESS PRINTED NO ERROR BAR UNTIL NOW, WHICH IS THE REAL FINDING.**
+At n=160 the level-1 edge is **1.6 SE** — a 95% interval spanning zero. The
+recorded +1.25 was taken at n=80 with no interval printed at all, so a result
+that was never significant has read as settled fact for months. This file's own
+rule ("an interval spanning zero is not a direction") could not be applied to a
+harness incapable of producing one. It produces one now.
+* The mirror reading **exactly 0.000** is the good news: `cmatch` rotates which
+  bot is contract-aware across the two seatings, so the seed asymmetry that
+  makes `arena`'s null read +0.147 at n≈200 genuinely cancels here. Its pairing
+  is sounder than `arena`'s.
+* **The Null rate roughly HALVED, exactly as this file predicted and never
+  re-ran**: 12 per 160 rounds is 3 per 40, against the recorded 6–7 per 40. The
+  standing note — "the cliff is smaller and the Null rate should have fallen
+  with it. **Nobody has re-run it**" — is now discharged.
+* Do NOT read +2.562 against the old +1.25 as a ratio. The payoff CURRENCY moved
+  too (a level-1 make base went 11 → 5), which is this file's own
+  `DOUBLE_MARGIN` lesson: a measurement in payoff units is silently re-scaled by
+  a re-pricing.
+
+**FOUR DOC CLAIMS FROM THE SAME COMMIT, now corrected**: the section that
+DEFINES the jump bonus still said 3 (`rules.jsx` had 6 all along, so players
+were told the truth and the manual was not); "what shipping a rate change would
+entail" read as pending work when it had shipped; the leaf-bug postmortem quoted
+the set base as `(N + 10 + 3j) × D`; and `Dissonance.jsx`'s worked example
+showed `(N × N + 10)`.
+
+**VERIFIED CLEAN:** `payoff.jsonl` regenerates byte-identical, and a sweep of
+every `src/bin/*.rs` plus the Python and JSX finds no other copy.
+
+**THE MECHANICAL FIX, so this class cannot recur.**
+`tools/gen_shipped_terms.py` emits the plain per-level classic terms — and the
+jump axis — straight out of `engine._terms_for` into
+`tests/fixtures/shipped_terms.jsonl`; `dd::shipped_classic_terms` is the crate's
+ONE copy and two Rust tests hold it to that fixture. The pre-existing
+`wire::payoff_parity` pins the arithmetic that turns terms into a number; this
+pins WHICH TERMS the game charges, which is the half nothing covered and the
+half a bin inventing its own was free to get wrong. Verified non-vacuous
+(reverting the make base fails it), and a jump-rate test would have caught the
+documentation half too.
+
+**NOT AFFECTED: everything measured on 2026-08-19.** `pimcprops`, `sigma` and
+the alpha-mu arena all score in trick POINTS and never build a contract; the
+three `cfrlab` exploitability arms price through `engine._terms_for`, i.e. the
+live engine; and `priorexp` was written after the fix and reads
+`shipped_classic_terms`. None needs re-running.
 
 ## Not built yet
 
