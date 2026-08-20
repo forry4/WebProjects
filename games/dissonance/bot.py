@@ -902,9 +902,19 @@ def play_calibration() -> dict | None:
     spread do different jobs: the mean says contracts are easier than the solver
     thinks, the SPREAD is what flattens P(make) per rung and is the half that
     changes shape rather than level.
+
+    **NEGATIVE SCALES ARE MEANT, not a guard nobody removed.** Correcting the
+    leaf toward measured reality made the tier much WORSE (5.45 -> 6.60 with the
+    spread, 7.77 without it), which says the guarantee's pessimism is doing
+    necessary work rather than being an error. The reading that explains it is
+    a RISK PREMIUM: bidding is a commitment to TAKE the points, and this payoff
+    punishes a set far harder than an overtrick pays, so the right estimate to
+    bid against sits below the mean. A negative scale tests that directly -- it
+    predicts more pessimism should help -- and a prediction a knob can already
+    express is one worth checking before it becomes a story.
     """
     w = float(os.environ.get("DIS_PLAY_CAL", "0") or 0)
-    if w <= 0:
+    if w == 0:
         return None
     out = {k: v * w for k, v in PLAY_CAL.items()}
     if os.environ.get("DIS_PLAY_SD") is not None:
