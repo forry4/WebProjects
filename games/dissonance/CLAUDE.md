@@ -5237,7 +5237,9 @@ The control validates the instrument: the prior takes strength from 0.737 to
 axis. **Re-tuning tilt/curve/tries is spent.**
 
 **TRUMP LENGTH IS THE UNSPENT CHANNEL, AND IT IS BIGGER THAN THE BIAS THE PRIOR
-WAS BUILT FOR.** 0.779 against the 0.765 that started this whole thread — and
+WAS BUILT FOR.** *(SPENT, 2026-08-20 — it corrects cleanly and is worth nothing;
+see "THE TRUMP CHANNEL: CORRECTED, CENTRED, AND WORTH NOTHING" below. Read the
+rest of this paragraph as the diagnosis, not as an open lever.)* 0.779 against the 0.765 that started this whole thread — and
 the tilt removes only **0.035 of a 0.279 bias, about 13% of it**. The reason is
 structural: `trump_mult = 2.0` makes trumps count double *in a scalar sum*,
 which is not the same as modelling suit LENGTH — a hand reaches the same sum
@@ -5316,6 +5318,86 @@ that is not a refinement: three of its four statistics are small integers
 counts every tie as "above me". The first cut did that and `voids` read exactly
 0.000 on every round. `beliefprobe` gets away with strict `<` because its
 statistic is a float sum that essentially never ties; a discrete one cannot.
+
+### THE TRUMP CHANNEL: CORRECTED, CENTRED, AND WORTH NOTHING (2026-08-20)
+
+**`BidPrior.trump_len` is built, correct and SHIPS AT 0.0.** The fourth
+consecutive entry in this file where a real, measured belief bias did not become
+a measured gain — and the first where the null came with its own decomposition,
+so it is not merely "no effect" but "here is where the apparent effect went".
+
+**THE CORRECTION WORKS, AND IT IS NEARLY FREE ON EVERY OTHER CHANNEL.** A flat
+worth per trump added on top of the rank curve — `exp(beta x strength + gamma x
+trumps)`, gamma 0 being the shipped prior byte for byte. Swept offline over one
+run of draws (`channelprobe sweep`, 400 rounds, 200 resamples each; `draws_of`
+is split from `score` so every candidate gamma is a lookup, the `swaplab`
+method):
+
+| gamma | strength *(control)* | trumps | tops | voids |
+|---|---|---|---|---|
+| **0.00** *(shipped)* | 0.508 | **0.744** | 0.457 | 0.506 |
+| 0.50 | 0.491 | 0.639 | 0.465 | 0.502 |
+| **1.00** | **0.483** | **0.530** | **0.477** | 0.497 |
+| 1.50 | 0.481 | 0.429 | 0.491 | 0.491 |
+
+At gamma 1.0 the trump channel centres and **nothing pays for it**: strength
+stays inside 2 SE of 0.500, voids do not move, and `tops` — which the shipped
+prior OVER-corrects to 0.457 — comes back toward centre. This is not the usual
+trade of one channel against another, which is what made it worth gating.
+
+**WHY A FLAT TERM AND NOT A BIGGER `trump_mult`:** the multiplier scales a
+trump's RANK, so the same strength sum is reachable with high cards anywhere and
+a long suit is worth only what its cards happen to be. A flat term values the
+sixth trump as much as the first, which no multiplier on a curve can express at
+any dose. That is the shape the 0.779 → 0.744 residual is made of.
+
+**THE GATE: 320 CRN-PAIRED DEALS, ONE CHANGE WIDE, EXACT GROUND TRUTH.**
+`expertst` self-play both arms, same seeds, `ARENA_DBL=1` so every Double is
+scored against an exact double-dummy resolve of both branches:
+
+| | gamma 0 *(shipped)* | gamma 1.0 |
+|---|---|---|
+| doubles taken | 33.1% | 35.6% |
+| **agreement with truth** | **81.9%** | **80.0%** |
+| **discrimination** | **+60.0** | **+56.9** |
+| value captured | +0.66 | +0.98 |
+| *of an available* | *+5.36* | *+5.84* |
+
+**PAIRED PER DEAL: +0.328 ± 0.784 a round, t = +0.42.** Nothing — and the two
+quality columns that carry no base rate at all (agreement, discrimination) both
+move slightly the WRONG way.
+
+**AND THE DECOMPOSITION IS THE FINDING.** The available value moved **+0.481 ±
+0.547** on the same pairing: the trump term changes the BIDDING as well as the
+doubling, so more contracts worth doubling arrived at the Double. Net of that,
+the decision itself is **−0.153 ± 0.565**. **The entire nominal gain is a base
+rate.** That is the exact mechanism behind the `dblprobe` claim this file
+retracted a day earlier, caught this time BEFORE it was written down as a
+result — which is the whole return on having understood it: *"which bot did the
+bidding IS the distribution"* applies to a bot bidding against ITSELF under a
+changed prior, not only to swapping one bot for another. **Any measurement of a
+defensive decision must report the base rate beside the value captured, or it
+cannot tell a better defender from an easier population.**
+
+**IT IS KEPT, OFF, AND THAT IS DELIBERATE.** `trump_len` is optional on the
+wire, so 0.0 is the old prior byte for byte and a cached wasm reads 0.0 — the
+`tilt = 0` discipline. No wasm was rebuilt, which is safe for exactly that
+reason and does mean the term reaches only the offline harnesses until one is.
+`DIS_BID_TRUMP_LEN` arms it for any future arm that needs a better-calibrated
+sampler for its own reasons.
+
+**THIS CLOSES THE BELIEF THREAD FOR THE SECOND TIME, on its last open channel.**
+The file already recorded it closed on the strength axis with a mechanism —
+`DOUBLE_MARGIN` discards every decision below its threshold and the prior
+sharpens precisely those, so the two are treatments for one disease and the
+margin gets there first. The trump channel was the one large uncorrected bias
+left, it corrects cleanly, and it lands in the same place. Four instruments now
+agree (the Double at +0.161 ± 0.623, card play at +0.617 ± 2.522,
+exploitability, and this): **in this game a better world distribution is not a
+better bot**, which is CAMPAIGN.md's strategy-fusion verdict arrived at from a
+fourth direction. Do not re-open this without a mechanism that is not "the
+sampler is biased" — that has now been true, correctable and worthless four
+times.
 
 ### THE WIDENED ABSTRACTION CARRIES REAL SIGNAL — the equilibrium conditions on it (2026-08-20)
 
