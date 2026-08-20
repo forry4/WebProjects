@@ -5159,8 +5159,58 @@ MAKES costs far more than a doubled set wins), so the break-even sits well above
 **DO NOT SHIP THAT OFF THIS TABLE.** The declarer-EV column carries ±2.4–3.0, so
 these candidates are not separated; the gain column has no error bar at all; and
 **this file already records a `DOUBLE_MARGIN` re-fit that was wrong, shipped and
-reverted (2026-08-16)**. It needs a CRN-paired arena at the candidate value,
-mirror reading exactly +0.0000, before anything moves.
+reverted (2026-08-16)**.
+
+### AND IT WAS ONE RUN'S LUCK. `DOUBLE_MARGIN` STAYS AT 12. (2026-08-20)
+
+**The +1.45 above did not replicate, and the constant does not move.** Re-taken
+on deals 320–640 — a deal sample the first run never touched, same tier, same
+harness — margin 20 reads **+0.966 against the shipped 12's +1.122**, i.e. the
+peak is not merely smaller, it is on the wrong side. Pooled over both runs,
+1280 recorded doubles:
+
+| margin | dbl% | on FAIL | on MADE | disc | value/round | **vs 12** | **SE** | **t** | moved |
+|---|---|---|---|---|---|---|---|---|---|
+| 0 | 57.7% | 90.3% | 42.2% | +48.1 | −1.748 | **−2.694** | 0.296 | **−9.11** | 288 |
+| 4 | 49.2% | 86.4% | 31.6% | +54.8 | −0.706 | **−1.652** | 0.252 | **−6.54** | 180 |
+| 8 | 41.9% | 82.0% | 22.8% | +59.2 | +0.206 | **−0.739** | 0.193 | **−3.82** | 88 |
+| **12** *(shipped)* | 34.8% | 71.8% | 17.3% | +54.6 | **+0.945** | — | — | — | 0 |
+| 16 | 29.8% | 63.1% | 14.1% | +49.1 | +1.144 | +0.198 | 0.168 | +1.18 | 64 |
+| 18 | 27.3% | 58.3% | 12.7% | +45.6 | +1.159 | +0.214 | 0.190 | +1.12 | 92 |
+| 20 | 22.7% | 49.0% | 10.1% | +38.9 | +1.208 | +0.263 | 0.240 | +1.09 | 152 |
+| 22 | 17.7% | 38.3% | 7.8% | +30.5 | +1.166 | +0.220 | 0.284 | +0.77 | 214 |
+| 24 | 14.2% | 29.1% | 7.1% | +22.0 | +0.819 | −0.127 | 0.309 | −0.41 | 258 |
+| 40 | 2.8% | 6.3% | 1.2% | +5.2 | +0.473 | −0.472 | 0.402 | −1.17 | 400 |
+
+**THE VALUE CURVE IS FLAT FROM 12 TO 22 AND FALLS OFF A CLIFF BELOW IT.** Every
+candidate above the shipped value sits at ~1 SE and none is separated from any
+other; every candidate below it is decisive in the other direction (−3.8 SE at
+8, −6.5 at 4, −9.1 at 0). **So the one thing this measurement establishes is
+that the 2026-08-16 re-fit downward was wrong**, which is already known — and it
+now has a number instead of a postmortem. There is no measured reason to move
+the constant up, and one run said there was.
+
+**THE ERROR BAR IS PAIRED AND EXACT, AND THAT IS WHY IT COULD BE HAD AT ALL.**
+The margin changes which doubles are TAKEN and nothing else — the auction tree
+does not model the Double, so the contracts are identical at every candidate,
+and a Double changes the payoff rather than the card play, so the rounds are
+too. Every round therefore appears in both arms and most contribute exactly
+zero. `moved` is how many rounds a candidate actually re-decides, so the SE is
+visibly a statement about those: **at margin 14 it is 34 rounds of 1280**, which
+is why a swept table with no error bar reads so much more confidently than the
+data supports. **A CRN-paired arena would have been the wrong instrument** — it
+would re-measure this same quantity through 18 points of per-deal payoff noise,
+at hours per candidate, when the recorded sums and the exact ground truth price
+every candidate for free.
+
+**THE METHOD NOTE, and this file has now recorded it five times.** A single 320-
+deal run put margin 20 at **+0.681 ± 0.351** — 1.94 SE, a plausible-looking
+peak, a smooth single-humped curve, and a mechanism that reads as sound (the
+asymmetric payoff really does push break-even above 50%). The independent sample
+put it at −0.156. **A smooth curve with a mechanism is not a replication.** This
+is the same constant the repo has already re-fitted wrongly once; the only thing
+that stopped it happening twice was running the second sample before writing the
+first one down as a result.
 
 **Instrument notes.** `dbl_truth` runs on its own bidserve channel for the reason
 `quality_of` documents — the `Solved` cache is one slot and an off-tier ask
