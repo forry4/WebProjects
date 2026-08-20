@@ -8,6 +8,12 @@ corrupting -- the run producing them.
 
     PYTHONPATH=. python3 games/dissonance/tools/gate_pool.py <ckpt> [<ckpt> ...]
 
+`GATE_LABEL="A - B"` names the arms in the output. It defaults to a neutral
+"tierA - tierB" ON PURPOSE: the first version hardcoded the tier names of the
+run it was written for, and then printed those names over a DIFFERENT run's
+numbers. A checkpoint does not record which tiers produced it, so the label
+cannot be derived and must not be guessed.
+
 Reads the same fields `auction_arena` writes and resumes from: `pair` is the
 deal's two flips averaged (so seat and cards both cancel), `q` is the opener's
 hand quality for the control variate, `differ` says whether the two arms
@@ -67,8 +73,10 @@ def main(argv):
     if not pairs:
         raise SystemExit("no deals in those checkpoints yet")
     m, se, n = stats(pairs)
+    import os
+    label = os.environ.get("GATE_LABEL", "tierA - tierB")
     print(f"pooled over {n} paired deals from {len(argv) - 1} checkpoint(s)")
-    print(f"  expertdt - expertst = {m:+.4f} +/- {se:.4f} payoff/round")
+    print(f"  {label} = {m:+.4f} +/- {se:.4f} payoff/round")
     print(f"  95% CI              [{m - 1.96 * se:+.3f}, {m + 1.96 * se:+.3f}]")
     nd = sum(differ)
     print(f"  auctions that differ: {nd}/{n} ({100.0 * nd / n:.1f}%)")

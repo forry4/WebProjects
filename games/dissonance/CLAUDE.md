@@ -5046,6 +5046,65 @@ the continuation but ALSO makes the bot open lower across every bucket, and the
 two cancelled. A test that isolates the asymmetry has to leave the opening
 alone.
 
+### AND THE WIDENED BLUEPRINT LOSES TO EXPERT BY 12.8 POINTS A ROUND (2026-08-20)
+
+**`bpwt` vs `expertst`, CRN-paired, dd-resolved, 354 paired deals:**
+
+| | |
+|---|---|
+| **blueprint − Expert** | **−12.8377 ± 1.4738 payoff/round** |
+| 95% CI | **[−15.726, −9.949]** |
+| auctions that differ | 342/345 (99.1%) |
+| mirror (`hard hard`) | exactly **+0.0000** |
+
+**8.7 SE, and stable the whole way** (−13.28 at n=87, −13.74 at n=95, −12.84 at
+n=345). Stopped there rather than run to 1550: nothing at that separation
+reverses, and the box was better spent elsewhere. For scale, the entire
+`opp_temp` gain this file ships is **+0.957**, and Expert's whole edge over Hard
+is **+1.19** — the blueprint loses by ten times either.
+
+**THE MECHANISM IS ONE NUMBER:**
+
+| | declared | mean level | **made** |
+|---|---|---|---|
+| blueprint | 337 | 4.08 | **49.6%** |
+| Expert | 363 | 4.42 | **73.0%** |
+
+**It buys contracts at the same heights and fulfils barely half of them.** That
+is what an abstraction with NO DENOMINATIONS produces when its policy is
+shipped: the blueprint names a LEVEL, the pricer then takes the best suit still
+legal, and a level chosen blind to the suit is a commitment the actual hand may
+not support. Expert's tree picks level and denomination together and makes three
+quarters.
+
+**SO THE WIDENING WAS THE WRONG AXIS, and that is the finding to carry.** The
+extra hand features are real — the section below shows the equilibrium
+conditioning on them by up to 1.9 rungs — and they are nowhere near the binding
+constraint. **The abstraction's problem is its ACTION space, not its hand
+space.** Anyone returning to this should put denominations in the tree and raise
+the `MAXL = 8` ladder cap before adding a single further feature; more private
+resolution on a policy that cannot name a suit buys nothing.
+
+**AND IT BRACKETS THE THEORY EMPIRICALLY.** The equilibrium direction was argued
+here as producing SAFETY rather than STRENGTH — in a two-player zero-sum game an
+equilibrium guarantees the game value against any opponent but does not punish a
+flawed one, so a perfect equilibrium bidder should DRAW with Expert. It lost by
+12.8, which is worse than the theory predicts, and the extra distance is the
+second fault: **an equilibrium of a coarse abstraction is not an equilibrium of
+this game at all.** It is simply a policy, and a bad one. Its measured
+exploitability of **1.46** was taken inside that same toy — the circularity
+flagged when the number was first computed, now with a price attached.
+
+Together with the `Diverse` gate above, two independent arms now say the same
+thing: **exploitability is not strength here, and optimising it produces bidders
+that are equal at best and catastrophic at worst.**
+
+**HARNESS GAP, recorded because it is mine.** The `bp` branch returns before the
+arena's opening-telemetry block, so `open` events are not recorded for a
+blueprint tier — `mean opening` reads 0.00 at n=0 for `bpwt` above. It affects
+the descriptive stats only; the strength number and the make rates come from the
+round resolution and are unaffected.
+
 ### THE WIDENED ABSTRACTION CARRIES REAL SIGNAL — the equilibrium conditions on it (2026-08-20)
 
 The Edelkamp direction, first half. `CFR_FEATURES=2` makes the private bucket a
