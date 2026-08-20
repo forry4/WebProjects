@@ -5105,6 +5105,102 @@ blueprint tier — `mean opening` reads 0.00 at n=0 for `bpwt` above. It affects
 the descriptive stats only; the strength number and the make rates come from the
 round resolution and are unaffected.
 
+### THE PRIOR'S UNSPENT CHANNEL IS TRUMP LENGTH — and the DOUBLE is the bigger problem (2026-08-20)
+
+**THE PRIOR'S OWN AXIS IS FINISHED.** `tools/channelprobe.py`, 400 rounds at the
+Double, 200 resamples each, shipped tilt 0.35. Percentile of the declarer's TRUE
+holding inside the sampler's own distribution; **0.500 is unbiased**:
+
+| statistic | uniform | under the shipped tilt |
+|---|---|---|
+| **strength** *(the control)* | 0.737 | **0.508 ± 0.014** |
+| **trumps** — cards in the DECLARED denomination | 0.779 | **0.744 ± 0.011** |
+| **tops** — cards in the top two ranks | 0.624 | **0.457 ± 0.013** |
+| **voids** | 0.506 | 0.506 ± 0.005 |
+
+The control validates the instrument: the prior takes strength from 0.737 to
+0.508, i.e. it does exactly what it claims and there is nothing left on that
+axis. **Re-tuning tilt/curve/tries is spent.**
+
+**TRUMP LENGTH IS THE UNSPENT CHANNEL, AND IT IS BIGGER THAN THE BIAS THE PRIOR
+WAS BUILT FOR.** 0.779 against the 0.765 that started this whole thread — and
+the tilt removes only **0.035 of a 0.279 bias, about 13% of it**. The reason is
+structural: `trump_mult = 2.0` makes trumps count double *in a scalar sum*,
+which is not the same as modelling suit LENGTH — a hand reaches the same sum
+with high cards anywhere. A declarer who NAMED a denomination is direct evidence
+about that suit specifically, and the sampler still deals them too few of it.
+
+`tops` is mildly OVER-corrected (0.624 → 0.457, past centre) and `voids` carries
+nothing. So of four dimensions: one finished, one large and untouched, one
+slightly over-shot, one empty.
+
+**TWO CHANNELS COULD NOT BE MEASURED AT ALL under a server-bot driver, and that
+is a fact about the harness rather than about the channels.** `to_double` drives
+with `bot.act`, which opens at the level it settles on and always swaps:
+
+* **bid path** — only **5 of 400** rounds had the declarer pushed above its
+  opening. Those 5 read **0.704 ± 0.105** against 0.506 for the rest, which
+  hints that a pushed declarer is badly under-rated, but n=5 is a hint and
+  nothing more.
+* **talon swap** — **400 of 400** swapped. Zero information; the split cannot
+  exist under this driver.
+
+Both need Expert-driven auctions (`ARENA_DEALS=1` records the position at the
+Double for exactly this).
+
+---
+
+**THE DOUBLE: the prior does not help it, and the Double has a much bigger
+problem than the prior.** `tools/dblprobe.py`, same 400 rounds, ground truth an
+exact double-dummy resolve under both the doubled and undoubled terms:
+
+| | prior ON *(shipped)* | prior OFF |
+|---|---|---|
+| doubles taken | 124 (**31.0%**) | 115 (28.8%) |
+| doubles that SHOULD be taken | 38 (9.5%) | 38 (9.5%) |
+| agreement with truth | 264 (**66.0%**) | 273 (**68.2%**) |
+| hit / false alarm / miss | 13 / **111** / 25 | 13 / **102** / 25 |
+| **value captured** | **−3.73** | **−3.33** |
+| doubles contracts that MADE | 111/362 = **30.7%** | 102/362 = 28.2% |
+| doubles contracts that FAILED | 13/38 = **34.2%** | 13/38 = 34.2% |
+
+**The prior makes the Double slightly WORSE.** Identical hits (13), nine MORE
+false alarms, lower agreement, worse value. So the one place the belief thread
+left open — "the Double is a binary make/fail call, not a move choice, so
+strategy fusion does not apply there" — measures negative too.
+
+**AND THE DOUBLE BARELY DISCRIMINATES AT ALL.** It doubles contracts that MADE
+at 30.7% and contracts that FAILED at 34.2% — **three and a half points of
+separation.** `value captured` is `sum(gain) / rounds` where
+`gain = payoff(undoubled) − payoff(doubled)`, so **−3.73 means the doubles taken
+COST the defender 3.73 payoff a round**, against **+2.84** available if they
+were targeted perfectly. The shipped Double is not a small inefficiency; it is
+net destructive on this measurement.
+
+**CAVEATS, and the first is load-bearing.** These rounds are driven by the
+SERVER bot, so the contracts arriving at the Double are its contracts, not
+Expert's — and this file's own rule is that **which bot did the bidding IS the
+distribution**. The ON/OFF comparison is clean because both arms share the
+driver; the ABSOLUTE rates may not transfer to an Expert-bid room, and should be
+re-run through `ARENA_DEALS` positions before anything is re-priced on them.
+`DOUBLE_MARGIN` was live at its shipped 12 in both arms, so this is the Double
+*with* its suppressor already applied.
+
+**AND `dblprobe` WAS MEASURING A DOUBLE THE SERVER DOES NOT PLAY.** Its `ask`
+said "the armed double request, exactly as main.py builds it" while sending
+NEITHER shipped knob — no `bid_prior`, no `double_margin`. Every number it ever
+produced described an adjacent decision. Fourth instrument of this exact shape
+after `cmatch`, `abench` and `nullbot`; both knobs now default to the shipped
+values with `DIS_BID_PRIOR=0` / `DIS_DBL_MARGIN=<x>` keeping the control arms
+reachable.
+
+**A METHOD NOTE worth carrying.** `channelprobe`'s percentile is MID-RANK, and
+that is not a refinement: three of its four statistics are small integers
+(0–13 trumps, 0–4 tops, 0–4 voids), so ties are the common case and a strict `<`
+counts every tie as "above me". The first cut did that and `voids` read exactly
+0.000 on every round. `beliefprobe` gets away with strict `<` because its
+statistic is a float sum that essentially never ties; a discrete one cannot.
+
 ### THE WIDENED ABSTRACTION CARRIES REAL SIGNAL — the equilibrium conditions on it (2026-08-20)
 
 The Edelkamp direction, first half. `CFR_FEATURES=2` makes the private bucket a

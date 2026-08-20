@@ -16,6 +16,7 @@ import sys
 
 from games.dissonance import bot as B
 from games.dissonance import engine as E
+from games.dissonance import main as M
 
 BIN = os.path.abspath("rust-cores/dissonance-core/target/release/bidserve")
 K = int(os.environ.get("DIS_K", "8"))
@@ -35,11 +36,32 @@ def proc(tag, seed=0):
     return _procs[tag]
 
 
+#: THE TWO KNOBS main.py SHIPS ON A DOUBLE, and this probe was sending NEITHER
+#: (found 2026-08-20) while its docstring said "exactly as main.py builds it".
+#: So every number it has ever produced described a Double the server does not
+#: play. Same shape as the three offline harnesses found scoring on a dead price
+#: list, and the same fix: send what ships, and keep the control arm reachable.
+#:
+#:   DIS_BID_PRIOR=0    drop the belief prior (uniform world sampling)
+#:   DIS_DBL_MARGIN=<x> re-dose or, at 0, remove the doubling threshold
+#:
+#: Both default to the shipped values, so the DEFAULT run is now the served
+#: decision rather than an adjacent one.
+PRIOR_ON = os.environ.get("DIS_BID_PRIOR", "1") not in ("", "0")
+MARGIN = float(os.environ.get("DIS_DBL_MARGIN", str(M.DOUBLE_MARGIN.get("classic", 0.0))))
+
+
 def ask(g, seat, opts):
     """The armed double request, exactly as main.py builds it."""
     auc = {"phase": g["phase"],
            "declarer": (g["auction"]["declarer"] if FIX else seat),
            "options": opts}
+    if PRIOR_ON:
+        prior = B.bid_prior_terms(g)
+        if prior:
+            auc["bid_prior"] = prior
+    if MARGIN:
+        auc["double_margin"] = MARGIN
     p = proc("dbl")
     p.stdin.write(json.dumps({"view": E.view_for(g, seat), "auction": auc}) + "\n")
     p.stdin.flush()
@@ -129,6 +151,8 @@ def main():
     fn = sum(1 for r in rows if not r["chose"] and r["should"])
     got = sum(r["gain"] for r in rows if r["chose"]) / m
     best = sum(max(0, r["gain"]) for r in rows if r["should"]) / m
+    print(f"  arm: bid_prior {'ON' if PRIOR_ON else 'OFF'}, "
+          f"double_margin {MARGIN:g}")
     print(f"\n=== {m} rounds at the double phase "
           f"(k={K}, declarer field = {'REAL DECLARER (fix)' if FIX else 'ACTING SEAT (shipped)'}) ===")
     print(f"  doubles taken            {sum(r['chose'] for r in rows):4d} "
