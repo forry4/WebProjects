@@ -5046,6 +5046,73 @@ the continuation but ALSO makes the bot open lower across every bucket, and the
 two cancelled. A test that isolates the asymmetry has to leave the opening
 alone.
 
+### THE GATE: DIVERSE IS LESS EXPLOITABLE AND NOT STRONGER. IT DOES NOT SHIP. (2026-08-20)
+
+**`expertdt` vs `expertst`, CRN-paired, dd-resolved, 1550 paired deals — the
+same n the shipped `opp_temp` result was published at:**
+
+| | |
+|---|---|
+| **diverse − Expert** | **−0.6810 ± 0.5329 payoff/round** |
+| 95% CI | **[−1.725, +0.363]** |
+| auctions that differ | 1512/1550 (**97.5%**) |
+| mirror (`hard hard`) | exactly **+0.0000** |
+
+**1.28 SE, spanning zero, and pointing the wrong way. The ship bar is a positive
+head-to-head at equal time; this does not clear it, and `Diverse` costs ~2.5x.
+It stays behind its flag, off.**
+
+**THE TWO NUMBERS TOGETHER ARE THE FINDING, and they are worth more than either
+alone.** `Diverse` is **23% less exploitable** (9.14 → 7.06, split-half bands
+not overlapping) and **not measurably stronger**. This file already records the
+same dissociation in the other direction — Expert is MORE exploitable than Hard
+while beating it +0.957 ± 0.454. Two independent instances, opposite signs:
+
+> **In this game, exploitability and head-to-head strength are close to
+> independent. The exploitability instrument is not a proxy for strength, and a
+> campaign steering by it alone is steering by something else.**
+
+That is the durable lesson of the whole 2026-08-19/20 run and it applies
+retroactively: every exploitability figure in the sections above is a statement
+about exploitability, and none of them was ever evidence about strength.
+
+**WHY IT COMES OUT NULL, and the mechanism is legible in the arms' own
+statistics:**
+
+| | mean opening | mean settled | made |
+|---|---|---|---|
+| `expertdt` (diverse) | 2.56 | 4.00 | 66.7% |
+| `expertst` (Expert) | 2.42 | 4.17 | 66.5% |
+
+**97.5% of auctions take a different SEQUENCE and the aggregate SHAPE barely
+moves.** Diverse rearranges which line it walks without changing the
+distribution it lands on — so a best responder finds it harder to punish (fewer
+crisply predictable nodes) while the opponent across the table sees the same
+contracts made at the same rate. Less exploitable, equally strong, by
+construction.
+
+**AND IT LEAVES THE STANDING DIAGNOSIS UNTOUCHED, which was predicted before the
+run.** The conditional defect is that the opening barely varies with the hand;
+the equilibrium opens near 4 almost regardless. Diverse moved the mean opening
+**2.42 → 2.56 — a fifth of a rung.** It attacks the pass-vs-raise pessimism
+asymmetry, which is a real and different defect. Nothing here is evidence about
+the conditional one.
+
+**METHOD NOTE, and this file has now recorded it four times.** The running
+estimate wandered **−2.57 (n=196) → −2.02 → −1.51 → −0.77 → −0.21 (n=718) →
+−0.85 → −0.68 (n=1550)**. Any of those early reads, quoted alone, would have
+been a different conclusion — including a confident "diverse is clearly worse"
+at n≈200. The harness's own warning is the same one: a 300-deal read once said
++1.71 where the full run said −0.28.
+
+**COST OF THE MEASUREMENT, for whoever runs the next one:** ~5.5 deals/min on an
+uncontended 4-core box at 4 shards, so n=1550 is 4-5 hours; per-deal sigma ≈18.
+**And the harness's variance reduction is inert for expert-vs-expert races** —
+the quality covariate is captured only when a seat's tier is literally `hard`,
+so `q` is 0 throughout and the adjustment does nothing. That is true of this
+gate and of the `opp_temp` measurement whose ±0.454 was therefore raw. Fixing it
+costs one extra myopic ask per deal. See `tools/GATE_RESUME.md`.
+
 ### MULTI-VALUED STATES CUT EXPLOITABILITY 23%, AND THE BLUEPRINT NUMBER IS CIRCULAR (2026-08-19)
 
 Three bidders, **same 400-deal cache, same instrument, same 90 rounds, same

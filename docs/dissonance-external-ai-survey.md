@@ -344,14 +344,25 @@ one of the nulls is un-measurable rather than negative — the distinction matte
 |---|---|---|
 | 1 | **Three PIMC properties** | **Measured.** Leaf correlation **0.713** near the leaves (favours PIMC), bias **0.605**, disambiguation **0.505** — mid-range, the paper's stated worst case. Two of three axes put this game where PIMC is *not* near-optimal, so fusion is structurally present. Also: the information set is now COUNTED exactly, and hard-constraint inference is worth **≤0.6 bits** against sets 6–27 bits wide. |
 | 2 | **Sigma** | **Measured, and it replicates** — 1.586 / 1.590. But the convolution model **overstates** the ladder loosening by ~2.4× (predicted ~19%, measured 7.7%). Bonus: the opening lead is **+0.992 double-dummy but +0.673 in real play**, a third smaller than the number that justified `declarer leads`. |
-| 3 | **Multi-valued states** | **PAID. Exploitability 9.14 → 7.06, a 23% cut**, split-half bands not overlapping. The first thing this campaign has measured that moves exploitability at all. Costs ~2.5× the soft min. |
+| 3 | **Multi-valued states** | **Exploitability 9.14 → 7.06 (−23%) — but the head-to-head gate says NO.** −0.6810 ± 0.5329 over 1550 paired deals, CI [−1.725, +0.363]. Less exploitable, not stronger, 2.5× the cost. Does not ship. |
 | 4 | **αµ** | **Built, correct, and it LOSES** — about −0.22 pts/round against `pimc:8` at ~10× the compute. αµ(1) is a byte-identical null control, so the arm is clean. |
 | 5 | **Auction re-solving** | **Blueprint half built and measured at 1.46 — but that number is largely CIRCULAR** (the blueprint plays the abstraction's own equilibrium and the best responder lives in that same abstraction). Needs a head-to-head arena to mean anything. |
 | 6 | **Prior's exploitability cost** (from the 2019 PI paper) | **Built; un-measurable at this n.** −0.033 ± 1.785 — an error bar fifty times the effect. Not a null, a non-measurement. |
 
-**The one that matters:** item 3. Both endpoints of the opponent-model axis had
-already been measured here (one hand-blind model: −0.62; a blurred clairvoyant
-min: +0.957) and nobody had tried the middle, which is the published answer.
+**The one that matters is what items 3 and 5 proved together, and it is not what
+either was built to show.** `Diverse` came out 23% less exploitable and, at the
+same n the shipped `opp_temp` result was published at, **not stronger**. The file
+already recorded the same dissociation with the signs reversed — Expert is *more*
+exploitable than Hard while beating it +0.957. Two independent instances:
+
+> **In this game, exploitability and head-to-head strength are close to
+> independent.** The exploitability instrument this campaign has been steering by
+> is not a proxy for strength.
+
+That reframes the whole survey: item 1's headline recommendation — make the
+equilibrium a player — was argued from exploitability, and exploitability turns
+out not to be the thing. A blueprint bidder should be gated on a paired arena
+from the start, not on the number that motivated it.
 
 **Two methodological findings worth more than some of the results:**
 

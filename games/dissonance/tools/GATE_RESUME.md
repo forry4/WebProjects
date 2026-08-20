@@ -1,6 +1,12 @@
 # The diverse-vs-Expert auction gate — how to resume it
 
-**Status at time of writing (2026-08-20): RUNNING, INCOMPLETE.** The
+**STATUS: COMPLETE 2026-08-20. RESULT: −0.6810 ± 0.5329 over 1550 paired deals,
+CI [−1.725, +0.363]. Diverse is 23% less exploitable and NOT stronger; it does
+not ship.** Full write-up in `games/dissonance/CLAUDE.md`. Do not re-run this
+arm — what is left below is the method, kept because the next expert-vs-expert
+arm needs every word of it.
+
+**Superseded status line:** The
 exploitability result that motivates it (`Diverse` 9.14 → 7.06, −23%) is in
 `games/dissonance/CLAUDE.md`; this is the head-to-head gate it needs before
 anything ships, because exploitability and strength are different quantities in
