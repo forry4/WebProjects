@@ -406,6 +406,28 @@ def play(m, tier_of, qual, events):
             phase_now = g["phase"]
             opening = phase_now == "auction" and not g["auction"]["log"]
             mv, sums, opts = ask(g, seat, tier_of[seat])
+
+            # THE OPENING TELEMETRY NEEDS ONLY THE MOVE, and gating it on
+            # `sums` cost the blueprint tier its entire record (found
+            # 2026-08-20: `bpwt` reported `mean opening 0.00 (n=0)` over 354
+            # deals). A `bp` arm answers from a policy table and has no prices
+            # at all, so everything below that reads `sums` is genuinely
+            # unavailable to it -- but which level it opened is not, and that is
+            # the statistic every report starts from.
+            #
+            # Split rather than back-filled: the sacrifice taxonomy really does
+            # need prices ("a pass was on offer and the search still priced the
+            # bid negative"), so for a priceless bidder it must report NOTHING
+            # rather than a guess.
+            if mv is not None and phase_now == "auction":
+                if opening and mv.get("kind") == "bid":
+                    events.append(("open", tier_of[seat],
+                                   mv.get("level") or mv.get("value"),
+                                   mv.get("denom", -1)))
+                if opening and mv.get("kind") == "pass":
+                    opener_passed = True
+                    events.append(("openpass", tier_of[seat]))
+
             if mv is not None and sums is not None:
                 tier = tier_of[seat]
                 if phase_now == "auction":
@@ -419,15 +441,10 @@ def play(m, tier_of, qual, events):
                     events.append(("decision", tier, kind))
                     if mv.get("kind") == "bid":
                         last_bid_kind[seat] = kind
-                    if opening and mv.get("kind") == "bid":
-                        events.append(("open", tier,
-                                       mv.get("level") or mv.get("value"),
-                                       mv.get("denom", -1)))
-                    # THE OPENER'S PASS, and the pass-out it can lead to --
-                    # the two rates the OPENER_MAY_PASS experiment is for.
-                    if opening and mv.get("kind") == "pass":
-                        opener_passed = True
-                        events.append(("openpass", tier))
+                    # `open` / `openpass` are recorded above, unconditionally
+                    # -- they need only the move, and a priceless tier has them
+                    # too. (The opener's pass and the pass-out it can lead to
+                    # are the two rates the OPENER_MAY_PASS experiment is for.)
                 elif phase_now == "double" and os.environ.get("ARENA_DEALS"):
                     # THE POSITION AT THE DOUBLE, for re-fitting the belief
                     # prior against EXPERT-driven auctions. The tilt map was

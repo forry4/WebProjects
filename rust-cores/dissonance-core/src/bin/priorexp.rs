@@ -34,7 +34,19 @@
 //! so the only thing varying inside each difference is the contract level and
 //! inside the outer difference is the prior.
 //!
-//!   priorexp [--deals N] [--k K] [--under U] [--tt BITS]
+//! SCORING: `--points 1` scores the round in TRICK POINTS instead of contract
+//! payoff. The payoff carries the +-20 Null and the `N^2+4` / `2N+2+5*shortfall`
+//! split, so its per-row spread swamps the effect -- the first run of this
+//! harness read -0.033 +/- 1.785, an error bar fifty times the estimate, which
+//! is a non-measurement rather than a null. Points span roughly -7..12 and are
+//! an order of magnitude tighter.
+//!
+//! IT IS A DIFFERENT QUESTION AND THAT IS THE TRADE. Payoff asks "what did the
+//! inference cost at the table"; points ask "did the defender take fewer
+//! tricks", which is a proxy for playing worse and is what the exploitability
+//! claim is really about. Quote which one a number came from.
+//!
+//!   priorexp [--deals N] [--k K] [--under U] [--tt BITS] [--points 0|1]
 
 use dissonance::bid::BidPrior;
 use dissonance::bots::PimcBot;
@@ -73,6 +85,7 @@ fn play_at(
     k: usize,
     bits: u32,
     tilt: Option<f64>,
+    points: bool,
 ) -> i32 {
     let mut g = Game::deal(&mut Rng::new(seed), den, declarer as u8);
     let c = shipped_classic_terms(level, declarer);
@@ -97,6 +110,12 @@ fn play_at(
         g.apply(card);
     }
     let dpts = g.s.pts[declarer] as i32;
+    if points {
+        // The DEFENDER's trick points -- same sign convention as the payoff
+        // branch (higher is better for the seat that infers), an order of
+        // magnitude tighter, and a different question. See the header.
+        return g.s.pts[1 - declarer] as i32;
+    }
     let scored = g.s.escored & (1 << declarer) != 0;
     // Signed for the defender.
     -c.payoff(dpts, scored)
@@ -118,6 +137,7 @@ fn main() {
     let k = arg("--k", 8) as usize;
     let under = arg("--under", 2) as i32;
     let bits = arg("--tt", 20) as u32;
+    let points = arg("--points", 0) != 0;
     let tilt = 0.35f64;
 
     let threads = std::thread::available_parallelism()
@@ -153,10 +173,10 @@ fn main() {
                             continue; // no deviation available; contributes nothing
                         }
                         out.push([
-                            play_at(seed, den, declarer, honest, k, bits, Some(tilt)) as f64,
-                            play_at(seed, den, declarer, deviate, k, bits, Some(tilt)) as f64,
-                            play_at(seed, den, declarer, honest, k, bits, None) as f64,
-                            play_at(seed, den, declarer, deviate, k, bits, None) as f64,
+                            play_at(seed, den, declarer, honest, k, bits, Some(tilt), points) as f64,
+                            play_at(seed, den, declarer, deviate, k, bits, Some(tilt), points) as f64,
+                            play_at(seed, den, declarer, honest, k, bits, None, points) as f64,
+                            play_at(seed, den, declarer, deviate, k, bits, None, points) as f64,
                         ]);
                     }
                 }
@@ -177,8 +197,9 @@ fn main() {
     let did: Vec<f64> = rows.iter().map(|r| (r[1] - r[0]) - (r[3] - r[2])).collect();
 
     println!(
-        "priorexp: {} rows, pimc:{}, tilt {}, declarer underbids by {}",
-        n, k, tilt, under
+        "priorexp: {} rows, pimc:{}, tilt {}, declarer underbids by {}, scoring {}",
+        n, k, tilt, under,
+        if points { "TRICK POINTS" } else { "contract payoff" }
     );
     println!("  payoff is signed for the DEFENDER, who is the seat that infers");
     println!();
