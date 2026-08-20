@@ -70,9 +70,31 @@ therefore raw.
 
 It is gated that way for a reason — the covariate is Hard's own myopic price at
 the opening node, free from an ask Hard is making anyway, and an expert arm's
-tree value is a different quantity. Making it work for expert-vs-expert means
-paying for one extra myopic ask per deal, which is cheap next to the tree. Worth
-doing before anyone runs another 17-hour expert-vs-expert arm.
+tree value is a different quantity.
+
+**FIXED 2026-08-20, AND THE FIX IS WORTH ALMOST NOTHING — which is the finding.**
+`quality_of` now prices the covariate explicitly, on its own bidserve channel so
+it cannot evict a tier's `Solved` entry (the mirror still reads exactly +0.0000,
+which is the check). It populates on **100/100 deals** where it used to populate
+on none. And it shrinks the error bar by **0.4%**.
+
+**That is a ceiling, not a bad fit.** Measured over 100 paired deals,
+`corr(pair, quality) = −0.078`, so the best any covariate-based adjustment can
+do here is `1 − sqrt(1 − rho²)` = **0.31%**. The reason is structural and should
+have been obvious before the work: **a pair is two flips with the SEATS
+SWAPPED, so a deal-level property like the opener's hand quality affects both
+flips and cancels.** The CRN pairing already extracted exactly what the
+covariate was built to extract; there is nothing left for it to explain.
+
+**So the ±0.46 at n=1550 is close to irreducible for this harness, and future
+arms cannot be made cheaper this way.** The only routes left are more compute or
+a lower-variance outcome statistic — the contract payoff carries the ±20 Null
+and the `N²+4` / `2N+2+5×shortfall` split, and `sd(pair) = 18.16` is nearly all
+of that. Scoring an auction comparison in trick points would be far tighter and
+would be asking a different question.
+
+The fix stays in regardless: a covariate advertised in the docstring and
+silently doing nothing is worse than one that honestly reports ~0.
 
 ## What to do with the result
 

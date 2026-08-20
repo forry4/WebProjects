@@ -137,6 +137,55 @@ def proc_for(key, k=None, seed=0):
     return PROC[key]
 
 
+#: The world count the hand-quality covariate is priced at. FIXED, and not
+#: either tier's `k`: the covariate must be ONE quantity across every deal and
+#: every run, or deals priced at different k are not comparable and the
+#: adjustment is fitting a mixture.
+QUAL_K = 8
+
+
+def quality_of(g, seat):
+    """The opener's hand quality: the myopic best bid price at the opening node.
+
+    WHY THIS EXISTS AS AN EXPLICIT ASK (2026-08-20). This was previously read
+    for free off whichever flip had a tier literally named `hard`, because
+    Hard's `sums` ARE the myopic price list. That made the covariate -- the one
+    thing in this harness that can shrink an error bar without touching the
+    mean -- **silently inert for every expert-vs-expert race**, since neither
+    arm is Hard, `qual` stayed empty and every recorded `q` was 0.0. It covered
+    the 2026-08-20 diverse gate and the shipped `opp_temp` measurement alike,
+    whose +-0.454 was therefore raw. Those are the expensive runs, and they were
+    the ones getting nothing.
+
+    Paying for it explicitly costs ONE myopic ask per deal -- the cheap price
+    list, not a tree -- against an arm that costs thousands of solves.
+
+    IT GOES TO ITS OWN CHANNEL, and that is not tidiness. `bidserve`'s `Solved`
+    cache is one slot: an off-tier ask keys differently and EVICTS the auction
+    entry, which is exactly how a stray double ask once made `hardt-hardt` read
+    -1.67 where `hard-hard` read exactly 0. A covariate that perturbed the
+    tiers' answers would be buying precision with bias. The mirror is the check,
+    and it must still read exactly +0.0000.
+    """
+    opts = E.auction_payoff_options(g)
+    if not opts:
+        return None
+    req = json.dumps({"view": E.view_for(g, seat),
+                      "auction": {"phase": g["phase"], "declarer": seat,
+                                  "options": opts}}) + "\n"
+    p = proc_for(("qual", seat), k=QUAL_K, seed=104729)
+    p.stdin.write(req)
+    p.stdin.flush()
+    res = json.loads(p.stdout.readline())
+    sums = res.get("sums")
+    if not sums or len(sums) != len(opts):
+        return None
+    bids = [v for v, o in zip(sums, opts) if o["move"]["kind"] == "bid"]
+    if not bids:
+        return None
+    return max(bids) / QUAL_K
+
+
 def ask(g, seat, tier):
     """The armed request, answered by the shipped path; the client's own pick.
 
@@ -411,23 +460,15 @@ def play(m, tier_of, qual, events):
                                    None if on is None else sums[on],
                                    None if off is None else sums[off],
                                    len(g["auction"]["log"])))
-            # THE CONTROL VARIATE, captured for free. The opening node is asked
-            # of Hard in exactly one of a deal's two flips (the tiers swap
-            # seats), and its myopic best bid price IS the hand-quality
-            # yardstick `auction_style.py` uses. Noise in a covariate only
-            # weakens the adjustment; it cannot bias the mean.
-            if (mv is not None and g["phase"] == "auction"
-                    and g["auction"]["declarer"] < 0 and not g["auction"]["log"]
-                    and tier_of[seat] == "hard" and m not in qual):
-                bids = [s for s, o in zip(sums, opts) if o["move"]["kind"] == "bid"]
-                if bids:
-                    # Per-world normalised; a pooled spec's TOTAL k is what the
-                    # summed sums are proportional to. (The first version did
-                    # int("4p") here and killed all four shards -- and the
-                    # mirror never covers this line, because it only runs on
-                    # the HARD flip of a mixed pairing.)
-                    per, np_ = _kspec(K_B if TIER_B == "hard" else K_A)
-                    qual[m] = max(bids) / max(1, per * np_)
+            # THE CONTROL VARIATE, now priced EXPLICITLY and for every pairing.
+            # It used to be read for free off a tier named `hard` and was
+            # therefore inert for expert-vs-expert -- see `quality_of`. Noise in
+            # a covariate only weakens the adjustment; it cannot bias the mean.
+            if (g["phase"] == "auction" and g["auction"]["declarer"] < 0
+                    and not g["auction"]["log"] and m not in qual):
+                q = quality_of(g, seat)
+                if q is not None:
+                    qual[m] = q
         if mv is None:
             kind, p = B.act(g, seat, random.Random(m))
             mv = ({"kind": "pass"} if p.get("pass")
