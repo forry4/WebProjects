@@ -338,7 +338,8 @@ It is the same reasoning Kermit's inference tables encode.
 ## Part 4 — RESULTS (eleven items built and measured, 2026-08-19/20)
 
 Everything below was implemented and run. **Not one produced a shippable strength
-gain.** What they produced instead is a well-evidenced map of where the strength
+gain** — though item 12, added last, is the first to find a real and actionable
+defect rather than another null. What they produced instead is a well-evidenced map of where the strength
 is not, several corrected instruments, and three methodological findings that are
 worth more than most of the results — which is the honest summary and is stated
 that way deliberately.
@@ -402,6 +403,18 @@ from the start, not on the number that motivated it.
 survey's headline recommendation is answered: making the equilibrium a player
 does not work here, and the reason it looked promising was exploitability, which
 items 3 and 5 jointly showed is not the thing.
+
+**ITEM 12 — the pass/raise asymmetry — IS THE FIRST POSITIVE FINDING (2026-08-20).**
+Measured with `tools/shadeprobe.py`: the tree shades the BID branch by
+**−10.222 ± 0.391** per-world payoff points on the option it is actually
+choosing, and the PASS branch by **exactly zero** (an exact control, since
+passing is a leaf in both pricers and both vectors come off the same worlds). It
+concedes **44.4%** where the price list concedes **29.0%**, and the divergence is
+entirely at standing levels 1–4, decaying to exact agreement by 6. That is the
+"concedes level 4" defect confirmed, quantified, and extended three rungs below
+where it had been seen. The fix is a one-constant additive correction on a wire
+field this package already ships twice — but the gate stays a CRN-paired arena,
+not the sweep.
 
 **Still not done:** the one direction none of the eleven items touched. Every
 arm above attacked either the sampler (items 6, 8, 10 — all null, four

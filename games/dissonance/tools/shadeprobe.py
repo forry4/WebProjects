@@ -169,8 +169,18 @@ def node(g, seat):
     if not msum:
         return None, mv
 
-    tp, mp = tsum[ipass[0]] / K, msum[ipass[0]] / K
-    tb = [tsum[i] / K for i in ibid]
+    # THE TIE-BREAK COMES OFF FIRST, and it is why the control read -0.000
+    # rather than 0.000 on the first 400-deal run. `answer_auction` returns
+    # `tree + 1e-5 * myopic` -- Hard's price ordering ties the tree cannot see --
+    # so the raw sums carry a myopic term even on the pass. It is recoverable
+    # EXACTLY, because this function is holding the same `myopic` vector the
+    # Rust added, so the tree's own value is `sums - 1e-5 * myopic` and the
+    # control goes back to being exactly zero rather than nearly zero.
+    def tv(i):
+        return (tsum[i] - 1e-5 * msum[i]) / K
+
+    tp, mp = tv(ipass[0]), msum[ipass[0]] / K
+    tb = [tv(i) for i in ibid]
     mb = [msum[i] / K for i in ibid]
     bt = max(range(len(ibid)), key=lambda j: tb[j])     # tree's favourite bid
     bm = max(range(len(ibid)), key=lambda j: mb[j])     # price list's favourite

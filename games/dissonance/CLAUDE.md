@@ -5683,6 +5683,94 @@ for both. The three findings worth knowing without opening it:
   advance how much strategy fusion is recoverable, and the sigma measurement this
   file already asks for and has never run.
 
+### THE TREE IS PESSIMISTIC ONLY ABOUT THE BRANCH THAT CONTINUES — CONFIRMED, QUANTIFIED, LOCALISED (2026-08-20)
+
+**The first positive finding of this campaign.** Ten items attacked the SAMPLER
+(four nulls) or the ABSTRACTION (three refusals); this is the first instrument
+pointed at the defect the attribution kept naming, and the defect is real.
+
+**THE STATISTIC, and it needs no ground truth and no continuation assumption:**
+
+    shade(option) = tree value - price-list value, SAME option, SAME node
+
+Passing is a LEAF IN BOTH pricers, so its shade is an exact control. Bidding
+continues into a subtree whose modelled opponent holds our exact hand. Both
+vectors come off the SAME `entry.worlds` — `answer_auction` computes them
+together — so this cannot be a leaf-accuracy artefact or a sampling artefact.
+`tools/shadeprobe.py`, 400 deals, 900 decisions where both branches were legal,
+`expertst` driving its own auction:
+
+| | per-world payoff points |
+|---|---|
+| **passing (the CONTROL)** | **+0.000 ± 0.000** — exactly zero on every node |
+| bidding, every option unselected | **−0.735 ± 0.056** (13 SE) |
+| **bidding, the price list's favourite** | **−10.222 ± 0.391** (26 SE) |
+
+**THE TREE SHADES THE BID BRANCH BY ~10 POINTS ON THE OPTION IT IS ACTUALLY
+CHOOSING, AND THE PASS BRANCH BY EXACTLY NOTHING.** Consequence at the same
+nodes: **the tree concedes 44.4% where the price list concedes 29.0%.**
+
+**AND IT IS LOCALISED EXACTLY WHERE THE DEFECT WAS NAMED.** The shading decays
+monotonically as the standing bid rises — because a higher standing bid leaves
+fewer rungs, i.e. less subtree to be pessimistic about:
+
+| standing | n | bid shade | tree passes | price list passes |
+|---|---|---|---|---|
+| 1 | 264 | −1.193 ± 0.159 | **22.3%** | **0.0%** |
+| 2 | 67 | −1.803 ± 0.197 | **31.3%** | **1.5%** |
+| 3 | 108 | −1.192 ± 0.115 | **36.1%** | **9.3%** |
+| 4 | 170 | −0.472 ± 0.067 | **48.8%** | **34.1%** |
+| 5 | 181 | −0.111 ± 0.033 | 60.2% | 56.9% |
+| 6 | 100 | +0.027 ± 0.016 | 79.0% | 79.0% |
+| 7 | 9 | +0.013 ± 0.013 | 100.0% | 100.0% |
+
+At standing 6–7 the two pricers agree to the decision, and the shade is zero.
+Every point of divergence is at standing 1–4. **That is the "concedes level 4"
+finding, plus three rungs below it nobody had looked at.**
+
+**WHERE THE SHADING FLIPS THE DECISION (153 nodes), IT LOOKS WRONG — and this
+row is the confounded one.** Against an exact double-dummy resolve of each
+branch, the tree's choice is worth **−9.020 ± 1.816** against the price list's,
+better on 54 and worse on 99. **Read it as direction, not magnitude**, for two
+reasons that both cut the same way: the resolve prices each option as if the
+auction SETTLES there, and a bid's true value is at most its settled value (the
+opponent may raise over it), so it FLATTERS bidding; and the price list is not
+a better bidder in general — the tree beats the worlds-matched price list
+**+1.19 ± 0.32** head to head — so these 153 nodes are selected on disagreement.
+The shade rows above carry no such confound.
+
+**THE FIX IS A ONE-CONSTANT ADDITIVE CORRECTION AND NEEDS NO RUST CHANGE.**
+A per-option term the SERVER computes and the search adds is a pattern this
+package already ships twice (`double_margin`, `open_bias`), so a pass penalty —
+or equivalently a bid bonus — rides the same wire field. And it can be swept
+EXACTLY off recorded nodes rather than arena'd per candidate, the method that
+priced every `DOUBLE_MARGIN` for free: record each node's two vectors plus an
+exact resolve, and every candidate correction is a re-argmax over numbers
+already in hand. **The ship gate is unchanged and is not the sweep table** — a
+CRN-paired arena at equal time, mirror exactly +0.0000 — because this file
+already records one constant re-fitted on a sweep, shipped, and reverted.
+
+**TWO INSTRUMENT TRAPS, both of which produced clean plausible tables first.**
+* **The two pricers must land on the SAME WORLDS.** Sent to its own channel per
+  the `quality_of` discipline, the price list drew a fresh sample and the
+  control read **−13.2 ± 6.5** — two samples disagreeing, not a tree shading
+  anything. It now goes to the SAME `bidserve` processes right after the tree
+  ask, where the one-slot `Solved` entry is already filled with the union of
+  denominations and the price list wants a subset, so it is a pure cache hit.
+  **The `swap` block is load-bearing**: it is XOR'd into the cache key, so a
+  myopic ask omitting the talon model keys differently, misses, solves fresh
+  worlds, and evicts the tree's entry on the way out.
+* **IMPORTING `auction_arena` RUNS IT.** It reads `sys.argv` at module level and
+  its race body has no `__main__` guard, so the first run of this parsed argv as
+  mode "6", **k = 0**, and reported a full table off a search over ZERO worlds.
+  It is imported under a valid empty-window argv now, with `K` read back OFF the
+  arena so the two cannot diverge — rather than copying `ask()`, which is
+  exactly how `cfrlab` spent a campaign measuring Hard while claiming Expert.
+* And the control read `−0.000` rather than `0.000` until the **`1e-5 × myopic`
+  tie-break** was subtracted back off the tree's sums. It is recoverable exactly
+  (the same `myopic` vector is in hand), and the report now SHOUTS if the
+  control is ever non-zero rather than leaving it to be noticed.
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a
