@@ -906,6 +906,13 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
             # predates it prices the old way.
             if bot.exact_leaf():
                 room["_ai_search"]["auction"]["exact_leaf"] = True
+            # THE LEAF, CALIBRATED ON REAL PLAY -- an experiment, off unless
+            # `DIS_PLAY_CAL` is set. It rides beside the options because it
+            # corrects the POINTS every pricer reads, the myopic one and the
+            # tree alike, and not any rule of the auction.
+            cal = bot.play_calibration()
+            if cal:
+                room["_ai_search"]["auction"]["play_cal"] = cal
             tier = _valid_difficulty(room.get("ai_difficulty"))
             if tier in SEARCH_AUCTION_TIERS:
                 search = engine.auction_search_payload(g)

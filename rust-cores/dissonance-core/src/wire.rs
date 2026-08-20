@@ -870,13 +870,34 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
     // found one would price the opponent as clairvoyant while reporting itself
     // as the belief tier.
     let belief_k = auc.get("belief_worlds").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+    // THE LEAF, CALIBRATED ON REAL PLAY -- see `bid::PlayCal`. Optional and
+    // all-zero by default, which is the double-dummy guarantee the tree has
+    // always searched. It carries the entry's `eps` draws, so it is part of the
+    // cache identity like `swap` and `exact_leaf`: an entry sampled under one
+    // calibration cannot price a decision made under another.
+    let cal = auc.get("play_cal").map(|c| crate::bid::PlayCal {
+        shift: c.get("shift").and_then(|x| x.as_f64()).unwrap_or(0.0),
+        slope: c.get("slope").and_then(|x| x.as_f64()).unwrap_or(0.0),
+        sd: c.get("sd").and_then(|x| x.as_f64()).unwrap_or(0.0),
+    }).unwrap_or_default();
     let key = crate::bid::hand_key(&view, declarer, k.max(1))
         ^ swap.as_ref().map_or(0, |sp| sp.key())
         ^ if exact { 0xE4AC_71EA } else { 0 }
-        ^ (belief_k as u64) << 48;
+        ^ (belief_k as u64) << 48
+        ^ if cal.off() { 0 } else {
+            // Any of the three moving is a different sample, so mix all three
+            // rather than a flag -- two calibrations that differed only in
+            // spread would otherwise share an entry.
+            (cal.shift.to_bits() ^ cal.slope.to_bits().rotate_left(21)
+             ^ cal.sd.to_bits().rotate_left(42)) | 1
+        };
     // A different hand starts a new entry; the same hand extends the one it
     // has, and asking about nothing new does no work at all.
     let (mut entry, _) = cache.take(key);
+    // Set BEFORE the deals are drawn: `deals_into` draws each world's `eps`
+    // from it, so an entry that learned its calibration afterwards would carry
+    // a spread of zero while claiming one.
+    entry.cal = cal;
     let cached = (wanted & !entry.covered) == 0 && (wanted_opp & !entry.covered_opp) == 0;
     if !cached {
         crate::bid::solve_into(&view, dd, rng, k.max(1), wanted, wanted_opp, declarer,
@@ -891,7 +912,7 @@ pub fn answer_auction(v: &Value, k: usize, dd: &mut Dd, rng: &mut crate::rng::Rn
                                 declarer, &mut entry, swap.as_ref());
     }
     let myopic = crate::bid::price(&opts, &entry.worlds, entry.covered, entry.covered_opp,
-                                   entry.exact);
+                                   entry.exact, &entry.cal);
     let sums = match &expert {
         Some((st, rules, terms, edges)) => {
             let mut s = crate::auc_search::Search::new(view.me, rules.clone(), terms, &entry);
@@ -1736,7 +1757,7 @@ mod exact_double {
                 let pool = g.s.pool() as i32;
                 w.pts[2] = (pool + diff) / 2;
                 w.duck[2] = dd.null_no_even_makeable(&g.s, 0);
-                let proxy = price(&opts, &[w], 1 << 2, 0, false);
+                let proxy = price(&opts, &[w], 1 << 2, 0, false, &Default::default());
                 // The DECISION each would take: double iff it costs the declarer.
                 n += 1;
                 if (exact[0] < exact[1]) != (proxy[0] < proxy[1]) {

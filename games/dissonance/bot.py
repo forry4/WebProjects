@@ -872,6 +872,46 @@ def belief_worlds() -> int:
     return int(os.environ.get("DIS_BELIEF_W", "0") or 0)
 
 
+#: THE MEASURED GAP BETWEEN THE SOLVER'S LADDER AND THE REAL ONE.
+#:
+#: `cfrlab playnoise`, 794 imposed contracts played out by the SHIPPED search on
+#: both seats: a real declarer finishes **+0.95 points** above the double-dummy
+#: guarantee on average, with **sd 1.94**, and the ladder that follows is 16%
+#: looser than the solver believes (a rung costs 19.4 points of make-chance
+#: double-dummy and 16.3 in real play). The mean shrinks with the level -- a
+#: defender leaks less to a declarer who is straining -- which is why the slope
+#: is separate rather than folded into a pooled constant.
+#:
+#: These are the numbers `cfrlab`'s own real-play leaf already uses, quoted here
+#: so the bot and the yardstick can finally be the same game.
+PLAY_CAL = {"shift": 1.45, "slope": -0.11, "sd": 1.94}
+
+
+def play_calibration() -> dict | None:
+    """The auction leaf's real-play correction, or None for the double-dummy
+    guarantee the tree has always searched. OFF unless `DIS_PLAY_CAL` is set.
+
+    THE MISALIGNMENT THIS ADDRESSES, and it went unnoticed through six failed
+    treatments. The exploitability instrument scores every arm with the
+    REAL-PLAY leaf while the tree it grades optimises the DOUBLE-DUMMY one -- so
+    the bot has been maximising an objective it is not marked on, and every
+    previous arm tuned a coefficient inside that mismatch.
+
+    `DIS_PLAY_CAL` is a scale on `PLAY_CAL`, so `1` is the measurement and `0`
+    is today. `DIS_PLAY_SD` overrides the spread alone, because the mean and the
+    spread do different jobs: the mean says contracts are easier than the solver
+    thinks, the SPREAD is what flattens P(make) per rung and is the half that
+    changes shape rather than level.
+    """
+    w = float(os.environ.get("DIS_PLAY_CAL", "0") or 0)
+    if w <= 0:
+        return None
+    out = {k: v * w for k, v in PLAY_CAL.items()}
+    if os.environ.get("DIS_PLAY_SD") is not None:
+        out["sd"] = float(os.environ["DIS_PLAY_SD"])
+    return out
+
+
 def search_rules_overrides() -> dict:
     """Every EXPERIMENT knob the auction search's `rules` block takes, in ONE
     place -- and that is the whole point of the function.

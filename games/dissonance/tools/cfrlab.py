@@ -477,6 +477,13 @@ def bid(g, seat):
     # `main.py` reads, so the control arm here really is the served bidder.
     if B.exact_leaf():
         auc["exact_leaf"] = True
+    # The real-play leaf. The SAME switch `main.py` reads, so the control arm
+    # here really is the served bidder -- and the same correction this file's
+    # own `leaf` applies, so for the first time the bot and the yardstick are
+    # scoring one game.
+    cal = B.play_calibration()
+    if cal:
+        auc["play_cal"] = cal
     if g["phase"] == "auction":
         s = E.auction_search_payload(g)
         if s:
@@ -697,7 +704,8 @@ def expert_round(seed):
            # STAMPED, because a checkpoint outlives the shell that made it and
            # two tiers' rows are indistinguishable once pooled.
            "temp": OPP_TEMP, "xfit": B.cross_fit(), "jw": B.jump_weight(),
-           "bw": B.belief_worlds()}
+           "bw": B.belief_worlds(),
+           "cal": B.play_calibration()}
     # KEPT IN ITS OWN FIELD. The settled statistics above (level, made, EV) are
     # about self-play and must stay that way; only the POLICY FIT wants the
     # off-policy probes, and mixing them into `dec` would quietly re-weight
@@ -1849,7 +1857,8 @@ def corpus_tiers(rows):
     seen = defaultdict(int)
     for r in rows:
         seen[(r.get("temp", 0.0), float(r.get("xfit") or 0),
-              float(r.get("jw", 1) or 1), int(r.get("bw", 0) or 0))] += 1
+              float(r.get("jw", 1) or 1), int(r.get("bw", 0) or 0),
+              json.dumps(r.get("cal")) if r.get("cal") else "")] += 1
     return dict(seen)
 
 
@@ -1858,8 +1867,9 @@ def _tier_line(rows):
     return "  corpus tier: " + ", ".join(
         f"{'minimax (hard)' if k == 0 else f'soft temp {k:g} (expert)'}"
         f"{f' +xfit {x:g}' if x else ''}{f' +jumpw {j:g}' if j != 1 else ''}"
-        f"{f' +belief {w}' if w else ''}: {v} rounds"
-        for (k, x, j, w), v in sorted(t.items())) + (
+        f"{f' +belief {w}' if w else ''}{f' +playcal {c}' if c else ''}"
+        f": {v} rounds"
+        for (k, x, j, w, c), v in sorted(t.items())) + (
         "   *** MIXED TIERS -- this pools two different bidders ***"
         if len(t) > 1 else "")
 

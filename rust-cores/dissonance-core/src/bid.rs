@@ -255,6 +255,65 @@ pub struct World {
     pub opp_pts: [i32; NDENOM_SLOTS],
     pub opp_duck: [bool; NDENOM_SLOTS],
     pub opp_threat: [i32; NDENOM_SLOTS],
+    /// This world's REAL-PLAY deviation, per declaring side: `[ours, theirs]`.
+    /// Drawn once with the deal and never redrawn -- see `PlayCal`. 0 unless a
+    /// calibration with a spread was asked for.
+    pub eps: [f64; 2],
+}
+
+/// THE LEAF IS A DOUBLE-DUMMY GUARANTEE AND THE TABLE IS NOT (2026-08-20).
+///
+/// `solve_world` gives what a declarer can FORCE against a defender who sees
+/// all forty cards. Nobody plays that defender. Measured over 794 imposed
+/// contracts played out by the SHIPPED search on both seats
+/// (`cfrlab playnoise`), real declarers finish **+0.95 points** above the
+/// guarantee on average, with **sd 1.94** -- and the ladder that follows is 16%
+/// looser than the solver believes: a rung costs 19.4 points of make-chance
+/// double-dummy and 16.3 in real play.
+///
+/// THAT IS A MISALIGNMENT, not merely an inaccuracy, and it went unnoticed
+/// through six failed treatments. The exploitability instrument scores every
+/// arm with the REAL-PLAY leaf, while the tree it is grading optimises the
+/// double-dummy one -- so the bot has been maximising an objective it is not
+/// being marked on. Every previous arm tuned a coefficient inside that
+/// mismatch.
+///
+/// Two terms, and they do different jobs:
+/// * `shift` + `slope x level` -- the MEAN correction. Contracts are easier
+///   than the guarantee says, slightly less so the higher they are (a defender
+///   leaks less to a declarer who is straining).
+/// * `sd` -- the SPREAD. This is the half that changes SHAPE rather than
+///   level: play noise as large as the entire hand-quality spread is what
+///   flattens P(make) per rung, and a mean-only correction leaves the leaf as
+///   falsely certain as it ever was. Drawn once per world per side and kept
+///   for the entry's life -- a deviation redrawn per option would make the
+///   choice between candidates noise rather than judgement.
+///
+/// All three cross the wire as DATA (`play_cal`), so a re-measurement moves the
+/// bot with no Rust change -- the `payoff_terms` discipline. Absent, or all
+/// zero, and the leaf is the double-dummy guarantee it has always been.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlayCal {
+    pub shift: f64,
+    pub slope: f64,
+    pub sd: f64,
+}
+
+impl PlayCal {
+    #[inline]
+    pub fn off(&self) -> bool {
+        self.shift == 0.0 && self.slope == 0.0 && self.sd == 0.0
+    }
+
+    /// The guarantee, corrected to what a real declarer takes at this level.
+    /// `eps` is the world's own draw; the rest is the measured mean.
+    #[inline]
+    pub fn apply(&self, pts: i32, level: i32, eps: f64) -> i32 {
+        if self.off() {
+            return pts;
+        }
+        (pts as f64 + eps + self.shift + self.slope * level as f64).round() as i32
+    }
 }
 
 /// The sampled deals AND what has been solved on them so far.
@@ -286,6 +345,10 @@ pub struct Solved {
     /// declarer could force nothing at all -- a plausible-looking number, which
     /// is the failure shape this crate keeps paying for.
     pub exact: bool,
+    /// The real-play calibration these worlds were sampled under. Part of the
+    /// entry's identity: the `eps` draws belong to it, and pricing a world
+    /// under a different one would mix two leaves.
+    pub cal: PlayCal,
     pub worlds: Vec<World>,
     /// ONE BELIEF SAMPLE PER WORLD -- what the OPPONENT would be looking at, if
     /// the world at that index were the truth. Empty unless the tier asked for
@@ -448,9 +511,20 @@ pub fn solve_into(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
 /// scalars they read: the pricer and the tree both come through here, and the
 /// `exact` flag is the entry's own (`Solved::exact`), never a caller's opinion.
 #[inline]
-pub fn leaf(o: &Option_, exact: bool, pts: i32, duck: bool, threat: i32) -> i32 {
+pub fn leaf(o: &Option_, exact: bool, pts: i32, duck: bool, threat: i32,
+            cal: &PlayCal, eps: f64) -> i32 {
+    // THE CORRECTION IS APPLIED TO THE POINTS, NOT TO THE PRICE. A contract's
+    // terms are what the room pays and are never touched; what moves is the
+    // estimate of how many points the declarer actually finishes with, which is
+    // the thing that was measured. It has to happen here rather than at solve
+    // time because the mean correction depends on the LEVEL, and one solved
+    // world is priced at every level on the ladder.
+    let pts = cal.apply(pts, o.target, eps);
     if exact {
-        o.payoff_exact(pts, threat)
+        // The threat is a point total on the same scale, so it takes the same
+        // correction -- otherwise the exact leaf's two scalars would be
+        // measured against different games.
+        o.payoff_exact(pts, cal.apply(threat, o.target, eps))
     } else {
         o.payoff(pts, duck)
     }
@@ -504,7 +578,7 @@ pub fn belief_into(v: &View, dd: &mut Dd, rng: &mut Rng, m: usize,
 /// it would price as a flat 0 points in every deal — a plausible-looking number
 /// that would outrank genuinely bad contracts.
 pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8,
-             exact: bool) -> Vec<f64> {
+             exact: bool, cal: &PlayCal) -> Vec<f64> {
     let mut sums = vec![0f64; opts.len()];
     for w in worlds {
         for (i, o) in opts.iter().enumerate() {
@@ -521,9 +595,10 @@ pub fn price(opts: &[Option_], worlds: &[World], have: u8, have_opp: u8,
             // NEGATED for a pass: the option is priced for the opponent, and
             // every entry in this list is signed for the seat being asked.
             sums[i] += if o.opp {
-                -leaf(o, exact, w.opp_pts[d], w.opp_duck[d], w.opp_threat[d]) as f64
+                -leaf(o, exact, w.opp_pts[d], w.opp_duck[d], w.opp_threat[d],
+                      cal, w.eps[1]) as f64
             } else {
-                leaf(o, exact, w.pts[d], w.duck[d], w.threat[d]) as f64
+                leaf(o, exact, w.pts[d], w.duck[d], w.threat[d], cal, w.eps[0]) as f64
             };
         }
     }
@@ -694,8 +769,32 @@ pub fn deals_into(v: &View, rng: &mut Rng, k: usize, cache: &mut Solved,
         shown
     }).collect();
     cache.worlds = vec![World::default(); k];
+    // THE WORLD'S OWN REAL-PLAY DEVIATION, drawn once here and kept for the
+    // entry's life. Per SIDE, because each seat declares in its own branches
+    // and their play noise is not the same draw. A Box-Muller pair off the
+    // crate's own RNG -- no dependency, and the sampler is the one every other
+    // determinization already uses, so a seed reproduces the whole entry.
+    if cache.cal.sd > 0.0 {
+        for w in cache.worlds.iter_mut() {
+            for e in w.eps.iter_mut() {
+                *e = cache.cal.sd * gauss(rng);
+            }
+        }
+    }
     cache.covered = 0;
     cache.covered_opp = 0;
+}
+
+/// A standard normal from the crate's own RNG (Box-Muller).
+///
+/// `u1` is nudged off zero rather than rejected: a rejection loop would consume
+/// a variable number of draws and the entry would stop being reproducible from
+/// its seed, which every parity fixture and every paired arena run depends on.
+fn gauss(rng: &mut Rng) -> f64 {
+    const SCALE: f64 = 1.0 / ((1u64 << 53) as f64);
+    let u1 = ((rng.next_u64() >> 11) as f64 * SCALE).max(1e-12);
+    let u2 = (rng.next_u64() >> 11) as f64 * SCALE;
+    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
 }
 
 /// PRICE A SETTLED CONTRACT EXACTLY: one `solve_contract` per option per world.
@@ -857,12 +956,96 @@ pub fn eval_options(v: &View, dd: &mut Dd, rng: &mut Rng, k: usize,
     let (wanted, wanted_opp) = wanted_denoms(opts);
     let mut cache = Solved::default();
     solve_into(v, dd, rng, k, wanted, wanted_opp, declarer, &mut cache, None, false);
-    price(opts, &cache.worlds, cache.covered, cache.covered_opp, false)
+    price(opts, &cache.worlds, cache.covered, cache.covered_opp, false,
+          &PlayCal::default())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE REAL-PLAY CALIBRATION MOVES THE POINTS AND NEVER THE PRICE.
+    ///
+    /// The distinction is the whole safety property. A contract's terms are
+    /// what the ROOM pays and this must not touch them; what moves is the
+    /// estimate of how many points the declarer finishes with, which is the
+    /// quantity that was measured. A calibration that leaked into `make` or
+    /// `set_base` would be the tier searching a scoring the game does not
+    /// charge -- the drift `payoff_terms` exists to prevent.
+    #[test]
+    fn the_play_calibration_corrects_points_and_leaves_the_terms_alone() {
+        let o = Option_ { denom: 0, target: 4, make: 20, over: 1, set_base: 10,
+                          short: 5, ramp: 0, null: 20, opp: false, redeal: false };
+        let off = PlayCal::default();
+        assert!(off.off());
+        // OFF IS THE GUARANTEE, UNTOUCHED -- what makes the A/B unconfounded.
+        for p in -6..=12 {
+            assert_eq!(off.apply(p, 4, 0.0), p);
+            assert_eq!(leaf(&o, false, p, false, 0, &off, 3.3),
+                       o.payoff(p, false),
+                       "an off calibration must ignore even a nonzero eps");
+        }
+        // The measured mean: +0.95 overall, slightly smaller the higher the
+        // contract. `slope` is what makes a rung cost less make-chance than the
+        // solver thinks, so it must really depend on the level.
+        let cal = PlayCal { shift: 1.45, slope: -0.11, sd: 0.0 };
+        assert_eq!(cal.apply(4, 3, 0.0), 5, "+1.12 at level 3");
+        assert_eq!(cal.apply(4, 9, 0.0), 4, "+0.46 at level 9 rounds away");
+        assert!(cal.apply(4, 3, 0.0) >= cal.apply(4, 9, 0.0),
+                "the correction must not GROW with the level");
+        // ...and the eps is what supplies the spread. Without it the leaf is
+        // as falsely certain as it ever was, just shifted.
+        assert_eq!(cal.apply(4, 4, 2.0), 7);
+        assert_eq!(cal.apply(4, 4, -2.0), 3);
+        // The TERMS are never rewritten -- the corrected price must equal the
+        // untouched contract evaluated at the corrected points.
+        for p in -6..=12 {
+            for e in [-2.0, 0.0, 2.0] {
+                assert_eq!(leaf(&o, false, p, false, 0, &cal, e),
+                           o.payoff(cal.apply(p, o.target, e), false));
+            }
+        }
+    }
+
+    /// THE WORLD'S DEVIATION IS DRAWN ONCE AND KEPT.
+    ///
+    /// A deviation redrawn per option would make the choice BETWEEN candidates
+    /// noise rather than judgement -- the same failure the `shown` talon set
+    /// was given a permanent home to avoid. And it must be per SIDE: each seat
+    /// declares in its own branches and their play noise is not one draw.
+    #[test]
+    fn the_play_deviation_is_per_world_per_side_and_stable() {
+        let g = crate::game::Game::deal(&mut Rng::new(4242), 2, 0);
+        let v = View::of(&g, 0);
+        let mut fill = |sd: f64| {
+            let mut c = Solved { cal: PlayCal { shift: 0.0, slope: 0.0, sd },
+                                 ..Default::default() };
+            deals_into(&v, &mut Rng::new(9), 6, &mut c, None);
+            c
+        };
+        let a = fill(2.0);
+        assert_eq!(a.worlds.len(), 6);
+        let flat: Vec<f64> = a.worlds.iter().flat_map(|w| w.eps).collect();
+        assert!(flat.iter().any(|&x| x != 0.0), "no deviation was drawn");
+        assert!(flat.iter().any(|&x| x > 0.0) && flat.iter().any(|&x| x < 0.0),
+                "the deviation is one-sided: {flat:?}");
+        // Per side, not one value copied twice.
+        assert!(a.worlds.iter().any(|w| w.eps[0] != w.eps[1]),
+                "both sides drew the same deviation in every world");
+        // Reproducible from the seed: every fixture and every paired arena run
+        // depends on an entry being a function of its seed.
+        let b = fill(2.0);
+        for (x, y) in a.worlds.iter().zip(&b.worlds) {
+            assert_eq!(x.eps, y.eps, "the draw is not reproducible");
+        }
+        // ...and a spread of zero draws nothing at all.
+        assert!(fill(0.0).worlds.iter().all(|w| w.eps == [0.0, 0.0]));
+        // The SCALE is the one asked for, not an arbitrary unit.
+        let n = flat.len() as f64;
+        let mean = flat.iter().sum::<f64>() / n;
+        let sd = (flat.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n).sqrt();
+        assert!(sd > 0.7 && sd < 4.0, "sd {sd:.2} is not near the 2.0 asked for");
+    }
 
     /// THE BELIEF SAMPLE IS THE OPPONENT'S INFORMATION SET, and every clause of
     /// that is checked separately, because a sample that is merely PLAUSIBLE is
@@ -1114,8 +1297,8 @@ mod tests {
         // An option nobody solved must contribute nothing instead.
         let o = Option_ { denom: 3, ..opt(4, 16, 12) };
         let worlds = vec![World::default()];
-        assert_eq!(price(&[o], &worlds, 0b00000, 0, false), vec![0.0]);
-        assert_eq!(price(&[o], &worlds, 0b01000, 0, false), vec![-20.0]);   // -(4 + 4x4)
+        assert_eq!(price(&[o], &worlds, 0b00000, 0, false, &PlayCal::default()), vec![0.0]);
+        assert_eq!(price(&[o], &worlds, 0b01000, 0, false, &PlayCal::default()), vec![-20.0]);   // -(4 + 4x4)
     }
 
     #[test]
@@ -1136,7 +1319,7 @@ mod tests {
         let mine = Option_ { denom: 2, target: 3, make: 9, over: 1, set_base: 3,
                              short: 4, ramp: 0, null: 12, opp: false, redeal: false };
         let theirs = Option_ { opp: true, ..mine };
-        let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp, false);
+        let sums = price(&[mine, theirs], &cache.worlds, cache.covered, cache.covered_opp, false, &PlayCal::default());
         let by_hand: f64 = cache.worlds.iter()
             .map(|w| -theirs.payoff(w.opp_pts[2], w.opp_duck[2]) as f64).sum();
         assert_eq!(sums[1], by_hand, "the pass is not the negated opponent solve");
@@ -1153,7 +1336,7 @@ mod tests {
         let (mine, theirs) = wanted_denoms(&[redeal]);
         assert_eq!((mine, theirs), (0, 0), "a pass-out asks for no solve at all");
         let worlds = vec![World::default(); 3];
-        assert_eq!(price(&[redeal], &worlds, 0, 0, false), vec![0.0]);
+        assert_eq!(price(&[redeal], &worlds, 0, 0, false, &PlayCal::default()), vec![0.0]);
     }
 
     #[test]

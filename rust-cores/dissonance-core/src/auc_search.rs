@@ -550,9 +550,11 @@ impl<'a> Search<'a> {
                 // every contract as though the declarer could force nothing.
                 let ex = self.worlds.exact;
                 let v = if mine {
-                    crate::bid::leaf(&o, ex, w.pts[d], w.duck[d], w.threat[d])
+                    crate::bid::leaf(&o, ex, w.pts[d], w.duck[d], w.threat[d],
+                                     &self.worlds.cal, w.eps[0])
                 } else {
-                    crate::bid::leaf(&o, ex, w.opp_pts[d], w.opp_duck[d], w.opp_threat[d])
+                    crate::bid::leaf(&o, ex, w.opp_pts[d], w.opp_duck[d],
+                                     w.opp_threat[d], &self.worlds.cal, w.eps[1])
                 };
                 best = Some(best.map_or(v, |b: i32| b.max(v)));
             }
@@ -730,7 +732,8 @@ impl<'a> Search<'a> {
                             }
                             let v = crate::bid::leaf(
                                 &self.with_jump(o, jump), self.worlds.exact,
-                                w.opp_pts[d], w.opp_duck[d], w.opp_threat[d]);
+                                w.opp_pts[d], w.opp_duck[d], w.opp_threat[d],
+                                &self.worlds.cal, w.eps[1]);
                             best = Some(best.map_or(v, |x: i32| x.max(v)));
                         }
                         if let Some(v) = best {
@@ -1175,7 +1178,7 @@ mod tests {
 
     fn solved(ws: Vec<World>, belief: Vec<Solved>) -> Solved {
         Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f,
-                 covered_opp: 0x7f, exact: false, belief, worlds: ws }
+                 covered_opp: 0x7f, exact: false, cal: Default::default(), belief, worlds: ws }
     }
 
     /// THE ONE THING A TEMPERATURE CANNOT DO: a reply that VARIES with the
@@ -1431,7 +1434,7 @@ mod tests {
             w.pts[d] = pts;
             w.opp_pts[d] = opp;
         }
-        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f, exact: false, belief: Vec::new(),
+        Solved { deals: Vec::new(), shown: Vec::new(), covered: 0x7f, covered_opp: 0x7f, exact: false, cal: Default::default(), belief: Vec::new(),
                  worlds: vec![w] }
     }
 
