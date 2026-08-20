@@ -146,6 +146,34 @@ def ask(g, seat, tier):
     opts = E.auction_payoff_options(g)
     if not opts:
         return None, None, None
+
+    # THE BLUEPRINT TIER (2026-08-20). A tier named `bp...` answers AUCTION
+    # decisions from `cfrlab`'s solved CFR equilibrium instead of from the tree:
+    # the blueprint names a LEVEL (all it can, since the abstraction has no
+    # denominations) and the shipped exact pricer names the suit among the real
+    # legal options at that level.
+    #
+    # EVERY OTHER PHASE STILL GOES TO THE TREE, including the Double -- the
+    # abstraction has no Double in it, so answering one from the blueprint would
+    # be inventing a policy rather than reading one. So a `bp` arm differs from
+    # its comparison tier in the AUCTION and nowhere else, which is what makes
+    # the race one change wide.
+    #
+    # `CFR_FEATURES` selects the abstraction the blueprint was solved under (1 =
+    # the original strength quantile, 2 = widened with quick tricks), and
+    # `CFR_CKPT` must point at a cache carrying the features that build needs --
+    # `bucketise` refuses outright rather than silently solving at a third of
+    # its advertised resolution.
+    if tier.startswith("bp") and g["phase"] == "auction":
+        from games.dissonance.tools import cfrlab as _C
+        mv = _C.blueprint_bid(g, seat)
+        if mv is not None:
+            return mv, None, opts
+        # The blueprint cannot express this position (above its ladder, or no
+        # real option at the level it wants). Falling through to the tree is
+        # deliberate and is the same choice `cfrlab` makes: an arm that guessed
+        # outside the abstraction's support would be measuring the guess.
+
     # `double` joins kontra/re here, per main.py: all three are the DEFENDER
     # betting on the DECLARER's settled contract, so the solve is from the
     # declarer's side and only the sign belongs to the asker. `DIS_OLD_DBL=1`
