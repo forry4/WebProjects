@@ -72,7 +72,37 @@ DCKPT = os.environ.get("CFR_DCKPT")
 #: The ladder the abstract game bids on. Nothing in 800 deals of Expert
 #: self-play ever settled above 8, so rungs above it are tree with no data.
 MAXL = int(os.environ.get("CFR_MAXL", "8"))
-NBUCKET = 8
+#: Strength quantiles -- the abstraction's original and only private signal.
+NSTRENGTH = 8
+#: HOW MANY HAND FEATURES THE PRIVATE BUCKET CARRIES (2026-08-20).
+#:
+#: 1 is the original abstraction, byte for byte, and is the null control for
+#: every widened arm. 2 adds a `tops` split (quick tricks: cards in the top two
+#: ranks the seat can NAME), 3 adds `shortest` (its shortest visible suit).
+#:
+#: MEASURED BEFORE BUILT, by `tools/featlab.py` over 1600 seat-hands, scoring
+#: each candidate by the R^2 it adds ON TOP of the strength the bucket already
+#: carries -- because a feature that merely correlates with the leaf splits the
+#: same buckets thinner and starves the solve:
+#:
+#:     s_best alone      0.4013
+#:     + tops           +0.0294   <- the most independent signal available
+#:     + shortest       +0.0216
+#:     + voids          +0.0114
+#:     everything       +0.0743
+#:
+#: `s_mean` is the control: 0.3660 on its own and +0.0001 incremental, i.e. the
+#: same information restated. A method that could not tell those apart would be
+#: measuring correlation and calling it structure.
+#:
+#: THE COST IS MULTIPLICATIVE. Each extra split multiplies the private space
+#: (8 -> 24 -> 72), and this file already records what thin coverage does to the
+#: exploitability instrument. Widening must be paid for with a bigger deal
+#: cache, which is the bootstrapping half of the idea.
+CFR_FEATURES = int(os.environ.get("CFR_FEATURES", "1"))
+NTOPS = 3 if CFR_FEATURES >= 2 else 1
+NSHORT = 3 if CFR_FEATURES >= 3 else 1
+NBUCKET = NSTRENGTH * NTOPS * NSHORT
 #: Consecutive same-level overtakes. EXACT, not a truncation: an overtake must
 #: name a strictly higher-ranked denomination and there are `NOTRUMP + 1` = 5 of
 #: them, so at most 4 can follow the bid that set the level.
@@ -92,6 +122,24 @@ def rpc(payload):
     return json.loads(_P.stdout.readline())
 
 
+def hand_shape(g, seat):
+    """`(tops, shortest)` for a seat -- the widened bucket's raw features.
+
+    ONLY THE CARDS THE SEAT MAY NAME. A seat holds thirteen and can name eleven;
+    the two outer pile bottoms are face down to their owner too. This reads
+    exactly what `bot.hand_strength` reads, and reading more would build an
+    abstraction the rules do not permit.
+    """
+    cards = (E.playable(g, seat)
+             + [p[0] for i, p in enumerate(g["piles"][seat])
+                if len(p) == 2 and i == 1])
+    suits = [0] * 4
+    for c in cards:
+        suits[E.suit(c)] += 1
+    tops = sum(1 for c in cards if E.rank(c) >= E.NRANK - 2)
+    return tops, min(suits)
+
+
 def sample_deal(seed):
     """One deal, reduced to what the abstract game needs.
 
@@ -101,8 +149,13 @@ def sample_deal(seed):
     consolation there.
     """
     g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
-    rec = {"str": [0.0, 0.0], "pts": [0, 0], "duck": [False, False]}
+    rec = {"str": [0.0, 0.0], "pts": [0, 0], "duck": [False, False],
+           # The widened bucket's raw features, recorded ALWAYS so a cache is
+           # readable at any CFR_FEATURES rather than only the one that built
+           # it. Cheap -- they are counts over cards already in hand.
+           "tops": [0, 0], "short": [0, 0]}
     for seat in (0, 1):
+        rec["tops"][seat], rec["short"][seat] = hand_shape(g, seat)
         best_d, best_s = 0, -1e9
         for d in range(E.NOTRUMP + 1):
             s = B.hand_strength(g, seat, d)
@@ -193,19 +246,68 @@ def collect(n):
     return recs[:n]
 
 
-def bucketise(recs):
-    """Quantile buckets over the strength of each seat's best denomination."""
-    allv = sorted(s for r in recs for s in r["str"])
-    cuts = [allv[int((i + 1) * len(allv) / NBUCKET)] for i in range(NBUCKET - 1)]
+def _quantiles(vals, k):
+    """`k - 1` cut points splitting `vals` into k equal-count bins."""
+    if k <= 1:
+        return []
+    v = sorted(vals)
+    return [v[int((i + 1) * len(v) / k)] for i in range(k - 1)]
 
-    def b(x):
-        i = 0
-        while i < len(cuts) and x >= cuts[i]:
-            i += 1
-        return i
+
+def _bin(x, cuts):
+    i = 0
+    while i < len(cuts) and x >= cuts[i]:
+        i += 1
+    return i
+
+
+def bucketise(recs):
+    """Quantile buckets over each seat's hand.
+
+    ONE FEATURE AT `CFR_FEATURES = 1` -- the strength of the best denomination,
+    which is the original abstraction byte for byte and the null control. Above
+    that the bucket is a JOINT index over strength x tops (x shortest), which is
+    what `featlab.py` measured the ground for.
+
+    Returns the cut points for every axis, because a policy read with different
+    cuts is a different policy -- the blueprint bidder needs the same ones the
+    solve used, and this file has already paid for a harness that rebuilt half a
+    payload.
+    """
+    # A CACHE BUILT BEFORE THE FEATURES EXISTED CANNOT BE SOLVED WIDE, and the
+    # failure is silent unless it is made loud: `.get("tops", [0, 0])` puts
+    # every hand in bin 0, so a "widened" solve runs at 8 of 24 buckets while
+    # every label says 24. Same shape as the corpus-tier bug this file records
+    # twice -- a default standing in for data nobody collected.
+    if CFR_FEATURES >= 2 and not any("tops" in r for r in recs):
+        raise SystemExit(
+            f"CFR_FEATURES={CFR_FEATURES} needs a cache carrying hand features, "
+            f"and none of these {len(recs)} records has one.\n"
+            "Rebuild it (the deal sampler records them now):\n"
+            "  CFR_CKPT=<new path> python3 -c \"from games.dissonance.tools "
+            "import cfrlab as C; C.collect(<n>)\"")
+    scuts = _quantiles([s for r in recs for s in r["str"]], NSTRENGTH)
+    tcuts = _quantiles([t for r in recs for t in r.get("tops", [0, 0])], NTOPS)
+    hcuts = _quantiles([h for r in recs for h in r.get("short", [0, 0])], NSHORT)
+
     for r in recs:
-        r["b"] = [b(r["str"][0]), b(r["str"][1])]
-    return cuts
+        r["b"] = [joint_bucket(r["str"][q],
+                               r.get("tops", [0, 0])[q],
+                               r.get("short", [0, 0])[q],
+                               (scuts, tcuts, hcuts))
+                  for q in (0, 1)]
+    return (scuts, tcuts, hcuts)
+
+
+def joint_bucket(strength, tops, short, cuts):
+    """The private bucket index, from raw features and the solve's own cuts."""
+    scuts, tcuts, hcuts = cuts
+    i = _bin(strength, scuts)
+    if NTOPS > 1:
+        i = i * NTOPS + _bin(tops, tcuts)
+    if NSHORT > 1:
+        i = i * NSHORT + _bin(short, hcuts)
+    return i
 
 
 #: A scoring OVERRIDE for the design sweeps, empty in every other mode. `p`/`A`
@@ -556,15 +658,16 @@ def load_blueprint():
 def _bucket_of(g, seat, cuts):
     """This seat's abstraction bucket, computed the way the solve computed it.
 
-    Best denomination by `hand_strength`, which is information-legal by
-    construction -- it never touches the solve, which depends on cards this seat
-    cannot see.
+    Same `joint_bucket` and the SAME CUTS the solve used -- a policy read under
+    different cuts is a different policy, which is why `load_blueprint` carries
+    them rather than recomputing.
+
+    Every input is information-legal: `hand_strength` and `hand_shape` both read
+    only the eleven cards a seat may name.
     """
     best = max(B.hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1))
-    i = 0
-    while i < len(cuts) and best >= cuts[i]:
-        i += 1
-    return i
+    tops, short = hand_shape(g, seat)
+    return joint_bucket(best, tops, short, cuts)
 
 
 def _live_abstract_state(g):

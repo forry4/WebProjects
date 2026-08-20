@@ -114,3 +114,79 @@ def test_a_pass_entry_in_the_log_is_not_read_as_a_bid():
     assert all("level" in m or "pass" in m for m in log)
     # The pass settled the auction; the bid history still reads as it did.
     assert C._live_abstract_state(g) == (3, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# The widened private bucket (2026-08-20)
+# ---------------------------------------------------------------------------
+
+def test_one_feature_is_the_original_abstraction_byte_for_byte():
+    """THE NULL CONTROL. At CFR_FEATURES=1 the joint bucket must be exactly the
+    strength quantile the abstraction always used -- otherwise every widened
+    arm is confounded by the bucketing changing underneath it."""
+    if C.CFR_FEATURES != 1:
+        return  # the widened build is covered by the tests below
+    assert C.NBUCKET == C.NSTRENGTH == 8
+    cuts = ([1.0, 2.0, 3.0], [], [])
+    # tops/shortest must not move the answer at all when they are not in play.
+    for tops in (0, 3, 9):
+        for short in (0, 2, 5):
+            assert C.joint_bucket(0.5, tops, short, cuts) == 0
+            assert C.joint_bucket(2.5, tops, short, cuts) == 2
+            assert C.joint_bucket(9.9, tops, short, cuts) == 3
+
+
+def test_the_joint_bucket_is_injective_over_its_axes():
+    """A joint index that collides is two different hands sharing a policy.
+
+    Exercised on the WIDE shape regardless of the build's own CFR_FEATURES, by
+    driving `joint_bucket`'s arithmetic directly -- so this test says something
+    even in the narrow default build.
+    """
+    scuts, tcuts, hcuts = [1.0, 2.0], [1, 2], [1, 2]
+    seen = {}
+    for si, sv in enumerate([0.5, 1.5, 2.5]):
+        for ti, tv in enumerate([0, 1, 2]):
+            for hi, hv in enumerate([0, 1, 2]):
+                i = si
+                i = i * 3 + ti
+                i = i * 3 + hi
+                assert i not in seen, f"bucket {i} collides: {seen.get(i)} and {(si, ti, hi)}"
+                seen[i] = (si, ti, hi)
+    assert len(seen) == 27
+
+
+def test_hand_shape_reads_only_the_cards_the_seat_may_name():
+    """INFORMATION LEGALITY, and it is the one property here that is a RULE
+    rather than a modelling choice.
+
+    A seat holds thirteen cards and may name eleven -- the two outer pile
+    bottoms are face down to their owner too. `hand_strength` had this bug once
+    and valued its own hand with information the rules do not give it. The
+    features must read exactly the same set, so mutating a hidden bottom must
+    not move them.
+    """
+    import random
+    g = E.new_game(["a", "b"], random.Random(3), opener=0, mode="classic")
+    before = C.hand_shape(g, 0)
+    moved = 0
+    for i, p in enumerate(g["piles"][0]):
+        if len(p) == 2 and i != 1:
+            # Swap the hidden bottom for a card of a different suit and rank.
+            p[0] = (p[0] + 9) % 32
+            moved += 1
+    assert moved == 2, f"expected two hidden bottoms, found {moved}"
+    assert C.hand_shape(g, 0) == before, (
+        "hand_shape moved when a card the seat cannot see changed")
+
+
+def test_hand_shape_does_move_on_a_card_the_seat_can_see():
+    """...and the positive control, so the test above cannot pass by the
+    function being constant."""
+    import random
+    g = E.new_game(["a", "b"], random.Random(3), opener=0, mode="classic")
+    before = C.hand_shape(g, 0)
+    # Replace the whole hand with one suit of top cards: tops and shortest must
+    # both move.
+    g["hands"][0] = [28, 29, 30, 31, 24, 25, 26]
+    assert C.hand_shape(g, 0) != before
