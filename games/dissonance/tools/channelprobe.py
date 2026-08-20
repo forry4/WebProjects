@@ -92,6 +92,66 @@ def weighted_percentile(mine, samples, weights):
     return (below + 0.5 * equal) / tot if tot else 0.5
 
 
+def draws_of(g, rng):
+    """The truth and `DRAWS` candidate holdings, as raw statistic dicts.
+
+    SEPARATED FROM THE SCORING SO A WEIGHTING CAN BE SWEPT FOR FREE. Drawing the
+    worlds is the whole cost here; a weight over them is arithmetic. This is the
+    `swaplab` method one instrument further out -- label the sample once, price
+    any policy against it by a lookup -- and it is what makes the trump sweep
+    below cost one run instead of one run per candidate.
+    """
+    decl = g["auction"]["declarer"]
+    defd = 1 - decl
+    trump = g["auction"]["denom"]
+
+    seen = set(g["hands"][defd])
+    known_decl = []
+    for owner in (0, 1):
+        for i, p in enumerate(g["piles"][owner]):
+            if not p:
+                continue
+            seen.add(p[-1])
+            if len(p) == 2 and i == 1:
+                seen.add(p[0])
+            if owner == decl:
+                known_decl.append(p[-1])
+                if len(p) == 2 and i == 1:
+                    known_decl.append(p[0])
+    pool = [c for c in range(E.deck_size("classic")) if c not in seen]
+
+    real = list(g["hands"][decl])
+    for p in g["piles"][decl]:
+        real += list(p)
+    n_unknown = len(real) - len(known_decl)
+    if n_unknown <= 0 or n_unknown > len(pool):
+        return None
+    return (stats_of(real, trump),
+            [stats_of(known_decl + rng.sample(pool, n_unknown), trump)
+             for _ in range(DRAWS)])
+
+
+def score(truth, drawn, beta, gamma=0.0):
+    """Per-statistic percentiles under `exp(beta x strength + gamma x trumps)`.
+
+    `gamma = 0` IS THE SHIPPED PRIOR, exactly -- the same weights, so the
+    baseline column of any sweep is the shipped one rather than something
+    adjacent to it.
+    """
+    ss = [d["strength"] for d in drawn]
+    ts = [d["trumps"] for d in drawn]
+    ex = [beta * a + gamma * b for a, b in zip(ss, ts)]
+    hi = max(ex)
+    w = [math.exp(e - hi) for e in ex]
+    flat = [1.0] * len(drawn)
+    out = {}
+    for k in truth:
+        col = [d[k] for d in drawn]
+        out[k] = (weighted_percentile(truth[k], col, flat),
+                  weighted_percentile(truth[k], col, w))
+    return out
+
+
 def probe(g, rng, beta):
     """Per-statistic percentiles, uniform and under the SHIPPED tilt."""
     decl = g["auction"]["declarer"]
@@ -150,7 +210,69 @@ def bid_path(g):
     return "pushed" if mine[0] < g["auction"]["level"] else "direct"
 
 
+def sweep_main(argv):
+    """THE TRUMP-LENGTH SWEEP. One run of draws, every candidate priced free.
+
+    `channelprobe` measured the shipped prior leaving the TRUMP percentile at
+    0.744 against a uniform 0.779 -- it removes 13% of a bias that is LARGER
+    than the strength bias the prior was built for. The reason is structural:
+    the likelihood is `sum(curve[rank] x (trump_mult if trump))`, which is
+    LINEAR in the cards, so a hand reaches the same sum with high cards anywhere
+    and long trumps are worth no more than their ranks. A flat per-trump term is
+    the missing shape -- it values the SIXTH trump as much as the first, which
+    a rank curve scaled by 2.0 cannot.
+
+    Swept as `exp(beta x strength + gamma x trumps)`. gamma = 0 is the shipped
+    prior byte for byte.
+
+    THE READ IS NOT "DOES TRUMPS CENTRE" -- it will, by construction, since the
+    weight is on that exact statistic. It is whether it centres at a gamma that
+    leaves the OTHER channels alone: strength is the prior's whole existing job,
+    and a correction that buys trumps by decentring strength has moved the bias
+    rather than removed it.
+    """
+    n = int(argv[2]) if len(argv) > 2 else 400
+    beta = B._BID_TILT
+    rng = random.Random(0xC4A9)
+    rows = []
+    for i in range(n * 3):
+        if len(rows) >= n:
+            break
+        g = BP.to_double(1000 + i)
+        if g is None:
+            continue
+        d = draws_of(g, rng)
+        if d is None:
+            continue
+        rows.append(d)
+        if len(rows) % 100 == 0:
+            print(f"  {len(rows)}/{n} rounds", flush=True)
+
+    cols = ["strength", "trumps", "tops", "voids"]
+    print(f"\ntrump-length sweep: {len(rows)} rounds, {DRAWS} resamples each, "
+          f"beta = {beta} (shipped)")
+    print(f"\n  {'gamma':>6}  " + "  ".join(f"{k:>16}" for k in cols))
+    for gamma in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5):
+        per = {k: [] for k in cols}
+        for truth, drawn in rows:
+            r = score(truth, drawn, beta, gamma)
+            for k in cols:
+                per[k].append(r[k][1])
+        cells = []
+        for k in cols:
+            v = per[k]
+            cells.append(f"{statistics.mean(v):.3f} +/- "
+                         f"{statistics.stdev(v)/len(v)**0.5:.3f}")
+        mark = "   <- shipped" if gamma == 0.0 else ""
+        print(f"  {gamma:>6.2f}  " + "  ".join(f"{c:>16}" for c in cells) + mark)
+    print("\n  0.500 is an unbiased sampler. `strength` is the CONTROL: a gamma "
+          "that\n  centres trumps by pushing strength off 0.500 has moved the "
+          "bias, not removed it.")
+
+
 def main(argv):
+    if len(argv) > 1 and argv[1] == "sweep":
+        return sweep_main(argv)
     n = int(argv[1]) if len(argv) > 1 else 400
     beta = B._BID_TILT
     rng = random.Random(0xC4A9)
