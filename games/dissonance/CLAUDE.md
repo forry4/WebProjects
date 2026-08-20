@@ -2614,9 +2614,15 @@ Three things follow, and they are the answer to "is client-side worth it":
   stronger than a slow laptop here — the CAP binds, not the CPU (except at ≤4
   cores, where the worker pool itself shrinks).
 
-**This is CARD PLAY only.** The auction's compute→strength curve is still
+**This is CARD PLAY only.** ~~The auction's compute→strength curve is still
 unmeasured; its cap is a separate `CLIENT_AI_AUCTION_WORLDS` (3) and nothing
-says whether that sits at the knee the way 8 does here.
+says whether that sits at the knee the way 8 does here.~~ **MEASURED 2026-08-20,
+AND 8 IS THE RIGHT CAP.** Against the equilibrium instrument, paired on 220
+deals: exploitability **13.25 at k=1, 8.13 at k=2, 6.28 at the shipped k=8, and
+6.73 at k=16** — the knee is at or just below 8 and doubling the solves buys
+nothing. The same sweep is what VALIDATES that instrument (a knowably weaker
+bidder must read worse, and one world reads twice as exploitable, in all four
+disjoint quarters). See "THE INSTRUMENT IS VALIDATED" below.
 
 * **Why client-side, and why it could never be otherwise.** The search is an
   EXACT double-dummy solve per sampled deal: `bin/bench` times one full solve at
@@ -5346,6 +5352,60 @@ opponent model and the selection rule are all now measured and all at or past
 their optimum.** The next honest step is not another arm on this bot; it is
 either a finer abstraction for the instrument (so a conditional defect can be
 SEEN), or a different part of the game.
+
+### THE INSTRUMENT IS VALIDATED, AND THE AUCTION'S WORLD COUNT IS MEASURED AT LAST (2026-08-20)
+
+**After eight treatments made the bot more exploitable and none made it less,
+the honest question stopped being "what next" and became "does this statistic
+order strength at all".** The way to answer it is a bot that is knowably weaker
+for a reason nobody disputes: fewer determinized worlds. Paired on 220 deals,
+2-D abstraction, each arm also split into four disjoint quarters:
+
+| arm | exploitability | q0 | q1 | q2 | q3 | settled | made |
+|---|---|---|---|---|---|---|---|
+| **k=1** (one world) | **13.25** | 13.76 | 15.01 | 15.14 | 12.84 | 5.60 | 40.5% |
+| **k=2** | **8.13** | 7.72 | 10.51 | 11.21 | 9.50 | 4.83 | 54.5% |
+| **k=8** (shipped) | **6.28** | 7.44 | 6.79 | 7.95 | 7.85 | 4.49 | 69.1% |
+| k=16 | 6.73 | 7.55 | 7.47 | 8.41 | 8.19 | 4.42 | 74.5% |
+
+**THE INSTRUMENT ORDERS SEARCH STRENGTH, STEEPLY AND IN EVERY QUARTER.** A
+one-world bidder reads 13.25 against the shipped 6.28 — more than twice as
+exploitable — and the ordering k=1 > k=2 > k=8 holds in all four disjoint
+subsets. So exploitability is measuring something real about how well the bot
+bids, and **the eight negative results are credible rather than an artefact of a
+statistic that rewards whatever the shipped tier happens to do.** That question
+had to be asked, and this is the answer.
+
+**AND IT CLOSES AN OPEN QUESTION THIS FILE HAS CARRIED SINCE THE TIER SHIPPED.**
+`CLIENT_AI_AUCTION_WORLDS` was raised 3 → 8 by analogy with the card search,
+and the file said so outright: *"the auction's compute→strength curve is still
+unmeasured; its cap is a separate `CLIENT_AI_AUCTION_WORLDS` (3) and nothing
+says whether that sits at the knee the way 8 does here."* **It is measured now
+and 8 is the right cap.** The curve falls hard to 8 (13.25 → 8.13 → 6.28) and
+does not improve past it — k=16 reads 6.73, higher in all four quarters, for
+double the solves. The knee is at or just below the shipped value.
+
+* **k=16 is the eighth treatment and the eighth failure**, and it also refutes
+  the mechanism that motivated it. The 2-D abstraction localised the bot's loss
+  on CONCENTRATED hands, and the proposed cause was that a one-suit hand's value
+  rests on a single denomination's estimate where a flexible hand's is
+  corroborated across several — so more worlds should have flattened the
+  grading. It does not: shape 2 goes 2.15 → 2.40 and shape 0 goes 1.19 → 1.53.
+  Doubling the sample leaves the conditional defect exactly where it was.
+* **Note that k=16 MAKES MORE CONTRACTS (74.5% against 69.1%) while being
+  slightly more exploitable.** A clean reminder that the two quantities are
+  different: a best responder is a far harsher opponent than the one across the
+  table, and a policy can play better against real opposition while being easier
+  to punish by an exact exploiter.
+
+**WHAT THE CONDITIONAL DEFECT NOW IS, stated precisely, since it is what
+survives.** The bot loses 1.75x more per unit of reach on one-suit hands than on
+flexible ones; the mistake is concrete (it concedes strong concentrated hands
+where the equilibrium overtakes); it is not the abstraction crediting an illegal
+HOLD (legality is a uniform 78% across shape buckets, measured on 15,512 rebuilt
+states); and it is **not a sampling-noise problem**, because doubling the worlds
+does not touch it. It is a judgement the tree makes about a KIND of hand, and
+the remaining candidates for it are structural rather than parametric.
 
 ## Not built yet
 

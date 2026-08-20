@@ -3419,3 +3419,52 @@ CONDITIONAL — which hands the tree wins the auction with, not how high it bids
 and no uniform coefficient can reach it. The next honest step is a finer
 abstraction for the instrument, so a conditional defect can be seen at all, or a
 different part of the game.
+
+### 2026-08-20 (end) — the finer abstraction, and the check that validates eight negatives
+
+Built the 2-D hand abstraction the log asked for: the existing strength
+quantiles crossed with **how far a seat's best denomination stands above its
+next** — what the hand loses when pushed off that suit. Information-legal, and
+recomputed FROM THE SEED, so every corpus already recorded re-buckets and
+re-measures without replaying an auction. Coverage survived (4113 infosets,
+99.3% exact, split-halves 6.52/6.53).
+
+**It sees a conditional defect the 1-D bucket cannot.** Loss per unit reach:
+1.13 flexible, 1.44, **1.98 one-suit** — the bot loses 1.75x more on hands with
+one good suit. The mistake is concrete: on strong concentrated hands it concedes
+where the equilibrium overtakes.
+
+**Two confounds killed, both cheaply.** (1) A same-level overtake needs a
+higher-ranked denomination and the ladder has no denominations, so the
+abstraction may credit an illegal HOLD — rebuilt 15,512 probed states from their
+seeds and asked the engine: legal 78% of the time, and **78/78/79% across the
+three shape buckets**, so uniform and not the explanation. (2) The equilibrium
+control is reported but unusable: the one-step deviation penalises MIXING by
+construction, and the equilibrium mixes where the bot is near-deterministic.
+
+**Then the check the campaign had earned.** Eight treatments worse, none better
+— so does the statistic order strength at all? Paired on 220 deals, sweeping the
+one knob whose weakness nobody disputes:
+
+    k=1  13.25    k=2  8.13    k=8 (shipped) 6.28    k=16  6.73
+
+**The instrument orders search strength steeply and in all four quarters.** A
+one-world bidder is more than twice as exploitable as the shipped one. So the
+eight negatives are credible, not an artefact of a statistic that rewards
+whatever the shipped tier does.
+
+**And it closes an open question the file has carried since the tier shipped:**
+`CLIENT_AI_AUCTION_WORLDS` was raised 3 → 8 by analogy with the card search,
+explicitly unmeasured. Measured now — the knee is at or just below 8, and k=16
+is worse in all four quarters for double the solves. **8 is right.**
+
+k=16 also refutes the mechanism that motivated it: if concentrated hands lost
+because their value rests on one noisy estimate, more worlds would flatten the
+grading. It does not (shape 2: 2.15 → 2.40). The conditional defect is not
+sampling noise; it is a judgement about a KIND of hand, and what is left for it
+is structural rather than parametric.
+
+**Worth carrying:** k=16 MAKES MORE CONTRACTS (74.5% vs 69.1%) while being
+slightly more exploitable — a clean reminder that head-to-head strength and
+exploitability are different quantities, and that a best responder is far
+harsher than the opponent across the table.
