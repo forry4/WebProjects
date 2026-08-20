@@ -5130,12 +5130,13 @@ solve, never which solves happen. The caching results stand as measured.
 | level | edge (contract-aware − points) | mirror control | Nulls |
 |---|---|---|---|
 | 1 | **+2.562 ± 1.605** | **0.000 ± 1.602** | 12 vs 0 |
-| 4 | **+7.112** | — | 14 vs 0 |
+| 4 | **+7.112 ± 3.442** | **0.000 ± 3.552** | 14 vs 0 |
 
 **AND THE HARNESS PRINTED NO ERROR BAR UNTIL NOW, WHICH IS THE REAL FINDING.**
-At n=160 the level-1 edge is **1.6 SE** — a 95% interval spanning zero. The
-recorded +1.25 was taken at n=80 with no interval printed at all, so a result
-that was never significant has read as settled fact for months. This file's own
+At n=160 the level-1 edge is **1.6 SE** and level 4 is **2.1 SE** — one interval
+spans zero and the other barely clears it. The recorded +1.25 and +0.55 were
+taken at n=80 with no interval printed at all, so results that were never
+established have read as settled fact for months. This file's own
 rule ("an interval spanning zero is not a direction") could not be applied to a
 harness incapable of producing one. It produces one now.
 * The mirror reading **exactly 0.000** is the good news: `cmatch` rotates which
@@ -5146,6 +5147,13 @@ harness incapable of producing one. It produces one now.
   re-ran**: 12 per 160 rounds is 3 per 40, against the recorded 6–7 per 40. The
   standing note — "the cliff is smaller and the Null rate should have fallen
   with it. **Nobody has re-run it**" — is now discharged.
+* **THE CONCLUSION SURVIVES; THE EVIDENCE FOR IT IS WEAKER THAN THE FILE
+  IMPLIED.** The direction is positive at both levels with clean mirrors, and
+  the Null counts are a CATEGORICAL difference no error bar touches — the points
+  searcher takes zero Nulls in 160 rounds at either level, which is the
+  structural claim ("a points solver cannot see the consolation cliff") showing
+  up as a count rather than a margin. That is what actually justifies the
+  contract-aware tier; the payoff margins never carried it.
 * Do NOT read +2.562 against the old +1.25 as a ratio. The payoff CURRENCY moved
   too (a level-1 make base went 11 → 5), which is this file's own
   `DOUBLE_MARGIN` lesson: a measurement in payoff units is silently re-scaled by
