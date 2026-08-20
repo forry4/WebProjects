@@ -415,6 +415,29 @@ often, at every strength. Nothing here tested that, and the temperature knob is
 the wrong instrument for it because softening the continuation also lowers the
 opening and the two cancel.
 
+## Parked: the two rewrites that survive the campaign (2026-08-20)
+
+Asked directly whether a neural net or MCTS is the answer. **For the
+architecture this game already has, no — and it is measured, not argued.** A net
+cannot help the card-play leaf because that leaf is an *exact* double-dummy
+solve; it would buy speed, speed buys world count, and world count is at its
+stop (`pimc:24` vs `pimc:8` = 50.0%). MCTS fails in mirror — it is for when you
+cannot solve. And the prize is tiny: **89.5% of card decisions are already
+exactly optimal**, the oracle gap is 0.79 on a 5-point pool and mostly
+irreducible, and IIMC measured +0.067 ± 0.053. In the auction a net is an eval,
+and the *exact* leaf measured null twice.
+
+What survives are the two that replace the approach rather than a component:
+
+| | why it survives | why it is parked |
+|---|---|---|
+| **R-NaD / DeepNash** | The only method here that took a 2p zero-sum imperfect-info game of this size to top-human, with **no search at all**. The Rust engine is already the fast simulator that usually blocks this, and CoC proves this repo can serve a fetched `.bin` client-side. | Weeks–months of training compute against a Hard tier whose whole edge over greedy is +1.10 pts/round. |
+| **ReBeL** | Better *suited* here than where it was invented: its expensive part is a value function at a depth limit, and this game's leaf is exactly solvable and cached per hand. It is the principled successor to the failed blueprint — poker's answer to "the abstraction is too coarse" was to make the blueprint a **seed** and re-solve the real subgame, which `cfrlab` never did. | A research project, not an afternoon. |
+
+**Gate for either, unchanged:** a CRN-paired arena at equal time with the mirror
+reading exactly +0.0000 — *not* exploitability, which items 3 and 5 jointly
+showed is close to independent of strength in this game.
+
 ## Sources
 
 * [The αµ Search Algorithm for the Game of Bridge](https://arxiv.org/abs/1911.07960) — Cazenave & Ventos

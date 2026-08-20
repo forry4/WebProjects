@@ -5658,6 +5658,7 @@ live engine; and `priorexp` was written after the fix and reads
 
 ## Not built yet
 
+
 **Before picking anything here up, read
 [`docs/dissonance-external-ai-survey.md`](../../docs/dissonance-external-ai-survey.md)
 (2026-08-19).** It maps the world's strongest AIs for adjacent games — Skat
@@ -5681,6 +5682,54 @@ for both. The three findings worth knowing without opening it:
   properties (leaf correlation / bias / disambiguation factor), which predict in
   advance how much strategy fusion is recoverable, and the sigma measurement this
   file already asks for and has never run.
+
+### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
+
+Neither is scheduled. They are here because the question "should this be a
+neural net or an MCTS" now has a measured answer for the ARCHITECTURE THIS GAME
+ALREADY HAS, and the answer is no — so anyone returning to it should know which
+two things were NOT ruled out, and why they are different in kind.
+
+**WHAT WAS RULED OUT, so it is not re-argued.** A net cannot help the CARD-PLAY
+leaf: that leaf is an exact double-dummy solve, and every other game in this
+repo carries a net precisely because its leaf cannot be solved. A net there buys
+only SPEED, speed buys WORLD COUNT, and world count is measured at its stop
+(`pimc:24` vs `pimc:8` reads 50.0%; `pimc:32` over `pimc:8` is +0.21 for four
+times the compute). MCTS fails for the mirror reason — it is what you reach for
+when you cannot solve, and here a world solves exactly in ~20–74ms. And the
+prize is small either way: **89.5% of card decisions are already exactly
+optimal**, the whole oracle gap is 0.79 pts/round on a 5-point pool, CAMPAIGN.md
+reads most of that as irreducible, and IIMC — the correct tool for the reducible
+part — measured **+0.067 ± 0.053**. In the AUCTION a net is an eval, and the
+exact leaf (`threat_value`, the best evaluation obtainable) measured null twice.
+
+**WHAT THAT LEAVES.** Both survivors replace the whole approach rather than a
+component, which is why neither is refuted by anything above.
+
+* **R-NaD / DeepNash.** The only method on the survey's list that took a
+  two-player zero-sum imperfect-information game of this size to top-human, and
+  it uses NO SEARCH — regularised Nash dynamics, model-free, over millions of
+  self-play games. It is the only candidate with a plausible route to a STEP
+  change rather than another tenth of a point. Two things here make it less
+  far-fetched than it sounds: the Rust engine is already a fast simulator, which
+  is the usual blocker, and **CoC already proves this repo can serve a fetched
+  `.bin` model client-side**, so the serving path exists. The cost is weeks to
+  months of training compute against a Hard tier whose whole edge over greedy is
+  +1.10 pts/round — disproportionate for this site, which is why it is parked
+  and not scheduled.
+* **ReBeL.** Better SUITED in principle than anywhere it has been applied: its
+  hard part is a value function over public belief states at a depth limit, and
+  this game's leaf is *exactly solvable and cached per hand*, which is the part
+  that makes it expensive elsewhere. It is the natural successor to the
+  blueprint arm that failed — poker's own answer to "the abstraction is too
+  coarse to ship" was to make the blueprint a SEED and re-solve the real subgame
+  at decision time, which is exactly what `cfrlab`'s blueprint never did.
+
+**IF EITHER IS PICKED UP, the gate is unchanged and is the lesson of this whole
+campaign: a CRN-paired arena at equal time, mirror reading exactly +0.0000.**
+Not exploitability — two independent arms measured exploitability and
+head-to-head strength close to INDEPENDENT in this game, and the blueprint that
+scored near the abstraction's floor lost by −12.84 a round.
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
   never Open, and the multiplier is priced without modelling the extra risk.
