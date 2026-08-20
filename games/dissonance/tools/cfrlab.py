@@ -73,6 +73,11 @@ DCKPT = os.environ.get("CFR_DCKPT")
 #: self-play ever settled above 8, so rungs above it are tree with no data.
 MAXL = int(os.environ.get("CFR_MAXL", "8"))
 NBUCKET = 8
+#: THE HAND ABSTRACTION. "1d" is the original -- eight quantiles of the seat's
+#: best-denomination `hand_strength`. "2d" adds a second axis; see `bucketise`.
+BUCKET = os.environ.get("CFR_BUCKET", "1d")
+NSTR = int(os.environ.get("CFR_NSTR", "8"))
+NSHAPE = int(os.environ.get("CFR_NSHAPE", "3"))
 #: Consecutive same-level overtakes. EXACT, not a truncation: an overtake must
 #: name a strictly higher-ranked denomination and there are `NOTRUMP + 1` = 5 of
 #: them, so at most 4 can follow the bid that set the level.
@@ -209,19 +214,79 @@ def collect(n):
     return recs[:n]
 
 
-def bucketise(recs):
-    """Quantile buckets over the strength of each seat's best denomination."""
-    allv = sorted(s for r in recs for s in r["str"])
-    cuts = [allv[int((i + 1) * len(allv) / NBUCKET)] for i in range(NBUCKET - 1)]
+def _quantiles(vals, n):
+    v = sorted(vals)
+    return [v[int((i + 1) * len(v) / n)] for i in range(n - 1)]
 
-    def b(x):
-        i = 0
-        while i < len(cuts) and x >= cuts[i]:
-            i += 1
-        return i
-    for r in recs:
-        r["b"] = [b(r["str"][0]), b(r["str"][1])]
-    return cuts
+
+def _place(cuts, x):
+    i = 0
+    while i < len(cuts) and x >= cuts[i]:
+        i += 1
+    return i
+
+
+def hand_shape(seed):
+    """Per seat: the best denomination's strength, and HOW FAR IT STANDS ABOVE
+    THE NEXT ONE.
+
+    Both are information-legal -- `hand_strength` reads the eleven cards a seat
+    may name and nothing else -- and the second is the auction's own question,
+    not a generic dispersion statistic: it is exactly what a seat gives up when
+    it is pushed off its best suit, by an overtake it must outrank or by the
+    denomination it has already spent. `cfrlab banned` measured that cost at
+    0.3-0.6 of `hand_strength` on the 19-36% of decisions where the ban binds.
+
+    Recomputed FROM THE SEED rather than stored, and that is what makes a finer
+    abstraction cheap: the expensive half of a cached deal is the double-dummy
+    solve, and this touches none of it. Every corpus already recorded can be
+    re-bucketed and re-measured without replaying a single auction.
+    """
+    g = E.new_game(["a", "b"], random.Random(seed), opener=0, mode="classic")
+    out = []
+    for seat in (0, 1):
+        v = sorted((B.hand_strength(g, seat, d) for d in range(E.NOTRUMP + 1)),
+                   reverse=True)
+        out.append((v[0], v[0] - v[1]))
+    return out
+
+
+def bucketise(recs, base_seed=800_000):
+    """Put each seat's hand in a bucket. `CFR_BUCKET` picks the scheme.
+
+    **"1d" (the original): eight quantiles of best-denomination strength.**
+
+    **"2d": that, crossed with how CONCENTRATED the hand is.** The reason to
+    have it is that exploitability is measured against the FITTED policy, so a
+    coarse bucket hides a conditional defect twice over -- variation the bucket
+    cannot see reads as the bot MIXING, which a best responder cannot punish,
+    and the equilibrium solved on the same buckets cannot express the better
+    conditional policy either. Seven treatments have now failed on a bot whose
+    aggression is measurably optimal, which says what is left is conditional:
+    WHICH hands it wins the auction with, not how high it bids. A one-scalar
+    hand abstraction is not able to show that.
+
+    THE COST IS COVERAGE, and it is the thing to check rather than assume: the
+    infoset count multiplies, so the same corpus is spread thinner and the best
+    responder starts eating the sample again -- the exact defect the off-policy
+    probes were built to fix. Every reader prints the coverage; `CFR_PROBES` is
+    nearly free and is the lever.
+    """
+    global NBUCKET
+    if BUCKET != "2d":
+        NBUCKET = NSTR if os.environ.get("CFR_NSTR") else 8
+        cuts = _quantiles([s for r in recs for s in r["str"]], NBUCKET)
+        for r in recs:
+            r["b"] = [_place(cuts, r["str"][0]), _place(cuts, r["str"][1])]
+        return cuts
+    NBUCKET = NSTR * NSHAPE
+    feats = [hand_shape(base_seed + i) for i in range(len(recs))]
+    scut = _quantiles([f[s][0] for f in feats for s in (0, 1)], NSTR)
+    hcut = _quantiles([f[s][1] for f in feats for s in (0, 1)], NSHAPE)
+    for r, f in zip(recs, feats):
+        r["b"] = [_place(scut, f[s][0]) * NSHAPE + _place(hcut, f[s][1])
+                  for s in (0, 1)]
+    return scut
 
 
 #: A scoring OVERRIDE for the design sweeps, empty in every other mode. `p`/`A`
@@ -2193,7 +2258,7 @@ def _act_name(a):
     return "pass" if a == -1 else ("hold" if a == HOLD else f"bid {a}")
 
 
-def attrib_main(iters):
+def attrib_main(iters, who="expert"):
     """`cfrlab attrib` -- WHERE the exploitability is, not just how much.
 
     `br` prices Expert's auction at 5.87 payoff points a deal against this
@@ -2223,6 +2288,24 @@ def attrib_main(iters):
     print(f"  fitted Expert over {len(rows)} rounds / {ndec} decisions, "
           f"{len(pol.t)} infosets")
     print(_tier_line(rows))
+    # THE CONTROL. A defect is only the BOT's if the equilibrium does not have
+    # it too: some of the loss along any axis is a property of the game and the
+    # abstraction rather than of the bidder, and the only way to tell is to
+    # attribute the equilibrium's own policy through the identical machinery.
+    if who == "eq":
+        cfr = CFR(recs)
+        rng = random.Random(1234)
+        for i in range(iters):
+            rec = recs[rng.randrange(len(recs))]
+            cfr.t = i + 1
+            for me in (0, 1):
+                cfr.walk(rec, 0, 0, 0, 0, me, rng)
+        pol = Policy({k: {a: max(x, 0.0) / sum(max(y, 0.0) for y in v.values())
+                          for a, x in v.items()}
+                      for k, v in cfr.S.items()
+                      if sum(max(y, 0.0) for y in v.values()) > 0}, backoff=False)
+        counts = {k: 99 for k in pol.t}
+        print(f"  ...ATTRIBUTING THE EQUILIBRIUM instead, {len(pol.t)} infosets")
 
     hits = []
     for seat in (0, 1):
@@ -2277,6 +2360,47 @@ def attrib_main(iters):
         lbl = f"{k}+" if k == 4 else str(k)
         print(f"  {lbl:>9} {byj[k]:>8.3f} {100*byj[k]/tot:>6.1f}% "
               f"{reachj[k]:>8.3f} {byj[k]/max(1e-9, reachj[k]):>11.2f}")
+
+    # ALONG THE NEW AXIS, which is the only reason to pay for a finer
+    # abstraction at all. A 1-D hand bucket cannot show a defect that depends on
+    # the SHAPE of a hand rather than its strength -- variation the bucket
+    # cannot see reads as the bot mixing, which a best responder cannot punish.
+    # If the loss is flat across the shape axis, the finer abstraction has
+    # bought nothing and should be said so rather than kept for its own sake.
+    if BUCKET == "2d":
+        bys = defaultdict(float)
+        reachs = defaultdict(float)
+        for h in hits:
+            bys[h["bucket"] % NSHAPE] += h["loss"]
+            reachs[h["bucket"] % NSHAPE] += h["reach"]
+        print(f"\n  BY HOW CONCENTRATED THE HAND IS (0 = flexible, "
+              f"{NSHAPE - 1} = one suit and nothing else):")
+        print(f"  {'shape':>9} {'loss':>8} {'share':>7} {'reach':>8} {'loss/reach':>11}")
+        for k in sorted(bys):
+            print(f"  {k:>9} {bys[k]:>8.3f} {100*bys[k]/tot:>6.1f}% "
+                  f"{reachs[k]:>8.3f} {bys[k]/max(1e-9, reachs[k]):>11.2f}")
+        # ...and crossed with strength, since "the bot misprices concentrated
+        # hands" and "it misprices concentrated STRONG hands" are different
+        # claims and only the second is actionable.
+        print(f"\n  LOSS PER UNIT REACH, strength (rows) x concentration (cols):")
+        cell = defaultdict(float)
+        rch = defaultdict(float)
+        for h in hits:
+            k = (h["bucket"] // NSHAPE, h["bucket"] % NSHAPE)
+            cell[k] += h["loss"]
+            rch[k] += h["reach"]
+        print("        " + " ".join(f"{'shape ' + str(c) + ' loss/reach':>13}"
+                                    for c in range(NSHAPE)))
+        for r in range(NSTR):
+            row = [f"  str {r}"]
+            for c in range(NSHAPE):
+                v = rch[(r, c)]
+                # The reach rides with the ratio: a cell with almost no reach
+                # can show any ratio at all, and one did (72.89 on 0.004 of
+                # reach) before this was printed.
+                row.append(f"{cell[(r, c)] / v:>7.2f}/{v:<5.2f}"
+                           if v > 1e-9 else f"{'--':>13}")
+            print(" ".join(row))
 
     # ...and the individual nodes, with what the policy DOES against what it
     # should. This is the actionable half: a node is only worth fixing if the
@@ -2464,7 +2588,8 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "banned":
         return banned_main()
     if len(sys.argv) > 1 and sys.argv[1] == "attrib":
-        return attrib_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
+        return attrib_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000,
+                           sys.argv[3] if len(sys.argv) > 3 else "expert")
     if len(sys.argv) > 1 and sys.argv[1] == "br":
         return br_main(int(sys.argv[2]) if len(sys.argv) > 2 else 200_000)
     if len(sys.argv) > 1 and sys.argv[1] == "expert":
