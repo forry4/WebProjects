@@ -36,8 +36,11 @@ added.
 
 ## What it costs, measured
 
-**~1.5 deals/min on a 4-core box**, so n=1550 is roughly 17 hours there. Per-deal
-sigma is **≈18**, which is why:
+**~5.5 deals/min on an uncontended 4-core box at 4 shards**, so n=1550 is roughly
+**4–5 hours** there. (An earlier figure of 1.5/min in this file was measured
+while another job had the cores and is what produced a 17-hour estimate; the
+lesson is the ordinary one — time a harness on a quiet box or not at all.)
+Per-deal sigma is **≈18**, which is why:
 
 | n | error bar |
 |---|---|
