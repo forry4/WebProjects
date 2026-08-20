@@ -5105,7 +5105,71 @@ blueprint tier — `mean opening` reads 0.00 at n=0 for `bpwt` above. It affects
 the descriptive stats only; the strength number and the make rates come from the
 round resolution and are unaffected.
 
-### THE PRIOR'S UNSPENT CHANNEL IS TRUMP LENGTH — and the DOUBLE is the bigger problem (2026-08-20)
+### THE DOUBLE IS FINE. THE "-3.73" WAS THE DRIVER'S BASE RATE. (2026-08-20)
+
+**RETRACTION FIRST.** The entry below concluded from `dblprobe` that the shipped
+Double is "net destructive" and "the largest single shipped defect" — doubling
+31% of contracts when 9.5% deserve it, discriminating by 3.5 points, capturing
+−3.73 payoff a round. **That is wrong, and it is wrong for exactly the reason
+that entry flagged as its load-bearing caveat: `dblprobe` drives with the SERVER
+bot.** Re-taken on EXPERT-bid contracts, via `ARENA_DBL=1` + `tools/dblreport.py`
+over 320 paired deals (640 doubles):
+
+| | server-bot bid | **Expert bid** |
+|---|---|---|
+| doubles taken | 31.0% | 33.1% |
+| doubles that SHOULD be | **9.5%** | **29.4%** |
+| agreement with truth | 66.0% | **81.9%** |
+| hit / false alarm / miss | 13 / 111 / 25 | **142 / 70 / 46** |
+| doubles contracts that MADE | 30.7% | **15.5%** |
+| doubles contracts that FAILED | 34.2% | **75.5%** |
+| **discrimination** | **+3.5 pts** | **+60.0 pts** |
+| **value captured** | **−3.73** | **+0.66** (of +5.36 available) |
+
+**The Double doubles three quarters of failing contracts and one seventh of
+making ones. It is not broken; it is working.**
+
+**THE MECHANISM IS A BASE RATE, and it is worth carrying because it will happen
+again.** Only **9.5%** of the server bot's contracts are worth doubling against
+**29.4%** of Expert's. When almost nothing deserves a double, almost every
+double taken is a false alarm BY CONSTRUCTION, and both the discrimination and
+the captured value collapse without the decision rule changing at all. The
+harness was measuring its driver's bidding, not the Double. **"Which bot did the
+bidding IS the distribution" is already this file's rule; it applies to
+DEFENDING decisions too, and a probe that drives itself is choosing its own
+base rate.**
+
+**THE MARGIN IS THE ONE THING THAT MIGHT STILL MOVE.** `dblsweep --live 12` over
+the same recorded run — the sums are recorded, so every threshold is priced
+exactly off one run:
+
+| margin | dbl% | on FAIL | on MADE | disc | defender gain |
+|---|---|---|---|---|---|
+| **12** *(shipped)* | 32.5% | 74.5% | 15.0% | +59.4 | **+0.77** |
+| 15 | 29.1% | 70.2% | 11.9% | +58.3 | +1.22 |
+| **20** | 20.9% | 52.1% | 8.0% | +44.2 | **+1.45** |
+| 24 | 11.6% | 28.7% | 4.4% | +24.3 | +1.04 |
+| 32 | 5.3% | 16.0% | 0.9% | +15.1 | +1.14 |
+
+**20 roughly doubles the defender's gain over the shipped 12**, by doubling less
+often and more selectively — the payoff is asymmetric (a doubled contract that
+MAKES costs far more than a doubled set wins), so the break-even sits well above
+"more likely than not to fail".
+
+**DO NOT SHIP THAT OFF THIS TABLE.** The declarer-EV column carries ±2.4–3.0, so
+these candidates are not separated; the gain column has no error bar at all; and
+**this file already records a `DOUBLE_MARGIN` re-fit that was wrong, shipped and
+reverted (2026-08-16)**. It needs a CRN-paired arena at the candidate value,
+mirror reading exactly +0.0000, before anything moves.
+
+**Instrument notes.** `dbl_truth` runs on its own bidserve channel for the reason
+`quality_of` documents — the `Solved` cache is one slot and an off-tier ask
+evicts the auction entry; the mirror still reads exactly +0.0000 with recording
+on. `dblreport` pools BOTH flips of a pair, since each flip is its own Double by
+its own tier and reading `events[0]` alone would halve the sample and silently
+drop every decision the second seating made.
+
+### THE PRIOR'S UNSPENT CHANNEL IS TRUMP LENGTH — and the DOUBLE turned out to be fine (2026-08-20)
 
 **THE PRIOR'S OWN AXIS IS FINISHED.** `tools/channelprobe.py`, 400 rounds at the
 Double, 200 resamples each, shipped tilt 0.35. Percentile of the declarer's TRUE
@@ -5169,9 +5233,11 @@ false alarms, lower agreement, worse value. So the one place the belief thread
 left open — "the Double is a binary make/fail call, not a move choice, so
 strategy fusion does not apply there" — measures negative too.
 
-**AND THE DOUBLE BARELY DISCRIMINATES AT ALL.** It doubles contracts that MADE
-at 30.7% and contracts that FAILED at 34.2% — **three and a half points of
-separation.** `value captured` is `sum(gain) / rounds` where
+**AND THE DOUBLE BARELY DISCRIMINATES AT ALL — RETRACTED, see the section above.
+On EXPERT-bid contracts it discriminates by 60.0 points and captures POSITIVE
+value; everything in this paragraph is the server-bot driver's base rate.** It
+doubles contracts that MADE at 30.7% and contracts that FAILED at 34.2% —
+three and a half points of separation. `value captured` is `sum(gain) / rounds` where
 `gain = payoff(undoubled) − payoff(doubled)`, so **−3.73 means the doubles taken
 COST the defender 3.73 payoff a round**, against **+2.84** available if they
 were targeted perfectly. The shipped Double is not a small inefficiency; it is

@@ -186,6 +186,45 @@ def quality_of(g, seat):
     return max(bids) / QUAL_K
 
 
+#: Record GROUND TRUTH at every Double. Off by default: it costs two exact
+#: resolves per double and no other report reads it.
+DBL_TRUTH = os.environ.get("ARENA_DBL") not in (None, "", "0")
+
+
+def dbl_truth(g, opts):
+    """What each branch of the Double really pays, declarer-signed.
+
+    THE FOLLOW-UP THIS EXISTS FOR (2026-08-20). `dblprobe` measured the shipped
+    Double at **-3.73 payoff a round** -- the doubles it takes COST the defender
+    that much against +2.84 available -- but it drives its rounds with the
+    SERVER bot, and this file's own rule is that which bot did the bidding IS
+    the distribution. Expert buys different contracts, so the number has to be
+    re-taken on Expert-bid ones before anything is re-priced on it.
+    `beliefprobe`'s `--from-arena` path rebuilds a partial game for its own
+    purpose; a Double needs a PLAYABLE one, so the evaluation happens here,
+    where the real game is in hand.
+
+    Its own bidserve channel, for the reason `quality_of` documents: the Solved
+    cache is one slot and an off-tier ask evicts the auction entry. The mirror
+    is the check.
+    """
+    decl = g["auction"]["declarer"]
+    out = []
+    for o in opts:
+        terms = {k: v for k, v in o.items() if k not in ("move", "opp", "redeal")}
+        terms["declarer"] = decl
+        req = json.dumps({"resolve": {
+            "hands": [sorted(h) for h in g["hands"]],
+            "piles": [[list(x) for x in q] for q in g["piles"]],
+            "trump": g["auction"]["denom"], "leader": decl, "terms": terms,
+        }}) + "\n"
+        p = proc_for(("dbltruth",), k=1, seed=7919)
+        p.stdin.write(req)
+        p.stdin.flush()
+        out.append(json.loads(p.stdout.readline()).get("payoff"))
+    return out
+
+
 def ask(g, seat, tier):
     """The armed request, answered by the shipped path; the client's own pick.
 
@@ -477,6 +516,17 @@ def play(m, tier_of, qual, events):
                                    None if on is None else sums[on],
                                    None if off is None else sums[off],
                                    len(g["auction"]["log"])))
+                    if DBL_TRUTH and on is not None and off is not None:
+                        vals = dbl_truth(g, opts)
+                        if vals[on] is not None and vals[off] is not None:
+                            # `gain` is what doubling takes OFF the declarer, so
+                            # positive means the double helped the defender.
+                            events.append((
+                                "dbltruth", tier, bool(mv.get("on")),
+                                bool(vals[on] < vals[off]),
+                                vals[off] - vals[on],
+                                bool(vals[off] > 0),
+                                g["auction"]["level"]))
             # THE CONTROL VARIATE, now priced EXPLICITLY and for every pairing.
             # It used to be read for free off a tier named `hard` and was
             # therefore inert for expert-vs-expert -- see `quality_of`. Noise in
