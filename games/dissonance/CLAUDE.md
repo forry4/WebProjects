@@ -5201,6 +5201,80 @@ monotone across three weights) and a NEGATIVE CONTROL (policy entropy against
 exploitability). **When treatments keep failing, stop proposing treatments:
 sweep a dose, and test the instrument.**
 
+### THE OPPONENT'S OWN UNCERTAINTY — BUILT, MEASURED, AND IT IS THE SIXTH NULL (2026-08-20)
+
+**The direction this file named as "the only live one", built properly rather
+than as another surrogate — and it does not pay. `DIS_BELIEF_W` ships at 0.**
+
+**WHAT IT IS.** Every other opponent model here answers "how sharply does the
+opponent punish the hand we actually hold" — `Minimax` perfectly, `Soft` with a
+temperature, `Myopic` with a price list. All three share one flaw: the sample
+they choose against contains OUR REAL CARDS in every world, so the modelled
+opponent is clairvoyant however the aggregation is softened. This replaces the
+aggregation with a second SEARCH. Per sampled world, the opponent runs the same
+tree over deals drawn from THEIR information set in that world — they know the
+hand that world dealt them, ours is resampled — so their reply varies with their
+own holding and is blind to ours. **That is qualitatively beyond a temperature**,
+which can only give one mixed reply shared across every world.
+
+**The construction is EXACT, not an approximation, and only because the auction
+runs before a card is played.** `View::belief_of` is this view with the seats
+swapped: they hold the world's hand, we join the pool they resample.
+`Knowledge` is inference from played cards, so before trick 1 there is none to
+carry across — the debug assert says so rather than the docstring alone.
+Nesting is ONE level: `belief_into` never fills the inner entries' own belief,
+so the modelled opponent models US as clairvoyant. The regress is infinite and
+that is the honest place to cut it.
+
+**MEASURED, paired on 200 seeds, Hard tier, 99.9% exact coverage:**
+
+| | settled mean | made | probe-pass | exploitability |
+|---|---|---|---|---|
+| baseline | 4.50 | **69.5%** | 81.5% | **5.25** |
+| belief (m=4) | 4.80 | **49.0%** | 75.4% | **5.43** |
+
+**AND THE SIGN FLIPPED ON THE WAY, which is the part worth keeping.** At n=131
+the same paired comparison read belief BETTER by 0.18 and I reported it as the
+first improvement in six treatments — correctly caveated, and correctly not
+believed. At n=200 it reads belief WORSE by 0.17. Splitting the same 200 seeds
+into four disjoint quarters and recomputing the paired difference on each:
+**+0.58, +0.90, +1.13, +0.76** — every quarter agrees that belief is worse, and
+the favourable n=131 reading is reproduced by none of them. **This file has now
+recorded the "an interval spanning zero is not a direction" lesson four times;
+this is the first where a DISJOINT-SUBSET check settled it in minutes rather
+than another hour of arena.**
+
+* **The statistic is strongly n-dependent and differences are NOT comparable
+  across n**: the quarters average +0.84 where the full sample reads +0.17. Same
+  shape as the loss statistic's documented sample bias (0.54 on 2000 deals, 0.69
+  on 500). Compare arms only at equal n, paired on the same deals — and when a
+  reading matters, split it.
+* **The behavioural cost is unambiguous even where the exploitability is not.**
+  Contracts made fall **69.5% → 49.0%**. The bot concedes less (probe-pass 81.5%
+  → 75.4%, and standing-3 concessions 38% → 19%) and bids higher (settled mean
+  4.50 → 4.80) — and makes far fewer of them. No exploitability wobble of ±0.2
+  buys that back.
+* **And it STILL does not rotate.** The jump slope stays flat (level 4: +2 → −0;
+  level 5: +4 → +2) — a sixth uniform shift, from the one mechanism that was
+  supposed to be structurally different.
+
+**SO THE STOPPING RULE STANDS AND IS NOW STRONGER.** Six treatments — the
+opening bias, the exact leaf, opponent softening, cross-fitting, the jump
+weight, and now the opponent's own uncertainty — every one null or worse, and
+five of the six with the same signature: concede less, bid higher, make fewer.
+**The auction search's pessimism about continuing is load-bearing, and the
+5.45-against-1.47 residual is not reachable by changing what the tree believes.**
+
+**WHAT IS LEFT, honestly.** The remaining candidates are all bigger than a
+search change: a better ABSTRACTION for the exploitability instrument itself
+(denominations are still collapsed to a burn count), a leaf calibrated on
+REAL PLAY rather than the double-dummy guarantee (the ladder is measured 16%
+looser than the solver believes, and every arm above inherits that), or
+accepting that the tier is where it is and spending the effort elsewhere in the
+game. **The code is kept and gated** — `belief_of`, `belief_into` and
+`OppModel::Belief` are correct, tested and one env var from running, so a future
+attempt starts from a built mechanism rather than from this paragraph.
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but
@@ -5219,13 +5293,11 @@ sweep a dose, and test the instrument.**
   settled, and skat's talon resolves before the game is named. It needs its
   own `swaplab` run, not the classic weights on faith —
   `test_the_skat_talon_still_runs_the_old_policy` is the marker.
-* **Modelling the opponent's UNCERTAINTY in the auction tree — and as of
-  2026-08-19 this is the ONLY live direction left on the auction bot.** Five
-  separate re-weightings of the existing search were measured against the
-  equilibrium instrument and every one made it more exploitable (section above);
-  the residual is not reachable by changing a coefficient. The single clearest
-  reason Expert's lookahead does not pay is that its modelled opponent
-  is handed our exact hand. Anything that makes their branch choose without it
-  (a sampled-opponent-view search, or simply capping how sharply their reply is
-  modelled) attacks the mechanism the measurements point at.
+* ~~**Modelling the opponent's UNCERTAINTY in the auction tree.**~~ **BUILT AND
+  MEASURED 2026-08-20 — it is the SIXTH null.** `View::belief_of` /
+  `bid::belief_into` / `OppModel::Belief` are correct, tested and shipped at
+  `DIS_BELIEF_W = 0`; paired on 200 seeds it reads 5.43 against 5.25 and takes
+  the make rate from 69.5% to 49.0%. See the section above, and do not re-open
+  it as "the live direction" — the mechanism exists and the measurement is the
+  answer.
 * A `/review`.

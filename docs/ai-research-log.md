@@ -3341,3 +3341,44 @@ of the five touches. **Do not spend on another coefficient.**
 treatment but a DOSE CURVE (monotone across three weights) and a NEGATIVE
 CONTROL (entropy vs exploitability). When treatments keep failing, stop
 proposing treatments — sweep a dose, and test the instrument.
+
+### 2026-08-20 — modelling the opponent's uncertainty: the sixth null, and a faster way to know
+
+Built the direction the log named as the only live one, properly rather than as
+another surrogate. `View::belief_of` swaps the seats — the opponent holds the
+hand that world dealt them and ours joins the pool they resample — which is
+EXACT rather than approximate, because the auction runs before a card is played
+and `Knowledge` has nothing to carry across. `bid::belief_into` draws m such
+deals per sampled world and solves them; `OppModel::Belief` runs the opponent's
+own tree over them, per world. One level of nesting, by construction.
+
+It is the one mechanism qualitatively beyond a temperature: a softmax gives one
+mixed reply shared across every world, this gives a different reply per world
+correlated with the hand making it. Gated by three tests, including that their
+own hand is fixed across their belief while ours really varies, and that asking
+for the model without funding the sample falls back to plain minimax.
+
+**Result, paired on 200 seeds:** exploitability 5.25 → 5.43, contracts made
+69.5% → 49.0%, settled mean 4.50 → 4.80, probe-pass 81.5% → 75.4%. And the jump
+slope stays flat — a sixth uniform shift from the mechanism that was supposed to
+be structurally different.
+
+**The methodological half is the more useful one.** At n=131 the same paired
+comparison read belief BETTER by 0.18, and I said so while explicitly declining
+to believe it. At n=200 it read WORSE by 0.17 — a sign flip, the fourth time
+this campaign has met one. What settled it in minutes: splitting the same 200
+seeds into four DISJOINT quarters and recomputing the paired difference on each
+(+0.58, +0.90, +1.13, +0.76 — unanimous, and the favourable reading reproduced
+by none). The statistic is also strongly n-dependent (quarters average +0.84
+where the full sample reads +0.17), so differences are not comparable across n.
+**When a reading matters, split it — it is cheaper than another hour of arena
+and it answers the question the interval was going to fudge.**
+
+**Six treatments, six failures**, five of them with one signature: concede less,
+bid higher, make fewer. The auction search's pessimism about continuing is
+load-bearing, and the residual above this abstraction's floor is not reachable
+by changing what the tree believes. Remaining candidates are all bigger than a
+search change — a finer abstraction for the instrument, or a leaf calibrated on
+real play rather than the double-dummy guarantee, which every arm above
+inherits. The code is kept and gated so a future attempt starts from a built
+mechanism.
