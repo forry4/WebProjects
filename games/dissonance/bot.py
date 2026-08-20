@@ -650,6 +650,20 @@ _BID_TILT = 0.35
 #: that follows it, so this buys the resampling real resolution for nothing:
 #: a tilt can only prefer among the candidates it was actually offered.
 _BID_TRIES = 24
+#: FLAT WORTH PER TRUMP in the prior's likelihood — the suit-LENGTH term, and an
+#: EXPERIMENT: 0.0 is the shipped prior byte for byte and is what ships until the
+#: arm is gated. `DIS_BID_TRUMP_LEN` arms it.
+#:
+#: WHY IT EXISTS. `trump_mult` scales a trump's RANK, so a hand reaches the same
+#: strength sum with high cards anywhere and a LONG trump suit is worth no more
+#: than the cards in it happen to be. Measured (`tools/channelprobe.py`, 400
+#: rounds at the Double): the declarer's trump COUNT sits at the 0.744 percentile
+#: of the tilted sample against a uniform 0.779, i.e. the shipped prior removes
+#: 13% of a bias LARGER than the strength bias it was built for, and the sampler
+#: goes on dealing the declarer too short a trump suit. A flat per-trump term is
+#: the missing shape; swept, 1.0 brings trumps to 0.530 while strength stays
+#: inside 2 SE of 0.500 and `tops` improves.
+_BID_TRUMP_LEN = float(os.environ.get("DIS_BID_TRUMP_LEN", "0") or 0.0)
 
 
 def bid_prior_terms(g: dict) -> dict | None:
@@ -680,6 +694,7 @@ def bid_prior_terms(g: dict) -> dict | None:
         # its offset from the LENGTH, so the wide deck needs no flag.
         "curve": list(_RANK_VALUE[E.NEXTRA:]),
         "trump_mult": 2.0,
+        "trump_len": _BID_TRUMP_LEN,
         "tilt": _BID_TILT,
         "tries": _BID_TRIES,
     }

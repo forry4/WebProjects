@@ -515,6 +515,21 @@ pub struct BidPrior {
     pub curve: [f64; 10],
     /// What holding a card in the contract's own denomination multiplies by.
     pub trump_mult: f64,
+    /// FLAT WORTH PER TRUMP, ADDED ON TOP OF THE CURVE — the suit-LENGTH term.
+    ///
+    /// `trump_mult` scales a trump's RANK, so under it a long suit is worth no
+    /// more than the cards in it happen to be: the same sum is reachable with
+    /// high cards anywhere. Measured (`channelprobe`, 400 rounds at the Double,
+    /// 200 resamples each), that leaves the declarer's TRUMP COUNT at the
+    /// **0.744 percentile** of the tilted sample against a uniform 0.779 — the
+    /// prior removes 13% of a bias LARGER than the strength bias it exists for.
+    /// This term values the sixth trump as much as the first, which no
+    /// multiplier on a rank curve can, and a flat 1.0 brings that to 0.530
+    /// while strength stays inside 2 SE of 0.500.
+    ///
+    /// 0 IS THE PRE-2026-08-20 PRIOR, byte for byte — same reason `tilt` of 0
+    /// is uniform sampling. Optional on the wire, so a cached wasm reads 0.0.
+    pub trump_len: f64,
     /// The tilt. 0 IS uniform sampling, in Rust and end to end.
     pub tilt: f64,
     /// Whose hand the evidence is about — the seat that won the auction.
@@ -533,15 +548,19 @@ impl BidPrior {
         while m != 0 {
             let c = m.trailing_zeros() as u8;
             m &= m - 1;
+            let t = esuit(c, s.trump) == tc;
             tot += self.curve[rank(c) as usize]
-                * if esuit(c, s.trump) == tc { self.trump_mult } else { 1.0 };
+                * if t { self.trump_mult } else { 1.0 }
+                + if t { self.trump_len } else { 0.0 };
         }
         for i in 0..3 {
             let p = &s.pile[self.declarer][i];
             for j in 0..p.n as usize {
                 let c = p.c[j];
+                let t = esuit(c, s.trump) == tc;
                 tot += self.curve[rank(c) as usize]
-                    * if esuit(c, s.trump) == tc { self.trump_mult } else { 1.0 };
+                    * if t { self.trump_mult } else { 1.0 }
+                    + if t { self.trump_len } else { 0.0 };
             }
         }
         tot

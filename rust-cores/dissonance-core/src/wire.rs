@@ -338,6 +338,10 @@ pub fn bid_prior_from_json(v: &Value, declarer: usize) -> Option<crate::bid::Bid
     Some(crate::bid::BidPrior {
         curve,
         trump_mult: v.get("trump_mult").and_then(|x| x.as_f64()).unwrap_or(1.0),
+        // ABSENT IS 0.0 AND 0.0 IS THE PRE-2026-08-20 PRIOR EXACTLY, so a
+        // cached wasm older than the server samples as it always did rather
+        // than as something adjacent to it.
+        trump_len: v.get("trump_len").and_then(|x| x.as_f64()).unwrap_or(0.0),
         tilt: v.get("tilt").and_then(|x| x.as_f64()).unwrap_or(0.0),
         declarer,
         tries: v.get("tries").and_then(|x| x.as_u64()).unwrap_or(1) as usize,
@@ -1865,7 +1869,7 @@ mod belief_prior {
         BidPrior {
             // `bot._RANK_VALUE` sliced to the base deck, as the wire ships it.
             curve: [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4],
-            trump_mult: 2.0, tilt, declarer, tries,
+            trump_mult: 2.0, trump_len: 0.0, tilt, declarer, tries,
         }
     }
 

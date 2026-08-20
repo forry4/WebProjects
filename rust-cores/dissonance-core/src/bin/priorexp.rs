@@ -72,7 +72,7 @@ fn shipped_prior(declarer: usize, tilt: f64) -> BidPrior {
     for (i, v) in [0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4].iter().enumerate() {
         curve[i] = *v;
     }
-    BidPrior { curve, trump_mult: 2.0, tilt, declarer, tries: 24 }
+    BidPrior { curve, trump_mult: 2.0, trump_len: 0.0, tilt, declarer, tries: 24 }
 }
 
 /// One round at an imposed contract. Returns the payoff to the DEFENDER.
