@@ -168,6 +168,35 @@ slightly different question.
 **This file's own rule applies to it**: an interval spanning zero is not a
 direction, and this is now the fourth time that has had to be recorded.
 
+**RE-RUN IN TRICK POINTS (2026-08-20), AND NOW IT IS AN ANSWER.** The payoff
+carries the +-20 Null and the `N^2+4` / `2N+2+5*shortfall` split, so its spread
+was the whole problem. Scoring the same difference-in-differences in trick
+points (`--points 1`) over 297 rows:
+
+| arm | defender's gain from the deviation |
+|---|---|
+| prior ON | **+0.027 ± 0.108** |
+| prior OFF | **−0.118 ± 0.104** |
+| **difference in differences** | **+0.145 ± 0.139** |
+
+**The error bar went from ±1.785 to ±0.139 — a 13x tightening — and the answer
+is that the paper's exploitability cost does not reproduce here.** At 1.04 SE it
+spans zero, and its sign is the OPPOSITE of the warning: against a declarer who
+deliberately underbids, the inferring defender fared marginally BETTER than the
+one that never inferred, not worse.
+
+**Read it at the resolution it has.** This can now see effects of about a tenth
+of a trick point, which is a real instrument rather than the earlier
+non-measurement — but it is 1.04 SE, so the honest statement is "no measurable
+cost at ±0.14 points", not "no cost". And it is the POINTS question: whether the
+defender took fewer tricks. Whether the inference costs PAYOFF at the table is
+the other question, and that one remains un-powered.
+
+**The lesson is the cheap one and it was available from the start:** when an
+estimate is buried by variance, look for a lower-variance statistic of the same
+mechanism before buying forty times the samples. Forty times the rows here would
+have been hours; changing the currency was a flag.
+
 ## ALPHA-MU: BUILT, CORRECT, AND IT MEASURES WORSE THAN PIMC (2026-08-19)
 
 **Verdict first: `AlphaMuBot` is committed and gated OFF. At depth 2 it is about
