@@ -203,6 +203,22 @@ def ask(g, seat, tier):
             if "s" in tier[len("expert"):]:
                 s["rules"]["opp_model"] = "soft"
                 s["rules"]["opp_temp"] = float(os.environ.get("DIS_OPP_TEMP", "4"))
+            # `expertd` -- DIVERSE CONTINUATIONS (2026-08-19), Brown/Sandholm/
+            # Amos multi-valued states. The opponent commits to one of
+            # `DIS_OPP_N` hand-blind strategies spanning a bias toward conceding
+            # through a bias toward contesting, and the node takes the worst of
+            # them for us. `soft` blurs the clairvoyant min; this changes WHICH
+            # replies are on the menu instead.
+            #
+            # A spread of 0 collapses to `myopic` in the Rust (every bias is 0
+            # and the dedupe folds them), which is a tier this crate has already
+            # measured -- so the knob has a known null rather than an undefined
+            # one. It is checked AFTER `s` so a tier naming both takes diverse,
+            # and no shipped tier names both.
+            if "d" in tier[len("expert"):]:
+                s["rules"]["opp_model"] = "diverse"
+                s["rules"]["opp_spread"] = float(os.environ.get("DIS_OPP_SPREAD", "6"))
+                s["rules"]["opp_n"] = int(os.environ.get("DIS_OPP_N", "3"))
             auc["search"] = s
     # A trailing `t` on either tier name adds the TALON MODEL -- the fitted
     # swap weights the server ships on classic auction requests -- so the
