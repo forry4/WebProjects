@@ -5275,6 +5275,78 @@ game. **The code is kept and gated** — `belief_of`, `belief_into` and
 `OppModel::Belief` are correct, tested and one env var from running, so a future
 attempt starts from a built mechanism rather than from this paragraph.
 
+### THE LEAF IS ALREADY CALIBRATED: THE DOUBLE-DUMMY GUARANTEE IS A MINIMUM, NOT A BIAS (2026-08-20)
+
+**The seventh treatment, the one with the best premise, and the one that closes
+the campaign.** `DIS_PLAY_CAL` ships at 0.
+
+**THE PREMISE WAS A REAL MISALIGNMENT.** The exploitability instrument scores
+every arm with the REAL-PLAY leaf — `cfrlab`'s own `leaf` applies the measured
+deviation whenever the deal cache carries one — while the tree it grades
+optimises the DOUBLE-DUMMY guarantee. The bot had been maximising an objective
+it was not marked on, through six failed treatments, every one of them tuning a
+coefficient inside that mismatch. The gap is measured, not assumed: 794 imposed
+contracts played out by the shipped search on both seats put a real declarer
+**+0.95 points** above the guarantee with **sd 1.94**, and the ladder that
+follows 16% looser than the solver believes.
+
+**ALIGNING THEM MADE IT MUCH WORSE, AND SO DID GOING THE OTHER WAY.** Paired on
+324 deals, all four arms on identical seeds, each also split into four disjoint
+quarters:
+
+| leaf shift | exploitability | q0 | q1 | q2 | q3 | settled | made | probe-pass |
+|---|---|---|---|---|---|---|---|---|
+| **−1.45** (more pessimistic) | 6.69 | 7.44 | 6.86 | 6.74 | 6.55 | 3.45 | 86.7% | 91.4% |
+| **0 — the guarantee (shipped)** | **5.42** | **6.54** | **5.09** | **5.35** | **5.60** | 4.47 | 67.3% | 81.6% |
+| **+1.45**, no spread | 7.95 | 9.42 | 7.26 | 9.03 | 9.23 | 5.60 | 41.0% | 67.0% |
+| **+1.45** + spread 1.94 | 6.89 | 7.39 | 6.57 | 8.61 | 8.78 | 4.86 | 51.9% | 68.6% |
+
+**The shipped value is the minimum in the full sample AND in every one of the
+four disjoint quarters.** That is as strong as this instrument gets, and it is
+the one result in the campaign that is unanimous under the subset check rather
+than merely surviving it.
+
+* **The behaviour is perfectly monotone in the shift**, which is what says the
+  knob does exactly what it looks like: settled mean 3.45 → 4.47 → 5.60 and
+  contracts made 86.7% → 67.3% → 41.0%. **A shift of 1.45 points is almost
+  exactly one rung of the ladder.**
+* **So this experiment is an AGGRESSION DIAL wearing a calibration's clothes,
+  and that is the finding.** It sweeps the bot's bidding level directly, in both
+  directions, and the shipped point is the optimum of that sweep. The
+  double-dummy leaf is not a pessimism to be corrected; it lands the bot exactly
+  where the payoff wants it.
+* **The spread half partly RESCUES the mean's damage** (7.95 → 6.89): making
+  marginal contracts uncertain pulls back the overbidding a higher mean causes.
+  Worth knowing, and not enough to matter.
+
+**A RISK-PREMIUM READING WAS PROPOSED AND IS REFUTED BY ITS OWN TEST.** When the
++1.45 arm failed, the explanation on offer was that the guarantee acts as a risk
+premium — bidding commits you to TAKE the points, and this payoff punishes a set
+far harder than an overtrick pays, so the right estimate sits below the mean.
+That story predicts **more** pessimism should help. `DIS_PLAY_CAL` was opened to
+negative scales specifically to test it, and −1.45 reads **6.69**: worse, in all
+four quarters. The story was wrong and the knob said so in three blocks. **A
+prediction a knob can already express is worth checking before it becomes a
+paragraph.**
+
+**WHAT THE WHOLE CAMPAIGN ADDS UP TO.** Seven treatments — the opening bias, the
+exact leaf, opponent softening, cross-fitting, the jump weight, the opponent's
+own uncertainty, and the real-play leaf — all null or worse. **Five of the seven
+moved the bot's aggression, and this last one sweeps that axis directly in both
+directions and finds the shipped point at the bottom.** So the residual
+exploitability (5.42 against this abstraction's 1.47 floor) **is not an
+aggression problem**, and every treatment that failed was tuning the one axis
+that was already right.
+
+**That is a genuinely useful place to have got to**, and it is a stopping rule
+with a reason rather than a shrug: what is left must be CONDITIONAL — which
+hands the tree wins the auction with, not how high it bids — and nothing that
+moves a coefficient uniformly can touch it. **`payoff_terms`, the leaf, the
+opponent model and the selection rule are all now measured and all at or past
+their optimum.** The next honest step is not another arm on this bot; it is
+either a finer abstraction for the instrument (so a conditional defect can be
+SEEN), or a different part of the game.
+
 ## Not built yet
 
 * **Announcements beyond Sharp.** `auction_payoff_options` enumerates Sharp but

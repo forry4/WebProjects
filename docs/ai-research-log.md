@@ -3382,3 +3382,40 @@ search change — a finer abstraction for the instrument, or a leaf calibrated o
 real play rather than the double-dummy guarantee, which every arm above
 inherits. The code is kept and gated so a future attempt starts from a built
 mechanism.
+
+### 2026-08-20 (later) — the leaf is already calibrated, and that closes the campaign
+
+Picked the real-play leaf as the most promising remaining direction, on a real
+premise: the exploitability instrument scores every arm with the real-play leaf
+while the tree optimises the double-dummy guarantee, so the bot had been
+maximising an objective it was not marked on through six failed treatments.
+
+**Aligning them made it much worse — and so did the opposite.** Paired on 324
+deals, four arms on identical seeds, each also split into four disjoint quarters:
+
+    shift -1.45 (more pessimistic)   6.69   settled 3.45   made 86.7%
+    shift  0    (the guarantee)      5.42   settled 4.47   made 67.3%
+    shift +1.45 no spread            7.95   settled 5.60   made 41.0%
+    shift +1.45 + spread 1.94        6.89   settled 4.86   made 51.9%
+
+The shipped value is the minimum in the full sample **and in every one of the
+four quarters** — the only unanimous result of the campaign. Behaviour is
+perfectly monotone in the shift, and 1.45 points is almost exactly one rung: so
+this is an AGGRESSION DIAL wearing a calibration's clothes, swept in both
+directions, with the shipped bot at the bottom.
+
+**A risk-premium explanation was proposed for the first failure and refuted by
+its own test.** It predicted more pessimism should help; the knob was opened to
+negative scales specifically to check, and -1.45 came back worse in all four
+quarters. Three blocks to kill a story that would otherwise have been written
+down as an insight. *A prediction a knob can already express is worth checking
+before it becomes a paragraph.*
+
+**Seven treatments, all null or worse. Five of them moved aggression, and this
+one sweeps that axis directly and finds the shipped point optimal.** So the
+residual (5.42 against a 1.47 floor) is not an aggression problem, and every
+failed treatment was tuning the one axis already right. What is left must be
+CONDITIONAL — which hands the tree wins the auction with, not how high it bids —
+and no uniform coefficient can reach it. The next honest step is a finer
+abstraction for the instrument, so a conditional defect can be seen at all, or a
+different part of the game.
