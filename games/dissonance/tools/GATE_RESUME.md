@@ -50,6 +50,21 @@ published at, which is the point of choosing it — like for like. Note even the
 an `opp_temp`-sized effect (+0.957) lands at only ~2 SE. **This measurement is
 expensive to make decisive; budget for it rather than expecting a quick answer.**
 
+**AND THE HARNESS'S VARIANCE REDUCTION IS INERT HERE, which is why those error
+bars cannot be shrunk (found 2026-08-20).** The quality control variate — the
+one the docstring says "cannot move the mean's expectation, only shrink its
+error bar" — is captured under `tier_of[seat] == "hard"`, i.e. **only when one
+arm is literally Hard.** In any expert-vs-expert race `qual` stays empty, every
+recorded `q` is 0.0, and the adjustment silently does nothing. That covers this
+gate and it also covers the shipped `opp_temp` measurement, whose ±0.454 was
+therefore raw.
+
+It is gated that way for a reason — the covariate is Hard's own myopic price at
+the opening node, free from an ask Hard is making anyway, and an expert arm's
+tree value is a different quantity. Making it work for expert-vs-expert means
+paying for one extra myopic ask per deal, which is cheap next to the tree. Worth
+doing before anyone runs another 17-hour expert-vs-expert arm.
+
 ## What to do with the result
 
 * Positive and clear → then check LATENCY before shipping. `Diverse` measured
