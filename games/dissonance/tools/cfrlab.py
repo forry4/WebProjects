@@ -99,6 +99,24 @@ HOLD = 0          # the abstract action; -1 is pass, >=1 is "raise to that level
 #: costs. See `leaf` for how the index is formed and `actions` for the seat that
 #: runs out.
 BURN = bool(os.environ.get("CFR_BURN"))
+#: DETERMINIZED WORLDS PER AUCTION DECISION -- the shipped
+#: `CLIENT_AI_AUCTION_WORLDS`. 8 is what the tier serves.
+#:
+#: THE ONE STRENGTH KNOB THIS PACKAGE HAS NEVER MEASURED. The CARD search
+#: saturates at k = 8 (CAMPAIGN.md), and the auction's cap was raised 3 -> 8 by
+#: analogy rather than by its own sweep -- the file says so outright: "the
+#: auction's compute->strength curve is still unmeasured; nothing says whether
+#: that sits at the knee the way 8 does here".
+#:
+#: It became worth measuring when the 2-D abstraction localised the bot's
+#: remaining loss on CONCENTRATED hands (1.98 per unit reach against 1.13 for
+#: flexible ones). A one-suit hand's value rests on a single denomination's
+#: `pts`, estimated over k worlds; a flexible hand's is corroborated across
+#: several. So the concentrated estimate is the noisier one, and the optimiser's
+#: curse -- which shades CONTINUING down and which this campaign has already
+#: measured directly -- bites hardest exactly where the estimate is noisiest.
+#: That predicts the observed defect, and predicts more worlds as its fix.
+KWORLDS = int(os.environ.get("CFR_K", "8"))
 
 _P = None
 
@@ -106,7 +124,7 @@ _P = None
 def rpc(payload):
     global _P
     if _P is None:
-        _P = subprocess.Popen([BIN, "8", "18", "0"], stdin=subprocess.PIPE,
+        _P = subprocess.Popen([BIN, str(KWORLDS), "18", "0"], stdin=subprocess.PIPE,
                               stdout=subprocess.PIPE, text=True, bufsize=1)
     _P.stdin.write(json.dumps(payload) + "\n")
     _P.stdin.flush()
@@ -2254,6 +2272,11 @@ def _burn_report(out):
               f"state the ladder cannot express at all")
 
 
+def _bk(b):
+    """A bucket for the eye: "strength/shape" under the 2-D abstraction."""
+    return f"{b // NSHAPE}/{b % NSHAPE}" if BUCKET == "2d" else str(b)
+
+
 def _act_name(a):
     return "pass" if a == -1 else ("hold" if a == HOLD else f"bid {a}")
 
@@ -2405,14 +2428,16 @@ def attrib_main(iters, who="expert"):
     # ...and the individual nodes, with what the policy DOES against what it
     # should. This is the actionable half: a node is only worth fixing if the
     # better action is one a bot could plausibly be made to take.
-    print(f"\n  {'seat':>4} {'standing':>8} {'prev':>4} {'holds':>5} {'bkt':>3} "
+    print(f"\n  {'seat':>4} {'standing':>8} {'prev':>4} {'holds':>5} "
+          f"{('str/shp' if BUCKET == '2d' else 'bkt'):>7} "
           f"{'obs':>4} {'loss':>7} {'reach':>6}  wants -> currently")
     for h in sorted(hits, key=lambda x: -x["loss"])[:18]:
         does = " ".join(f"{_act_name(a)}:{100*p:.0f}%"
                         for a, p in sorted(h["does"].items(), key=lambda kv: -kv[1])
                         if p > 0.05) or "(unseen: concedes)"
         print(f"  {h['seat']:>4} {('open' if h['level'] == 0 else h['level']):>8} "
-              f"{h['prev']:>4} {h['holds']:>5} {h['bucket']:>3} "
+              f"{h['prev']:>4} {h['holds']:>5} "
+              f"{_bk(h['bucket']):>7} "
               f"{h['n']:>4.0f} {h['loss']:>7.3f} {h['reach']:>6.3f}  "
               f"{_act_name(h['want']):>6} -> {does}")
 
