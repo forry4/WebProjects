@@ -61,11 +61,15 @@ def test_the_wide_decks_extra_cards_are_the_low_ranks_and_move_no_existing_id():
     a renumbering is exactly the kind of change that looks harmless."""
     for c in range(E.NCARD):
         assert E.suit(c) == c // E.NRANK
-        assert E.rank(c) == c % E.NRANK + E.NEXTRA
+        assert E.rank(c) == c % E.NRANK + E.BASE_OFFSET
     # ...and the eight new ones are a 5 and a 6 in each suit, below every 7.
+    # THEIR STRENGTHS ARE NO LONGER 0 AND 1: the full deck put the 2, 3 and 4
+    # underneath them, so they sit at `WIDE_OFFSET`. Their IDS did not move,
+    # which is the property this test exists for.
     extra = list(range(E.NCARD, E.NCARD_WIDE))
     assert sorted(E.suit(c) for c in extra) == [0, 0, 1, 1, 2, 2, 3, 3]
-    assert sorted(set(E.rank(c) for c in extra)) == [0, 1]
+    assert sorted(set(E.rank(c) for c in extra)) == [E.WIDE_OFFSET,
+                                                     E.WIDE_OFFSET + 1]
     assert {E.RANK_NAMES[E.rank(c)] for c in extra} == {"5", "6"}
     for c in extra:
         for b in range(E.NCARD):
@@ -96,11 +100,20 @@ def test_a_thirty_two_card_room_still_ships_the_wire_table_it_always_did():
     entries with `c % 8` and labelling every corner chip correctly. A dummy room
     ships all ten and the client takes its offset from the LENGTH."""
     assert E.wire_card_values("skat") == [-1, -1, 2, 2, 2, 2, -1, -1]
-    assert len(E.wire_card_values("dummy")) == E.NRANKS
+    assert len(E.wire_card_values("dummy")) == E.nranks_for("dummy") == 10
     for c in range(E.NCARD):
         assert E.wire_card_values("skat")[c % E.NRANK] == E.card_points(c)
     for c in range(E.NCARD_WIDE):
-        assert E.wire_card_values("dummy")[E.rank(c)] == E.card_points(c)
+        off = E.rank_offset("dummy")
+        assert E.wire_card_values("dummy")[E.rank(c) - off] == E.card_points(c)
+    # THE CLIENT'S OWN ARITHMETIC, asserted here rather than trusted: it takes
+    # the offset from the LENGTH (`NRANKS - len(t)`), which is the whole reason
+    # a third deck width needed no wire change and no version bump.
+    for mode in ("classic", "skat", "minor", "dummy"):
+        t = E.wire_card_values(mode)
+        assert E.NRANKS - len(t) == E.rank_offset(mode)
+        for c in range(E.deck_size(mode)):
+            assert t[E.rank(c) - (E.NRANKS - len(t))] == E.card_points(c)
 
 
 def test_there_is_no_talon_and_the_auction_runs_straight_into_the_double():

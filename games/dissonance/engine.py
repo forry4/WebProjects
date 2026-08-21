@@ -79,9 +79,28 @@ import random
 #     branch in each of two functions instead.
 #
 # The cost, stated: the id's low bits are no longer the rank. `rank()` returns
-# a STRENGTH-ordered index 0..9 (0 = the 5, 9 = the ace) in every mode, so
-# `RANK_NAMES`, `CARD_VALUES` and every rank curve are indexed by strength and
-# `beats` is still a plain `>`; the base deck simply never produces a 0 or 1.
+# a STRENGTH-ordered index (0 = the lowest card the widest deck holds, NRANKS-1
+# = the ace) in every mode, so `RANK_NAMES`, `CARD_VALUES` and every rank curve
+# are indexed by strength and `beats` is still a plain `>`; a narrower deck
+# simply never produces the low indices.
+#
+# THE FULL DECK (2026-08-21): the four-hand mode deals FIFTY-TWO cards -- the
+# 40 above plus a 2, 3 and 4 in each suit, at ids 40..51. The append discipline
+# is now applied for the SECOND time and it is the reason this cost one
+# afternoon rather than a migration: the extras arrive in BLOCKS, each bolted
+# onto the end of the id space, so ids 32..39 still mean the 5 and the 6 and
+# every dummy save dealt under the wide deck is still read correctly. Laying
+# the five extra low ranks out contiguously instead -- `NCARD + suit * 5 + k`,
+# the "obvious" generalisation -- would have renumbered the 5 and the 6 into
+# the 2 and the 3, and `deal_is_current` could NOT have caught it: a renumbered
+# dummy save still holds forty distinct ids and still counts right, so every
+# card would silently have changed rank. Silent is the failure mode this
+# layout exists to avoid.
+#
+# THE INVARIANT THE BLOCKS BUY, and every deck function leans on it: a deck of
+# N cards is exactly `range(N)` AND exactly the top N/NSUIT ranks. It holds for
+# all three widths (32 = ranks 5..12, 40 = ranks 3..12, 52 = ranks 0..12), so
+# `deck_size` alone still says what the deck is and no caller needs a set.
 
 VERSION = 2  # bumped by the 32-card / ranked / Null / swap release
 
@@ -90,13 +109,26 @@ NSUIT = 4
 NCARD = 32   # the base deck: ids 0..31, and they never move
 NOTRUMP = 4
 
-#: The wide deck's extra ranks per suit (the 5 and the 6), laid out as
-#: `NCARD + suit * NEXTRA + k` so the base ids keep their meaning.
-NEXTRA = 2
-NCARD_WIDE = NCARD + NSUIT * NEXTRA   # 40
-NRANKS = NRANK + NEXTRA               # rank slots, strength-ordered
+#: Extra low ranks per suit, added in two historical BLOCKS. Each block is laid
+#: out as `<start of block> + suit * <ranks in block> + k`, appended to the id
+#: space so no id that ever shipped changes meaning.
+#:
+#:   block A -- the 5 and the 6, ids 32..39   (2026-08-10, dummy's wide deck)
+#:   block B -- the 2, 3 and 4, ids 40..51    (2026-08-21, the full deck)
+NEXTRA_WIDE = 2
+NEXTRA_FULL = 3
+NCARD_WIDE = NCARD + NSUIT * NEXTRA_WIDE        # 40
+NCARD_FULL = NCARD_WIDE + NSUIT * NEXTRA_FULL   # 52
+NRANKS = NRANK + NEXTRA_WIDE + NEXTRA_FULL      # 13 rank slots, strength-ordered
 
-RANK_NAMES = ["5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+#: Where each deck's lowest rank sits in the strength order. A deck holding
+#: `n` ranks per suit starts at `NRANKS - n`, which is what `rank_offset` says
+#: for a mode; these two are the constants for the fixed-width decks that
+#: OTHER code (Rust's 0..7 rank, the wire tables) is indexed by.
+BASE_OFFSET = NRANKS - NRANK                    # 5 -- the 7 is strength 5
+WIDE_OFFSET = NRANKS - (NRANK + NEXTRA_WIDE)    # 3 -- the 5 is strength 3
+
+RANK_NAMES = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 SUIT_NAMES = ["clubs", "diamonds", "hearts", "spades"]
 SUIT_CHARS = ["c", "d", "h", "s"]
 
@@ -721,7 +753,15 @@ def even_value(mode: str) -> int:
 #:   * it gives the mode a genuinely SAFE discard, which is what free discard
 #:     (no follow-suit, 2026-08-10) wants to feed on: a card that neither wins
 #:     a trick you want to lose nor costs points when someone else takes it.
-CARD_VALUES = [0, 0, -1, -1, 2, 2, 2, 2, -1, -1]
+#: THE FULL DECK'S THREE NEW RANKS ARE WORTH ZERO TOO (2026-08-21), for the
+#: first of the reasons above and not the others: the deck total stays +16 at
+#: every width (32, 40 and 52 all read it), so a wider deck never silently
+#: re-scales a ladder keyed on it. The gcd argument is already paid for by the
+#: 5 and the 6, and the four-hand mode scores trick PARITY rather than cards,
+#: so nothing here is on its scoring path -- these entries exist to keep the
+#: table indexable by `rank` at full width.
+#:                2   3   4   5   6   7   8  9  10   J   Q   K   A
+CARD_VALUES = [   0,  0,  0,  0,  0, -1, -1, 2,  2,  2,  2, -1, -1]
 
 
 def card_points(c: int) -> int:
@@ -758,9 +798,10 @@ def wire_card_values(mode: str) -> list:
     same eight entries it always did, indexed 7..A, so a bundle cached from
     before the wide deck goes on labelling skat's corner chips correctly; a
     dummy room ships all ten. The client takes its offset from the LENGTH
-    (`NRANKS - len`), which needs no new field and no version bump.
+    (`NRANKS - len`), which needs no new field and no version bump -- and that
+    is why a THIRD width cost this function nothing.
     """
-    return list(CARD_VALUES) if wide_deck(mode) else list(CARD_VALUES[NEXTRA:])
+    return list(CARD_VALUES[rank_offset(mode):])
 
 
 def card_pool_for(mode: str) -> int:
@@ -1078,21 +1119,27 @@ def skat_multiplier(hand: bool, sharp: bool, open_: bool) -> int:
 def suit(c: int) -> int:
     if c < NCARD:
         return c // NRANK
-    return (c - NCARD) // NEXTRA
+    if c < NCARD_WIDE:
+        return (c - NCARD) // NEXTRA_WIDE
+    return (c - NCARD_WIDE) // NEXTRA_FULL
 
 
 def rank(c: int) -> int:
-    """The card's STRENGTH, 0 (the 5) to 9 (the ace) -- not its id's low bits.
+    """The card's STRENGTH, 0 (the 2) to 12 (the ace) -- not its id's low bits.
 
-    The base deck's ids are `suit * 8 + rank`, so a base card's own rank runs
-    0..7 for 7..A and has to be lifted by `NEXTRA` to sit above the wide deck's
-    two extra low ranks. Ordering is then a plain `>` everywhere, and every
-    rank-indexed table (`RANK_NAMES`, `CARD_VALUES`, the bot's curves) reads in
-    the order a player would say them.
+    Three id blocks, one per time the deck was widened, each answering for its
+    own ranks. The base deck's ids are `suit * 8 + rank`, so a base card's own
+    rank runs 0..7 for 7..A and is lifted by `BASE_OFFSET` to sit above the
+    five low ranks the wider decks added underneath it. Ordering is then a
+    plain `>` everywhere, and every rank-indexed table (`RANK_NAMES`,
+    `CARD_VALUES`, the bot's curves) reads in the order a player would say
+    them.
     """
     if c < NCARD:
-        return c % NRANK + NEXTRA
-    return (c - NCARD) % NEXTRA
+        return c % NRANK + BASE_OFFSET
+    if c < NCARD_WIDE:
+        return (c - NCARD) % NEXTRA_WIDE + WIDE_OFFSET
+    return (c - NCARD_WIDE) % NEXTRA_FULL
 
 
 def card_of(s: int, r: int) -> int:
@@ -1100,30 +1147,55 @@ def card_of(s: int, r: int) -> int:
     number `rank` returns, not the id's low bits.
 
     The inverse of (`suit`, `rank`), and the only correct way to write a card
-    down from its name now that the wide deck's two ranks live at the end of
-    the id space. `suit * NRANK + rank` is right for the base deck alone, and
-    is wrong for it too if the rank came out of `rank()` or `TEN_RANK`.
+    down now that five low ranks live in two blocks at the end of the id space.
+    `suit * NRANK + rank` is right for the base deck alone, and is wrong for it
+    too if the rank came out of `rank()` or `TEN_RANK`.
     """
-    if r < NEXTRA:
-        return NCARD + s * NEXTRA + r
-    return s * NRANK + (r - NEXTRA)
+    if r >= BASE_OFFSET:
+        return s * NRANK + (r - BASE_OFFSET)
+    if r >= WIDE_OFFSET:
+        return NCARD + s * NEXTRA_WIDE + (r - WIDE_OFFSET)
+    return NCARD_WIDE + s * NEXTRA_FULL + r
+
+
+#: Ranks per suit each mode deals. The DEFAULT is the base deck; a mode is
+#: listed here only if it deals wider. `deck_size` and `rank_offset` both
+#: derive from this, so widening a mode is one row.
+_NRANKS_FOR = {DUMMY: NRANK + NEXTRA_WIDE}
+_NRANKS_DEFAULT = NRANK
+
+
+def nranks_for(mode: str) -> int:
+    """How many ranks per suit this mode's deck holds -- 8, 10 or 13."""
+    return _NRANKS_FOR.get(mode, _NRANKS_DEFAULT)
 
 
 def wide_deck(mode: str) -> bool:
-    """Does this mode deal the 40-card deck? Dummy alone -- three seats of
-    thirteen do not come out of 32 cards."""
-    return has_dummy(mode)
+    """Does this mode deal wider than the base 32? Kept as the one-bit question
+    a few call sites still only need the answer to; `nranks_for` is the real
+    accessor now that there are three widths rather than two."""
+    return nranks_for(mode) > NRANK
 
 
 def deck_size(mode: str) -> int:
-    return NCARD_WIDE if wide_deck(mode) else NCARD
+    """The deck IS `range(deck_size(mode))` -- see the block-layout note at the
+    head of this file. That is what keeps every caller a range rather than a
+    set, across all three widths."""
+    return NSUIT * nranks_for(mode)
+
+
+def rank_offset(mode: str) -> int:
+    """Strength of the LOWEST card this mode deals, i.e. how far into a
+    NRANKS-long table this mode's deck starts. The one number that turns a
+    full-width rank table into this deck's view of it."""
+    return NRANKS - nranks_for(mode)
 
 
 def rank_bounds(mode: str) -> tuple:
     """(lowest, highest) rank this mode's deck actually contains. What a
-    heuristic needs to normalise "how high is this card" without the base deck
-    silently re-scaling when the wide one arrived."""
-    return (0 if wide_deck(mode) else NEXTRA, NRANKS - 1)
+    heuristic needs to normalise "how high is this card" without a narrower
+    deck silently re-scaling when a wider one arrived."""
+    return (rank_offset(mode), NRANKS - 1)
 
 
 def card_name(c: int) -> str:

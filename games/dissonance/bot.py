@@ -204,11 +204,13 @@ def choose_card(g: dict, seat: int) -> int:
 #: force the -1 tricks onto the opponent), so the curve is deliberately
 #: shallower than a normal high-card-point count.
 #:
-#: TEN ENTRIES, INDEXED BY `E.rank` -- i.e. by STRENGTH, the 5 first. The two
-#: leading entries only ever get read in a mode that deals the wide deck, and
-#: the base deck's eight are byte-identical to what they were before it
-#: existed, so classic and minor bid exactly as they did.
-_RANK_VALUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
+#: `E.NRANKS` ENTRIES, INDEXED BY `E.rank` -- i.e. by STRENGTH, the 2 first.
+#: The five leading entries are the low ranks only a wider deck deals, and the
+#: base deck's eight are byte-identical to what they were before any widening,
+#: so classic and minor bid exactly as they did. `_unknown_rank_value` slices
+#: by `rank_bounds`, so each mode averages only over ranks it can be dealt.
+#:               2    3    4    5    6    7    8    9   10    J    Q    K    A
+_RANK_VALUE = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.5, 1.0, 1.6, 2.4]
 
 
 #: What a card the seat cannot identify is worth: the mean of `_RANK_VALUE`.
@@ -250,7 +252,8 @@ _UNKNOWN_RANK_VALUE = _unknown_rank_value(_RANK_VALUE, E.DEFAULT_MODE)
 #: discard, which is worth something under free discard, hence 0.45 rather
 #: than 0 -- a guess whose only job is to sit below the 8, with the LEVEL MAP
 #: doing the calibrated work as always.
-_SKAT_RANK_VALUE = [0.45, 0.45, 0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
+#:                     2    3    4     5     6    7    8    9   10    J    Q    K    A
+_SKAT_RANK_VALUE = [0.0, 0.0, 0.0, 0.45, 0.45, 0.6, 0.5, 0.8, 0.9, 1.1, 1.3, 1.0, 1.5]
 
 _SKAT_UNKNOWN_RANK_VALUE = _unknown_rank_value(_SKAT_RANK_VALUE, E.DEFAULT_MODE)
 
@@ -553,14 +556,15 @@ def swap_denom(g: dict, seat: int) -> int:
 #: labelled candidates -- the weight is unlearnable there; the entry only
 #: keeps the row indexable.
 #:
-#: THE WIDE DECK'S TWO LEADING ENTRIES ARE UNREACHABLE and are 0.0 for that
-#: reason: only dummy mode deals a 5 or a 6, and dummy mode has no talon at
-#: all. They exist so the row is indexable by rank like every other curve here.
-#: `swap_policy_terms` ships the BASE-DECK SLICE over the wire, because Rust's
-#: `SwapPolicy` indexes by its own 0..7 rank -- shipping ten entries would
-#: silently price a 7 as a 5 on the client side.
-_SWAP_TAKE_W = (0.0, 0.0, 0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
-_SWAP_GIVE_W = (0.0, 0.0, 0.32, 0.10, 1.51, 0.88, 0.95, -0.10, -1.04, 0.0)
+#: THE WIDER DECKS' FIVE LEADING ENTRIES ARE UNREACHABLE and are 0.0 for that
+#: reason: only dummy deals a 5 or a 6 and only the four-hand mode deals a 2, 3
+#: or 4, and NEITHER of those modes has a talon. They exist so the row is
+#: indexable by rank like every other curve here. `swap_policy_terms` ships the
+#: BASE-DECK SLICE over the wire, because Rust's `SwapPolicy` indexes by its
+#: own 0..7 rank -- shipping the full row would silently price a 7 as a 2.
+#:               2    3    4    5    6     7      8      9     10      J      Q     K     A
+_SWAP_TAKE_W = (0.0, 0.0, 0.0, 0.0, 0.0, 0.92, -1.36, -1.16, -1.33, -0.44, -0.57, 0.99, 2.05)
+_SWAP_GIVE_W = (0.0, 0.0, 0.0, 0.0, 0.0, 0.32,  0.10,  1.51,  0.88,  0.95, -0.10, -1.04, 0.0)
 _SWAP_TAKE_TRUMP = 1.57
 _SWAP_GIVE_TRUMP = -1.24
 #: Discarding a suit's LAST card (a void beats a singleton, but both help --
@@ -588,13 +592,13 @@ def swap_policy_terms() -> dict:
     wasm rebuild; only the feature arithmetic lives twice, and
     `tests/fixtures/swap_policy.jsonl` holds the two copies to one answer.
 
-    The rank rows go over SLICED TO THE BASE DECK: Rust indexes them by its own
-    0..7 rank, and the wide deck's two extra entries only exist here to keep
-    the rows indexable by `E.rank`. A talon is a classic/skat thing anyway --
-    dummy, the one mode that deals the wide deck, has none.
+    The rank rows go over SLICED TO THE BASE DECK (`E.BASE_OFFSET`): Rust
+    indexes them by its own 0..7 rank, and the wider decks' five extra entries
+    only exist here to keep the rows indexable by `E.rank`. A talon is a
+    classic/skat thing anyway -- neither mode that deals a wider deck has one.
     """
-    return {"take_w": list(_SWAP_TAKE_W[E.NEXTRA:]),
-            "give_w": list(_SWAP_GIVE_W[E.NEXTRA:]),
+    return {"take_w": list(_SWAP_TAKE_W[E.BASE_OFFSET:]),
+            "give_w": list(_SWAP_GIVE_W[E.BASE_OFFSET:]),
             "take_trump": _SWAP_TAKE_TRUMP, "give_trump": _SWAP_GIVE_TRUMP,
             "void": _SWAP_VOID, "singleton": _SWAP_SINGLETON,
             "length": _SWAP_LENGTH}
@@ -677,8 +681,8 @@ def bid_prior_terms(g: dict) -> dict | None:
         return None
     return {
         # Sliced to the base deck, exactly like `swap_policy_terms`: Rust takes
-        # its offset from the LENGTH, so the wide deck needs no flag.
-        "curve": list(_RANK_VALUE[E.NEXTRA:]),
+        # its offset from the LENGTH, so a wider deck needs no flag.
+        "curve": list(_RANK_VALUE[E.BASE_OFFSET:]),
         "trump_mult": 2.0,
         "tilt": _BID_TILT,
         "tries": _BID_TRIES,
@@ -735,18 +739,19 @@ def bid_prior_terms(g: dict) -> dict | None:
 #: `take suit len` +2.11 is a preference about the HAND rather than either card:
 #: take into the suit you are already long in.
 #: THE TABLES ARE `E.NRANKS` LONG, NOT `E.NRANK`. `E.rank` scores a card on the
-#: WIDE deck's scale (0..9, the 5 through the ace) even in a 32-card mode where
-#: only 2..9 are reachable, so the two leading zeros are the unreachable 5 and 6
+#: FULL deck's scale (0..12, the 2 through the ace) even in a 32-card mode where
+#: only 5..12 are reachable, so the five leading zeros are the unreachable 2..6
 #: and are not fitted. The first cut of this policy sized both tables by `NRANK`
 #: (8) and the fit's feature vector with them, which OVERLAPPED the give block
 #: onto the trump features -- "give a king" and "the take is trump" were one
 #: weight -- and made the policy raise IndexError on an ace. `_SWAP_TAKE_W`
 #: above has always been `NRANKS` long; the guard is
-#: `test_swap_policy.py::test_the_skat_weight_tables_span_every_rank`.
-_SK_TAKE_W = (0.000, 0.000, 2.345, 0.161, -1.035, 0.995, 0.142, 0.880,
-              -1.381, -2.067)
-_SK_GIVE_W = (0.000, 0.000, -2.353, -0.516, 0.747, 0.002, -0.307, -1.141,
-              1.340, 2.268)
+#: `test_swap_policy.py::test_the_skat_weight_tables_span_every_rank`, and it
+#: is what caught every one of these rows when the deck went to 52.
+_SK_TAKE_W = (0.000, 0.000, 0.000, 0.000, 0.000, 2.345, 0.161, -1.035,
+              0.995, 0.142, 0.880, -1.381, -2.067)
+_SK_GIVE_W = (0.000, 0.000, 0.000, 0.000, 0.000, -2.353, -0.516, 0.747,
+              0.002, -0.307, -1.141, 1.340, 2.268)
 _SK_TAKE_TRUMP = 2.851
 _SK_GIVE_TRUMP = -4.481
 _SK_VOID = 0.685

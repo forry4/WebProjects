@@ -159,7 +159,7 @@ def test_the_skat_weight_tables_span_every_rank():
         assert len(table) == E.NRANKS, (len(table), E.NRANKS)
     # ...and the two unreachable wide-deck ranks are the LEADING pair, so a
     # 32-card mode never reads a fitted weight for a card it cannot hold.
-    assert E.rank(_card(0, 0)) == E.NEXTRA
+    assert E.rank(_card(0, 0)) == E.BASE_OFFSET
 
 
 def test_the_fitted_skat_talon_is_legal_on_every_real_deal_that_reaches_it(
@@ -209,7 +209,7 @@ def test_the_fitted_skat_talon_is_legal_on_every_real_deal_that_reaches_it(
     # EVERY RANK A 32-CARD DECK HOLDS was scored at least once. Without this the
     # test could pass having never handed the tables their top index, which is
     # precisely the read that used to raise.
-    assert ranks == set(range(E.NEXTRA, E.NRANKS)), sorted(ranks)
+    assert ranks == set(range(E.BASE_OFFSET, E.NRANKS)), sorted(ranks)
 
 
 def test_the_flag_is_what_decides_which_skat_policy_runs(monkeypatch):

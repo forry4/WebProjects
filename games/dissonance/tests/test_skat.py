@@ -1112,7 +1112,7 @@ def test_card_values_price_the_middle_ranks_up_and_the_ends_down():
     the dealt-in pool is 16 minus whatever the six out-cards are worth."""
     # The table is ten entries in STRENGTH order since the wide deck (dummy
     # mode); skat deals the base 32, whose ranks are its last eight.
-    assert E.CARD_VALUES[E.NEXTRA:] == [-1, -1, 2, 2, 2, 2, -1, -1]
+    assert E.CARD_VALUES[E.BASE_OFFSET:] == [-1, -1, 2, 2, 2, 2, -1, -1]
     assert E.card_pool_for("skat") == 16
     for c in range(E.NCARD):
         want = 2 if E.RANK_NAMES[E.rank(c)] in ("9", "10", "J", "Q") else -1
@@ -1172,7 +1172,7 @@ def test_the_view_flags_card_scoring_and_ships_the_values():
     # SLICED TO THE DECK THIS ROOM DEALS -- a 32-card room ships the same
     # eight entries it shipped before the wide deck existed, so a bundle
     # cached from before it still labels every corner chip correctly.
-    assert v["card_values"] == E.CARD_VALUES[E.NEXTRA:]
+    assert v["card_values"] == E.CARD_VALUES[E.BASE_OFFSET:]
     # A card-scored trick has no value until both cards are down, so the
     # per-trick label is 0 and the client renders off the cards instead.
     assert v["trick_value"] == 0
