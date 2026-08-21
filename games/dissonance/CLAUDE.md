@@ -6013,6 +6013,72 @@ is **byte-identical** to before the change.
   PROCESSES it is 51x. **Fork, do not reload, when a module reads its config at
   import.**
 
+### THE OUTCOME SAMPLER WAS BIASED, AND EXTERNAL STILL WINS AT EQUAL TIME (2026-08-21)
+
+The sampler landed 2026-08-20 explicitly marked NOT correct: on the level-only
+abstraction it and external sampling converged to DIFFERENT equilibria, which is
+the signature of a mis-weighted estimator rather than a slow one. Both halves of
+that are now settled.
+
+**THE BUG, AND THE INSTRUMENT THAT FOUND IT.** A convergence ladder can only say
+THAT the two disagree — regret matching is a feedback loop, so a small weighting
+error moves the strategy, which moves the next estimate, and nothing localises.
+`tools/cfrcheck.py` asks the one question with an exact answer: freeze the
+strategy at UNIFORM, and both samplers estimate `v(I,a) - v(I)`, which a tiny
+game (`CFR_MAXL=3`, one deal) computes by enumeration. That property holds
+independently of the dynamics. It read:
+
+    external  mean |estimate - truth| / mean |truth| = 0.0021
+    outcome   mean |estimate - truth| / mean |truth| = 0.7115
+
+— decisive in one run, and it points at the weighting and nowhere else.
+
+The defect was a `descend(a)` closure that captured the PARENT's `q`. The
+recursive branch was entered with `q * probe[a]`, but a terminal reached by a
+PASS was priced at plain `q`: the sampled action's own probability was missing
+from exactly the outcomes that end the auction. Every such estimate came back
+shrunk toward zero (worst infoset: 2.83 against a true 6.64). The fix is
+structural rather than a patched line — **draw the action FIRST, compute
+`nq`/`n_opp` ONCE above the branch, then build the child** — so a terminal and a
+node cannot disagree about what has been sampled. `dbl_os` had the same omission
+twice over (the pass never entered the defender's reach either).
+
+After: 0.7115 -> 0.0187 at 400k iterations, and the residual is variance, not a
+second bias — 0.0459 / 0.0187 / 0.0095 across 100k / 400k / 1.6M is a clean
+`1/sqrt(n)` (4.83x over 16x).
+
+**A GATE THAT RUNS, NOT A NOTE.** `tests/test_cfr_unbiased.py` is the checker as
+a permanent test, on four hand-written deal records rather than the gitignored
+research cache (a test that needs an artifact is a test that skips, which this
+package forbids). It carries its own non-vacuity proof: a third test re-injects
+the defect's SHAPE — a missing multiplicative factor in `1/q` — at a MILDER
+constant than the real one, and asserts the band still catches it. The iteration
+counts are per sampler and sized off five seeds, because their costs and
+variances run in opposite directions: external ~0.005 at 60k, outcome
+0.036–0.045 at 400k, one 0.10 band over both.
+
+**AND THE COST RESULT DOES NOT SURVIVE AN EQUAL-TIME READING.** The 260x
+per-iteration figure is real and unchanged. It is also the wrong axis. Solving
+for real and pricing with the exact best response, on the level-only
+abstraction:
+
+      sampler     iters     solve      exploitability
+      external     200k     170.9s               1.04
+      outcome        1M      40.9s               6.58
+      outcome        4M     163.1s               4.11
+
+At matched wall clock external is **4x less exploitable**. Outcome sampling is
+converging — 12.15 / 6.58 / 4.11 at 200k / 1M / 4M — just far slower per
+iteration, which is the standard OS-MCCFR trade and not a defect. Its decay
+fits `n^-0.36` against external's `n^-0.24`, and extrapolating both into the
+`DENOMS` space (where external costs 51x more per iteration and outcome barely
+changes) still favours external, narrowly. **So the sampler is correct, it is
+kept, and it is NOT the automatic answer for the real action space** — this
+repo's own equal-time rule applies to solvers exactly as it does to arenas.
+What actually blocks pricing `DENOMS` is that `best_response` still reads
+actions as bare levels and refuses to run; that port, not the sampler, is the
+next thing standing between here and a number.
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a

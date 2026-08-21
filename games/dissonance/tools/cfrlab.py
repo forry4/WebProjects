@@ -1087,6 +1087,18 @@ class CFR:
         #: contributing to the average with weight `t`.
         self.t = 1
 
+    def bump(self, key, a, r):
+        """Add one regret estimate, floored at 0 (regret matching+).
+
+        ONE OWNER, so a test can intercept it. The floor is what makes CFR+
+        work and it is also what makes the raw estimates unrecoverable, so an
+        unbiasedness check on the SAMPLER has nowhere to look unless the
+        increment passes through a single seam. `tools/cfrcheck.py` overrides
+        this to accumulate `r` unclipped and compare it against exact
+        enumeration.
+        """
+        self.R[key][a] = max(self.R[key][a] + r, 0.0)
+
     def strategy(self, key, acts):
         r = self.R[key]
         pos = {a: max(r[a], 0.0) for a in acts}
@@ -1139,7 +1151,7 @@ class CFR:
             vals[a] = child(a)
             node += sig[a] * vals[a]
         for a in acts:
-            self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
+            self.bump(key, a, vals[a] - node)
         return node
 
     #: OUTCOME-SAMPLING MCCFR (2026-08-20) -- ONE trajectory per iteration.
@@ -1180,69 +1192,74 @@ class CFR:
                 pi_me=1.0, pi_opp=1.0, q=1.0):
         """One sampled trajectory. Returns `(u, tail)`.
 
-        `u` is the terminal utility to `me` DIVIDED BY `q`, the probability the
-        trajectory was sampled; `tail` is the product of the sampled actions'
-        probabilities under sigma from here down. Those two are what the regret
-        and average-strategy updates need, and returning them together is what
-        keeps the recursion single-pass.
+        `u` is the terminal utility to `me` DIVIDED BY `q(z)`, the probability
+        the whole trajectory was sampled; `tail` is `pi^sigma(h -> z)`, the
+        product of the sampled actions' probabilities under sigma from HERE
+        down -- BOTH seats', because that is what the counterfactual value
+        `v(I,a) = sum_h pi_-i(h) sum_z pi^sigma(ha -> z) u_i(z)` multiplies.
+        Those two are what the regret and average-strategy updates need, and
+        returning them together is what keeps the recursion single-pass.
+
+        THE ACTION IS DRAWN BEFORE THE CHILD IS BUILT, and that ordering is the
+        whole correctness story. The first version had a `descend(a)` helper
+        that closed over the PARENT's `q`, so the recursive branch was entered
+        with `q * probe[a]` but a terminal reached by a pass was priced at plain
+        `q` -- the sampled action's own probability was missing from exactly the
+        outcomes that end the auction. It ran, converged, and printed a
+        plausible policy that was systematically shrunk toward zero (measured:
+        the worst infoset's regret estimate read 2.83 against a true 6.64).
+        `tools/cfrcheck.py` is the gate that caught it; keep `nq`/`n_opp`
+        computed ONCE, above the branch, so a terminal and a node cannot
+        disagree about what has been sampled.
         """
         holder = 1 - to_act if level else None
         acts = actions(level, holds)
         key = (rec["b"][to_act], level, prev, holds)
         sig = self.strategy(key, acts)
 
-        # TAGGED, not a bare 2-tuple. The first version returned `(u, tail)` for
-        # a terminal and `(None, state)` for a node, so a terminal unpacked its
-        # own utility into the "is it a leaf" slot and the caller then tried to
-        # unpack a float. Tagging costs nothing and the untagged version fails
-        # as a TypeError only because `tail` happens not to be a tuple.
-        def descend(a):
-            if a == -1:
-                if WITH_DOUBLE:
-                    return "leaf", self.dbl_os(rec, level, prev, holds, to_act,
-                                               me, rng, pi_me, pi_opp, q)
-                u = leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
-                return "leaf", (u / q, 1.0)
-            return "node", _step(level, prev, holds, a)
-
         if to_act == me:
             # SAMPLE OURSELVES TOO -- the difference from `walk`, and the only
             # reason this is cheap. Mixed toward uniform so `q` stays bounded.
             probe = {a: OS_EPS / len(acts) + (1 - OS_EPS) * sig[a] for a in acts}
             a = _pick(acts, probe, rng)
-            kind, val = descend(a)
-            if kind == "node":
-                u, tail = self.walk_os(rec, val[0], val[1], val[2], 1 - to_act,
-                                       me, rng, pi_me * sig[a], pi_opp,
-                                       q * probe[a])
-            else:
-                u, tail = val
-            # The counterfactual regret of the SAMPLED action against the node's
-            # own value, importance-weighted by the opponent's reach. Every
-            # unsampled action gets the negative share, which is what makes the
-            # estimator unbiased over iterations rather than only in expectation
-            # at the sampled one.
-            w = u * pi_opp
-            for b in acts:
-                r = w * tail * ((1.0 - sig[a]) if b == a else -sig[a])
-                self.R[key][b] = max(self.R[key][b] + r, 0.0)
-            return u, tail * sig[a]
-
-        a = _pick(acts, sig, rng)
-        kind, val = descend(a)
-        if kind == "node":
-            u, tail = self.walk_os(rec, val[0], val[1], val[2], 1 - to_act, me,
-                                   rng, pi_me, pi_opp * sig[a], q * sig[a])
+            nq, n_me, n_opp = q * probe[a], pi_me * sig[a], pi_opp
         else:
-            u, tail = val
-        # THE AVERAGE STRATEGY IS THE OPPONENT'S HERE, exactly as in `walk` --
-        # each seat's average is accumulated during the OTHER seat's traversal,
-        # and both traversals run every iteration. Weighted by their own reach
-        # over the sampling probability, which `walk` does not need because
-        # external sampling already visits these nodes at the right rate.
-        wt = self.t * pi_opp / q
-        for b in acts:
-            self.S[key][b] += wt * sig[b]
+            a = _pick(acts, sig, rng)
+            nq, n_me, n_opp = q * sig[a], pi_me, pi_opp * sig[a]
+
+        if a == -1:
+            if WITH_DOUBLE:
+                u, tail = self.dbl_os(rec, level, prev, holds, to_act, me, rng,
+                                      n_me, n_opp, nq)
+            else:
+                v = leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
+                u, tail = v / nq, 1.0
+        else:
+            nl, np_, nh = _step(level, prev, holds, a)
+            u, tail = self.walk_os(rec, nl, np_, nh, 1 - to_act, me, rng,
+                                   n_me, n_opp, nq)
+
+        if to_act == me:
+            # The counterfactual regret of the SAMPLED action against the node's
+            # own value. `v_hat(I,b) = 1{b == a} * W` and `v_hat(I) = sigma[a] *
+            # W`, so every action's estimate differs only by the indicator --
+            # note the subtracted term is `sigma[a]`, the SAMPLED action's
+            # probability, for every `b`, not `sigma[b]`. That is what makes the
+            # unsampled actions' negative shares average out to their true
+            # counterfactual regret rather than merely to zero.
+            w = u * pi_opp * tail
+            for b in acts:
+                self.bump(key, b, w * ((1.0 - sig[a]) if b == a else -sig[a]))
+        else:
+            # THE AVERAGE STRATEGY IS THE OPPONENT'S HERE, exactly as in `walk`
+            # -- each seat's average is accumulated during the OTHER seat's
+            # traversal, and both traversals run every iteration. Weighted by
+            # their own reach over the sampling probability of getting HERE
+            # (`q`, not `nq`), which `walk` does not need because external
+            # sampling already visits these nodes at the right rate.
+            wt = self.t * pi_opp / q
+            for b in acts:
+                self.S[key][b] += wt * sig[b]
         return u, tail * sig[a]
 
     def dbl_os(self, rec, level, prev, holds, defender, me, rng,
@@ -1264,7 +1281,7 @@ class CFR:
             w = u * pi_opp
             for b in acts:
                 r = w * ((1.0 - sig[a]) if b == a else -sig[a])
-                self.R[key][b] = max(self.R[key][b] + r, 0.0)
+                self.bump(key, b, r)
             return u, sig[a]
         a = _pick(acts, sig, rng)
         wt = self.t * pi_opp / q
@@ -1297,7 +1314,7 @@ class CFR:
         vals = {a: val(a) for a in acts}
         node = sum(sig[a] * vals[a] for a in acts)
         for a in acts:
-            self.R[key][a] = max(self.R[key][a] + vals[a] - node, 0.0)
+            self.bump(key, a, vals[a] - node)
         return node
 
     def average(self, key, acts):
