@@ -772,8 +772,11 @@ def _live_abstract_state(g):
     if DENOMS:
         raise SystemExit(
             "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
-            "response and the off-policy probes have not been ported.")
+            "Ported: the SOLVE, `curve`, and the exact best response (via "
+            "`_step`, 2026-08-21). Not ported: blueprint SERVING into a live "
+            "auction and the off-policy probes -- those map an abstract action "
+            "back onto a real bid, which is a genuinely new mapping rather "
+            "than a transition `_step` already owns.")
     # THE LOG HAS NO `kind` FIELD -- a bid entry is `{seat, level, denom}` and a
     # pass is `{seat, pass: True}`. Filtering on `kind == "bid"` (which is the
     # MOVE's vocabulary, not the log's) matches nothing and silently reports the
@@ -809,8 +812,11 @@ def blueprint_bid(g, seat):
     if DENOMS:
         raise SystemExit(
             "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
-            "response and the off-policy probes have not been ported.")
+            "Ported: the SOLVE, `curve`, and the exact best response (via "
+            "`_step`, 2026-08-21). Not ported: blueprint SERVING into a live "
+            "auction and the off-policy probes -- those map an abstract action "
+            "back onto a real bid, which is a genuinely new mapping rather "
+            "than a transition `_step` already owns.")
     opts = E.auction_payoff_options(g)
     if not opts:
         return None
@@ -872,8 +878,11 @@ def _path_to(level, prev, holds, actor):
     if DENOMS:
         raise SystemExit(
             "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
-            "response and the off-policy probes have not been ported.")
+            "Ported: the SOLVE, `curve`, and the exact best response (via "
+            "`_step`, 2026-08-21). Not ported: blueprint SERVING into a live "
+            "auction and the off-policy probes -- those map an abstract action "
+            "back onto a real bid, which is a genuinely new mapping rather "
+            "than a transition `_step` already owns.")
     base = ([prev, level] if prev else [level]) + [level] * holds
     if len(base) % 2 == actor:
         return base
@@ -1331,7 +1340,15 @@ def states():
     `(level, prev, holds, actor)`. A raise strictly increases `level`, a HOLD
     strictly increases `holds` at the same level, and nothing else moves -- so
     ordering by `(-level, -holds)` puts every child ahead of its parent and one
-    linear pass suffices. Roughly 400 states, which is why the best response
+    linear pass suffices.
+
+    THE SAME ENUMERATION SERVES `DENOMS`, and that is a fact worth stating
+    rather than leaving to be rediscovered: there the third slot is the standing
+    bid's RANK, not a hold count. Different meaning, identical RANGE
+    (`0..E.NOTRUMP` either way, since `HOLDCAP` is `E.NOTRUMP`) and identical
+    ordering guarantee -- a same-level bid must name a strictly HIGHER rank, so
+    `(-level, -holds)` still puts every child ahead of its parent. What does NOT
+    survive is reading a transition off the tuple by hand; go through `_step`. Roughly 400 states, which is why the best response
     below is EXACT rather than another sampled estimate: the earlier draft
     enumerated HISTORIES and drowned (65k of them once HOLD existed), but the
     history beyond this tuple changes nothing that follows it.
@@ -1359,19 +1376,19 @@ def best_response(recs, pol, br_seat, attrib=None):
     choice is made ONCE PER INFOSET across every deal that shares it -- choosing
     per deal would be a cheater's response that reads the cards it cannot see.
     """
-    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
-    # rank into every action, so a reader that treats an action as a bare level
-    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
-    # is the discipline this package already applies to a cache missing `tops`:
-    # a harness that half-understands its own encoding is how `cfrlab` measured
-    # Hard for a campaign while claiming Expert.
-    if DENOMS:
-        raise SystemExit(
-            "CFR_DENOMS is on and this path still reads actions as bare levels. "
-            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
-            "response and the off-policy probes have not been ported.")
+    # ABSTRACTION-AGNOSTIC SINCE 2026-08-21. It used to refuse under `DENOMS`,
+    # because it read a transition off the action by hand -- `(a, level, 0, ...)`
+    # treats the action as a bare level, and a packed one would have bid level
+    # 41 or, worse, landed on a plausible one. The port is not a `DENOMS` branch:
+    # every transition now goes through `_step`, THE one owner of what an action
+    # does, so neither abstraction can be described twice and drift.
     N = len(recs)
     st = states()
+
+    def nxt(level, prev, holds, actor, a):
+        """The child STATE of taking `a`. `_step` and nothing else."""
+        nl, np_, nh = _step(level, prev, holds, a)
+        return nl, np_, nh, 1 - actor
 
     # FORWARD: how likely is the opponent to let us reach each state, per deal.
     # Ordered parents-first, which is `st` reversed.
@@ -1384,10 +1401,9 @@ def best_response(recs, pol, br_seat, attrib=None):
         if not any(base):
             continue
         acts = actions(level, holds)
-        kids = {a: reach.setdefault(
-            (level, prev, holds + 1, 1 - actor) if a == HOLD
-            else (a, level, 0, 1 - actor), [0.0] * N)
-            for a in acts if a != -1}
+        kids = {a: reach.setdefault(nxt(level, prev, holds, actor, a),
+                                    [0.0] * N)
+                for a in acts if a != -1}
         if actor == br_seat:
             for tgt in kids.values():            # BR's own choice not weighted
                 for i in range(N):
@@ -1416,8 +1432,7 @@ def best_response(recs, pol, br_seat, attrib=None):
         acts = actions(level, holds)
 
         def kid(a):
-            return val[(level, prev, holds + 1, 1 - actor)] if a == HOLD \
-                else val[(a, level, 0, 1 - actor)]
+            return val[nxt(level, prev, holds, actor, a)]
 
         if actor == br_seat:
             grp = defaultdict(list)
@@ -1485,23 +1500,25 @@ def best_response(recs, pol, br_seat, attrib=None):
                                        holds, acts) or {},
                     })
 
-    # The root: seat 0 opens and cannot pass.
+    # The root: seat 0 opens and cannot pass. `actions(0, 0)` rather than a
+    # hand-written `range(1, MAXL + 1)` -- identical under the level-only
+    # abstraction, and the only form that survives a packed action.
+    acts = actions(0, 0)
     if br_seat == 0:
         grp = defaultdict(list)
         for i, rc in enumerate(recs):
             grp[rc["b"][0]].append(i)
         tot = 0.0
         for _, idx in grp.items():
-            pick = max(range(1, MAXL + 1),
-                       key=lambda a: sum(val[(a, 0, 0, 1)][i] for i in idx))
-            tot += sum(val[(pick, 0, 0, 1)][i] for i in idx)
+            pick = max(acts, key=lambda a: sum(
+                val[nxt(0, 0, 0, 0, a)][i] for i in idx))
+            tot += sum(val[nxt(0, 0, 0, 0, pick)][i] for i in idx)
         return tot / N
-    acts = actions(0, 0)
     tot = 0.0
     for i, rc in enumerate(recs):
         sig = pol.at(rc["b"][0], 0, 0, 0, acts)
         if sig:
-            tot += sum(sig[a] * val[(a, 0, 0, 1)][i] for a in acts)
+            tot += sum(sig[a] * val[nxt(0, 0, 0, 0, a)][i] for a in acts)
     return tot / N
 
 
