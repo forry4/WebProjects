@@ -709,40 +709,79 @@ def bid_prior_terms(g: dict) -> dict | None:
 #: HELD OUT BY DEAL (185 decisions), regret against the oracle:
 #:     standing pat 7.54    shipped rule 5.16    FITTED 4.35
 #:
+#: AND THE SHIP GATE SAID NO, which is why this is behind a flag and the old
+#: rule is still what runs (`tools/swaparena.py`, paired on the same deals):
+#:
+#:     resolution                    fit - old      old - pat
+#:     dd    (exact double-dummy)   +0.817 +- 0.212   (+2.18, swaplab)
+#:     play  (the shipped bot)      -2.132 +- 0.168   +1.941 +- 0.197
+#:
+#: 6000 and 30000 deals. The fit is genuinely the better policy FOR A SOLVER and
+#: costs 2.1 a round in front of the card play the server actually runs. See
+#: `CLAUDE.md` -- the histograms say why, and it is not subtle: skat scores 9/10/
+#: J/Q at +2 and 7/8/K/A at -1, and the fit GIVES A JACK on 24% of exchanges
+#: (the old rule 0.7%) while taking kings on 19.6% (7.7%). It throws +2 cards out
+#: of play and takes -1 cards into hand. The declarer's mean card points go
+#: 8.0 -> 7.2 and the contract comes home 84.8% -> 80.6%.
+#:
 #: The weights are the fit's, `tools/skat_swapfit.py`, and they say what the
-#: histograms did: taking a 7 or an 8 is bad (-1.89 / -2.60) and GIVING one is
-#: good (+2.89 / +4.11), but giving a TEN is the worst thing on the board
-#: (-3.08) -- the one card the shipped rule would never give and the oracle
-#: gives on 10% of decisions. `take suit len` at -1.08 is a preference the
-#: separable rule cannot hold at any weights: do not take into a suit you are
+#: histograms did. GIVING a ten is the worst thing on the board (-3.60) and
+#: giving an ace is next (-2.97) -- the two cards the separable rule would never
+#: give, since its curve is monotone in rank and they sit at the top of it --
+#: while giving a 7 or an 8 is good (+1.23 / +2.45) and TAKING one is bad
+#: (-1.24 / -1.91). Taking the ace is worth +3.10 and taking the ten only +0.72,
+#: which is not a rank ordering at all: an ace wins the trick it is played in,
+#: and a ten is 10 card points you have to bring home. And `take suit len` at
+#: -1.06 is a preference the separable rule cannot hold at any weights, because
+#: it is not a property of either card alone: do not take into a suit you are
 #: already long in.
-_SK_TAKE_W = (0.000, 0.000, -1.892, -2.603, -0.958, 1.110, -0.212, 0.425)
-_SK_GIVE_W = (0.130, 2.468, 2.894, 4.114, 1.491, -3.079, 1.652, 1.043)
-_SK_TAKE_TRUMP = 1.210
-_SK_GIVE_TRUMP = 0.333
-_SK_VOID = 0.859
-_SK_SINGLETON = 0.274
-_SK_TAKE_LEN = -1.077
+#:
+#: THE TABLES ARE `E.NRANKS` LONG, NOT `E.NRANK`. `E.rank` scores a card on the
+#: WIDE deck's scale (0..9, the 5 through the ace) even in a 32-card mode where
+#: only 2..9 are reachable, so the two leading zeros are the unreachable 5 and 6
+#: and are not fitted. The first cut of this policy sized both tables by `NRANK`
+#: (8) and the fit's feature vector with them, which OVERLAPPED the give block
+#: onto the trump features -- "give a king" and "the take is trump" were one
+#: weight -- and made the policy raise IndexError on an ace. `_SWAP_TAKE_W`
+#: above has always been `NRANKS` long; the guard is
+#: `test_swap_policy.py::test_the_skat_weight_tables_span_every_rank`.
+_SK_TAKE_W = (0.000, 0.000, -1.242, -1.911, -1.395, 0.723, -0.630, 0.005,
+              0.817, 3.097)
+_SK_GIVE_W = (0.000, 0.000, 1.231, 2.452, 0.946, -3.600, 1.106, 0.498,
+              -0.203, -2.965)
+_SK_TAKE_TRUMP = 1.185
+_SK_GIVE_TRUMP = 0.308
+_SK_VOID = 0.841
+_SK_SINGLETON = 0.258
+_SK_TAKE_LEN = -1.063
 #: Skat scores the CARDS captured and a discard leaves play entirely, so what
 #: the talon swallows changes what the round is worth to both seats. Classic has
 #: no analogue of this term.
-_SK_POINTS = -1.113
-#: THE BAR AN EXCHANGE MUST CLEAR TO BE WORTH MAKING, and the only term that can
-#: teach this policy to do nothing. Classic fitted a stand-pat bar and dropped
-#: it because there it cancels out of the argmax -- every candidate carried it
-#: equally. Here standing pat is itself a candidate, scored at exactly zero, so
-#: it does not cancel.
-_SK_BAR = 1.532
+_SK_POINTS = -0.369
+_SK_BAR = -0.536
+#: THE BAR AN EXCHANGE MUST CLEAR TO BE WORTH MAKING -- the fit's intercept, and
+#: the only term that can teach this policy to do nothing, since standing pat is
+#: itself a candidate scored at exactly zero. Classic fitted one and dropped it
+#: because there it cancels out of the argmax (every candidate carried it
+#: equally); here it does not cancel. It came back NEGATIVE, which is the fit
+#: saying the exchange is worth making more often than the oracle's 23% stand-pat
+#: rate suggests -- a linear score cannot see the deal-specific combinatorics
+#: that make the oracle decline, so it declines on 2% of held-out decisions.
 
 
 def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
-    """The fitted skat exchange, or stand pat. See the weights above."""
+    """The fitted skat exchange, or stand pat. See the weights above.
+
+    Mirrors `tools/skat_swapfit.py::feats` term for term -- the fit's features
+    ARE this function, and a drift between them is a policy scoring itself with
+    weights that were trained for a different vector.
+    """
     hand = list(g["hands"][seat])
     tc = E.trump_class(denom)
     best, best_score = {"take": None, "give": None}, 0.0
     for t in g["shown"]:
         for h in hand:
-            s = _SK_TAKE_W[E.rank(t)] + _SK_GIVE_W[E.rank(h)] - _SK_BAR
+            s = _SK_TAKE_W[E.rank(t)] + _SK_GIVE_W[E.rank(h)] + _SK_BAR
             if E.esuit(t, denom) == tc:
                 s += _SK_TAKE_TRUMP
             if E.esuit(h, denom) == tc:

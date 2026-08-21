@@ -121,3 +121,94 @@ def test_the_chosen_swap_is_always_legal_on_a_real_deal(seed):
         assert sw["take"] in g["shown"]
         assert sw["give"] in g["hands"][decl]
     E.apply_swap(g, decl, sw["take"], sw["give"])   # must not raise
+
+
+# --- skat's FITTED talon, behind its flag ----------------------------------
+
+
+def test_the_skat_weight_tables_span_every_rank():
+    """`E.rank` returns a card's strength on the WIDE deck's scale (0..9), not
+    an index into the base deck's 8 ranks, so every rank-indexed table has to be
+    `NRANKS` long.
+
+    The first cut of the fitted skat policy sized both tables -- and the fit's
+    own feature vector with them -- by `NRANK`, which overlapped the give block
+    onto the trump features (one weight meaning both "give a king" and "the take
+    is trump") and made the policy raise IndexError the first time it was handed
+    an ace. It never reached a test because nothing indexed the tables in the
+    suite: the flag was off. This asserts the shape directly."""
+    for table in (B._SWAP_TAKE_W, B._SWAP_GIVE_W, B._SK_TAKE_W, B._SK_GIVE_W):
+        assert len(table) == E.NRANKS, (len(table), E.NRANKS)
+    # ...and the two unreachable wide-deck ranks are the LEADING pair, so a
+    # 32-card mode never reads a fitted weight for a card it cannot hold.
+    assert E.rank(_card(0, 0)) == E.NEXTRA
+
+
+def test_the_fitted_skat_talon_is_legal_on_every_real_deal_that_reaches_it(
+        monkeypatch):
+    """The flag's whole job is to be inert until a paired arena says otherwise,
+    which means nothing else in the suite ever exercises the fitted policy. This
+    one does -- across enough real skat deals to hand it every rank, including
+    the ace the first cut of it crashed on.
+
+    ONE TEST OVER MANY SEEDS RATHER THAN A PARAMETRIZE, because not every
+    auction reaches the talon and a per-seed test would have to return early on
+    the ones that do not -- a state-reachability skip wearing a pass. Counting
+    instead makes the reachability itself an assertion.
+    """
+    monkeypatch.setenv("DIS_SKAT_SWAP_FIT", "1")
+    reached, ranks = 0, set()
+    for seed in range(40):
+        g = E.new_game(["a", "b"], random.Random(9600 + seed), opener=seed % 2,
+                       mode="skat")
+        rng = random.Random(seed)
+        guard = 0
+        while g["phase"] not in ("talon", "play", "over") and guard < 40:
+            guard += 1
+            s = E.turn_seat(g)
+            kind, p = B.act(g, s, rng)
+            mv = ({"kind": "pass"} if p.get("pass")
+                  else {"kind": "bid",
+                        **{a: b for a, b in p.items() if a != "pass"}}) \
+                if kind == "bid" else (p if kind == "move"
+                                       else ({"kind": "swap", **p}
+                                             if kind == "swap" else p))
+            E.apply_move(g, g["seats"][s], mv)
+        if g["phase"] != "talon":
+            continue
+        reached += 1
+        decl = g["auction"]["declarer"]
+        if not g.get("looked"):
+            E.apply_move(g, g["seats"][decl], {"kind": "look"})
+        ranks |= {E.rank(c) for c in g["shown"]} | {E.rank(c)
+                                                    for c in g["hands"][decl]}
+        sw = B.choose_swap(g, decl)
+        if sw["take"] is not None:
+            assert sw["take"] in g["shown"]
+            assert sw["give"] in g["hands"][decl]
+        E.apply_swap(g, decl, sw["take"], sw["give"])   # must not raise
+    assert reached >= 20, reached
+    # EVERY RANK A 32-CARD DECK HOLDS was scored at least once. Without this the
+    # test could pass having never handed the tables their top index, which is
+    # precisely the read that used to raise.
+    assert ranks == set(range(E.NEXTRA, E.NRANKS)), sorted(ranks)
+
+
+def test_the_flag_is_what_decides_which_skat_policy_runs(monkeypatch):
+    """A flag that changes nothing is a flag nobody can trust to be off. This
+    pins that the two branches actually disagree on a hand where they should:
+    the old rule takes the highest card shown and gives the lowest held, the
+    fitted one will not give an ace."""
+    hand = sorted([_card(2, r) for r in range(6)] + [_card(3, 7)])
+    g = {"auction": {"denom": -1, "level": 0, "value": 12, "declarer": 0},
+         "hands": [hand, []],
+         "shown": [_card(1, 0), _card(1, 7), _card(1, 3)],
+         "piles": [[[], [], []], [[], [], []]], "out": []}
+    monkeypatch.delenv("DIS_SKAT_SWAP_FIT", raising=False)
+    assert not B.skat_swap_fit()
+    old = B.choose_swap(dict(g), 0, denom=1)
+    monkeypatch.setenv("DIS_SKAT_SWAP_FIT", "1")
+    assert B.skat_swap_fit()
+    fit = B.choose_swap(dict(g), 0, denom=1)
+    assert old != fit
+    assert E.rank(fit["give"]) < E.rank(_card(0, 7))   # never the ace

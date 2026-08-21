@@ -36,7 +36,13 @@ import sys
 from games.dissonance import engine as E, bot as B
 
 SP = os.environ.get("SWAPLAB_DIR", ".")
-NRANK = E.NRANK
+#: RANK SLOTS, not `NRANK`. `E.rank` returns a card's STRENGTH on the WIDE
+#: deck's scale (0..9, the 5 through the ace) even in a 32-card mode, where only
+#: 2..9 are ever reachable. Sizing the one-hot blocks by `NRANK` (8) instead
+#: OVERLAPS them: the give block would start at 8 and run to 17, and 16/17 are
+#: the trump features -- so "give a king" and "the take is trump" would be the
+#: same weight. Caught by the shipped policy raising IndexError on an ace.
+NRANKS = E.NRANKS
 
 
 def replay(m):
@@ -70,7 +76,7 @@ def feats(g, seat, take, give):
     floor compares two separable worths, so it stands pat on 1% of decisions
     where the oracle does on 23%.
     """
-    n = 2 * NRANK + 7
+    n = 2 * NRANKS + 7
     x = [0.0] * n
     if take is None:
         return x
@@ -87,8 +93,8 @@ def feats(g, seat, take, give):
     hand = list(g["hands"][seat])
     tc = E.trump_class(d)
     x[E.rank(take)] = 1.0                       # what comes in, by rank
-    x[NRANK + E.rank(give)] = 1.0               # what goes out, by rank
-    i = 2 * NRANK
+    x[NRANKS + E.rank(give)] = 1.0               # what goes out, by rank
+    i = 2 * NRANKS
     x[i] = 1.0 if E.esuit(take, d) == tc else 0.0
     x[i + 1] = 1.0 if E.esuit(give, d) == tc else 0.0
     # SHAPE, from the hand AFTER the exchange: how short the give leaves its
@@ -182,10 +188,15 @@ def main():
     npat = sum(1 for r, c in te if pick(c) == (None, None))
     print(f"  fitted stands pat on {100*npat/len(te):.0f}% of held-out decisions "
           f"(oracle 23%, shipped 1%)")
-    names = ([f"take {E.RANK_NAMES[i]}" for i in range(NRANK)]
-             + [f"give {E.RANK_NAMES[i]}" for i in range(NRANK)]
+    names = ([f"take {E.RANK_NAMES[i]}" for i in range(NRANKS)]
+             + [f"give {E.RANK_NAMES[i]}" for i in range(NRANKS)]
              + ["take trump", "give trump", "give voids", "give singleton",
                 "take suit len", "card-point delta", "SWAP AT ALL (bar)"])
+    # A NAME PER WEIGHT, asserted. The layout bug this file shipped with was
+    # exactly a length mismatch (one-hot blocks sized by `NRANK`, indexed by a
+    # `NRANKS` rank), and the only reason it surfaced at all was the policy
+    # raising IndexError on an ace -- the fit itself printed 23 happy numbers.
+    assert len(names) == len(w), (len(names), len(w))
     print("\n  WEIGHTS")
     for n, v in zip(names, w):
         print(f"    {n:>18} {v:>+8.3f}")
