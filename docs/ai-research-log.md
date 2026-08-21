@@ -3250,18 +3250,21 @@ attribution explained both and repriced the entire campaign's instrument.
 
 ## WHERE THE DISSONANCE RESEARCH TOOLING LIVES (2026-08-21)
 
-**The two sessions below, and the ten before them, are on an UNMERGED branch:
-`claude/superhuman-ai-game-research-o5pwel`** — 52 commits, branched from
-`00170c9`, head `f0330d1`. Nothing on it is user-visible: no engine change, no
-frontend change, no shipped bot change. It was deliberately not landed on `main`
-because none of it changes how the site plays, and merging it would fire both
-deploy workflows for code the server never imports.
+**THE FINDINGS BELOW ARE ON `main`. THE INSTRUMENTS THAT PRODUCED THEM ARE
+NOT.** They live on an unmerged branch, kept because none of it is
+user-visible — no engine change, no frontend change, no shipped bot change — and
+merging it would republish a byte-identical site, stamping a fresh
+`__BUILD_ID__` that nudges every open tab to refresh, for code the server never
+imports.
 
-**READ THIS BEFORE TRUSTING A BRANCH AS AN ARCHIVE.** A branch is a moving
-pointer, not durable storage: delete it and the commits become unreachable and
-eventually get pruned. The SHAs above are what actually identify the work. If
-the branch is ever cleaned up, tag it first (`git tag dissonance-research-2026-08
-f0330d1`) — a tag is what this really wants to be.
+    tag     dissonance-research-2026-08     <- use this
+    branch  claude/superhuman-ai-game-research-o5pwel
+    base    00170c9        53 commits
+
+**USE THE TAG, NOT THE BRANCH.** A branch is a moving pointer, not durable
+storage: delete it and the commits become unreachable and are eventually pruned.
+The tag is what keeps this work alive, and it is why the branch is safe to clean
+up whenever you like.
 
 **What is on it that would be expensive to rebuild.** The measurements are
 recorded here and in `games/dissonance/CLAUDE.md`; the instruments are not, and
