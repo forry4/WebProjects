@@ -685,57 +685,55 @@ def bid_prior_terms(g: dict) -> dict | None:
     }
 
 
-#: SKAT'S TALON SWAP, FITTED (2026-08-20) -- OFF unless `DIS_SKAT_SWAP_FIT`.
+#: SKAT'S TALON SWAP, FITTED (2026-08-21). Worth **+4.086 +- 0.183 a round**
+#: over the rule it replaced, and it took two fits to get there -- the first one
+#: was measurably better and shipped nothing, which is the part worth reading.
 #:
-#: The rule it would replace is `worth(take) - worth(give)`, which is SEPARABLE,
-#: so its 3x7 "search" can only ever mean "take the highest card shown, throw
-#: the lowest card held". Classic ran the identical shape until 2026-08-08 and
-#: measured it at -0.477 +- 0.226 score/round against simply standing pat.
+#: THE RULE IT REPLACED was `worth(take) - worth(give)`, which is SEPARABLE, so
+#: its 3x7 "search" could only ever mean "take the highest card shown, throw the
+#: lowest card held". Classic ran the identical shape until 2026-08-08.
 #:
-#: MEASURED AGAINST AN ORACLE over 614 real skat swap decisions
-#: (`tools/swaplab.py skat`, every candidate resolved by an exact double-dummy
-#: solve of the real deal, the declaration made from the post-swap hand by the
-#: shipped `choose_declare`):
+#: THE FIRST FIT was trained on ORACLE LABELS -- every candidate exchange
+#: resolved by an exact double-dummy solve of the real deal (`tools/swaplab.py`,
+#: 614 decisions). It won on every diagnostic it was scored on: held-out regret
+#: against that oracle 4.35 against the old rule's 5.16 and standing pat's 7.54.
+#: Then the paired arena (`tools/swaparena.py`) said:
 #:
-#:     policy regret vs the oracle   mean 4.10   worst 50
-#:     policy vs standing pat        +2.18
-#:     ORACLE vs standing pat        +6.28      <- 65% of the gain is unclaimed
-#:     oracle stands pat 23% of decisions, the shipped rule 1%
-#:     the shipped rule is WORSE THAN PAT on 12% of them
+#:     card play                        first fit - old
+#:     dd    exact double-dummy         +0.817 +- 0.212   (n=6000)
+#:     play  the shipped server bot     -2.132 +- 0.168   (n=30000)
 #:
-#: and the histograms show the separability directly: it GIVES an 8 on 55% of
-#: decisions and a 10/J/Q on 1%, where the oracle gives a 10/J/Q on 36%.
+#: It was a better policy FOR A SOLVER and cost 2.1 a round in front of the card
+#: play the server actually runs. The histograms said why and it was not subtle:
+#: skat scores the CARDS captured -- 9/10/J/Q at +2, 7/8/K/A at -1 -- and it
+#: GAVE A JACK on 24% of exchanges (the old rule 0.7%) while taking kings on
+#: 19.6% (7.7%). It threw +2 cards out of play and took -1 cards into hand,
+#: because a solver converts top cards into tempo and the greedy bot cannot.
 #:
-#: HELD OUT BY DEAL (185 decisions), regret against the oracle:
-#:     standing pat 7.54    shipped rule 5.16    FITTED 4.35
+#: THE SECOND FIT -- these weights -- is the same enumeration relabelled by the
+#: SHIPPED CARD PLAY (`swaplab.py skat <n> <lo> <hi> play`, 40000 decisions,
+#: which costs no solver at all and so buys 65x the corpus). Gated on deals
+#: DISJOINT from the ones it was fitted on:
 #:
-#: AND THE SHIP GATE SAID NO, which is why this is behind a flag and the old
-#: rule is still what runs (`tools/swaparena.py`, paired on the same deals):
+#:     card play                        this fit - old      this fit - pat
+#:     play  the shipped server bot   +4.086 +- 0.183   +6.027 +- 0.185  n=30000
+#:     hard  the tier's own k=8 PIMC  +2.602 +- 1.157                    n=440
+#:     dd    exact double-dummy       -4.758 +- 0.430                    n=4000
 #:
-#:     resolution                    fit - old      old - pat
-#:     dd    (exact double-dummy)   +0.817 +- 0.212   (+2.18, swaplab)
-#:     play  (the shipped bot)      -2.132 +- 0.168   +1.941 +- 0.197
+#: A GAIN UNDER BOTH CARD PLAYERS THAT EXIST, and a loss only against a solver
+#: holding the opponent's cards, which no tier is. The old rule was +1.941 +-
+#: 0.197 vs pat, so the talon's value roughly triples. The `hard` figure is the
+#: one that decided it: five disjoint 88-deal windows, every one positive, run
+#: through `bidserve`'s `pick` -- the same `wire::answer_card` the browser
+#: worker calls -- so it is the tier's card play and not a proxy for it.
 #:
-#: 6000 and 30000 deals. The fit is genuinely the better policy FOR A SOLVER and
-#: costs 2.1 a round in front of the card play the server actually runs. See
-#: `CLAUDE.md` -- the histograms say why, and it is not subtle: skat scores 9/10/
-#: J/Q at +2 and 7/8/K/A at -1, and the fit GIVES A JACK on 24% of exchanges
-#: (the old rule 0.7%) while taking kings on 19.6% (7.7%). It throws +2 cards out
-#: of play and takes -1 cards into hand. The declarer's mean card points go
-#: 8.0 -> 7.2 and the contract comes home 84.8% -> 80.6%.
-#:
-#: The weights are the fit's, `tools/skat_swapfit.py`, and they say what the
-#: histograms did. GIVING a ten is the worst thing on the board (-3.60) and
-#: giving an ace is next (-2.97) -- the two cards the separable rule would never
-#: give, since its curve is monotone in rank and they sit at the top of it --
-#: while giving a 7 or an 8 is good (+1.23 / +2.45) and TAKING one is bad
-#: (-1.24 / -1.91). Taking the ace is worth +3.10 and taking the ten only +0.72,
-#: which is not a rank ordering at all: an ace wins the trick it is played in,
-#: and a ten is 10 card points you have to bring home. And `take suit len` at
-#: -1.06 is a preference the separable rule cannot hold at any weights, because
-#: it is not a property of either card alone: do not take into a suit you are
-#: already long in.
-#:
+#: WHAT THE WEIGHTS SAY. `card-point delta` +2.52 and `give trump` -4.48 are the
+#: two the separable rule could not hold at any weights: take the points, never
+#: discard a trump. Giving an ace (+2.27) or a king (+1.34) is good and TAKING
+#: one is bad (-2.07 / -1.38) -- they are the -1 cards, and a discard leaves
+#: play entirely, so the talon is where a liability goes to be deleted. And
+#: `take suit len` +2.11 is a preference about the HAND rather than either card:
+#: take into the suit you are already long in.
 #: THE TABLES ARE `E.NRANKS` LONG, NOT `E.NRANK`. `E.rank` scores a card on the
 #: WIDE deck's scale (0..9, the 5 through the ace) even in a 32-card mode where
 #: only 2..9 are reachable, so the two leading zeros are the unreachable 5 and 6
@@ -745,28 +743,27 @@ def bid_prior_terms(g: dict) -> dict | None:
 #: weight -- and made the policy raise IndexError on an ace. `_SWAP_TAKE_W`
 #: above has always been `NRANKS` long; the guard is
 #: `test_swap_policy.py::test_the_skat_weight_tables_span_every_rank`.
-_SK_TAKE_W = (0.000, 0.000, -1.242, -1.911, -1.395, 0.723, -0.630, 0.005,
-              0.817, 3.097)
-_SK_GIVE_W = (0.000, 0.000, 1.231, 2.452, 0.946, -3.600, 1.106, 0.498,
-              -0.203, -2.965)
-_SK_TAKE_TRUMP = 1.185
-_SK_GIVE_TRUMP = 0.308
-_SK_VOID = 0.841
-_SK_SINGLETON = 0.258
-_SK_TAKE_LEN = -1.063
+_SK_TAKE_W = (0.000, 0.000, 2.345, 0.161, -1.035, 0.995, 0.142, 0.880,
+              -1.381, -2.067)
+_SK_GIVE_W = (0.000, 0.000, -2.353, -0.516, 0.747, 0.002, -0.307, -1.141,
+              1.340, 2.268)
+_SK_TAKE_TRUMP = 2.851
+_SK_GIVE_TRUMP = -4.481
+_SK_VOID = 0.685
+_SK_SINGLETON = -0.532
+_SK_TAKE_LEN = 2.111
 #: Skat scores the CARDS captured and a discard leaves play entirely, so what
 #: the talon swallows changes what the round is worth to both seats. Classic has
 #: no analogue of this term.
-_SK_POINTS = -0.369
-_SK_BAR = -0.536
+_SK_POINTS = 2.521
+_SK_BAR = 0.040
 #: THE BAR AN EXCHANGE MUST CLEAR TO BE WORTH MAKING -- the fit's intercept, and
 #: the only term that can teach this policy to do nothing, since standing pat is
 #: itself a candidate scored at exactly zero. Classic fitted one and dropped it
 #: because there it cancels out of the argmax (every candidate carried it
-#: equally); here it does not cancel. It came back NEGATIVE, which is the fit
-#: saying the exchange is worth making more often than the oracle's 23% stand-pat
-#: rate suggests -- a linear score cannot see the deal-specific combinatorics
-#: that make the oracle decline, so it declines on 2% of held-out decisions.
+#: equally); here it does not cancel. It came back at +0.04, i.e. no bar at all:
+#: under the shipped card play an exchange is almost always worth making, and
+#: the policy stands pat on ~1% of decisions.
 
 
 def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
@@ -775,6 +772,12 @@ def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
     Mirrors `tools/skat_swapfit.py::feats` term for term -- the fit's features
     ARE this function, and a drift between them is a policy scoring itself with
     weights that were trained for a different vector.
+
+    Not shipped to the auction leaf. `main.py` sends `swap_policy_terms()` on a
+    classic or minor auction request and deliberately not on a skat one, so this
+    is a server-side change with no wire shape and no wasm rebuild behind it --
+    at the cost of widening skat's talon blind spot in the auction search, which
+    now under-prices winning a skat auction by ~6 rather than ~2.
     """
     hand = list(g["hands"][seat])
     tc = E.trump_class(denom)
@@ -799,12 +802,13 @@ def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
     return best
 
 
-def skat_swap_fit() -> bool:
-    """Is skat's FITTED talon swap on? Off unless `DIS_SKAT_SWAP_FIT` is set, so
-    shipped behaviour is byte-identical until the paired arena says otherwise --
-    a held-out regret against a cheating oracle is a DIAGNOSTIC, and the ship
-    gate for classic's fit was an arena over the real information set."""
-    return bool(os.environ.get("DIS_SKAT_SWAP_FIT"))
+def skat_swap_old() -> bool:
+    """Fall back to the OLD separable rank rule for skat's talon?
+
+    Off. The fitted policy above ships (2026-08-21), and this exists so
+    `tools/swaparena.py` can put the incumbent in one arm without a second copy
+    of it living in the harness -- a copy of a policy measures the copy."""
+    return bool(os.environ.get("DIS_SKAT_SWAP_OLD"))
 
 
 def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
@@ -812,14 +816,11 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
 
     CLASSIC (the contract is settled): the fitted policy above.
 
-    SKAT (the talon resolves BEFORE the game is named): still the old
-    rank-worth rule, DELIBERATELY. The fit was trained and gated on classic
-    decisions, where the denomination and level are known; skat's swap has
-    neither, and shipping the classic weights there would be a guess wearing a
-    measurement's clothes. Skat's own `swaplab` run has been made and its
-    weights are fitted (`_skat_swap_fitted`), but they are behind
-    `DIS_SKAT_SWAP_FIT` until a paired arena -- not a held-out regret against a
-    cheating oracle -- says they are better.
+    SKAT (the talon resolves BEFORE the game is named): its OWN fitted policy
+    since 2026-08-21, from its own `swaplab` run -- never classic's weights,
+    which were fitted where the denomination and level are already known.
+    `DIS_SKAT_SWAP_OLD` restores the separable rank rule it replaced, for the
+    arena's incumbent arm.
     """
     if denom is None:
         denom = swap_denom(g, seat)
@@ -848,7 +849,7 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
                     best = {"take": t, "give": h}
         return best
 
-    if skat_swap_fit():
+    if not skat_swap_old():
         return _skat_swap_fitted(g, seat, denom)
 
     def worth(c: int) -> float:

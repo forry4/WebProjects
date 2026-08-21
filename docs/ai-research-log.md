@@ -3468,3 +3468,116 @@ is structural rather than parametric.
 slightly more exploitable — a clean reminder that head-to-head strength and
 exploitability are different quantities, and that a best responder is far
 harsher than the opponent across the table.
+
+---
+
+## 2026-08-21 — Dissonance: skat's talon swap. The first fit was better and shipped nothing.
+
+**Asked for:** skat's talon swap, the queued item behind classic's fitted swap.
+
+**Shipped: +4.086 ± 0.183 score/round** over the rule it replaced, on 30000
+paired deals disjoint from the ones it was fitted on. The talon's value against
+standing pat goes +1.941 ± 0.197 → +6.027 ± 0.185. It is the second-largest
+measured gain of the Dissonance campaign after classic's own swap fix, and for
+the same reason: the rule it replaced could not represent the preference the
+game rewards.
+
+**But the headline is the fit that did NOT ship**, because it is a mistake with
+a general shape.
+
+### Two fits, one enumeration, opposite answers
+
+Classic's method labels real decisions with an ORACLE: every candidate exchange
+resolved by an exact double-dummy solve of the real deal. The oracle cheats on
+purpose and the write-up is careful to call it a diagnostic and to ship-gate on
+a paired arena instead. Skat's first fit followed that method exactly, and won
+every diagnostic it was scored on — held-out regret against the oracle **4.35**
+against the old rule's 5.16 and standing pat's 7.54.
+
+Then the arena:
+
+| card play | first fit − old |
+|---|---|
+| `dd` exact double-dummy | **+0.817 ± 0.212** (n=6000) |
+| `play` the shipped server bot | **−2.132 ± 0.168** (n=30000) |
+
+A better policy **for a solver**, costing 2.1 a round in front of the card play
+the server actually runs. The histograms say why and it is not subtle: skat
+scores the CARDS captured — 9/10/J/Q at +2, 7/8/K/A at −1 — and the first fit
+**gave a jack on 24% of exchanges** where the old rule does on 0.7%, while taking
+kings on 19.6% against 7.7%. It threw +2 cards out of play and took −1 cards
+into hand, because a solver converts top cards into tempo and the greedy bot
+cannot. Declarer card points 8.0 → 7.2; contract made 84.8% → 80.6%.
+
+**The lesson, and it is not about swaps: AN ORACLE LABEL IS A CHOICE OF
+OBJECTIVE, NOT A GROUND TRUTH.** Classic's write-up already said the swap's
+value depends on who plays the cards afterwards, and ship-gated under both
+resolutions. What it did not say — and what cost a whole fit here — is that the
+LABELS carry the same dependence. A policy trained on `dd` labels is fitted to a
+card player nobody is, and its held-out regret against those labels will happily
+confirm it. Anywhere a policy is fitted against a solver and served in front of
+a heuristic, the first question is which one the label assumed.
+
+### The second fit, and the cheap label is also the big one
+
+Same enumeration, relabelled by the SHIPPED card play. That resolution needs no
+solver and runs ~600 rounds a second, so the corpus went **614 → 40000
+decisions for two minutes of wall time** — a 65× bigger training set for less
+compute than the small one cost. Gated on disjoint deals under all three card
+players:
+
+| card play | this fit − old | this fit − pat |
+|---|---|---|
+| `play` the shipped server bot | **+4.086 ± 0.183** | +6.027 ± 0.185 (n=30000) |
+| `hard` the tier's own k=8 PIMC | **+2.602 ± 1.157** (n=440) | |
+| `dd` exact double-dummy | −4.758 ± 0.430 (n=4000) | |
+
+**A gain under both card players that exist**, and a loss only against a solver
+holding the opponent's cards, which no tier is.
+
+**The `hard` row is what actually decided it**, and it is the row the repo's own
+rule demanded: *a measurement harness must reproduce the SERVING shape*. Hard
+and Expert serve card play client-side, so "does this help Hard?" cannot be
+answered by `dd` — double dummy is not PIMC, it is PIMC's unreachable limit, and
+the two disagree here by seven points a round. `bidserve`'s `pick` request calls
+the same `wire::answer_card` the browser worker calls, so the arena can play
+both seats at the actual tier. It costs ~22s a deal, which is why that row is
+440 deals and not 30000 — five disjoint 88-deal windows, every one positive.
+
+**What the weights say.** `card-point delta` +2.52 and `give trump` −4.48 are
+the two the separable rule could not hold at any weights: take the points, never
+discard a trump. Giving an ace (+2.27) or a king (+1.34) is good and TAKING one
+is bad (−2.07 / −1.38) — they are the −1 cards, and a discard leaves play
+entirely, so the talon is where a liability goes to be deleted.
+
+### Two process findings worth more than the numbers
+
+**An experiment parked behind a flag is untested code, and the flag is what makes
+it look otherwise.** The first fit shipped as dead code carrying a real bug:
+both weight tables and the fit's own feature vector were sized by `NRANK` (8)
+and indexed by `E.rank`, which scores on the WIDE deck's 0..9 scale. The give
+block overlapped the trump features — one weight meaning both "give a king" and
+"the take is trump" — and the policy raised IndexError the first time it was
+handed an ace. Nothing caught it: the flag was off, so no test ever indexed the
+tables. Three guards now do, all verified non-vacuous against the 8-long tables.
+
+**A mirror that short-circuits asserts nothing.** `swaparena`'s `arm arm` reads
++0.0000 for free, because identical picks skip the playout entirely.
+`SWAPARENA_NO_SHORTCUT=1` drives both arms through the whole round instead, and
+that mirror — old/old and fit/fit at exactly +0.0000 over 3000 deals — is the
+one that says the two branches share no state.
+
+### Queued, and stated as queued
+
+* **Skat's auction leaf still models no talon.** `main.py` ships
+  `swap_policy_terms()` on classic and minor auction requests and deliberately
+  not on skat ones, so this was a pure server-side change with no wire shape and
+  no wasm rebuild. The price is that skat's auction search now under-prices
+  winning a skat auction by ~6 rather than ~2 — the same blind spot classic's
+  swap fix opened, and the same fix closes it.
+* **NOT measured:** whether the first (`dd`-labelled) fit beats this one under
+  `hard`. This fit beats the old rule under both regimes that exist, which is
+  what the ship decision needed; a tier-aware talon is only worth building if a
+  `hard` arena between the two fits says so.
+* **Minor's talon** is still unfitted, and now has a method that costs nothing
+  to run: `swaplab.py minor <n> <lo> <hi> play`.

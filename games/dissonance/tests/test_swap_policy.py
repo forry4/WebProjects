@@ -79,21 +79,39 @@ def test_a_trump_is_never_discarded_in_favour_of_an_equal_off_suit_card():
 # --- the skat branch is deliberately the OLD rule --------------------------
 
 
-def test_the_skat_talon_still_runs_the_old_policy():
-    """The fit was trained and gated on CLASSIC decisions, where the contract
-    is settled; skat's talon resolves before the game is named. Shipping the
-    classic weights there would be a guess wearing a measurement's clothes, so
-    the old rule stays until skat gets its own swaplab run. This test is the
-    marker: if it fails because someone unified the branches, that run had
-    better exist."""
+def test_the_skat_talon_runs_its_own_weights_and_not_classics(monkeypatch):
+    """Skat's talon resolves BEFORE the game is named, so it was never allowed
+    the classic weights on faith -- it got its own swaplab run and its own fit
+    (2026-08-21). This is the marker: if someone unifies the branches, the two
+    policies have to be measured to agree first, because they were fitted
+    against different information and different card play."""
+    monkeypatch.delenv("DIS_SKAT_SWAP_OLD", raising=False)
+    assert B._SK_TAKE_W != B._SWAP_TAKE_W
+    assert B._SK_GIVE_W != B._SWAP_GIVE_W
     g = {"auction": {"denom": -1, "level": 0, "value": 12},
          "hands": [sorted([_card(2, r) for r in range(7)]), []],
          "shown": [_card(1, 0), _card(1, 7), _card(1, 3)],
          "piles": [[[], [], []], [[], [], []]], "out": []}
-    sw = B.choose_swap(g, 0, denom=1)
-    # Old rule: take the highest shown, give the lowest held.
-    assert sw["take"] == _card(1, 7)
-    assert sw["give"] == _card(2, 0)
+    assert B.choose_swap(g, 0, denom=1) != _old_skat_pick(g)
+
+
+def _old_skat_pick(g, monkey=None):
+    """What the separable rank rule would have done: take the highest card
+    shown, throw the lowest card held. It cannot express anything else."""
+    return {"take": _card(1, 7), "give": _card(2, 0)}
+
+
+def test_the_old_skat_rule_is_still_reachable_for_the_arena(monkeypatch):
+    """`swaparena.py` puts the incumbent in one arm through this flag rather
+    than through a copy of the rule in the harness -- a copy measures the copy.
+    So the flag has to keep working, and it has to keep meaning what it says."""
+    monkeypatch.setenv("DIS_SKAT_SWAP_OLD", "1")
+    assert B.skat_swap_old()
+    g = {"auction": {"denom": -1, "level": 0, "value": 12},
+         "hands": [sorted([_card(2, r) for r in range(7)]), []],
+         "shown": [_card(1, 0), _card(1, 7), _card(1, 3)],
+         "piles": [[[], [], []], [[], [], []]], "out": []}
+    assert B.choose_swap(g, 0, denom=1) == _old_skat_pick(g)
 
 
 # --- against the real engine ----------------------------------------------
@@ -146,17 +164,17 @@ def test_the_skat_weight_tables_span_every_rank():
 
 def test_the_fitted_skat_talon_is_legal_on_every_real_deal_that_reaches_it(
         monkeypatch):
-    """The flag's whole job is to be inert until a paired arena says otherwise,
-    which means nothing else in the suite ever exercises the fitted policy. This
-    one does -- across enough real skat deals to hand it every rank, including
-    the ace the first cut of it crashed on.
+    """The fitted policy across enough real skat deals to hand it every rank,
+    including the ace the first cut of it crashed on -- it was sized by `NRANK`
+    and indexed by `E.rank`, and no test caught it because the policy was still
+    behind a flag nothing turned on.
 
     ONE TEST OVER MANY SEEDS RATHER THAN A PARAMETRIZE, because not every
     auction reaches the talon and a per-seed test would have to return early on
     the ones that do not -- a state-reachability skip wearing a pass. Counting
     instead makes the reachability itself an assertion.
     """
-    monkeypatch.setenv("DIS_SKAT_SWAP_FIT", "1")
+    monkeypatch.delenv("DIS_SKAT_SWAP_OLD", raising=False)
     reached, ranks = 0, set()
     for seed in range(40):
         g = E.new_game(["a", "b"], random.Random(9600 + seed), opener=seed % 2,
@@ -195,20 +213,22 @@ def test_the_fitted_skat_talon_is_legal_on_every_real_deal_that_reaches_it(
 
 
 def test_the_flag_is_what_decides_which_skat_policy_runs(monkeypatch):
-    """A flag that changes nothing is a flag nobody can trust to be off. This
-    pins that the two branches actually disagree on a hand where they should:
-    the old rule takes the highest card shown and gives the lowest held, the
-    fitted one will not give an ace."""
+    """A flag that changes nothing is a flag nobody can trust. This pins that
+    the two branches actually disagree on a hand where they should: the old rule
+    throws the lowest card held, and the fitted one will not throw a 7 -- a 7 is
+    a -1 card, and the whole point of the talon is that a discard leaves play,
+    so a liability is what belongs in it."""
     hand = sorted([_card(2, r) for r in range(6)] + [_card(3, 7)])
     g = {"auction": {"denom": -1, "level": 0, "value": 12, "declarer": 0},
          "hands": [hand, []],
          "shown": [_card(1, 0), _card(1, 7), _card(1, 3)],
          "piles": [[[], [], []], [[], [], []]], "out": []}
-    monkeypatch.delenv("DIS_SKAT_SWAP_FIT", raising=False)
-    assert not B.skat_swap_fit()
-    old = B.choose_swap(dict(g), 0, denom=1)
-    monkeypatch.setenv("DIS_SKAT_SWAP_FIT", "1")
-    assert B.skat_swap_fit()
+    monkeypatch.delenv("DIS_SKAT_SWAP_OLD", raising=False)
+    assert not B.skat_swap_old()
     fit = B.choose_swap(dict(g), 0, denom=1)
+    monkeypatch.setenv("DIS_SKAT_SWAP_OLD", "1")
+    assert B.skat_swap_old()
+    old = B.choose_swap(dict(g), 0, denom=1)
     assert old != fit
-    assert E.rank(fit["give"]) < E.rank(_card(0, 7))   # never the ace
+    assert E.rank(old["give"]) == E.rank(_card(0, 0))     # the lowest held
+    assert E.rank(fit["give"]) != E.rank(_card(0, 0))

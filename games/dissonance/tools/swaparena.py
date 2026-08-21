@@ -17,7 +17,7 @@ is no mirror to run: the arms are two policies for ONE seat, not two tiers
 sitting in two seats, so there is nothing for a seat swap to cancel.
 
     old   the shipped `choose_swap`             (skat: the separable rank rule)
-    fit   the same function under DIS_SKAT_SWAP_FIT
+    fit   the same function under DIS_SKAT_SWAP_OLD
     pat   stand pat -- decline the exchange entirely
 
 `fit` and `old` are THE SAME SHIPPED FUNCTION under two settings of its own
@@ -54,11 +54,10 @@ Shards by deal window; each shard prints a `SHARD {...}` line to pool.
 import json
 import math
 import os
-import random
-import subprocess
 import sys
 
-from games.dissonance import engine as E, bot as B
+from games.dissonance import bot as B
+from games.dissonance.tools import talon as T
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "skat"
 N = int(sys.argv[2]) if len(sys.argv) > 2 else 200
@@ -67,17 +66,8 @@ ARM_B = sys.argv[4] if len(sys.argv) > 4 else "old"
 LO = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 HI = int(sys.argv[6]) if len(sys.argv) > 6 else N
 RES = sys.argv[7] if len(sys.argv) > 7 else "play"
+SOLVER = T.Solver() if RES in ("dd", "hard") else None
 
-SKAT = MODE == "skat"
-SWAP_PHASE = "talon" if SKAT else "swap"
-BIN = "rust-cores/dissonance-core/target/release/bidserve"
-PROC = (subprocess.Popen([BIN, "3"], stdin=subprocess.PIPE,
-                         stdout=subprocess.PIPE, text=True)
-        if RES == "dd" else None)
-
-#: THE SAME DEAL SEEDS `swaplab` USES, so a decision this arena disagrees with
-#: can be looked up in the oracle corpus by its deal index instead of re-solved.
-DEAL_SEED = 600000
 #: THE MIRROR'S TEETH. `arm arm` reads +0.0000 for free, because identical picks
 #: short-circuit to an exact 0 without playing a card -- which makes the usual
 #: mirror check assert nothing about the PLAYOUT. `SWAPARENA_NO_SHORTCUT=1`
@@ -87,100 +77,31 @@ DEAL_SEED = 600000
 #: two branches (a shared mutable snapshot, an RNG drawn once and reused, a
 #: policy reading a global the previous arm moved).
 NO_SHORTCUT = bool(os.environ.get("SWAPARENA_NO_SHORTCUT"))
-#: A SEPARATE STREAM FOR THE PLAYOUT, and the same one for both arms. Sharing
-#: the auction's `rng` would work too, but only by accident: the auction has
-#: already drawn from it a deal-dependent number of times, so the playout would
-#: start at a different offset per deal for no reason anyone could reconstruct.
-PLAY_SEED = 1_000_000
-
-
-def _mv(kind, p):
-    if kind == "play":
-        # `bot.act` hands back a bare card id for a play, not a move dict --
-        # the only branch that does.
-        return {"kind": "play", "card": p}
-    return ({"kind": "pass"} if p.get("pass")
-            else {"kind": "bid", **{a: b for a, b in p.items() if a != "pass"}}) \
-        if kind == "bid" else (p if kind == "move"
-                               else ({"kind": "swap", **p} if kind == "swap" else p))
-
-
-def _step(g, rng):
-    seat = E.turn_seat(g)
-    kind, p = B.act(g, seat, rng)
-    E.apply_move(g, g["seats"][seat], _mv(kind, p), rng)
-
-
-def resolve(g):
-    """Exact declarer payoff of `g`'s settled contract on the real deal."""
-    terms = E.payoff_terms(g)
-    req = {"resolve": {"hands": [list(h) for h in g["hands"]],
-                       "piles": [[list(x) for x in row] for row in g["piles"]],
-                       "trump": g["auction"]["denom"],
-                       "leader": terms["declarer"], "terms": terms}}
-    PROC.stdin.write(json.dumps(req) + "\n")
-    PROC.stdin.flush()
-    r = json.loads(PROC.stdout.readline())
-    if "payoff" not in r:
-        raise SystemExit(f"unresolvable: {r}")
-    return r["payoff"]
 
 
 def pick(g, decl, arm):
     """One arm's exchange, from the SHIPPED function under its own flag."""
     if arm == "pat":
         return (None, None)
-    was = os.environ.get("DIS_SKAT_SWAP_FIT")
+    was = os.environ.get("DIS_SKAT_SWAP_OLD")
     try:
-        if arm == "fit":
-            os.environ["DIS_SKAT_SWAP_FIT"] = "1"
+        if arm == "old":
+            os.environ["DIS_SKAT_SWAP_OLD"] = "1"
         else:
-            os.environ.pop("DIS_SKAT_SWAP_FIT", None)
+            os.environ.pop("DIS_SKAT_SWAP_OLD", None)
         sw = B.choose_swap(g, decl)
     finally:
-        os.environ.pop("DIS_SKAT_SWAP_FIT", None)
+        os.environ.pop("DIS_SKAT_SWAP_OLD", None)
         if was is not None:
-            os.environ["DIS_SKAT_SWAP_FIT"] = was
+            os.environ["DIS_SKAT_SWAP_OLD"] = was
     return (sw["take"], sw["give"])
 
 
-def value(snap, decl, take, give, m):
-    """Apply one exchange to the talon snapshot and score the round."""
-    g = json.loads(snap)
-    E.apply_swap(g, decl, take, give)
-    if RES == "dd":
-        gd = 0
-        while g["phase"] in ("declare", "kontra", "re", "double") and gd < 6:
-            gd += 1
-            if g["phase"] == "declare":
-                E.apply_move(g, g["seats"][decl],
-                             {"kind": "declare", **B.choose_declare(g, decl)})
-            else:
-                E.apply_move(g, g["seats"][1 - decl], {"kind": g["phase"], "on": False})
-        return resolve(g) if g["phase"] == "play" else None
-    rng = random.Random(PLAY_SEED + m)
-    guard = 0
-    while g["phase"] != "over" and guard < 200:
-        guard += 1
-        _step(g, rng)
-    if g["phase"] != "over":
-        return None
-    s = g["result"]["scores"]
-    return float(s[decl] - s[1 - decl])
-
-
 def one(m):
-    g = E.new_game(["a", "b"], random.Random(DEAL_SEED + m), opener=m % 2, mode=MODE)
-    rng = random.Random(m)
-    guard = 0
-    while g["phase"] not in (SWAP_PHASE, "play", "over") and guard < 40:
-        guard += 1
-        _step(g, rng)
-    if g["phase"] != SWAP_PHASE:
+    at = T.drive_to_talon(m, MODE)
+    if at is None:
         return None
-    decl = g["auction"]["declarer"]
-    if SKAT and not g.get("looked"):
-        E.apply_move(g, g["seats"][decl], {"kind": "look"})
+    g, decl = at
     snap = json.dumps(g)
     ta, ga = pick(g, decl, ARM_A)
     tb, gb = pick(g, decl, ARM_B)
@@ -190,12 +111,11 @@ def one(m):
         # per-deal one -- the effect on a round of play is what ships, and a
         # policy that agrees with the incumbent most of the time moves it less.
         return {"deal": m, "d": 0.0, "same": True}
-    va = value(snap, decl, ta, ga, m)
-    vb = value(snap, decl, tb, gb, m)
+    va = T.value(snap, decl, ta, ga, m, RES, SOLVER)
+    vb = T.value(snap, decl, tb, gb, m, RES, SOLVER)
     if va is None or vb is None:
         return None
-    return {"deal": m, "d": va - vb, "same": False,
-            "a": va, "b": vb, "level": g["auction"]["value" if SKAT else "level"]}
+    return {"deal": m, "d": va - vb, "same": False, "a": va, "b": vb}
 
 
 def ci(xs):

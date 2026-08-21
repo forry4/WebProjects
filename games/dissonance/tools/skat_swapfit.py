@@ -30,12 +30,17 @@ opponent's cards or the solve.
 import glob
 import json
 import os
-import random
 import sys
 
 from games.dissonance import engine as E, bot as B
+from games.dissonance.tools import talon as T
 
 SP = os.environ.get("SWAPLAB_DIR", ".")
+#: WHICH CORPUS. `dd` labels are the exact-solve oracle this file was built
+#: around; `play` labels are the same enumeration scored by the SHIPPED card
+#: play (`swaplab.py <mode> <n> <lo> <hi> play`). They are different objectives
+#: and the fits differ -- see the module docstring.
+GLOB = os.environ.get("SWAPLAB_GLOB", "skatswap_*.jsonl")
 #: RANK SLOTS, not `NRANK`. `E.rank` returns a card's STRENGTH on the WIDE
 #: deck's scale (0..9, the 5 through the ace) even in a 32-card mode, where only
 #: 2..9 are ever reachable. Sizing the one-hot blocks by `NRANK` (8) instead
@@ -47,23 +52,8 @@ NRANKS = E.NRANKS
 
 def replay(m):
     """Re-drive deal `m` to its talon. Deterministic: same seeds as `swaplab`."""
-    g = E.new_game(["a", "b"], random.Random(600000 + m), opener=m % 2, mode="skat")
-    rng = random.Random(m)
-    guard = 0
-    while g["phase"] not in ("talon", "play", "over") and guard < 40:
-        guard += 1
-        seat = E.turn_seat(g)
-        kind, p = B.act(g, seat, rng)
-        mv = ({"kind": "pass"} if p.get("pass")
-              else {"kind": "bid", **{a: b for a, b in p.items() if a != "pass"}}) \
-            if kind == "bid" else (p if kind == "move"
-                                   else ({"kind": "swap", **p} if kind == "swap" else p))
-        E.apply_move(g, g["seats"][seat], mv)
-    if g["phase"] != "talon":
-        return None
-    if not g.get("looked"):
-        E.apply_move(g, g["seats"][g["auction"]["declarer"]], {"kind": "look"})
-    return g
+    at = T.drive_to_talon(m, "skat")
+    return None if at is None else at[0]
 
 
 def feats(g, seat, take, give):
@@ -133,7 +123,7 @@ def ridge(X, y, lam=1.0):
 
 
 def main():
-    rows = [json.loads(l[5:]) for p in glob.glob(SP + "/skatswap_*.jsonl")
+    rows = [json.loads(l[5:]) for p in glob.glob(SP + "/" + GLOB)
             for l in open(p) if l.startswith("SWAP ")]
     rows.sort(key=lambda r: r["deal"])
     print(f"  {len(rows)} decisions")
