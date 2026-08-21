@@ -6079,6 +6079,117 @@ What actually blocks pricing `DENOMS` is that `best_response` still reads
 actions as bare levels and refuses to run; that port, not the sampler, is the
 next thing standing between here and a number.
 
+### OUTCOME SAMPLING LOSES BY *MORE* IN THE SPACE IT WAS BUILT FOR (2026-08-21)
+
+Follow-on from the bias fix above, and it closes the sampler question rather
+than merely qualifying it. `best_response` is now abstraction-agnostic (it
+routes every transition through `_step`), so the real action space can finally
+be PRICED, and the equal-time comparison runs where it always should have.
+
+**`DENOMS`, 600 all-denomination deals, exact best response:**
+
+      sampler      iters     solve     exploitability
+      external        2k     63.7s               9.97
+      external        5k    131.4s               6.76
+      external       19k    351.6s               4.27
+      outcome       100k     12.7s              44.97
+      outcome       500k     64.4s              37.83
+      outcome       4.7M    641.7s              25.79
+
+At ~64 seconds external reads 9.97 against outcome's 37.83; at ~640 it is
+roughly 3.3 (extrapolated from 4.27 at 352s) against 25.79. **External is
+3.8x better at the small budget and ~8x at the large one, and the gap WIDENS.**
+External at TWO THOUSAND iterations beats outcome at a hundred thousand.
+
+**AND THAT REVERSES THE EXTRAPOLATION, WHICH IS THE lesson worth keeping.** The
+level-only reading (external 1.04 vs outcome 4.11 at matched time) plus the
+measured 51x cost gap suggested the two would be near-even here. They are not
+close. The extrapolation assumed each sampler's exploitability-vs-iterations
+curve TRANSFERS between abstractions, and outcome sampling's does not: widening
+the action space 5x costs external only per-iteration TIME, but it costs
+outcome sampling VARIANCE -- each infoset is visited a fifth as often per
+trajectory and every `1/q` weight grows. Its cost advantage is real and its
+statistical efficiency degrades faster than the advantage buys back. **A
+per-iteration cost ratio is not a convergence ratio, and fitting a decay curve
+in one abstraction says nothing about another.**
+
+**WHAT THIS MEANS FOR THE SAMPLER.** It is correct, it is gated
+(`tests/test_cfr_unbiased.py`), and it stays -- it is the right tool if the
+action space ever grows to where external's per-node branching is genuinely
+unaffordable (the FOREVER-BAN's 30,373 states, say). It is NOT the answer for
+`DENOMS`, and `CFR_SAMPLING` should stay on `external` for everything this
+campaign currently measures. Do not re-open it on the strength of the 260x.
+
+### THE LEVEL-ONLY ABSTRACTION COSTS 14 POINTS A DEAL, AND NOW IT IS MEASURED (2026-08-21)
+
+The question the whole `DENOMS` arm exists for, finally asked properly.
+
+**WHY IT COULD NOT BE ASKED BEFORE, and it is not the reason I assumed.** Two
+exploitability numbers from two abstractions cannot be compared: exploitability
+is only defined against a best responder, and the two abstractions hand the
+responder different action sets, so they are numbers from different games.
+Ranking them is meaningless. What was needed was ONE game and ONE responder.
+
+**THE EMBEDDING IS EXACT, WHICH IS WHAT MAKES IT POSSIBLE.** The level-only
+game is a strict SUB-GAME of the wide one, not an approximation:
+
+    pass            -> pass
+    HOLD            -> the SAME level at rank `holds + 1`
+    raise to `L`    -> level `L` at rank 0
+
+`leaf` already prices a contract as "rank = holds", and level-only's `_step`
+resets `holds` on a raise and increments it on a HOLD -- so a level-only state
+`(level, prev, holds)` and a wide state `(level, prev, rank)` with
+`rank == holds` are THE SAME CONTRACT at THE SAME PAYOFF. The lift is a
+relabelling. `tools/liftlab.py` does it; `tests/test_lift_is_faithful.py`
+PROVES it, by the one identity that settles the matter: restrict the wide
+responder to the lift's image and the exact best response must come back at the
+level-only value to floating point. It does. The test also asserts the two
+things that would make that identity worthless -- that handing the responder
+the full denomination set MOVES the number (and never downward, since a larger
+action set cannot do worse), and that a one-character mis-lift is caught.
+
+**THE RESULT, at matched wall clock (324s vs 343s), 600 all-denomination
+deals:**
+
+      policy                 backoff   BR seat 0   BR seat 1   exploitability
+      level-only, LIFTED       False       14.73       19.07            16.90
+      level-only, LIFTED        True       15.93       19.33            17.63
+      wide (native)            False        5.23        2.05             3.64
+      wide (native)             True        5.23        2.05             3.64
+
+**14.0 points a deal.** And it is not a convergence artifact in either
+direction: 2.5x the level-only iterations moved it 21.33 -> 17.63 while the
+wide arm sat at 3.64, so the narrow policy is converging toward something well
+above the wide one, not merely under-solved.
+
+**READ THE BACKOFF ROWS, NOT THE NO-BACKOFF ONES.** `Policy`'s docstring
+records why an unseen infoset conceding makes a number "mostly the sample
+size", and the lifted policy is structurally the one with holes (12.9% of
+reach-weighted lookups). That is the artifact that would manufacture exactly
+this answer, so it was checked rather than argued: with backoff on, the holes
+close and the gap gets BIGGER (16.90 -> 17.63). Coverage was flattering the
+narrow arm, not damning it.
+
+**THIS IS THE SAME DEFECT THE HEAD-TO-HEAD ALREADY SAW, from the other end.**
+The blueprint lost to Expert by **-12.84 +- 1.47** and the mechanism was one
+number: it made **49.6%** of its contracts against Expert's **73.0%** at the
+same levels -- because a level chosen blind to the suit is a commitment the
+real hand may not support. That was inferred from a play-out; this measures it
+directly against a best responder. The two figures are close and the
+correspondence is suggestive, but they are NOT the same quantity (points a deal
+against an exact responder vs points a round against Expert) and should not be
+quoted as one number.
+
+**WHAT THIS UNBLOCKS AND WHAT IT DOES NOT.** It says the widened action space
+is where the auction's remaining money is, which is the first positive result
+this campaign has had after a long run of nulls (eval weights, exact leaf,
+trump channel, contested gate, diverse continuations). It does NOT yet ship
+anything: `blueprint_bid` and `_path_to` still refuse under `DENOMS`, because
+serving needs to map an abstract action back onto a REAL bid -- a new mapping,
+not a transition `_step` already owns. That port is the next step, and unlike
+every other item on the list it now has a measured 14-point prize attached.
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a
