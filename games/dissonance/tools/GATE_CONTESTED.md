@@ -10,10 +10,24 @@ is not.** Settling it needs **n ≈ 2900** — σ measured 21.4, not the 18 budg
 below, so the declared n bought ±0.76 rather than ±0.64. Full write-up in
 `games/dissonance/CLAUDE.md`.
 
-**To resume:** same command, same checkpoints, raise `800` to `2900` and extend
-each shard window — `ARENA_CKPT` skips deals already recorded, so it EXTENDS the
-sample rather than restarting it. Per-shard reads so far: +2.59 / +2.02 / +1.56
-/ −1.40.
+**EXTENSION PRE-REGISTERED (2026-08-20), before any further number exists.**
+Running deals **800–2900** in four NEW windows (525 each) with their own
+checkpoint files beside the first four. Fresh windows rather than widened ones
+on purpose: widening the existing shards would make shard 0's new range overlap
+deals shards 1–3 already recorded, and the pooled read would double-count them.
+The pooler also dedupes on the deal id as a net.
+
+* **Read ONCE at n = 2900**, target ±0.40 at the measured σ = 21.4. No interim
+  totals — the n=800 read is the last number quoted until then.
+* **The n=800 read stands as recorded** (+1.1938 ± 0.7555) and is NOT revised
+  by the extension; the pooled 2900 is a different, larger sample that
+  CONTAINS it, and only the pooled figure gets quoted afterwards.
+* **The secondary read-outs are re-declared unchanged**: settled distribution,
+  make rate and mean opening are reported beside the payoff, and a payoff win
+  with contracts climbing the ladder is still a hold.
+* **The ship bar is unchanged and is not "positive"**: the CI must exclude zero.
+
+Per-shard reads at n=800 were +2.59 / +2.02 / +1.56 / −1.40.
 
 ---
 
