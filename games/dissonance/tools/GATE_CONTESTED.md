@@ -1,4 +1,23 @@
-# The contested-node softening gate — PRE-REGISTERED 2026-08-20
+# The contested-node softening gate — PRE-REGISTERED, then RUN 2026-08-20
+
+**RESULT (read once, at the declared n): +1.1938 ± 0.7555 payoff/round, CI
+[−0.287, +2.674], n = 800. Spans zero — NOT ESTABLISHED, does not ship.**
+Every secondary read-out is favourable and the pre-declared hold condition did
+not fire: the opening is unmoved (mean 2.42 vs 2.44), concessions fall 31.3% →
+21.5%, the settled mean falls 4.68 → 4.43, level-6 settlements fall 29% → 22%,
+and the make rate rises 58.9% → 60.1%. **The mechanism is confirmed; the payoff
+is not.** Settling it needs **n ≈ 2900** — σ measured 21.4, not the 18 budgeted
+below, so the declared n bought ±0.76 rather than ±0.64. Full write-up in
+`games/dissonance/CLAUDE.md`.
+
+**To resume:** same command, same checkpoints, raise `800` to `2900` and extend
+each shard window — `ARENA_CKPT` skips deals already recorded, so it EXTENDS the
+sample rather than restarting it. Per-shard reads so far: +2.59 / +2.02 / +1.56
+/ −1.40.
+
+---
+
+## The pre-registration, as written before any number existed
 
 **Written BEFORE any number exists.** This package's ledger records four
 separate occasions where a running total said the opposite of the completed

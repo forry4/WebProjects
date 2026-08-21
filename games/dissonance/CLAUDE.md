@@ -5857,6 +5857,72 @@ across the same two samples (−10.222 vs −10.050 on the chosen bid; concessio
 44.4% vs 41.1%), which is the difference between a measurement and an artefact.
 **Do not quote the flip row as a magnitude.**
 
+### THE CONTESTED GATE: THE MECHANISM WORKS EXACTLY AS DESIGNED, THE PAYOFF IS NOT ESTABLISHED (2026-08-20)
+
+**Built, pre-registered, run to the declared n, and it stays OFF.**
+`EXPERT_OPP_TEMP_CONTESTED = 12` softens the modelled opponent only at nodes
+where a PASS is legal; the opening — the one node that cannot pass — keeps its
+fitted 5. `expertsgt` vs shipped `expertst`, CRN-paired, dd-resolved:
+
+**+1.1938 ± 0.7555 payoff/round, 95% CI [−0.287, +2.674], t = +1.58, n = 800.**
+
+**Spans zero. Not established, and it does not ship on this.** Per shard of 200
+it read +2.59 / +2.02 / +1.56 / **−1.40** — the spread this package's ledger
+warns about four times over, and the reason the read was pre-registered.
+
+**BUT EVERY SECONDARY READ-OUT IS FAVOURABLE, AND THE PRE-DECLARED "HOLD"
+CONDITION DID NOT FIRE.** The gate was declared a hold if it won on payoff while
+pushing contracts up the ladder. It did the opposite:
+
+| | gated (12) | shipped (5) |
+|---|---|---|
+| **mean opening** | **2.42** | **2.44** |
+| opening distribution | 52/8/10/10/13/5/1% | 53/7/10/10/13/5/1% |
+| contracts declared | **970** | 630 |
+| decisions that PASS | **21.5%** | 31.3% |
+| mean settled level | **4.43** | 4.68 |
+| settled at level 6 | **22%** | 29% |
+| **made** | **60.1%** | 58.9% |
+
+**THE OPENING IS UNMOVED TO WITHIN 0.02 OF A RUNG WHILE THE CONCESSION RATE
+FALLS TEN POINTS.** That is the whole design goal, demonstrated: the ungated
+2/5/12 sweep cancelled *because softening also lowered the opening across every
+bucket*, and gating on "is a pass legal here" separates the two effects for the
+first time. The level-6 pile-up this file has flagged since the 800-round
+profile (28% settling at 6, 64% of those set) comes down to 22%, the settled
+mean falls, and the make rate rises — so the correction is not buying points by
+climbing the ladder.
+
+**WHAT IT WOULD TAKE TO SETTLE IT: n ≈ 2900.** Per-deal σ measured **21.4**, not
+the 18 the pre-registration budgeted with, so the declared n=800 bought ±0.76
+rather than ±0.64 — **the pre-registration under-powered itself, and that is the
+method note to carry**: σ is a property of the ARM, not of the harness, and a
+new arm's σ should be measured on the first shard rather than assumed from the
+last campaign's. ±0.4 needs ~2900 paired deals, roughly five more hours at this
+box's ~6 deals/min.
+
+**HOW TO READ IT HONESTLY.** +1.19 is the same size as the tree's entire edge
+over Hard (+1.19 ± 0.32) and as the shipped `opp_temp` gain (+0.957 ± 0.454), so
+if it is real it is a first-rank result — which is exactly why it needs the
+sample rather than the benefit of the doubt. The mechanism is confirmed
+independently of the payoff (shadeprobe's shade rows, the concession rate, the
+untouched opening); what is unconfirmed is that correcting it pays.
+
+**AND 12 IS A CANDIDATE, NOT AN OPTIMUM.** It was chosen because the shade
+crosses zero at ≈13.5 and 12 lands the concession rate on the price list's own
+29.0%. But zeroing the shade is not self-evidently right: the price list
+concedes 29.0% and the CFR equilibrium concedes **0–5%**, so both pricers may
+still be conceding far too much and 15 or 20 could be better. Each needs its own
+pre-registration — **not a sweep read off this run**, which is the mistake this
+file already records under `DOUBLE_MARGIN`.
+
+**Verified before any number was taken**, and all three are the reason the
+result can be attributed to one change: unarmed `expertsgt` vs `expertst` reads
+**exactly +0.0000** (byte-identical when the gate is off), the armed mirror
+reads **exactly +0.0000**, and armed it changes 13 of 14 auctions.
+`test_the_contested_gate_softens_only_where_a_pass_is_legal` pins both ends and
+is verified non-vacuous by defeating the gate.
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a
