@@ -78,6 +78,20 @@ assert A.MODE == "classic" and A.TIER_A == TIER, "arena imported misconfigured"
 #: Exact resolves cost three solves apiece, so they are asked for only at the
 #: options that can change a decision. Off gives the shade columns alone.
 TRUTH = os.environ.get("SHADE_TRUTH", "1") not in ("", "0")
+#: DIAGNOSTIC 1 -- WHICH MECHANISM MAKES THE BID BRANCH PESSIMISTIC?
+#:
+#: If it is the modelled opponent's CLAIRVOYANCE, softening them compresses the
+#: shade. If it is the OPTIMISER'S CURSE -- the min of noisy estimates sitting
+#: below the true min, compounding down the tree -- the temperature barely moves
+#: it and the corrective shape is depth-scaled instead. Those imply different
+#: fixes, so the sweep decides the design rather than the design being guessed.
+#:
+#: EVERY TEMP IS PRICED AT THE SAME NODE and the FIRST one drives the auction.
+#: A separate run per temp would take a different path through the bidding and
+#: the arms would not be paired -- and pairing is free here because `opp_model`
+#: and `opp_temp` are SEARCH parameters, not world parameters: they are not in
+#: `hand_key`, so every temp reads the identical cached `entry.worlds`.
+TEMPS = [float(x) for x in os.environ.get("SHADE_TEMPS", "5").split(",")]
 
 
 def myopic_sums(g, seat, opts):
@@ -162,9 +176,25 @@ def node(g, seat):
     if not ipass or not ibid:
         mv, _, _ = A.ask(g, seat, TIER)
         return None, mv
-    mv, tsum, _ = A.ask(g, seat, TIER)
-    if not tsum or len(tsum) != len(opts):
-        return None, mv
+    # `A.ask` reads DIS_OPP_TEMP per call, so the env is the control surface --
+    # reusing it verbatim rather than rebuilding the payload here, which is the
+    # trap this file's header already records.
+    keep = os.environ.get("DIS_OPP_TEMP")
+    by_temp = {}
+    mv = None
+    for t in TEMPS:
+        os.environ["DIS_OPP_TEMP"] = repr(t)
+        m_t, s_t, _ = A.ask(g, seat, TIER)
+        if not s_t or len(s_t) != len(opts):
+            if keep is not None:
+                os.environ["DIS_OPP_TEMP"] = keep
+            return None, m_t
+        by_temp[t] = s_t
+        if mv is None:
+            mv = m_t          # the FIRST temp is the one that drives
+    if keep is not None:
+        os.environ["DIS_OPP_TEMP"] = keep
+    tsum = by_temp[TEMPS[0]]
     msum = myopic_sums(g, seat, opts)
     if not msum:
         return None, mv
@@ -195,6 +225,27 @@ def node(g, seat):
         "tree_passes": bool(tp > tb[bt]),
         "myopic_passes": bool(mp > mb[bm]),
     }
+    # THE TEMPERATURE SWEEP, all on the same worlds and the same option list.
+    row["by_temp"] = {}
+    for t, st in by_temp.items():
+        tvt = [(st[i] - 1e-5 * msum[i]) / K for i in ibid]
+        pvt = (st[ipass[0]] - 1e-5 * msum[ipass[0]]) / K
+        row["by_temp"][repr(t)] = {
+            "shade_pass": pvt - mp,
+            "shade_bid": statistics.mean(a - b for a, b in zip(tvt, mb)),
+            "shade_bestbid": tvt[bm] - mb[bm],
+            "passes": bool(pvt > max(tvt)),
+        }
+    # DIAGNOSTIC 2 -- HOW MUCH OF THE SHADE IS LEGITIMATE? A bid really IS worth
+    # less than its settled value, because the opponent can raise over it; that
+    # part is the lookahead doing its job, not a bias. So the chosen bid's
+    # "settles here" value is banked now and the auction's REALISED contract is
+    # resolved once at the end (`deal`), and the difference between them is the
+    # legitimate discount. Excess = shade - legitimate, and only the excess is
+    # what any correction should be aimed at.
+    if TRUTH and not row["tree_passes"]:
+        row["seat"] = seat
+        row["settled_here"] = exact_of(g, seat, opts[ibid[bt]])
     if TRUTH and row["tree_passes"] != row["myopic_passes"]:
         # ONLY WHERE THE SHADING FLIPPED THE DECISION. Three options resolved,
         # not fifty: the pass, and each pricer's own favourite bid.
@@ -207,6 +258,33 @@ def node(g, seat):
                 "myopic_took": xp if row["myopic_passes"] else xm,
             }
     return row, mv
+
+
+def realised_of(g, seat):
+    """What the auction ACTUALLY settled on, resolved exactly, signed for `seat`.
+
+    One resolve per auction, attributed back to every node in it. This is the
+    other half of diagnostic 2: `settled_here` is what a bid would pay if the
+    auction stopped on it, this is what it really paid once the opponent had
+    their say, and the gap between them is the legitimate discount that a
+    correction must NOT try to remove.
+    """
+    a = g["auction"]
+    if a.get("declarer", -1) < 0 or not a.get("level"):
+        return None
+    decl = a["declarer"]
+    terms = dict(E.payoff_terms(g))
+    terms["declarer"] = decl
+    req = json.dumps({"resolve": {
+        "hands": [sorted(h) for h in g["hands"]],
+        "piles": [[list(x) for x in q] for q in g["piles"]],
+        "trump": a["denom"], "leader": decl, "terms": terms,
+    }}) + "\n"
+    p = A.proc_for(("shade_truth",), k=1, seed=7919)
+    p.stdin.write(req)
+    p.stdin.flush()
+    pay = json.loads(p.stdout.readline()).get("payoff")
+    return None if pay is None else (pay if decl == seat else -pay)
 
 
 def deal(m):
@@ -227,6 +305,16 @@ def deal(m):
         if mv is None:
             break
         E.apply_move(g, g["seats"][seat], mv, redeal_rng)
+    # THE REALISED CONTRACT, once, attributed back. A redeal (both passed out)
+    # or an auction that never settled leaves it absent rather than zero -- a
+    # zero here would read as "bidding was worth nothing", which is a number,
+    # and this file's ledger is mostly about numbers that were really absences.
+    if TRUTH:
+        for r in rows:
+            if "settled_here" in r and r["settled_here"] is not None:
+                v = realised_of(g, r["seat"])
+                if v is not None:
+                    r["realised"] = v
     return rows
 
 
@@ -284,6 +372,42 @@ def report(rows):
         worse = sum(1 for x in gain if x < 0)
         print(f"    {'tree better / worse / same':>42}: "
               f"{better} / {worse} / {len(gain)-better-worse}")
+    # ---- DIAGNOSTIC 1: does softening the opponent compress the shade? -----
+    keys = [k for k in (rows[0].get("by_temp") or {})]
+    if len(keys) > 1:
+        print(f"\n  OPPONENT TEMPERATURE SWEEP -- every temp priced at the SAME "
+              f"node,\n  on the SAME worlds ({TEMPS[0]:g} is the one that drove "
+              f"the auction)")
+        print(f"    {'temp':>6}  {'pass (control)':>16}  {'bid, all':>16}  "
+              f"{'bid, best':>16}  {'concedes':>8}")
+        for k in keys:
+            cp = [r["by_temp"][k]["shade_pass"] for r in rows if "by_temp" in r]
+            cb = [r["by_temp"][k]["shade_bid"] for r in rows if "by_temp" in r]
+            ce = [r["by_temp"][k]["shade_bestbid"] for r in rows if "by_temp" in r]
+            pc = [r["by_temp"][k]["passes"] for r in rows if "by_temp" in r]
+            print(f"    {float(k):>6.0f}  {line(cp):>16}  {line(cb):>16}  "
+                  f"{line(ce):>16}  {100*sum(pc)/len(pc):>7.1f}%")
+        print("    a shade that COMPRESSES with temperature is the modelled "
+              "opponent's\n    clairvoyance; one that does not move is the "
+              "optimiser's curse, and wants\n    a depth-scaled correction "
+              "instead of a softer opponent.")
+
+    # ---- DIAGNOSTIC 2: how much of the shade is legitimate? ----------------
+    sp = [r for r in rows if r.get("realised") is not None
+          and r.get("settled_here") is not None]
+    if sp:
+        legit = [r["realised"] - r["settled_here"] for r in sp]
+        shade = [r["shade_bestbid"] for r in sp]
+        excess = [s - l for s, l in zip(shade, legit)]
+        print(f"\n  IS THE SHADE A BIAS, OR THE LOOKAHEAD DOING ITS JOB? "
+              f"({len(sp)} nodes the tree BID)")
+        print(f"    {'the tree shades the bid by':>42}: {line(shade)}")
+        print(f"    {'LEGITIMATE (realised - settles here)':>42}: {line(legit)}")
+        print(f"    {'EXCESS (shade - legitimate)':>42}: {line(excess)}")
+        print("    Only the EXCESS is a bias. Correcting the whole shade would "
+              "delete the\n    lookahead, which beats the price list "
+              "+1.19 +- 0.32 head to head.")
+
     print("\n  The pass row is the control: it is a LEAF in both pricers, so a "
           "shade there\n  is measurement noise. A bid row that differs from it "
           "is the asymmetry.")
