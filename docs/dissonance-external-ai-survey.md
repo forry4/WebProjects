@@ -412,9 +412,35 @@ passing is a leaf in both pricers and both vectors come off the same worlds). It
 concedes **44.4%** where the price list concedes **29.0%**, and the divergence is
 entirely at standing levels 1–4, decaying to exact agreement by 6. That is the
 "concedes level 4" defect confirmed, quantified, and extended three rungs below
-where it had been seen. The fix is a one-constant additive correction on a wire
-field this package already ships twice — but the gate stays a CRN-paired arena,
-not the sweep.
+where it had been seen.
+
+**Both follow-up diagnostics then answered the design question, and the answer
+is NOT an additive constant.** The shade is driven by the modelled opponent's
+CLAIRVOYANCE rather than the optimiser's curse — the temperature is a direct
+lever, and the shade on the chosen option crosses zero at `opp_temp` ≈ 13.5
+(every temp priced at the same node on the same worlds, so the arms are exactly
+paired; temp 12 lands the concession rate on 29.0%, the price list's own rate to
+the decimal). And the discount is **not** legitimate: measured against the
+contract the auction actually reached, being outbid costs **−0.206 ± 0.855** —
+nothing, because the set base rises with the level so being raised over hands us
+a better defence and the two cancel. **−9.763 ± 0.915 of the −9.969 is bias**,
+which also relocates the tree's +1.19 over the price list into *which* bid it
+picks rather than *whether* it bids.
+
+So a flat constant is out — the shade is not constant, and a flat term would be
+pure damage at standing 5–7 where the two pricers already agree on 100% of
+decisions. The implementation is the **existing temperature, gated to nodes
+where a pass is legal**: `opp_temp` is read per request and the server knows the
+option list, so the opening keeps its fitted 5 and only the contested branch is
+softened. No new wire field, no Rust change. That is exactly the isolating test
+this file had said was needed and that the recorded (ungated) sweep could not
+be, since softening also lowered the opening across every bucket.
+
+**Still unestablished, and it is the whole ship question:** all of this measures
+the ESTIMATOR, not strength. Both pricers may be conceding far too much — the
+equilibrium concedes 0–5% — so matching the price list would only match a bidder
+the tree already beats. Gate unchanged: CRN-paired arena, mirror +0.0000,
+watching the settled distribution and make rate as well as payoff.
 
 **Still not done:** the one direction none of the eleven items touched. Every
 arm above attacked either the sampler (items 6, 8, 10 — all null, four
