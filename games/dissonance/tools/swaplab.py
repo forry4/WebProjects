@@ -33,6 +33,10 @@ import sys
 
 from games.dissonance import engine as E, bot as B
 
+
+def _skat_decl(g):
+    return g["auction"]["declarer"]
+
 BIN = "rust-cores/dissonance-core/target/release/bidserve"
 MODE = sys.argv[1] if len(sys.argv) > 1 else "classic"
 N = int(sys.argv[2]) if len(sys.argv) > 2 else 100
@@ -58,23 +62,41 @@ def resolve(g):
     return r["payoff"]
 
 
+SKAT = MODE == "skat"
+#: THE PHASE THE SWAP LIVES IN. Classic's is `swap` and skat's is `talon` --
+#: and skat's has to be LOOKED at first, since declining to look IS the Hand
+#: announcement and a declarer who plays Hand never sees the talon at all.
+SWAP_PHASE = "talon" if SKAT else "swap"
+
+
+def _step(g, rng):
+    seat = E.turn_seat(g)
+    kind, p = B.act(g, seat, rng)
+    mv = ({"kind": "pass"} if p.get("pass")
+          else {"kind": "bid", **{a: b for a, b in p.items() if a != "pass"}}) \
+        if kind == "bid" else (p if kind == "move"
+                               else ({"kind": "swap", **p} if kind == "swap" else p))
+    E.apply_move(g, g["seats"][seat], mv)
+
+
 def one(m):
-    """Drive one round to the swap phase; enumerate and resolve every candidate."""
+    """Drive one round to the swap; enumerate and resolve every candidate."""
     g = E.new_game(["a", "b"], random.Random(600000 + m), opener=m % 2, mode=MODE)
     rng = random.Random(m)
     guard = 0
-    while g["phase"] not in ("swap", "play", "over") and guard < 40:
+    while g["phase"] not in (SWAP_PHASE, "play", "over") and guard < 40:
         guard += 1
-        seat = E.turn_seat(g)
-        kind, p = B.act(g, seat, rng)
-        mv = ({"kind": "pass"} if p.get("pass")
-              else {"kind": "bid", **{a: b for a, b in p.items() if a != "pass"}}) \
-            if kind == "bid" else (p if kind == "move"
-                                   else ({"kind": "swap", **p} if kind == "swap" else p))
-        E.apply_move(g, g["seats"][seat], mv)
-    if g["phase"] != "swap":
+        _step(g, rng)
+    if g["phase"] != SWAP_PHASE:
         return None
-    decl = g["auction"]["declarer"]
+    if SKAT:
+        # Look before swapping. `talon` is one phase covering look / hand /
+        # swap, so a round that has not looked is not yet AT the decision.
+        if not g.get("looked"):
+            E.apply_move(g, g["seats"][_skat_decl(g)], {"kind": "look"})
+        decl = _skat_decl(g)
+    else:
+        decl = g["auction"]["declarer"]
     denom = g["auction"]["denom"]
     hand = sorted(g["hands"][decl])
     shown = list(g["shown"])
@@ -83,22 +105,58 @@ def one(m):
     def value_of(take, give):
         gg = json.loads(snap)
         E.apply_swap(gg, decl, take, give)
-        # The defender's Double intervenes before play; hold it OFF for every
-        # candidate so the comparison is between swaps, not between the server
-        # tier's Double answers to them (it declines every Double anyway).
-        E.apply_double(gg, 1 - decl, False)
+        if SKAT:
+            # SKAT'S TALON RESOLVES BEFORE THE GAME IS NAMED, which is the whole
+            # reason classic's fitted policy could not simply be pointed at it.
+            # So a candidate exchange has no contract to be priced against until
+            # the declaration is made -- and the declaration is made FROM THE
+            # POST-SWAP HAND, by the shipped `choose_declare`, which is exactly
+            # how it happens at the table. Letting it respond is not a
+            # contaminant: naming a better game IS part of what a good swap buys,
+            # and a fit that held the declaration fixed would be measuring a
+            # decision nobody makes.
+            #
+            # Kontra and Re are forced OFF for every candidate, the same reason
+            # classic forces the Double off: the comparison is between SWAPS,
+            # not between the tier's answers to the contracts they lead to.
+            gd = 0
+            while gg["phase"] in ("declare", "kontra", "re") and gd < 6:
+                gd += 1
+                if gg["phase"] == "declare":
+                    E.apply_move(gg, gg["seats"][decl],
+                                 {"kind": "declare", **B.choose_declare(gg, decl)})
+                else:
+                    E.apply_move(gg, gg["seats"][1 - decl],
+                                 {"kind": gg["phase"], "on": False})
+            if gg["phase"] != "play":
+                return None
+        else:
+            # The defender's Double intervenes before play; hold it OFF for every
+            # candidate so the comparison is between swaps, not between the server
+            # tier's Double answers to them (it declines every Double anyway).
+            E.apply_double(gg, 1 - decl, False)
         return resolve(gg)
 
-    cands = [{"take": None, "give": None, "v": value_of(None, None)}]
+    pat_v = value_of(None, None)
+    if pat_v is None:
+        return None
+    cands = [{"take": None, "give": None, "v": pat_v}]
     for t in shown:
         for h in hand:
-            cands.append({"take": t, "give": h, "v": value_of(t, h)})
+            v = value_of(t, h)
+            if v is None:
+                return None
+            cands.append({"take": t, "give": h, "v": v})
     cur = B.choose_swap(g, decl)
     best = max(cands, key=lambda c: c["v"])
     pat = cands[0]["v"]
     cur_v = next(c["v"] for c in cands
                  if c["take"] == cur["take"] and c["give"] == cur["give"])
-    return {"deal": m, "denom": denom, "level": g["auction"]["level"],
+    return {"deal": m, "denom": denom,
+            # Skat's level is not settled yet; its bid VALUE is what the
+            # declarer has to satisfy, and is the analogous number.
+            "level": g["auction"]["value"] if SKAT else g["auction"]["level"],
+            "guess": B.swap_denom(g, decl) if SKAT else denom,
             "declarer": decl,
             "hand": hand, "shown": shown,
             "pat": pat, "best": best["v"], "cur": cur_v,
