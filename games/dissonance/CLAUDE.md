@@ -2,11 +2,12 @@
 
 > **The AI-research sections below reference tools that are not on `main`** —
 > `tools/cfrlab.py`'s solver arms, `cfrcheck`, `liftlab`, `shadeprobe`,
-> `dblreport`, `channelprobe`, `featlab` and three Rust bins. They are on tag
-> **`dissonance-research-2026-08`** (branch
-> `claude/superhuman-ai-game-research-o5pwel`), unmerged on purpose: nothing on
-> it is user-visible. See the head of [`docs/ai-research-log.md`](../../docs/ai-research-log.md)
-> for the inventory and what each one measures.
+> `dblreport`, `channelprobe`, `featlab` and three Rust bins. They are on branch
+> **`claude/dissonance-research-2026-08-archive`** (head `2477cdf`), unmerged on
+> purpose: nothing on it is user-visible. See the head of
+> [`docs/ai-research-log.md`](../../docs/ai-research-log.md) for the inventory,
+> what each one measures, and the one command that turns that branch into a
+> proper tag.
 
 Sixth game. Two-player trick-taking where **taking tricks is not simply good**:
 even-numbered tricks score **+2** to whoever wins them, odd-numbered ones

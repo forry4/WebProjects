@@ -3257,14 +3257,27 @@ merging it would republish a byte-identical site, stamping a fresh
 `__BUILD_ID__` that nudges every open tab to refresh, for code the server never
 imports.
 
-    tag     dissonance-research-2026-08     <- use this
-    branch  claude/superhuman-ai-game-research-o5pwel
-    base    00170c9        53 commits
+    archive  claude/dissonance-research-2026-08-archive   <- use this
+    working  claude/superhuman-ai-game-research-o5pwel
+    base     00170c9        head 2477cdf        53 commits
 
-**USE THE TAG, NOT THE BRANCH.** A branch is a moving pointer, not durable
-storage: delete it and the commits become unreachable and are eventually pruned.
-The tag is what keeps this work alive, and it is why the branch is safe to clean
-up whenever you like.
+**BOTH OF THOSE ARE BRANCHES, WHICH IS NOT WHAT THIS WANTS TO BE.** A branch is
+a moving pointer, not durable storage: delete it and the commits become
+unreachable and are eventually pruned. The archive branch exists only so the
+working branch can be cleaned up without taking the commits with it — it is a
+second pointer, not a stronger one.
+
+**The durable form is a tag, and it takes one command from a checkout with push
+rights** (the session that produced this work could not create it — tag pushes
+returned HTTP 403, since its credentials are scoped to the `claude/*` branch
+namespace):
+
+    git tag -a dissonance-research-2026-08 2477cdf -m "Dissonance AI research campaign, 2026-08"
+    git push origin dissonance-research-2026-08
+
+Once that tag exists, **both branches are safe to delete** and this block should
+be updated to name the tag instead. Until then, do not delete the archive
+branch.
 
 **What is on it that would be expensive to rebuild.** The measurements are
 recorded here and in `games/dissonance/CLAUDE.md`; the instruments are not, and
