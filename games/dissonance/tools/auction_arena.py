@@ -319,6 +319,17 @@ def ask(g, seat, tier):
             if "s" in tier[len("expert"):]:
                 s["rules"]["opp_model"] = "soft"
                 s["rules"]["opp_temp"] = float(os.environ.get("DIS_OPP_TEMP", "4"))
+            # `expertsg` -- THE SOFTENING GATED TO CONTESTED NODES (2026-08-20).
+            # `main.opp_temp_for` is the ONE owner of the rule; asking it by
+            # name rather than re-deriving "is a pass legal" here is the
+            # discipline `cfrlab` paid a campaign for. It returns
+            # EXPERT_OPP_TEMP at every node while DIS_OPP_TEMP_CONTESTED is 0,
+            # so an unarmed `g` arm is byte-identical to its `s` control -- and
+            # with DIS_OPP_TEMP=5 (= EXPERT_OPP_TEMP) the two arms differ at
+            # CONTESTED NODES AND NOWHERE ELSE, which is what makes the race one
+            # change wide.
+            if "g" in tier[len("expert"):]:
+                s["rules"]["opp_temp"] = M.opp_temp_for(g)
             # `expertd` -- DIVERSE CONTINUATIONS (2026-08-19), Brown/Sandholm/
             # Amos multi-valued states. The opponent commits to one of
             # `DIS_OPP_N` hand-blind strategies spanning a bias toward conceding

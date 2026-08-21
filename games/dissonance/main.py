@@ -24,6 +24,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import os
 import random
 import time
 from typing import Any
@@ -122,6 +123,60 @@ SEARCH_AUCTION_TIERS = ("hard", "expert")
 #: fitted in. (The fit was loose to begin with, so a re-fit would measure noise
 #: unless the whole sweep is rebuilt; not worth arena hours while it is in band.)
 EXPERT_OPP_TEMP = 5.0
+
+#: THE SAME SOFTENING, HOTTER, BUT ONLY WHERE A PASS IS LEGAL. Off at 0, which
+#: returns `EXPERT_OPP_TEMP` at every node and is the shipped tier byte for
+#: byte; `DIS_OPP_TEMP_CONTESTED` arms it.
+#:
+#: WHY A NODE GATE RATHER THAN A HOTTER TEMPERATURE EVERYWHERE. The tree's
+#: measured defect is an ASYMMETRY, not a general pessimism: passing is a LEAF,
+#: priced once from the opponent's side, while raising continues into a subtree
+#: whose modelled opponent holds our exact hand. Measured
+#: (`tools/shadeprobe.py`, 400 deals / 973 decisions, both pricers on the SAME
+#: worlds so the control is exactly zero): the tree shades the bid it is
+#: choosing by **-10.050 +- 0.378** per-world payoff points and the pass by
+#: **+0.000**, and it concedes 41.1% where the price list concedes 29.0%.
+#:
+#: The temperature is a direct lever on exactly that -- the shade crosses zero
+#: at about 13.5, and 12 lands the concession rate on 29.0% -- so the mechanism
+#: is the modelled opponent's clairvoyance rather than the optimiser's curse.
+#: But a hotter temperature EVERYWHERE also lowers the OPENING across every
+#: strength bucket, which is this file's own explanation for why the recorded
+#: 2/5/12 sweep cancelled out (+1.07 vs +0.99, indistinguishable at n=150). The
+#: opening node cannot pass, so gating on "is a pass legal here" leaves it at
+#: the fitted 5 and softens only the branch the asymmetry is on. That is the
+#: isolating change the crate notes have asked for and never had.
+#:
+#: AND THE DISCOUNT IT REMOVES IS NOT REAL, which is what makes removing it
+#: defensible: measured against the contract each auction actually reached,
+#: being outbid costs **-0.206 +- 0.855** -- nothing -- because the set base
+#: rises with the level, so being raised over hands us a better defence and the
+#: two cancel. **-9.763 +- 0.915 of the -9.969 is bias.**
+#:
+#: NOT YET GATED ON STRENGTH. Every number above is about the ESTIMATOR. Both
+#: pricers may still concede far too much (the equilibrium concedes 0-5%), so
+#: matching the price list would only match a bidder the tree already beats.
+#: This ships OFF until a CRN-paired arena says otherwise.
+EXPERT_OPP_TEMP_CONTESTED = float(os.environ.get("DIS_OPP_TEMP_CONTESTED", "0")
+                                  or 0.0)
+
+
+def opp_temp_for(g: dict) -> float:
+    """The softening temperature for THIS node -- one owner, two callers.
+
+    `main` and `tools/auction_arena.py` both build the armed request, and a
+    rule that lived in only one of them is exactly how `cfrlab` spent a
+    campaign measuring Hard while its docstring said Expert. So the gate is
+    computed here and the harness asks for it by name.
+    """
+    if not EXPERT_OPP_TEMP_CONTESTED or g.get("phase") != "auction":
+        return EXPERT_OPP_TEMP
+    # "Contested" IS "a pass is legal", read off the engine rather than guessed
+    # from the auction log: the classic opener is the node that cannot pass, and
+    # it is also the one the ungated sweep kept moving.
+    if not engine.auction_options(g).get("may_pass"):
+        return EXPERT_OPP_TEMP
+    return EXPERT_OPP_TEMP_CONTESTED
 
 #: Phases beyond `play` whose decision the browser searches. The talon and the
 #: swap are deliberately absent: they are choices about INFORMATION, and what
@@ -917,7 +972,7 @@ async def _ask_the_client(room_id: str, seat: int) -> dict | None:
                     # to nothing.
                     if tier == "expert":
                         search["rules"]["opp_model"] = "soft"
-                        search["rules"]["opp_temp"] = EXPERT_OPP_TEMP
+                        search["rules"]["opp_temp"] = opp_temp_for(g)
                     room["_ai_search"]["auction"]["search"] = search
         room["_ai_pending_move"] = None
         evt = room["_ai_move_evt"] = asyncio.Event()

@@ -338,3 +338,43 @@ def test_the_two_searching_tiers_differ_by_the_opponent_model(monkeypatch):
         task.cancel()
         loop.run_until_complete(asyncio.sleep(0))
         loop.close()
+
+
+def test_the_contested_gate_softens_only_where_a_pass_is_legal(monkeypatch):
+    """`opp_temp_for` -- the gate, pinned at both ends and OFF by default.
+
+    A knob like this fails SILENTLY in both directions and neither shows up as
+    an error: unarmed it must be the shipped tier byte for byte (or every
+    measurement taken against it is two changes wide), and armed it must leave
+    the OPENING alone (or it is the ungated sweep again, whose benefit this
+    package measured as cancelling precisely because it also lowered the
+    opening across every strength bucket).
+    """
+    import random
+    from games.dissonance import engine as E, main as m
+
+    g = E.new_game(["a", "b"], random.Random(7), opener=0, mode="classic")
+    # The classic opener is the one node that CANNOT pass -- which is exactly
+    # what the gate keys on, so it is the control end of the assertion.
+    assert not E.auction_options(g)["may_pass"], "the opener could pass"
+
+    monkeypatch.setattr(m, "EXPERT_OPP_TEMP_CONTESTED", 0.0)
+    assert m.opp_temp_for(g) == m.EXPERT_OPP_TEMP
+
+    seat = E.turn_seat(g)
+    E.apply_move(g, g["seats"][seat], {"kind": "bid", "level": 2, "denom": 2})
+    assert E.auction_options(g)["may_pass"], "the responder could not pass"
+    # UNARMED IS THE SHIPPED TIER AT EVERY NODE, contested or not.
+    assert m.opp_temp_for(g) == m.EXPERT_OPP_TEMP
+
+    monkeypatch.setattr(m, "EXPERT_OPP_TEMP_CONTESTED", 12.0)
+    assert m.opp_temp_for(g) == 12.0, "the gate did not fire where a pass is legal"
+
+    # ...and the opening keeps the fitted temperature even when armed, which is
+    # the whole reason the gate exists rather than a hotter global temperature.
+    g2 = E.new_game(["a", "b"], random.Random(7), opener=0, mode="classic")
+    assert m.opp_temp_for(g2) == m.EXPERT_OPP_TEMP
+
+    # A phase with no auction tree must not pick up a temperature at all.
+    g2["phase"] = "play"
+    assert m.opp_temp_for(g2) == m.EXPERT_OPP_TEMP
