@@ -3248,6 +3248,42 @@ resists two plausible treatments is telling you to decompose it, not to try a
 third.* Both nulls were correct answers to the wrong question, and one hour of
 attribution explained both and repriced the entire campaign's instrument.
 
+## WHERE THE DISSONANCE RESEARCH TOOLING LIVES (2026-08-21)
+
+**The two sessions below, and the ten before them, are on an UNMERGED branch:
+`claude/superhuman-ai-game-research-o5pwel`** — 52 commits, branched from
+`00170c9`, head `f0330d1`. Nothing on it is user-visible: no engine change, no
+frontend change, no shipped bot change. It was deliberately not landed on `main`
+because none of it changes how the site plays, and merging it would fire both
+deploy workflows for code the server never imports.
+
+**READ THIS BEFORE TRUSTING A BRANCH AS AN ARCHIVE.** A branch is a moving
+pointer, not durable storage: delete it and the commits become unreachable and
+eventually get pruned. The SHAs above are what actually identify the work. If
+the branch is ever cleaned up, tag it first (`git tag dissonance-research-2026-08
+f0330d1`) — a tag is what this really wants to be.
+
+**What is on it that would be expensive to rebuild.** The measurements are
+recorded here and in `games/dissonance/CLAUDE.md`; the instruments are not, and
+several of them cost most of a session to get right:
+
+| tool | what it measures | why it was hard |
+|---|---|---|
+| `tools/cfrcheck.py` | MCCFR estimator unbiasedness, by exact enumeration under a frozen strategy | the only instrument that localises a weighting bug; a convergence ladder cannot |
+| `tools/liftlab.py` | what the level-only abstraction costs, via an exact embedding into the wide one | two exploitability numbers from two abstractions are incomparable in principle |
+| `tools/shadeprobe.py` | `tree value − price-list value` at the same node on the same worlds | the control is exactly 0.000 only if both pricers share the one-slot `Solved` cache |
+| `tools/dblreport.py` | every `DOUBLE_MARGIN` candidate, paired and exact, off recorded sums | a CRN arena would cost hours a candidate to measure the same thing worse |
+| `tools/channelprobe.py` | belief-prior bias per channel, any tilt as a free lookup | `draws_of` split from `score` so a sweep costs one run of draws |
+| `tools/featlab.py`, `tools/gate_pool.py` | the widened-abstraction feature ground; pooled gate runs | — |
+| `rust-cores/.../bin/{pimcprops,sigma,priorexp}.rs` | the three PIMC axes, σ, prior exponent | native, so they are the only affordable form |
+
+Also on the branch: `cfrlab`'s outcome sampler and `CFR_DENOMS` action space,
+`best_response`'s port onto `_step`, and three tests that gate the above —
+`test_cfr_unbiased.py`, `test_lift_is_faithful.py`, `test_cfrlab_blueprint.py`.
+**Those three run nowhere while the branch is unmerged**, which is worth stating
+plainly: they protect the correctness of MEASUREMENTS, so what they actually
+guard is this log.
+
 ## 2026-08-20 — Dissonance: five nulls, one positive, and the campaign's first localised defect
 
 Continuing directly from the 2026-08-19 attribution work. That session ended
