@@ -685,6 +685,89 @@ def bid_prior_terms(g: dict) -> dict | None:
     }
 
 
+#: SKAT'S TALON SWAP, FITTED (2026-08-20) -- OFF unless `DIS_SKAT_SWAP_FIT`.
+#:
+#: The rule it would replace is `worth(take) - worth(give)`, which is SEPARABLE,
+#: so its 3x7 "search" can only ever mean "take the highest card shown, throw
+#: the lowest card held". Classic ran the identical shape until 2026-08-08 and
+#: measured it at -0.477 +- 0.226 score/round against simply standing pat.
+#:
+#: MEASURED AGAINST AN ORACLE over 614 real skat swap decisions
+#: (`tools/swaplab.py skat`, every candidate resolved by an exact double-dummy
+#: solve of the real deal, the declaration made from the post-swap hand by the
+#: shipped `choose_declare`):
+#:
+#:     policy regret vs the oracle   mean 4.10   worst 50
+#:     policy vs standing pat        +2.18
+#:     ORACLE vs standing pat        +6.28      <- 65% of the gain is unclaimed
+#:     oracle stands pat 23% of decisions, the shipped rule 1%
+#:     the shipped rule is WORSE THAN PAT on 12% of them
+#:
+#: and the histograms show the separability directly: it GIVES an 8 on 55% of
+#: decisions and a 10/J/Q on 1%, where the oracle gives a 10/J/Q on 36%.
+#:
+#: HELD OUT BY DEAL (185 decisions), regret against the oracle:
+#:     standing pat 7.54    shipped rule 5.16    FITTED 4.35
+#:
+#: The weights are the fit's, `tools/skat_swapfit.py`, and they say what the
+#: histograms did: taking a 7 or an 8 is bad (-1.89 / -2.60) and GIVING one is
+#: good (+2.89 / +4.11), but giving a TEN is the worst thing on the board
+#: (-3.08) -- the one card the shipped rule would never give and the oracle
+#: gives on 10% of decisions. `take suit len` at -1.08 is a preference the
+#: separable rule cannot hold at any weights: do not take into a suit you are
+#: already long in.
+_SK_TAKE_W = (0.000, 0.000, -1.892, -2.603, -0.958, 1.110, -0.212, 0.425)
+_SK_GIVE_W = (0.130, 2.468, 2.894, 4.114, 1.491, -3.079, 1.652, 1.043)
+_SK_TAKE_TRUMP = 1.210
+_SK_GIVE_TRUMP = 0.333
+_SK_VOID = 0.859
+_SK_SINGLETON = 0.274
+_SK_TAKE_LEN = -1.077
+#: Skat scores the CARDS captured and a discard leaves play entirely, so what
+#: the talon swallows changes what the round is worth to both seats. Classic has
+#: no analogue of this term.
+_SK_POINTS = -1.113
+#: THE BAR AN EXCHANGE MUST CLEAR TO BE WORTH MAKING, and the only term that can
+#: teach this policy to do nothing. Classic fitted a stand-pat bar and dropped
+#: it because there it cancels out of the argmax -- every candidate carried it
+#: equally. Here standing pat is itself a candidate, scored at exactly zero, so
+#: it does not cancel.
+_SK_BAR = 1.532
+
+
+def _skat_swap_fitted(g: dict, seat: int, denom: int) -> dict:
+    """The fitted skat exchange, or stand pat. See the weights above."""
+    hand = list(g["hands"][seat])
+    tc = E.trump_class(denom)
+    best, best_score = {"take": None, "give": None}, 0.0
+    for t in g["shown"]:
+        for h in hand:
+            s = _SK_TAKE_W[E.rank(t)] + _SK_GIVE_W[E.rank(h)] - _SK_BAR
+            if E.esuit(t, denom) == tc:
+                s += _SK_TAKE_TRUMP
+            if E.esuit(h, denom) == tc:
+                s += _SK_GIVE_TRUMP
+            gs = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(h, denom))
+            ts = sum(1 for c in hand if E.esuit(c, denom) == E.esuit(t, denom))
+            if gs == 1:
+                s += _SK_VOID
+            elif gs == 2:
+                s += _SK_SINGLETON
+            s += _SK_TAKE_LEN * ts / 7.0
+            s += _SK_POINTS * (E.card_points(t) - E.card_points(h)) / 2.0
+            if s > best_score:
+                best_score, best = s, {"take": t, "give": h}
+    return best
+
+
+def skat_swap_fit() -> bool:
+    """Is skat's FITTED talon swap on? Off unless `DIS_SKAT_SWAP_FIT` is set, so
+    shipped behaviour is byte-identical until the paired arena says otherwise --
+    a held-out regret against a cheating oracle is a DIAGNOSTIC, and the ship
+    gate for classic's fit was an arena over the real information set."""
+    return bool(os.environ.get("DIS_SKAT_SWAP_FIT"))
+
+
 def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
     """Pick the talon exchange, or stand pat.
 
@@ -694,7 +777,10 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
     rank-worth rule, DELIBERATELY. The fit was trained and gated on classic
     decisions, where the denomination and level are known; skat's swap has
     neither, and shipping the classic weights there would be a guess wearing a
-    measurement's clothes. Fixing skat's swap is its own `swaplab` run.
+    measurement's clothes. Skat's own `swaplab` run has been made and its
+    weights are fitted (`_skat_swap_fitted`), but they are behind
+    `DIS_SKAT_SWAP_FIT` until a paired arena -- not a held-out regret against a
+    cheating oracle -- says they are better.
     """
     if denom is None:
         denom = swap_denom(g, seat)
@@ -722,6 +808,9 @@ def choose_swap(g: dict, seat: int, denom: int | None = None) -> dict:
                     best_score = s
                     best = {"take": t, "give": h}
         return best
+
+    if skat_swap_fit():
+        return _skat_swap_fitted(g, seat, denom)
 
     def worth(c: int) -> float:
         # Card scoring rates the talon differently: a card TAKEN joins the
