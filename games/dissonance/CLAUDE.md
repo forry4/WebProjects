@@ -5771,6 +5771,92 @@ already records one constant re-fitted on a sweep, shipped, and reverted.
   (the same `myopic` vector is in hand), and the report now SHOUTS if the
   control is ever non-zero rather than leaving it to be noticed.
 
+### AND BOTH DIAGNOSTICS ANSWER: IT IS CLAIRVOYANCE, AND ALMOST NONE OF IT IS LEGITIMATE (2026-08-20)
+
+**The two questions a correction had to answer before it could be designed, both
+measured on 400 deals / 973 decisions, control exactly zero at every arm.**
+
+**1. WHICH MECHANISM — the temperature is a direct lever, so it is the modelled
+opponent's clairvoyance, not the optimiser's curse.** Every temp is priced at
+the SAME node on the SAME worlds (`opp_model`/`opp_temp` are search parameters,
+not world parameters — they are not in `hand_key`), and the first drives the
+auction, so the arms are exactly paired:
+
+| opp_temp | pass (control) | bid, all options | bid, the chosen one | concedes |
+|---|---|---|---|---|
+| **5** *(shipped)* | +0.000 | −0.618 ± 0.043 | **−10.050 ± 0.378** | **41.1%** |
+| 8 | +0.000 | +0.243 ± 0.045 | −7.183 ± 0.369 | 36.3% |
+| 10 | +0.000 | +1.060 ± 0.051 | −4.820 ± 0.366 | 32.4% |
+| **12** | +0.000 | +2.112 ± 0.061 | −2.190 ± 0.363 | **29.0%** |
+| 15 | +0.000 | +4.190 ± 0.077 | +2.103 ± 0.357 | 23.1% |
+| 25 | +0.000 | +14.934 ± 0.111 | +15.827 ± 0.331 | 10.6% |
+
+**The shade on the option actually being chosen crosses zero at temp ≈ 13.5, and
+temp 12 puts the tree's concession rate at 29.0% — which is the price list's own
+rate to the decimal.** Two independent routes landing on the same place is the
+same pattern that first justified `DOUBLE_MARGIN = 20`.
+
+**2. HOW MUCH IS LEGITIMATE — essentially NONE of it**, which is the finding
+that changes what should be built (573 nodes where the tree bid; `settles here`
+is an exact resolve of the chosen bid, `realised` an exact resolve of the
+contract the auction actually reached, signed for the deciding seat):
+
+| | |
+|---|---|
+| the tree shades the chosen bid by | **−9.969 ± 0.442** |
+| **LEGITIMATE** (realised − settles here) | **−0.206 ± 0.855** — indistinguishable from zero |
+| **EXCESS** (shade − legitimate) | **−9.763 ± 0.915** |
+
+**Being outbid costs essentially nothing.** The standing worry — that a bid is
+genuinely worth less than its settled value because the opponent can raise over
+it, so correcting the shade would delete the lookahead — **is measured false**.
+The mechanism is the game's own shape: the set base rises with the level, so
+being raised over hands us a *better* defensive proposition, and the two roughly
+cancel. Almost the whole −10 is bias.
+
+**SO WHERE IS THE TREE'S MEASURED +1.19 OVER THE PRICE LIST?** Not in the
+discount — that is zero. It must be in WHICH bid the tree picks and in the
+capping play, not in WHETHER it bids. That is a coherent and testable split:
+**the tree adds value choosing among bids and adds bias choosing between bidding
+and passing.** Correcting the second need not cost the first.
+
+**THEREFORE: DO NOT SHIP AN ADDITIVE CONSTANT.** Three reasons, all measured
+here. The shade is not constant (−1.13 at standing 2, +0.02 at standing 6, where
+the two pricers already agree on 100% of decisions, so a flat term is pure
+damage there). The lever that moves it already exists and is already fitted. And
+a constant would be a fourth tuning knob where a knob is already in the payload.
+
+**THE IMPLEMENTATION IS THE EXISTING TEMPERATURE, GATED TO CONTESTED NODES.**
+`opp_temp` is read per REQUEST, and the server knows whether a pass is legal at
+this node because it built the option list — so a higher temperature can be sent
+exactly where the asymmetry lives and the opening can keep its fitted 5. **No
+new wire field, no Rust change, no wasm rebuild.** This is precisely the
+isolating change this file already said was required and had never been built:
+the recorded temp sweep (2/5/12 at n=150, +1.07/+0.99, "somewhere around 5–12,
+not a tuned optimum") was UNGATED, and the file's own explanation for why
+softening cancelled is that it *also lowered the opening across every bucket*.
+Gating it separates the two effects for the first time.
+
+**WHAT IS STILL NOT ESTABLISHED, and it is the whole ship question.** Every
+number here is about the ESTIMATOR, not about strength. Zeroing the shade is not
+self-evidently right — the price list concedes 29.0% and the *equilibrium*
+concedes 0–5%, so both pricers may be conceding far too much and matching the
+price list would only be matching a bidder the tree already beats. The gate is
+unchanged: a CRN-paired arena at equal time, mirror exactly +0.0000, **watching
+the settled distribution and make rate as well as payoff** — this file records
+Experts already bidding each other past the making point, and a correction that
+wins on points while pushing contracts up the ladder is buying strength the
+game's shape says it should not keep.
+
+**ONE ROW IS UNSTABLE AND IS THE ONE ALREADY FLAGGED AS CONFOUNDED.** The
+flipped-decision row read −9.020 ± 1.816 on the first sample and −2.752 ± 1.758
+on this one — same deals, different world draws (the six temp asks advance
+`bidserve`'s per-request seed, so a later deal is determinized differently),
+i.e. ~2.5 SE apart on nominally ±1.8 error bars. The shade rows are stable
+across the same two samples (−10.222 vs −10.050 on the chosen bid; concession
+44.4% vs 41.1%), which is the difference between a measurement and an artefact.
+**Do not quote the flip row as a magnitude.**
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a
