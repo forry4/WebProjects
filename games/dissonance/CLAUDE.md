@@ -5942,6 +5942,77 @@ reads **exactly +0.0000**, and armed it changes 13 of 14 auctions.
 `test_the_contested_gate_softens_only_where_a_pass_is_legal` pins both ends and
 is verified non-vacuous by defeating the gate.
 
+### THE REAL ACTION SPACE: BUILT, CHEAP IN STATES, 51x IN SOLVER TIME (2026-08-20)
+
+**The ReBeL direction, costed properly — and the cost is not where this file
+said it was.** The standing finding was that the blueprint's binding constraint
+is its ACTION space (no denominations, ladder capped at 8), not its hand space.
+That is now built (`CFR_DENOMS`, off by default) and the arithmetic is measured
+rather than inferred.
+
+**THE STATE COUNT SAYS IT IS NEARLY FREE.** Enumerated exactly:
+
+| abstraction | reachable states |
+|---|---|
+| levels only, no denominations | 58 |
+| **+ real denominations** | **384** — 1.2x what `cfrlab` reaches today (321) |
+| + the per-player FOREVER-BAN's `used` masks | **30,373** — 79x on top |
+
+So denominations were never the expensive half. **The ban is**, and it alone
+would want ~19M iterations against the 200k that converges here. **Dropping the
+ban is measured, not assumed**: `cfrlab banned` put the pass rate at standing 4
+at 44% whether the seat's best denomination was still free or not (9,032 probed
+decisions), and the suit-priced ladder measured a same-level overtake costing
+1.13 points of difficulty against a level's 1.00 while paying the same. The
+rungs the ban withholds are rungs nobody wants.
+
+**AND THE STATE COUNT IS THE WRONG COST MODEL, WHICH IS THE ACTUAL FINDING.**
+External-sampling MCCFR samples ONE action at the opponent's node and evaluates
+EVERY action at ours, so its per-iteration cost is driven by the branching
+factor at our own nodes — not by how many distinct states exist. Measured in
+separate processes:
+
+| | opening actions | walk calls / iteration | ms / iteration |
+|---|---|---|---|
+| level-only (shipped) | 8 | **102** | 0.94 |
+| real action space | 40 | **4,128** | **47.6** |
+
+**40x the traversals and 51x the wall clock for 1.2x the states.** A converged
+200k-iteration solve goes from ~3 minutes to **~2.6 hours per seed**, before
+allowing that a 5x larger action set plausibly needs more iterations too.
+
+**SO THE PREREQUISITE IS A CHEAPER CFR, AND THIS FILE ALREADY NAMED IT.** The
+finer-ladder note says "converging it needs a cheaper CFR (outcome sampling) or
+a real compute budget", and that is exactly right for the same reason: outcome
+sampling draws OUR action as well, making per-iteration cost independent of the
+branching factor. **Build that before running this arm**, or budget ~2.6 hours a
+seed. Do not re-derive the state count and conclude it is cheap.
+
+**WHAT IS COMMITTED.** `DENOMS` packs a bid as `level * 8 + rank` so every
+existing reader that tests `a == -1` keeps working; `actions`/`_step`/`act_level`
+/`act_rank` are the only new vocabulary; `leaf` needed NO change because it
+already indexed the all-denomination cache by rank ("rank = holds"). The four
+paths that still read an action as a bare level — `blueprint_bid`,
+`best_response`, `_live_abstract_state`, `_path_to` — **refuse loudly** under
+`CFR_DENOMS` rather than bidding level 41. With the flag off the `curve` output
+is **byte-identical** to before the change.
+
+**TWO INSTRUMENT BUGS, BOTH OF THE FAMILY THIS FILE KEEPS RECORDING.**
+* **A control that only exercises the OFF path cannot catch an ON path that was
+  never wired.** `str.replace(pat, new, 1)` patched the FIRST match — which was
+  `jump_main`, not `curve_main` — so the playout that actually runs still read
+  packed action codes as levels. It printed a full, plausible table: settled
+  "levels" of 8..40, a settled mean of 23.33 and a make rate of 0.0%. The
+  byte-identical control passed throughout, because with DENOMS off both copies
+  are equivalent. **A duplicated function is not caught by a flag-off control.**
+* **A module reload that does not re-read its env flag reports the null twice.**
+  The first per-iteration benchmark deleted `sys.modules` entries and
+  re-imported with `CFR_DENOMS` flipped, and reported **1.16x** — it had
+  measured level-only both times, visible in hindsight as "infosets touched
+  1,218 vs 1,354" when a real DENOMS run touches 40x more. Re-run in SEPARATE
+  PROCESSES it is 51x. **Fork, do not reload, when a module reads its config at
+  import.**
+
 ### THE TWO ARCHITECTURAL REWRITES, PARKED WITH THEIR REASONS (noted 2026-08-20)
 
 Neither is scheduled. They are here because the question "should this be a
@@ -5965,7 +6036,15 @@ exact leaf (`threat_value`, the best evaluation obtainable) measured null twice.
 **WHAT THAT LEAVES.** Both survivors replace the whole approach rather than a
 component, which is why neither is refuted by anything above.
 
-* **R-NaD / DeepNash.** The only method on the survey's list that took a
+* **R-NaD / DeepNash. NOT RUNNABLE IN THIS CONTAINER, and here is exactly what
+  it would need** (checked 2026-08-20): 4 CPU cores, 15GB RAM, **no GPU, and
+  neither torch, numpy, jax nor scipy installed**. R-NaD is model-free deep RL
+  over millions of self-play games; it needs a GPU box, a DL framework, and the
+  auction+play loop exposed as a stepped RL environment (the Rust engine is the
+  simulator but has no such API). None of that is a judgement about the method —
+  it is the one candidate here with a plausible route to a STEP change — and all
+  of it is why nothing about it can be measured on this machine. It is the only
+  method on the survey's list that took a
   two-player zero-sum imperfect-information game of this size to top-human, and
   it uses NO SEARCH — regularised Nash dynamics, model-free, over millions of
   self-play games. It is the only candidate with a plausible route to a STEP

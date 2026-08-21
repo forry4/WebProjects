@@ -498,6 +498,51 @@ def leaf(rec, level, prev, declarer, holds=0, dbl=False):
     return E.payoff(terms, pts, not duck)
 
 
+#: THE REAL ACTION SPACE (2026-08-20) -- a bid names a LEVEL **and a
+#: DENOMINATION**, not a level in whatever suit is forced.
+#:
+#: WHY THIS IS THE ARM THAT MATTERED. The blueprint lost to Expert by
+#: **-12.84 +- 1.47** and the mechanism was one number: it made **49.6%** of its
+#: contracts against Expert's **73.0%** at the same levels. The abstraction names
+#: a LEVEL and the shipped pricer then takes the best suit still legal, so a
+#: level chosen blind to the suit is a commitment the real hand may not support.
+#: `holds` already selects the contract in `leaf` ("rank = holds"), but only a
+#: SAME-LEVEL overtake could move it -- a RAISE always reset to rank 0, i.e. the
+#: bidder's best suit, whether or not it could support the level.
+#:
+#: AND IT IS NEARLY FREE, WHICH IS THE SURPRISE. Enumerated exactly: levels
+#: alone reach 58 states, adding denominations reaches **384** (1.2x the 321 this
+#: abstraction reaches today), and adding the per-player FOREVER-BAN's `used`
+#: masks reaches **30,373** -- 79x on top. So denominations were never the
+#: expensive half; the ban is, and it alone would want ~19M iterations against
+#: the 200k that converges here.
+#:
+#: **DROPPING THE BAN IS MEASURED, NOT ASSUMED.** `cfrlab banned` put the pass
+#: rate at standing 4 at 44% whether the seat's best denomination was still free
+#: or not (9,032 probed decisions), and the suit-priced ladder measured a
+#: same-level overtake costing 1.13 points of difficulty against a level's 1.00
+#: while paying the same -- so the rungs the ban withholds are rungs nobody
+#: wants. The abstraction is entitled to leave it out.
+DENOMS = os.environ.get("CFR_DENOMS") not in (None, "", "0")
+
+#: Actions stay INTs so every existing reader that tests `a == -1` or sorts them
+#: keeps working; under `DENOMS` a bid packs as `level * 8 + rank`. 8 rather
+#: than 5 so the rank never carries into the level under any `MAXL`.
+_APACK = 8
+
+
+def act_level(a):
+    """The LEVEL an action bids, 0 for a pass. Identity when DENOMS is off."""
+    if a <= 0:
+        return 0
+    return a // _APACK if DENOMS else a
+
+
+def act_rank(a):
+    """Which of the bidder's OWN denominations, best first. 0 when off."""
+    return (a % _APACK) if (DENOMS and a > 0) else 0
+
+
 def actions(level, holds):
     """Legal abstract actions from a state. `level == 0` is the forced opening.
 
@@ -505,13 +550,35 @@ def actions(level, holds):
     higher-ranked denomination; anything else raises to that level. The opener
     can do neither of the first two (`OPENER_MAY_PASS` is off in classic, and
     there is nothing standing to overtake).
+
+    Under `DENOMS` the HOLD/raise split disappears: every bid names a level and
+    a rank, a same-level bid must name a STRICTLY higher rank (which is what
+    outranking the standing denomination means), and a raise may name any rank
+    -- including a worse suit at a level the bidder can actually support, which
+    is the move the level-only abstraction cannot express.
     """
+    if DENOMS:
+        acts = [] if level == 0 else [-1]
+        for L in range(max(level, 1), MAXL + 1):
+            lo = holds + 1 if L == level else 0
+            acts += [L * _APACK + r for r in range(lo, E.NOTRUMP + 1)]
+        return acts
     if level == 0:
         return list(range(1, MAXL + 1))
     acts = [-1]
     if holds < HOLDCAP:
         acts.append(HOLD)
     return acts + list(range(level + 1, MAXL + 1))
+
+
+def _step(level, prev, holds, a):
+    """Where a bid lands: `(level, prev, holds)` after taking action `a`."""
+    if DENOMS:
+        L, r = act_level(a), act_rank(a)
+        return L, (level if L > level else prev), r
+    if a == HOLD:
+        return level, prev, holds + 1
+    return a, level, 0
 
 
 #: THE OPPONENT MODEL, and it has to be set HERE or the harness quietly
@@ -679,6 +746,17 @@ def _live_abstract_state(g):
     builds a path to the same state. Reading it any other way would be the
     duplicate-rule mistake this file keeps recording.
     """
+    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
+    # rank into every action, so a reader that treats an action as a bare level
+    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
+    # is the discipline this package already applies to a cache missing `tops`:
+    # a harness that half-understands its own encoding is how `cfrlab` measured
+    # Hard for a campaign while claiming Expert.
+    if DENOMS:
+        raise SystemExit(
+            "CFR_DENOMS is on and this path still reads actions as bare levels. "
+            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
+            "response and the off-policy probes have not been ported.")
     # THE LOG HAS NO `kind` FIELD -- a bid entry is `{seat, level, denom}` and a
     # pass is `{seat, pass: True}`. Filtering on `kind == "bid"` (which is the
     # MOVE's vocabulary, not the log's) matches nothing and silently reports the
@@ -705,6 +783,17 @@ def blueprint_bid(g, seat):
     falls back to the shipped bidder -- a blueprint that silently guessed
     outside its own support would be measuring the fallback.
     """
+    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
+    # rank into every action, so a reader that treats an action as a bare level
+    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
+    # is the discipline this package already applies to a cache missing `tops`:
+    # a harness that half-understands its own encoding is how `cfrlab` measured
+    # Hard for a campaign while claiming Expert.
+    if DENOMS:
+        raise SystemExit(
+            "CFR_DENOMS is on and this path still reads actions as bare levels. "
+            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
+            "response and the off-policy probes have not been ported.")
     opts = E.auction_payoff_options(g)
     if not opts:
         return None
@@ -757,6 +846,17 @@ def _path_to(level, prev, holds, actor):
     None when no path exists: an opening that already set the level (`prev` 0)
     has nothing before it, and neither does `prev` 1.
     """
+    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
+    # rank into every action, so a reader that treats an action as a bare level
+    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
+    # is the discipline this package already applies to a cache missing `tops`:
+    # a harness that half-understands its own encoding is how `cfrlab` measured
+    # Hard for a campaign while claiming Expert.
+    if DENOMS:
+        raise SystemExit(
+            "CFR_DENOMS is on and this path still reads actions as bare levels. "
+            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
+            "response and the off-policy probes have not been ported.")
     base = ([prev, level] if prev else [level]) + [level] * holds
     if len(base) % 2 == actor:
         return base
@@ -1001,9 +1101,8 @@ class CFR:
                 if WITH_DOUBLE:
                     return self.dbl_node(rec, level, prev, holds, to_act, me, rng)
                 return leaf(rec, level, prev, holder, holds) * (1 if holder == me else -1)
-            if a == HOLD:
-                return self.walk(rec, level, prev, holds + 1, 1 - to_act, me, rng)
-            return self.walk(rec, a, level, 0, 1 - to_act, me, rng)
+            nl, np_, nh = _step(level, prev, holds, a)
+            return self.walk(rec, nl, np_, nh, 1 - to_act, me, rng)
 
         if to_act != me:
             # SAMPLE the opponent, and accumulate their average strategy.
@@ -1096,6 +1195,17 @@ def best_response(recs, pol, br_seat, attrib=None):
     choice is made ONCE PER INFOSET across every deal that shares it -- choosing
     per deal would be a cheater's response that reads the cards it cannot see.
     """
+    # THE PATHS THAT STILL SPEAK THE LEVEL-ONLY ABSTRACTION. `DENOMS` packs a
+    # rank into every action, so a reader that treats an action as a bare level
+    # would silently bid level 41 -- or, worse, land on a plausible one. Refusing
+    # is the discipline this package already applies to a cache missing `tops`:
+    # a harness that half-understands its own encoding is how `cfrlab` measured
+    # Hard for a campaign while claiming Expert.
+    if DENOMS:
+        raise SystemExit(
+            "CFR_DENOMS is on and this path still reads actions as bare levels. "
+            "It covers the SOLVE and `curve`; blueprint serving, the exact best "
+            "response and the off-policy probes have not been ported.")
     N = len(recs)
     st = states()
 
@@ -1458,14 +1568,20 @@ def jump_main(rate, iters, seed=1234):
     # The opening distribution, marginalised over the bucket distribution --
     # which is uniform by construction, the buckets being quantiles.
     acts = actions(0, 0)
-    opn = {a: 0.0 for a in acts}
+    # BY LEVEL, ALWAYS. `TARGET_OPEN` is a distribution over levels 1..MAXL, so
+    # under DENOMS the five ranks at one level have to be summed into their
+    # level before the loss is taken -- comparing a 40-action distribution
+    # against an 8-bin target would score the arm against a target it cannot
+    # even have the shape of, and it would look like a catastrophic regression.
+    opn = defaultdict(float)
     per = {}
     for b in range(NBUCKET):
         s = eqp.at(b, 0, 0, 0, acts) or {a: 1 / len(acts) for a in acts}
-        per[b] = sum(a * s[a] for a in acts)
+        per[b] = sum(act_level(a) * s[a] for a in acts)
         for a in acts:
-            opn[a] += s[a] / NBUCKET
-    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(acts))
+            opn[act_level(a)] += s[a] / NBUCKET
+    opn = dict(opn)
+    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(opn))
     mean = sum(a * p for a, p in opn.items())
     sd = (sum(p * (a - mean) ** 2 for a, p in opn.items())) ** 0.5
 
@@ -1491,10 +1607,8 @@ def jump_main(rate, iters, seed=1234):
                 break
             holder = to_act
             bids += 1
-            if pick == HOLD:
-                holds, to_act = holds + 1, 1 - to_act
-            else:
-                level, prev, holds, to_act = pick, level, 0, 1 - to_act
+            level, prev, holds = _step(level, prev, holds, pick)
+            to_act = 1 - to_act
         settle[level] += 1
         nbids[bids] += 1
         if leaf(rec, level, prev, holder, holds) > 0:
@@ -1988,14 +2102,19 @@ def curve_main(spec, iters, seed=1234):
                   if sum(max(y, 0.0) for y in s.values()) > 0}, backoff=False)
 
     acts = actions(0, 0)
-    opn = {a: 0.0 for a in acts}
+    # BY LEVEL, ALWAYS. `TARGET_OPEN` is a distribution over levels 1..MAXL, so
+    # under DENOMS the five ranks at one level must be summed into their level
+    # before the loss is taken -- scoring a 40-action distribution against an
+    # 8-bin target would mark the arm down for a shape it cannot have.
+    opn = defaultdict(float)
     per = {}
     for b in range(NBUCKET):
         s = eqp.at(b, 0, 0, 0, acts) or {a: 1 / len(acts) for a in acts}
-        per[b] = sum(a * s[a] for a in acts)
+        per[b] = sum(act_level(a) * s[a] for a in acts)
         for a in acts:
-            opn[a] += s[a] / NBUCKET
-    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(acts))
+            opn[act_level(a)] += s[a] / NBUCKET
+    opn = dict(opn)
+    ent = -sum(p * math.log(p) for p in opn.values() if p > 0) / math.log(len(opn))
 
     settle, made, n = defaultdict(int), 0, 6000
     nbids = defaultdict(int)
@@ -2018,10 +2137,8 @@ def curve_main(spec, iters, seed=1234):
                 break
             holder = to_act
             bids += 1
-            if pick == HOLD:
-                holds, to_act = holds + 1, 1 - to_act
-            else:
-                level, prev, holds, to_act = pick, level, 0, 1 - to_act
+            level, prev, holds = _step(level, prev, holds, pick)
+            to_act = 1 - to_act
         # The Double, played out with the same average strategy.
         dbl = False
         if WITH_DOUBLE and holder is not None:
@@ -2053,7 +2170,7 @@ def curve_main(spec, iters, seed=1234):
     print(f"{lo+ls:>5.2f} {lo:>5.2f} {ls:>5.2f} "
           f"{spec:>40}{'' if seed == 1234 else chr(96+seed)} "
           f"{per[NBUCKET-1]-per[0]:>+6.2f} {smean:>5.2f} {100*made/n:>5.1f}% | o "
-          + " ".join(f"{a}:{100*opn[a]:.0f}" for a in acts if opn[a] > .015)
+          + " ".join(f"{a}:{100*opn[a]:.0f}" for a in sorted(opn) if opn[a] > .015)
           + " | s "
           + " ".join(f"{k}:{100*v:.0f}" for k, v in sorted(sd.items())
                      if v > .015)
