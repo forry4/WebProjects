@@ -3248,6 +3248,374 @@ resists two plausible treatments is telling you to decompose it, not to try a
 third.* Both nulls were correct answers to the wrong question, and one hour of
 attribution explained both and repriced the entire campaign's instrument.
 
+### 2026-08-19 (later still) — cross-fitting the tree: the fourth null, and the one that reframes the other three
+
+The user opened the door to changing how the tree values its two branch kinds,
+so I built the change the diagnosis pointed at.
+
+**The mechanism.** `min`/`max` over noisy estimates are biased, the tree takes
+one such aggregation per ply, so the bias is depth-dependent — and passing is
+the shallowest branch there is while raising buys one more opponent `min`. Every
+raise is shaded against every pass. Fixed by leave-one-out cross-fitting (choose
+on the other worlds, score on the held-out one), which costs no solves.
+Demonstrated by simulation, since the curse is a population bias and any fixed
+world set makes the hard min correct: min node −0.367 → −0.018, max +0.355 →
++0.008 over 4000 samples at k=8.
+
+**It works and it is worse.** Paired on the honest instrument, Hard tier:
+5.45 → 5.69 (weight 0.4) → 6.11 (weight 1.0). Monotone. Behaviourally it did
+exactly what it was built to do — probe-pass 81.7% → 77.0%, settled mean 4.48 →
+4.92 — and the make rate fell 68.5% → 49.2%. Removing a selection bias entirely
+costs the selection: when noise exceeds the gap between two actions, a
+cross-fitted choice returns their mean where the truth is their min. LOO is
+already the sharpest cross-fit possible, so shrinkage was the only axis, and the
+dose curve closed it.
+
+**The reframe, which is the actual output of the day.** Four treatments — the
+opening bias, the exact leaf, opponent softening, cross-fitting — all null or
+worse, and the last one *monotonically* worse in the direction of the
+equilibrium's behaviour. The tree's pessimism about continuing is load-bearing.
+So the likeliest reading is no longer "Expert concedes too much" but "the
+equilibrium concedes too little, because the abstraction lets it re-bid its best
+suit forever and classic does not."
+
+**And I tested the wrong side of that confound earlier.** `cfrlab banned` asked
+whether the ban changes EXPERT's behaviour (no: 44% vs 44%). The question that
+decides the headline is whether it would change the EQUILIBRIUM's — and the
+abstraction has no denominations, so it never pays the cost, which is a measured
+0.3–0.6 of hand strength on the 19–36% of decisions where it binds.
+
+**Next, and nothing else until it runs:** carry a per-seat burn count in the
+abstract state (~36× the states, thousands, fine for the exact DP) and index the
+leaf by that seat's (c+1)-th best denomination. `cfrlab dcache` already builds
+exactly that cache. If the equilibrium's level-4 concession climbs toward
+Expert's once it pays for its suits, four nulls are explained at once.
+
+**Method note worth keeping: a monotone dose–response is worth more than any
+single arm.** Two points would have read as noise; three made the answer
+unambiguous and also proved there is no middle setting worth hunting for.
+
+### 2026-08-19 (end of session) — five treatments, five failures, and a stopping rule
+
+Continued into the auction tree itself. Built the burn-count abstraction (so the
+equilibrium finally pays classic's denomination forever-ban), the jump-weight
+calibration, and the attribution and dose machinery to judge them.
+
+**A retraction first.** `br`'s concession table reports ONE infoset per level,
+and I generalised its "equilibrium concedes level 4 on 0-5%" into a claim about
+the level. A reach-weighted playout of the same equilibrium concedes standing-4
+on **69%**. Four treatments were aimed at my generalisation.
+
+**The correctly-diagnosed version.** The equilibrium's concession rotates hard on
+the standing bid's JUMP; the tree's is flat (standing 4: equilibrium 2% of
+one-rung climbs vs 28% of leaps; tree 52% vs 53%), and 44.4% of the tree's
+attributed loss sits at jump 1. Verified as a calibration and not a bug: editing
+only `state.jump` moves the option sums by a median of 54 and flips 2 decisions
+in 40.
+
+**And the treatment for it failed the same way.** `jump_weight` is SYMMETRIC —
+it makes conceding their leap more attractive and our own leaps less attractive
+at once. At 3x the slope barely moved (+1 → +4, +1 → −2, +4 → +2) while the
+settled mean fell 4.48 → 4.15. Another shift where a rotation was needed. 5.78
+against 5.45.
+
+**The full table**: shipped 5.45; exact leaf 5.58; opponent softening 5.70; xfit
+0.4 5.69; jump weight 3 5.78; xfit 1.0 6.11; floor 1.47. Every perturbation is
+worse, in both directions on aggression, across four mechanisms.
+
+**The instrument was then tested, because after five failures it had to be.**
+Hypothesis: a best responder punishes predictability, so anything sharpening the
+bot's conditioning reads as worse. Measured, mean policy entropy against
+exploitability: **corr +0.62, the wrong sign**, and `jump weight 3` is the
+decisive counterexample — lowest entropy of any arm, still worse. Cleared.
+
+**Conclusion, stated as a stopping rule:** the residual exploitability is not
+reachable by re-weighting the existing search. Every treatment tried changes a
+coefficient inside a tree that searches from one seat's information set with the
+modelled opponent handed our exact hand. That is the auction-side twin of
+CAMPAIGN.md's card-play verdict. The only live direction is modelling the
+opponent's uncertainty — nested sampling, its own budget, and the one thing none
+of the five touches. **Do not spend on another coefficient.**
+
+**Method lesson, the transferable half:** what settled this was not a better
+treatment but a DOSE CURVE (monotone across three weights) and a NEGATIVE
+CONTROL (entropy vs exploitability). When treatments keep failing, stop
+proposing treatments — sweep a dose, and test the instrument.
+
+### 2026-08-20 — modelling the opponent's uncertainty: the sixth null, and a faster way to know
+
+Built the direction the log named as the only live one, properly rather than as
+another surrogate. `View::belief_of` swaps the seats — the opponent holds the
+hand that world dealt them and ours joins the pool they resample — which is
+EXACT rather than approximate, because the auction runs before a card is played
+and `Knowledge` has nothing to carry across. `bid::belief_into` draws m such
+deals per sampled world and solves them; `OppModel::Belief` runs the opponent's
+own tree over them, per world. One level of nesting, by construction.
+
+It is the one mechanism qualitatively beyond a temperature: a softmax gives one
+mixed reply shared across every world, this gives a different reply per world
+correlated with the hand making it. Gated by three tests, including that their
+own hand is fixed across their belief while ours really varies, and that asking
+for the model without funding the sample falls back to plain minimax.
+
+**Result, paired on 200 seeds:** exploitability 5.25 → 5.43, contracts made
+69.5% → 49.0%, settled mean 4.50 → 4.80, probe-pass 81.5% → 75.4%. And the jump
+slope stays flat — a sixth uniform shift from the mechanism that was supposed to
+be structurally different.
+
+**The methodological half is the more useful one.** At n=131 the same paired
+comparison read belief BETTER by 0.18, and I said so while explicitly declining
+to believe it. At n=200 it read WORSE by 0.17 — a sign flip, the fourth time
+this campaign has met one. What settled it in minutes: splitting the same 200
+seeds into four DISJOINT quarters and recomputing the paired difference on each
+(+0.58, +0.90, +1.13, +0.76 — unanimous, and the favourable reading reproduced
+by none). The statistic is also strongly n-dependent (quarters average +0.84
+where the full sample reads +0.17), so differences are not comparable across n.
+**When a reading matters, split it — it is cheaper than another hour of arena
+and it answers the question the interval was going to fudge.**
+
+**Six treatments, six failures**, five of them with one signature: concede less,
+bid higher, make fewer. The auction search's pessimism about continuing is
+load-bearing, and the residual above this abstraction's floor is not reachable
+by changing what the tree believes. Remaining candidates are all bigger than a
+search change — a finer abstraction for the instrument, or a leaf calibrated on
+real play rather than the double-dummy guarantee, which every arm above
+inherits. The code is kept and gated so a future attempt starts from a built
+mechanism.
+
+### 2026-08-20 (later) — the leaf is already calibrated, and that closes the campaign
+
+Picked the real-play leaf as the most promising remaining direction, on a real
+premise: the exploitability instrument scores every arm with the real-play leaf
+while the tree optimises the double-dummy guarantee, so the bot had been
+maximising an objective it was not marked on through six failed treatments.
+
+**Aligning them made it much worse — and so did the opposite.** Paired on 324
+deals, four arms on identical seeds, each also split into four disjoint quarters:
+
+    shift -1.45 (more pessimistic)   6.69   settled 3.45   made 86.7%
+    shift  0    (the guarantee)      5.42   settled 4.47   made 67.3%
+    shift +1.45 no spread            7.95   settled 5.60   made 41.0%
+    shift +1.45 + spread 1.94        6.89   settled 4.86   made 51.9%
+
+The shipped value is the minimum in the full sample **and in every one of the
+four quarters** — the only unanimous result of the campaign. Behaviour is
+perfectly monotone in the shift, and 1.45 points is almost exactly one rung: so
+this is an AGGRESSION DIAL wearing a calibration's clothes, swept in both
+directions, with the shipped bot at the bottom.
+
+**A risk-premium explanation was proposed for the first failure and refuted by
+its own test.** It predicted more pessimism should help; the knob was opened to
+negative scales specifically to check, and -1.45 came back worse in all four
+quarters. Three blocks to kill a story that would otherwise have been written
+down as an insight. *A prediction a knob can already express is worth checking
+before it becomes a paragraph.*
+
+**Seven treatments, all null or worse. Five of them moved aggression, and this
+one sweeps that axis directly and finds the shipped point optimal.** So the
+residual (5.42 against a 1.47 floor) is not an aggression problem, and every
+failed treatment was tuning the one axis already right. What is left must be
+CONDITIONAL — which hands the tree wins the auction with, not how high it bids —
+and no uniform coefficient can reach it. The next honest step is a finer
+abstraction for the instrument, so a conditional defect can be seen at all, or a
+different part of the game.
+
+### 2026-08-20 (end) — the finer abstraction, and the check that validates eight negatives
+
+Built the 2-D hand abstraction the log asked for: the existing strength
+quantiles crossed with **how far a seat's best denomination stands above its
+next** — what the hand loses when pushed off that suit. Information-legal, and
+recomputed FROM THE SEED, so every corpus already recorded re-buckets and
+re-measures without replaying an auction. Coverage survived (4113 infosets,
+99.3% exact, split-halves 6.52/6.53).
+
+**It sees a conditional defect the 1-D bucket cannot.** Loss per unit reach:
+1.13 flexible, 1.44, **1.98 one-suit** — the bot loses 1.75x more on hands with
+one good suit. The mistake is concrete: on strong concentrated hands it concedes
+where the equilibrium overtakes.
+
+**Two confounds killed, both cheaply.** (1) A same-level overtake needs a
+higher-ranked denomination and the ladder has no denominations, so the
+abstraction may credit an illegal HOLD — rebuilt 15,512 probed states from their
+seeds and asked the engine: legal 78% of the time, and **78/78/79% across the
+three shape buckets**, so uniform and not the explanation. (2) The equilibrium
+control is reported but unusable: the one-step deviation penalises MIXING by
+construction, and the equilibrium mixes where the bot is near-deterministic.
+
+**Then the check the campaign had earned.** Eight treatments worse, none better
+— so does the statistic order strength at all? Paired on 220 deals, sweeping the
+one knob whose weakness nobody disputes:
+
+    k=1  13.25    k=2  8.13    k=8 (shipped) 6.28    k=16  6.73
+
+**The instrument orders search strength steeply and in all four quarters.** A
+one-world bidder is more than twice as exploitable as the shipped one. So the
+eight negatives are credible, not an artefact of a statistic that rewards
+whatever the shipped tier does.
+
+**And it closes an open question the file has carried since the tier shipped:**
+`CLIENT_AI_AUCTION_WORLDS` was raised 3 → 8 by analogy with the card search,
+explicitly unmeasured. Measured now — the knee is at or just below 8, and k=16
+is worse in all four quarters for double the solves. **8 is right.**
+
+k=16 also refutes the mechanism that motivated it: if concentrated hands lost
+because their value rests on one noisy estimate, more worlds would flatten the
+grading. It does not (shape 2: 2.15 → 2.40). The conditional defect is not
+sampling noise; it is a judgement about a KIND of hand, and what is left for it
+is structural rather than parametric.
+
+**Worth carrying:** k=16 MAKES MORE CONTRACTS (74.5% vs 69.1%) while being
+slightly more exploitable — a clean reminder that head-to-head strength and
+exploitability are different quantities, and that a best responder is far
+harsher than the opponent across the table.
+
+---
+
+## 2026-08-21 — Dissonance: skat's talon swap. The first fit was better and shipped nothing.
+
+**Asked for:** skat's talon swap, the queued item behind classic's fitted swap.
+
+**Shipped: +4.086 ± 0.183 score/round** over the rule it replaced, on 30000
+paired deals disjoint from the ones it was fitted on. The talon's value against
+standing pat goes +1.941 ± 0.197 → +6.027 ± 0.185. It is the second-largest
+measured gain of the Dissonance campaign after classic's own swap fix, and for
+the same reason: the rule it replaced could not represent the preference the
+game rewards.
+
+**But the headline is the fit that did NOT ship**, because it is a mistake with
+a general shape.
+
+### Two fits, one enumeration, opposite answers
+
+Classic's method labels real decisions with an ORACLE: every candidate exchange
+resolved by an exact double-dummy solve of the real deal. The oracle cheats on
+purpose and the write-up is careful to call it a diagnostic and to ship-gate on
+a paired arena instead. Skat's first fit followed that method exactly, and won
+every diagnostic it was scored on — held-out regret against the oracle **4.35**
+against the old rule's 5.16 and standing pat's 7.54.
+
+Then the arena:
+
+| card play | first fit − old |
+|---|---|
+| `dd` exact double-dummy | **+0.817 ± 0.212** (n=6000) |
+| `play` the shipped server bot | **−2.132 ± 0.168** (n=30000) |
+
+A better policy **for a solver**, costing 2.1 a round in front of the card play
+the server actually runs. The histograms say why and it is not subtle: skat
+scores the CARDS captured — 9/10/J/Q at +2, 7/8/K/A at −1 — and the first fit
+**gave a jack on 24% of exchanges** where the old rule does on 0.7%, while taking
+kings on 19.6% against 7.7%. It threw +2 cards out of play and took −1 cards
+into hand, because a solver converts top cards into tempo and the greedy bot
+cannot. Declarer card points 8.0 → 7.2; contract made 84.8% → 80.6%.
+
+**The lesson, and it is not about swaps: AN ORACLE LABEL IS A CHOICE OF
+OBJECTIVE, NOT A GROUND TRUTH.** Classic's write-up already said the swap's
+value depends on who plays the cards afterwards, and ship-gated under both
+resolutions. What it did not say — and what cost a whole fit here — is that the
+LABELS carry the same dependence. A policy trained on `dd` labels is fitted to a
+card player nobody is, and its held-out regret against those labels will happily
+confirm it. Anywhere a policy is fitted against a solver and served in front of
+a heuristic, the first question is which one the label assumed.
+
+### The second fit, and the cheap label is also the big one
+
+Same enumeration, relabelled by the SHIPPED card play. That resolution needs no
+solver and runs ~600 rounds a second, so the corpus went **614 → 40000
+decisions for two minutes of wall time** — a 65× bigger training set for less
+compute than the small one cost. Gated on disjoint deals under all three card
+players:
+
+| card play | this fit − old | this fit − pat |
+|---|---|---|
+| `play` the shipped server bot | **+4.086 ± 0.183** | +6.027 ± 0.185 (n=30000) |
+| `hard` the tier's own k=8 PIMC | **+2.602 ± 1.157** (n=440) | |
+| `dd` exact double-dummy | −4.758 ± 0.430 (n=4000) | |
+
+**A gain under both card players that exist**, and a loss only against a solver
+holding the opponent's cards, which no tier is.
+
+**The `hard` row is what actually decided it**, and it is the row the repo's own
+rule demanded: *a measurement harness must reproduce the SERVING shape*. Hard
+and Expert serve card play client-side, so "does this help Hard?" cannot be
+answered by `dd` — double dummy is not PIMC, it is PIMC's unreachable limit, and
+the two disagree here by seven points a round. `bidserve`'s `pick` request calls
+the same `wire::answer_card` the browser worker calls, so the arena can play
+both seats at the actual tier. It costs ~22s a deal, which is why that row is
+440 deals and not 30000 — five disjoint 88-deal windows, every one positive.
+
+**What the weights say.** `card-point delta` +2.52 and `give trump` −4.48 are
+the two the separable rule could not hold at any weights: take the points, never
+discard a trump. Giving an ace (+2.27) or a king (+1.34) is good and TAKING one
+is bad (−2.07 / −1.38) — they are the −1 cards, and a discard leaves play
+entirely, so the talon is where a liability goes to be deleted.
+
+### Two process findings worth more than the numbers
+
+**An experiment parked behind a flag is untested code, and the flag is what makes
+it look otherwise.** The first fit shipped as dead code carrying a real bug:
+both weight tables and the fit's own feature vector were sized by `NRANK` (8)
+and indexed by `E.rank`, which scores on the WIDE deck's 0..9 scale. The give
+block overlapped the trump features — one weight meaning both "give a king" and
+"the take is trump" — and the policy raised IndexError the first time it was
+handed an ace. Nothing caught it: the flag was off, so no test ever indexed the
+tables. Three guards now do, all verified non-vacuous against the 8-long tables.
+
+**A mirror that short-circuits asserts nothing.** `swaparena`'s `arm arm` reads
++0.0000 for free, because identical picks skip the playout entirely.
+`SWAPARENA_NO_SHORTCUT=1` drives both arms through the whole round instead, and
+that mirror — old/old and fit/fit at exactly +0.0000 over 3000 deals — is the
+one that says the two branches share no state.
+
+### Queued, and stated as queued
+
+* **Skat's auction leaf still models no talon.** `main.py` ships
+  `swap_policy_terms()` on classic and minor auction requests and deliberately
+  not on skat ones, so this was a pure server-side change with no wire shape and
+  no wasm rebuild. The price is that skat's auction search now under-prices
+  winning a skat auction by ~6 rather than ~2 — the same blind spot classic's
+  swap fix opened, and the same fix closes it.
+* **NOT measured:** whether the first (`dd`-labelled) fit beats this one under
+  `hard`. This fit beats the old rule under both regimes that exist, which is
+  what the ship decision needed; a tier-aware talon is only worth building if a
+  `hard` arena between the two fits says so.
+* **Minor's talon** is still unfitted, and now has a method that costs nothing
+  to run: `swaplab.py minor <n> <lo> <hi> play`.
+
+<!-- ===================================================================== -->
+## TWO PARALLEL LINES, ONE BASE — read this before the sessions below (2026-08-21)
+
+The Dissonance entries from here on were produced by **two independent session
+lineages that both branched from `00170c9`** and never saw each other's results.
+They are complementary rather than contradictory, but one pair of conclusions
+has to be read together or the file appears to argue with itself.
+
+**The line above** (cross-fitting, opponent uncertainty, leaf calibration, the
+finer HAND abstraction, skat's talon) ran seven treatments to null-or-worse and
+closed with: *the residual is not an aggression problem, every failed treatment
+was tuning the one axis already right, and what is left must be CONDITIONAL —
+which hands the tree wins the auction with, not how high it bids.*
+
+**The line below** (the Double margin, the belief prior's trump channel, the
+pass/raise shading, the contested gate, the real ACTION space, and the CFR
+sampler work) reached the same wall from the other side and then measured a way
+through it: the level-only action abstraction — a bid names a level, and the
+pricer then takes the best suit still legal — **costs 14.0 points a deal**,
+because a level chosen blind to the suit is a commitment the real hand may not
+support.
+
+**That is the same word from two directions.** One line concluded a conditional
+defect must be what remains and asked for a finer abstraction to see it; the
+other widened a DIFFERENT abstraction (actions, not hands) and put a number on
+one. Neither knew about the other, which makes the agreement worth more than
+either alone.
+
+**So "the campaign closes" above should be read as scoped to what that line
+tested** — uniform coefficients over the shipped action space. It does not cover
+the action space itself, and the 14-point measurement reopens the auction as the
+place with the most recoverable value. The stopping rule that entry proposes is
+still right about aggression dials.
+
 ## WHERE THE DISSONANCE RESEARCH TOOLING LIVES (2026-08-21)
 
 **THE FINDINGS BELOW ARE ON `main`. THE INSTRUMENTS THAT PRODUCED THEM ARE
