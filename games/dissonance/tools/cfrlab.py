@@ -729,12 +729,41 @@ def load_blueprint():
     # The same external-sampling loop every other solve in this file runs; there
     # is no `CFR.solve`, and writing one here would be a second driver.
     iters = int(os.environ.get("CFR_BP_ITERS", "200000"))
-    rng = random.Random(int(os.environ.get("CFR_BP_SEED", "1234")))
+    seed = int(os.environ.get("CFR_BP_SEED", "1234"))
+
+    # CACHED TO DISK WHEN `CFR_BP_CACHE` NAMES A FILE, because the arena shards
+    # by PROCESS and every shard would otherwise re-solve the same equilibrium.
+    # Level-only that is ~3 minutes and merely wasteful; under `DENOMS` a
+    # converged solve is over an hour, so a 4-shard arena would spend more time
+    # re-deriving one policy than measuring it. The key carries every input that
+    # changes the answer -- cache file, iterations, seed, action space and
+    # feature set -- so a cache built under one abstraction can never be read
+    # back under another. That is not paranoia: this package has already
+    # measured one arm twice while believing it had measured two.
+    ck = os.environ.get("CFR_BP_CACHE")
+    key = f"{os.path.basename(CKPT)}|{iters}|{seed}|{int(DENOMS)}|{CFR_FEATURES}"
+    if ck and os.path.exists(ck):
+        blob = json.load(open(ck))
+        if blob.get("key") == key:
+            for k, row in blob["S"].items():
+                a, b, c, d = k.split("|")
+                cfr.S[(int(a), int(b), int(c), int(d))] = {
+                    int(x): v for x, v in row.items()}
+            _BP["cfr"], _BP["cuts"] = cfr, cuts
+            return _BP
+        print(f"  [blueprint cache {ck} is for {blob.get('key')!r}, "
+              f"not {key!r} -- re-solving]", flush=True)
+
+    rng = random.Random(seed)
     for i in range(iters):
         rec = recs[rng.randrange(len(recs))]
         cfr.t = i + 1
         for me in (0, 1):
             cfr.iterate(rec, me, rng)
+    if ck:
+        json.dump({"key": key, "S": {"|".join(map(str, k)): {str(a): v
+                                                             for a, v in row.items()}
+                                     for k, row in cfr.S.items()}}, open(ck, "w"))
     _BP["cfr"], _BP["cuts"] = cfr, cuts
     return _BP
 

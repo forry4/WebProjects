@@ -23,14 +23,33 @@ says exactly why: it can only bite on a same-level overtake, which is 0.8% of
 what the blueprint plays (4 of 477). A raise permits any rank, so `order[r]` is
 always legal there.
 
-AND THEN THE SECOND QUESTION ANSWERS ITSELF UNHELPFULLY. The rank the blueprint
-NAMES is 0 -- its own best suit, exactly what the level-only abstraction forces
--- on **89.9%** of its bids. So the wide action space changes about one bid in
-ten. That does not refute the 14-point exploitability gap; it locates it. The
-gap is what a BEST RESPONDER extracts from a policy that cannot answer, not
-what the wide policy does differently in ordinary play -- which is the caveat
-`docs/ai-research-log.md` attaches to that number, here with a measurement
-behind it. Expect an arena against Expert to read far below 14.
+AND THE SECOND QUESTION FOUND SOMETHING BETTER THAN AN ANSWER. Run this with
+`CFR_DENOMS` OFF and it reports the rank the SHIPPED PRICER lands on, which is
+the comparison that matters. 200 deals each:
+
+    names rank      0       1       2       3
+    level-only    38.2%   46.5%   15.0%    0.3%     <- suit chosen by the PRICER
+    DENOMS        89.9%    9.4%       -     0.4%     <- suit chosen by the BLUEPRINT
+
+**THE LEVEL-ONLY BOT WAS NEVER FORCED INTO ITS BEST SUIT.** The abstraction
+models it that way -- `leaf` prices a contract as "rank = holds", so a
+level-only raise is scored as if it landed in rank 0 -- but the SERVED bot does
+no such thing: `blueprint_bid` hands the level to `auction_payoff_options` and
+the exact double-dummy pricer picks the denomination per deal, by true value.
+It lands on rank 0 barely a third of the time because `hand_strength` (a cheap
+estimate, and the ordering `rank` is defined in) is not the exact value.
+
+So the two policies differ enormously in suit choice, in the OPPOSITE direction
+to the one the 14-point gap suggests: level-only chooses with an exact per-deal
+solve, `DENOMS` with a learned average preference over a coarse ordering.
+
+**THAT IS WHERE THE 14 POINTS WENT.** The gap is measured INSIDE the
+abstraction, where both policies are scored through `pts[seat][rank]` and the
+level-only one is charged for a rigidity it does not have in play. The
+abstraction is pessimistic about its own restriction, and serving quietly
+repairs it. Nothing here is wrong with the measurement -- it is a correct
+statement about two abstract policies -- but it does mean the shipped
+consequence has to be measured in an arena and cannot be read off the 14.
 """
 import os, random, sys, time
 sys.argv = ["cfrlab.py"]

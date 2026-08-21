@@ -237,9 +237,9 @@ def ask(g, seat, tier):
 
     # THE BLUEPRINT TIER (2026-08-20). A tier named `bp...` answers AUCTION
     # decisions from `cfrlab`'s solved CFR equilibrium instead of from the tree:
-    # the blueprint names a LEVEL (all it can, since the abstraction has no
-    # denominations) and the shipped exact pricer names the suit among the real
-    # legal options at that level.
+    # the blueprint names a LEVEL and, under `CFR_DENOMS` (ported 2026-08-21),
+    # the DENOMINATION too; with `DENOMS` off it names the level only and the
+    # shipped exact pricer names the suit among the real legal options there.
     #
     # EVERY OTHER PHASE STILL GOES TO THE TREE, including the Double -- the
     # abstraction has no Double in it, so answering one from the blueprint would
